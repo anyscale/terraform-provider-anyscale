@@ -1,0 +1,83 @@
+# Terraform Provider Binary
+terraform-provider-anyscale
+build/
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# Test coverage
+coverage.out
+coverage.html
+*.coverprofile
+
+# Terraform files (in examples/)
+**/.terraform/
+**/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/*.tfstate
+**/*.tfstate.*
+
+# Sensitive variable files
+**/terraform.tfvars
+**/*.auto.tfvars
+
+# Terraform crash logs
+crash.log
+crash.*.log
+
+# Terraform override files
+**/override.tf
+**/override.tf.json
+**/*_override.tf
+**/*_override.tf.json
+
+# Terraform CLI config
+.terraformrc
+terraform.rc
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# OS-specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Debug logs
+*.log
+debug/
+terraform-debug.log
+
+# Credentials (never commit these)
+credentials.json
+*.pem
+*.key
+.env
+.env.*
