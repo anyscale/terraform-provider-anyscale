@@ -298,6 +298,130 @@ func TestExpandAWSConfig(t *testing.T) {
 	}
 }
 
+// TestExpandGCPConfig tests the GCP config expansion helper
+func TestExpandGCPConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]any
+		expected *GCPConfig
+	}{
+		{
+			name: "full gcp config",
+			input: map[string]any{
+				"name":           "test-cloud",
+				"cloud_provider": "GCP",
+				"region":         "us-central1",
+				"gcp_config": []any{
+					map[string]any{
+						"project_id":                        "my-project",
+						"host_project_id":                   "host-project",
+						"provider_name":                     "projects/123456789/locations/global/workloadIdentityPools/pool/providers/provider",
+						"vpc_name":                          "my-vpc",
+						"subnet_names":                      []any{"subnet-1", "subnet-2"},
+						"controlplane_service_account_email": "cp-sa@my-project.iam.gserviceaccount.com",
+						"dataplane_service_account_email":    "dp-sa@my-project.iam.gserviceaccount.com",
+						"firewall_policy_names":              []any{"policy-1"},
+						"memorystore_instance_name":          "my-memorystore",
+					},
+				},
+			},
+			expected: &GCPConfig{
+				ProjectID:                   "my-project",
+				HostProjectID:               "host-project",
+				ProviderName:                "projects/123456789/locations/global/workloadIdentityPools/pool/providers/provider",
+				VPCName:                     "my-vpc",
+				SubnetNames:                 []string{"subnet-1", "subnet-2"},
+				AnyscaleServiceAccountEmail: "cp-sa@my-project.iam.gserviceaccount.com",
+				ClusterServiceAccountEmail:  "dp-sa@my-project.iam.gserviceaccount.com",
+				FirewallPolicyNames:         []string{"policy-1"},
+				MemorystoreInstanceName:     "my-memorystore",
+			},
+		},
+		{
+			name: "minimal gcp config",
+			input: map[string]any{
+				"name":           "test-cloud",
+				"cloud_provider": "GCP",
+				"region":         "us-central1",
+				"gcp_config": []any{
+					map[string]any{
+						"project_id":                        "my-project",
+						"provider_name":                     "projects/123456789/locations/global/workloadIdentityPools/pool/providers/provider",
+						"vpc_name":                          "my-vpc",
+						"subnet_names":                      []any{"subnet-1"},
+						"controlplane_service_account_email": "cp-sa@my-project.iam.gserviceaccount.com",
+						"dataplane_service_account_email":    "dp-sa@my-project.iam.gserviceaccount.com",
+					},
+				},
+			},
+			expected: &GCPConfig{
+				ProjectID:                   "my-project",
+				ProviderName:                "projects/123456789/locations/global/workloadIdentityPools/pool/providers/provider",
+				VPCName:                     "my-vpc",
+				SubnetNames:                 []string{"subnet-1"},
+				AnyscaleServiceAccountEmail: "cp-sa@my-project.iam.gserviceaccount.com",
+				ClusterServiceAccountEmail:  "dp-sa@my-project.iam.gserviceaccount.com",
+			},
+		},
+		{
+			name: "no gcp config",
+			input: map[string]any{
+				"name":           "test-cloud",
+				"cloud_provider": "AWS",
+				"region":         "us-west-2",
+			},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := schema.TestResourceDataRaw(t, ResourceCloud().Schema, tt.input)
+
+			result := ExpandGCPConfig(d)
+
+			if tt.expected == nil {
+				if result != nil {
+					t.Errorf("ExpandGCPConfig() = %+v, want nil", result)
+				}
+				return
+			}
+
+			if result == nil {
+				t.Fatal("ExpandGCPConfig() = nil, want non-nil")
+			}
+
+			if result.ProjectID != tt.expected.ProjectID {
+				t.Errorf("ProjectID = %q, want %q", result.ProjectID, tt.expected.ProjectID)
+			}
+			if result.HostProjectID != tt.expected.HostProjectID {
+				t.Errorf("HostProjectID = %q, want %q", result.HostProjectID, tt.expected.HostProjectID)
+			}
+			if result.ProviderName != tt.expected.ProviderName {
+				t.Errorf("ProviderName = %q, want %q", result.ProviderName, tt.expected.ProviderName)
+			}
+			if result.VPCName != tt.expected.VPCName {
+				t.Errorf("VPCName = %q, want %q", result.VPCName, tt.expected.VPCName)
+			}
+			if len(result.SubnetNames) != len(tt.expected.SubnetNames) {
+				t.Errorf("SubnetNames length = %d, want %d", len(result.SubnetNames), len(tt.expected.SubnetNames))
+			}
+			if result.AnyscaleServiceAccountEmail != tt.expected.AnyscaleServiceAccountEmail {
+				t.Errorf("AnyscaleServiceAccountEmail = %q, want %q", result.AnyscaleServiceAccountEmail, tt.expected.AnyscaleServiceAccountEmail)
+			}
+			if result.ClusterServiceAccountEmail != tt.expected.ClusterServiceAccountEmail {
+				t.Errorf("ClusterServiceAccountEmail = %q, want %q", result.ClusterServiceAccountEmail, tt.expected.ClusterServiceAccountEmail)
+			}
+			if len(result.FirewallPolicyNames) != len(tt.expected.FirewallPolicyNames) {
+				t.Errorf("FirewallPolicyNames length = %d, want %d", len(result.FirewallPolicyNames), len(tt.expected.FirewallPolicyNames))
+			}
+			if result.MemorystoreInstanceName != tt.expected.MemorystoreInstanceName {
+				t.Errorf("MemorystoreInstanceName = %q, want %q", result.MemorystoreInstanceName, tt.expected.MemorystoreInstanceName)
+			}
+		})
+	}
+}
+
 // TestExpandObjectStorage tests the object storage expansion helper
 func TestExpandObjectStorage(t *testing.T) {
 	tests := []struct {

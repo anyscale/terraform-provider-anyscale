@@ -100,11 +100,15 @@ type AWSConfig struct {
 
 // GCPConfig represents GCP-specific cloud configuration
 type GCPConfig struct {
-	ProjectID           string   `json:"project_id"`
-	VPCName             string   `json:"vpc_name"`
-	SubnetName          string   `json:"subnet_name"`
-	ServiceAccountEmail string   `json:"service_account_email"`
-	FirewallPolicyNames []string `json:"firewall_policy_names,omitempty"`
+	ProjectID                   string   `json:"project_id"`
+	HostProjectID               string   `json:"host_project_id,omitempty"`
+	ProviderName                string   `json:"provider_name"`
+	VPCName                     string   `json:"vpc_name"`
+	SubnetNames                 []string `json:"subnet_names"`
+	AnyscaleServiceAccountEmail string   `json:"anyscale_service_account_email"`
+	ClusterServiceAccountEmail  string   `json:"cluster_service_account_email"`
+	FirewallPolicyNames         []string `json:"firewall_policy_names,omitempty"`
+	MemorystoreInstanceName     string   `json:"memorystore_instance_name,omitempty"`
 }
 
 // AzureConfig represents Azure-specific cloud configuration

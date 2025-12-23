@@ -149,23 +149,42 @@ func ResourceCloud() *schema.Resource {
 							ForceNew:    true,
 							Description: "The GCP project ID.",
 						},
+						"host_project_id": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							ForceNew:    true,
+							Description: "The host project ID for shared VPCs (optional).",
+						},
+						"provider_name": {
+							Type:        schema.TypeString,
+							Required:    true,
+							ForceNew:    true,
+							Description: "Workload Identity Federation provider name (e.g., projects/123456789/locations/global/workloadIdentityPools/anyscale-pool/providers/anyscale-provider).",
+						},
 						"vpc_name": {
 							Type:        schema.TypeString,
 							Required:    true,
 							ForceNew:    true,
 							Description: "The VPC network name.",
 						},
-						"subnet_name": {
-							Type:        schema.TypeString,
+						"subnet_names": {
+							Type:        schema.TypeList,
 							Required:    true,
 							ForceNew:    true,
-							Description: "The subnet name within the VPC.",
+							Description: "List of subnet names within the VPC for Anyscale resources.",
+							Elem:        &schema.Schema{Type: schema.TypeString},
 						},
-						"service_account_email": {
+						"controlplane_service_account_email": {
 							Type:        schema.TypeString,
 							Required:    true,
 							ForceNew:    true,
-							Description: "Service account email for Anyscale resources.",
+							Description: "Service account email for Anyscale control plane (cross-project access).",
+						},
+						"dataplane_service_account_email": {
+							Type:        schema.TypeString,
+							Required:    true,
+							ForceNew:    true,
+							Description: "Service account email for Ray cluster nodes (data plane).",
 						},
 						"firewall_policy_names": {
 							Type:        schema.TypeList,
@@ -173,6 +192,12 @@ func ResourceCloud() *schema.Resource {
 							ForceNew:    true,
 							Description: "List of firewall policy names.",
 							Elem:        &schema.Schema{Type: schema.TypeString},
+						},
+						"memorystore_instance_name": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							ForceNew:    true,
+							Description: "Memorystore instance name for Ray GCS fault tolerance.",
 						},
 					},
 				},
@@ -411,6 +436,68 @@ func ExpandObjectStorage(d *schema.ResourceData) *ObjectStorage {
 	return storage
 }
 
+// ExpandGCPConfig extracts GCP configuration from Terraform state
+func ExpandGCPConfig(d *schema.ResourceData) *GCPConfig {
+	v, ok := d.GetOk("gcp_config")
+	if !ok || len(v.([]any)) == 0 {
+		return nil
+	}
+
+	config := v.([]any)[0].(map[string]any)
+
+	gcpConfig := &GCPConfig{}
+
+	// Required fields - handle nil values safely
+	if projectID, ok := config["project_id"].(string); ok {
+		gcpConfig.ProjectID = projectID
+	}
+	if providerName, ok := config["provider_name"].(string); ok {
+		gcpConfig.ProviderName = providerName
+	}
+	if vpcName, ok := config["vpc_name"].(string); ok {
+		gcpConfig.VPCName = vpcName
+	}
+	if controlplaneSA, ok := config["controlplane_service_account_email"].(string); ok {
+		gcpConfig.AnyscaleServiceAccountEmail = controlplaneSA
+	}
+	if dataplaneSA, ok := config["dataplane_service_account_email"].(string); ok {
+		gcpConfig.ClusterServiceAccountEmail = dataplaneSA
+	}
+
+	// Handle subnet_names list - filter out nil values
+	if subnetNames, ok := config["subnet_names"].([]any); ok && len(subnetNames) > 0 {
+		var validNames []string
+		for _, v := range subnetNames {
+			if s, ok := v.(string); ok && s != "" {
+				validNames = append(validNames, s)
+			}
+		}
+		gcpConfig.SubnetNames = validNames
+	}
+
+	// Handle firewall_policy_names list - filter out nil values
+	if fwPolicies, ok := config["firewall_policy_names"].([]any); ok && len(fwPolicies) > 0 {
+		var validPolicies []string
+		for _, v := range fwPolicies {
+			if s, ok := v.(string); ok && s != "" {
+				validPolicies = append(validPolicies, s)
+			}
+		}
+		gcpConfig.FirewallPolicyNames = validPolicies
+	}
+
+	// Optional fields
+	if hostProjectID, ok := config["host_project_id"].(string); ok && hostProjectID != "" {
+		gcpConfig.HostProjectID = hostProjectID
+	}
+
+	if memorystoreName, ok := config["memorystore_instance_name"].(string); ok && memorystoreName != "" {
+		gcpConfig.MemorystoreInstanceName = memorystoreName
+	}
+
+	return gcpConfig
+}
+
 // GetNetworkingMode determines networking mode based on is_private_cloud
 func GetNetworkingMode(d *schema.ResourceData) string {
 	if d.Get("is_private_cloud").(bool) {
@@ -433,10 +520,30 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 	log.Printf("[INFO] Creating Anyscale Cloud: name=%s, provider=%s, region=%s, compute_stack=%s",
 		name, provider, region, computeStack)
 
-	// Get credentials (controlplane IAM role ARN for AWS)
+	// Get credentials based on provider type
 	var credentials string
-	if awsConfig := ExpandAWSConfig(d); awsConfig != nil {
-		credentials = awsConfig.AnyscaleIAMRoleID
+	switch strings.ToUpper(provider) {
+	case "AWS":
+		if awsConfig := ExpandAWSConfig(d); awsConfig != nil {
+			credentials = awsConfig.AnyscaleIAMRoleID
+		}
+	case "GCP":
+		if gcpConfig := ExpandGCPConfig(d); gcpConfig != nil {
+			// For GCP, credentials must be a JSON object with provider_id, project_id, service_account_email
+			gcpCreds := map[string]string{
+				"provider_id":           gcpConfig.ProviderName,
+				"project_id":            gcpConfig.ProjectID,
+				"service_account_email": gcpConfig.AnyscaleServiceAccountEmail,
+			}
+			if gcpConfig.HostProjectID != "" {
+				gcpCreds["host_project_id"] = gcpConfig.HostProjectID
+			}
+			credsJSON, err := json.Marshal(gcpCreds)
+			if err != nil {
+				return diag.FromErr(fmt.Errorf("failed to marshal GCP credentials: %w", err))
+			}
+			credentials = string(credsJSON)
+		}
 	}
 
 	// Step 1: Create the cloud with required fields
@@ -516,8 +623,25 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 		}
 
 	case "GCP":
-		// GCP config expansion would go here
-		log.Printf("[WARN] GCP configuration not fully implemented yet")
+		gcpConfig := ExpandGCPConfig(d)
+		if gcpConfig == nil {
+			return diag.Errorf("gcp_config is required when cloud_provider is GCP")
+		}
+		deployReq.GCPConfig = gcpConfig
+
+		// Add object storage if configured
+		if objStorage := ExpandObjectStorage(d); objStorage != nil {
+			// Ensure GCS bucket has proper prefix
+			bucketName := objStorage.BucketName
+			if !strings.HasPrefix(bucketName, "gs://") {
+				bucketName = "gs://" + bucketName
+			}
+			deployReq.ObjectStorage = &ObjectStorage{
+				BucketName: bucketName,
+				Region:     objStorage.Region,
+				Endpoint:   objStorage.Endpoint,
+			}
+		}
 
 	case "AZURE":
 		// Azure config expansion would go here

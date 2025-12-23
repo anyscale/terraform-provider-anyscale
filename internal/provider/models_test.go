@@ -196,11 +196,15 @@ func TestAWSConfigJSON(t *testing.T) {
 // TestGCPConfigJSON tests GCP config JSON marshaling
 func TestGCPConfigJSON(t *testing.T) {
 	config := GCPConfig{
-		ProjectID:           "my-project",
-		VPCName:             "my-vpc",
-		SubnetName:          "my-subnet",
-		ServiceAccountEmail: "sa@my-project.iam.gserviceaccount.com",
-		FirewallPolicyNames: []string{"policy-1", "policy-2"},
+		ProjectID:                   "my-project",
+		HostProjectID:               "host-project",
+		ProviderName:                "projects/123456789/locations/global/workloadIdentityPools/anyscale-pool/providers/anyscale-provider",
+		VPCName:                     "my-vpc",
+		SubnetNames:                 []string{"subnet-1", "subnet-2"},
+		AnyscaleServiceAccountEmail: "anyscale-sa@my-project.iam.gserviceaccount.com",
+		ClusterServiceAccountEmail:  "cluster-sa@my-project.iam.gserviceaccount.com",
+		FirewallPolicyNames:         []string{"policy-1", "policy-2"},
+		MemorystoreInstanceName:     "my-memorystore",
 	}
 
 	data, err := json.Marshal(config)
@@ -216,11 +220,29 @@ func TestGCPConfigJSON(t *testing.T) {
 	if decoded.ProjectID != config.ProjectID {
 		t.Errorf("ProjectID = %q, want %q", decoded.ProjectID, config.ProjectID)
 	}
+	if decoded.HostProjectID != config.HostProjectID {
+		t.Errorf("HostProjectID = %q, want %q", decoded.HostProjectID, config.HostProjectID)
+	}
+	if decoded.ProviderName != config.ProviderName {
+		t.Errorf("ProviderName = %q, want %q", decoded.ProviderName, config.ProviderName)
+	}
 	if decoded.VPCName != config.VPCName {
 		t.Errorf("VPCName = %q, want %q", decoded.VPCName, config.VPCName)
 	}
+	if len(decoded.SubnetNames) != 2 {
+		t.Errorf("SubnetNames length = %d, want 2", len(decoded.SubnetNames))
+	}
+	if decoded.AnyscaleServiceAccountEmail != config.AnyscaleServiceAccountEmail {
+		t.Errorf("AnyscaleServiceAccountEmail = %q, want %q", decoded.AnyscaleServiceAccountEmail, config.AnyscaleServiceAccountEmail)
+	}
+	if decoded.ClusterServiceAccountEmail != config.ClusterServiceAccountEmail {
+		t.Errorf("ClusterServiceAccountEmail = %q, want %q", decoded.ClusterServiceAccountEmail, config.ClusterServiceAccountEmail)
+	}
 	if len(decoded.FirewallPolicyNames) != 2 {
 		t.Errorf("FirewallPolicyNames length = %d, want 2", len(decoded.FirewallPolicyNames))
+	}
+	if decoded.MemorystoreInstanceName != config.MemorystoreInstanceName {
+		t.Errorf("MemorystoreInstanceName = %q, want %q", decoded.MemorystoreInstanceName, config.MemorystoreInstanceName)
 	}
 }
 
