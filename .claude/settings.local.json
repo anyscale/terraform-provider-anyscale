@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod tidy:*)",
+      "WebFetch(domain:console.anyscale.com)",
+      "Bash(go run:*)",
+      "Bash(go build:*)",
+      "Bash(ls:*)",
+      "Bash(terraform init:*)",
+      "Bash(TF_LOG=DEBUG terraform plan:*)",
+      "Bash(TF_LOG=DEBUG terraform apply:*)",
+      "Bash(tee:*)",
+      "Bash(TF_LOG=DEBUG TF_LOG_PATH=./terraform-debug.log terraform apply:*)",
+      "Bash(TF_LOG=INFO terraform apply:*)",
+      "Bash(terraform plan:*)",
+      "Bash(make help:*)",
+      "Bash(make clean:*)",
+      "Bash(make build:*)",
+      "Bash(make test:*)",
+      "Bash(make tf-plan:*)",
+      "Bash(terraform state list:*)",
+      "Bash(terraform state show:*)",
+      "Bash(terraform state rm:*)",
+      "Bash(terraform destroy:*)",
+      "Bash(cat:*)",
+      "Bash(terraform apply:*)",
+      "Bash(terraform output:*)",
+      "Bash(/bin/bash -c 'TOKEN=$\\(python3 -c \"\"import json; f=open\\(\\\\\"\"$HOME/.anyscale/credentials.json\\\\\"\"\\); d=json.load\\(f\\); print\\(d.get\\(\\\\\"\"cli_token\\\\\"\"\\) or d.get\\(\\\\\"\"token\\\\\"\"\\)\\)\"\"\\)\ncurl -s -H \"\"Authorization: Bearer $TOKEN\"\" \"\"https://console.anyscale.com/api/v2/clouds/cld_arxhbfha7cmfpn6qcftpxjxqdc\"\"')",
+      "Bash(python3 -m json.tool:*)",
+      "Bash(/bin/bash -c 'TOKEN=$\\(python3 -c \"\"import json; f=open\\(\\\\\"\"$HOME/.anyscale/credentials.json\\\\\"\"\\); d=json.load\\(f\\); print\\(d.get\\(\\\\\"\"cli_token\\\\\"\"\\) or d.get\\(\\\\\"\"token\\\\\"\"\\)\\)\"\"\\)\ncurl -s -H \"\"Authorization: Bearer $TOKEN\"\" \"\"https://console.anyscale.com/api/v2/clouds/cld_arxhbfha7cmfpn6qcftpxjxqdc/deployments\"\"')"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
