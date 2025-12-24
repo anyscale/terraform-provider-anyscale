@@ -190,28 +190,172 @@ ci: deps check test ## Run CI pipeline (deps, check, test)
 	@echo "==> CI pipeline complete"
 
 # ============================================================================
-# TERRAFORM TESTING
+# TERRAFORM TESTING - AWS VM SCENARIOS
 # ============================================================================
 
-.PHONY: tf-plan
-tf-plan: build ## Build and run terraform plan in examples/basic-anyscale-cloud
-	@echo "==> Running terraform plan..."
-	cd examples/basic-anyscale-cloud && terraform plan
+.PHONY: test-aws-vm-basic
+test-aws-vm-basic: build ## Test AWS VM basic scenario (no EFS, no MemoryDB)
+	@echo "==> Testing AWS VM basic scenario..."
+	cd examples/aws-vm-basic && terraform apply -auto-approve
+	cd examples/aws-vm-basic && terraform destroy -auto-approve
 
-.PHONY: tf-apply
-tf-apply: build ## Build and run terraform apply in examples/basic-anyscale-cloud
-	@echo "==> Running terraform apply..."
-	cd examples/basic-anyscale-cloud && terraform apply
+.PHONY: test-aws-vm-efs
+test-aws-vm-efs: build ## Test AWS VM with EFS scenario
+	@echo "==> Testing AWS VM with EFS scenario..."
+	cd examples/aws-vm-with-efs && terraform apply -auto-approve
+	cd examples/aws-vm-with-efs && terraform destroy -auto-approve
 
-.PHONY: tf-destroy
-tf-destroy: ## Run terraform destroy in examples/basic-anyscale-cloud
-	@echo "==> Running terraform destroy..."
-	cd examples/basic-anyscale-cloud && terraform destroy
+.PHONY: test-aws-vm-memorydb
+test-aws-vm-memorydb: build ## Test AWS VM with MemoryDB scenario
+	@echo "==> Testing AWS VM with MemoryDB scenario..."
+	cd examples/aws-vm-with-memorydb && terraform apply -auto-approve
+	cd examples/aws-vm-with-memorydb && terraform destroy -auto-approve
 
-.PHONY: tf-plan-debug
-tf-plan-debug: build ## Build and run terraform plan with DEBUG logging
-	@echo "==> Running terraform plan with DEBUG logging..."
-	cd examples/basic-anyscale-cloud && TF_LOG=DEBUG terraform plan
+.PHONY: test-aws-vm-full
+test-aws-vm-full: build ## Test AWS VM full scenario (EFS + MemoryDB)
+	@echo "==> Testing AWS VM full scenario..."
+	cd examples/aws-vm-full && terraform apply -auto-approve
+	cd examples/aws-vm-full && terraform destroy -auto-approve
+
+# ============================================================================
+# TERRAFORM TESTING - GCP VM SCENARIOS
+# ============================================================================
+
+.PHONY: test-gcp-vm-basic
+test-gcp-vm-basic: build ## Test GCP VM basic scenario (no Filestore, no Memorystore)
+	@echo "==> Testing GCP VM basic scenario..."
+	cd examples/gcp-vm-basic && terraform apply -auto-approve
+	cd examples/gcp-vm-basic && terraform destroy -auto-approve
+
+.PHONY: test-gcp-vm-filestore
+test-gcp-vm-filestore: build ## Test GCP VM with Filestore scenario
+	@echo "==> Testing GCP VM with Filestore scenario..."
+	cd examples/gcp-vm-with-filestore && terraform apply -auto-approve
+	cd examples/gcp-vm-with-filestore && terraform destroy -auto-approve
+
+.PHONY: test-gcp-vm-memorystore
+test-gcp-vm-memorystore: build ## Test GCP VM with Memorystore scenario
+	@echo "==> Testing GCP VM with Memorystore scenario..."
+	cd examples/gcp-vm-with-memorystore && terraform apply -auto-approve
+	cd examples/gcp-vm-with-memorystore && terraform destroy -auto-approve
+
+.PHONY: test-gcp-vm-full
+test-gcp-vm-full: build ## Test GCP VM full scenario (Filestore + Memorystore)
+	@echo "==> Testing GCP VM full scenario..."
+	cd examples/gcp-vm-full && terraform apply -auto-approve
+	cd examples/gcp-vm-full && terraform destroy -auto-approve
+
+# ============================================================================
+# TERRAFORM TESTING - BATCH SCENARIOS
+# ============================================================================
+
+.PHONY: test-all-aws-vm
+test-all-aws-vm: build ## Run all AWS VM test scenarios sequentially
+	@echo "==> Running all AWS VM test scenarios..."
+	$(MAKE) test-aws-vm-basic
+	$(MAKE) test-aws-vm-efs
+	$(MAKE) test-aws-vm-memorydb
+	$(MAKE) test-aws-vm-full
+	@echo "==> All AWS VM scenarios completed"
+
+.PHONY: test-all-gcp-vm
+test-all-gcp-vm: build ## Run all GCP VM test scenarios sequentially
+	@echo "==> Running all GCP VM test scenarios..."
+	$(MAKE) test-gcp-vm-basic
+	$(MAKE) test-gcp-vm-filestore
+	$(MAKE) test-gcp-vm-memorystore
+	$(MAKE) test-gcp-vm-full
+	@echo "==> All GCP VM scenarios completed"
+
+.PHONY: test-all-vm
+test-all-vm: build ## Run all VM test scenarios (AWS + GCP)
+	@echo "==> Running all VM test scenarios..."
+	$(MAKE) test-all-aws-vm
+	$(MAKE) test-all-gcp-vm
+	@echo "==> All VM scenarios completed"
+
+# Parallel testing (each scenario has unique IAM roles)
+.PHONY: test-all-aws-vm-parallel
+test-all-aws-vm-parallel: build ## Run all AWS VM scenarios in parallel
+	@echo "==> Running all AWS VM scenarios in parallel..."
+	$(MAKE) -j4 test-aws-vm-basic test-aws-vm-efs test-aws-vm-memorydb test-aws-vm-full
+
+.PHONY: test-all-gcp-vm-parallel
+test-all-gcp-vm-parallel: build ## Run all GCP VM scenarios in parallel
+	@echo "==> Running all GCP VM scenarios in parallel..."
+	$(MAKE) -j4 test-gcp-vm-basic test-gcp-vm-filestore test-gcp-vm-memorystore test-gcp-vm-full
+
+# ============================================================================
+# TERRAFORM TESTING - APPLY/DESTROY ONLY (for manual testing)
+# ============================================================================
+
+# AWS VM Apply-only targets
+.PHONY: apply-aws-vm-basic
+apply-aws-vm-basic: build ## Apply AWS VM basic scenario only
+	cd examples/aws-vm-basic && terraform apply
+
+.PHONY: apply-aws-vm-efs
+apply-aws-vm-efs: build ## Apply AWS VM with EFS scenario only
+	cd examples/aws-vm-with-efs && terraform apply
+
+.PHONY: apply-aws-vm-memorydb
+apply-aws-vm-memorydb: build ## Apply AWS VM with MemoryDB scenario only
+	cd examples/aws-vm-with-memorydb && terraform apply
+
+.PHONY: apply-aws-vm-full
+apply-aws-vm-full: build ## Apply AWS VM full scenario only
+	cd examples/aws-vm-full && terraform apply
+
+# GCP VM Apply-only targets
+.PHONY: apply-gcp-vm-basic
+apply-gcp-vm-basic: build ## Apply GCP VM basic scenario only
+	cd examples/gcp-vm-basic && terraform apply
+
+.PHONY: apply-gcp-vm-filestore
+apply-gcp-vm-filestore: build ## Apply GCP VM with Filestore scenario only
+	cd examples/gcp-vm-with-filestore && terraform apply
+
+.PHONY: apply-gcp-vm-memorystore
+apply-gcp-vm-memorystore: build ## Apply GCP VM with Memorystore scenario only
+	cd examples/gcp-vm-with-memorystore && terraform apply
+
+.PHONY: apply-gcp-vm-full
+apply-gcp-vm-full: build ## Apply GCP VM full scenario only
+	cd examples/gcp-vm-full && terraform apply
+
+# AWS VM Destroy-only targets
+.PHONY: destroy-aws-vm-basic
+destroy-aws-vm-basic: ## Destroy AWS VM basic scenario
+	cd examples/aws-vm-basic && terraform destroy
+
+.PHONY: destroy-aws-vm-efs
+destroy-aws-vm-efs: ## Destroy AWS VM with EFS scenario
+	cd examples/aws-vm-with-efs && terraform destroy
+
+.PHONY: destroy-aws-vm-memorydb
+destroy-aws-vm-memorydb: ## Destroy AWS VM with MemoryDB scenario
+	cd examples/aws-vm-with-memorydb && terraform destroy
+
+.PHONY: destroy-aws-vm-full
+destroy-aws-vm-full: ## Destroy AWS VM full scenario
+	cd examples/aws-vm-full && terraform destroy
+
+# GCP VM Destroy-only targets
+.PHONY: destroy-gcp-vm-basic
+destroy-gcp-vm-basic: ## Destroy GCP VM basic scenario
+	cd examples/gcp-vm-basic && terraform destroy
+
+.PHONY: destroy-gcp-vm-filestore
+destroy-gcp-vm-filestore: ## Destroy GCP VM with Filestore scenario
+	cd examples/gcp-vm-with-filestore && terraform destroy
+
+.PHONY: destroy-gcp-vm-memorystore
+destroy-gcp-vm-memorystore: ## Destroy GCP VM with Memorystore scenario
+	cd examples/gcp-vm-with-memorystore && terraform destroy
+
+.PHONY: destroy-gcp-vm-full
+destroy-gcp-vm-full: ## Destroy GCP VM full scenario
+	cd examples/gcp-vm-full && terraform destroy
 
 # ============================================================================
 # RELEASE (placeholder for future CI/CD)

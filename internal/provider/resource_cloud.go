@@ -436,6 +436,36 @@ func ExpandObjectStorage(d *schema.ResourceData) *ObjectStorage {
 	return storage
 }
 
+// ExpandFileStorage extracts file storage configuration from Terraform state
+func ExpandFileStorage(d *schema.ResourceData) *FileStorage {
+	v, ok := d.GetOk("file_storage")
+	if !ok || len(v.([]any)) == 0 {
+		return nil
+	}
+
+	config := v.([]any)[0].(map[string]any)
+
+	storage := &FileStorage{
+		FileSystemID: config["file_system_id"].(string),
+	}
+
+	if mountPath, ok := config["mount_path"].(string); ok && mountPath != "" {
+		storage.MountPath = mountPath
+	}
+
+	// Handle mount_targets list
+	if mountTargets, ok := config["mount_targets"].([]any); ok && len(mountTargets) > 0 {
+		storage.MountTargets = make([]string, len(mountTargets))
+		for i, v := range mountTargets {
+			if s, ok := v.(string); ok {
+				storage.MountTargets[i] = s
+			}
+		}
+	}
+
+	return storage
+}
+
 // ExpandGCPConfig extracts GCP configuration from Terraform state
 func ExpandGCPConfig(d *schema.ResourceData) *GCPConfig {
 	v, ok := d.GetOk("gcp_config")
@@ -622,6 +652,11 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 			}
 		}
 
+		// Add file storage (EFS) if configured
+		if fileStorage := ExpandFileStorage(d); fileStorage != nil {
+			deployReq.FileStorage = fileStorage
+		}
+
 	case "GCP":
 		gcpConfig := ExpandGCPConfig(d)
 		if gcpConfig == nil {
@@ -641,6 +676,11 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 				Region:     objStorage.Region,
 				Endpoint:   objStorage.Endpoint,
 			}
+		}
+
+		// Add file storage (Filestore) if configured
+		if fileStorage := ExpandFileStorage(d); fileStorage != nil {
+			deployReq.FileStorage = fileStorage
 		}
 
 	case "AZURE":
