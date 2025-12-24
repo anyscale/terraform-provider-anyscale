@@ -32,7 +32,8 @@ resource "anyscale_cloud" "test" {
     region      = var.aws_region
   }
 
-  # No file_storage block - EFS disabled
+  # EFS: DISABLED for this scenario
+  create_efs_resources = false
 
   timeouts {
     create = "30m"
