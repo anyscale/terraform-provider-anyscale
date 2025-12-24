@@ -31,9 +31,15 @@ resource "anyscale_cloud" "test" {
 
   # File Storage (EFS)
   file_storage {
-    file_system_id = module.aws_anyscale_v2.anyscale_efs_id
-    mount_path     = "/mnt/shared"
-    mount_targets  = module.aws_anyscale_v2.anyscale_efs_mount_target_ips
+    file_storage_id = module.aws_anyscale_v2.anyscale_efs_id
+    mount_path      = "/mnt/shared"
+
+    dynamic "mount_targets" {
+      for_each = module.aws_anyscale_v2.anyscale_efs_mount_target_ips
+      content {
+        address = mount_targets.value
+      }
+    }
   }
 
   timeouts {

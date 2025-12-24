@@ -336,9 +336,12 @@ func TestObjectStorageJSON(t *testing.T) {
 // TestFileStorageJSON tests file storage JSON marshaling
 func TestFileStorageJSON(t *testing.T) {
 	config := FileStorage{
-		FileSystemID: "fs-123",
-		MountPath:    "/mnt/shared",
-		MountTargets: []string{"10.0.0.1", "10.0.0.2"},
+		FileStorageID: "fs-123",
+		MountPath:     "/mnt/shared",
+		MountTargets: []MountTarget{
+			{Address: "10.0.0.1", Zone: "us-east-1a"},
+			{Address: "10.0.0.2", Zone: "us-east-1b"},
+		},
 	}
 
 	data, err := json.Marshal(config)
@@ -351,14 +354,20 @@ func TestFileStorageJSON(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if decoded.FileSystemID != config.FileSystemID {
-		t.Errorf("FileSystemID = %q, want %q", decoded.FileSystemID, config.FileSystemID)
+	if decoded.FileStorageID != config.FileStorageID {
+		t.Errorf("FileStorageID = %q, want %q", decoded.FileStorageID, config.FileStorageID)
 	}
 	if decoded.MountPath != config.MountPath {
 		t.Errorf("MountPath = %q, want %q", decoded.MountPath, config.MountPath)
 	}
 	if len(decoded.MountTargets) != 2 {
 		t.Errorf("MountTargets length = %d, want 2", len(decoded.MountTargets))
+	}
+	if decoded.MountTargets[0].Address != "10.0.0.1" {
+		t.Errorf("MountTargets[0].Address = %q, want %q", decoded.MountTargets[0].Address, "10.0.0.1")
+	}
+	if decoded.MountTargets[0].Zone != "us-east-1a" {
+		t.Errorf("MountTargets[0].Zone = %q, want %q", decoded.MountTargets[0].Zone, "us-east-1a")
 	}
 }
 

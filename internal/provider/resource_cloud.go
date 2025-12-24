@@ -308,19 +308,19 @@ func ResourceCloud() *schema.Resource {
 				},
 			},
 
-			// ─── File Storage (common abstraction) ──────────────
+			// ─── File Storage (EFS, Filestore, etc.) ──────────────
 			"file_storage": {
 				Type:        schema.TypeList,
 				Optional:    true,
 				MaxItems:    1,
-				Description: "File storage configuration (EFS, Filestore, Azure Files).",
+				Description: "File storage configuration (EFS, Filestore, etc.).",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"file_system_id": {
+						"file_storage_id": {
 							Type:        schema.TypeString,
 							Required:    true,
 							ForceNew:    true,
-							Description: "The file system ID (EFS ID, Filestore name, etc.).",
+							Description: "The file storage ID (EFS ID, Filestore name, etc.).",
 						},
 						"mount_path": {
 							Type:        schema.TypeString,
@@ -331,8 +331,21 @@ func ResourceCloud() *schema.Resource {
 						"mount_targets": {
 							Type:        schema.TypeList,
 							Optional:    true,
-							Description: "List of mount target IPs or DNS names.",
-							Elem:        &schema.Schema{Type: schema.TypeString},
+							Description: "List of mount targets with address and optional zone.",
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									"address": {
+										Type:        schema.TypeString,
+										Required:    true,
+										Description: "The IP address or DNS name of the mount target.",
+									},
+									"zone": {
+										Type:        schema.TypeString,
+										Optional:    true,
+										Description: "The zone of the mount target (optional).",
+									},
+								},
+							},
 						},
 					},
 				},
@@ -446,19 +459,26 @@ func ExpandFileStorage(d *schema.ResourceData) *FileStorage {
 	config := v.([]any)[0].(map[string]any)
 
 	storage := &FileStorage{
-		FileSystemID: config["file_system_id"].(string),
+		FileStorageID: config["file_storage_id"].(string),
 	}
 
 	if mountPath, ok := config["mount_path"].(string); ok && mountPath != "" {
 		storage.MountPath = mountPath
 	}
 
-	// Handle mount_targets list
+	// Handle mount_targets list of objects
 	if mountTargets, ok := config["mount_targets"].([]any); ok && len(mountTargets) > 0 {
-		storage.MountTargets = make([]string, len(mountTargets))
+		storage.MountTargets = make([]MountTarget, len(mountTargets))
 		for i, v := range mountTargets {
-			if s, ok := v.(string); ok {
-				storage.MountTargets[i] = s
+			if targetMap, ok := v.(map[string]any); ok {
+				target := MountTarget{}
+				if addr, ok := targetMap["address"].(string); ok {
+					target.Address = addr
+				}
+				if zone, ok := targetMap["zone"].(string); ok {
+					target.Zone = zone
+				}
+				storage.MountTargets[i] = target
 			}
 		}
 	}

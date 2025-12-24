@@ -76,11 +76,19 @@ type ObjectStorage struct {
 	Endpoint   *string `json:"endpoint,omitempty"`
 }
 
-// FileStorage represents file storage configuration (EFS, Filestore, Azure Files)
+// FileStorage represents file storage configuration (EFS, Filestore, etc.)
 type FileStorage struct {
-	FileSystemID string   `json:"file_system_id"`
-	MountPath    string   `json:"mount_path,omitempty"`
-	MountTargets []string `json:"mount_targets,omitempty"`
+	FileStorageID            string        `json:"file_storage_id"`
+	MountPath                string        `json:"mount_path,omitempty"`
+	MountTargets             []MountTarget `json:"mount_targets,omitempty"`
+	PersistentVolumeClaim    string        `json:"persistent_volume_claim,omitempty"`
+	CSIEphemeralVolumeDriver string        `json:"csi_ephemeral_volume_driver,omitempty"`
+}
+
+// MountTarget represents a mount target with address and zone
+type MountTarget struct {
+	Address string `json:"address"`
+	Zone    string `json:"zone,omitempty"`
 }
 
 // AWSConfig represents AWS-specific cloud configuration
