@@ -279,12 +279,11 @@ func TestAzureConfigJSON(t *testing.T) {
 }
 
 // TestKubernetesConfigJSON tests Kubernetes config JSON marshaling
+// Note: KubernetesConfig only includes fields accepted by the Anyscale API
 func TestKubernetesConfigJSON(t *testing.T) {
 	config := KubernetesConfig{
-		ClusterName:    "my-cluster",
-		Namespace:      "anyscale",
-		KubeconfigPath: "/path/to/kubeconfig",
-		Context:        "my-context",
+		AnyscaleOperatorIAMIdentity: "arn:aws:iam::123456789012:role/anyscale-operator",
+		Zones:                       []string{"us-east-1a", "us-east-1b"},
 	}
 
 	data, err := json.Marshal(config)
@@ -297,11 +296,11 @@ func TestKubernetesConfigJSON(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if decoded.ClusterName != config.ClusterName {
-		t.Errorf("ClusterName = %q, want %q", decoded.ClusterName, config.ClusterName)
+	if decoded.AnyscaleOperatorIAMIdentity != config.AnyscaleOperatorIAMIdentity {
+		t.Errorf("AnyscaleOperatorIAMIdentity = %q, want %q", decoded.AnyscaleOperatorIAMIdentity, config.AnyscaleOperatorIAMIdentity)
 	}
-	if decoded.Namespace != config.Namespace {
-		t.Errorf("Namespace = %q, want %q", decoded.Namespace, config.Namespace)
+	if len(decoded.Zones) != len(config.Zones) {
+		t.Errorf("Zones length = %d, want %d", len(decoded.Zones), len(config.Zones))
 	}
 }
 
