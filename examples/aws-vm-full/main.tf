@@ -3,14 +3,12 @@
 # Uses split pattern: empty cloud + cloud_resource
 
 # Step 1: Create empty cloud shell
+# cloud_provider and region are optional - will use placeholders for empty clouds
 resource "anyscale_cloud" "test" {
-  name           = var.cloud_name
-  cloud_provider = "AWS"
-  region         = var.aws_region
-  compute_stack  = "VM"
+  name = var.cloud_name
 
-  is_private_cloud = var.is_private_cloud
-  auto_add_user    = var.auto_add_user
+  is_private_cloud = true
+  auto_add_user    = true
 
   # Cloud-level settings
   enable_lineage_tracking = true
@@ -30,7 +28,7 @@ resource "anyscale_cloud" "test" {
 resource "anyscale_cloud_resource" "primary" {
   cloud_id      = anyscale_cloud.test.cloud_id
   region        = var.aws_region
-  compute_stack = var.compute_stack
+  compute_stack = "VM"
   is_private    = var.is_private_cloud
 
   # AWS Configuration
@@ -56,22 +54,19 @@ resource "anyscale_cloud_resource" "primary" {
     region      = var.aws_region
   }
 
-  # File Storage (EFS)
+  # File Storage (EFS) - API expects single mount target
   file_storage {
     file_storage_id = module.aws_anyscale_v2.anyscale_efs_id
     mount_path      = "/mnt/shared"
 
-    dynamic "mount_targets" {
-      for_each = module.aws_anyscale_v2.anyscale_efs_mount_target_ips
-      content {
-        address = mount_targets.value
-      }
+    mount_targets {
+      address = module.aws_anyscale_v2.anyscale_efs_mount_target_ips[0]
     }
   }
 
   timeouts {
-    create = "30m"
-    update = "30m"
-    delete = "30m"
+    create = "10m"
+    update = "10m"
+    delete = "10m"
   }
 }

@@ -8,15 +8,7 @@ output "cloud_name" {
   value       = anyscale_cloud.test.name
 }
 
-output "cloud_state" {
-  description = "The current state of the Anyscale cloud"
-  value       = anyscale_cloud.test.state
-}
 
-output "cloud_status" {
-  description = "The current status of the Anyscale cloud"
-  value       = anyscale_cloud.test.status
-}
 
 output "is_empty_cloud" {
   description = "Whether the cloud was created as an empty shell"

@@ -3,17 +3,30 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
+
+// generateRandomString generates a random alphanumeric string of the given length
+func generateRandomString(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, length)
+	rand.Read(b)
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b)
+}
 
 // ResourceCloud returns the schema for the anyscale_cloud resource
 func ResourceCloud() *schema.Resource {
@@ -41,22 +54,23 @@ func ResourceCloud() *schema.Resource {
 			},
 			"cloud_provider": {
 				Type:        schema.TypeString,
-				Required:    true,
+				Optional:    true,
+				Computed:    true,
 				ForceNew:    true,
-				Description: "Cloud provider: AWS, GCP, Azure, or Generic.",
+				Description: "Cloud provider: AWS, GCP, Azure, or Generic. Auto-detected from aws_config/gcp_config, or defaults to AWS for empty clouds.",
 			},
 			"compute_stack": {
 				Type:        schema.TypeString,
 				Optional:    true,
-				Default:     "VM",
 				ForceNew:    true,
-				Description: "Compute stack type: VM or K8S.",
+				Description: "Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config).",
 			},
 			"region": {
 				Type:        schema.TypeString,
-				Required:    true,
+				Optional:    true,
+				Computed:    true,
 				ForceNew:    true,
-				Description: "The region where the cloud is deployed.",
+				Description: "The region where the cloud is deployed. Auto-detected from config or defaults to us-east-1 for empty clouds.",
 			},
 			"is_private_cloud": {
 				Type:        schema.TypeBool,
@@ -70,6 +84,12 @@ func ResourceCloud() *schema.Resource {
 				Optional:    true,
 				Default:     false,
 				Description: "Whether to automatically add users to this cloud.",
+			},
+			"credentials": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "Cloud credentials. For AWS: the IAM role ARN. For GCP: the Workload Identity Provider name. Required when using split pattern (empty cloud + cloud_resource).",
 			},
 			"enable_lineage_tracking": {
 				Type:        schema.TypeBool,
@@ -392,16 +412,6 @@ func ResourceCloud() *schema.Resource {
 				Computed:    true,
 				Description: "Whether this cloud was created without embedded resource configuration. Use anyscale_cloud_resource to attach resources separately.",
 			},
-			"status": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The current status of the cloud (e.g., ready, pending).",
-			},
-			"state": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The current state of the cloud (e.g., ACTIVE, FAILED).",
-			},
 		},
 	}
 }
@@ -615,6 +625,53 @@ func hasEmbeddedResourceConfig(d *schema.ResourceData) bool {
 	return hasAWS || hasGCP || hasAzure || hasK8s || hasObjStorage || hasFileStorage
 }
 
+// findCloudByName searches for an existing cloud with the given name.
+// Returns the cloud ID if found, empty string if not found.
+func findCloudByName(client *Client, name string) (string, error) {
+	// Use name filter query parameter if supported, otherwise list and filter
+	resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds?name=%s", url.QueryEscape(name)), nil)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// If name filter not supported, try listing all and filtering
+		resp2, err := client.DoRequest("GET", "/api/v2/clouds", nil)
+		if err != nil {
+			return "", err
+		}
+		defer resp2.Body.Close()
+
+		body, err = io.ReadAll(resp2.Body)
+		if err != nil {
+			return "", err
+		}
+
+		if resp2.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("failed to list clouds: %s", string(body))
+		}
+	}
+
+	var cloudsResp CloudsListResponse
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		return "", err
+	}
+
+	for _, cloud := range cloudsResp.Results {
+		if cloud.Name == name {
+			return cloud.ID, nil
+		}
+	}
+
+	return "", nil
+}
+
 // ─── CRUD Operations ────────────────────────────────────────────────────────
 
 func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) diag.Diagnostics {
@@ -626,33 +683,102 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 	computeStack := d.Get("compute_stack").(string)
 	networkingMode := GetNetworkingMode(d)
 
+	// Check if this is an empty cloud pattern (no embedded config)
+	isEmptyCloud := !hasEmbeddedResourceConfig(d)
+
+	// Auto-detect or use placeholder values for empty cloud pattern
+	if provider == "" {
+		// Try to detect from config blocks
+		if _, ok := d.GetOk("aws_config"); ok {
+			provider = "AWS"
+		} else if _, ok := d.GetOk("gcp_config"); ok {
+			provider = "GCP"
+		} else if _, ok := d.GetOk("azure_config"); ok {
+			provider = "Azure"
+		} else {
+			// Default to AWS for empty cloud pattern
+			provider = "AWS"
+			log.Printf("[INFO] No cloud_provider specified, using placeholder: %s", provider)
+		}
+		d.Set("cloud_provider", provider)
+	}
+
+	if region == "" {
+		// Use placeholder region for empty cloud pattern
+		if isEmptyCloud {
+			region = "us-east-1"
+			log.Printf("[INFO] No region specified for empty cloud, using placeholder: %s", region)
+		}
+		d.Set("region", region)
+	}
+
 	log.Printf("[INFO] Creating Anyscale Cloud: name=%s, provider=%s, region=%s, compute_stack=%s",
 		name, provider, region, computeStack)
 
-	// Get credentials based on provider type
+	// Check if a cloud with this name already exists (handles interrupted creates)
+	existingCloudID, err := findCloudByName(client, name)
+	if err != nil {
+		log.Printf("[WARN] Failed to check for existing cloud: %v", err)
+		// Continue with creation - the API will return an error if name exists
+	} else if existingCloudID != "" {
+		log.Printf("[INFO] Found existing cloud with name %s, adopting cloud_id=%s", name, existingCloudID)
+		d.SetId(existingCloudID)
+		d.Set("cloud_id", existingCloudID)
+		// Check if this is an empty cloud or has resources
+		isEmptyCloud := !hasEmbeddedResourceConfig(d)
+		d.Set("is_empty_cloud", isEmptyCloud)
+		return resourceCloudRead(ctx, d, m)
+	}
+
+	// Get credentials - check explicit field first, then extract from config blocks, then use placeholder
 	var credentials string
-	switch strings.ToUpper(provider) {
-	case "AWS":
-		if awsConfig := ExpandAWSConfig(d); awsConfig != nil {
-			credentials = awsConfig.AnyscaleIAMRoleID
+	if creds, ok := d.GetOk("credentials"); ok {
+		credentials = creds.(string)
+	} else {
+		// Try to extract from config blocks (all-in-one pattern)
+		switch strings.ToUpper(provider) {
+		case "AWS":
+			if awsConfig := ExpandAWSConfig(d); awsConfig != nil {
+				credentials = awsConfig.AnyscaleIAMRoleID
+			}
+		case "GCP":
+			if gcpConfig := ExpandGCPConfig(d); gcpConfig != nil {
+				// For GCP, credentials must be a JSON object with provider_id, project_id, service_account_email
+				gcpCreds := map[string]string{
+					"provider_id":           gcpConfig.ProviderName,
+					"project_id":            gcpConfig.ProjectID,
+					"service_account_email": gcpConfig.AnyscaleServiceAccountEmail,
+				}
+				if gcpConfig.HostProjectID != "" {
+					gcpCreds["host_project_id"] = gcpConfig.HostProjectID
+				}
+				credsJSON, err := json.Marshal(gcpCreds)
+				if err != nil {
+					return diag.FromErr(fmt.Errorf("failed to marshal GCP credentials: %w", err))
+				}
+				credentials = string(credsJSON)
+			}
 		}
-	case "GCP":
-		if gcpConfig := ExpandGCPConfig(d); gcpConfig != nil {
-			// For GCP, credentials must be a JSON object with provider_id, project_id, service_account_email
-			gcpCreds := map[string]string{
-				"provider_id":           gcpConfig.ProviderName,
-				"project_id":            gcpConfig.ProjectID,
-				"service_account_email": gcpConfig.AnyscaleServiceAccountEmail,
+	}
+
+	// If still no credentials, generate unique placeholder for empty cloud pattern
+	if credentials == "" {
+		uniqueSuffix := generateRandomString(12)
+		switch strings.ToUpper(provider) {
+		case "AWS":
+			credentials = fmt.Sprintf("arn:aws:iam::000000000000:role/anyscale-placeholder-%s", uniqueSuffix)
+		case "GCP":
+			placeholderCreds := map[string]string{
+				"provider_id":           fmt.Sprintf("projects/000000000000/locations/global/workloadIdentityPools/placeholder-%s/providers/placeholder", uniqueSuffix),
+				"project_id":            "placeholder-project",
+				"service_account_email": fmt.Sprintf("placeholder-%s@placeholder-project.iam.gserviceaccount.com", uniqueSuffix),
 			}
-			if gcpConfig.HostProjectID != "" {
-				gcpCreds["host_project_id"] = gcpConfig.HostProjectID
-			}
-			credsJSON, err := json.Marshal(gcpCreds)
-			if err != nil {
-				return diag.FromErr(fmt.Errorf("failed to marshal GCP credentials: %w", err))
-			}
+			credsJSON, _ := json.Marshal(placeholderCreds)
 			credentials = string(credsJSON)
+		default:
+			credentials = fmt.Sprintf("placeholder-%s", uniqueSuffix)
 		}
+		log.Printf("[INFO] Using placeholder credentials for empty cloud pattern")
 	}
 
 	// Step 1: Create the cloud with required fields
@@ -699,14 +825,18 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 
 	log.Printf("[INFO] Cloud created successfully: cloud_id=%s", cloudID)
 
-	// Check if this is an "empty" cloud (no embedded resource config)
-	isEmptyCloud := !hasEmbeddedResourceConfig(d)
+	// Set empty cloud flag (already computed at start of function)
 	d.Set("is_empty_cloud", isEmptyCloud)
 
 	if isEmptyCloud {
 		// Skip add_resource call - resources will be added via anyscale_cloud_resource
 		log.Printf("[INFO] Created empty cloud %s - resources should be added via anyscale_cloud_resource", cloudID)
 		return resourceCloudRead(ctx, d, m)
+	}
+
+	// For all-in-one pattern, compute_stack is required
+	if computeStack == "" {
+		return diag.Errorf("compute_stack is required when using embedded config (aws_config/gcp_config)")
 	}
 
 	// Step 2: Build and add cloud resource/deployment
@@ -879,8 +1009,6 @@ func resourceCloudRead(ctx context.Context, d *schema.ResourceData, m any) diag.
 	d.Set("cloud_provider", cloud.Provider)
 	d.Set("region", cloud.Region)
 	d.Set("compute_stack", cloud.ComputeStack)
-	d.Set("status", cloud.Status)
-	d.Set("state", cloud.State)
 	d.Set("is_private_cloud", cloud.IsPrivateCloud)
 	d.Set("auto_add_user", cloud.AutoAddUser)
 	d.Set("enable_lineage_tracking", cloud.LineageTrackingEnabled)
@@ -944,9 +1072,19 @@ func resourceCloudDelete(ctx context.Context, d *schema.ResourceData, m any) dia
 	return diags
 }
 
+// waitForCloudReady polls for cloud readiness using exponential backoff.
+// It waits until the cloud state is ACTIVE and status is ready, or until timeout.
 func waitForCloudReady(ctx context.Context, client *Client, cloudID string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	pollCount := 0
+
+	// Exponential backoff configuration
+	const (
+		initialBackoff = 5 * time.Second
+		maxBackoff     = 60 * time.Second
+		backoffFactor  = 2.0
+	)
+	currentBackoff := initialBackoff
 
 	log.Printf("[INFO] Waiting for cloud %s to be ready (timeout: %v)", cloudID, timeout)
 
@@ -967,6 +1105,21 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		}
 
 		log.Printf("[DEBUG] Poll #%d - Response Status: %d", pollCount, resp.StatusCode)
+
+		// Handle rate limiting (429) with backoff
+		if resp.StatusCode == http.StatusTooManyRequests {
+			log.Printf("[WARN] Poll #%d - Rate limited, backing off for %v", pollCount, currentBackoff)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(currentBackoff):
+				currentBackoff = time.Duration(float64(currentBackoff) * backoffFactor)
+				if currentBackoff > maxBackoff {
+					currentBackoff = maxBackoff
+				}
+				continue
+			}
+		}
 
 		if resp.StatusCode != http.StatusOK {
 			log.Printf("[ERROR] Poll #%d - Failed response: %s", pollCount, string(body))
@@ -1001,14 +1154,18 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 			return fmt.Errorf("cloud creation failed with status: %s, state: %s", status, state)
 		}
 
-		log.Printf("[DEBUG] Cloud not ready yet, waiting 15 seconds before next poll...")
+		log.Printf("[DEBUG] Cloud not ready yet, waiting %v before next poll...", currentBackoff)
 
 		select {
 		case <-ctx.Done():
 			log.Printf("[ERROR] Context cancelled while waiting for cloud")
 			return ctx.Err()
-		case <-time.After(15 * time.Second):
-			// Continue polling
+		case <-time.After(currentBackoff):
+			// Increase backoff for next iteration
+			currentBackoff = time.Duration(float64(currentBackoff) * backoffFactor)
+			if currentBackoff > maxBackoff {
+				currentBackoff = maxBackoff
+			}
 		}
 	}
 

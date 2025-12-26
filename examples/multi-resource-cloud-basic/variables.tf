@@ -1,5 +1,5 @@
-# Variables for AWS Full Test Scenario
-# EFS + MemoryDB enabled - Full AWS cloud configuration
+# Variables for AWS Basic Test Scenario
+# No EFS, No MemoryDB - Minimal AWS cloud configuration
 # ---------------------------------------------------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -39,20 +39,20 @@ variable "anyscale_org_id" {
 # OPTIONAL VARIABLES
 # ---------------------------------------------------------------------------------------------------------------------
 
-# variable "anyscale_cloud_id" {
-#   description = "Anyscale Cloud ID (optional, not known until cloud is created)."
-#   type        = string
-#   default     = null
-#   validation {
-#     condition = (
-#       var.anyscale_cloud_id == null ? true : (
-#         length(var.anyscale_cloud_id) > 4 &&
-#         substr(var.anyscale_cloud_id, 0, 4) == "cld_"
-#       )
-#     )
-#     error_message = "The anyscale_cloud_id value must start with \"cld_\"."
-#   }
-# }
+variable "anyscale_cloud_id" {
+  description = "Anyscale Cloud ID (optional, not known until cloud is created)."
+  type        = string
+  default     = null
+  validation {
+    condition = (
+      var.anyscale_cloud_id == null ? true : (
+        length(var.anyscale_cloud_id) > 4 &&
+        substr(var.anyscale_cloud_id, 0, 4) == "cld_"
+      )
+    )
+    error_message = "The anyscale_cloud_id value must start with \"cld_\"."
+  }
+}
 
 variable "tags" {
   description = "A map of tags to add to all resources."
@@ -60,7 +60,7 @@ variable "tags" {
   default = {
     "test"        = "true"
     "environment" = "test"
-    "scenario"    = "aws-full"
+    "scenario"    = "aws-basic"
   }
 }
 
@@ -74,10 +74,20 @@ variable "anyscale_deploy_env" {
   }
 }
 
-variable "common_prefix" {
+variable "common_prefix_1" {
   description = "Common prefix for resource names. Must be unique per scenario."
   type        = string
-  default     = "as-aws-full-"
+  default     = "as-aws-basic1-"
+  validation {
+    condition     = var.common_prefix == null || try(length(var.common_prefix) <= 30, false)
+    error_message = "common_prefix must either be `null` or less than 30 characters."
+  }
+}
+
+variable "common_prefix_2" {
+  description = "Common prefix for resource names. Must be unique per scenario."
+  type        = string
+  default     = "as-aws-basic2-"
   validation {
     condition     = var.common_prefix == null || try(length(var.common_prefix) <= 30, false)
     error_message = "common_prefix must either be `null` or less than 30 characters."
@@ -88,9 +98,20 @@ variable "common_prefix" {
 variable "cloud_name" {
   description = "The name of the Anyscale cloud"
   type        = string
-  default     = "tf-aws-full-test"
+  default     = "tf-aws-basic-test"
 }
 
+variable "is_private_cloud" {
+  description = "Whether this is a private cloud"
+  type        = bool
+  default     = false
+}
+
+variable "auto_add_user" {
+  description = "Whether to automatically add users"
+  type        = bool
+  default     = false
+}
 
 variable "anyscale_s3_force_destroy" {
   description = "Force destroy S3 bucket for testing"

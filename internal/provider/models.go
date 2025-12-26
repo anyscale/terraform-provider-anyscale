@@ -15,6 +15,15 @@ type CloudResponse struct {
 	Result CloudResult `json:"result"`
 }
 
+// CloudsListResponse represents the response from listing clouds
+type CloudsListResponse struct {
+	Results  []CloudResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
 // CloudResult is the actual cloud data
 type CloudResult struct {
 	ID                             string       `json:"id"`

@@ -3,11 +3,9 @@
 # Uses split pattern: empty cloud + cloud_resource
 
 # Step 1: Create empty cloud shell
+# cloud_provider and region are optional - will use placeholders for empty clouds
 resource "anyscale_cloud" "test" {
-  name           = var.cloud_name
-  cloud_provider = "GCP"
-  region         = var.gcp_region
-  compute_stack  = "VM"
+  name = var.cloud_name
 
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user

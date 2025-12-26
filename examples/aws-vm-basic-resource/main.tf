@@ -1,28 +1,23 @@
-# AWS with MemoryDB Test Scenario
-# No EFS, MemoryDB enabled
-# Uses split pattern: empty cloud + cloud_resource
+# AWS Basic Test Scenario - Resource Based
+# No EFS, No MemoryDB - Minimal AWS cloud configuration
 
-# Step 1: Create empty cloud shell
-# cloud_provider and region are optional - will use placeholders for empty clouds
-resource "anyscale_cloud" "test" {
+resource "anyscale_cloud" "primary" {
+  # Common Fields
   name = var.cloud_name
-
-  is_private_cloud = var.is_private_cloud
-  auto_add_user    = true
+  # No file_storage block - EFS disabled
 
   timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
+    create = "5m"
+    update = "5m"
+    delete = "5m"
   }
 }
 
-# Step 2: Attach cloud resource with MemoryDB configuration
 resource "anyscale_cloud_resource" "primary" {
   cloud_id      = anyscale_cloud.test.cloud_id
   region        = var.aws_region
   compute_stack = "VM"
-  is_private    = var.is_private_cloud
+  is_private    = false
 
   # AWS Configuration
   aws_config {
@@ -34,11 +29,6 @@ resource "anyscale_cloud_resource" "primary" {
     controlplane_iam_role_arn = module.aws_anyscale_v2.anyscale_iam_role_arn
     dataplane_iam_role_arn    = module.aws_anyscale_v2.anyscale_iam_role_cluster_node_arn
     external_id               = module.aws_anyscale_v2.anyscale_iam_role_external_id
-
-    # MemoryDB for Ray GCS fault tolerance
-    memorydb_cluster_name     = module.aws_anyscale_v2.anyscale_memorydb_cluster_id
-    memorydb_cluster_arn      = module.aws_anyscale_v2.anyscale_memorydb_cluster_arn
-    memorydb_cluster_endpoint = module.aws_anyscale_v2.anyscale_memorydb_cluster_endpoint_address
   }
 
   # Object Storage (S3)
@@ -46,8 +36,6 @@ resource "anyscale_cloud_resource" "primary" {
     bucket_name = module.aws_anyscale_v2.anyscale_s3_bucket_id
     region      = var.aws_region
   }
-
-  # Note: EFS is disabled in this scenario
 
   timeouts {
     create = "10m"

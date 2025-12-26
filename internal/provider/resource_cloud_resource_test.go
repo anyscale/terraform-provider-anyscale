@@ -10,7 +10,7 @@ func TestResourceCloudResourceSchema(t *testing.T) {
 	s := ResourceCloudResource().Schema
 
 	// Test required fields
-	requiredFields := []string{"cloud_id", "region"}
+	requiredFields := []string{"cloud_id", "region", "compute_stack"}
 	for _, field := range requiredFields {
 		if _, ok := s[field]; !ok {
 			t.Errorf("Expected schema to have field %s", field)
@@ -22,7 +22,7 @@ func TestResourceCloudResourceSchema(t *testing.T) {
 	}
 
 	// Test optional fields
-	optionalFields := []string{"name", "compute_stack", "is_private", "aws_config", "gcp_config", "object_storage", "file_storage"}
+	optionalFields := []string{"name", "is_private", "aws_config", "gcp_config", "object_storage", "file_storage"}
 	for _, field := range optionalFields {
 		if _, ok := s[field]; !ok {
 			t.Errorf("Expected schema to have field %s", field)
@@ -46,7 +46,7 @@ func TestResourceCloudResourceSchema(t *testing.T) {
 	}
 
 	// Test ForceNew fields
-	forceNewFields := []string{"cloud_id", "name", "compute_stack", "region", "is_private"}
+	forceNewFields := []string{"cloud_id", "name", "compute_stack", "region"}
 	for _, field := range forceNewFields {
 		if _, ok := s[field]; !ok {
 			t.Errorf("Expected schema to have field %s", field)

@@ -217,6 +217,12 @@ test-aws-vm-full: build ## Test AWS VM full scenario (EFS + MemoryDB)
 	cd examples/aws-vm-full && terraform apply -auto-approve
 	cd examples/aws-vm-full && terraform destroy -auto-approve
 
+.PHONY: test-aws-vm-basic-resource
+test-aws-vm-basic-resource: build ## Test AWS VM basic with separate cloud_resource
+	@echo "==> Testing AWS VM basic resource scenario..."
+	cd examples/aws-vm-basic-resource && terraform apply -auto-approve
+	cd examples/aws-vm-basic-resource && terraform destroy -auto-approve
+
 # ============================================================================
 # TERRAFORM TESTING - GCP VM SCENARIOS
 # ============================================================================
@@ -244,6 +250,16 @@ test-gcp-vm-full: build ## Test GCP VM full scenario (Filestore + Memorystore)
 	@echo "==> Testing GCP VM full scenario..."
 	cd examples/gcp-vm-full && terraform apply -auto-approve
 	cd examples/gcp-vm-full && terraform destroy -auto-approve
+
+# ============================================================================
+# TERRAFORM TESTING - MULTI-RESOURCE SCENARIOS
+# ============================================================================
+
+.PHONY: test-multi-resource-basic
+test-multi-resource-basic: build ## Test multi-resource cloud basic scenario
+	@echo "==> Testing multi-resource cloud basic scenario..."
+	cd examples/multi-resource-cloud-basic && terraform apply -auto-approve
+	cd examples/multi-resource-cloud-basic && terraform destroy -auto-approve
 
 # ============================================================================
 # TERRAFORM TESTING - BATCH SCENARIOS
@@ -306,6 +322,10 @@ apply-aws-vm-memorydb: build ## Apply AWS VM with MemoryDB scenario only
 apply-aws-vm-full: build ## Apply AWS VM full scenario only
 	cd examples/aws-vm-full && terraform apply
 
+.PHONY: apply-aws-vm-basic-resource
+apply-aws-vm-basic-resource: build ## Apply AWS VM basic resource scenario only
+	cd examples/aws-vm-basic-resource && terraform apply
+
 # GCP VM Apply-only targets
 .PHONY: apply-gcp-vm-basic
 apply-gcp-vm-basic: build ## Apply GCP VM basic scenario only
@@ -322,6 +342,11 @@ apply-gcp-vm-memorystore: build ## Apply GCP VM with Memorystore scenario only
 .PHONY: apply-gcp-vm-full
 apply-gcp-vm-full: build ## Apply GCP VM full scenario only
 	cd examples/gcp-vm-full && terraform apply
+
+# Multi-resource Apply-only targets
+.PHONY: apply-multi-resource-basic
+apply-multi-resource-basic: build ## Apply multi-resource cloud basic scenario only
+	cd examples/multi-resource-cloud-basic && terraform apply
 
 # AWS VM Destroy-only targets
 .PHONY: destroy-aws-vm-basic
@@ -340,6 +365,10 @@ destroy-aws-vm-memorydb: ## Destroy AWS VM with MemoryDB scenario
 destroy-aws-vm-full: ## Destroy AWS VM full scenario
 	cd examples/aws-vm-full && terraform destroy
 
+.PHONY: destroy-aws-vm-basic-resource
+destroy-aws-vm-basic-resource: ## Destroy AWS VM basic resource scenario
+	cd examples/aws-vm-basic-resource && terraform destroy
+
 # GCP VM Destroy-only targets
 .PHONY: destroy-gcp-vm-basic
 destroy-gcp-vm-basic: ## Destroy GCP VM basic scenario
@@ -356,6 +385,11 @@ destroy-gcp-vm-memorystore: ## Destroy GCP VM with Memorystore scenario
 .PHONY: destroy-gcp-vm-full
 destroy-gcp-vm-full: ## Destroy GCP VM full scenario
 	cd examples/gcp-vm-full && terraform destroy
+
+# Multi-resource Destroy-only targets
+.PHONY: destroy-multi-resource-basic
+destroy-multi-resource-basic: ## Destroy multi-resource cloud basic scenario
+	cd examples/multi-resource-cloud-basic && terraform destroy
 
 # ============================================================================
 # RELEASE (placeholder for future CI/CD)

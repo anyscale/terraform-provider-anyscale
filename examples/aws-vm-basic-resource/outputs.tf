@@ -8,9 +8,7 @@ output "cloud_name" {
   value       = anyscale_cloud.test.name
 }
 
-
-
-output "memorystore_id" {
-  description = "The Memorystore instance ID"
-  value       = module.google_anyscale_v2.memorystore_id
+output "cloud_resource_id" {
+  description = "The ID of the created Anyscale cloud resource"
+  value       = anyscale_cloud_resource.primary.id
 }

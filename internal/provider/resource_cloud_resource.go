@@ -54,8 +54,7 @@ func ResourceCloudResource() *schema.Resource {
 			// ─── Compute Configuration ─────────────────────────────
 			"compute_stack": {
 				Type:        schema.TypeString,
-				Optional:    true,
-				Default:     "VM",
+				Required:    true,
 				ForceNew:    true,
 				Description: "Compute stack type: VM or K8S.",
 			},
@@ -532,6 +531,41 @@ func ExpandFileStorageFromResource(d *schema.ResourceData) *FileStorage {
 	return storage
 }
 
+// findDefaultCloudResource checks if the cloud has a single default resource.
+// This is used to detect if we should update an existing default resource instead of creating a new one.
+// Returns the default resource if found, nil if not found or if there are multiple resources.
+func findDefaultCloudResource(client *Client, cloudID string) (*CloudDeploymentResult, error) {
+	resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list cloud resources: %s - %s", resp.Status, string(body))
+	}
+
+	var deploymentsResp CloudDeploymentsResponse
+	if err := json.Unmarshal(body, &deploymentsResp); err != nil {
+		return nil, err
+	}
+
+	// Only return the default resource if there's exactly one resource
+	// This indicates we're dealing with a fresh empty cloud with just the placeholder
+	if len(deploymentsResp.Results) == 1 && deploymentsResp.Results[0].IsDefault {
+		log.Printf("[DEBUG] Found single default resource: %s", deploymentsResp.Results[0].Name)
+		return &deploymentsResp.Results[0], nil
+	}
+
+	log.Printf("[DEBUG] Cloud has %d resources, not updating default", len(deploymentsResp.Results))
+	return nil, nil
+}
+
 // ─── CRUD Operations ────────────────────────────────────────────────────────
 
 func resourceCloudResourceCreate(ctx context.Context, d *schema.ResourceData, m any) diag.Diagnostics {
@@ -555,6 +589,18 @@ func resourceCloudResourceCreate(ctx context.Context, d *schema.ResourceData, m 
 
 	log.Printf("[INFO] Creating Anyscale Cloud Resource: cloud_id=%s, name=%s, provider=%s, region=%s",
 		cloudID, name, provider, region)
+
+	// Check if there's an existing default resource that we should update instead of create
+	// This handles the case where an empty cloud was created with a placeholder default resource
+	existingDefault, err := findDefaultCloudResource(client, cloudID)
+	if err != nil {
+		log.Printf("[WARN] Failed to check for existing default resource: %v", err)
+		// Continue with creation - the API will handle conflicts
+	} else if existingDefault != nil {
+		log.Printf("[INFO] Found existing default resource %s, will update it instead of creating new", existingDefault.Name)
+		// Use the existing default resource's name
+		name = existingDefault.Name
+	}
 
 	// Build deployment request
 	deployReq := CloudDeploymentRequest{
@@ -649,17 +695,19 @@ func resourceCloudResourceCreate(ctx context.Context, d *schema.ResourceData, m 
 	}
 
 	// Set composite ID: cloud_id:resource_name
-	d.SetId(fmt.Sprintf("%s:%s", cloudID, deployResp.Result.Name))
-	d.Set("name", deployResp.Result.Name)
+	resourceName := deployResp.Result.Name
+	d.SetId(fmt.Sprintf("%s:%s", cloudID, resourceName))
+	d.Set("name", resourceName)
 	d.Set("cloud_resource_id", deployResp.Result.CloudResourceID)
 	d.Set("cloud_deployment_id", deployResp.Result.CloudDeploymentID)
 
 	log.Printf("[INFO] Cloud resource created successfully: id=%s", d.Id())
 
-	// Wait for cloud to be ready
+	// Wait for the parent cloud to become ready
+	// The cloud transitions from CREATING/pending to ACTIVE/ready after the first resource is attached
 	createTimeout := d.Timeout(schema.TimeoutCreate)
 	if err := waitForCloudReady(ctx, client, cloudID, createTimeout); err != nil {
-		log.Printf("[ERROR] Failed waiting for cloud to be ready: %v", err)
+		log.Printf("[ERROR] Failed waiting for parent cloud to be ready: %v", err)
 		return diag.FromErr(err)
 	}
 
@@ -760,6 +808,14 @@ func resourceCloudResourceDelete(ctx context.Context, d *schema.ResourceData, m 
 
 	log.Printf("[INFO] Deleting Anyscale Cloud Resource: cloud_id=%s, name=%s", cloudID, resourceName)
 
+	// Check if this is the default/primary resource
+	// Primary resources cannot be deleted independently - they are deleted with the cloud
+	if d.Get("is_default").(bool) {
+		log.Printf("[INFO] Cloud resource %s is the primary resource - it will be deleted when the cloud is deleted", resourceName)
+		d.SetId("")
+		return diags
+	}
+
 	// DELETE /api/v2/clouds/{cloud_id}/remove_resource?cloud_resource_name=...
 	deleteURL := fmt.Sprintf("/api/v2/clouds/%s/remove_resource?cloud_resource_name=%s",
 		cloudID, url.QueryEscape(resourceName))
@@ -775,8 +831,18 @@ func resourceCloudResourceDelete(ctx context.Context, d *schema.ResourceData, m 
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
 		body, _ := io.ReadAll(resp.Body)
-		log.Printf("[ERROR] Failed to delete cloud resource: %s - %s", resp.Status, string(body))
-		return diag.Errorf("failed to delete cloud resource: %s - %s", resp.Status, string(body))
+		bodyStr := string(body)
+		log.Printf("[ERROR] Failed to delete cloud resource: %s - %s", resp.Status, bodyStr)
+
+		// Handle the case where the API tells us this is a primary resource
+		// (in case is_default wasn't properly set in state)
+		if resp.StatusCode == http.StatusBadRequest && strings.Contains(bodyStr, "primary resource") {
+			log.Printf("[INFO] Cloud resource %s is the primary resource - it will be deleted when the cloud is deleted", resourceName)
+			d.SetId("")
+			return diags
+		}
+
+		return diag.Errorf("failed to delete cloud resource: %s - %s", resp.Status, bodyStr)
 	}
 
 	log.Printf("[INFO] Cloud resource deleted successfully: cloud_id=%s, name=%s", cloudID, resourceName)

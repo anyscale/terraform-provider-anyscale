@@ -24,12 +24,24 @@ func TestResourceCloudSchema(t *testing.T) {
 
 	// Test optional fields with defaults
 	optionalWithDefaults := map[string]any{
-		"compute_stack":           "VM",
 		"is_private_cloud":        false,
 		"auto_add_user":           false,
 		"enable_lineage_tracking": false,
 		"enable_log_ingestion":    false,
 	}
+
+	// Test optional fields without defaults
+	optionalNoDefaults := []string{"compute_stack", "credentials"}
+	for _, field := range optionalNoDefaults {
+		if _, ok := s[field]; !ok {
+			t.Errorf("expected schema to have field %q", field)
+			continue
+		}
+		if s[field].Required {
+			t.Errorf("expected field %q to be optional", field)
+		}
+	}
+
 	for field, expectedDefault := range optionalWithDefaults {
 		if _, ok := s[field]; !ok {
 			t.Errorf("expected schema to have field %q", field)
