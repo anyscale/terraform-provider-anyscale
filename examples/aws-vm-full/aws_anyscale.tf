@@ -3,7 +3,7 @@
 
 locals {
   full_tags = merge(tomap({
-    anyscale-cloud-id           = var.anyscale_cloud_id,
+    anyscale-cloud-id           = anyscale_cloud.test.cloud_id,
     anyscale-deploy-environment = var.anyscale_deploy_env
     }),
     var.tags
@@ -15,7 +15,7 @@ module "aws_anyscale_v2" {
   tags   = local.full_tags
 
   anyscale_deploy_env  = var.anyscale_deploy_env
-  anyscale_cloud_id    = var.anyscale_cloud_id
+  anyscale_cloud_id    = anyscale_cloud.test.cloud_id
   anyscale_org_id      = var.anyscale_org_id
   anyscale_external_id = var.anyscale_external_id
 

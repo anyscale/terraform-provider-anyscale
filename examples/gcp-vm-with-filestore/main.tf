@@ -12,9 +12,9 @@ data "google_filestore_instance" "anyscale" {
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "test" {
   name           = var.cloud_name
-  cloud_provider = var.cloud_provider
+  cloud_provider = "GCP"
   region         = var.gcp_region
-  compute_stack  = var.compute_stack
+  compute_stack  = "VM"
 
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user

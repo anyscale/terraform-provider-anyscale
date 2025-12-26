@@ -39,20 +39,20 @@ variable "anyscale_org_id" {
 # OPTIONAL VARIABLES
 # ---------------------------------------------------------------------------------------------------------------------
 
-variable "anyscale_cloud_id" {
-  description = "Anyscale Cloud ID (optional, not known until cloud is created)."
-  type        = string
-  default     = null
-  validation {
-    condition = (
-      var.anyscale_cloud_id == null ? true : (
-        length(var.anyscale_cloud_id) > 4 &&
-        substr(var.anyscale_cloud_id, 0, 4) == "cld_"
-      )
-    )
-    error_message = "The anyscale_cloud_id value must start with \"cld_\"."
-  }
-}
+# variable "anyscale_cloud_id" {
+#   description = "Anyscale Cloud ID (optional, not known until cloud is created)."
+#   type        = string
+#   default     = null
+#   validation {
+#     condition = (
+#       var.anyscale_cloud_id == null ? true : (
+#         length(var.anyscale_cloud_id) > 4 &&
+#         substr(var.anyscale_cloud_id, 0, 4) == "cld_"
+#       )
+#     )
+#     error_message = "The anyscale_cloud_id value must start with \"cld_\"."
+#   }
+# }
 
 variable "tags" {
   description = "A map of tags to add to all resources."
@@ -89,18 +89,6 @@ variable "cloud_name" {
   description = "The name of the Anyscale cloud"
   type        = string
   default     = "tf-aws-full-test"
-}
-
-variable "cloud_provider" {
-  description = "The cloud provider"
-  type        = string
-  default     = "AWS"
-}
-
-variable "compute_stack" {
-  description = "The compute stack type"
-  type        = string
-  default     = "VM"
 }
 
 variable "is_private_cloud" {

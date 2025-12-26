@@ -101,18 +101,6 @@ variable "cloud_name" {
   default     = "tf-gcp-memorystore-test"
 }
 
-variable "cloud_provider" {
-  description = "The cloud provider"
-  type        = string
-  default     = "GCP"
-}
-
-variable "compute_stack" {
-  description = "The compute stack type"
-  type        = string
-  default     = "VM"
-}
-
 variable "is_private_cloud" {
   description = "Whether this is a private cloud"
   type        = bool

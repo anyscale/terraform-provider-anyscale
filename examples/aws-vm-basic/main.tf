@@ -4,12 +4,9 @@
 resource "anyscale_cloud" "test" {
   # Common Fields
   name           = var.cloud_name
-  cloud_provider = var.cloud_provider
+  cloud_provider = "AWS"
   region         = var.aws_region
-  compute_stack  = var.compute_stack
-
-  is_private_cloud = var.is_private_cloud
-  auto_add_user    = var.auto_add_user
+  compute_stack  = "VM"
 
   # AWS Configuration
   aws_config {
@@ -32,8 +29,8 @@ resource "anyscale_cloud" "test" {
   # No file_storage block - EFS disabled
 
   timeouts {
-    create = "30m"
-    update = "30m"
-    delete = "30m"
+    create = "10m"
+    update = "10m"
+    delete = "10m"
   }
 }

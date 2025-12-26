@@ -12,9 +12,9 @@ data "google_filestore_instance" "anyscale" {
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "test" {
   name           = var.cloud_name
-  cloud_provider = var.cloud_provider
+  cloud_provider = "GCP"
   region         = var.gcp_region
-  compute_stack  = var.compute_stack
+  compute_stack  = "VM"
 
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user
@@ -24,9 +24,9 @@ resource "anyscale_cloud" "test" {
   enable_log_ingestion    = true
 
   timeouts {
-    create = "30m"
-    update = "30m"
-    delete = "30m"
+    create = "10m"
+    update = "10m"
+    delete = "10m"
   }
 }
 
