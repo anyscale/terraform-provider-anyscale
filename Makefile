@@ -308,88 +308,88 @@ test-all-gcp-vm-parallel: build ## Run all GCP VM scenarios in parallel
 # AWS VM Apply-only targets
 .PHONY: apply-aws-vm-basic
 apply-aws-vm-basic: build ## Apply AWS VM basic scenario only
-	cd examples/aws-vm-basic && terraform apply
+	cd examples/aws-vm-basic && terraform apply -auto-approve
 
 .PHONY: apply-aws-vm-efs
 apply-aws-vm-efs: build ## Apply AWS VM with EFS scenario only
-	cd examples/aws-vm-with-efs && terraform apply
+	cd examples/aws-vm-with-efs && terraform apply -auto-approve
 
 .PHONY: apply-aws-vm-memorydb
 apply-aws-vm-memorydb: build ## Apply AWS VM with MemoryDB scenario only
-	cd examples/aws-vm-with-memorydb && terraform apply
+	cd examples/aws-vm-with-memorydb && terraform apply -auto-approve
 
 .PHONY: apply-aws-vm-full
 apply-aws-vm-full: build ## Apply AWS VM full scenario only
-	cd examples/aws-vm-full && terraform apply
+	cd examples/aws-vm-full && terraform apply -auto-approve
 
 .PHONY: apply-aws-vm-basic-resource
 apply-aws-vm-basic-resource: build ## Apply AWS VM basic resource scenario only
-	cd examples/aws-vm-basic-resource && terraform apply
+	cd examples/aws-vm-basic-resource && terraform apply -auto-approve
 
 # GCP VM Apply-only targets
 .PHONY: apply-gcp-vm-basic
 apply-gcp-vm-basic: build ## Apply GCP VM basic scenario only
-	cd examples/gcp-vm-basic && terraform apply
+	cd examples/gcp-vm-basic && terraform apply -auto-approve
 
 .PHONY: apply-gcp-vm-filestore
 apply-gcp-vm-filestore: build ## Apply GCP VM with Filestore scenario only
-	cd examples/gcp-vm-with-filestore && terraform apply
+	cd examples/gcp-vm-with-filestore && terraform apply -auto-approve
 
 .PHONY: apply-gcp-vm-memorystore
 apply-gcp-vm-memorystore: build ## Apply GCP VM with Memorystore scenario only
-	cd examples/gcp-vm-with-memorystore && terraform apply
+	cd examples/gcp-vm-with-memorystore && terraform apply -auto-approve
 
 .PHONY: apply-gcp-vm-full
 apply-gcp-vm-full: build ## Apply GCP VM full scenario only
-	cd examples/gcp-vm-full && terraform apply
+	cd examples/gcp-vm-full && terraform apply -auto-approve
 
 # Multi-resource Apply-only targets
 .PHONY: apply-multi-resource-basic
 apply-multi-resource-basic: build ## Apply multi-resource cloud basic scenario only
-	cd examples/multi-resource-cloud-basic && terraform apply
+	cd examples/multi-resource-cloud-basic && terraform apply -auto-approve
 
 # AWS VM Destroy-only targets
 .PHONY: destroy-aws-vm-basic
 destroy-aws-vm-basic: ## Destroy AWS VM basic scenario
-	cd examples/aws-vm-basic && terraform destroy
+	cd examples/aws-vm-basic && terraform destroy -auto-approve
 
 .PHONY: destroy-aws-vm-efs
 destroy-aws-vm-efs: ## Destroy AWS VM with EFS scenario
-	cd examples/aws-vm-with-efs && terraform destroy
+	cd examples/aws-vm-with-efs && terraform destroy -auto-approve
 
 .PHONY: destroy-aws-vm-memorydb
 destroy-aws-vm-memorydb: ## Destroy AWS VM with MemoryDB scenario
-	cd examples/aws-vm-with-memorydb && terraform destroy
+	cd examples/aws-vm-with-memorydb && terraform destroy -auto-approve
 
 .PHONY: destroy-aws-vm-full
 destroy-aws-vm-full: ## Destroy AWS VM full scenario
-	cd examples/aws-vm-full && terraform destroy
+	cd examples/aws-vm-full && terraform destroy -auto-approve
 
 .PHONY: destroy-aws-vm-basic-resource
 destroy-aws-vm-basic-resource: ## Destroy AWS VM basic resource scenario
-	cd examples/aws-vm-basic-resource && terraform destroy
+	cd examples/aws-vm-basic-resource && terraform destroy -auto-approve
 
 # GCP VM Destroy-only targets
 .PHONY: destroy-gcp-vm-basic
 destroy-gcp-vm-basic: ## Destroy GCP VM basic scenario
-	cd examples/gcp-vm-basic && terraform destroy
+	cd examples/gcp-vm-basic && terraform destroy -auto-approve
 
 .PHONY: destroy-gcp-vm-filestore
 destroy-gcp-vm-filestore: ## Destroy GCP VM with Filestore scenario
-	cd examples/gcp-vm-with-filestore && terraform destroy
+	cd examples/gcp-vm-with-filestore && terraform destroy -auto-approve
 
 .PHONY: destroy-gcp-vm-memorystore
 destroy-gcp-vm-memorystore: ## Destroy GCP VM with Memorystore scenario
-	cd examples/gcp-vm-with-memorystore && terraform destroy
+	cd examples/gcp-vm-with-memorystore && terraform destroy -auto-approve
 
 .PHONY: destroy-gcp-vm-full
 destroy-gcp-vm-full: ## Destroy GCP VM full scenario
-	cd examples/gcp-vm-full && terraform destroy
+	cd examples/gcp-vm-full && terraform destroy -auto-approve
 
 # Multi-resource Destroy-only targets
 .PHONY: destroy-multi-resource-basic
 destroy-multi-resource-basic: ## Destroy multi-resource cloud basic scenario
-	cd examples/multi-resource-cloud-basic && terraform destroy
+	cd examples/multi-resource-cloud-basic && terraform destroy -auto-approve
 
 # ============================================================================
 # RELEASE (placeholder for future CI/CD)
