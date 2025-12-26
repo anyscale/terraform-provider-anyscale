@@ -23,12 +23,6 @@ module "aws_anyscale_1" {
   anyscale_vpc_cidr_block     = "172.24.0.0/16"
   anyscale_vpc_public_subnets = ["172.24.21.0/24", "172.24.22.0/24", "172.24.23.0/24"]
 
-  # IAM Configuration
-  anyscale_cluster_node_managed_policy_arns = [
-    "arn:aws:iam::aws:policy/AmazonSQSReadOnlyAccess",
-    "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
-  ]
-
   common_prefix   = var.common_prefix_1
   use_common_name = true
 

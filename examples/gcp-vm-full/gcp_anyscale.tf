@@ -3,7 +3,7 @@
 
 locals {
   full_labels = merge(tomap({
-    anyscale-cloud-id           = var.anyscale_cloud_id,
+    anyscale-cloud-id           = anyscale_cloud.primary.id,
     anyscale-deploy-environment = var.anyscale_deploy_env
     }),
     var.labels

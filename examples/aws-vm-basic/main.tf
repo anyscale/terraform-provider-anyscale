@@ -1,7 +1,7 @@
 # AWS Basic Test Scenario
 # No EFS, No MemoryDB - Minimal AWS cloud configuration
 
-resource "anyscale_cloud" "test" {
+resource "anyscale_cloud" "primary" {
   # Common Fields
   name           = var.cloud_name
   cloud_provider = "AWS"

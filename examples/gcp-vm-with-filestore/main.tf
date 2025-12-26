@@ -11,7 +11,7 @@ data "google_filestore_instance" "anyscale" {
 
 # Step 1: Create empty cloud shell
 # cloud_provider and region are optional - will use placeholders for empty clouds
-resource "anyscale_cloud" "test" {
+resource "anyscale_cloud" "primary" {
   name = var.cloud_name
 
   is_private_cloud = var.is_private_cloud
@@ -26,7 +26,7 @@ resource "anyscale_cloud" "test" {
 
 # Step 2: Attach cloud resource with Filestore configuration
 resource "anyscale_cloud_resource" "primary" {
-  cloud_id      = anyscale_cloud.test.cloud_id
+  cloud_id      = anyscale_cloud.primary.id
   region        = var.gcp_region
   compute_stack = var.compute_stack
   is_private    = var.is_private_cloud

@@ -1,6 +1,6 @@
-output "cloud_id" {
+output "id" {
   description = "The ID of the created Anyscale cloud"
-  value       = anyscale_cloud.test.cloud_id
+  value       = anyscale_cloud.test.id
 }
 
 output "cloud_name" {

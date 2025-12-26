@@ -402,11 +402,6 @@ func ResourceCloud() *schema.Resource {
 			},
 
 			// ─── Computed Fields ────────────────────────────────
-			"cloud_id": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The unique cloud ID assigned by Anyscale.",
-			},
 			"is_empty_cloud": {
 				Type:        schema.TypeBool,
 				Computed:    true,
@@ -721,9 +716,8 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 		log.Printf("[WARN] Failed to check for existing cloud: %v", err)
 		// Continue with creation - the API will return an error if name exists
 	} else if existingCloudID != "" {
-		log.Printf("[INFO] Found existing cloud with name %s, adopting cloud_id=%s", name, existingCloudID)
+		log.Printf("[INFO] Found existing cloud with name %s, adopting id=%s", name, existingCloudID)
 		d.SetId(existingCloudID)
-		d.Set("cloud_id", existingCloudID)
 		// Check if this is an empty cloud or has resources
 		isEmptyCloud := !hasEmbeddedResourceConfig(d)
 		d.Set("is_empty_cloud", isEmptyCloud)
@@ -821,9 +815,8 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 
 	cloudID := cloudResp.Result.ID
 	d.SetId(cloudID)
-	d.Set("cloud_id", cloudID)
 
-	log.Printf("[INFO] Cloud created successfully: cloud_id=%s", cloudID)
+	log.Printf("[INFO] Cloud created successfully: id=%s", cloudID)
 
 	// Set empty cloud flag (already computed at start of function)
 	d.Set("is_empty_cloud", isEmptyCloud)
@@ -1004,7 +997,6 @@ func resourceCloudRead(ctx context.Context, d *schema.ResourceData, m any) diag.
 	cloud := cloudResp.Result
 
 	// Set computed and common fields
-	d.Set("cloud_id", cloud.ID)
 	d.Set("name", cloud.Name)
 	d.Set("cloud_provider", cloud.Provider)
 	d.Set("region", cloud.Region)
@@ -1017,7 +1009,7 @@ func resourceCloudRead(ctx context.Context, d *schema.ResourceData, m any) diag.
 	// Set is_empty_cloud based on whether this cloud has embedded resource config
 	d.Set("is_empty_cloud", !hasEmbeddedResourceConfig(d))
 
-	log.Printf("[INFO] Cloud read successfully: cloud_id=%s, status=%s, state=%s", cloudID, cloud.Status, cloud.State)
+	log.Printf("[INFO] Cloud read successfully: id=%s, status=%s, state=%s", cloudID, cloud.Status, cloud.State)
 
 	return diags
 }

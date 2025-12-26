@@ -1,18 +1,18 @@
-output "cloud_id" {
+output "id" {
   description = "The ID of the created Anyscale cloud"
-  value       = anyscale_cloud.test.cloud_id
+  value       = anyscale_cloud.primary.id
 }
 
 output "cloud_name" {
   description = "The name of the created Anyscale cloud"
-  value       = anyscale_cloud.test.name
+  value       = anyscale_cloud.primary.name
 }
 
 
 
 output "is_empty_cloud" {
   description = "Whether the cloud was created as an empty shell"
-  value       = anyscale_cloud.test.is_empty_cloud
+  value       = anyscale_cloud.primary.is_empty_cloud
 }
 
 output "cloud_resource_id" {

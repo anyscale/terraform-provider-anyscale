@@ -4,7 +4,7 @@
 
 # Step 1: Create empty cloud shell
 # cloud_provider and region are optional - will use placeholders for empty clouds
-resource "anyscale_cloud" "test" {
+resource "anyscale_cloud" "primary" {
   name = var.cloud_name
 
   is_private_cloud = true
@@ -18,15 +18,15 @@ resource "anyscale_cloud" "test" {
   # This creates an "empty" cloud - resources attached via anyscale_cloud_resource
 
   timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
+    create = "5m"
+    update = "5m"
+    delete = "5m"
   }
 }
 
 # Step 2: Attach cloud resource with full configuration
 resource "anyscale_cloud_resource" "primary" {
-  cloud_id      = anyscale_cloud.test.cloud_id
+  cloud_id      = anyscale_cloud.primary.id
   region        = var.aws_region
   compute_stack = "VM"
   is_private    = var.is_private_cloud

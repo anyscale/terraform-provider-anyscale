@@ -14,7 +14,7 @@ resource "anyscale_cloud" "primary" {
 }
 
 resource "anyscale_cloud_resource" "primary" {
-  cloud_id      = anyscale_cloud.test.cloud_id
+  cloud_id      = anyscale_cloud.primary.id
   region        = var.aws_region
   compute_stack = "VM"
   is_private    = false
