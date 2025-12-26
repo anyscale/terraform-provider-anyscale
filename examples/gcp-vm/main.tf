@@ -1,25 +1,28 @@
-# GCP Full Test Scenario
-# Filestore + Memorystore enabled - Full configuration
+# GCP VM Test Scenario
+# Consolidated example with optional Filestore and Memorystore
 # Uses split pattern: empty cloud + cloud_resource
 
-# Data source to get Filestore IP address after module creates it
+# Data source to get Filestore IP address (only when Filestore is enabled)
 data "google_filestore_instance" "anyscale" {
+  count    = var.enable_filestore ? 1 : 0
   name     = module.google_anyscale_v2.filestore_name
   location = var.gcp_zone
   project  = module.google_anyscale_v2.project_id
 }
 
 # Step 1: Create empty cloud shell
-# cloud_provider and region are optional - will use placeholders for empty clouds
 resource "anyscale_cloud" "primary" {
   name = var.cloud_name
 
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user
 
-  # Cloud-level settings
+  # Cloud-level settings (optional)
   enable_lineage_tracking = true
   enable_log_ingestion    = true
+
+  # No gcp_config, object_storage, or file_storage blocks
+  # This creates an "empty" cloud - resources attached via anyscale_cloud_resource
 
   timeouts {
     create = "10m"
@@ -28,7 +31,7 @@ resource "anyscale_cloud" "primary" {
   }
 }
 
-# Step 2: Attach cloud resource with full configuration
+# Step 2: Attach cloud resource with configuration
 resource "anyscale_cloud_resource" "primary" {
   cloud_id      = anyscale_cloud.primary.id
   region        = var.gcp_region
@@ -47,9 +50,9 @@ resource "anyscale_cloud_resource" "primary" {
 
     firewall_policy_names = [module.google_anyscale_v2.vpc_firewall_policy_name]
 
-    # Memorystore for Ray GCS fault tolerance
-    memorystore_instance_name = module.google_anyscale_v2.memorystore_id
-    memorystore_endpoint      = module.google_anyscale_v2.memorystore_endpoint
+    # Memorystore for Ray GCS fault tolerance (only if enabled)
+    memorystore_instance_name = var.enable_memorystore ? module.google_anyscale_v2.memorystore_id : null
+    memorystore_endpoint      = var.enable_memorystore ? module.google_anyscale_v2.memorystore_endpoint : null
   }
 
   # Object Storage (GCS)
@@ -58,13 +61,16 @@ resource "anyscale_cloud_resource" "primary" {
     region      = var.gcp_region
   }
 
-  # File Storage (Filestore)
-  file_storage {
-    file_storage_id = module.google_anyscale_v2.filestore_name
-    mount_path      = "/mnt/shared"
-    mount_targets {
-      address = data.google_filestore_instance.anyscale.networks[0].ip_addresses[0]
-      zone    = var.gcp_zone
+  # File Storage (Filestore) - only if enabled
+  dynamic "file_storage" {
+    for_each = var.enable_filestore ? [1] : []
+    content {
+      file_storage_id = module.google_anyscale_v2.filestore_name
+      mount_path      = "/mnt/shared"
+      mount_targets {
+        address = module.google_anyscale_v2.filestore_ip_address
+        zone    = var.gcp_zone
+      }
     }
   }
 

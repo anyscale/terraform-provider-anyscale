@@ -1,5 +1,5 @@
-# GCP with Filestore Scenario - Cloud Foundation Module
-# Filestore enabled, No Memorystore
+# GCP VM Scenario - Cloud Foundation Module
+# Consolidated example with optional Filestore and Memorystore
 
 locals {
   full_labels = merge(tomap({
@@ -30,16 +30,16 @@ module "google_anyscale_v2" {
   anyscale_filestore_location = var.gcp_zone
 
   # Networking Configuration
-  anyscale_vpc_public_subnet_cidr               = "10.101.0.0/16"
+  anyscale_vpc_public_subnet_cidr               = var.vpc_public_subnet_cidr
   anyscale_vpc_firewall_allow_access_from_cidrs = var.customer_ingress_cidr_ranges
 
   # Resource Naming
   common_prefix   = var.common_prefix
   use_common_name = true
 
-  # Filestore: ENABLED for this scenario
-  enable_anyscale_filestore = true
+  # Filestore: Controlled by variable
+  enable_anyscale_filestore = var.enable_filestore
 
-  # Memorystore: DISABLED for this scenario
-  enable_anyscale_memorystore = false
+  # Memorystore: Controlled by variable
+  enable_anyscale_memorystore = var.enable_memorystore
 }

@@ -303,10 +303,18 @@ func ResourceCloud() *schema.Resource {
 				Description: "Kubernetes-specific configuration. Required when compute_stack is K8S.",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"cluster_name": {
+						"anyscale_operator_iam_identity": {
 							Type:        schema.TypeString,
+							Required:    true,
+							ForceNew:    true,
+							Description: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.",
+						},
+						"zones": {
+							Type:        schema.TypeList,
 							Optional:    true,
-							Description: "The Kubernetes cluster name (EKS, GKE, AKS cluster name).",
+							ForceNew:    true,
+							Elem:        &schema.Schema{Type: schema.TypeString},
+							Description: "List of availability zones for the Kubernetes cluster.",
 						},
 						"namespace": {
 							Type:        schema.TypeString,
@@ -314,15 +322,25 @@ func ResourceCloud() *schema.Resource {
 							Default:     "anyscale",
 							Description: "The Kubernetes namespace for Anyscale workloads.",
 						},
-						"kubeconfig_path": {
+						"ingress_host": {
 							Type:        schema.TypeString,
 							Optional:    true,
-							Description: "Path to kubeconfig file (for Generic K8S deployments).",
+							Description: "The ingress host for the Anyscale operator (e.g., anyscale.example.com).",
+						},
+						"cluster_name": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							Description: "The Kubernetes cluster name (EKS, GKE, AKS cluster name).",
 						},
 						"context": {
 							Type:        schema.TypeString,
 							Optional:    true,
 							Description: "Kubeconfig context to use (for Generic K8S deployments).",
+						},
+						"kubeconfig_path": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							Description: "Path to kubeconfig file (for Generic K8S deployments).",
 						},
 					},
 				},
@@ -406,6 +424,11 @@ func ResourceCloud() *schema.Resource {
 				Type:        schema.TypeBool,
 				Computed:    true,
 				Description: "Whether this cloud was created without embedded resource configuration. Use anyscale_cloud_resource to attach resources separately.",
+			},
+			"cloud_deployment_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation.",
 			},
 		},
 	}
@@ -598,6 +621,36 @@ func ExpandGCPConfig(d *schema.ResourceData) *GCPConfig {
 	}
 
 	return gcpConfig
+}
+
+// ExpandKubernetesConfig extracts kubernetes_config and returns only the fields
+// that are accepted by the Anyscale API (anyscale_operator_iam_identity and zones).
+// Other fields like namespace, ingress_host, etc. are stored in Terraform state
+// but not sent to the API.
+func ExpandKubernetesConfig(d *schema.ResourceData) *KubernetesConfig {
+	v, ok := d.GetOk("kubernetes_config")
+	if !ok || len(v.([]any)) == 0 {
+		return nil
+	}
+
+	config := v.([]any)[0].(map[string]any)
+
+	k8sConfig := &KubernetesConfig{}
+
+	// Only populate fields accepted by the API
+	if iamIdentity, ok := config["anyscale_operator_iam_identity"].(string); ok && iamIdentity != "" {
+		k8sConfig.AnyscaleOperatorIAMIdentity = iamIdentity
+	}
+
+	// Handle zones list
+	if zones, ok := config["zones"].([]any); ok && len(zones) > 0 {
+		k8sConfig.Zones = make([]string, len(zones))
+		for i, z := range zones {
+			k8sConfig.Zones[i] = z.(string)
+		}
+	}
+
+	return k8sConfig
 }
 
 // GetNetworkingMode determines networking mode based on is_private_cloud
@@ -844,15 +897,25 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 	// Add cloud-specific configuration based on provider
 	switch strings.ToUpper(provider) {
 	case "AWS":
-		awsConfig := ExpandAWSConfig(d)
-		if awsConfig == nil {
-			return diag.Errorf("aws_config is required when cloud_provider is AWS")
-		}
-		deployReq.AWSConfig = awsConfig
+		// For K8S compute stack, aws_config is NOT required
+		// For VM compute stack, aws_config IS required
+		if computeStack == "K8S" {
+			// K8S requires: kubernetes_config, object_storage
+			// aws_config is optional for K8S
+			k8sConfig := ExpandKubernetesConfig(d)
+			if k8sConfig == nil {
+				return diag.Errorf("kubernetes_config is required when compute_stack is K8S")
+			}
+			if k8sConfig.AnyscaleOperatorIAMIdentity == "" {
+				return diag.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for AWS K8S clouds")
+			}
+			deployReq.KubernetesConfig = k8sConfig
 
-		// Add object storage if configured
-		if objStorage := ExpandObjectStorage(d); objStorage != nil {
-			// Ensure S3 bucket has proper prefix
+			// object_storage is required for K8S
+			objStorage := ExpandObjectStorage(d)
+			if objStorage == nil {
+				return diag.Errorf("object_storage is required when compute_stack is K8S")
+			}
 			bucketName := objStorage.BucketName
 			if !strings.HasPrefix(bucketName, "s3://") {
 				bucketName = "s3://" + bucketName
@@ -862,23 +925,64 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 				Region:     objStorage.Region,
 				Endpoint:   objStorage.Endpoint,
 			}
-		}
 
-		// Add file storage (EFS) if configured
-		if fileStorage := ExpandFileStorage(d); fileStorage != nil {
-			deployReq.FileStorage = fileStorage
+			// aws_config is optional for K8S - add if provided
+			if awsConfig := ExpandAWSConfig(d); awsConfig != nil {
+				deployReq.AWSConfig = awsConfig
+			}
+
+			// file_storage (EFS) is optional
+			if fileStorage := ExpandFileStorage(d); fileStorage != nil {
+				deployReq.FileStorage = fileStorage
+			}
+		} else {
+			// VM compute stack - aws_config is required
+			awsConfig := ExpandAWSConfig(d)
+			if awsConfig == nil {
+				return diag.Errorf("aws_config is required when cloud_provider is AWS and compute_stack is VM")
+			}
+			deployReq.AWSConfig = awsConfig
+
+			// Add object storage if configured
+			if objStorage := ExpandObjectStorage(d); objStorage != nil {
+				// Ensure S3 bucket has proper prefix
+				bucketName := objStorage.BucketName
+				if !strings.HasPrefix(bucketName, "s3://") {
+					bucketName = "s3://" + bucketName
+				}
+				deployReq.ObjectStorage = &ObjectStorage{
+					BucketName: bucketName,
+					Region:     objStorage.Region,
+					Endpoint:   objStorage.Endpoint,
+				}
+			}
+
+			// Add file storage (EFS) if configured
+			if fileStorage := ExpandFileStorage(d); fileStorage != nil {
+				deployReq.FileStorage = fileStorage
+			}
 		}
 
 	case "GCP":
-		gcpConfig := ExpandGCPConfig(d)
-		if gcpConfig == nil {
-			return diag.Errorf("gcp_config is required when cloud_provider is GCP")
-		}
-		deployReq.GCPConfig = gcpConfig
+		// For K8S compute stack, gcp_config is NOT required
+		// For VM compute stack, gcp_config IS required
+		if computeStack == "K8S" {
+			// K8S requires: kubernetes_config, object_storage
+			// gcp_config is optional for K8S
+			k8sConfig := ExpandKubernetesConfig(d)
+			if k8sConfig == nil {
+				return diag.Errorf("kubernetes_config is required when compute_stack is K8S")
+			}
+			if k8sConfig.AnyscaleOperatorIAMIdentity == "" {
+				return diag.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for GCP K8S clouds")
+			}
+			deployReq.KubernetesConfig = k8sConfig
 
-		// Add object storage if configured
-		if objStorage := ExpandObjectStorage(d); objStorage != nil {
-			// Ensure GCS bucket has proper prefix
+			// object_storage is required for K8S
+			objStorage := ExpandObjectStorage(d)
+			if objStorage == nil {
+				return diag.Errorf("object_storage is required when compute_stack is K8S")
+			}
 			bucketName := objStorage.BucketName
 			if !strings.HasPrefix(bucketName, "gs://") {
 				bucketName = "gs://" + bucketName
@@ -888,11 +992,42 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 				Region:     objStorage.Region,
 				Endpoint:   objStorage.Endpoint,
 			}
-		}
 
-		// Add file storage (Filestore) if configured
-		if fileStorage := ExpandFileStorage(d); fileStorage != nil {
-			deployReq.FileStorage = fileStorage
+			// gcp_config is optional for K8S - add if provided
+			if gcpConfig := ExpandGCPConfig(d); gcpConfig != nil {
+				deployReq.GCPConfig = gcpConfig
+			}
+
+			// file_storage (Filestore) is optional
+			if fileStorage := ExpandFileStorage(d); fileStorage != nil {
+				deployReq.FileStorage = fileStorage
+			}
+		} else {
+			// VM compute stack - gcp_config is required
+			gcpConfig := ExpandGCPConfig(d)
+			if gcpConfig == nil {
+				return diag.Errorf("gcp_config is required when cloud_provider is GCP and compute_stack is VM")
+			}
+			deployReq.GCPConfig = gcpConfig
+
+			// Add object storage if configured
+			if objStorage := ExpandObjectStorage(d); objStorage != nil {
+				// Ensure GCS bucket has proper prefix
+				bucketName := objStorage.BucketName
+				if !strings.HasPrefix(bucketName, "gs://") {
+					bucketName = "gs://" + bucketName
+				}
+				deployReq.ObjectStorage = &ObjectStorage{
+					BucketName: bucketName,
+					Region:     objStorage.Region,
+					Endpoint:   objStorage.Endpoint,
+				}
+			}
+
+			// Add file storage (Filestore) if configured
+			if fileStorage := ExpandFileStorage(d); fileStorage != nil {
+				deployReq.FileStorage = fileStorage
+			}
 		}
 
 	case "AZURE":
@@ -942,6 +1077,15 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 
 	if deployResp.StatusCode != http.StatusOK {
 		return diag.Errorf("failed to add cloud resource: %s - %s", deployResp.Status, string(deployBody))
+	}
+
+	// Parse response to get cloud_deployment_id
+	var deployResult CloudDeploymentResponse
+	if err := json.Unmarshal(deployBody, &deployResult); err != nil {
+		log.Printf("[WARN] Failed to parse add_resource response: %v", err)
+	} else if deployResult.Result.CloudDeploymentID != "" {
+		d.Set("cloud_deployment_id", deployResult.Result.CloudDeploymentID)
+		log.Printf("[INFO] Cloud deployment ID: %s", deployResult.Result.CloudDeploymentID)
 	}
 
 	log.Printf("[INFO] Cloud resource added successfully, waiting for cloud to be ready...")
@@ -1007,7 +1151,30 @@ func resourceCloudRead(ctx context.Context, d *schema.ResourceData, m any) diag.
 	d.Set("enable_log_ingestion", cloud.IsAggregatedLogsEnabled)
 
 	// Set is_empty_cloud based on whether this cloud has embedded resource config
-	d.Set("is_empty_cloud", !hasEmbeddedResourceConfig(d))
+	isEmptyCloud := !hasEmbeddedResourceConfig(d)
+	d.Set("is_empty_cloud", isEmptyCloud)
+
+	// For non-empty clouds, fetch cloud_deployment_id from resources endpoint
+	if !isEmptyCloud {
+		resourcesResp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+		if err == nil {
+			defer resourcesResp.Body.Close()
+			resourcesBody, _ := io.ReadAll(resourcesResp.Body)
+			if resourcesResp.StatusCode == http.StatusOK {
+				var resourcesResult CloudDeploymentsResponse
+				if err := json.Unmarshal(resourcesBody, &resourcesResult); err == nil {
+					// Find the default/primary resource to get deployment ID
+					for _, res := range resourcesResult.Results {
+						if res.CloudDeploymentID != "" {
+							d.Set("cloud_deployment_id", res.CloudDeploymentID)
+							log.Printf("[INFO] Cloud deployment ID from resources: %s", res.CloudDeploymentID)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 
 	log.Printf("[INFO] Cloud read successfully: id=%s, status=%s, state=%s", cloudID, cloud.Status, cloud.State)
 

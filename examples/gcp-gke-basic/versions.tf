@@ -1,8 +1,6 @@
-# Configure the Anyscale Provider
 terraform {
-  required_version = ">= 1.9"
+  required_version = ">= 1.0"
   required_providers {
-
     anyscale = {
       source  = "terraform-providers/anyscale"
       version = "0.0.1" # version is ignored by dev_overrides
@@ -16,5 +14,6 @@ terraform {
 }
 
 provider "google" {
-  region = var.gcp_region
+  project = var.google_project_id
+  region  = var.google_region
 }

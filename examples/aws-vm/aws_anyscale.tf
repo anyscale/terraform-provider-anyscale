@@ -1,5 +1,5 @@
-# AWS with MemoryDB Scenario - Cloud Foundation Module
-# No EFS, MemoryDB enabled
+# AWS VM Scenario - Cloud Foundation Module
+# Consolidated example with optional EFS and MemoryDB
 
 locals {
   full_tags = merge(tomap({
@@ -20,8 +20,8 @@ module "aws_anyscale_v2" {
   anyscale_external_id = var.anyscale_external_id
 
   # VPC Configuration
-  anyscale_vpc_cidr_block     = "172.26.0.0/16"
-  anyscale_vpc_public_subnets = ["172.26.21.0/24", "172.26.22.0/24", "172.26.23.0/24"]
+  anyscale_vpc_cidr_block     = var.vpc_cidr_block
+  anyscale_vpc_public_subnets = var.vpc_public_subnets
 
   common_prefix   = var.common_prefix
   use_common_name = true
@@ -29,11 +29,11 @@ module "aws_anyscale_v2" {
   # Security Group Configuration
   security_group_ingress_allow_access_from_cidr_range = var.customer_ingress_cidr_ranges
 
-  # EFS: DISABLED for this scenario
-  create_efs_resources = false
+  # EFS: Controlled by variable
+  create_efs_resources = var.enable_efs
 
-  # MemoryDB: ENABLED for this scenario
-  create_memorydb_resources = true
+  # MemoryDB: Controlled by variable
+  create_memorydb_resources = var.enable_memorydb
 
   # S3 Configuration
   anyscale_s3_force_destroy = var.anyscale_s3_force_destroy

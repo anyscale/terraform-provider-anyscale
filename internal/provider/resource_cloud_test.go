@@ -10,8 +10,8 @@ import (
 func TestResourceCloudSchema(t *testing.T) {
 	s := ResourceCloud().Schema
 
-	// Test required fields
-	requiredFields := []string{"name", "cloud_provider", "region"}
+	// Test required fields (only name is required now - cloud_provider and region are optional/computed for empty clouds)
+	requiredFields := []string{"name"}
 	for _, field := range requiredFields {
 		if _, ok := s[field]; !ok {
 			t.Errorf("expected schema to have field %q", field)
@@ -30,8 +30,8 @@ func TestResourceCloudSchema(t *testing.T) {
 		"enable_log_ingestion":    false,
 	}
 
-	// Test optional fields without defaults
-	optionalNoDefaults := []string{"compute_stack", "credentials"}
+	// Test optional fields without defaults (cloud_provider and region are now optional/computed for empty cloud pattern)
+	optionalNoDefaults := []string{"compute_stack", "credentials", "cloud_provider", "region"}
 	for _, field := range optionalNoDefaults {
 		if _, ok := s[field]; !ok {
 			t.Errorf("expected schema to have field %q", field)
@@ -55,9 +55,9 @@ func TestResourceCloudSchema(t *testing.T) {
 		}
 	}
 
-	// Test computed fields
-	computedFields := []string{"cloud_id", "status", "state"}
-	for _, field := range computedFields {
+	// cloud_provider and region should be computed (for empty cloud pattern)
+	optionalComputedFields := []string{"cloud_provider", "region"}
+	for _, field := range optionalComputedFields {
 		if _, ok := s[field]; !ok {
 			t.Errorf("expected schema to have field %q", field)
 			continue

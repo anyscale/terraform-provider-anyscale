@@ -142,12 +142,38 @@ type AzureConfig struct {
 	ManagedIdentityID string `json:"managed_identity_id"`
 }
 
-// KubernetesConfig represents Kubernetes-specific cloud configuration
+// KubernetesConfig represents Kubernetes-specific cloud configuration for API requests.
+// Note: Only anyscale_operator_iam_identity and zones are accepted by the add_resource API.
+// Other fields (namespace, ingress_host, etc.) are stored in Terraform state for reference
+// but are not sent to the API.
 type KubernetesConfig struct {
-	ClusterName    string `json:"cluster_name,omitempty"`
-	Namespace      string `json:"namespace,omitempty"`
-	KubeconfigPath string `json:"kubeconfig_path,omitempty"`
-	Context        string `json:"context,omitempty"`
+	// Required for K8s deployments - IAM role ARN (AWS) or service account email (GCP/Azure)
+	AnyscaleOperatorIAMIdentity string `json:"anyscale_operator_iam_identity,omitempty"`
+
+	// Optional - availability zones for the K8s cluster
+	Zones []string `json:"zones,omitempty"`
+}
+
+// KubernetesConfigFull represents the full Kubernetes configuration including
+// fields stored in Terraform state but not sent to the API.
+type KubernetesConfigFull struct {
+	KubernetesConfig
+
+	// The following fields are stored in Terraform state for reference/outputs
+	// but are NOT sent to the Anyscale API
+
+	// Namespace for Anyscale operator (defaults to "anyscale")
+	Namespace string `json:"-"`
+
+	// Ingress settings
+	IngressHost string `json:"-"`
+
+	// Cloud-specific cluster identifiers
+	ClusterName string `json:"-"` // AWS EKS cluster name
+	Context     string `json:"-"` // K8s context name
+
+	// Legacy/generic fields
+	KubeconfigPath string `json:"-"`
 }
 
 // CloudDeploymentResponse represents the response from adding a cloud resource

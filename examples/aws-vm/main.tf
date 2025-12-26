@@ -1,16 +1,15 @@
-# AWS Full Test Scenario
-# EFS + MemoryDB enabled - Full configuration
+# AWS VM Test Scenario
+# Consolidated example with optional EFS and MemoryDB
 # Uses split pattern: empty cloud + cloud_resource
 
 # Step 1: Create empty cloud shell
-# cloud_provider and region are optional - will use placeholders for empty clouds
 resource "anyscale_cloud" "primary" {
   name = var.cloud_name
 
-  is_private_cloud = true
-  auto_add_user    = true
+  is_private_cloud = var.is_private_cloud
+  auto_add_user    = var.auto_add_user
 
-  # Cloud-level settings
+  # Cloud-level settings (optional)
   enable_lineage_tracking = true
   enable_log_ingestion    = true
 
@@ -24,7 +23,7 @@ resource "anyscale_cloud" "primary" {
   }
 }
 
-# Step 2: Attach cloud resource with full configuration
+# Step 2: Attach cloud resource with configuration
 resource "anyscale_cloud_resource" "primary" {
   cloud_id      = anyscale_cloud.primary.id
   region        = var.aws_region
@@ -42,10 +41,10 @@ resource "anyscale_cloud_resource" "primary" {
     dataplane_iam_role_arn    = module.aws_anyscale_v2.anyscale_iam_role_cluster_node_arn
     external_id               = module.aws_anyscale_v2.anyscale_iam_role_external_id
 
-    # MemoryDB for Ray GCS fault tolerance
-    memorydb_cluster_name     = module.aws_anyscale_v2.anyscale_memorydb_cluster_id
-    memorydb_cluster_arn      = module.aws_anyscale_v2.anyscale_memorydb_cluster_arn
-    memorydb_cluster_endpoint = module.aws_anyscale_v2.anyscale_memorydb_cluster_endpoint_address
+    # MemoryDB for Ray GCS fault tolerance (only if enabled)
+    memorydb_cluster_name     = var.enable_memorydb ? module.aws_anyscale_v2.anyscale_memorydb_cluster_id : null
+    memorydb_cluster_arn      = var.enable_memorydb ? module.aws_anyscale_v2.anyscale_memorydb_cluster_arn : null
+    memorydb_cluster_endpoint = var.enable_memorydb ? module.aws_anyscale_v2.anyscale_memorydb_cluster_endpoint_address : null
   }
 
   # Object Storage (S3)
@@ -54,13 +53,16 @@ resource "anyscale_cloud_resource" "primary" {
     region      = var.aws_region
   }
 
-  # File Storage (EFS) - API expects single mount target
-  file_storage {
-    file_storage_id = module.aws_anyscale_v2.anyscale_efs_id
-    mount_path      = "/mnt/shared"
+  # File Storage (EFS) - only if enabled
+  dynamic "file_storage" {
+    for_each = var.enable_efs ? [1] : []
+    content {
+      file_storage_id = module.aws_anyscale_v2.anyscale_efs_id
+      mount_path      = "/mnt/shared"
 
-    mount_targets {
-      address = module.aws_anyscale_v2.anyscale_efs_mount_target_ips[0]
+      mount_targets {
+        address = module.aws_anyscale_v2.anyscale_efs_mount_target_ips[0]
+      }
     }
   }
 

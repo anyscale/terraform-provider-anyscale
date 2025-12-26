@@ -1,5 +1,5 @@
-# Variables for GCP Full Test Scenario
-# Filestore + Memorystore enabled - Full GCP cloud configuration
+# Variables for GCP VM Test Scenario
+# Consolidated example with optional Filestore and Memorystore
 # ---------------------------------------------------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -49,28 +49,12 @@ variable "anyscale_org_id" {
 # OPTIONAL VARIABLES
 # ---------------------------------------------------------------------------------------------------------------------
 
-variable "anyscale_cloud_id" {
-  description = "Anyscale Cloud ID (optional, not known until cloud is created)."
-  type        = string
-  default     = null
-  validation {
-    condition = (
-      var.anyscale_cloud_id == null ? true : (
-        length(var.anyscale_cloud_id) > 4 &&
-        substr(var.anyscale_cloud_id, 0, 4) == "cld_"
-      )
-    )
-    error_message = "The anyscale_cloud_id value must start with \"cld_\"."
-  }
-}
-
 variable "labels" {
   description = "A map of labels to add to all GCP resources."
   type        = map(string)
   default = {
     "test"        = "true"
     "environment" = "test"
-    "scenario"    = "gcp-full"
   }
 }
 
@@ -87,7 +71,7 @@ variable "anyscale_deploy_env" {
 variable "common_prefix" {
   description = "Common prefix for resource names. Must be unique per scenario."
   type        = string
-  default     = "as-gcp-full-"
+  default     = "as-gcp-vm-"
   validation {
     condition     = var.common_prefix == null || try(length(var.common_prefix) <= 30, false)
     error_message = "common_prefix must either be `null` or less than 30 characters."
@@ -98,7 +82,7 @@ variable "common_prefix" {
 variable "cloud_name" {
   description = "The name of the Anyscale cloud"
   type        = string
-  default     = "tf-gcp-full-test"
+  default     = "tf-gcp-vm-test"
 }
 
 variable "is_private_cloud" {
@@ -110,5 +94,38 @@ variable "is_private_cloud" {
 variable "auto_add_user" {
   description = "Whether to automatically add users"
   type        = bool
+  default     = true
+}
+
+variable "compute_stack" {
+  description = "The compute stack to use (VM or K8S)"
+  type        = string
+  default     = "VM"
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# FEATURE TOGGLES
+# Control which optional GCP resources to create
+# ---------------------------------------------------------------------------------------------------------------------
+
+variable "enable_filestore" {
+  description = "Enable Filestore for shared storage."
+  type        = bool
   default     = false
+}
+
+variable "enable_memorystore" {
+  description = "Enable Memorystore for Ray GCS fault tolerance."
+  type        = bool
+  default     = false
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# VPC CONFIGURATION
+# ---------------------------------------------------------------------------------------------------------------------
+
+variable "vpc_public_subnet_cidr" {
+  description = "The CIDR block for the public subnet."
+  type        = string
+  default     = "10.100.0.0/16"
 }
