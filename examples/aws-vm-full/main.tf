@@ -12,6 +12,10 @@ resource "anyscale_cloud" "test" {
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user
 
+  # Cloud-level settings
+  enable_lineage_tracking = true
+  enable_log_ingestion    = true
+
   # No aws_config, object_storage, or file_storage blocks
   # This creates an "empty" cloud - resources attached via anyscale_cloud_resource
 

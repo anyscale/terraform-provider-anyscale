@@ -71,6 +71,18 @@ func ResourceCloud() *schema.Resource {
 				Default:     false,
 				Description: "Whether to automatically add users to this cloud.",
 			},
+			"enable_lineage_tracking": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "Whether to enable lineage tracking for this cloud.",
+			},
+			"enable_log_ingestion": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "Whether to enable aggregated log ingestion for this cloud.",
+			},
 
 			// ─── AWS Configuration (nested) ─────────────────────
 			"aws_config": {
@@ -769,6 +781,20 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 		log.Printf("[WARN] Generic configuration not fully implemented yet")
 	}
 
+	// Set cloud-level boolean settings
+	if v, ok := d.GetOk("auto_add_user"); ok {
+		autoAddUser := v.(bool)
+		deployReq.AutoAddUser = &autoAddUser
+	}
+	if v, ok := d.GetOk("enable_lineage_tracking"); ok {
+		lineageTracking := v.(bool)
+		deployReq.LineageTrackingEnabled = &lineageTracking
+	}
+	if v, ok := d.GetOk("enable_log_ingestion"); ok {
+		logIngestion := v.(bool)
+		deployReq.IsAggregatedLogsEnabled = &logIngestion
+	}
+
 	deployJSON, err := json.Marshal(deployReq)
 	if err != nil {
 		return diag.FromErr(err)
@@ -857,6 +883,8 @@ func resourceCloudRead(ctx context.Context, d *schema.ResourceData, m any) diag.
 	d.Set("state", cloud.State)
 	d.Set("is_private_cloud", cloud.IsPrivateCloud)
 	d.Set("auto_add_user", cloud.AutoAddUser)
+	d.Set("enable_lineage_tracking", cloud.LineageTrackingEnabled)
+	d.Set("enable_log_ingestion", cloud.IsAggregatedLogsEnabled)
 
 	// Set is_empty_cloud based on whether this cloud has embedded resource config
 	d.Set("is_empty_cloud", !hasEmbeddedResourceConfig(d))

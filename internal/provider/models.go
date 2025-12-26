@@ -67,6 +67,10 @@ type CloudDeploymentRequest struct {
 	GCPConfig        *GCPConfig        `json:"gcp_config,omitempty"`
 	AzureConfig      *AzureConfig      `json:"azure_config,omitempty"`
 	KubernetesConfig *KubernetesConfig `json:"kubernetes_config,omitempty"`
+	// Cloud-level settings that can be set when adding a resource
+	AutoAddUser             *bool `json:"auto_add_user,omitempty"`
+	LineageTrackingEnabled  *bool `json:"lineage_tracking_enabled,omitempty"`
+	IsAggregatedLogsEnabled *bool `json:"is_aggregated_logs_enabled,omitempty"`
 }
 
 // ObjectStorage represents object storage configuration (S3, GCS, Azure Blob, S3-compatible)
@@ -144,23 +148,26 @@ type CloudDeploymentResponse struct {
 
 // CloudDeploymentResult is the actual deployment data
 type CloudDeploymentResult struct {
-	CloudResourceID       string            `json:"cloud_resource_id"`
-	CloudDeploymentID     string            `json:"cloud_deployment_id"`
-	Name                  string            `json:"name"`
-	Provider              string            `json:"provider"`
-	ComputeStack          string            `json:"compute_stack"`
-	Region                string            `json:"region"`
-	NetworkingMode        string            `json:"networking_mode"`
-	ObjectStorage         *ObjectStorage    `json:"object_storage"`
-	FileStorage           *FileStorage      `json:"file_storage"`
-	AWSConfig             *AWSConfig        `json:"aws_config"`
-	GCPConfig             *GCPConfig        `json:"gcp_config"`
-	AzureConfig           *AzureConfig      `json:"azure_config"`
-	KubernetesConfig      *KubernetesConfig `json:"kubernetes_config"`
-	CreatedAt             string            `json:"created_at"`
-	IsDefault             bool              `json:"is_default"`
-	OperatorStatus        *string           `json:"operator_status"`
-	OperatorStatusDetails *string           `json:"operator_status_details"`
+	CloudResourceID         string            `json:"cloud_resource_id"`
+	CloudDeploymentID       string            `json:"cloud_deployment_id"`
+	Name                    string            `json:"name"`
+	Provider                string            `json:"provider"`
+	ComputeStack            string            `json:"compute_stack"`
+	Region                  string            `json:"region"`
+	NetworkingMode          string            `json:"networking_mode"`
+	ObjectStorage           *ObjectStorage    `json:"object_storage"`
+	FileStorage             *FileStorage      `json:"file_storage"`
+	AWSConfig               *AWSConfig        `json:"aws_config"`
+	GCPConfig               *GCPConfig        `json:"gcp_config"`
+	AzureConfig             *AzureConfig      `json:"azure_config"`
+	KubernetesConfig        *KubernetesConfig `json:"kubernetes_config"`
+	CreatedAt               string            `json:"created_at"`
+	IsDefault               bool              `json:"is_default"`
+	OperatorStatus          *string           `json:"operator_status"`
+	OperatorStatusDetails   *string           `json:"operator_status_details"`
+	AutoAddUser             *bool             `json:"auto_add_user,omitempty"`
+	LineageTrackingEnabled  *bool             `json:"lineage_tracking_enabled,omitempty"`
+	IsAggregatedLogsEnabled *bool             `json:"is_aggregated_logs_enabled,omitempty"`
 }
 
 // CloudDeploymentsResponse represents the response from listing cloud deployments

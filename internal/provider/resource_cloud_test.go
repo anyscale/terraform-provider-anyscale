@@ -24,9 +24,11 @@ func TestResourceCloudSchema(t *testing.T) {
 
 	// Test optional fields with defaults
 	optionalWithDefaults := map[string]any{
-		"compute_stack":    "VM",
-		"is_private_cloud": false,
-		"auto_add_user":    false,
+		"compute_stack":           "VM",
+		"is_private_cloud":        false,
+		"auto_add_user":           false,
+		"enable_lineage_tracking": false,
+		"enable_log_ingestion":    false,
 	}
 	for field, expectedDefault := range optionalWithDefaults {
 		if _, ok := s[field]; !ok {
