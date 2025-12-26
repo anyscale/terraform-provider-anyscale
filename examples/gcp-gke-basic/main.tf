@@ -11,10 +11,21 @@
 
 resource "anyscale_cloud" "primary" {
   # Common Fields
-  name           = var.cloud_name
-  cloud_provider = "GCP"
+  name = var.cloud_name
+
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
+}
+
+resource "anyscale_cloud_resource" "primary" {
+  cloud_id       = anyscale_cloud.primary.id
   region         = var.google_region
   compute_stack  = "K8S"
+  cloud_provider = "GCP"
 
   # Kubernetes Configuration (required for K8S compute_stack)
   kubernetes_config {
@@ -29,11 +40,5 @@ resource "anyscale_cloud" "primary" {
   object_storage {
     bucket_name = module.anyscale_cloudstorage.cloudstorage_bucket_name
     region      = var.google_region
-  }
-
-  timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
   }
 }
