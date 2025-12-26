@@ -117,6 +117,7 @@ type GCPConfig struct {
 	ClusterServiceAccountEmail  string   `json:"cluster_service_account_email"`
 	FirewallPolicyNames         []string `json:"firewall_policy_names,omitempty"`
 	MemorystoreInstanceName     string   `json:"memorystore_instance_name,omitempty"`
+	MemorystoreEndpoint         string   `json:"memorystore_endpoint,omitempty"`
 }
 
 // AzureConfig represents Azure-specific cloud configuration

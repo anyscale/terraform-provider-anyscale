@@ -25,6 +25,7 @@ resource "anyscale_cloud" "test" {
 
     # Memorystore for Ray GCS fault tolerance
     memorystore_instance_name = module.google_anyscale_v2.memorystore_id
+    memorystore_endpoint      = module.google_anyscale_v2.memorystore_endpoint
   }
 
   # Object Storage (GCS)

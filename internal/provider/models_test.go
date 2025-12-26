@@ -205,6 +205,7 @@ func TestGCPConfigJSON(t *testing.T) {
 		ClusterServiceAccountEmail:  "cluster-sa@my-project.iam.gserviceaccount.com",
 		FirewallPolicyNames:         []string{"policy-1", "policy-2"},
 		MemorystoreInstanceName:     "my-memorystore",
+		MemorystoreEndpoint:         "10.0.0.1:6379",
 	}
 
 	data, err := json.Marshal(config)
@@ -243,6 +244,9 @@ func TestGCPConfigJSON(t *testing.T) {
 	}
 	if decoded.MemorystoreInstanceName != config.MemorystoreInstanceName {
 		t.Errorf("MemorystoreInstanceName = %q, want %q", decoded.MemorystoreInstanceName, config.MemorystoreInstanceName)
+	}
+	if decoded.MemorystoreEndpoint != config.MemorystoreEndpoint {
+		t.Errorf("MemorystoreEndpoint = %q, want %q", decoded.MemorystoreEndpoint, config.MemorystoreEndpoint)
 	}
 }
 

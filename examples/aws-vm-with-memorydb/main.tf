@@ -23,7 +23,9 @@ resource "anyscale_cloud" "test" {
     external_id               = module.aws_anyscale_v2.anyscale_iam_role_external_id
 
     # MemoryDB for Ray GCS fault tolerance
-    memorydb_cluster_name = module.aws_anyscale_v2.anyscale_memorydb_cluster_id
+    memorydb_cluster_name     = module.aws_anyscale_v2.anyscale_memorydb_cluster_id
+    memorydb_cluster_arn      = module.aws_anyscale_v2.anyscale_memorydb_cluster_arn
+    memorydb_cluster_endpoint = module.aws_anyscale_v2.anyscale_memorydb_cluster_endpoint_address
   }
 
   # Object Storage (S3)
@@ -32,8 +34,7 @@ resource "anyscale_cloud" "test" {
     region      = var.aws_region
   }
 
-  # EFS: DISABLED for this scenario
-  create_efs_resources = false
+  # Note: EFS is disabled in the aws_anyscale.tf module configuration
 
   timeouts {
     create = "30m"

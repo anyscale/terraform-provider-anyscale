@@ -1,6 +1,13 @@
 # GCP Full Test Scenario
 # Filestore + Memorystore enabled - Full configuration
 
+# Data source to get Filestore IP address after module creates it
+data "google_filestore_instance" "anyscale" {
+  name     = module.google_anyscale_v2.filestore_name
+  location = var.gcp_zone
+  project  = module.google_anyscale_v2.project_id
+}
+
 resource "anyscale_cloud" "test" {
   # Common Fields
   name           = var.cloud_name
@@ -25,6 +32,7 @@ resource "anyscale_cloud" "test" {
 
     # Memorystore for Ray GCS fault tolerance
     memorystore_instance_name = module.google_anyscale_v2.memorystore_id
+    memorystore_endpoint      = module.google_anyscale_v2.memorystore_endpoint
   }
 
   # Object Storage (GCS)
@@ -35,8 +43,12 @@ resource "anyscale_cloud" "test" {
 
   # File Storage (Filestore)
   file_storage {
-    file_system_id = module.google_anyscale_v2.filestore_name
-    mount_path     = "/mnt/shared"
+    file_storage_id = module.google_anyscale_v2.filestore_name
+    mount_path      = "/mnt/shared"
+    mount_targets {
+      address = data.google_filestore_instance.anyscale.networks[0].ip_addresses[0]
+      zone    = var.gcp_zone
+    }
   }
 
   timeouts {

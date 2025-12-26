@@ -107,7 +107,7 @@ func TestResourceCloudAWSConfigSchema(t *testing.T) {
 	}
 
 	// Test optional AWS fields
-	optionalAWSFields := []string{"external_id", "memorydb_cluster_name", "subnet_ids_to_az"}
+	optionalAWSFields := []string{"external_id", "memorydb_cluster_name", "memorydb_cluster_arn", "memorydb_cluster_endpoint", "subnet_ids_to_az"}
 	for _, field := range optionalAWSFields {
 		if _, ok := elem.Schema[field]; !ok {
 			t.Errorf("expected aws_config to have field %q", field)
@@ -322,6 +322,7 @@ func TestExpandGCPConfig(t *testing.T) {
 						"dataplane_service_account_email":    "dp-sa@my-project.iam.gserviceaccount.com",
 						"firewall_policy_names":              []any{"policy-1"},
 						"memorystore_instance_name":          "my-memorystore",
+						"memorystore_endpoint":               "10.0.0.1:6379",
 					},
 				},
 			},
@@ -335,6 +336,7 @@ func TestExpandGCPConfig(t *testing.T) {
 				ClusterServiceAccountEmail:  "dp-sa@my-project.iam.gserviceaccount.com",
 				FirewallPolicyNames:         []string{"policy-1"},
 				MemorystoreInstanceName:     "my-memorystore",
+				MemorystoreEndpoint:         "10.0.0.1:6379",
 			},
 		},
 		{
@@ -417,6 +419,9 @@ func TestExpandGCPConfig(t *testing.T) {
 			}
 			if result.MemorystoreInstanceName != tt.expected.MemorystoreInstanceName {
 				t.Errorf("MemorystoreInstanceName = %q, want %q", result.MemorystoreInstanceName, tt.expected.MemorystoreInstanceName)
+			}
+			if result.MemorystoreEndpoint != tt.expected.MemorystoreEndpoint {
+				t.Errorf("MemorystoreEndpoint = %q, want %q", result.MemorystoreEndpoint, tt.expected.MemorystoreEndpoint)
 			}
 		})
 	}

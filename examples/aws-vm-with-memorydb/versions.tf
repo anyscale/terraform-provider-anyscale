@@ -2,15 +2,22 @@
 terraform {
   required_version = ">= 1.9"
   required_providers {
-
-    anyscale = {
-      source  = "terraform-providers/anyscale"
-      version = "0.0.1" # version is ignored by dev_overrides
-    }
-
+    # anyscale provider uses dev_overrides - no lock file entry needed
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = ">= 0.9.0"
+    }
+    anyscale = {
+      source  = "terraform-providers/anyscale"
+      version = "0.0.1"
     }
   }
 }

@@ -131,6 +131,18 @@ func ResourceCloud() *schema.Resource {
 							ForceNew:    true,
 							Description: "MemoryDB cluster name for Ray GCS fault tolerance.",
 						},
+						"memorydb_cluster_arn": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							ForceNew:    true,
+							Description: "MemoryDB cluster ARN.",
+						},
+						"memorydb_cluster_endpoint": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							ForceNew:    true,
+							Description: "MemoryDB cluster endpoint address.",
+						},
 					},
 				},
 			},
@@ -198,6 +210,12 @@ func ResourceCloud() *schema.Resource {
 							Optional:    true,
 							ForceNew:    true,
 							Description: "Memorystore instance name for Ray GCS fault tolerance.",
+						},
+						"memorystore_endpoint": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							ForceNew:    true,
+							Description: "Memorystore endpoint address.",
 						},
 					},
 				},
@@ -422,6 +440,14 @@ func ExpandAWSConfig(d *schema.ResourceData) *AWSConfig {
 		awsConfig.MemoryDBClusterName = &memoryDBName
 	}
 
+	if memoryDBARN, ok := config["memorydb_cluster_arn"].(string); ok && memoryDBARN != "" {
+		awsConfig.MemoryDBClusterARN = &memoryDBARN
+	}
+
+	if memoryDBEndpoint, ok := config["memorydb_cluster_endpoint"].(string); ok && memoryDBEndpoint != "" {
+		awsConfig.MemoryDBClusterEndpoint = &memoryDBEndpoint
+	}
+
 	return awsConfig
 }
 
@@ -543,6 +569,10 @@ func ExpandGCPConfig(d *schema.ResourceData) *GCPConfig {
 
 	if memorystoreName, ok := config["memorystore_instance_name"].(string); ok && memorystoreName != "" {
 		gcpConfig.MemorystoreInstanceName = memorystoreName
+	}
+
+	if memorystoreEndpoint, ok := config["memorystore_endpoint"].(string); ok && memorystoreEndpoint != "" {
+		gcpConfig.MemorystoreEndpoint = memorystoreEndpoint
 	}
 
 	return gcpConfig

@@ -23,7 +23,9 @@ resource "anyscale_cloud" "test" {
     external_id               = module.aws_anyscale_v2.anyscale_iam_role_external_id
 
     # MemoryDB for Ray GCS fault tolerance
-    memorydb_cluster_name = module.aws_anyscale_v2.anyscale_memorydb_cluster_id
+    memorydb_cluster_name     = module.aws_anyscale_v2.anyscale_memorydb_cluster_id
+    memorydb_cluster_arn      = module.aws_anyscale_v2.anyscale_memorydb_cluster_arn
+    memorydb_cluster_endpoint = module.aws_anyscale_v2.anyscale_memorydb_cluster_endpoint_address
   }
 
   # Object Storage (S3)
