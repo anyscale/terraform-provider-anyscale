@@ -1,4 +1,4 @@
-output "id" {
+output "cloud_id" {
   description = "The ID of the created Anyscale cloud"
   value       = anyscale_cloud.primary.id
 }
