@@ -198,3 +198,16 @@ variable "enable_filestore" {
   type        = bool
   default     = false
 }
+
+variable "cloud_name" {
+  description = <<-EOT
+    (Optional) The name of the Anyscale cloud.
+
+    ex:
+    ```
+    cloud_name = "my-eks-cloud"
+    ```
+  EOT
+  type        = string
+  default     = "tf-gke-test"
+}
