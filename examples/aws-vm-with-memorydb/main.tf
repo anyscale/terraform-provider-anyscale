@@ -1,8 +1,9 @@
 # AWS with MemoryDB Test Scenario
 # No EFS, MemoryDB enabled
+# Uses split pattern: empty cloud + cloud_resource
 
+# Step 1: Create empty cloud shell
 resource "anyscale_cloud" "test" {
-  # Common Fields
   name           = var.cloud_name
   cloud_provider = var.cloud_provider
   region         = var.aws_region
@@ -10,6 +11,20 @@ resource "anyscale_cloud" "test" {
 
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user
+
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
+  }
+}
+
+# Step 2: Attach cloud resource with MemoryDB configuration
+resource "anyscale_cloud_resource" "primary" {
+  cloud_id      = anyscale_cloud.test.cloud_id
+  region        = var.aws_region
+  compute_stack = var.compute_stack
+  is_private    = var.is_private_cloud
 
   # AWS Configuration
   aws_config {
@@ -34,7 +49,7 @@ resource "anyscale_cloud" "test" {
     region      = var.aws_region
   }
 
-  # Note: EFS is disabled in the aws_anyscale.tf module configuration
+  # Note: EFS is disabled in this scenario
 
   timeouts {
     create = "30m"

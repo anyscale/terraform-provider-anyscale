@@ -375,6 +375,11 @@ func ResourceCloud() *schema.Resource {
 				Computed:    true,
 				Description: "The unique cloud ID assigned by Anyscale.",
 			},
+			"is_empty_cloud": {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Whether this cloud was created without embedded resource configuration. Use anyscale_cloud_resource to attach resources separately.",
+			},
 			"status": {
 				Type:        schema.TypeString,
 				Computed:    true,
@@ -586,6 +591,18 @@ func GetNetworkingMode(d *schema.ResourceData) string {
 	return "PUBLIC"
 }
 
+// hasEmbeddedResourceConfig checks if the cloud has any embedded resource configuration
+// If false, this is an "empty" cloud that expects resources to be added via anyscale_cloud_resource
+func hasEmbeddedResourceConfig(d *schema.ResourceData) bool {
+	_, hasAWS := d.GetOk("aws_config")
+	_, hasGCP := d.GetOk("gcp_config")
+	_, hasAzure := d.GetOk("azure_config")
+	_, hasK8s := d.GetOk("kubernetes_config")
+	_, hasObjStorage := d.GetOk("object_storage")
+	_, hasFileStorage := d.GetOk("file_storage")
+	return hasAWS || hasGCP || hasAzure || hasK8s || hasObjStorage || hasFileStorage
+}
+
 // ─── CRUD Operations ────────────────────────────────────────────────────────
 
 func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) diag.Diagnostics {
@@ -669,6 +686,16 @@ func resourceCloudCreate(ctx context.Context, d *schema.ResourceData, m any) dia
 	d.Set("cloud_id", cloudID)
 
 	log.Printf("[INFO] Cloud created successfully: cloud_id=%s", cloudID)
+
+	// Check if this is an "empty" cloud (no embedded resource config)
+	isEmptyCloud := !hasEmbeddedResourceConfig(d)
+	d.Set("is_empty_cloud", isEmptyCloud)
+
+	if isEmptyCloud {
+		// Skip add_resource call - resources will be added via anyscale_cloud_resource
+		log.Printf("[INFO] Created empty cloud %s - resources should be added via anyscale_cloud_resource", cloudID)
+		return resourceCloudRead(ctx, d, m)
+	}
 
 	// Step 2: Build and add cloud resource/deployment
 	deployReq := CloudDeploymentRequest{
@@ -830,6 +857,9 @@ func resourceCloudRead(ctx context.Context, d *schema.ResourceData, m any) diag.
 	d.Set("state", cloud.State)
 	d.Set("is_private_cloud", cloud.IsPrivateCloud)
 	d.Set("auto_add_user", cloud.AutoAddUser)
+
+	// Set is_empty_cloud based on whether this cloud has embedded resource config
+	d.Set("is_empty_cloud", !hasEmbeddedResourceConfig(d))
 
 	log.Printf("[INFO] Cloud read successfully: cloud_id=%s, status=%s, state=%s", cloudID, cloud.Status, cloud.State)
 
