@@ -30,6 +30,7 @@ func New() *schema.Provider {
 		ResourcesMap: map[string]*schema.Resource{
 			"anyscale_cloud":          ResourceCloud(),
 			"anyscale_cloud_resource": ResourceCloudResource(),
+			"anyscale_compute_config": ResourceComputeConfig(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			// Data sources will be added here

@@ -190,266 +190,166 @@ ci: deps check test ## Run CI pipeline (deps, check, test)
 	@echo "==> CI pipeline complete"
 
 # ============================================================================
-# TERRAFORM TESTING - AWS VM (CONSOLIDATED)
-# Uses examples/aws-vm with enable_efs and enable_memorydb variables
+# PRIMARY TERRAFORM TESTS - Efficient coverage of all provider variations
+# ============================================================================
+# These 6 tests efficiently cover all major variations:
+#   - Cloud Providers: AWS, GCP
+#   - Compute Stacks: VM, K8S
+#   - Patterns: All-in-one (basic), Split (full)
+#   - Features: EFS/MemoryDB (AWS), Filestore/Memorystore (GCP)
+#
+# Test Matrix:
+#   aws-vm-basic  : AWS + VM + All-in-one pattern (simplest AWS)
+#   aws-vm-full   : AWS + VM + Split pattern + EFS + MemoryDB
+#   aws-eks-basic : AWS + K8S + kubernetes_config
+#   gcp-vm-basic  : GCP + VM + All-in-one pattern (simplest GCP)
+#   gcp-vm-full   : GCP + VM + Split pattern + Filestore + Memorystore
+#   gcp-gke-basic : GCP + K8S + kubernetes_config
 # ============================================================================
 
-.PHONY: test-aws-vm
-test-aws-vm: build ## Test AWS VM basic scenario (no EFS, no MemoryDB)
+.PHONY: test-primary
+test-primary: build ## Run primary test suite (6 tests covering all variations)
+	@echo "==> Running primary test suite..."
+	@echo "==> This covers: AWS/GCP, VM/K8S, All-in-one/Split patterns, all features"
+	$(MAKE) test-aws-vm-basic
+	$(MAKE) test-aws-vm-full
+	$(MAKE) test-aws-eks-basic
+	$(MAKE) test-gcp-vm-basic
+	$(MAKE) test-gcp-vm-full
+	$(MAKE) test-gcp-gke-basic
+	@echo "==> Primary test suite completed"
+
+.PHONY: test-primary-vm
+test-primary-vm: build ## Run primary VM tests only (4 tests)
+	@echo "==> Running primary VM tests..."
+	$(MAKE) test-aws-vm-basic
+	$(MAKE) test-aws-vm-full
+	$(MAKE) test-gcp-vm-basic
+	$(MAKE) test-gcp-vm-full
+	@echo "==> Primary VM tests completed"
+
+.PHONY: test-primary-k8s
+test-primary-k8s: build ## Run primary K8S tests only (2 tests)
+	@echo "==> Running primary K8S tests..."
+	$(MAKE) test-aws-eks-basic
+	$(MAKE) test-gcp-gke-basic
+	@echo "==> Primary K8S tests completed"
+
+.PHONY: test-primary-aws
+test-primary-aws: build ## Run primary AWS tests only (3 tests)
+	@echo "==> Running primary AWS tests..."
+	$(MAKE) test-aws-vm-basic
+	$(MAKE) test-aws-vm-full
+	$(MAKE) test-aws-eks-basic
+	@echo "==> Primary AWS tests completed"
+
+.PHONY: test-primary-gcp
+test-primary-gcp: build ## Run primary GCP tests only (3 tests)
+	@echo "==> Running primary GCP tests..."
+	$(MAKE) test-gcp-vm-basic
+	$(MAKE) test-gcp-vm-full
+	$(MAKE) test-gcp-gke-basic
+	@echo "==> Primary GCP tests completed"
+
+# ============================================================================
+# TERRAFORM TESTING - AWS VM
+# ============================================================================
+
+.PHONY: test-aws-vm-basic
+test-aws-vm-basic: build ## Test AWS VM basic (all-in-one pattern)
 	@echo "==> Testing AWS VM basic scenario..."
-	cd examples/aws-vm && terraform apply -auto-approve -var="cloud_name=tfprovider-aws-vm-basic" -var="common_prefix=aws-vm-basic-"
-	cd examples/aws-vm && terraform destroy -auto-approve -var="cloud_name=tfprovider-aws-vm-basic" -var="common_prefix=aws-vm-basic-"
-
-.PHONY: test-aws-vm-efs
-test-aws-vm-efs: build ## Test AWS VM with EFS scenario
-	@echo "==> Testing AWS VM with EFS scenario..."
-	cd examples/aws-vm && terraform apply -auto-approve -var="enable_efs=true" -var="cloud_name=tfprovider-aws-vm-efs" -var="common_prefix=aws-vm-efs-" -var="vpc_cidr_block=172.25.0.0/16" -var='vpc_public_subnets=["172.25.21.0/24", "172.25.22.0/24", "172.25.23.0/24"]'
-	cd examples/aws-vm && terraform destroy -auto-approve -var="enable_efs=true" -var="cloud_name=tfprovider-aws-vm-efs" -var="common_prefix=aws-vm-efs-" -var="vpc_cidr_block=172.25.0.0/16" -var='vpc_public_subnets=["172.25.21.0/24", "172.25.22.0/24", "172.25.23.0/24"]'
-
-.PHONY: test-aws-vm-memorydb
-test-aws-vm-memorydb: build ## Test AWS VM with MemoryDB scenario
-	@echo "==> Testing AWS VM with MemoryDB scenario..."
-	cd examples/aws-vm && terraform apply -auto-approve -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-memorydb" -var="common_prefix=aws-vm-mdb-" -var="vpc_cidr_block=172.26.0.0/16" -var='vpc_public_subnets=["172.26.21.0/24", "172.26.22.0/24", "172.26.23.0/24"]'
-	cd examples/aws-vm && terraform destroy -auto-approve -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-memorydb" -var="common_prefix=aws-vm-mdb-" -var="vpc_cidr_block=172.26.0.0/16" -var='vpc_public_subnets=["172.26.21.0/24", "172.26.22.0/24", "172.26.23.0/24"]'
+	cd examples/aws-vm-basic && terraform apply -auto-approve
+	cd examples/aws-vm-basic && terraform destroy -auto-approve
 
 .PHONY: test-aws-vm-full
-test-aws-vm-full: build ## Test AWS VM full scenario (EFS + MemoryDB)
+test-aws-vm-full: build ## Test AWS VM full (split pattern + EFS + MemoryDB)
 	@echo "==> Testing AWS VM full scenario..."
 	cd examples/aws-vm && terraform apply -auto-approve -var="enable_efs=true" -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-full" -var="common_prefix=aws-vm-full-" -var="vpc_cidr_block=172.27.0.0/16" -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
 	cd examples/aws-vm && terraform destroy -auto-approve -var="enable_efs=true" -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-full" -var="common_prefix=aws-vm-full-" -var="vpc_cidr_block=172.27.0.0/16" -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
 
-# Apply-only targets for AWS VM (consolidated)
-.PHONY: apply-aws-vm
-apply-aws-vm: build ## Apply AWS VM basic scenario only
-	cd examples/aws-vm && terraform apply -auto-approve -var="cloud_name=tfprovider-aws-vm-basic" -var="common_prefix=aws-vm-basic-"
-
-.PHONY: apply-aws-vm-efs
-apply-aws-vm-efs: build ## Apply AWS VM with EFS scenario only
-	cd examples/aws-vm && terraform apply -auto-approve -var="enable_efs=true" -var="cloud_name=tfprovider-aws-vm-efs" -var="common_prefix=aws-vm-efs-" -var="vpc_cidr_block=172.25.0.0/16" -var='vpc_public_subnets=["172.25.21.0/24", "172.25.22.0/24", "172.25.23.0/24"]'
-
-.PHONY: apply-aws-vm-memorydb
-apply-aws-vm-memorydb: build ## Apply AWS VM with MemoryDB scenario only
-	cd examples/aws-vm && terraform apply -auto-approve -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-memorydb" -var="common_prefix=aws-vm-mdb-" -var="vpc_cidr_block=172.26.0.0/16" -var='vpc_public_subnets=["172.26.21.0/24", "172.26.22.0/24", "172.26.23.0/24"]'
+.PHONY: apply-aws-vm-basic
+apply-aws-vm-basic: build ## Apply AWS VM basic only
+	cd examples/aws-vm-basic && terraform apply -auto-approve
 
 .PHONY: apply-aws-vm-full
-apply-aws-vm-full: build ## Apply AWS VM full scenario only
+apply-aws-vm-full: build ## Apply AWS VM full only
 	cd examples/aws-vm && terraform apply -auto-approve -var="enable_efs=true" -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-full" -var="common_prefix=aws-vm-full-" -var="vpc_cidr_block=172.27.0.0/16" -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
 
-# Destroy-only targets for AWS VM (consolidated)
-.PHONY: destroy-aws-vm
-destroy-aws-vm: ## Destroy AWS VM basic scenario
-	cd examples/aws-vm && terraform destroy -auto-approve -var="cloud_name=tfprovider-aws-vm-basic" -var="common_prefix=aws-vm-basic-"
-
-.PHONY: destroy-aws-vm-efs
-destroy-aws-vm-efs: ## Destroy AWS VM with EFS scenario
-	cd examples/aws-vm && terraform destroy -auto-approve -var="enable_efs=true" -var="cloud_name=tfprovider-aws-vm-efs" -var="common_prefix=aws-vm-efs-" -var="vpc_cidr_block=172.25.0.0/16" -var='vpc_public_subnets=["172.25.21.0/24", "172.25.22.0/24", "172.25.23.0/24"]'
-
-.PHONY: destroy-aws-vm-memorydb
-destroy-aws-vm-memorydb: ## Destroy AWS VM with MemoryDB scenario
-	cd examples/aws-vm && terraform destroy -auto-approve -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-memorydb" -var="common_prefix=aws-vm-mdb-" -var="vpc_cidr_block=172.26.0.0/16" -var='vpc_public_subnets=["172.26.21.0/24", "172.26.22.0/24", "172.26.23.0/24"]'
+.PHONY: destroy-aws-vm-basic
+destroy-aws-vm-basic: ## Destroy AWS VM basic
+	cd examples/aws-vm-basic && terraform destroy -auto-approve
 
 .PHONY: destroy-aws-vm-full
-destroy-aws-vm-full: ## Destroy AWS VM full scenario
+destroy-aws-vm-full: ## Destroy AWS VM full
 	cd examples/aws-vm && terraform destroy -auto-approve -var="enable_efs=true" -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-full" -var="common_prefix=aws-vm-full-" -var="vpc_cidr_block=172.27.0.0/16" -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
 
 # ============================================================================
-# TERRAFORM TESTING - GCP VM (CONSOLIDATED)
-# Uses examples/gcp-vm with enable_filestore and enable_memorystore variables
-# ============================================================================
-
-.PHONY: test-gcp-vm
-test-gcp-vm: build ## Test GCP VM basic scenario (no Filestore, no Memorystore)
-	@echo "==> Testing GCP VM basic scenario..."
-	cd examples/gcp-vm && terraform apply -auto-approve -var="cloud_name=tfprovider-gcp-vm-basic" -var="common_prefix=gcp-vm-basic-" -var="vpc_public_subnet_cidr=10.100.0.0/16"
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="cloud_name=tfprovider-gcp-vm-basic" -var="common_prefix=gcp-vm-basic-" -var="vpc_public_subnet_cidr=10.100.0.0/16"
-
-.PHONY: test-gcp-vm-filestore
-test-gcp-vm-filestore: build ## Test GCP VM with Filestore scenario
-	@echo "==> Testing GCP VM with Filestore scenario..."
-	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_filestore=true" -var="cloud_name=tfprovider-gcp-vm-filestore" -var="common_prefix=gcp-vm-fs-" -var="vpc_public_subnet_cidr=10.101.0.0/16"
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_filestore=true" -var="cloud_name=tfprovider-gcp-vm-filestore" -var="common_prefix=gcp-vm-fs-" -var="vpc_public_subnet_cidr=10.101.0.0/16"
-
-.PHONY: test-gcp-vm-memorystore
-test-gcp-vm-memorystore: build ## Test GCP VM with Memorystore scenario
-	@echo "==> Testing GCP VM with Memorystore scenario..."
-	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-memorystore" -var="common_prefix=gcp-vm-ms-" -var="vpc_public_subnet_cidr=10.102.0.0/16"
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-memorystore" -var="common_prefix=gcp-vm-ms-" -var="vpc_public_subnet_cidr=10.102.0.0/16"
-
-.PHONY: test-gcp-vm-full
-test-gcp-vm-full: build ## Test GCP VM full scenario (Filestore + Memorystore)
-	@echo "==> Testing GCP VM full scenario..."
-	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
-
-# Apply-only targets for GCP VM (consolidated)
-.PHONY: apply-gcp-vm
-apply-gcp-vm: build ## Apply GCP VM basic scenario only
-	cd examples/gcp-vm && terraform apply -auto-approve -var="cloud_name=tfprovider-gcp-vm-basic" -var="common_prefix=gcp-vm-basic-" -var="vpc_public_subnet_cidr=10.100.0.0/16"
-
-.PHONY: apply-gcp-vm-filestore
-apply-gcp-vm-filestore: build ## Apply GCP VM with Filestore scenario only
-	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_filestore=true" -var="cloud_name=tfprovider-gcp-vm-filestore" -var="common_prefix=gcp-vm-fs-" -var="vpc_public_subnet_cidr=10.101.0.0/16"
-
-.PHONY: apply-gcp-vm-memorystore
-apply-gcp-vm-memorystore: build ## Apply GCP VM with Memorystore scenario only
-	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-memorystore" -var="common_prefix=gcp-vm-ms-" -var="vpc_public_subnet_cidr=10.102.0.0/16"
-
-.PHONY: apply-gcp-vm-full
-apply-gcp-vm-full: build ## Apply GCP VM full scenario only
-	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
-
-# Destroy-only targets for GCP VM (consolidated)
-.PHONY: destroy-gcp-vm
-destroy-gcp-vm: ## Destroy GCP VM basic scenario
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="cloud_name=tfprovider-gcp-vm-basic" -var="common_prefix=gcp-vm-basic-" -var="vpc_public_subnet_cidr=10.100.0.0/16"
-
-.PHONY: destroy-gcp-vm-filestore
-destroy-gcp-vm-filestore: ## Destroy GCP VM with Filestore scenario
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_filestore=true" -var="cloud_name=tfprovider-gcp-vm-filestore" -var="common_prefix=gcp-vm-fs-" -var="vpc_public_subnet_cidr=10.101.0.0/16"
-
-.PHONY: destroy-gcp-vm-memorystore
-destroy-gcp-vm-memorystore: ## Destroy GCP VM with Memorystore scenario
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-memorystore" -var="common_prefix=gcp-vm-ms-" -var="vpc_public_subnet_cidr=10.102.0.0/16"
-
-.PHONY: destroy-gcp-vm-full
-destroy-gcp-vm-full: ## Destroy GCP VM full scenario
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
-
-# ============================================================================
-# TERRAFORM TESTING - AWS VM SCENARIOS (LEGACY - individual directories)
-# ============================================================================
-
-.PHONY: test-aws-vm-basic-legacy
-test-aws-vm-basic-legacy: build ## Test AWS VM basic scenario (legacy directory)
-	@echo "==> Testing AWS VM basic scenario (legacy)..."
-	cd examples/aws-vm-basic && terraform apply -auto-approve
-	cd examples/aws-vm-basic && terraform destroy -auto-approve
-
-.PHONY: test-aws-vm-basic-resource
-test-aws-vm-basic-resource: build ## Test AWS VM basic with separate cloud_resource
-	@echo "==> Testing AWS VM basic resource scenario..."
-	cd examples/aws-vm-basic-resource && terraform apply -auto-approve
-	cd examples/aws-vm-basic-resource && terraform destroy -auto-approve
-
-# ============================================================================
-# TERRAFORM TESTING - GCP VM SCENARIOS (LEGACY - individual directories)
-# ============================================================================
-
-.PHONY: test-gcp-vm-basic-legacy
-test-gcp-vm-basic-legacy: build ## Test GCP VM basic scenario (legacy directory)
-	@echo "==> Testing GCP VM basic scenario (legacy)..."
-	cd examples/gcp-vm-basic && terraform apply -auto-approve
-	cd examples/gcp-vm-basic && terraform destroy -auto-approve
-
-# ============================================================================
-# TERRAFORM TESTING - MULTI-RESOURCE SCENARIOS
-# ============================================================================
-
-.PHONY: test-multi-resource-basic
-test-multi-resource-basic: build ## Test multi-resource cloud basic scenario
-	@echo "==> Testing multi-resource cloud basic scenario..."
-	cd examples/multi-resource-cloud-basic && terraform apply -auto-approve
-	cd examples/multi-resource-cloud-basic && terraform destroy -auto-approve
-
-# ============================================================================
-# TERRAFORM TESTING - AWS EKS SCENARIOS
+# TERRAFORM TESTING - AWS EKS
 # ============================================================================
 
 .PHONY: test-aws-eks-basic
-test-aws-eks-basic: build ## Test AWS EKS basic scenario
+test-aws-eks-basic: build ## Test AWS EKS basic (K8S)
 	@echo "==> Testing AWS EKS basic scenario..."
 	cd examples/aws-eks-basic && terraform apply -auto-approve
 	cd examples/aws-eks-basic && terraform destroy -auto-approve
 
 .PHONY: apply-aws-eks-basic
-apply-aws-eks-basic: build ## Apply AWS EKS basic scenario only
+apply-aws-eks-basic: build ## Apply AWS EKS basic only
 	cd examples/aws-eks-basic && terraform apply -auto-approve
 
 .PHONY: destroy-aws-eks-basic
-destroy-aws-eks-basic: ## Destroy AWS EKS basic scenario
+destroy-aws-eks-basic: ## Destroy AWS EKS basic
 	cd examples/aws-eks-basic && terraform destroy -auto-approve
 
 # ============================================================================
-# TERRAFORM TESTING - BATCH SCENARIOS (using consolidated examples)
+# TERRAFORM TESTING - GCP VM
 # ============================================================================
 
-.PHONY: test-all-aws-vm
-test-all-aws-vm: build ## Run all AWS VM test scenarios sequentially
-	@echo "==> Running all AWS VM test scenarios..."
-	$(MAKE) test-aws-vm
-	$(MAKE) test-aws-vm-efs
-	$(MAKE) test-aws-vm-memorydb
-	$(MAKE) test-aws-vm-full
-	@echo "==> All AWS VM scenarios completed"
-
-.PHONY: test-all-gcp-vm
-test-all-gcp-vm: build ## Run all GCP VM test scenarios sequentially
-	@echo "==> Running all GCP VM test scenarios..."
-	$(MAKE) test-gcp-vm
-	$(MAKE) test-gcp-vm-filestore
-	$(MAKE) test-gcp-vm-memorystore
-	$(MAKE) test-gcp-vm-full
-	@echo "==> All GCP VM scenarios completed"
-
-.PHONY: test-all-vm
-test-all-vm: build ## Run all VM test scenarios (AWS + GCP)
-	@echo "==> Running all VM test scenarios..."
-	$(MAKE) test-all-aws-vm
-	$(MAKE) test-all-gcp-vm
-	@echo "==> All VM scenarios completed"
-
-# Parallel testing (each scenario has unique VPC CIDRs and cloud names)
-.PHONY: test-all-aws-vm-parallel
-test-all-aws-vm-parallel: build ## Run all AWS VM scenarios in parallel
-	@echo "==> Running all AWS VM scenarios in parallel..."
-	$(MAKE) -j4 test-aws-vm test-aws-vm-efs test-aws-vm-memorydb test-aws-vm-full
-
-.PHONY: test-all-gcp-vm-parallel
-test-all-gcp-vm-parallel: build ## Run all GCP VM scenarios in parallel
-	@echo "==> Running all GCP VM scenarios in parallel..."
-	$(MAKE) -j4 test-gcp-vm test-gcp-vm-filestore test-gcp-vm-memorystore test-gcp-vm-full
-
-# ============================================================================
-# TERRAFORM TESTING - LEGACY APPLY/DESTROY ONLY (individual directories)
-# ============================================================================
-
-# Legacy AWS VM Apply-only targets
-.PHONY: apply-aws-vm-basic-legacy
-apply-aws-vm-basic-legacy: build ## Apply AWS VM basic (legacy dir)
-	cd examples/aws-vm-basic && terraform apply -auto-approve
-
-.PHONY: apply-aws-vm-basic-resource
-apply-aws-vm-basic-resource: build ## Apply AWS VM basic resource scenario only
-	cd examples/aws-vm-basic-resource && terraform apply -auto-approve
-
-# Legacy GCP VM Apply-only targets
-.PHONY: apply-gcp-vm-basic-legacy
-apply-gcp-vm-basic-legacy: build ## Apply GCP VM basic (legacy dir)
+.PHONY: test-gcp-vm-basic
+test-gcp-vm-basic: build ## Test GCP VM basic (all-in-one pattern)
+	@echo "==> Testing GCP VM basic scenario..."
 	cd examples/gcp-vm-basic && terraform apply -auto-approve
-
-# Multi-resource Apply-only targets
-.PHONY: apply-multi-resource-basic
-apply-multi-resource-basic: build ## Apply multi-resource cloud basic scenario only
-	cd examples/multi-resource-cloud-basic && terraform apply -auto-approve
-
-# Legacy AWS VM Destroy-only targets
-.PHONY: destroy-aws-vm-basic-legacy
-destroy-aws-vm-basic-legacy: ## Destroy AWS VM basic (legacy dir)
-	cd examples/aws-vm-basic && terraform destroy -auto-approve
-
-.PHONY: destroy-aws-vm-basic-resource
-destroy-aws-vm-basic-resource: ## Destroy AWS VM basic resource scenario
-	cd examples/aws-vm-basic-resource && terraform destroy -auto-approve
-
-# Legacy GCP VM Destroy-only targets
-.PHONY: destroy-gcp-vm-basic-legacy
-destroy-gcp-vm-basic-legacy: ## Destroy GCP VM basic (legacy dir)
 	cd examples/gcp-vm-basic && terraform destroy -auto-approve
 
-# Multi-resource Destroy-only targets
-.PHONY: destroy-multi-resource-basic
-destroy-multi-resource-basic: ## Destroy multi-resource cloud basic scenario
-	cd examples/multi-resource-cloud-basic && terraform destroy -auto-approve
+.PHONY: test-gcp-vm-full
+test-gcp-vm-full: build ## Test GCP VM full (split pattern + Filestore + Memorystore)
+	@echo "==> Testing GCP VM full scenario..."
+	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
+	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
+
+.PHONY: apply-gcp-vm-basic
+apply-gcp-vm-basic: build ## Apply GCP VM basic only
+	cd examples/gcp-vm-basic && terraform apply -auto-approve
+
+.PHONY: apply-gcp-vm-full
+apply-gcp-vm-full: build ## Apply GCP VM full only
+	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
+
+.PHONY: destroy-gcp-vm-basic
+destroy-gcp-vm-basic: ## Destroy GCP VM basic
+	cd examples/gcp-vm-basic && terraform destroy -auto-approve
+
+.PHONY: destroy-gcp-vm-full
+destroy-gcp-vm-full: ## Destroy GCP VM full
+	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
+
+# ============================================================================
+# TERRAFORM TESTING - GCP GKE
+# ============================================================================
+
+.PHONY: test-gcp-gke-basic
+test-gcp-gke-basic: build ## Test GCP GKE basic (K8S)
+	@echo "==> Testing GCP GKE basic scenario..."
+	cd examples/gcp-gke-basic && terraform apply -auto-approve
+	cd examples/gcp-gke-basic && terraform destroy -auto-approve
+
+.PHONY: apply-gcp-gke-basic
+apply-gcp-gke-basic: build ## Apply GCP GKE basic only
+	cd examples/gcp-gke-basic && terraform apply -auto-approve
+
+.PHONY: destroy-gcp-gke-basic
+destroy-gcp-gke-basic: ## Destroy GCP GKE basic
+	cd examples/gcp-gke-basic && terraform destroy -auto-approve
 
 # ============================================================================
 # RELEASE (placeholder for future CI/CD)
