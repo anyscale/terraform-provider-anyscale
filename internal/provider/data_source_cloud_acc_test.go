@@ -113,18 +113,19 @@ data "anyscale_cloud" "test" {
 }
 
 func testAccCloudDataSourceConfig_withComputeConfig(cloudID string) string {
+	configName := fmt.Sprintf("tf-test-datasource-compute-%d", os.Getpid())
 	return fmt.Sprintf(`
 data "anyscale_cloud" "test" {
   id = "%s"
 }
 
 resource "anyscale_compute_config" "test" {
-  name     = "tf-test-datasource-compute"
+  name     = "%s"
   cloud_id = data.anyscale_cloud.test.id
 
   head_node = {
     instance_type = "m5.large"
   }
 }
-`, cloudID)
+`, cloudID, configName)
 }
