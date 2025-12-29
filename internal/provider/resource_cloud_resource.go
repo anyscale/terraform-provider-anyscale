@@ -45,8 +45,9 @@ type CloudResourceResource struct {
 
 // CloudResourceResourceModel describes the resource data model.
 type CloudResourceResourceModel struct {
-	// Parent reference
-	CloudID types.String `tfsdk:"cloud_id"`
+	// Parent reference - can specify either cloud_id or cloud_name
+	CloudID   types.String `tfsdk:"cloud_id"`
+	CloudName types.String `tfsdk:"cloud_name"`
 
 	// Resource identity
 	Name types.String `tfsdk:"name"`
@@ -157,7 +158,15 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			// ─── Parent Reference ─────────────────────────────────
 			"cloud_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The cloud ID to attach this resource to.",
+				Computed:            true,
+				MarkdownDescription: "The cloud ID to attach this resource to. Either `cloud_id` or `cloud_name` can be specified.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"cloud_name": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "The cloud name to attach this resource to. Either `cloud_id` or `cloud_name` can be specified. If provided, will be resolved to cloud_id.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -538,7 +547,24 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
+	// Resolve cloud_name to cloud_id if needed
 	cloudID := plan.CloudID.ValueString()
+	if (plan.CloudID.IsNull() || plan.CloudID.IsUnknown()) && !plan.CloudName.IsNull() {
+		cloudName := plan.CloudName.ValueString()
+		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
+
+		resolvedID, err := r.resolveCloudNameToID(ctx, cloudName)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Cloud Name Resolution Failed",
+				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
+			)
+			return
+		}
+		cloudID = resolvedID
+		plan.CloudID = types.StringValue(cloudID)
+	}
+
 	region := plan.Region.ValueString()
 	computeStack := plan.ComputeStack.ValueString()
 	isPrivate := plan.IsPrivate.ValueBool()
@@ -1438,4 +1464,67 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 
 	tflog.Error(ctx, "Timeout waiting for cloud to be ready", map[string]any{"poll_count": pollCount})
 	return fmt.Errorf("timeout waiting for cloud to be ready")
+}
+
+// resolveCloudNameToID looks up a cloud by name and returns its ID
+func (r *CloudResourceResource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
+	resp, err := r.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to list clouds: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
+	}
+
+	var cloudsResp struct {
+		Results []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			CreatedAt string `json:"created_at"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Find clouds with matching name
+	// If multiple exist, return the most recently created one
+	var matchedCloudID string
+	var latestCreatedAt string
+
+	for _, cloud := range cloudsResp.Results {
+		if cloud.Name == cloudName {
+			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
+				matchedCloudID = cloud.ID
+				latestCreatedAt = cloud.CreatedAt
+			}
+		}
+	}
+
+	if matchedCloudID == "" {
+		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
+	}
+
+	if len(cloudsResp.Results) > 1 {
+		tflog.Warn(ctx, "Multiple clouds found with same name, using most recent", map[string]any{
+			"cloud_name": cloudName,
+			"cloud_id":   matchedCloudID,
+			"created_at": latestCreatedAt,
+		})
+	}
+
+	tflog.Info(ctx, "Resolved cloud name to ID", map[string]any{
+		"cloud_name": cloudName,
+		"cloud_id":   matchedCloudID,
+	})
+
+	return matchedCloudID, nil
 }

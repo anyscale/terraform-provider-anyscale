@@ -13,7 +13,30 @@ Manages an Anyscale Cloud Resource deployment. This attaches infrastructure conf
 ## Example Usage
 
 ```terraform
-# AWS VM Cloud Resource
+# AWS VM Cloud Resource using cloud_name
+resource "anyscale_cloud_resource" "aws_vm_by_name" {
+  cloud_name    = "production-cloud"  # Alternative to cloud_id
+  resource_name = "vm-aws-us-east-2"
+  compute_stack = "VM"
+
+  aws_config {
+    vpc_id = "vpc-0343edeee0eab27c3"
+    subnet_ids_to_az = {
+      "subnet-086ac7bba68e3c1c3" = "us-east-2a"
+      "subnet-08a309019a027ec72" = "us-east-2b"
+    }
+    security_group_ids        = ["sg-064dac0ed5cffc779"]
+    controlplane_iam_role_arn = "arn:aws:iam::xxx:role/crossacct"
+    dataplane_iam_role_arn    = "arn:aws:iam::xxx:role/cluster-node"
+  }
+
+  object_storage {
+    bucket_name = "my-bucket"
+    region      = "us-east-2"
+  }
+}
+
+# AWS VM Cloud Resource using cloud_id
 resource "anyscale_cloud_resource" "aws_vm" {
   cloud_id      = "cld_abc123"
   resource_name = "vm-aws-us-east-2"
@@ -93,11 +116,13 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
 
 ### Required
 
-- `cloud_id` (String) The cloud ID to attach this resource to.
 - `compute_stack` (String) Compute stack type: VM or K8S.
 - `region` (String) The region for this cloud resource.
 
 ### Optional
+
+- `cloud_id` (String) The cloud ID to attach this resource to. Either `cloud_id` or `cloud_name` must be specified.
+- `cloud_name` (String) The cloud name to attach this resource to. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id.
 
 - `aws_config` (Block, Optional) AWS-specific configuration. (see [below for nested schema](#nestedblock--aws_config))
 - `cloud_provider` (String) Cloud provider: AWS or GCP. Required for K8S compute_stack when aws_config/gcp_config is not provided. Inferred from aws_config/gcp_config if not specified.

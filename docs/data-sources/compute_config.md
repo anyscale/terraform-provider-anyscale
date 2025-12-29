@@ -41,6 +41,32 @@ data "anyscale_cloud" "prod_cloud" {
 }
 ```
 
+### Look up by Name with Cloud Filter (by ID)
+
+```terraform
+# Filter by both name and cloud_id to scope the search
+data "anyscale_compute_config" "staging" {
+  name     = "my-compute-config"
+  cloud_id = "cld_abc123xyz"
+}
+```
+
+### Look up by Name with Cloud Filter (by Name)
+
+```terraform
+# Filter by both name and cloud_name to scope the search
+# The cloud_name will be automatically resolved to cloud_id
+data "anyscale_compute_config" "production" {
+  name       = "my-compute-config"
+  cloud_name = "production-cloud"
+}
+
+# You can also reference computed cloud_name in outputs
+output "config_cloud" {
+  value = data.anyscale_compute_config.production.cloud_name
+}
+```
+
 ### Use Existing Config as Template
 
 ```terraform
@@ -87,12 +113,12 @@ output "config_details" {
 
 ### Optional
 
-- `id` (String) The unique identifier of the compute config. Either `id` or `name` must be specified.
-- `name` (String) The name of the compute config. Either `id` or `name` must be specified. If multiple configs have the same name, the most recently created one will be returned.
+- `id` (String) The unique identifier of the compute config. Either `id` or `name` is required for lookups.
+- `name` (String) The name of the compute config. Either `id` or `name` is required for lookups. This field is computed when looking up by ID.
+- `cloud_id` (String) The ID of the Anyscale cloud. Can be used to filter compute configs when looking up by name. Either `cloud_id` or `cloud_name` can be specified. This field is also computed as output.
+- `cloud_name` (String) The name of the Anyscale cloud. Can be used to filter compute configs when looking up by name. Either `cloud_id` or `cloud_name` can be specified. If provided, will be resolved to cloud_id. This field is also computed as output.
 
 ### Read-Only
-
-- `cloud_id` (String) The ID of the Anyscale cloud used for launching clusters.
 - `region` (String) The region to launch clusters in.
 - `idle_termination_minutes` (Number) Number of minutes after which idle clusters will be terminated. 0 means disabled.
 - `maximum_uptime_minutes` (Number) Maximum uptime in minutes before cluster termination.
@@ -106,8 +132,10 @@ output "config_details" {
 
 ## Notes
 
-- When looking up by name, if multiple configs exist with the same name, the most recently created config will be returned, and a warning will be logged.
+- You can look up compute configs by either ID or name. If multiple configs exist with the same name, the most recently created one will be returned.
+- When looking up by name, you can optionally provide `cloud_id` or `cloud_name` to filter results to a specific cloud. This is useful in multi-cloud environments.
+- If you provide `cloud_name` instead of `cloud_id`, the provider will automatically resolve it to the cloud ID. If multiple clouds exist with the same name, the most recently created one will be used.
 - Anonymous compute configs (created without a name) can only be looked up by ID.
 - The data source performs a read-only query and does not modify any infrastructure.
 - Node configuration details (head_node, worker_nodes) are not included in the data source output. Use the compute config ID to reference the full configuration if needed.
-- Ensure you have appropriate permissions in your Anyscale account to list and read compute configurations.
+- Ensure you have appropriate permissions in your Anyscale account to read compute configurations.

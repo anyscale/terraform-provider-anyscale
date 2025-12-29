@@ -56,7 +56,8 @@ func TestAccComputeConfigDataSource_ByName(t *testing.T) {
 		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
 	}
 
-	configName := "tf-test-datasource-by-name"
+	// Use timestamp to ensure unique name for each test run
+	configName := fmt.Sprintf("tf-test-datasource-by-name-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -104,7 +105,7 @@ func TestAccComputeConfigDataSource_AsTemplate(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Check base config
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.base", "id"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.base", "name", "tf-test-datasource-base"),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.base", "name"),
 					// Check data source
 					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.template", "id"),
 					// Check derived config uses same cloud
@@ -116,25 +117,67 @@ func TestAccComputeConfigDataSource_AsTemplate(t *testing.T) {
 	})
 }
 
+func TestAccComputeConfigDataSource_ByNameWithCloudName(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC not set, skipping acceptance test")
+	}
+
+	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
+	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
+	if cloudID == "" || cloudName == "" {
+		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_CLOUD_NAME must be set for this test")
+	}
+
+	configName := fmt.Sprintf("tf-test-datasource-cloudname-%d", os.Getpid())
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// First create a named compute config
+			{
+				Config: testAccComputeConfigDataSourceConfig_createNamedConfig(cloudID, configName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
+				),
+			},
+			// Then look it up by name and cloud_name (not cloud_id)
+			{
+				Config: testAccComputeConfigDataSourceConfig_byNameAndCloudName(cloudID, configName, cloudName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.test", "name", configName),
+					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.test", "id"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.test", "cloud_id", cloudID),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.test", "cloud_name", cloudName),
+					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.test", "region"),
+				),
+			},
+		},
+	})
+}
+
 // Configuration templates
 
 func testAccComputeConfigDataSourceConfig_createConfig(cloudID string) string {
+	configName := fmt.Sprintf("tf-test-datasource-config-%d", os.Getpid())
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  name     = "tf-test-datasource-config"
+  name     = "%s"
   cloud_id = "%s"
 
   head_node = {
     instance_type = "m5.large"
   }
 }
-`, cloudID)
+`, configName, cloudID)
 }
 
 func testAccComputeConfigDataSourceConfig_byID(cloudID string) string {
+	configName := fmt.Sprintf("tf-test-datasource-config-%d", os.Getpid())
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  name     = "tf-test-datasource-config"
+  name     = "%s"
   cloud_id = "%s"
 
   head_node = {
@@ -145,7 +188,7 @@ resource "anyscale_compute_config" "test" {
 data "anyscale_compute_config" "test" {
   id = anyscale_compute_config.test.id
 }
-`, cloudID)
+`, configName, cloudID)
 }
 
 func testAccComputeConfigDataSourceConfig_createNamedConfig(cloudID, configName string) string {
@@ -179,9 +222,11 @@ data "anyscale_compute_config" "test" {
 }
 
 func testAccComputeConfigDataSourceConfig_asTemplate(cloudID string) string {
+	baseName := fmt.Sprintf("tf-test-datasource-base-%d", os.Getpid())
+	derivedName := fmt.Sprintf("tf-test-datasource-derived-%d", os.Getpid())
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "base" {
-  name                     = "tf-test-datasource-base"
+  name                     = "%s"
   cloud_id                 = "%s"
   idle_termination_minutes = 120
 
@@ -195,7 +240,7 @@ data "anyscale_compute_config" "template" {
 }
 
 resource "anyscale_compute_config" "derived" {
-  name                     = "tf-test-datasource-derived"
+  name                     = "%s"
   cloud_id                 = data.anyscale_compute_config.template.cloud_id
   region                   = data.anyscale_compute_config.template.region
   idle_termination_minutes = 60
@@ -204,5 +249,23 @@ resource "anyscale_compute_config" "derived" {
     instance_type = "m5.xlarge"
   }
 }
-`, cloudID)
+`, baseName, cloudID, derivedName)
+}
+
+func testAccComputeConfigDataSourceConfig_byNameAndCloudName(cloudID, configName, cloudName string) string {
+	return fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+}
+
+data "anyscale_compute_config" "test" {
+  name       = anyscale_compute_config.test.name
+  cloud_name = "%s"
+}
+`, configName, cloudID, cloudName)
 }

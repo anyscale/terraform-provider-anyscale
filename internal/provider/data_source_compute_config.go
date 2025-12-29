@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -35,8 +36,11 @@ type ComputeConfigDataSourceModel struct {
 	ID   types.String `tfsdk:"id"`
 	Name types.String `tfsdk:"name"`
 
-	// Computed outputs
-	CloudID                  types.String `tfsdk:"cloud_id"`
+	// Cloud identification - can provide either ID or Name as input, also computed as output
+	CloudID   types.String `tfsdk:"cloud_id"`
+	CloudName types.String `tfsdk:"cloud_name"`
+
+	// Computed outputs (excluding CloudID and CloudName which are above)
 	Region                   types.String `tfsdk:"region"`
 	IdleTerminationMinutes   types.Int64  `tfsdk:"idle_termination_minutes"`
 	MaximumUptimeMinutes     types.Int64  `tfsdk:"maximum_uptime_minutes"`
@@ -68,13 +72,19 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 			"name": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "The name of the compute config. Either `id` or `name` must be specified. If multiple configs have the same name, the most recently created one will be returned.",
+				MarkdownDescription: "The name of the compute config. Either `id` or `name` must be specified. This field is computed when looking up by ID.",
 			},
 
 			// Computed fields
 			"cloud_id": schema.StringAttribute{
+				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "The ID of the Anyscale cloud used for launching clusters.",
+				MarkdownDescription: "The ID of the Anyscale cloud. Can be used to filter compute configs when looking up by name. Either `cloud_id` or `cloud_name` can be specified.",
+			},
+			"cloud_name": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "The name of the Anyscale cloud. Can be used to filter compute configs when looking up by name. Either `cloud_id` or `cloud_name` can be specified. If provided, will be resolved to cloud_id.",
 			},
 			"region": schema.StringAttribute{
 				Computed:            true,
@@ -166,9 +176,28 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	} else {
 		// Look up by name
 		name := config.Name.ValueString()
-		tflog.Info(ctx, "Looking up compute config by name", map[string]any{"name": name})
+		cloudID := ""
 
-		configID, err = d.findComputeConfigByName(ctx, name)
+		// Resolve cloud_id from either cloud_id or cloud_name
+		if !config.CloudID.IsNull() {
+			cloudID = config.CloudID.ValueString()
+		} else if !config.CloudName.IsNull() {
+			cloudName := config.CloudName.ValueString()
+			tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
+
+			cloudID, err = d.resolveCloudNameToID(ctx, cloudName)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Cloud Name Resolution Failed",
+					fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
+				)
+				return
+			}
+		}
+
+		tflog.Info(ctx, "Looking up compute config by name", map[string]any{"name": name, "cloud_id": cloudID})
+
+		configID, err = d.findComputeConfigByName(ctx, name, cloudID)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Compute Config Lookup Failed",
@@ -268,6 +297,29 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	if configData, ok := resultData["config"].(map[string]interface{}); ok {
 		if cloudID, ok := configData["cloud_id"].(string); ok {
 			config.CloudID = types.StringValue(cloudID)
+
+			// Fetch cloud name for the cloud_id
+			cloudResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+			if err == nil {
+				defer cloudResp.Body.Close()
+				if cloudResp.StatusCode == http.StatusOK {
+					cloudBody, err := io.ReadAll(cloudResp.Body)
+					if err == nil {
+						var cloudResult map[string]interface{}
+						if err := json.Unmarshal(cloudBody, &cloudResult); err == nil {
+							if cloudData, ok := cloudResult["result"].(map[string]interface{}); ok {
+								if cloudName, ok := cloudData["name"].(string); ok {
+									config.CloudName = types.StringValue(cloudName)
+								}
+							}
+						}
+					}
+				}
+			}
+			// If we can't fetch cloud name, just leave it null - it's not critical
+			if config.CloudName.IsNull() {
+				tflog.Debug(ctx, "Could not fetch cloud name", map[string]any{"cloud_id": cloudID})
+			}
 		}
 
 		if region, ok := configData["region"].(string); ok {
@@ -306,11 +358,28 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
 
-// findComputeConfigByName looks for a compute config with the given name
-func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, name string) (string, error) {
-	// List all compute configs and filter by name
-	// Note: The API may support filtering, but for maximum compatibility we list and filter
-	resp, err := d.client.DoRequest(ctx, "GET", "/api/v2/compute_templates", nil)
+// findComputeConfigByName looks for a compute config with the given name using the search API
+func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, name string, cloudID string) (string, error) {
+	// Use the search API to find compute configs by name
+	searchPayload := map[string]interface{}{
+		"name": map[string]string{
+			"equals": name,
+		},
+		"include_anonymous": false,
+		"archive_status":    "NOT_ARCHIVED",
+	}
+
+	// Add cloud_id filter if provided
+	if cloudID != "" {
+		searchPayload["cloud_id"] = cloudID
+	}
+
+	searchBody, err := json.Marshal(searchPayload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal search request: %w", err)
+	}
+
+	resp, err := d.client.DoRequest(ctx, "POST", "/api/v2/compute_templates/search", strings.NewReader(string(searchBody)))
 	if err != nil {
 		return "", err
 	}
@@ -322,10 +391,10 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to list compute configs: %s - %s", resp.Status, string(body))
+		return "", fmt.Errorf("failed to search compute configs: %s - %s", resp.Status, string(body))
 	}
 
-	var configsResp struct {
+	var searchResp struct {
 		Results []struct {
 			ID        string `json:"id"`
 			Name      string `json:"name"`
@@ -334,37 +403,102 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 		} `json:"results"`
 	}
 
-	if err := json.Unmarshal(body, &configsResp); err != nil {
+	if err := json.Unmarshal(body, &searchResp); err != nil {
 		return "", err
 	}
 
-	// Find configs with matching name (excluding anonymous configs)
-	// If multiple exist, return the most recently created one
+	if len(searchResp.Results) == 0 {
+		return "", nil // Not found
+	}
+
+	// If multiple configs exist with the same name, return the most recently created one
 	var matchedConfigID string
 	var latestCreatedAt string
 
-	for _, cfg := range configsResp.Results {
-		// Skip anonymous configs
-		if cfg.Anonymous {
-			continue
-		}
-
-		if cfg.Name == name {
-			if matchedConfigID == "" || cfg.CreatedAt > latestCreatedAt {
-				matchedConfigID = cfg.ID
-				latestCreatedAt = cfg.CreatedAt
-			}
+	for _, cfg := range searchResp.Results {
+		if matchedConfigID == "" || cfg.CreatedAt > latestCreatedAt {
+			matchedConfigID = cfg.ID
+			latestCreatedAt = cfg.CreatedAt
 		}
 	}
 
-	if matchedConfigID != "" && len(configsResp.Results) > 1 {
+	if len(searchResp.Results) > 1 {
 		// Log warning if multiple configs with same name exist
 		tflog.Warn(ctx, "Multiple compute configs found with same name, returning most recent", map[string]any{
 			"name":       name,
 			"config_id":  matchedConfigID,
 			"created_at": latestCreatedAt,
+			"count":      len(searchResp.Results),
 		})
 	}
 
+	tflog.Info(ctx, "Found compute config by name", map[string]any{
+		"name":      name,
+		"config_id": matchedConfigID,
+	})
+
 	return matchedConfigID, nil
+}
+
+// resolveCloudNameToID looks up a cloud by name and returns its ID
+func (d *ComputeConfigDataSource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
+	resp, err := d.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to list clouds: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
+	}
+
+	var cloudsResp struct {
+		Results []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			CreatedAt string `json:"created_at"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Find clouds with matching name
+	// If multiple exist, return the most recently created one
+	var matchedCloudID string
+	var latestCreatedAt string
+
+	for _, cloud := range cloudsResp.Results {
+		if cloud.Name == cloudName {
+			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
+				matchedCloudID = cloud.ID
+				latestCreatedAt = cloud.CreatedAt
+			}
+		}
+	}
+
+	if matchedCloudID == "" {
+		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
+	}
+
+	if len(cloudsResp.Results) > 1 {
+		tflog.Warn(ctx, "Multiple clouds found with same name, using most recent", map[string]any{
+			"cloud_name": cloudName,
+			"cloud_id":   matchedCloudID,
+			"created_at": latestCreatedAt,
+		})
+	}
+
+	tflog.Info(ctx, "Resolved cloud name to ID", map[string]any{
+		"cloud_name": cloudName,
+		"cloud_id":   matchedCloudID,
+	})
+
+	return matchedCloudID, nil
 }

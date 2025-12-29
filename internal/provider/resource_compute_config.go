@@ -20,6 +20,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -41,6 +42,7 @@ type ComputeConfigResourceModel struct {
 	Name                     types.String  `tfsdk:"name"`
 	ProjectID                types.String  `tfsdk:"project_id"`
 	CloudID                  types.String  `tfsdk:"cloud_id"`
+	CloudName                types.String  `tfsdk:"cloud_name"`
 	Region                   types.String  `tfsdk:"region"`
 	IdleTerminationMinutes   types.Int64   `tfsdk:"idle_termination_minutes"`
 	MaximumUptimeMinutes     types.Int64   `tfsdk:"maximum_uptime_minutes"`
@@ -132,9 +134,15 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				MarkdownDescription: "The project ID to associate the compute config with.",
 			},
 			"cloud_id": schema.StringAttribute{
-				Required:            true,
-				Description:         "The ID of the Anyscale cloud to use for launching clusters.",
-				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters.",
+				Optional:            true,
+				Computed:            true,
+				Description:         "The ID of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified.",
+				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified.",
+			},
+			"cloud_name": schema.StringAttribute{
+				Optional:            true,
+				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id.",
+				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id.",
 			},
 			"region": schema.StringAttribute{
 				Optional:            true,
@@ -420,11 +428,43 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
+	// Validate that either cloud_id or cloud_name is provided
+	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
+		resp.Diagnostics.AddError(
+			"Missing Required Attribute",
+			"Either 'cloud_id' or 'cloud_name' must be specified.",
+		)
+		return
+	}
+
+	// Resolve cloud_name to cloud_id if needed
+	cloudID := plan.CloudID.ValueString()
+	if (plan.CloudID.IsNull() || plan.CloudID.IsUnknown()) && !plan.CloudName.IsNull() {
+		cloudName := plan.CloudName.ValueString()
+		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
+
+		resolvedID, err := r.resolveCloudNameToID(ctx, cloudName)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Cloud Name Resolution Failed",
+				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
+			)
+			return
+		}
+		cloudID = resolvedID
+		plan.CloudID = types.StringValue(cloudID)
+	}
+
 	// Build the API request
+	tflog.Debug(ctx, "Building create request", map[string]any{
+		"cloud_id":  cloudID,
+		"anonymous": plan.Anonymous.ValueBool(),
+	})
+
 	createRequest := map[string]interface{}{
 		"anonymous": plan.Anonymous.ValueBool(),
 		"config": map[string]interface{}{
-			"cloud_id": plan.CloudID.ValueString(),
+			"cloud_id": cloudID,
 		},
 	}
 
@@ -1579,4 +1619,67 @@ func convertDynamicMapFromAPI(ctx context.Context, input map[string]interface{})
 		return types.MapNull(types.DynamicType), fmt.Errorf("conversion failed")
 	}
 	return result, nil
+}
+
+// resolveCloudNameToID looks up a cloud by name and returns its ID
+func (r *ComputeConfigResource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
+	resp, err := r.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to list clouds: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
+	}
+
+	var cloudsResp struct {
+		Results []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			CreatedAt string `json:"created_at"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Find clouds with matching name
+	// If multiple exist, return the most recently created one
+	var matchedCloudID string
+	var latestCreatedAt string
+
+	for _, cloud := range cloudsResp.Results {
+		if cloud.Name == cloudName {
+			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
+				matchedCloudID = cloud.ID
+				latestCreatedAt = cloud.CreatedAt
+			}
+		}
+	}
+
+	if matchedCloudID == "" {
+		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
+	}
+
+	if len(cloudsResp.Results) > 1 {
+		tflog.Warn(ctx, "Multiple clouds found with same name, using most recent", map[string]any{
+			"cloud_name": cloudName,
+			"cloud_id":   matchedCloudID,
+			"created_at": latestCreatedAt,
+		})
+	}
+
+	tflog.Info(ctx, "Resolved cloud name to ID", map[string]any{
+		"cloud_name": cloudName,
+		"cloud_id":   matchedCloudID,
+	})
+
+	return matchedCloudID, nil
 }
