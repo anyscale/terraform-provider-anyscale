@@ -621,9 +621,10 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": string(jsonData)})
+	// Log sanitized request (redact sensitive fields like credentials)
+	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": SanitizeJSONForLog(string(jsonData))})
 
-	httpResp, err := r.client.DoRequest("PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(jsonData)))
+	httpResp, err := r.client.DoRequest(ctx, "PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(jsonData)))
 	if err != nil {
 		tflog.Error(ctx, "Failed to add cloud resource", map[string]any{"error": err.Error()})
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
@@ -767,7 +768,7 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 	deleteURL := fmt.Sprintf("/api/v2/clouds/%s/remove_resource?cloud_resource_name=%s",
 		cloudID, url.QueryEscape(resourceName))
 
-	httpResp, err := r.client.DoRequest("DELETE", deleteURL, nil)
+	httpResp, err := r.client.DoRequest(ctx, "DELETE", deleteURL, nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to delete cloud resource", map[string]any{"error": err.Error()})
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
@@ -828,7 +829,7 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 
 // findDefaultCloudResource checks if the cloud has a single default resource
 func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cloudID string) (*CloudDeploymentResult, error) {
-	resp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+	resp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -859,7 +860,7 @@ func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cl
 
 // readCloudResource reads a cloud resource from the API and updates the state model
 func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel) error {
-	resp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+	resp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 	if err != nil {
 		return err
 	}
@@ -1358,7 +1359,7 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		pollCount++
 		tflog.Debug(ctx, "Polling cloud status", map[string]any{"poll_count": pollCount, "cloud_id": cloudID})
 
-		resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+		resp, err := client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
 		if err != nil {
 			tflog.Error(ctx, "Failed to check cloud status", map[string]any{"error": err.Error()})
 			return err
@@ -1403,7 +1404,7 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		tflog.Info(ctx, "Cloud status check", map[string]any{"poll_count": pollCount, "status": status, "state": state})
 
 		// Also check cloud resources for debugging
-		resourcesResp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+		resourcesResp, err := client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 		if err == nil {
 			resourcesBody, _ := io.ReadAll(resourcesResp.Body)
 			resourcesResp.Body.Close()

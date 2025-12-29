@@ -559,7 +559,7 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 
 	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Request: %s", string(jsonData))
 
-	apiResp, err := r.client.DoRequest("POST", "/api/v2/compute_templates/", bytes.NewBuffer(jsonData))
+	apiResp, err := r.client.DoRequest(ctx, "POST", "/api/v2/compute_templates/", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Printf("[ERROR] Failed to create compute config: %v", err)
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
@@ -626,7 +626,7 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Make API call to get compute config
-	apiResp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil)
+	apiResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil)
 	if err != nil {
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
@@ -772,7 +772,7 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 	// For actual changes, Terraform should destroy and recreate (ForceNew plan modifiers)
 
 	// Read back current state from API to ensure we have latest values
-	apiResp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil)
+	apiResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil)
 	if err != nil {
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
@@ -841,7 +841,7 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 	log.Printf("[INFO] Archiving compute config: id=%s", state.ID.ValueString())
 
 	// Make API call to archive compute config (compute templates are archived, not deleted)
-	apiResp, err := r.client.DoRequest("POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", state.ID.ValueString()), nil)
+	apiResp, err := r.client.DoRequest(ctx, "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", state.ID.ValueString()), nil)
 	if err != nil {
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return

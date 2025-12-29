@@ -1,0 +1,106 @@
+terraform {
+  required_providers {
+    anyscale = {
+      source = "registry.terraform.io/anyscale/anyscale"
+    }
+  }
+}
+
+provider "anyscale" {
+  # Configuration options
+  # token can be set via ANYSCALE_CLI_TOKEN or ~/.anyscale/credentials.json
+}
+
+# Example 1: Look up an existing cloud by name
+data "anyscale_cloud" "production" {
+  name = "production-cloud"
+}
+
+output "production_cloud_id" {
+  value       = data.anyscale_cloud.production.id
+  description = "The ID of the production cloud"
+}
+
+output "production_cloud_provider" {
+  value       = data.anyscale_cloud.production.cloud_provider
+  description = "The cloud provider (AWS, GCP, etc.)"
+}
+
+output "production_cloud_region" {
+  value       = data.anyscale_cloud.production.region
+  description = "The region where the cloud is deployed"
+}
+
+# Example 2: Look up an existing cloud by ID
+data "anyscale_cloud" "by_id" {
+  id = "cld_abc123xyz"
+}
+
+# Example 3: Use data source to create compute config
+resource "anyscale_compute_config" "example" {
+  name     = "example-compute-config"
+  cloud_id = data.anyscale_cloud.production.id
+
+  idle_termination_minutes = 60
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+
+  worker_nodes = [
+    {
+      name          = "workers"
+      instance_type = "m5.xlarge"
+      min_nodes     = 0
+      max_nodes     = 10
+    }
+  ]
+}
+
+# Example 4: Look up an existing compute config by name
+data "anyscale_compute_config" "standard" {
+  name = "standard-config"
+}
+
+output "standard_config_details" {
+  value = {
+    id                       = data.anyscale_compute_config.standard.id
+    cloud_id                 = data.anyscale_compute_config.standard.cloud_id
+    region                   = data.anyscale_compute_config.standard.region
+    idle_termination_minutes = data.anyscale_compute_config.standard.idle_termination_minutes
+  }
+  description = "Details of the standard compute config"
+}
+
+# Example 5: Use existing config as template for new config
+data "anyscale_compute_config" "template" {
+  name = "base-config"
+}
+
+resource "anyscale_compute_config" "customized" {
+  name     = "customized-config"
+  cloud_id = data.anyscale_compute_config.template.cloud_id
+  region   = data.anyscale_compute_config.template.region
+
+  # Customize the idle timeout
+  idle_termination_minutes = 30
+
+  head_node = {
+    instance_type = "m5.2xlarge"
+  }
+}
+
+# Example 6: Cross-reference data sources
+data "anyscale_cloud" "dev" {
+  name = "dev-cloud"
+}
+
+data "anyscale_compute_config" "dev_config" {
+  name = "dev-compute-config"
+}
+
+# Verify the compute config is using the expected cloud
+output "config_uses_correct_cloud" {
+  value       = data.anyscale_compute_config.dev_config.cloud_id == data.anyscale_cloud.dev.id
+  description = "Verify the compute config is using the dev cloud"
+}

@@ -1,0 +1,130 @@
+package provider
+
+import (
+	"fmt"
+	"os"
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+)
+
+func TestAccCloudDataSource_ByID(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC not set, skipping acceptance test")
+	}
+
+	// Get a test cloud ID from environment
+	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
+	if cloudID == "" {
+		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccCloudDataSourceConfig_byID(cloudID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.anyscale_cloud.test", "id", cloudID),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "name"),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "cloud_provider"),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "region"),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "status"),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "state"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccCloudDataSource_ByName(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC not set, skipping acceptance test")
+	}
+
+	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
+	if cloudName == "" {
+		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccCloudDataSourceConfig_byName(cloudName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.anyscale_cloud.test", "name", cloudName),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "cloud_provider"),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "region"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC not set, skipping acceptance test")
+	}
+
+	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
+	if cloudID == "" {
+		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccCloudDataSourceConfig_withComputeConfig(cloudID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Check data source
+					resource.TestCheckResourceAttr("data.anyscale_cloud.test", "id", cloudID),
+					resource.TestCheckResourceAttrSet("data.anyscale_cloud.test", "name"),
+					// Check compute config uses the data source
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "cloud_id", cloudID),
+				),
+			},
+		},
+	})
+}
+
+// Configuration templates
+
+func testAccCloudDataSourceConfig_byID(cloudID string) string {
+	return fmt.Sprintf(`
+data "anyscale_cloud" "test" {
+  id = "%s"
+}
+`, cloudID)
+}
+
+func testAccCloudDataSourceConfig_byName(cloudName string) string {
+	return fmt.Sprintf(`
+data "anyscale_cloud" "test" {
+  name = "%s"
+}
+`, cloudName)
+}
+
+func testAccCloudDataSourceConfig_withComputeConfig(cloudID string) string {
+	return fmt.Sprintf(`
+data "anyscale_cloud" "test" {
+  id = "%s"
+}
+
+resource "anyscale_compute_config" "test" {
+  name     = "tf-test-datasource-compute"
+  cloud_id = data.anyscale_cloud.test.id
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+}
+`, cloudID)
+}

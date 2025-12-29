@@ -537,7 +537,7 @@ func (r *CloudResource) hasEmbeddedResourceConfig(plan *CloudResourceModel) bool
 
 // findCloudByName looks for an existing cloud with the given name
 func (r *CloudResource) findCloudByName(ctx context.Context, name string) (string, error) {
-	resp, err := r.client.DoRequest("GET", "/api/v2/clouds", nil)
+	resp, err := r.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
 	if err != nil {
 		return "", err
 	}
@@ -680,9 +680,10 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	tflog.Debug(ctx, "POST /api/v2/clouds", map[string]any{"request": string(jsonData)})
+	// Log sanitized request (redact sensitive fields like credentials)
+	tflog.Debug(ctx, "POST /api/v2/clouds", map[string]any{"request": SanitizeJSONForLog(string(jsonData))})
 
-	httpResp, err := r.client.DoRequest("POST", "/api/v2/clouds", strings.NewReader(string(jsonData)))
+	httpResp, err := r.client.DoRequest(ctx, "POST", "/api/v2/clouds", strings.NewReader(string(jsonData)))
 	if err != nil {
 		tflog.Error(ctx, "Failed to create cloud", map[string]any{"error": err.Error()})
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
@@ -834,9 +835,10 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
-	tflog.Debug(ctx, "PATCH /api/v2/clouds/"+cloudID, map[string]any{"request": string(jsonData)})
+	// Log sanitized request (redact sensitive fields)
+	tflog.Debug(ctx, "PATCH /api/v2/clouds/"+cloudID, map[string]any{"request": SanitizeJSONForLog(string(jsonData))})
 
-	httpResp, err := r.client.DoRequest("PATCH", fmt.Sprintf("/api/v2/clouds/%s", cloudID), strings.NewReader(string(jsonData)))
+	httpResp, err := r.client.DoRequest(ctx, "PATCH", fmt.Sprintf("/api/v2/clouds/%s", cloudID), strings.NewReader(string(jsonData)))
 	if err != nil {
 		tflog.Error(ctx, "Failed to update cloud", map[string]any{"error": err.Error()})
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
@@ -881,7 +883,7 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	cloudID := state.ID.ValueString()
 	tflog.Info(ctx, "Deleting Anyscale Cloud", map[string]any{"id": cloudID})
 
-	httpResp, err := r.client.DoRequest("DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	httpResp, err := r.client.DoRequest(ctx, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to delete cloud", map[string]any{"error": err.Error()})
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
@@ -1198,9 +1200,10 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 	}
 
 	tflog.Info(ctx, "Adding cloud resource/deployment", map[string]any{"cloud_id": cloudID})
-	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": string(deployJSON)})
+	// Log sanitized request (redact sensitive fields)
+	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": SanitizeJSONForLog(string(deployJSON))})
 
-	deployResp, err := r.client.DoRequest("PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(deployJSON)))
+	deployResp, err := r.client.DoRequest(ctx, "PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(deployJSON)))
 	if err != nil {
 		tflog.Error(ctx, "Failed to add cloud resource", map[string]any{"error": err.Error()})
 		return err
@@ -1233,7 +1236,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 
 // readCloudState reads the cloud from the API and updates the state model
 func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, state *CloudResourceModel) error {
-	resp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	resp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
 	if err != nil {
 		return err
 	}

@@ -138,7 +138,8 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 // DataSources defines the data sources implemented in the provider.
 func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
-		// Data sources will be added here
+		NewCloudDataSource,
+		NewComputeConfigDataSource,
 	}
 }
 

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -95,11 +96,13 @@ func GetAuthToken() (string, error) {
 	return token, nil
 }
 
-// DoRequest performs an authenticated HTTP request to the Anyscale API
-func (c *Client) DoRequest(method, path string, body io.Reader) (*http.Response, error) {
+// DoRequest performs an authenticated HTTP request to the Anyscale API.
+// The context is used for cancellation and timeouts.
+func (c *Client) DoRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := c.BaseURL + path
 
-	req, err := http.NewRequest(method, url, body)
+	// Use NewRequestWithContext to support context cancellation
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

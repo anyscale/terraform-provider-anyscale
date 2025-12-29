@@ -84,4 +84,4 @@ credentials.json
 
 # Claude local memory
 CLAUDE.local.md
-.claude/
+.claude/settings.local.json

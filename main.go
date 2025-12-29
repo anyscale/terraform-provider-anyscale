@@ -23,7 +23,10 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/terraform-providers/anyscale",
+		// Use proper registry namespace format
+		// For HashiCorp registry: registry.terraform.io/<namespace>/<name>
+		// The namespace should match your GitHub organization or username
+		Address: "registry.terraform.io/anyscale/anyscale",
 		Debug:   debug,
 	}
 

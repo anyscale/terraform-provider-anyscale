@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -193,7 +194,7 @@ func testAccCheckCloudResourceExistsInAPI(resourceName, expectedResourceName str
 		}
 
 		// Make API call to list cloud resources/deployments
-		resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
 		}
@@ -254,7 +255,7 @@ func testAccCheckCloudResourceAttributes(resourceName, expectedName, expectedCom
 		}
 
 		// Fetch cloud resources from API
-		resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
 		}
