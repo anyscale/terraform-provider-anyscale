@@ -173,10 +173,8 @@ func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.name"),
 					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.cloud_id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.cluster_config_id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.creator_id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.created_at"),
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.organization_id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.directory_name"),
 					// Note: description might be empty for some projects, so we don't check it
 					// Note: collaborators are NOT included in plural data source

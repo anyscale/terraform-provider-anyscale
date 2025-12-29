@@ -24,7 +24,6 @@ Fetches details about an Anyscale Project by ID or name.
 
 ### Read-Only
 
-- `cluster_config_id` (String) The cluster configuration ID assigned to this project.
 - `collaborators` (Attributes List) List of collaborators with access to this project. (see [below for nested schema](#nestedatt--collaborators))
 - `created_at` (String) Timestamp when the project was created.
 - `creator_id` (String) The ID of the user who created the project.
@@ -32,7 +31,6 @@ Fetches details about an Anyscale Project by ID or name.
 - `directory_name` (String) The directory name used for this project's storage.
 - `is_default` (Boolean) Whether this is the default project for the organization.
 - `last_used_cloud_id` (String) The ID of the cloud last used by this project.
-- `organization_id` (String) The organization ID this project belongs to.
 
 <a id="nestedatt--collaborators"></a>
 ### Nested Schema for `collaborators`

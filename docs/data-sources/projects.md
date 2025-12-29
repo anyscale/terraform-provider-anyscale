@@ -33,7 +33,6 @@ Lists and filters Anyscale Projects. This data source returns a list of projects
 Read-Only:
 
 - `cloud_id` (String) The cloud ID this project belongs to.
-- `cluster_config_id` (String) The cluster configuration ID assigned to this project.
 - `created_at` (String) Timestamp when the project was created.
 - `creator_id` (String) The ID of the user who created the project.
 - `description` (String) Description of the project.
@@ -42,4 +41,3 @@ Read-Only:
 - `is_default` (Boolean) Whether this is the default project for the organization.
 - `last_used_cloud_id` (String) The ID of the cloud last used by this project.
 - `name` (String) The name of the project.
-- `organization_id` (String) The organization ID this project belongs to.

@@ -36,8 +36,6 @@ func TestAccProjectResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_project.test", "cloud_id", cloudID),
 					resource.TestCheckResourceAttrSet("anyscale_project.test", "created_at"),
 					resource.TestCheckResourceAttrSet("anyscale_project.test", "creator_id"),
-					resource.TestCheckResourceAttrSet("anyscale_project.test", "organization_id"),
-					resource.TestCheckResourceAttrSet("anyscale_project.test", "cluster_config_id"),
 					resource.TestCheckResourceAttrSet("anyscale_project.test", "directory_name"),
 					resource.TestCheckResourceAttr("anyscale_project.test", "is_default", "false"),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
@@ -106,7 +104,7 @@ func TestAccProjectResource_WithCloudName(t *testing.T) {
 				Config: testAccProjectResourceWithCloudNameConfig(cloudName, projectName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_project.test", "name", projectName),
-					resource.TestCheckResourceAttrSet("anyscale_project.test", "cloud_id"),
+					resource.TestCheckResourceAttr("anyscale_project.test", "cloud_name", cloudName),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
 				),
 			},
@@ -197,8 +195,9 @@ func testAccCheckProjectExistsInAPI(resourceName string) resource.TestCheckFunc 
 func testAccProjectResourceBasicConfig(cloudID, projectName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "test" {
-  name     = "%s"
-  cloud_id = "%s"
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project created by acceptance tests"
 }
 `, projectName, cloudID)
 }
@@ -216,8 +215,9 @@ resource "anyscale_project" "test" {
 func testAccProjectResourceWithCloudNameConfig(cloudName, projectName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "test" {
-  name       = "%s"
-  cloud_name = "%s"
+  name        = "%s"
+  cloud_name  = "%s"
+  description = "Test project using cloud_name"
 }
 `, projectName, cloudName)
 }
@@ -225,8 +225,9 @@ resource "anyscale_project" "test" {
 func testAccProjectResourceWithCollaboratorsConfig(cloudID, projectName, email1, email2 string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "test" {
-  name     = "%s"
-  cloud_id = "%s"
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project with collaborators"
 
   collaborator {
     email            = "%s"
@@ -244,8 +245,9 @@ resource "anyscale_project" "test" {
 func testAccProjectResourceWithUpdatedCollaboratorsConfig(cloudID, projectName, email1 string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "test" {
-  name     = "%s"
-  cloud_id = "%s"
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project with collaborators"
 
   collaborator {
     email            = "%s"

@@ -42,10 +42,8 @@ type ProjectDataSourceModel struct {
 
 	// Computed outputs
 	Description     types.String `tfsdk:"description"`
-	ClusterConfigID types.String `tfsdk:"cluster_config_id"`
 	CreatorID       types.String `tfsdk:"creator_id"`
 	CreatedAt       types.String `tfsdk:"created_at"`
-	OrganizationID  types.String `tfsdk:"organization_id"`
 	LastUsedCloudID types.String `tfsdk:"last_used_cloud_id"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	DirectoryName   types.String `tfsdk:"directory_name"`
@@ -96,10 +94,6 @@ func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 				Computed:            true,
 				MarkdownDescription: "Description of the project.",
 			},
-			"cluster_config_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The cluster configuration ID assigned to this project.",
-			},
 			"creator_id": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The ID of the user who created the project.",
@@ -107,10 +101,6 @@ func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 			"created_at": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "Timestamp when the project was created.",
-			},
-			"organization_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The organization ID this project belongs to.",
 			},
 			"last_used_cloud_id": schema.StringAttribute{
 				Computed:            true,
@@ -264,10 +254,8 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		config.Description = types.StringNull()
 	}
 
-	config.ClusterConfigID = types.StringValue(project.ClusterConfig)
 	config.CreatorID = types.StringValue(project.CreatorID)
 	config.CreatedAt = types.StringValue(project.CreatedAt)
-	config.OrganizationID = types.StringValue(project.OrganizationID)
 
 	if project.LastUsedCloudID != nil {
 		config.LastUsedCloudID = types.StringValue(*project.LastUsedCloudID)

@@ -105,7 +105,7 @@ This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provi
 ### Key rules
 
 - **Do not run terraform init** when dev_overrides is active (provider is not in the public registry).
-- Rebuild after changes (make build) before running terraform plan/apply.
+- Rebuild after changes (`make build`) before running terraform plan/apply.
 - `make install` is a convenience wrapper that builds and prints the expected local binary location.
 
 ### Example flow

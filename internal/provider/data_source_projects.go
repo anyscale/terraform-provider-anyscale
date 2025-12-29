@@ -49,10 +49,8 @@ type ProjectSummaryModel struct {
 	Name            types.String `tfsdk:"name"`
 	Description     types.String `tfsdk:"description"`
 	CloudID         types.String `tfsdk:"cloud_id"`
-	ClusterConfigID types.String `tfsdk:"cluster_config_id"`
 	CreatorID       types.String `tfsdk:"creator_id"`
 	CreatedAt       types.String `tfsdk:"created_at"`
-	OrganizationID  types.String `tfsdk:"organization_id"`
 	LastUsedCloudID types.String `tfsdk:"last_used_cloud_id"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	DirectoryName   types.String `tfsdk:"directory_name"`
@@ -110,10 +108,6 @@ func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 							Computed:            true,
 							MarkdownDescription: "The cloud ID this project belongs to.",
 						},
-						"cluster_config_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The cluster configuration ID assigned to this project.",
-						},
 						"creator_id": schema.StringAttribute{
 							Computed:            true,
 							MarkdownDescription: "The ID of the user who created the project.",
@@ -121,10 +115,6 @@ func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 						"created_at": schema.StringAttribute{
 							Computed:            true,
 							MarkdownDescription: "Timestamp when the project was created.",
-						},
-						"organization_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The organization ID this project belongs to.",
 						},
 						"last_used_cloud_id": schema.StringAttribute{
 							Computed:            true,
@@ -329,15 +319,13 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 		// Convert to model
 		for _, project := range projectsResp.Results {
 			projectModel := ProjectSummaryModel{
-				ID:              types.StringValue(project.ID),
-				Name:            types.StringValue(project.Name),
-				CloudID:         types.StringValue(project.ParentCloudID),
-				ClusterConfigID: types.StringValue(project.ClusterConfig),
-				CreatorID:       types.StringValue(project.CreatorID),
-				CreatedAt:       types.StringValue(project.CreatedAt),
-				OrganizationID:  types.StringValue(project.OrganizationID),
-				IsDefault:       types.BoolValue(project.IsDefault),
-				DirectoryName:   types.StringValue(project.DirectoryName),
+				ID:            types.StringValue(project.ID),
+				Name:          types.StringValue(project.Name),
+				CloudID:       types.StringValue(project.ParentCloudID),
+				CreatorID:     types.StringValue(project.CreatorID),
+				CreatedAt:     types.StringValue(project.CreatedAt),
+				IsDefault:     types.BoolValue(project.IsDefault),
+				DirectoryName: types.StringValue(project.DirectoryName),
 			}
 
 			if project.Description != nil {

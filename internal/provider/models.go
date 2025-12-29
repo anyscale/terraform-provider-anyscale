@@ -35,7 +35,7 @@ type CloudResult struct {
 	Config                         CloudConfig `json:"config"`
 	IsK8s                          bool        `json:"is_k8s"`
 	IsAIOA                         bool        `json:"is_aioa"`
-	AvailabilityZones              *string     `json:"availability_zones"`
+	AvailabilityZones              []string    `json:"availability_zones"`
 	IsBringYourOwnResource         bool        `json:"is_bring_your_own_resource"`
 	IsPrivateCloud                 bool        `json:"is_private_cloud"`
 	ClusterManagementStackVersion  string      `json:"cluster_management_stack_version"`
@@ -241,17 +241,15 @@ type ProjectsListResponse struct {
 
 // ProjectResult is the actual project data
 type ProjectResult struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	Description      *string `json:"description"`
-	ParentCloudID    string  `json:"parent_cloud_id"`
-	ClusterConfig    string  `json:"cluster_config"`      // Computed cluster config ID
-	CreatorID        string  `json:"creator_id"`
-	CreatedAt        string  `json:"created_at"`
-	OrganizationID   string  `json:"organization_id"`
-	LastUsedCloudID  *string `json:"last_used_cloud_id,omitempty"`
-	IsDefault        bool    `json:"is_default"`
-	DirectoryName    string  `json:"directory_name"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Description     *string `json:"description"`
+	ParentCloudID   string  `json:"parent_cloud_id"`
+	CreatorID       string  `json:"creator_id"`
+	CreatedAt       string  `json:"created_at"`
+	LastUsedCloudID *string `json:"last_used_cloud_id,omitempty"`
+	IsDefault       bool    `json:"is_default"`
+	DirectoryName   string  `json:"directory_name"`
 }
 
 // ProjectCollaboratorBatchRequest for batch creating collaborators

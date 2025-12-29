@@ -34,8 +34,6 @@ func TestAccProjectDataSource_ByID(t *testing.T) {
 					resource.TestCheckResourceAttr("data.anyscale_project.test", "cloud_id", cloudID),
 					resource.TestCheckResourceAttrSet("data.anyscale_project.test", "created_at"),
 					resource.TestCheckResourceAttrSet("data.anyscale_project.test", "creator_id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_project.test", "organization_id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_project.test", "cluster_config_id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_project.test", "directory_name"),
 					resource.TestCheckResourceAttr("data.anyscale_project.test", "is_default", "false"),
 					// Collaborators should be present (empty list is fine)
@@ -175,8 +173,9 @@ func TestAccProjectDataSource_WithCollaborators(t *testing.T) {
 func testAccProjectDataSourceByIDConfig(cloudID, projectName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "source" {
-  name     = "%s"
-  cloud_id = "%s"
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project for data source lookup by ID"
 }
 
 data "anyscale_project" "test" {
@@ -188,8 +187,9 @@ data "anyscale_project" "test" {
 func testAccProjectDataSourceByNameConfig(cloudID, projectName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "source" {
-  name     = "%s"
-  cloud_id = "%s"
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project for data source"
 }
 
 data "anyscale_project" "test" {
@@ -201,8 +201,9 @@ data "anyscale_project" "test" {
 func testAccProjectDataSourceByNameWithCloudFilterConfig(cloudID, projectName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "source" {
-  name     = "%s"
-  cloud_id = "%s"
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project for data source"
 }
 
 data "anyscale_project" "test" {
@@ -215,8 +216,9 @@ data "anyscale_project" "test" {
 func testAccProjectDataSourceByNameWithCloudNameConfig(cloudID, cloudName, projectName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "source" {
-  name     = "%s"
-  cloud_id = "%s"
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project for data source"
 }
 
 data "anyscale_project" "test" {
@@ -229,8 +231,9 @@ data "anyscale_project" "test" {
 func testAccProjectDataSourceWithCollaboratorsConfig(cloudID, projectName, email string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "source" {
-  name     = "%s"
-  cloud_id = "%s"
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project for data source"
 
   collaborator {
     email            = "%s"
