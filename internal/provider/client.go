@@ -71,7 +71,12 @@ func GetAuthToken() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("no ANYSCALE_CLI_TOKEN environment variable set and failed to read %s: %w", credentialsPath, err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			// Log the error but don't override the primary error
+			fmt.Fprintf(os.Stderr, "warning: failed to close credentials file: %v\n", closeErr)
+		}
+	}()
 
 	data, err := io.ReadAll(file)
 	if err != nil {

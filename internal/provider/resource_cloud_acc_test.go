@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"testing"
@@ -120,9 +121,9 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:            "anyscale_cloud.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
+				ResourceName:      "anyscale_cloud.test",
+				ImportState:       true,
+				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials",
 					"gcp_config",
@@ -191,7 +192,11 @@ func testAccCheckCloudExistsInAPI(resourceName string) resource.TestCheckFunc {
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
 
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("cloud %s not found in API", cloudID)
@@ -240,7 +245,11 @@ func testAccCheckCloudAttributes(resourceName, expectedName, expectedProvider, e
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -298,22 +307,6 @@ func getTestClient() (*Client, error) {
 	return NewClientWithToken(apiURL, token), nil
 }
 
-// Helper function to check if cloud exists in state
-func testAccCheckCloudExists(n string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[n]
-		if !ok {
-			return fmt.Errorf("not found: %s", n)
-		}
-
-		if rs.Primary.ID == "" {
-			return fmt.Errorf("no Cloud ID is set")
-		}
-
-		return nil
-	}
-}
-
 // Configuration templates
 
 func testAccCloudResourceAWSBasicConfig(name string) string {
@@ -323,34 +316,6 @@ resource "anyscale_cloud" "test" {
   cloud_provider = "AWS"
   compute_stack  = "VM"
   region         = "us-east-2"
-
-  aws_config {
-    vpc_id             = "vpc-test123"
-    subnet_ids         = ["subnet-test1", "subnet-test2"]
-    security_group_ids = ["sg-test1"]
-
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/anyscale-crossaccount-role"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/anyscale-cluster-node-role"
-    external_id               = "anyscale-external-id-test"
-
-    subnet_ids_to_az = {
-      "subnet-test1" = "us-east-2a"
-      "subnet-test2" = "us-east-2b"
-    }
-  }
-}
-`, name)
-}
-
-func testAccCloudResourceAWSBasicConfigUpdated(name string) string {
-	return fmt.Sprintf(`
-resource "anyscale_cloud" "test" {
-  name                     = "%s"
-  cloud_provider           = "AWS"
-  compute_stack            = "VM"
-  region                   = "us-east-2"
-  auto_add_user            = true
-  enable_lineage_tracking  = true
 
   aws_config {
     vpc_id             = "vpc-test123"

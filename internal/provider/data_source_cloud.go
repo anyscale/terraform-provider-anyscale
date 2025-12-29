@@ -183,7 +183,11 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
 	}
-	defer apiResp.Body.Close()
+	defer func() {
+		if closeErr := apiResp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	if apiResp.StatusCode == http.StatusNotFound {
 		resp.Diagnostics.AddError(
@@ -259,7 +263,11 @@ func (d *CloudDataSource) findCloudByName(ctx context.Context, name string) (str
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -299,8 +307,8 @@ func (d *CloudDataSource) findCloudByName(ctx context.Context, name string) (str
 	if matchedCloudID != "" && len(cloudsResp.Results) > 1 {
 		// Log warning if multiple clouds with same name exist
 		tflog.Warn(ctx, "Multiple clouds found with same name, returning most recent", map[string]any{
-			"name":      name,
-			"cloud_id":  matchedCloudID,
+			"name":       name,
+			"cloud_id":   matchedCloudID,
 			"created_at": latestCreatedAt,
 		})
 	}

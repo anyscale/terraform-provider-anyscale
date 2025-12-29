@@ -403,7 +403,7 @@ func convertAttrValueToInterface(val attr.Value) interface{} {
 // InterfaceToDynamic converts a map[string]interface{} from the API
 // to a types.Dynamic value for Terraform state.
 func InterfaceToDynamic(ctx context.Context, input map[string]interface{}) (types.Dynamic, error) {
-	if input == nil || len(input) == 0 {
+	if len(input) == 0 {
 		return types.DynamicNull(), nil
 	}
 

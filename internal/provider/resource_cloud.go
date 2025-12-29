@@ -45,16 +45,16 @@ type CloudResource struct {
 // CloudResourceModel describes the resource data model.
 type CloudResourceModel struct {
 	// Common fields
-	ID                     types.String `tfsdk:"id"`
-	Name                   types.String `tfsdk:"name"`
-	CloudProvider          types.String `tfsdk:"cloud_provider"`
-	ComputeStack           types.String `tfsdk:"compute_stack"`
-	Region                 types.String `tfsdk:"region"`
-	IsPrivateCloud         types.Bool   `tfsdk:"is_private_cloud"`
-	AutoAddUser            types.Bool   `tfsdk:"auto_add_user"`
-	Credentials            types.String `tfsdk:"credentials"`
-	EnableLineageTracking  types.Bool   `tfsdk:"enable_lineage_tracking"`
-	EnableLogIngestion     types.Bool   `tfsdk:"enable_log_ingestion"`
+	ID                    types.String `tfsdk:"id"`
+	Name                  types.String `tfsdk:"name"`
+	CloudProvider         types.String `tfsdk:"cloud_provider"`
+	ComputeStack          types.String `tfsdk:"compute_stack"`
+	Region                types.String `tfsdk:"region"`
+	IsPrivateCloud        types.Bool   `tfsdk:"is_private_cloud"`
+	AutoAddUser           types.Bool   `tfsdk:"auto_add_user"`
+	Credentials           types.String `tfsdk:"credentials"`
+	EnableLineageTracking types.Bool   `tfsdk:"enable_lineage_tracking"`
+	EnableLogIngestion    types.Bool   `tfsdk:"enable_log_ingestion"`
 
 	// Provider-specific configurations (nested)
 	AWSConfig        types.Object `tfsdk:"aws_config"`
@@ -523,7 +523,10 @@ func (r *CloudResource) Configure(ctx context.Context, req resource.ConfigureReq
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, length)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to a simple timestamp-based string on error
+		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+	}
 	for i := range b {
 		b[i] = charset[int(b[i])%len(charset)]
 	}
@@ -541,7 +544,11 @@ func (r *CloudResource) findCloudByName(ctx context.Context, name string) (strin
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -582,10 +589,10 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	name := plan.Name.ValueString()
-	
+
 	// Determine if this is an empty cloud (no embedded config)
 	isEmptyCloud := !r.hasEmbeddedResourceConfig(&plan)
-	
+
 	// Auto-detect cloud provider from config blocks
 	provider := plan.CloudProvider.ValueString()
 	if provider == "" {
@@ -601,11 +608,11 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		}
 		plan.CloudProvider = types.StringValue(provider)
 	}
-	
+
 	// Auto-detect or default region
 	region := plan.Region.ValueString()
 	computeStack := plan.ComputeStack.ValueString()
-	
+
 	// Extract region from config blocks if not explicitly set
 	if region == "" {
 		if !plan.AWSConfig.IsNull() {
@@ -648,13 +655,13 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		tflog.Info(ctx, "Found existing cloud, adopting", map[string]any{"name": name, "id": existingCloudID})
 		plan.ID = types.StringValue(existingCloudID)
 		plan.IsEmptyCloud = types.BoolValue(isEmptyCloud)
-		
+
 		// Read the existing cloud to populate state
 		if err := r.readCloudState(ctx, existingCloudID, &plan); err != nil {
 			resp.Diagnostics.AddError("Read Error", fmt.Sprintf("Failed to read existing cloud: %s", err.Error()))
 			return
 		}
-		
+
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
@@ -689,7 +696,11 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() {
+		if closeErr := httpResp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -727,13 +738,13 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	if isEmptyCloud {
 		// Skip add_resource call - resources will be added via anyscale_cloud_resource
 		tflog.Info(ctx, "Created empty cloud - resources should be added via anyscale_cloud_resource", map[string]any{"id": cloudID})
-		
+
 		// Read back to get final state
 		if err := r.readCloudState(ctx, cloudID, &plan); err != nil {
 			resp.Diagnostics.AddError("Read Error", err.Error())
 			return
 		}
-		
+
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
@@ -814,10 +825,10 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	// Build update request with only mutable fields
 	updateReq := make(map[string]interface{})
-	
+
 	// Name can be updated
 	updateReq["name"] = plan.Name.ValueString()
-	
+
 	// Boolean settings
 	if !plan.AutoAddUser.IsNull() {
 		updateReq["auto_add_user"] = plan.AutoAddUser.ValueBool()
@@ -844,7 +855,11 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() {
+		if closeErr := httpResp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -889,7 +904,11 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() {
+		if closeErr := httpResp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusNotFound {
 		body, _ := io.ReadAll(httpResp.Body)
@@ -908,9 +927,9 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Import by cloud ID
 	cloudID := req.ID
-	
+
 	tflog.Info(ctx, "Importing Anyscale Cloud", map[string]any{"id": cloudID})
-	
+
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), cloudID)...)
 }
 
@@ -990,7 +1009,7 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourceModel, cloudID, provider, computeStack string) error {
 	region := plan.Region.ValueString()
 	isPrivate := plan.IsPrivateCloud.ValueBool()
-	
+
 	networkingMode := "PUBLIC"
 	if isPrivate {
 		networkingMode = "PRIVATE"
@@ -1012,7 +1031,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 			if plan.KubernetesConfig.IsNull() {
 				return fmt.Errorf("kubernetes_config is required when compute_stack is K8S")
 			}
-			
+
 			k8sConfig, err := expandKubernetesConfig(ctx, plan.KubernetesConfig)
 			if err != nil {
 				return err
@@ -1025,7 +1044,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 			if plan.ObjectStorage.IsNull() {
 				return fmt.Errorf("object_storage is required when compute_stack is K8S")
 			}
-			
+
 			objStorage, err := expandObjectStorage(ctx, plan.ObjectStorage)
 			if err != nil {
 				return err
@@ -1062,7 +1081,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 			if plan.AWSConfig.IsNull() {
 				return fmt.Errorf("aws_config is required when cloud_provider is AWS and compute_stack is VM")
 			}
-			
+
 			awsConfig, err := expandAWSConfig(ctx, plan.AWSConfig)
 			if err != nil {
 				return err
@@ -1101,7 +1120,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 			if plan.KubernetesConfig.IsNull() {
 				return fmt.Errorf("kubernetes_config is required when compute_stack is K8S")
 			}
-			
+
 			k8sConfig, err := expandKubernetesConfig(ctx, plan.KubernetesConfig)
 			if err != nil {
 				return err
@@ -1114,7 +1133,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 			if plan.ObjectStorage.IsNull() {
 				return fmt.Errorf("object_storage is required when compute_stack is K8S")
 			}
-			
+
 			objStorage, err := expandObjectStorage(ctx, plan.ObjectStorage)
 			if err != nil {
 				return err
@@ -1151,7 +1170,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 			if plan.GCPConfig.IsNull() {
 				return fmt.Errorf("gcp_config is required when cloud_provider is GCP and compute_stack is VM")
 			}
-			
+
 			gcpConfig, err := expandGCPConfig(ctx, plan.GCPConfig)
 			if err != nil {
 				return err
@@ -1186,7 +1205,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 
 	case "AZURE":
 		tflog.Warn(ctx, "Azure configuration not fully implemented yet")
-		
+
 	case "GENERIC":
 		tflog.Warn(ctx, "Generic configuration not fully implemented yet")
 	}
@@ -1208,7 +1227,11 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		tflog.Error(ctx, "Failed to add cloud resource", map[string]any{"error": err.Error()})
 		return err
 	}
-	defer deployResp.Body.Close()
+	defer func() {
+		if closeErr := deployResp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	deployBody, err := io.ReadAll(deployResp.Body)
 	if err != nil {
@@ -1240,7 +1263,11 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("cloud not found")

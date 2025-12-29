@@ -403,8 +403,8 @@ func TestExtractRegionFromSubnetMap(t *testing.T) {
 			expectedRegion: "eu-west-1",
 		},
 		{
-			name: "empty map returns empty",
-			subnetMap: map[string]string{},
+			name:           "empty map returns empty",
+			subnetMap:      map[string]string{},
 			expectedRegion: "",
 		},
 	}
@@ -482,58 +482,58 @@ func TestBucketPrefixNormalization(t *testing.T) {
 // Test compute stack validation
 func TestComputeStackValidation(t *testing.T) {
 	tests := []struct {
-		name         string
-		computeStack string
-		provider     string
-		hasAWSConfig bool
-		hasGCPConfig bool
-		hasK8sConfig bool
-		hasObjectSt  bool
+		name          string
+		computeStack  string
+		provider      string
+		hasAWSConfig  bool
+		hasGCPConfig  bool
+		hasK8sConfig  bool
+		hasObjectSt   bool
 		shouldBeValid bool
 	}{
 		{
-			name:         "AWS VM with aws_config",
-			computeStack: "VM",
-			provider:     "AWS",
-			hasAWSConfig: true,
+			name:          "AWS VM with aws_config",
+			computeStack:  "VM",
+			provider:      "AWS",
+			hasAWSConfig:  true,
 			shouldBeValid: true,
 		},
 		{
-			name:         "AWS VM without aws_config",
-			computeStack: "VM",
-			provider:     "AWS",
-			hasAWSConfig: false,
+			name:          "AWS VM without aws_config",
+			computeStack:  "VM",
+			provider:      "AWS",
+			hasAWSConfig:  false,
 			shouldBeValid: false,
 		},
 		{
-			name:         "GCP VM with gcp_config",
-			computeStack: "VM",
-			provider:     "GCP",
-			hasGCPConfig: true,
+			name:          "GCP VM with gcp_config",
+			computeStack:  "VM",
+			provider:      "GCP",
+			hasGCPConfig:  true,
 			shouldBeValid: true,
 		},
 		{
-			name:         "AWS K8S with k8s_config and object_storage",
-			computeStack: "K8S",
-			provider:     "AWS",
-			hasK8sConfig: true,
-			hasObjectSt:  true,
+			name:          "AWS K8S with k8s_config and object_storage",
+			computeStack:  "K8S",
+			provider:      "AWS",
+			hasK8sConfig:  true,
+			hasObjectSt:   true,
 			shouldBeValid: true,
 		},
 		{
-			name:         "AWS K8S without object_storage",
-			computeStack: "K8S",
-			provider:     "AWS",
-			hasK8sConfig: true,
-			hasObjectSt:  false,
+			name:          "AWS K8S without object_storage",
+			computeStack:  "K8S",
+			provider:      "AWS",
+			hasK8sConfig:  true,
+			hasObjectSt:   false,
 			shouldBeValid: false,
 		},
 		{
-			name:         "GCP K8S with k8s_config and object_storage",
-			computeStack: "K8S",
-			provider:     "GCP",
-			hasK8sConfig: true,
-			hasObjectSt:  true,
+			name:          "GCP K8S with k8s_config and object_storage",
+			computeStack:  "K8S",
+			provider:      "GCP",
+			hasK8sConfig:  true,
+			hasObjectSt:   true,
 			shouldBeValid: true,
 		},
 	}
@@ -543,13 +543,14 @@ func TestComputeStackValidation(t *testing.T) {
 			// Simulate validation logic from Create method
 			isValid := true
 
-			if tt.computeStack == "VM" {
+			switch tt.computeStack {
+			case "VM":
 				if tt.provider == "AWS" && !tt.hasAWSConfig {
 					isValid = false
 				} else if tt.provider == "GCP" && !tt.hasGCPConfig {
 					isValid = false
 				}
-			} else if tt.computeStack == "K8S" {
+			case "K8S":
 				if !tt.hasK8sConfig || !tt.hasObjectSt {
 					isValid = false
 				}

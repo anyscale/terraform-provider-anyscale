@@ -1,173 +1,216 @@
 # Claude Instructions – Terraform Provider Dev
 
-## Project Overview
+## Purpose
 
-Building a Go based Terraform Provider for managing Anyscale resources. Uses Anyscale APIs.
+You are assisting with development of a Go-based Terraform Provider for managing Anyscale resources via the Anyscale API v2.
 
-## Project Role
+### Goals
 
-You are assisting with developing a Terraform provider written in Go using the official Terraform Plugin Framework.
-Goals:
+- Clean, idiomatic provider code using the Terraform Plugin Framework.
+- Stable, reviewable schemas and state <-> API mappings.
+- Docs compatible with Terraform Registry format (generated where possible).
+- Easy to test, extend, and troubleshoot.
 
-- Implement a clean, idiomatic provider with resources and data sources following HashiCorp best practices.
-- Maintain high-quality docs compatible with the Terraform Registry format.
-- Keep the provider easy to test, extend, and review.
+---
+
+## How to Respond (Agent Behavior)
+
+### Default approach
+1. **Scaffold first, then refine**
+   - Start with minimal working code (provider + one resource/data source).
+   - Iterate to add validation, plan modifiers, error handling, and tests.
+
+2. **Show only what’s needed**
+   - If files are small: show full file contents.
+   - If files are large: show focused diffs/patches.
+   - Avoid generic explanations unless asked; prefer concrete changes.
+
+3. **Ask only when truly blocked**
+   - If the request is vague, ask 1–2 clarifying questions.
+   - Otherwise, make reasonable assumptions and state them.
+
+### Security / hygiene
+- **Never print or commit tokens** (including snippets from credentials files).
+- If you need to show examples: use `$ANYSCALE_CLI_TOKEN` and placeholders.
+
+---
 
 ## Tech Stack & Conventions
 
-- Language: Go (latest stable), standard tooling (`go test`, `golangci-lint` if present).
-- SDK: `github.com/hashicorp/terraform-plugin-framework` and `providerserver`.
-- Target API: Anyscale API v2, as exposed via the Anyscale console OpenAPI/Swagger docs at https://console.anyscale.com/api/v2/docs#.
-  - Local source code for this API can be found in the product repository at
-- Auth: Bearer token for Anyscale API requests, resolved using the priority rules in **Provider-Specific Notes**.
-- Docs: Generated via `tfplugindocs` where possible; hand-written markdown must follow Terraform Registry structure.
+- Language: Go (as defined by `go.mod`).
+- Framework: `github.com/hashicorp/terraform-plugin-framework` + `providerserver`.
+- API: Anyscale Managed Ray API v2 (see console OpenAPI/Swagger docs).
+- Docs: `tfplugindocs` preferred; do not hand-edit generated docs under `docs/` unless the repo explicitly requires it.
 - Layout (preferred):
-  - `main.go` – provider entrypoint using `providerserver.Serve`.
-  - `internal/provider/provider.go` – `Metadata`, `Schema`, `Configure`, `Resources`, `DataSources`.
-  - `internal/provider/resource_*.go` – each resource in its own file.
-  - `internal/provider/data_source_*.go` – each data source in its own file.
-  - `docs/` – generated docs for provider, resources, and data sources.
-  - `examples/` – small, runnable Terraform configurations.
+  - `main.go` — provider entrypoint using `providerserver.Serve`
+  - `internal/provider/provider.go` — `Metadata`, `Schema`, `Configure`, `Resources`, `DataSources`
+  - `internal/provider/resource_*.go` — each resource in its own file
+  - `internal/provider/data_source_*.go` — each data source in its own file
+  - `docs/` — generated docs
+  - `examples/` — runnable Terraform configs
 
-## How To Work On This Repo
-
-When responding:
-
-1. **Scaffold first, then refine**
-   - Propose or update:
-     - `main.go` with a `providerserver.Serve` entrypoint.
-     - `internal/provider/provider.go` with `Metadata`, `Schema`, `Configure`, `Resources`, and `DataSources`. [web:7][web:8]
-     - Per-resource and per-datasource files with clear `Schema`, `Create`, `Read`, `Update`, and `Delete` (as applicable).
-   - Start with minimal working code, then iterate to add validation, error handling, and tests.
-
-2. **Follow Terraform provider patterns**
-   - Keep provider configuration focused on auth, endpoints, and common client options.
-   - Ensure resources:
-     - Use strong types (`schema.StringAttribute`, `schema.Int64Attribute`, etc.) with `Required`, `Optional`, `Computed` set correctly. [web:7]
-     - Handle plan modifiers, defaults, and `RequiresReplace` where appropriate.
-     - Correctly map state <-> API models.
-   - Ensure provider `Configure` builds and shares a client object via `ResourceData` / `DataSourceData`. [web:7]
-
-3. **Documentation expectations**
-   - For each resource/data source, maintain a markdown doc under `docs/` with:
-     - Front-matter and headings compatible with the Terraform Registry docs guidelines. [web:6]
-     - A minimal working example under an `## Example Usage` section.
-   - Prefer suggesting `tfplugindocs` usage for regeneration of docs after schema changes. [web:6]
-
-4. **Testing guidance**
-   - Add or extend Go tests in `internal/provider/*_test.go`.
-   - Prefer:
-     - Unit tests for schema and model conversions.
-     - Acceptance-style tests using the plugin framework patterns if the repo already uses them.
-   - When writing tests, show how to run them, e.g. `go test ./...`.
-
-5. **Development workflow**
-   - Assume local dev flow:
-     - Build: `go build ./...`
-     - Test: `go test ./...`
-     - (Optional) `tfplugindocs` to regenerate docs.
-     - Terraform dev overrides via `.terraformrc` or `CLI config` so Terraform loads the local provider binary. [web:7]
-   - When asked, generate example `.terraformrc` or example Terraform configuration using the provider.
-
-## How To Interact With Me
-
-When you need to modify or add files:
-
-- Show **only the relevant file(s)** with full contents if reasonably small, or focused diffs/patch-style edits if large.
-- Avoid generic explanations unless requested; focus on concrete code, schemas, and examples.
-- When the user asks for help:
-  - If the request is vague, ask one or two clarifying questions instead of guessing.
-  - Prefer small, incremental steps so changes are easy to review and revert.
+---
 
 ## Provider-Specific Notes
 
-- Authentication priority:
-  1. `token` argument on the Terraform provider block.
-  2. `ANYSCALE_CLI_TOKEN` environment variable.
-  3. Credentials file at `~/.anyscale/credentials.json` (same format as the Anyscale CLI).
-- Authentication behavior:
-  - Use the first non-empty source in the priority list to build the Anyscale API client.
-  - If no token is found, return a clear diagnostic explaining how to create an API key in the Anyscale console and configure it via the provider block, `ANYSCALE_CLI_TOKEN`, or the credentials file.
-- Provider `Configure`:
-  - Centralize token resolution in a helper (e.g. `resolveToken(ctx, providerConfig)`).
-  - Initialize a shared Anyscale API client using the resolved token and attach it to `resp.DataSourceData` and `resp.ResourceData` for reuse by all resources and data sources.
-- Error handling:
-  - Use `resp.Diagnostics.AddError` for authentication and configuration issues instead of panics or fatal logs.
-- Compatibility:
-  - Assume target Terraform >= 1.5 and a current `terraform-plugin-framework` version consistent with HashiCorp docs.
+### Authentication priority
+1. `token` argument on the provider block
+2. `ANYSCALE_CLI_TOKEN` environment variable
+3. `~/.anyscale/credentials.json` (same format as Anyscale CLI)
 
-## When Unsure
+### Configure behavior
+- Centralize token resolution in a helper (e.g. `resolveToken(ctx, config)`).
+- Initialize a shared Anyscale API client once.
+- Attach it to both:
+  - `resp.ResourceData`
+  - `resp.DataSourceData`
 
-- If a Terraform behavior, plugin framework API, or docs requirement is unclear, mention the uncertainty and propose one or two reasonable implementation options.
-- Ask the user what target platform or API they are wrapping (e.g., internal HTTP API, cloud service) before generating large sets of resources or models.
 
-## Essential Commands
+### Error handling
+- Use `resp.Diagnostics.AddError` for configuration/auth issues.
+- Avoid panics / fatal logs.
+
+### Compatibility targets
+- Terraform >= 1.6
+- Current `terraform-plugin-framework` version used by the repo
+
+## Local Dev Workflow (Canonical: Makefile)
+
+### Build
+```bash
+make build
+```
+
+### Unit tests
+```bash
+make test
+```
+
+### Lint / format (optional but encouraged)
+```bash
+make fmt
+make lint
+```
+
+### Docs
+```bash
+make docs
+# Do not manually edit generated docs under docs/
+```
+
+## Terraform Local Testing (dev_overrides)
+
+This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provider binary.
+
+### Key rules
+
+- **Do not run terraform init** when dev_overrides is active (provider is not in the public registry).
+- Rebuild after changes (make build) before running terraform plan/apply.
+- `make install` is a convenience wrapper that builds and prints the expected local binary location.
+
+### Example flow
 
 ```bash
-# Build & Test
-make build                   # Build to ./build/atmos
-make testacc                 # Run tests
-make testacc-cover           # Tests with coverage
-make lint                    # golangci-lint on changed files
+# Build provider binary where dev_overrides expects it
+make build
+
+# Test with example configs (no init)
+cd examples/aws-vm-basic/
+terraform plan
+terraform apply
 ```
+
+---
+
+## Testing guidance
+
+- Prefer:
+	- Unit tests for schema validation and model conversions.
+	- Acceptance tests using resource.Test.
+
+### Acceptance Tests
+
+```bash
+make testacc
+```
+
+### Acceptance tests with coverage
+
+```bash
+make testacc-cover
+```
+
+---
+
+## Quick reference
+
+```bash
+# Build & Install
+make build
+make install
+
+# Testing
+make test
+make testacc
+
+# Code Quality
+make fmt
+make lint
+pre-commit run --all-files
+
+# Documentation
+make docs
+make docs-validate
+```
+
+---
+
+## Repo-Level Terraform Scenario Tests (Examples)
+
+There are Makefile targets that run end-to-end Terraform applies/destroys using the examples/ configs.
+
+### Primary matrix (efficient coverage)
+
+```bash
+make test-primary
+# or narrowed:
+make test-primary-aws
+make test-primary-gcp
+make test-primary-vm
+make test-primary-k8s
+```
+
+### Individual scenarios
+```bash
+make test-aws-vm-basic
+make test-aws-vm-full
+make test-aws-eks-basic
+make test-gcp-vm-basic
+make test-gcp-vm-full
+make test-gcp-gke-basic
+```
+
+These targets run terraform apply and terraform destroy. Ensure your credentials and cloud quotas are in a safe state before running.
+
+---
 
 ## Repository Context & Boundaries
 
-- Working directory:
-  - This Terraform provider lives in the current repository and is the **only** place where you should create, edit, or delete files.
-- External monorepo (read-only reference):
-  - The Anyscale product monorepo is located at `~/projects/anyscale/product`.
-  - Treat this monorepo as **read-only**: you may open and read files there to understand the Anyscale Managed Ray API v2 surface and models, but must not modify or create files in that repository.
-  - No changes should be suggested on the product monorepo.
-  - The APIs that will be called from this provider can be found in `~/projects/anyscale/product/backend/server/api` and subfolders
-- Scope rules:
-  - Do not run build, test, or tooling commands from inside `~/projects/anyscale/product` as part of this workflow.
-  - Keep all automated refactors, generated code, and edits constrained to the Terraform provider repository and its subdirectories.
+- This Terraform provider repo is the only place where files may be created/edited.
+- External product monorepo is **read-only reference**:
+  - Location: ~/projects/anyscale/product
+  - You may read files there to understand API surface/models.
+  - **Do not** run build/test/tooling commands inside it.
+  - **Do not** suggest changes to that repository.
+  - API code reference: ~/projects/anyscale/product/backend/server/api and subfolders
 
-## Anyscale API Docs Access
+---
 
-- API documentation:
-  - The REST surface for this provider is documented in the Anyscale Managed Ray API v2 docs at the Anyscale console.
-  - Treat these API docs as the primary reference for available endpoints, fields, and expected request/response shapes.
-- Authentication for docs and ad-hoc calls:
-  - The current environment is already authenticated to Anyscale via `~/.anyscale/credentials.json`, which is managed by `anyscale login`.
-  - When you need to inspect or experiment with an endpoint beyond the Terraform provider:
-    - Read the CLI token from `~/.anyscale/credentials.json`.
-    - Use it as a bearer token in `curl` or small scripts when calling the Managed Ray API v2.
-  - Do **not** commit or print the raw token; keep it in memory or use environment variables like `ANYSCALE_CLI_TOKEN`.
-- Using the docs with code:
-  - Prefer copying endpoint paths, query parameters, and JSON schemas from the Managed Ray API v2 docs into the provider implementation and tests.
-  - When suggesting example requests, show how to pass the bearer token obtained from `ANYSCALE_CLI_TOKEN` or `credentials.json` in the `Authorization: Bearer …` header.
+## Using the Anyscale API Docs
 
-## Local Development & Testing Workflow
-
-- Provider installation for local dev:
-  - This provider uses Terraform's `dev_overrides` in `~/.terraformrc` to load the local binary instead of fetching from a registry.
-  - The override points at the provider directory: `/Users/brent/Projects/terraform/terraform-provider-anyscale`.
-- Build the provider:
-  - From the provider repo root, run:
-    ```
-    go build -o terraform-provider-anyscale
-    ```
-  - This drops the compiled binary in the repo root where the dev_override expects it.
-- Testing with Terraform:
-  - **Skip `terraform init`** when the dev override is active; it will fail because the provider is not in the public registry yet.
-  - Go directly to `terraform plan` or `terraform apply` to test resources and data sources.
-  - Terraform will automatically load the local provider binary via the dev_override.
-  - Example workflow:
-    ```
-    # Build provider
-    go build -o terraform-provider-anyscale
-
-    # Test with example config (no init needed)
-    cd examples/
-    terraform plan
-    terraform apply
-    ```
-- When suggesting test workflows or examples:
-  - Do not include `terraform init` in the steps.
-  - Show `go build` followed directly by `terraform plan` or `terraform apply`.
-  - Remind the user that changes to the provider require a rebuild (`go build`) before the next Terraform command.
-- Acceptance tests:
-  - Use Go's acceptance test framework for the plugin if the repo has `*_test.go` files with `resource.Test`.
-  - Run with `TF_ACC=1 go test ./...` to enable acceptance tests that actually invoke
+- Treat console OpenAPI/Swagger docs as the primary reference for endpoints and schemas.
+- The OpenAPI/Swagger docs can be found at https://console.anyscale.com/api/v2/docs
+- When showing example requests:
+  - Use Authorization: Bearer $ANYSCALE_CLI_TOKEN
+  - Do not print real tokens
+  - The $ANYSCALE_CLI_TOKEN may be read from an environment variable, or read from ~/.anyscale/credentials.json

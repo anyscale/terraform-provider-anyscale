@@ -26,33 +26,33 @@ type CloudsListResponse struct {
 
 // CloudResult is the actual cloud data
 type CloudResult struct {
-	ID                             string       `json:"id"`
-	Name                           string       `json:"name"`
-	Provider                       string       `json:"provider"`
-	ComputeStack                   string       `json:"compute_stack"`
-	Region                         string       `json:"region"`
-	Credentials                    string       `json:"credentials"`
-	Config                         CloudConfig  `json:"config"`
-	IsK8s                          bool         `json:"is_k8s"`
-	IsAIOA                         bool         `json:"is_aioa"`
-	AvailabilityZones              *string      `json:"availability_zones"`
-	IsBringYourOwnResource         bool         `json:"is_bring_your_own_resource"`
-	IsPrivateCloud                 bool         `json:"is_private_cloud"`
-	ClusterManagementStackVersion  string       `json:"cluster_management_stack_version"`
-	IsPrivateServiceCloud          bool         `json:"is_private_service_cloud"`
-	AutoAddUser                    bool         `json:"auto_add_user"`
-	LineageTrackingEnabled         bool         `json:"lineage_tracking_enabled"`
-	ExternalID                     *string      `json:"external_id"`
-	Type                           string       `json:"type"`
-	CreatorID                      string       `json:"creator_id"`
-	CreatedAt                      string       `json:"created_at"`
-	Status                         string       `json:"status"`
-	State                          string       `json:"state"`
-	Version                        string       `json:"version"`
-	IsDefault                      bool         `json:"is_default"`
-	CustomerAggregatedLogsConfigID string       `json:"customer_aggregated_logs_config_id"`
-	IsAggregatedLogsEnabled        bool         `json:"is_aggregated_logs_enabled"`
-	SystemClusterConfigID          *string      `json:"system_cluster_config_id"`
+	ID                             string      `json:"id"`
+	Name                           string      `json:"name"`
+	Provider                       string      `json:"provider"`
+	ComputeStack                   string      `json:"compute_stack"`
+	Region                         string      `json:"region"`
+	Credentials                    string      `json:"credentials"`
+	Config                         CloudConfig `json:"config"`
+	IsK8s                          bool        `json:"is_k8s"`
+	IsAIOA                         bool        `json:"is_aioa"`
+	AvailabilityZones              *string     `json:"availability_zones"`
+	IsBringYourOwnResource         bool        `json:"is_bring_your_own_resource"`
+	IsPrivateCloud                 bool        `json:"is_private_cloud"`
+	ClusterManagementStackVersion  string      `json:"cluster_management_stack_version"`
+	IsPrivateServiceCloud          bool        `json:"is_private_service_cloud"`
+	AutoAddUser                    bool        `json:"auto_add_user"`
+	LineageTrackingEnabled         bool        `json:"lineage_tracking_enabled"`
+	ExternalID                     *string     `json:"external_id"`
+	Type                           string      `json:"type"`
+	CreatorID                      string      `json:"creator_id"`
+	CreatedAt                      string      `json:"created_at"`
+	Status                         string      `json:"status"`
+	State                          string      `json:"state"`
+	Version                        string      `json:"version"`
+	IsDefault                      bool        `json:"is_default"`
+	CustomerAggregatedLogsConfigID string      `json:"customer_aggregated_logs_config_id"`
+	IsAggregatedLogsEnabled        bool        `json:"is_aggregated_logs_enabled"`
+	SystemClusterConfigID          *string     `json:"system_cluster_config_id"`
 }
 
 // CloudConfig represents cloud configuration

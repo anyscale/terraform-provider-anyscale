@@ -93,16 +93,16 @@ type AWSConfigModel struct {
 
 // GCPConfigModel represents GCP-specific configuration.
 type GCPConfigModel struct {
-	ProjectID                      types.String `tfsdk:"project_id"`
-	HostProjectID                  types.String `tfsdk:"host_project_id"`
-	ProviderName                   types.String `tfsdk:"provider_name"`
-	VPCName                        types.String `tfsdk:"vpc_name"`
-	SubnetNames                    types.List   `tfsdk:"subnet_names"`
+	ProjectID                       types.String `tfsdk:"project_id"`
+	HostProjectID                   types.String `tfsdk:"host_project_id"`
+	ProviderName                    types.String `tfsdk:"provider_name"`
+	VPCName                         types.String `tfsdk:"vpc_name"`
+	SubnetNames                     types.List   `tfsdk:"subnet_names"`
 	ControlplaneServiceAccountEmail types.String `tfsdk:"controlplane_service_account_email"`
-	DataplaneServiceAccountEmail   types.String `tfsdk:"dataplane_service_account_email"`
-	FirewallPolicyNames            types.List   `tfsdk:"firewall_policy_names"`
-	MemorystoreInstanceName        types.String `tfsdk:"memorystore_instance_name"`
-	MemorystoreEndpoint            types.String `tfsdk:"memorystore_endpoint"`
+	DataplaneServiceAccountEmail    types.String `tfsdk:"dataplane_service_account_email"`
+	FirewallPolicyNames             types.List   `tfsdk:"firewall_policy_names"`
+	MemorystoreInstanceName         types.String `tfsdk:"memorystore_instance_name"`
+	MemorystoreEndpoint             types.String `tfsdk:"memorystore_endpoint"`
 }
 
 // KubernetesConfigModel represents Kubernetes-specific configuration.
@@ -656,7 +656,11 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() {
+		if closeErr := httpResp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -800,7 +804,11 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() {
+		if closeErr := httpResp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	tflog.Debug(ctx, "DELETE response", map[string]any{"status": httpResp.StatusCode})
 
@@ -859,7 +867,11 @@ func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cl
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -890,7 +902,11 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("cloud not found")
@@ -1392,7 +1408,9 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
 		if err != nil {
 			return err
 		}
@@ -1433,7 +1451,9 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		resourcesResp, err := client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 		if err == nil {
 			resourcesBody, _ := io.ReadAll(resourcesResp.Body)
-			resourcesResp.Body.Close()
+			if closeErr := resourcesResp.Body.Close(); closeErr != nil {
+				tflog.Warn(ctx, "Failed to close resources response body", map[string]any{"error": closeErr.Error()})
+			}
 			tflog.Debug(ctx, "Cloud resources", map[string]any{"poll_count": pollCount, "resources": string(resourcesBody)})
 		}
 
@@ -1472,7 +1492,11 @@ func (r *CloudResourceResource) resolveCloudNameToID(ctx context.Context, cloudN
 	if err != nil {
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

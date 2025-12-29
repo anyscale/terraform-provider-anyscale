@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"testing"
@@ -85,10 +86,10 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:            "anyscale_cloud_resource.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateIdFunc:       testAccCloudResourceImportStateIdFunc("anyscale_cloud_resource.test"),
+				ResourceName:      "anyscale_cloud_resource.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateIdFunc: testAccCloudResourceImportStateIdFunc("anyscale_cloud_resource.test"),
 				ImportStateVerifyIgnore: []string{
 					"gcp_config",
 					"object_storage",
@@ -198,7 +199,11 @@ func testAccCheckCloudResourceExistsInAPI(resourceName, expectedResourceName str
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
 
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("cloud %s not found in API", cloudID)
@@ -259,7 +264,11 @@ func testAccCheckCloudResourceAttributes(resourceName, expectedName, expectedCom
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {

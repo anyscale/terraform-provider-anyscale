@@ -11,9 +11,7 @@ import (
 
 // Version information (set via ldflags)
 var (
-	version   = "dev"
-	commit    = "unknown"
-	buildDate = "unknown"
+	version = "dev"
 )
 
 func main() {

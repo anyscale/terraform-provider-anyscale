@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"testing"
 
@@ -168,7 +169,11 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
 
 		if resp.StatusCode == 404 {
 			return fmt.Errorf("compute config %s not found in API", configID)

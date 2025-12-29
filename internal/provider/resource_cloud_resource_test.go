@@ -10,11 +10,11 @@ import (
 
 func TestParseCloudResourceID(t *testing.T) {
 	tests := []struct {
-		name          string
-		id            string
-		wantCloudID   string
-		wantResName   string
-		wantErr       bool
+		name        string
+		id          string
+		wantCloudID string
+		wantResName string
+		wantErr     bool
 	}{
 		{
 			name:        "valid format",
@@ -86,7 +86,7 @@ func TestExpandAWSConfig(t *testing.T) {
 					"memorydb_cluster_endpoint": types.StringType,
 				},
 				map[string]attr.Value{
-					"vpc_id": types.StringValue("vpc-123"),
+					"vpc_id":     types.StringValue("vpc-123"),
 					"subnet_ids": types.ListNull(types.StringType),
 					"subnet_ids_to_az": types.MapValueMust(
 						types.StringType,

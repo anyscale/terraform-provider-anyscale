@@ -41,16 +41,16 @@ type ComputeConfigDataSourceModel struct {
 	CloudName types.String `tfsdk:"cloud_name"`
 
 	// Computed outputs (excluding CloudID and CloudName which are above)
-	Region                   types.String `tfsdk:"region"`
-	IdleTerminationMinutes   types.Int64  `tfsdk:"idle_termination_minutes"`
-	MaximumUptimeMinutes     types.Int64  `tfsdk:"maximum_uptime_minutes"`
-	EnableCrossZoneScaling   types.Bool   `tfsdk:"enable_cross_zone_scaling"`
-	AutoSelectWorkerConfig   types.Bool   `tfsdk:"auto_select_worker_config"`
-	Anonymous                types.Bool   `tfsdk:"anonymous"`
-	ProjectID                types.String `tfsdk:"project_id"`
-	Version                  types.Int64  `tfsdk:"version"`
-	CreatedAt                types.String `tfsdk:"created_at"`
-	LastModifiedAt           types.String `tfsdk:"last_modified_at"`
+	Region                 types.String `tfsdk:"region"`
+	IdleTerminationMinutes types.Int64  `tfsdk:"idle_termination_minutes"`
+	MaximumUptimeMinutes   types.Int64  `tfsdk:"maximum_uptime_minutes"`
+	EnableCrossZoneScaling types.Bool   `tfsdk:"enable_cross_zone_scaling"`
+	AutoSelectWorkerConfig types.Bool   `tfsdk:"auto_select_worker_config"`
+	Anonymous              types.Bool   `tfsdk:"anonymous"`
+	ProjectID              types.String `tfsdk:"project_id"`
+	Version                types.Int64  `tfsdk:"version"`
+	CreatedAt              types.String `tfsdk:"created_at"`
+	LastModifiedAt         types.String `tfsdk:"last_modified_at"`
 }
 
 // Metadata returns the data source type name.
@@ -222,7 +222,11 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
 	}
-	defer apiResp.Body.Close()
+	defer func() {
+		if closeErr := apiResp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	if apiResp.StatusCode == http.StatusNotFound {
 		resp.Diagnostics.AddError(
@@ -301,7 +305,11 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 			// Fetch cloud name for the cloud_id
 			cloudResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
 			if err == nil {
-				defer cloudResp.Body.Close()
+				defer func() {
+					if closeErr := cloudResp.Body.Close(); closeErr != nil {
+						tflog.Warn(ctx, "Failed to close cloud response body", map[string]any{"error": closeErr.Error()})
+					}
+				}()
 				if cloudResp.StatusCode == http.StatusOK {
 					cloudBody, err := io.ReadAll(cloudResp.Body)
 					if err == nil {
@@ -383,7 +391,11 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -446,7 +458,11 @@ func (d *ComputeConfigDataSource) resolveCloudNameToID(ctx context.Context, clou
 	if err != nil {
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
