@@ -214,3 +214,75 @@ type DeploymentMetadata struct {
 	Total           int     `json:"total"`
 	NextPagingToken *string `json:"next_paging_token"`
 }
+
+// Project API Models
+
+// CreateProjectRequest is the request body for creating a project
+type CreateProjectRequest struct {
+	Name                     string  `json:"name"`
+	ParentCloudID            string  `json:"parent_cloud_id"`
+	Description              *string `json:"description,omitempty"`
+	InitialClusterConfigID   *string `json:"cluster_config,omitempty"` // Note: API uses 'cluster_config' not 'initial_cluster_config'
+}
+
+// ProjectResponse represents a single project from the Anyscale API
+type ProjectResponse struct {
+	Result ProjectResult `json:"result"`
+}
+
+// ProjectsListResponse represents the response from listing projects
+type ProjectsListResponse struct {
+	Results  []ProjectResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// ProjectResult is the actual project data
+type ProjectResult struct {
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	Description      *string `json:"description"`
+	ParentCloudID    string  `json:"parent_cloud_id"`
+	ClusterConfig    string  `json:"cluster_config"`      // Computed cluster config ID
+	CreatorID        string  `json:"creator_id"`
+	CreatedAt        string  `json:"created_at"`
+	OrganizationID   string  `json:"organization_id"`
+	LastUsedCloudID  *string `json:"last_used_cloud_id,omitempty"`
+	IsDefault        bool    `json:"is_default"`
+	DirectoryName    string  `json:"directory_name"`
+}
+
+// ProjectCollaboratorBatchRequest for batch creating collaborators
+type ProjectCollaboratorBatchRequest []ProjectCollaboratorEntry
+
+// ProjectCollaboratorEntry represents a single collaborator for request
+type ProjectCollaboratorEntry struct {
+	Value struct {
+		Email string `json:"email"`
+	} `json:"value"`
+	PermissionLevel string `json:"permission_level"` // "owner", "writer", "readonly"
+}
+
+// ProjectCollaboratorListResponse for listing collaborators
+type ProjectCollaboratorListResponse struct {
+	Results  []ProjectCollaboratorResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// ProjectCollaboratorResult represents a collaborator from the API
+type ProjectCollaboratorResult struct {
+	IdentityID      string `json:"identity_id"`
+	UserID          string `json:"user_id"`
+	Email           string `json:"email"`
+	PermissionLevel string `json:"permission_level"`
+}
+
+// ProjectCollaboratorUpdateRequest for updating a single collaborator's permission
+type ProjectCollaboratorUpdateRequest struct {
+	PermissionLevel string `json:"permission_level"`
+}

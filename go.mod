@@ -9,6 +9,8 @@ require (
 	github.com/hashicorp/terraform-plugin-testing v1.14.0
 )
 
+require github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
+
 require (
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
 	github.com/agext/levenshtein v1.2.2 // indirect

@@ -94,7 +94,6 @@ output "compute_config_id" {
 
 ### Required
 
-- `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters.
 - `head_node` (Attributes) Configuration for the head node of the cluster. (see [below for nested schema](#nestedatt--head_node))
 
 ### Optional
@@ -103,6 +102,8 @@ output "compute_config_id" {
 - `allowed_azs` (List of String) The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.
 - `anonymous` (Boolean) An anonymous compute config does not show up in the list of cluster configs.
 - `auto_select_worker_config` (Boolean) If set to true, worker node groups will automatically be selected based on workload.
+- `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified.
+- `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id.
 - `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Recommended for production services.
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
 - `idle_termination_minutes` (Number) If set to a positive number, Anyscale will terminate the cluster this many minutes after the cluster is idle. Set to 0 to disable. Defaults to 120 minutes.
@@ -130,9 +131,9 @@ Required:
 
 Optional:
 
-- `advanced_instance_config` (String) Advanced instance configurations as JSON that will be passed through to the cloud provider. Use `jsonencode()` to pass a map.
+- `advanced_instance_config` (String) Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects.
 - `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--head_node--cloud_deployment))
-- `flags` (String) Node-level flags as JSON specifying advanced or experimental options. Use `jsonencode()` to pass a map.
+- `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.
 - `labels` (Map of String) Labels to associate the node with for scheduling purposes.
 - `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes.
 - `required_resources` (Attributes) Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--head_node--required_resources))
@@ -172,9 +173,9 @@ Required:
 
 Optional:
 
-- `advanced_instance_config` (String) Advanced instance configurations as JSON that will be passed through to the cloud provider. Use `jsonencode()` to pass a map.
+- `advanced_instance_config` (String) Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects.
 - `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--worker_nodes--cloud_deployment))
-- `flags` (String) Node-level flags as JSON specifying advanced or experimental options. Use `jsonencode()` to pass a map.
+- `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.
 - `labels` (Map of String) Labels to associate the node with for scheduling purposes.
 - `market_type` (String) The type of instances to use: `ON_DEMAND` (standard pricing), `SPOT` (discounted, interruptible), or `PREFER_SPOT` (prefer spot with on-demand fallback).
 - `max_nodes` (Number) Maximum number of nodes of this type that can be running in the cluster.
