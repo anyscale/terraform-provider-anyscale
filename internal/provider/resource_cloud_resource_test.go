@@ -1,198 +1,42 @@
 package provider
 
 import (
+	"context"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
-
-func TestResourceCloudResourceSchema(t *testing.T) {
-	s := ResourceCloudResource().Schema
-
-	// Test required fields
-	requiredFields := []string{"cloud_id", "region", "compute_stack"}
-	for _, field := range requiredFields {
-		if _, ok := s[field]; !ok {
-			t.Errorf("Expected schema to have field %s", field)
-			continue
-		}
-		if !s[field].Required {
-			t.Errorf("Expected field %s to be required", field)
-		}
-	}
-
-	// Test optional fields
-	optionalFields := []string{"name", "is_private", "aws_config", "gcp_config", "object_storage", "file_storage"}
-	for _, field := range optionalFields {
-		if _, ok := s[field]; !ok {
-			t.Errorf("Expected schema to have field %s", field)
-			continue
-		}
-		if s[field].Required {
-			t.Errorf("Expected field %s to be optional", field)
-		}
-	}
-
-	// Test computed fields
-	computedFields := []string{"cloud_resource_id", "cloud_deployment_id", "status", "is_default"}
-	for _, field := range computedFields {
-		if _, ok := s[field]; !ok {
-			t.Errorf("Expected schema to have field %s", field)
-			continue
-		}
-		if !s[field].Computed {
-			t.Errorf("Expected field %s to be computed", field)
-		}
-	}
-
-	// Test ForceNew fields
-	forceNewFields := []string{"cloud_id", "name", "compute_stack", "region"}
-	for _, field := range forceNewFields {
-		if _, ok := s[field]; !ok {
-			t.Errorf("Expected schema to have field %s", field)
-			continue
-		}
-		if !s[field].ForceNew {
-			t.Errorf("Expected field %s to have ForceNew", field)
-		}
-	}
-}
-
-func TestResourceCloudResourceAWSConfigSchema(t *testing.T) {
-	s := ResourceCloudResource().Schema
-
-	awsConfig, ok := s["aws_config"]
-	if !ok {
-		t.Fatal("Expected schema to have aws_config field")
-	}
-
-	if awsConfig.Type != schema.TypeList {
-		t.Error("Expected aws_config to be TypeList")
-	}
-
-	if awsConfig.MaxItems != 1 {
-		t.Error("Expected aws_config MaxItems to be 1")
-	}
-
-	// Check nested schema
-	elemResource, ok := awsConfig.Elem.(*schema.Resource)
-	if !ok {
-		t.Fatal("Expected aws_config.Elem to be *schema.Resource")
-	}
-
-	requiredAWSFields := []string{"vpc_id", "security_group_ids", "controlplane_iam_role_arn", "dataplane_iam_role_arn"}
-	for _, field := range requiredAWSFields {
-		if _, ok := elemResource.Schema[field]; !ok {
-			t.Errorf("Expected aws_config to have field %s", field)
-			continue
-		}
-		if !elemResource.Schema[field].Required {
-			t.Errorf("Expected aws_config.%s to be required", field)
-		}
-	}
-
-	optionalAWSFields := []string{"subnet_ids", "subnet_ids_to_az", "external_id", "memorydb_cluster_name", "memorydb_cluster_arn", "memorydb_cluster_endpoint"}
-	for _, field := range optionalAWSFields {
-		if _, ok := elemResource.Schema[field]; !ok {
-			t.Errorf("Expected aws_config to have optional field %s", field)
-			continue
-		}
-		if elemResource.Schema[field].Required {
-			t.Errorf("Expected aws_config.%s to be optional", field)
-		}
-	}
-}
-
-func TestResourceCloudResourceGCPConfigSchema(t *testing.T) {
-	s := ResourceCloudResource().Schema
-
-	gcpConfig, ok := s["gcp_config"]
-	if !ok {
-		t.Fatal("Expected schema to have gcp_config field")
-	}
-
-	if gcpConfig.Type != schema.TypeList {
-		t.Error("Expected gcp_config to be TypeList")
-	}
-
-	// Check nested schema
-	elemResource, ok := gcpConfig.Elem.(*schema.Resource)
-	if !ok {
-		t.Fatal("Expected gcp_config.Elem to be *schema.Resource")
-	}
-
-	requiredGCPFields := []string{"project_id", "provider_name", "vpc_name", "subnet_names", "controlplane_service_account_email", "dataplane_service_account_email"}
-	for _, field := range requiredGCPFields {
-		if _, ok := elemResource.Schema[field]; !ok {
-			t.Errorf("Expected gcp_config to have field %s", field)
-			continue
-		}
-		if !elemResource.Schema[field].Required {
-			t.Errorf("Expected gcp_config.%s to be required", field)
-		}
-	}
-
-	optionalGCPFields := []string{"host_project_id", "firewall_policy_names", "memorystore_instance_name", "memorystore_endpoint"}
-	for _, field := range optionalGCPFields {
-		if _, ok := elemResource.Schema[field]; !ok {
-			t.Errorf("Expected gcp_config to have optional field %s", field)
-			continue
-		}
-		if elemResource.Schema[field].Required {
-			t.Errorf("Expected gcp_config.%s to be optional", field)
-		}
-	}
-}
-
-func TestResourceCloudResourceTimeouts(t *testing.T) {
-	r := ResourceCloudResource()
-
-	if r.Timeouts == nil {
-		t.Fatal("Expected resource to have timeouts")
-	}
-
-	if r.Timeouts.Create == nil {
-		t.Error("Expected Create timeout to be set")
-	}
-
-	if r.Timeouts.Update == nil {
-		t.Error("Expected Update timeout to be set")
-	}
-
-	if r.Timeouts.Delete == nil {
-		t.Error("Expected Delete timeout to be set")
-	}
-}
 
 func TestParseCloudResourceID(t *testing.T) {
 	tests := []struct {
-		name         string
-		id           string
-		wantCloudID  string
-		wantResource string
-		wantErr      bool
+		name          string
+		id            string
+		wantCloudID   string
+		wantResName   string
+		wantErr       bool
 	}{
 		{
-			name:         "valid ID",
-			id:           "cld_123:vm-aws-us-west-2",
-			wantCloudID:  "cld_123",
-			wantResource: "vm-aws-us-west-2",
-			wantErr:      false,
+			name:        "valid format",
+			id:          "cld_123:vm-aws-us-east-2",
+			wantCloudID: "cld_123",
+			wantResName: "vm-aws-us-east-2",
+			wantErr:     false,
 		},
 		{
-			name:         "valid ID with colons in resource name",
-			id:           "cld_abc:resource:with:colons",
-			wantCloudID:  "cld_abc",
-			wantResource: "resource:with:colons",
-			wantErr:      false,
+			name:        "resource name with colons",
+			id:          "cld_abc:k8s-gcp-us-central1:custom",
+			wantCloudID: "cld_abc",
+			wantResName: "k8s-gcp-us-central1:custom",
+			wantErr:     false,
 		},
 		{
-			name:    "invalid ID - no separator",
-			id:      "cld_123_vm-aws-us-west-2",
+			name:    "missing delimiter",
+			id:      "cld_123",
 			wantErr: true,
 		},
 		{
-			name:    "invalid ID - empty",
+			name:    "empty string",
 			id:      "",
 			wantErr: true,
 		},
@@ -200,197 +44,664 @@ func TestParseCloudResourceID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cloudID, resourceName, err := parseCloudResourceID(tt.id)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Error("Expected error, got nil")
+			gotCloudID, gotResName, err := parseCloudResourceID(tt.id)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseCloudResourceID() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if gotCloudID != tt.wantCloudID {
+					t.Errorf("parseCloudResourceID() gotCloudID = %v, want %v", gotCloudID, tt.wantCloudID)
 				}
+				if gotResName != tt.wantResName {
+					t.Errorf("parseCloudResourceID() gotResName = %v, want %v", gotResName, tt.wantResName)
+				}
+			}
+		})
+	}
+}
+
+func TestExpandAWSConfig(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		obj     types.Object
+		want    *AWSConfig
+		wantErr bool
+	}{
+		{
+			name: "full config with subnet_ids_to_az",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"vpc_id":                    types.StringType,
+					"subnet_ids":                types.ListType{ElemType: types.StringType},
+					"subnet_ids_to_az":          types.MapType{ElemType: types.StringType},
+					"security_group_ids":        types.ListType{ElemType: types.StringType},
+					"controlplane_iam_role_arn": types.StringType,
+					"dataplane_iam_role_arn":    types.StringType,
+					"external_id":               types.StringType,
+					"memorydb_cluster_name":     types.StringType,
+					"memorydb_cluster_arn":      types.StringType,
+					"memorydb_cluster_endpoint": types.StringType,
+				},
+				map[string]attr.Value{
+					"vpc_id": types.StringValue("vpc-123"),
+					"subnet_ids": types.ListNull(types.StringType),
+					"subnet_ids_to_az": types.MapValueMust(
+						types.StringType,
+						map[string]attr.Value{
+							"subnet-111": types.StringValue("us-east-2a"),
+							"subnet-222": types.StringValue("us-east-2b"),
+						},
+					),
+					"security_group_ids": types.ListValueMust(
+						types.StringType,
+						[]attr.Value{
+							types.StringValue("sg-111"),
+							types.StringValue("sg-222"),
+						},
+					),
+					"controlplane_iam_role_arn": types.StringValue("arn:aws:iam::123456789012:role/anyscale-controlplane"),
+					"dataplane_iam_role_arn":    types.StringValue("arn:aws:iam::123456789012:role/anyscale-dataplane"),
+					"external_id":               types.StringValue("external-123"),
+					"memorydb_cluster_name":     types.StringValue("anyscale-memorydb"),
+					"memorydb_cluster_arn":      types.StringValue("arn:aws:memorydb:us-east-2:123456789012:cluster/anyscale-memorydb"),
+					"memorydb_cluster_endpoint": types.StringValue("anyscale-memorydb.abc123.memorydb.us-east-2.amazonaws.com:6379"),
+				},
+			),
+			want: &AWSConfig{
+				VPCID:             "vpc-123",
+				SubnetIDs:         []string{"subnet-111", "subnet-222"},
+				Zones:             []string{"us-east-2a", "us-east-2b"},
+				SecurityGroupIDs:  []string{"sg-111", "sg-222"},
+				AnyscaleIAMRoleID: "arn:aws:iam::123456789012:role/anyscale-controlplane",
+				ClusterIAMRoleID:  "arn:aws:iam::123456789012:role/anyscale-dataplane",
+				ExternalID:        "external-123",
+				MemoryDBClusterName: func() *string {
+					s := "anyscale-memorydb"
+					return &s
+				}(),
+				MemoryDBClusterARN: func() *string {
+					s := "arn:aws:memorydb:us-east-2:123456789012:cluster/anyscale-memorydb"
+					return &s
+				}(),
+				MemoryDBClusterEndpoint: func() *string {
+					s := "anyscale-memorydb.abc123.memorydb.us-east-2.amazonaws.com:6379"
+					return &s
+				}(),
+			},
+			wantErr: false,
+		},
+		{
+			name: "minimal config with subnet_ids list",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"vpc_id":                    types.StringType,
+					"subnet_ids":                types.ListType{ElemType: types.StringType},
+					"subnet_ids_to_az":          types.MapType{ElemType: types.StringType},
+					"security_group_ids":        types.ListType{ElemType: types.StringType},
+					"controlplane_iam_role_arn": types.StringType,
+					"dataplane_iam_role_arn":    types.StringType,
+					"external_id":               types.StringType,
+					"memorydb_cluster_name":     types.StringType,
+					"memorydb_cluster_arn":      types.StringType,
+					"memorydb_cluster_endpoint": types.StringType,
+				},
+				map[string]attr.Value{
+					"vpc_id": types.StringValue("vpc-456"),
+					"subnet_ids": types.ListValueMust(
+						types.StringType,
+						[]attr.Value{
+							types.StringValue("subnet-aaa"),
+							types.StringValue("subnet-bbb"),
+						},
+					),
+					"subnet_ids_to_az": types.MapNull(types.StringType),
+					"security_group_ids": types.ListValueMust(
+						types.StringType,
+						[]attr.Value{
+							types.StringValue("sg-aaa"),
+						},
+					),
+					"controlplane_iam_role_arn": types.StringValue("arn:aws:iam::999:role/cp"),
+					"dataplane_iam_role_arn":    types.StringValue("arn:aws:iam::999:role/dp"),
+					"external_id":               types.StringNull(),
+					"memorydb_cluster_name":     types.StringNull(),
+					"memorydb_cluster_arn":      types.StringNull(),
+					"memorydb_cluster_endpoint": types.StringNull(),
+				},
+			),
+			want: &AWSConfig{
+				VPCID:             "vpc-456",
+				SubnetIDs:         []string{"subnet-aaa", "subnet-bbb"},
+				SecurityGroupIDs:  []string{"sg-aaa"},
+				AnyscaleIAMRoleID: "arn:aws:iam::999:role/cp",
+				ClusterIAMRoleID:  "arn:aws:iam::999:role/dp",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "null object",
+			obj:     types.ObjectNull(map[string]attr.Type{}),
+			want:    nil,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandAWSConfig(ctx, tt.obj)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("expandAWSConfig() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+			if tt.want == nil && got != nil {
+				t.Errorf("expandAWSConfig() = %v, want nil", got)
 				return
 			}
-
-			if cloudID != tt.wantCloudID {
-				t.Errorf("cloudID = %s, want %s", cloudID, tt.wantCloudID)
-			}
-
-			if resourceName != tt.wantResource {
-				t.Errorf("resourceName = %s, want %s", resourceName, tt.wantResource)
-			}
-		})
-	}
-}
-
-func TestGenerateResourceName(t *testing.T) {
-	tests := []struct {
-		computeStack string
-		provider     string
-		region       string
-		want         string
-	}{
-		{"VM", "AWS", "us-west-2", "vm-aws-us-west-2"},
-		{"K8S", "GCP", "us-central1", "k8s-gcp-us-central1"},
-		{"vm", "aws", "US-EAST-1", "vm-aws-us-east-1"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			got := generateResourceName(tt.computeStack, tt.provider, tt.region)
-			if got != tt.want {
-				t.Errorf("generateResourceName(%s, %s, %s) = %s, want %s",
-					tt.computeStack, tt.provider, tt.region, got, tt.want)
+			if tt.want != nil {
+				if got == nil {
+					t.Errorf("expandAWSConfig() = nil, want non-nil")
+					return
+				}
+				if got.VPCID != tt.want.VPCID {
+					t.Errorf("expandAWSConfig() VPCID = %v, want %v", got.VPCID, tt.want.VPCID)
+				}
+				if got.AnyscaleIAMRoleID != tt.want.AnyscaleIAMRoleID {
+					t.Errorf("expandAWSConfig() AnyscaleIAMRoleID = %v, want %v", got.AnyscaleIAMRoleID, tt.want.AnyscaleIAMRoleID)
+				}
+				if got.ClusterIAMRoleID != tt.want.ClusterIAMRoleID {
+					t.Errorf("expandAWSConfig() ClusterIAMRoleID = %v, want %v", got.ClusterIAMRoleID, tt.want.ClusterIAMRoleID)
+				}
+				// Verify SubnetIDs (order may vary for map-based input)
+				if len(got.SubnetIDs) != len(tt.want.SubnetIDs) {
+					t.Errorf("expandAWSConfig() SubnetIDs length = %v, want %v", len(got.SubnetIDs), len(tt.want.SubnetIDs))
+				}
+				// Verify SecurityGroupIDs
+				if len(got.SecurityGroupIDs) != len(tt.want.SecurityGroupIDs) {
+					t.Errorf("expandAWSConfig() SecurityGroupIDs length = %v, want %v", len(got.SecurityGroupIDs), len(tt.want.SecurityGroupIDs))
+				}
 			}
 		})
 	}
 }
 
-func TestGetNetworkingModeFromResource(t *testing.T) {
+func TestExpandGCPConfig(t *testing.T) {
+	ctx := context.Background()
+
 	tests := []struct {
-		name      string
-		isPrivate bool
-		want      string
-	}{
-		{"public", false, "PUBLIC"},
-		{"private", true, "PRIVATE"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := schema.TestResourceDataRaw(t, ResourceCloudResource().Schema, map[string]any{
-				"cloud_id":   "cld_123",
-				"region":     "us-west-2",
-				"is_private": tt.isPrivate,
-			})
-
-			got := getNetworkingModeFromResource(d)
-			if got != tt.want {
-				t.Errorf("getNetworkingModeFromResource() = %s, want %s", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGetProviderFromResourceData(t *testing.T) {
-	tests := []struct {
-		name   string
-		config map[string]any
-		want   string
+		name    string
+		obj     types.Object
+		want    *GCPConfig
+		wantErr bool
 	}{
 		{
-			name: "AWS config",
-			config: map[string]any{
-				"cloud_id": "cld_123",
-				"region":   "us-west-2",
-				"aws_config": []any{
-					map[string]any{
-						"vpc_id":                    "vpc-123",
-						"security_group_ids":        []any{"sg-123"},
-						"controlplane_iam_role_arn": "arn:aws:iam::123:role/control",
-						"dataplane_iam_role_arn":    "arn:aws:iam::123:role/data",
-					},
+			name: "full config",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"project_id":                         types.StringType,
+					"host_project_id":                    types.StringType,
+					"provider_name":                      types.StringType,
+					"vpc_name":                           types.StringType,
+					"subnet_names":                       types.ListType{ElemType: types.StringType},
+					"controlplane_service_account_email": types.StringType,
+					"dataplane_service_account_email":    types.StringType,
+					"firewall_policy_names":              types.ListType{ElemType: types.StringType},
+					"memorystore_instance_name":          types.StringType,
+					"memorystore_endpoint":               types.StringType,
 				},
-			},
-			want: "AWS",
-		},
-		{
-			name: "GCP config",
-			config: map[string]any{
-				"cloud_id": "cld_123",
-				"region":   "us-central1",
-				"gcp_config": []any{
-					map[string]any{
-						"project_id":                          "my-project",
-						"provider_name":                       "projects/123/providers/p",
-						"vpc_name":                            "my-vpc",
-						"subnet_names":                        []any{"subnet-1"},
-						"controlplane_service_account_email":  "control@proj.iam",
-						"dataplane_service_account_email":     "data@proj.iam",
-					},
+				map[string]attr.Value{
+					"project_id":      types.StringValue("my-project"),
+					"host_project_id": types.StringValue("host-project"),
+					"provider_name":   types.StringValue("projects/123/locations/global/workloadIdentityPools/pool/providers/provider"),
+					"vpc_name":        types.StringValue("anyscale-vpc"),
+					"subnet_names": types.ListValueMust(
+						types.StringType,
+						[]attr.Value{
+							types.StringValue("anyscale-subnet-1"),
+							types.StringValue("anyscale-subnet-2"),
+						},
+					),
+					"controlplane_service_account_email": types.StringValue("anyscale-cp@my-project.iam.gserviceaccount.com"),
+					"dataplane_service_account_email":    types.StringValue("anyscale-dp@my-project.iam.gserviceaccount.com"),
+					"firewall_policy_names": types.ListValueMust(
+						types.StringType,
+						[]attr.Value{
+							types.StringValue("anyscale-fw-policy"),
+						},
+					),
+					"memorystore_instance_name": types.StringValue("anyscale-memorystore"),
+					"memorystore_endpoint":      types.StringValue("10.0.0.3:6379"),
 				},
+			),
+			want: &GCPConfig{
+				ProjectID:                   "my-project",
+				HostProjectID:               "host-project",
+				ProviderName:                "projects/123/locations/global/workloadIdentityPools/pool/providers/provider",
+				VPCName:                     "anyscale-vpc",
+				SubnetNames:                 []string{"anyscale-subnet-1", "anyscale-subnet-2"},
+				AnyscaleServiceAccountEmail: "anyscale-cp@my-project.iam.gserviceaccount.com",
+				ClusterServiceAccountEmail:  "anyscale-dp@my-project.iam.gserviceaccount.com",
+				FirewallPolicyNames:         []string{"anyscale-fw-policy"},
+				MemorystoreInstanceName:     "anyscale-memorystore",
+				MemorystoreEndpoint:         "10.0.0.3:6379",
 			},
-			want: "GCP",
+			wantErr: false,
 		},
 		{
-			name: "no config",
-			config: map[string]any{
-				"cloud_id": "cld_123",
-				"region":   "us-west-2",
-			},
-			want: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := schema.TestResourceDataRaw(t, ResourceCloudResource().Schema, tt.config)
-
-			got := getProviderFromResourceData(d)
-			if got != tt.want {
-				t.Errorf("getProviderFromResourceData() = %s, want %s", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestHasEmbeddedResourceConfig(t *testing.T) {
-	tests := []struct {
-		name   string
-		config map[string]any
-		want   bool
-	}{
-		{
-			name: "has AWS config",
-			config: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "AWS",
-				"region":         "us-west-2",
-				"aws_config": []any{
-					map[string]any{
-						"vpc_id":                    "vpc-123",
-						"security_group_ids":        []any{"sg-123"},
-						"controlplane_iam_role_arn": "arn:aws:iam::123:role/control",
-						"dataplane_iam_role_arn":    "arn:aws:iam::123:role/data",
-					},
+			name: "minimal config",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"project_id":                         types.StringType,
+					"host_project_id":                    types.StringType,
+					"provider_name":                      types.StringType,
+					"vpc_name":                           types.StringType,
+					"subnet_names":                       types.ListType{ElemType: types.StringType},
+					"controlplane_service_account_email": types.StringType,
+					"dataplane_service_account_email":    types.StringType,
+					"firewall_policy_names":              types.ListType{ElemType: types.StringType},
+					"memorystore_instance_name":          types.StringType,
+					"memorystore_endpoint":               types.StringType,
 				},
-			},
-			want: true,
-		},
-		{
-			name: "has object_storage only",
-			config: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "AWS",
-				"region":         "us-west-2",
-				"object_storage": []any{
-					map[string]any{
-						"bucket_name": "my-bucket",
-					},
+				map[string]attr.Value{
+					"project_id":      types.StringValue("project-123"),
+					"host_project_id": types.StringNull(),
+					"provider_name":   types.StringValue("projects/456/locations/global/workloadIdentityPools/test/providers/test"),
+					"vpc_name":        types.StringValue("vpc-test"),
+					"subnet_names": types.ListValueMust(
+						types.StringType,
+						[]attr.Value{
+							types.StringValue("subnet-test"),
+						},
+					),
+					"controlplane_service_account_email": types.StringValue("cp@project-123.iam.gserviceaccount.com"),
+					"dataplane_service_account_email":    types.StringValue("dp@project-123.iam.gserviceaccount.com"),
+					"firewall_policy_names":              types.ListNull(types.StringType),
+					"memorystore_instance_name":          types.StringNull(),
+					"memorystore_endpoint":               types.StringNull(),
 				},
+			),
+			want: &GCPConfig{
+				ProjectID:                   "project-123",
+				ProviderName:                "projects/456/locations/global/workloadIdentityPools/test/providers/test",
+				VPCName:                     "vpc-test",
+				SubnetNames:                 []string{"subnet-test"},
+				AnyscaleServiceAccountEmail: "cp@project-123.iam.gserviceaccount.com",
+				ClusterServiceAccountEmail:  "dp@project-123.iam.gserviceaccount.com",
 			},
-			want: true,
+			wantErr: false,
 		},
 		{
-			name: "empty cloud - no config blocks",
-			config: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "AWS",
-				"region":         "us-west-2",
-			},
-			want: false,
+			name:    "null object",
+			obj:     types.ObjectNull(map[string]attr.Type{}),
+			want:    nil,
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := schema.TestResourceDataRaw(t, ResourceCloud().Schema, tt.config)
+			got, err := expandGCPConfig(ctx, tt.obj)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("expandGCPConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.want == nil && got != nil {
+				t.Errorf("expandGCPConfig() = %v, want nil", got)
+				return
+			}
+			if tt.want != nil {
+				if got == nil {
+					t.Errorf("expandGCPConfig() = nil, want non-nil")
+					return
+				}
+				if got.ProjectID != tt.want.ProjectID {
+					t.Errorf("expandGCPConfig() ProjectID = %v, want %v", got.ProjectID, tt.want.ProjectID)
+				}
+				if got.VPCName != tt.want.VPCName {
+					t.Errorf("expandGCPConfig() VPCName = %v, want %v", got.VPCName, tt.want.VPCName)
+				}
+				if got.AnyscaleServiceAccountEmail != tt.want.AnyscaleServiceAccountEmail {
+					t.Errorf("expandGCPConfig() AnyscaleServiceAccountEmail = %v, want %v", got.AnyscaleServiceAccountEmail, tt.want.AnyscaleServiceAccountEmail)
+				}
+			}
+		})
+	}
+}
 
-			got := hasEmbeddedResourceConfig(d)
-			if got != tt.want {
-				t.Errorf("hasEmbeddedResourceConfig() = %v, want %v", got, tt.want)
+func TestExpandKubernetesConfig(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		obj     types.Object
+		want    *KubernetesConfig
+		wantErr bool
+	}{
+		{
+			name: "full config",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"anyscale_operator_iam_identity": types.StringType,
+					"zones":                          types.ListType{ElemType: types.StringType},
+					"namespace":                      types.StringType,
+					"ingress_host":                   types.StringType,
+					"cluster_name":                   types.StringType,
+					"context":                        types.StringType,
+					"kubeconfig_path":                types.StringType,
+				},
+				map[string]attr.Value{
+					"anyscale_operator_iam_identity": types.StringValue("arn:aws:iam::123456789012:role/anyscale-operator"),
+					"zones": types.ListValueMust(
+						types.StringType,
+						[]attr.Value{
+							types.StringValue("us-east-2a"),
+							types.StringValue("us-east-2b"),
+						},
+					),
+					"namespace":       types.StringValue("anyscale-prod"),
+					"ingress_host":    types.StringValue("anyscale.example.com"),
+					"cluster_name":    types.StringValue("my-eks-cluster"),
+					"context":         types.StringNull(),
+					"kubeconfig_path": types.StringNull(),
+				},
+			),
+			want: &KubernetesConfig{
+				AnyscaleOperatorIAMIdentity: "arn:aws:iam::123456789012:role/anyscale-operator",
+				Zones:                       []string{"us-east-2a", "us-east-2b"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "minimal config",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"anyscale_operator_iam_identity": types.StringType,
+					"zones":                          types.ListType{ElemType: types.StringType},
+					"namespace":                      types.StringType,
+					"ingress_host":                   types.StringType,
+					"cluster_name":                   types.StringType,
+					"context":                        types.StringType,
+					"kubeconfig_path":                types.StringType,
+				},
+				map[string]attr.Value{
+					"anyscale_operator_iam_identity": types.StringValue("operator@project.iam.gserviceaccount.com"),
+					"zones":                          types.ListNull(types.StringType),
+					"namespace":                      types.StringValue("anyscale"),
+					"ingress_host":                   types.StringNull(),
+					"cluster_name":                   types.StringNull(),
+					"context":                        types.StringNull(),
+					"kubeconfig_path":                types.StringNull(),
+				},
+			),
+			want: &KubernetesConfig{
+				AnyscaleOperatorIAMIdentity: "operator@project.iam.gserviceaccount.com",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "null object",
+			obj:     types.ObjectNull(map[string]attr.Type{}),
+			want:    nil,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandKubernetesConfig(ctx, tt.obj)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("expandKubernetesConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.want == nil && got != nil {
+				t.Errorf("expandKubernetesConfig() = %v, want nil", got)
+				return
+			}
+			if tt.want != nil {
+				if got == nil {
+					t.Errorf("expandKubernetesConfig() = nil, want non-nil")
+					return
+				}
+				if got.AnyscaleOperatorIAMIdentity != tt.want.AnyscaleOperatorIAMIdentity {
+					t.Errorf("expandKubernetesConfig() AnyscaleOperatorIAMIdentity = %v, want %v", got.AnyscaleOperatorIAMIdentity, tt.want.AnyscaleOperatorIAMIdentity)
+				}
+				if len(got.Zones) != len(tt.want.Zones) {
+					t.Errorf("expandKubernetesConfig() Zones length = %v, want %v", len(got.Zones), len(tt.want.Zones))
+				}
+			}
+		})
+	}
+}
+
+func TestExpandObjectStorage(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		obj     types.Object
+		want    *ObjectStorage
+		wantErr bool
+	}{
+		{
+			name: "full S3 config",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"bucket_name": types.StringType,
+					"region":      types.StringType,
+					"endpoint":    types.StringType,
+				},
+				map[string]attr.Value{
+					"bucket_name": types.StringValue("my-anyscale-bucket"),
+					"region":      types.StringValue("us-west-2"),
+					"endpoint":    types.StringValue("https://s3.us-west-2.amazonaws.com"),
+				},
+			),
+			want: &ObjectStorage{
+				BucketName: "my-anyscale-bucket",
+				Region: func() *string {
+					s := "us-west-2"
+					return &s
+				}(),
+				Endpoint: func() *string {
+					s := "https://s3.us-west-2.amazonaws.com"
+					return &s
+				}(),
+			},
+			wantErr: false,
+		},
+		{
+			name: "minimal GCS config",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"bucket_name": types.StringType,
+					"region":      types.StringType,
+					"endpoint":    types.StringType,
+				},
+				map[string]attr.Value{
+					"bucket_name": types.StringValue("gs://my-gcs-bucket"),
+					"region":      types.StringNull(),
+					"endpoint":    types.StringNull(),
+				},
+			),
+			want: &ObjectStorage{
+				BucketName: "gs://my-gcs-bucket",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "null object",
+			obj:     types.ObjectNull(map[string]attr.Type{}),
+			want:    nil,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandObjectStorage(ctx, tt.obj)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("expandObjectStorage() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.want == nil && got != nil {
+				t.Errorf("expandObjectStorage() = %v, want nil", got)
+				return
+			}
+			if tt.want != nil {
+				if got == nil {
+					t.Errorf("expandObjectStorage() = nil, want non-nil")
+					return
+				}
+				if got.BucketName != tt.want.BucketName {
+					t.Errorf("expandObjectStorage() BucketName = %v, want %v", got.BucketName, tt.want.BucketName)
+				}
+			}
+		})
+	}
+}
+
+func TestExpandFileStorage(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		obj     types.Object
+		want    *FileStorage
+		wantErr bool
+	}{
+		{
+			name: "full EFS config with mount targets",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"file_storage_id": types.StringType,
+					"mount_path":      types.StringType,
+					"mount_targets": types.ListType{
+						ElemType: types.ObjectType{
+							AttrTypes: map[string]attr.Type{
+								"address": types.StringType,
+								"zone":    types.StringType,
+							},
+						},
+					},
+				},
+				map[string]attr.Value{
+					"file_storage_id": types.StringValue("fs-12345678"),
+					"mount_path":      types.StringValue("/mnt/efs"),
+					"mount_targets": types.ListValueMust(
+						types.ObjectType{
+							AttrTypes: map[string]attr.Type{
+								"address": types.StringType,
+								"zone":    types.StringType,
+							},
+						},
+						[]attr.Value{
+							types.ObjectValueMust(
+								map[string]attr.Type{
+									"address": types.StringType,
+									"zone":    types.StringType,
+								},
+								map[string]attr.Value{
+									"address": types.StringValue("fs-12345678.efs.us-east-2.amazonaws.com"),
+									"zone":    types.StringValue("us-east-2a"),
+								},
+							),
+							types.ObjectValueMust(
+								map[string]attr.Type{
+									"address": types.StringType,
+									"zone":    types.StringType,
+								},
+								map[string]attr.Value{
+									"address": types.StringValue("fs-12345678.efs.us-east-2.amazonaws.com"),
+									"zone":    types.StringValue("us-east-2b"),
+								},
+							),
+						},
+					),
+				},
+			),
+			want: &FileStorage{
+				FileStorageID: "fs-12345678",
+				MountPath:     "/mnt/efs",
+				MountTargets: []MountTarget{
+					{
+						Address: "fs-12345678.efs.us-east-2.amazonaws.com",
+						Zone:    "us-east-2a",
+					},
+					{
+						Address: "fs-12345678.efs.us-east-2.amazonaws.com",
+						Zone:    "us-east-2b",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "minimal config without mount targets",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"file_storage_id": types.StringType,
+					"mount_path":      types.StringType,
+					"mount_targets": types.ListType{
+						ElemType: types.ObjectType{
+							AttrTypes: map[string]attr.Type{
+								"address": types.StringType,
+								"zone":    types.StringType,
+							},
+						},
+					},
+				},
+				map[string]attr.Value{
+					"file_storage_id": types.StringValue("filestore-instance"),
+					"mount_path":      types.StringValue("/mnt/shared"),
+					"mount_targets": types.ListNull(types.ObjectType{
+						AttrTypes: map[string]attr.Type{
+							"address": types.StringType,
+							"zone":    types.StringType,
+						},
+					}),
+				},
+			),
+			want: &FileStorage{
+				FileStorageID: "filestore-instance",
+				MountPath:     "/mnt/shared",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "null object",
+			obj:     types.ObjectNull(map[string]attr.Type{}),
+			want:    nil,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandFileStorage(ctx, tt.obj)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("expandFileStorage() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.want == nil && got != nil {
+				t.Errorf("expandFileStorage() = %v, want nil", got)
+				return
+			}
+			if tt.want != nil {
+				if got == nil {
+					t.Errorf("expandFileStorage() = nil, want non-nil")
+					return
+				}
+				if got.FileStorageID != tt.want.FileStorageID {
+					t.Errorf("expandFileStorage() FileStorageID = %v, want %v", got.FileStorageID, tt.want.FileStorageID)
+				}
+				if got.MountPath != tt.want.MountPath {
+					t.Errorf("expandFileStorage() MountPath = %v, want %v", got.MountPath, tt.want.MountPath)
+				}
+				if len(got.MountTargets) != len(tt.want.MountTargets) {
+					t.Errorf("expandFileStorage() MountTargets length = %v, want %v", len(got.MountTargets), len(tt.want.MountTargets))
+				}
 			}
 		})
 	}

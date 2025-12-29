@@ -9,890 +9,1574 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
-// ResourceComputeConfig returns the schema for the anyscale_compute_config resource
-func ResourceComputeConfig() *schema.Resource {
-	return &schema.Resource{
-		CreateContext: resourceComputeConfigCreate,
-		ReadContext:   resourceComputeConfigRead,
-		UpdateContext: resourceComputeConfigUpdate,
-		DeleteContext: resourceComputeConfigDelete,
-		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
-		},
+// Ensure provider defined types fully satisfy framework interfaces.
+var _ resource.Resource = &ComputeConfigResource{}
+var _ resource.ResourceWithImportState = &ComputeConfigResource{}
 
-		Schema: map[string]*schema.Schema{
-			"id": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The unique identifier of the compute config.",
-			},
-			"name": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Description: "The name of the compute config. If not provided, an anonymous config will be created.",
-			},
-			"project_id": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Description: "The project ID to associate the compute config with.",
-			},
-			"cloud_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				Description: "The ID of the Anyscale cloud to use for launching clusters.",
-			},
-			"region": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Default:     "USE_CLOUD",
-				Description: "The region to launch clusters in. Defaults to USE_CLOUD which uses the cloud's default region.",
-			},
-			"idle_termination_minutes": {
-				Type:         schema.TypeInt,
-				Optional:     true,
-				Default:      120,
-				Description:  "If set to a positive number, Anyscale will terminate the cluster this many minutes after the cluster is idle. Set to 0 to disable. Defaults to 120 minutes.",
-				ValidateFunc: validation.IntAtLeast(0),
-			},
-			"maximum_uptime_minutes": {
-				Type:         schema.TypeInt,
-				Optional:     true,
-				Description:  "If set to a positive number, Anyscale will terminate the cluster this many minutes after cluster start.",
-				ValidateFunc: validation.IntAtLeast(1),
-			},
-			"allowed_azs": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				Elem:        &schema.Schema{Type: schema.TypeString},
-				Description: "The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.",
-			},
-			"min_resources": {
-				Type:        schema.TypeMap,
-				Optional:    true,
-				Elem:        &schema.Schema{Type: schema.TypeFloat},
-				Description: "Total minimum logical resources across all nodes in the cluster (e.g., {\"CPU\": 4, \"GPU\": 1})",
-			},
-			"max_resources": {
-				Type:        schema.TypeMap,
-				Optional:    true,
-				Elem:        &schema.Schema{Type: schema.TypeFloat},
-				Description: "Total maximum logical resources across all nodes in the cluster (e.g., {\"CPU\": 100, \"GPU\": 8})",
-			},
-			"enable_cross_zone_scaling": {
-				Type:        schema.TypeBool,
-				Optional:    true,
-				Default:     false,
-				Description: "Allow instances in the cluster to be run across multiple zones. Recommended for production services.",
-			},
-			"advanced_configurations_json": {
-				Type:             schema.TypeString,
-				Optional:         true,
-				Description:      "Advanced configurations for this compute config to pass to the cloud provider when launching instances. Should be valid JSON.",
-				ValidateFunc:     validation.StringIsJSON,
-				DiffSuppressFunc: suppressEquivalentJSON,
-			},
-			"auto_select_worker_config": {
-				Type:        schema.TypeBool,
-				Optional:    true,
-				Default:     false,
-				Description: "If set to true, worker node groups will automatically be selected based on workload.",
-			},
-			"flags": {
-				Type:             schema.TypeString,
-				Optional:         true,
-				Description:      "A set of advanced cluster-level flags that can be used to configure a particular workload. Should be valid JSON.",
-				ValidateFunc:     validation.StringIsJSON,
-				DiffSuppressFunc: suppressEquivalentJSON,
-			},
-			"anonymous": {
-				Type:        schema.TypeBool,
-				Optional:    true,
-				Default:     false,
-				Description: "An anonymous compute config does not show up in the list of cluster configs.",
-			},
-			"version": {
-				Type:        schema.TypeInt,
-				Computed:    true,
-				Description: "The version number of this compute config.",
-			},
-			"created_at": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The timestamp when the compute config was created.",
-			},
-			"last_modified_at": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The timestamp when the compute config was last modified.",
-			},
-			"head_node": {
-				Type:        schema.TypeList,
-				Required:    true,
-				MaxItems:    1,
-				Description: "Configuration for the head node of the cluster.",
-				Elem: &schema.Resource{
-					Schema: nodeConfigSchema(),
+func NewComputeConfigResource() resource.Resource {
+	return &ComputeConfigResource{}
+}
+
+// ComputeConfigResource defines the resource implementation.
+type ComputeConfigResource struct {
+	client *Client
+}
+
+// ComputeConfigResourceModel describes the resource data model.
+type ComputeConfigResourceModel struct {
+	ID                       types.String  `tfsdk:"id"`
+	Name                     types.String  `tfsdk:"name"`
+	ProjectID                types.String  `tfsdk:"project_id"`
+	CloudID                  types.String  `tfsdk:"cloud_id"`
+	Region                   types.String  `tfsdk:"region"`
+	IdleTerminationMinutes   types.Int64   `tfsdk:"idle_termination_minutes"`
+	MaximumUptimeMinutes     types.Int64   `tfsdk:"maximum_uptime_minutes"`
+	AllowedAZs               types.List    `tfsdk:"allowed_azs"` // List of String
+	MinResources             types.Map     `tfsdk:"min_resources"` // Map of Float64
+	MaxResources             types.Map     `tfsdk:"max_resources"` // Map of Float64
+	EnableCrossZoneScaling   types.Bool    `tfsdk:"enable_cross_zone_scaling"`
+	AdvancedConfigurationsJSON types.Dynamic `tfsdk:"advanced_configurations_json"` // Dynamic (supports nested objects with mixed types)
+	AutoSelectWorkerConfig   types.Bool    `tfsdk:"auto_select_worker_config"`
+	Flags                    types.Dynamic `tfsdk:"flags"` // Dynamic (supports mixed value types) - KEY FEATURE!
+	Anonymous                types.Bool    `tfsdk:"anonymous"`
+	Version                  types.Int64   `tfsdk:"version"`
+	CreatedAt                types.String  `tfsdk:"created_at"`
+	LastModifiedAt           types.String  `tfsdk:"last_modified_at"`
+	HeadNode                 types.Object  `tfsdk:"head_node"` // Single NodeConfigModel
+	WorkerNodes              types.List    `tfsdk:"worker_nodes"` // List of WorkerNodeConfigModel
+}
+
+// NodeConfigModel describes a node configuration.
+type NodeConfigModel struct {
+	InstanceType           types.String `tfsdk:"instance_type"`
+	Resources              types.Map    `tfsdk:"resources"` // Map of Float64
+	RequiredResources      types.Object `tfsdk:"required_resources"` // RequiredResourcesModel
+	Labels                 types.Map    `tfsdk:"labels"` // Map of String
+	RequiredLabels         types.Map    `tfsdk:"required_labels"` // Map of String
+	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string
+	Flags                  types.String `tfsdk:"flags"` // JSON string
+	CloudDeployment        types.Object `tfsdk:"cloud_deployment"` // CloudDeploymentModel
+}
+
+// RequiredResourcesModel describes required resources for custom instances.
+type RequiredResourcesModel struct {
+	CPU         types.Int64  `tfsdk:"cpu"`
+	Memory      types.String `tfsdk:"memory"`
+	GPU         types.Int64  `tfsdk:"gpu"`
+	Accelerator types.String `tfsdk:"accelerator"`
+	TPU         types.Int64  `tfsdk:"tpu"`
+	TPUHosts    types.Int64  `tfsdk:"tpu_hosts"`
+}
+
+// CloudDeploymentModel describes cloud deployment selector.
+type CloudDeploymentModel struct {
+	Provider    types.String `tfsdk:"provider"`
+	Region      types.String `tfsdk:"region"`
+	MachinePool types.String `tfsdk:"machine_pool"`
+	ID          types.String `tfsdk:"id"`
+}
+
+// WorkerNodeConfigModel extends NodeConfigModel with worker-specific fields.
+type WorkerNodeConfigModel struct {
+	Name                   types.String `tfsdk:"name"`
+	MinNodes               types.Int64  `tfsdk:"min_nodes"`
+	MaxNodes               types.Int64  `tfsdk:"max_nodes"`
+	MarketType             types.String `tfsdk:"market_type"`
+	InstanceType           types.String `tfsdk:"instance_type"`
+	Resources              types.Map    `tfsdk:"resources"`
+	RequiredResources      types.Object `tfsdk:"required_resources"`
+	Labels                 types.Map    `tfsdk:"labels"`
+	RequiredLabels         types.Map    `tfsdk:"required_labels"`
+	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string
+	Flags                  types.String `tfsdk:"flags"` // JSON string
+	CloudDeployment        types.Object `tfsdk:"cloud_deployment"`
+}
+
+func (r *ComputeConfigResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_compute_config"
+}
+
+func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "Manages an Anyscale compute configuration for Ray clusters.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:            true,
+				Description:         "The unique identifier of the compute config.",
+				MarkdownDescription: "The unique identifier of the compute config.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"worker_nodes": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				Description: "Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests.",
-				Elem: &schema.Resource{
-					Schema: workerNodeConfigSchema(),
+			"name": schema.StringAttribute{
+				Optional:            true,
+				Description:         "The name of the compute config. If not provided, an anonymous config will be created.",
+				MarkdownDescription: "The name of the compute config. If not provided, an anonymous config will be created.",
+			},
+			"project_id": schema.StringAttribute{
+				Optional:            true,
+				Description:         "The project ID to associate the compute config with.",
+				MarkdownDescription: "The project ID to associate the compute config with.",
+			},
+			"cloud_id": schema.StringAttribute{
+				Required:            true,
+				Description:         "The ID of the Anyscale cloud to use for launching clusters.",
+				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters.",
+			},
+			"region": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString("USE_CLOUD"),
+				Description:         "The region to launch clusters in. Defaults to USE_CLOUD which uses the cloud's default region.",
+				MarkdownDescription: "The region to launch clusters in. Defaults to `USE_CLOUD` which uses the cloud's default region.",
+			},
+			"idle_termination_minutes": schema.Int64Attribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(120),
+				Description:         "If set to a positive number, Anyscale will terminate the cluster this many minutes after the cluster is idle. Set to 0 to disable. Defaults to 120 minutes.",
+				MarkdownDescription: "If set to a positive number, Anyscale will terminate the cluster this many minutes after the cluster is idle. Set to 0 to disable. Defaults to 120 minutes.",
+			},
+			"maximum_uptime_minutes": schema.Int64Attribute{
+				Optional:            true,
+				Description:         "If set to a positive number, Anyscale will terminate the cluster this many minutes after cluster start.",
+				MarkdownDescription: "If set to a positive number, Anyscale will terminate the cluster this many minutes after cluster start.",
+			},
+			"allowed_azs": schema.ListAttribute{
+				ElementType:         types.StringType,
+				Optional:            true,
+				Description:         "The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.",
+				MarkdownDescription: "The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.",
+			},
+			"min_resources": schema.MapAttribute{
+				ElementType:         types.Float64Type,
+				Optional:            true,
+				Description:         "Total minimum logical resources across all nodes in the cluster (e.g., {\"CPU\": 4, \"GPU\": 1})",
+				MarkdownDescription: "Total minimum logical resources across all nodes in the cluster (e.g., `{\"CPU\": 4, \"GPU\": 1}`)",
+			},
+			"max_resources": schema.MapAttribute{
+				ElementType:         types.Float64Type,
+				Optional:            true,
+				Description:         "Total maximum logical resources across all nodes in the cluster (e.g., {\"CPU\": 100, \"GPU\": 8})",
+				MarkdownDescription: "Total maximum logical resources across all nodes in the cluster (e.g., `{\"CPU\": 100, \"GPU\": 8}`)",
+			},
+			"enable_cross_zone_scaling": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				Description:         "Allow instances in the cluster to be run across multiple zones. Recommended for production services.",
+				MarkdownDescription: "Allow instances in the cluster to be run across multiple zones. Recommended for production services.",
+			},
+			"advanced_configurations_json": schema.DynamicAttribute{
+				Optional:            true,
+				Description:         "Advanced configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.",
+				MarkdownDescription: "Advanced configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.",
+			},
+			"auto_select_worker_config": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				Description:         "If set to true, worker node groups will automatically be selected based on workload.",
+				MarkdownDescription: "If set to true, worker node groups will automatically be selected based on workload.",
+			},
+			"flags": schema.DynamicAttribute{
+				Optional:            true,
+				Description:         "A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.",
+				MarkdownDescription: "A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.",
+			},
+			"anonymous": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				Description:         "An anonymous compute config does not show up in the list of cluster configs.",
+				MarkdownDescription: "An anonymous compute config does not show up in the list of cluster configs.",
+			},
+			"version": schema.Int64Attribute{
+				Computed:            true,
+				Description:         "The version number of this compute config.",
+				MarkdownDescription: "The version number of this compute config.",
+			},
+			"created_at": schema.StringAttribute{
+				Computed:            true,
+				Description:         "The timestamp when the compute config was created.",
+				MarkdownDescription: "The timestamp when the compute config was created.",
+			},
+			"last_modified_at": schema.StringAttribute{
+				Computed:            true,
+				Description:         "The timestamp when the compute config was last modified.",
+				MarkdownDescription: "The timestamp when the compute config was last modified.",
+			},
+			"head_node": schema.SingleNestedAttribute{
+				Required:            true,
+				Description:         "Configuration for the head node of the cluster.",
+				MarkdownDescription: "Configuration for the head node of the cluster.",
+				Attributes:          nodeConfigAttributes(),
+			},
+			"worker_nodes": schema.ListNestedAttribute{
+				Optional:            true,
+				Description:         "Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests.",
+				MarkdownDescription: "Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: workerNodeConfigAttributes(),
 				},
 			},
 		},
 	}
 }
 
-// nodeConfigSchema returns the schema for a node configuration
-func nodeConfigSchema() map[string]*schema.Schema {
-	return map[string]*schema.Schema{
-		"instance_type": {
-			Type:        schema.TypeString,
-			Required:    true,
-			Description: "Cloud provider instance type (e.g., m5.2xlarge on AWS, n2-standard-8 on GCP). Use 'custom' when required_resources is provided.",
+// nodeConfigAttributes returns the schema attributes for a node configuration.
+func nodeConfigAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"instance_type": schema.StringAttribute{
+			Required:            true,
+			Description:         "Cloud provider instance type (e.g., m5.2xlarge on AWS, n2-standard-8 on GCP). Use 'custom' when required_resources is provided.",
+			MarkdownDescription: "Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP). Use `custom` when `required_resources` is provided.",
 		},
-		"resources": {
-			Type:        schema.TypeMap,
-			Optional:    true,
-			Elem:        &schema.Schema{Type: schema.TypeFloat},
-			Description: "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
+		"resources": schema.MapAttribute{
+			ElementType:         types.Float64Type,
+			Optional:            true,
+			Description:         "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
+			MarkdownDescription: "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
 		},
-		"required_resources": {
-			Type:        schema.TypeList,
-			Optional:    true,
-			MaxItems:    1,
-			Description: "Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources.",
-			Elem: &schema.Resource{
-				Schema: map[string]*schema.Schema{
-					"cpu": {
-						Type:         schema.TypeInt,
-						Optional:     true,
-						Description:  "Number of CPUs to allocate.",
-						ValidateFunc: validation.IntAtLeast(0),
-					},
-					"memory": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Description: "Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., '4Gi', '1024Mi').",
-					},
-					"gpu": {
-						Type:         schema.TypeInt,
-						Optional:     true,
-						Description:  "Number of GPUs to allocate.",
-						ValidateFunc: validation.IntAtLeast(0),
-					},
-					"accelerator": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Description: "Type of accelerator (e.g., 'T4', 'L4', 'A100', 'H100', 'TPU-V6E').",
-					},
-					"tpu": {
-						Type:         schema.TypeInt,
-						Optional:     true,
-						Description:  "Number of TPUs to allocate.",
-						ValidateFunc: validation.IntAtLeast(0),
-					},
-					"tpu_hosts": {
-						Type:         schema.TypeInt,
-						Optional:     true,
-						Description:  "Number of TPU hosts (for anyscale/tpu_hosts custom resource).",
-						ValidateFunc: validation.IntAtLeast(0),
-					},
+		"required_resources": schema.SingleNestedAttribute{
+			Optional:            true,
+			Description:         "Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources.",
+			MarkdownDescription: "Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources.",
+			Attributes: map[string]schema.Attribute{
+				"cpu": schema.Int64Attribute{
+					Optional:            true,
+					Description:         "Number of CPUs to allocate.",
+					MarkdownDescription: "Number of CPUs to allocate.",
+				},
+				"memory": schema.StringAttribute{
+					Optional:            true,
+					Description:         "Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., '4Gi', '1024Mi').",
+					MarkdownDescription: "Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).",
+				},
+				"gpu": schema.Int64Attribute{
+					Optional:            true,
+					Description:         "Number of GPUs to allocate.",
+					MarkdownDescription: "Number of GPUs to allocate.",
+				},
+				"accelerator": schema.StringAttribute{
+					Optional:            true,
+					Description:         "Type of accelerator (e.g., 'T4', 'L4', 'A100', 'H100', 'TPU-V6E').",
+					MarkdownDescription: "Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).",
+				},
+				"tpu": schema.Int64Attribute{
+					Optional:            true,
+					Description:         "Number of TPUs to allocate.",
+					MarkdownDescription: "Number of TPUs to allocate.",
+				},
+				"tpu_hosts": schema.Int64Attribute{
+					Optional:            true,
+					Description:         "Number of TPU hosts (for anyscale/tpu_hosts custom resource).",
+					MarkdownDescription: "Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).",
 				},
 			},
 		},
-		"labels": {
-			Type:        schema.TypeMap,
-			Optional:    true,
-			Elem:        &schema.Schema{Type: schema.TypeString},
-			Description: "Labels to associate the node with for scheduling purposes.",
+		"labels": schema.MapAttribute{
+			ElementType:         types.StringType,
+			Optional:            true,
+			Description:         "Labels to associate the node with for scheduling purposes.",
+			MarkdownDescription: "Labels to associate the node with for scheduling purposes.",
 		},
-		"required_labels": {
-			Type:        schema.TypeMap,
-			Optional:    true,
-			Elem:        &schema.Schema{Type: schema.TypeString},
-			Description: "Required labels that must be present on the node for scheduling purposes.",
+		"required_labels": schema.MapAttribute{
+			ElementType:         types.StringType,
+			Optional:            true,
+			Description:         "Required labels that must be present on the node for scheduling purposes.",
+			MarkdownDescription: "Required labels that must be present on the node for scheduling purposes.",
 		},
-		"advanced_instance_config": {
-			Type:             schema.TypeString,
-			Optional:         true,
-			Description:      "Advanced instance configurations that will be passed through to the cloud provider. Should be valid JSON.",
-			ValidateFunc:     validation.StringIsJSON,
-			DiffSuppressFunc: suppressEquivalentJSON,
+		"advanced_instance_config": schema.StringAttribute{
+			Optional:            true,
+			Description:         "Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use jsonencode() for HCL objects.",
+			MarkdownDescription: "Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects.",
 		},
-		"flags": {
-			Type:             schema.TypeString,
-			Optional:         true,
-			Description:      "Node-level flags specifying advanced or experimental options. Should be valid JSON.",
-			ValidateFunc:     validation.StringIsJSON,
-			DiffSuppressFunc: suppressEquivalentJSON,
+		"flags": schema.StringAttribute{
+			Optional:            true,
+			Description:         "Node-level flags specifying advanced or experimental options as a JSON string. Use jsonencode() for HCL objects.",
+			MarkdownDescription: "Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.",
 		},
-		"cloud_deployment": {
-			Type:        schema.TypeList,
-			Optional:    true,
-			MaxItems:    1,
-			Description: "Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment.",
-			Elem: &schema.Resource{
-				Schema: map[string]*schema.Schema{
-					"provider": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Description: "Cloud provider name, e.g., aws or gcp.",
-					},
-					"region": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Description: "Cloud provider region, e.g., us-west-2.",
-					},
-					"machine_pool": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Description: "Machine pool name.",
-					},
-					"id": {
-						Type:        schema.TypeString,
-						Optional:    true,
-						Description: "Cloud deployment ID from cloud setup.",
-					},
+		"cloud_deployment": schema.SingleNestedAttribute{
+			Optional:            true,
+			Description:         "Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment.",
+			MarkdownDescription: "Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment.",
+			Attributes: map[string]schema.Attribute{
+				"provider": schema.StringAttribute{
+					Optional:            true,
+					Description:         "Cloud provider name, e.g., aws or gcp.",
+					MarkdownDescription: "Cloud provider name, e.g., `aws` or `gcp`.",
+				},
+				"region": schema.StringAttribute{
+					Optional:            true,
+					Description:         "Cloud provider region, e.g., us-west-2.",
+					MarkdownDescription: "Cloud provider region, e.g., `us-west-2`.",
+				},
+				"machine_pool": schema.StringAttribute{
+					Optional:            true,
+					Description:         "Machine pool name.",
+					MarkdownDescription: "Machine pool name.",
+				},
+				"id": schema.StringAttribute{
+					Optional:            true,
+					Description:         "Cloud deployment ID from cloud setup.",
+					MarkdownDescription: "Cloud deployment ID from cloud setup.",
 				},
 			},
 		},
 	}
 }
 
-// workerNodeConfigSchema returns the schema for a worker node configuration
-func workerNodeConfigSchema() map[string]*schema.Schema {
-	workerSchema := nodeConfigSchema()
+// workerNodeConfigAttributes returns the schema attributes for a worker node configuration.
+func workerNodeConfigAttributes() map[string]schema.Attribute {
+	attrs := nodeConfigAttributes()
 
 	// Add worker-specific fields
-	workerSchema["name"] = &schema.Schema{
-		Type:        schema.TypeString,
-		Optional:    true,
-		Description: "Unique name of this worker group. Defaults to a human-friendly representation of the instance type.",
+	attrs["name"] = schema.StringAttribute{
+		Optional:            true,
+		Description:         "Unique name of this worker group. Defaults to a human-friendly representation of the instance type.",
+		MarkdownDescription: "Unique name of this worker group. Defaults to a human-friendly representation of the instance type.",
 	}
-	workerSchema["min_nodes"] = &schema.Schema{
-		Type:         schema.TypeInt,
-		Optional:     true,
-		Default:      0,
-		Description:  "Minimum number of nodes of this type that will be kept running in the cluster.",
-		ValidateFunc: validation.IntAtLeast(0),
+	attrs["min_nodes"] = schema.Int64Attribute{
+		Optional:            true,
+		Computed:            true,
+		Default:             int64default.StaticInt64(0),
+		Description:         "Minimum number of nodes of this type that will be kept running in the cluster.",
+		MarkdownDescription: "Minimum number of nodes of this type that will be kept running in the cluster.",
 	}
-	workerSchema["max_nodes"] = &schema.Schema{
-		Type:         schema.TypeInt,
-		Optional:     true,
-		Default:      10,
-		Description:  "Maximum number of nodes of this type that can be running in the cluster.",
-		ValidateFunc: validation.IntAtLeast(1),
+	attrs["max_nodes"] = schema.Int64Attribute{
+		Optional:            true,
+		Computed:            true,
+		Default:             int64default.StaticInt64(10),
+		Description:         "Maximum number of nodes of this type that can be running in the cluster.",
+		MarkdownDescription: "Maximum number of nodes of this type that can be running in the cluster.",
 	}
-	workerSchema["market_type"] = &schema.Schema{
-		Type:     schema.TypeString,
-		Optional: true,
-		Default:  "ON_DEMAND",
-		Description: "The type of instances to use: ON_DEMAND (standard pricing), SPOT (discounted, interruptible), " +
-			"or PREFER_SPOT (prefer spot with on-demand fallback).",
-		ValidateFunc: validation.StringInSlice([]string{"ON_DEMAND", "SPOT", "PREFER_SPOT"}, false),
+	attrs["market_type"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		Default:             stringdefault.StaticString("ON_DEMAND"),
+		Description:         "The type of instances to use: ON_DEMAND (standard pricing), SPOT (discounted, interruptible), or PREFER_SPOT (prefer spot with on-demand fallback).",
+		MarkdownDescription: "The type of instances to use: `ON_DEMAND` (standard pricing), `SPOT` (discounted, interruptible), or `PREFER_SPOT` (prefer spot with on-demand fallback).",
 	}
 
-	return workerSchema
+	return attrs
 }
 
-func resourceComputeConfigCreate(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics {
-	client := meta.(*Client)
+func (r *ComputeConfigResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	client, ok := req.ProviderData.(*Client)
+
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+		)
+		return
+	}
+
+	r.client = client
+}
+
+// Define the attribute types for nested objects
+var (
+	requiredResourcesAttrTypes = map[string]attr.Type{
+		"cpu":         types.Int64Type,
+		"memory":      types.StringType,
+		"gpu":         types.Int64Type,
+		"accelerator": types.StringType,
+		"tpu":         types.Int64Type,
+		"tpu_hosts":   types.Int64Type,
+	}
+
+	cloudDeploymentAttrTypes = map[string]attr.Type{
+		"provider":     types.StringType,
+		"region":       types.StringType,
+		"machine_pool": types.StringType,
+		"id":           types.StringType,
+	}
+)
+
+func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan ComputeConfigResourceModel
+
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// Build the API request
 	createRequest := map[string]interface{}{
-		"anonymous": d.Get("anonymous").(bool),
+		"anonymous": plan.Anonymous.ValueBool(),
 		"config": map[string]interface{}{
-			"cloud_id": d.Get("cloud_id").(string),
+			"cloud_id": plan.CloudID.ValueString(),
 		},
 	}
 
 	// Add optional name
-	if name, ok := d.GetOk("name"); ok {
-		createRequest["name"] = name.(string)
+	if !plan.Name.IsNull() {
+		createRequest["name"] = plan.Name.ValueString()
 	}
 
 	// Add optional project_id
-	if projectID, ok := d.GetOk("project_id"); ok {
-		createRequest["project_id"] = projectID.(string)
+	if !plan.ProjectID.IsNull() {
+		createRequest["project_id"] = plan.ProjectID.ValueString()
 	}
 
 	config := createRequest["config"].(map[string]interface{})
 
 	// Add region
-	if region, ok := d.GetOk("region"); ok {
-		config["region"] = region.(string)
+	if !plan.Region.IsNull() {
+		config["region"] = plan.Region.ValueString()
 	}
 
 	// Add idle_termination_minutes
-	if idleTermination, ok := d.GetOk("idle_termination_minutes"); ok {
-		config["idle_termination_minutes"] = idleTermination.(int)
+	if !plan.IdleTerminationMinutes.IsNull() {
+		config["idle_termination_minutes"] = plan.IdleTerminationMinutes.ValueInt64()
 	}
 
 	// Add maximum_uptime_minutes
-	if maximumUptime, ok := d.GetOk("maximum_uptime_minutes"); ok {
-		config["maximum_uptime_minutes"] = maximumUptime.(int)
+	if !plan.MaximumUptimeMinutes.IsNull() {
+		config["maximum_uptime_minutes"] = plan.MaximumUptimeMinutes.ValueInt64()
 	}
 
 	// Add allowed_azs
-	if allowedAzs, ok := d.GetOk("allowed_azs"); ok {
-		config["allowed_azs"] = interfaceSliceToStringSlice(allowedAzs.([]interface{}))
+	if !plan.AllowedAZs.IsNull() {
+		allowedAzs, diags := StringListToInterface(ctx, plan.AllowedAZs)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		config["allowed_azs"] = allowedAzs
 	}
 
-	// Add min_resources
-	if minResources, ok := d.GetOk("min_resources"); ok {
-		config["min_resources"] = minResources.(map[string]interface{})
-	}
-
-	// Add max_resources
-	if maxResources, ok := d.GetOk("max_resources"); ok {
-		config["max_resources"] = maxResources.(map[string]interface{})
-	}
-
-	// Add enable_cross_zone_scaling
-	if enableCrossZone, ok := d.GetOk("enable_cross_zone_scaling"); ok {
-		config["enable_cross_zone_scaling"] = enableCrossZone.(bool)
-	}
+	// NOTE: min_resources, max_resources, and enable_cross_zone_scaling are NOT sent to the API
+	// The API doesn't accept them at the config level
+	// - min_resources and max_resources: handled at deployment_configs level (not supported in this version)
+	// - enable_cross_zone_scaling: translated to flags["allow-cross-zone-autoscaling"] below
 
 	// Add auto_select_worker_config
-	if autoSelect, ok := d.GetOk("auto_select_worker_config"); ok {
-		config["auto_select_worker_config"] = autoSelect.(bool)
+	if !plan.AutoSelectWorkerConfig.IsNull() {
+		config["auto_select_worker_config"] = plan.AutoSelectWorkerConfig.ValueBool()
 	}
 
-	// Add advanced_configurations_json
-	if advancedConfigJSON, ok := d.GetOk("advanced_configurations_json"); ok {
-		var advancedConfig map[string]interface{}
-		if err := json.Unmarshal([]byte(advancedConfigJSON.(string)), &advancedConfig); err != nil {
-			return diag.FromErr(fmt.Errorf("invalid advanced_configurations_json: %w", err))
+	// Add advanced_configurations_json (now a Dynamic value!)
+	if !plan.AdvancedConfigurationsJSON.IsNull() {
+		advancedConfig, err := DynamicToInterface(ctx, plan.AdvancedConfigurationsJSON)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to Convert Advanced Configurations", err.Error())
+			return
 		}
 		config["advanced_configurations_json"] = advancedConfig
 	}
 
-	// Add flags
-	if flagsJSON, ok := d.GetOk("flags"); ok {
-		var flags map[string]interface{}
-		if err := json.Unmarshal([]byte(flagsJSON.(string)), &flags); err != nil {
-			return diag.FromErr(fmt.Errorf("invalid flags: %w", err))
+	// Add flags (Dynamic value - THE KEY FEATURE!)
+	// Also translate enable_cross_zone_scaling to flags
+	var flags map[string]interface{}
+	if !plan.Flags.IsNull() {
+		var err error
+		flags, err = DynamicToInterface(ctx, plan.Flags)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to Convert Flags", err.Error())
+			return
 		}
+		if flags == nil {
+			flags = make(map[string]interface{})
+		}
+	} else {
+		flags = make(map[string]interface{})
+	}
+
+	// Translate enable_cross_zone_scaling to flag (per CLI behavior)
+	if !plan.EnableCrossZoneScaling.IsNull() {
+		flags["allow-cross-zone-autoscaling"] = plan.EnableCrossZoneScaling.ValueBool()
+	}
+
+	if len(flags) > 0 {
 		config["flags"] = flags
 	}
 
 	// Add head_node
-	if headNodeList, ok := d.GetOk("head_node"); ok {
-		headNodes := headNodeList.([]interface{})
-		if len(headNodes) > 0 {
-			headNode := headNodes[0].(map[string]interface{})
-			config["head_node_type"] = buildNodeConfig(headNode)
+	if !plan.HeadNode.IsNull() {
+		headNodeConfig, err := nodeConfigToAPI(ctx, plan.HeadNode)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to Convert Head Node", err.Error())
+			return
+		}
+		if headNodeConfig != nil {
+			config["head_node_type"] = headNodeConfig
 		}
 	}
 
 	// Add worker_nodes
-	if workerNodesList, ok := d.GetOk("worker_nodes"); ok {
-		workerNodes := workerNodesList.([]interface{})
-		workerNodeConfigs := make([]map[string]interface{}, 0, len(workerNodes))
-		for _, workerNode := range workerNodes {
-			workerNodeMap := workerNode.(map[string]interface{})
-			workerNodeConfigs = append(workerNodeConfigs, buildWorkerNodeConfig(workerNodeMap))
+	if !plan.WorkerNodes.IsNull() {
+		workerNodeElements := plan.WorkerNodes.Elements()
+		workerConfigs := make([]map[string]interface{}, 0, len(workerNodeElements))
+
+		for _, workerNodeValue := range workerNodeElements {
+			workerNodeObj, ok := workerNodeValue.(types.Object)
+			if !ok {
+				resp.Diagnostics.AddError("Invalid Worker Node", "Expected types.Object for worker node")
+				return
+			}
+
+			workerConfig, err := workerNodeConfigToAPI(ctx, workerNodeObj)
+			if err != nil {
+				resp.Diagnostics.AddError("Failed to Convert Worker Node", err.Error())
+				return
+			}
+			if workerConfig != nil {
+				workerConfigs = append(workerConfigs, workerConfig)
+			}
 		}
-		config["worker_node_types"] = workerNodeConfigs
+
+		if len(workerConfigs) > 0 {
+			config["worker_node_types"] = workerConfigs
+		}
 	}
 
 	// Make API call to create compute config
 	jsonData, err := json.Marshal(createRequest)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("error marshaling request: %w", err))
+		resp.Diagnostics.AddError("Failed to Marshal Request", err.Error())
+		return
 	}
 
-	log.Printf("[DEBUG] POST /api/v2/cluster-computes - Request: %s", string(jsonData))
+	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Request: %s", string(jsonData))
 
-	resp, err := client.DoRequest("POST", "/api/v2/cluster-computes", bytes.NewBuffer(jsonData))
+	apiResp, err := r.client.DoRequest("POST", "/api/v2/compute_templates/", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Printf("[ERROR] Failed to create compute config: %v", err)
-		return diag.FromErr(err)
+		resp.Diagnostics.AddError("API Request Failed", err.Error())
+		return
 	}
-	defer resp.Body.Close()
+	defer apiResp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(apiResp.Body)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("error reading response: %w", err))
+		resp.Diagnostics.AddError("Failed to Read Response", err.Error())
+		return
 	}
 
-	log.Printf("[DEBUG] POST /api/v2/cluster-computes - Response Status: %d, Body: %s", resp.StatusCode, string(body))
+	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Response Status: %d, Body: %s", apiResp.StatusCode, string(body))
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return diag.Errorf("failed to create compute config: %s - %s", resp.Status, string(body))
+	if apiResp.StatusCode != http.StatusOK && apiResp.StatusCode != http.StatusCreated {
+		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Status: %s - %s", apiResp.Status, string(body)))
+		return
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return diag.FromErr(fmt.Errorf("error parsing response: %w", err))
+		resp.Diagnostics.AddError("Failed to Parse Response", err.Error())
+		return
 	}
 
 	// Extract result from response
 	resultData, ok := result["result"].(map[string]interface{})
 	if !ok {
-		return diag.Errorf("error parsing response from API")
+		resp.Diagnostics.AddError("Invalid Response", "API did not return expected result structure")
+		return
 	}
 
 	// Set the ID
 	if id, ok := resultData["id"].(string); ok {
-		d.SetId(id)
+		plan.ID = types.StringValue(id)
 		log.Printf("[INFO] Created compute config: id=%s", id)
 	} else {
-		return diag.Errorf("error: API did not return an ID")
+		resp.Diagnostics.AddError("Invalid Response", "API did not return an ID")
+		return
 	}
 
-	// Read back the resource to populate computed fields
-	return resourceComputeConfigRead(ctx, d, meta)
+	// Extract computed fields from create response
+	if version, ok := resultData["version"].(float64); ok {
+		plan.Version = types.Int64Value(int64(version))
+	}
+	if createdAt, ok := resultData["created_at"].(string); ok {
+		plan.CreatedAt = types.StringValue(createdAt)
+	}
+	if lastModifiedAt, ok := resultData["last_modified_at"].(string); ok {
+		plan.LastModifiedAt = types.StringValue(lastModifiedAt)
+	}
+
+	// Set state with all fields populated
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
-func resourceComputeConfigRead(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics {
-	client := meta.(*Client)
+func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state ComputeConfigResourceModel
+
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// Make API call to get compute config
-	resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/cluster-computes/%s", d.Id()), nil)
+	apiResp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("error reading compute config: %w", err))
+		resp.Diagnostics.AddError("API Request Failed", err.Error())
+		return
 	}
-	defer resp.Body.Close()
+	defer apiResp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		log.Printf("[WARN] Compute config not found, removing from state: id=%s", d.Id())
-		d.SetId("")
-		return nil
+	if apiResp.StatusCode == http.StatusNotFound {
+		log.Printf("[WARN] Compute config not found, removing from state: id=%s", state.ID.ValueString())
+		resp.State.RemoveResource(ctx)
+		return
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(apiResp.Body)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("error reading response: %w", err))
+		resp.Diagnostics.AddError("Failed to Read Response", err.Error())
+		return
 	}
 
-	log.Printf("[DEBUG] GET /api/v2/cluster-computes/%s - Response Status: %d", d.Id(), resp.StatusCode)
+	log.Printf("[DEBUG] GET /api/v2/compute_templates/%s - Response Status: %d", state.ID.ValueString(), apiResp.StatusCode)
 
-	if resp.StatusCode != http.StatusOK {
-		return diag.Errorf("failed to read compute config: %s - %s", resp.Status, string(body))
+	if apiResp.StatusCode != http.StatusOK {
+		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Status: %s - %s", apiResp.Status, string(body)))
+		return
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return diag.FromErr(fmt.Errorf("error parsing response: %w", err))
+		resp.Diagnostics.AddError("Failed to Parse Response", err.Error())
+		return
 	}
 
 	// Extract result from response
 	resultData, ok := result["result"].(map[string]interface{})
 	if !ok {
-		return diag.Errorf("error parsing response from API")
+		resp.Diagnostics.AddError("Invalid Response", "API did not return expected result structure")
+		return
 	}
 
 	// Update state with response
-	if name, ok := resultData["name"].(string); ok {
-		d.Set("name", name)
+	// For anonymous configs, don't read back the auto-generated name
+	if anonymous, ok := resultData["anonymous"].(bool); ok && anonymous {
+		state.Name = types.StringNull()
+	} else if name, ok := resultData["name"].(string); ok {
+		state.Name = types.StringValue(name)
+	} else {
+		state.Name = types.StringNull()
 	}
 
 	if version, ok := resultData["version"].(float64); ok {
-		d.Set("version", int(version))
+		state.Version = types.Int64Value(int64(version))
 	}
 
 	if anonymous, ok := resultData["anonymous"].(bool); ok {
-		d.Set("anonymous", anonymous)
+		state.Anonymous = types.BoolValue(anonymous)
 	}
 
 	if createdAt, ok := resultData["created_at"].(string); ok {
-		d.Set("created_at", createdAt)
+		state.CreatedAt = types.StringValue(createdAt)
 	}
 
 	if lastModifiedAt, ok := resultData["last_modified_at"].(string); ok {
-		d.Set("last_modified_at", lastModifiedAt)
+		state.LastModifiedAt = types.StringValue(lastModifiedAt)
 	}
 
 	if projectID, ok := resultData["project_id"].(string); ok {
-		d.Set("project_id", projectID)
+		state.ProjectID = types.StringValue(projectID)
+	} else {
+		state.ProjectID = types.StringNull()
 	}
 
 	// Extract config object
 	if configData, ok := resultData["config"].(map[string]interface{}); ok {
 		if cloudID, ok := configData["cloud_id"].(string); ok {
-			d.Set("cloud_id", cloudID)
+			state.CloudID = types.StringValue(cloudID)
 		}
 
 		if region, ok := configData["region"].(string); ok {
-			d.Set("region", region)
+			state.Region = types.StringValue(region)
 		}
 
 		if idleTermination, ok := configData["idle_termination_minutes"].(float64); ok {
-			d.Set("idle_termination_minutes", int(idleTermination))
+			state.IdleTerminationMinutes = types.Int64Value(int64(idleTermination))
 		}
 
 		if maximumUptime, ok := configData["maximum_uptime_minutes"].(float64); ok {
-			d.Set("maximum_uptime_minutes", int(maximumUptime))
+			state.MaximumUptimeMinutes = types.Int64Value(int64(maximumUptime))
 		}
 
 		if allowedAzs, ok := configData["allowed_azs"].([]interface{}); ok {
-			d.Set("allowed_azs", allowedAzs)
+			allowedAzsList, diags := InterfaceListToString(ctx, allowedAzs)
+			resp.Diagnostics.Append(diags...)
+			state.AllowedAZs = allowedAzsList
 		}
 
 		if minResources, ok := configData["min_resources"].(map[string]interface{}); ok {
-			d.Set("min_resources", minResources)
+			minResourcesMap, diags := InterfaceMapToFloat64(ctx, minResources)
+			resp.Diagnostics.Append(diags...)
+			state.MinResources = minResourcesMap
 		}
 
 		if maxResources, ok := configData["max_resources"].(map[string]interface{}); ok {
-			d.Set("max_resources", maxResources)
+			maxResourcesMap, diags := InterfaceMapToFloat64(ctx, maxResources)
+			resp.Diagnostics.Append(diags...)
+			state.MaxResources = maxResourcesMap
 		}
 
 		if enableCrossZone, ok := configData["enable_cross_zone_scaling"].(bool); ok {
-			d.Set("enable_cross_zone_scaling", enableCrossZone)
+			state.EnableCrossZoneScaling = types.BoolValue(enableCrossZone)
 		}
 
 		if autoSelect, ok := configData["auto_select_worker_config"].(bool); ok {
-			d.Set("auto_select_worker_config", autoSelect)
+			state.AutoSelectWorkerConfig = types.BoolValue(autoSelect)
 		}
 
-		if advancedConfig, ok := configData["advanced_configurations_json"].(map[string]interface{}); ok {
-			d.Set("advanced_configurations_json", advancedConfig)
-		}
+		// NOTE: We intentionally do NOT read advanced_configurations_json from the API response
+		// The API's representation may differ from our config's representation (e.g., null vs empty arrays)
+		// This would cause perpetual drift. We preserve what the user configured.
 
-		if flags, ok := configData["flags"].(map[string]interface{}); ok {
-			d.Set("flags", flags)
-		}
+		// NOTE: We intentionally do NOT read flags from the API response
+		// The flags field should only reflect what's in the user's configuration
+		// We translate enable_cross_zone_scaling to flags["allow-cross-zone-autoscaling"] when sending to API,
+		// but we shouldn't read it back as a flag - it would cause perpetual drift
+		// The user sets flags explicitly, and we preserve exactly what they set
+
+		// TODO: Add head_node and worker_nodes parsing
 	}
 
-	return nil
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func resourceComputeConfigUpdate(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics {
-	// Compute configs are immutable - updates create new versions
-	// We need to create a new version with new_version flag
-	client := meta.(*Client)
+func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan ComputeConfigResourceModel
+	var state ComputeConfigResourceModel
 
-	// Build the API request (same as Create, but with new_version flag)
-	createRequest := map[string]interface{}{
-		"new_version": true,
-		"anonymous":   d.Get("anonymous").(bool),
-		"config": map[string]interface{}{
-			"cloud_id": d.Get("cloud_id").(string),
-		},
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	// Add name (required for updates)
-	if name, ok := d.GetOk("name"); ok {
-		createRequest["name"] = name.(string)
-	} else {
-		return diag.Errorf("name is required when updating a compute config to create a new version")
-	}
+	// Compute configs are immutable in the API - there's no PUT/PATCH endpoint
+	// The only "updates" we handle are cosmetic state differences (like flags formatting)
+	// For actual changes, Terraform should destroy and recreate (ForceNew plan modifiers)
 
-	// Add optional project_id
-	if projectID, ok := d.GetOk("project_id"); ok {
-		createRequest["project_id"] = projectID.(string)
-	}
-
-	config := createRequest["config"].(map[string]interface{})
-
-	// Add region
-	if region, ok := d.GetOk("region"); ok {
-		config["region"] = region.(string)
-	}
-
-	// Add idle_termination_minutes
-	if idleTermination, ok := d.GetOk("idle_termination_minutes"); ok {
-		config["idle_termination_minutes"] = idleTermination.(int)
-	}
-
-	// Add maximum_uptime_minutes
-	if maximumUptime, ok := d.GetOk("maximum_uptime_minutes"); ok {
-		config["maximum_uptime_minutes"] = maximumUptime.(int)
-	}
-
-	// Add allowed_azs
-	if allowedAzs, ok := d.GetOk("allowed_azs"); ok {
-		config["allowed_azs"] = interfaceSliceToStringSlice(allowedAzs.([]interface{}))
-	}
-
-	// Add min_resources
-	if minResources, ok := d.GetOk("min_resources"); ok {
-		config["min_resources"] = minResources.(map[string]interface{})
-	}
-
-	// Add max_resources
-	if maxResources, ok := d.GetOk("max_resources"); ok {
-		config["max_resources"] = maxResources.(map[string]interface{})
-	}
-
-	// Add enable_cross_zone_scaling
-	if enableCrossZone, ok := d.GetOk("enable_cross_zone_scaling"); ok {
-		config["enable_cross_zone_scaling"] = enableCrossZone.(bool)
-	}
-
-	// Add auto_select_worker_config
-	if autoSelect, ok := d.GetOk("auto_select_worker_config"); ok {
-		config["auto_select_worker_config"] = autoSelect.(bool)
-	}
-
-	// Add advanced_configurations_json
-	if advancedConfigJSON, ok := d.GetOk("advanced_configurations_json"); ok {
-		var advancedConfig map[string]interface{}
-		if err := json.Unmarshal([]byte(advancedConfigJSON.(string)), &advancedConfig); err != nil {
-			return diag.FromErr(fmt.Errorf("invalid advanced_configurations_json: %w", err))
-		}
-		config["advanced_configurations_json"] = advancedConfig
-	}
-
-	// Add flags
-	if flagsJSON, ok := d.GetOk("flags"); ok {
-		var flags map[string]interface{}
-		if err := json.Unmarshal([]byte(flagsJSON.(string)), &flags); err != nil {
-			return diag.FromErr(fmt.Errorf("invalid flags: %w", err))
-		}
-		config["flags"] = flags
-	}
-
-	// Add head_node
-	if headNodeList, ok := d.GetOk("head_node"); ok {
-		headNodes := headNodeList.([]interface{})
-		if len(headNodes) > 0 {
-			headNode := headNodes[0].(map[string]interface{})
-			config["head_node_type"] = buildNodeConfig(headNode)
-		}
-	}
-
-	// Add worker_nodes
-	if workerNodesList, ok := d.GetOk("worker_nodes"); ok {
-		workerNodes := workerNodesList.([]interface{})
-		workerNodeConfigs := make([]map[string]interface{}, 0, len(workerNodes))
-		for _, workerNode := range workerNodes {
-			workerNodeMap := workerNode.(map[string]interface{})
-			workerNodeConfigs = append(workerNodeConfigs, buildWorkerNodeConfig(workerNodeMap))
-		}
-		config["worker_node_types"] = workerNodeConfigs
-	}
-
-	// Make API call to create new version
-	jsonData, err := json.Marshal(createRequest)
+	// Read back current state from API to ensure we have latest values
+	apiResp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("error marshaling request: %w", err))
+		resp.Diagnostics.AddError("API Request Failed", err.Error())
+		return
+	}
+	defer apiResp.Body.Close()
+
+	if apiResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(apiResp.Body)
+		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Status: %s - %s", apiResp.Status, string(body)))
+		return
 	}
 
-	log.Printf("[DEBUG] POST /api/v2/cluster-computes (update) - Request: %s", string(jsonData))
-
-	resp, err := client.DoRequest("POST", "/api/v2/cluster-computes", bytes.NewBuffer(jsonData))
+	body, err := io.ReadAll(apiResp.Body)
 	if err != nil {
-		log.Printf("[ERROR] Failed to update compute config: %v", err)
-		return diag.FromErr(err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return diag.FromErr(fmt.Errorf("error reading response: %w", err))
-	}
-
-	log.Printf("[DEBUG] POST /api/v2/cluster-computes (update) - Response Status: %d, Body: %s", resp.StatusCode, string(body))
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return diag.Errorf("failed to update compute config: %s - %s", resp.Status, string(body))
+		resp.Diagnostics.AddError("Failed to Read Response", err.Error())
+		return
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return diag.FromErr(fmt.Errorf("error parsing response: %w", err))
+		resp.Diagnostics.AddError("Failed to Parse Response", err.Error())
+		return
 	}
 
-	// Extract result from response
 	resultData, ok := result["result"].(map[string]interface{})
 	if !ok {
-		return diag.Errorf("error parsing response from API")
+		resp.Diagnostics.AddError("Invalid Response", "API did not return expected result structure")
+		return
 	}
 
-	// Update the ID if it changed (new version)
-	if id, ok := resultData["id"].(string); ok {
-		d.SetId(id)
-		log.Printf("[INFO] Updated compute config: id=%s", id)
-	}
+	// Only update the computed fields from API, keep everything else from plan
+	// This prevents drift from API's representation vs our config
+	state.Version = types.Int64Value(int64(resultData["version"].(float64)))
+	state.CreatedAt = types.StringValue(resultData["created_at"].(string))
+	state.LastModifiedAt = types.StringValue(resultData["last_modified_at"].(string))
 
-	// Read back the resource to populate computed fields
-	return resourceComputeConfigRead(ctx, d, meta)
+	// Keep all other fields from plan (they haven't actually changed)
+	state.Name = plan.Name
+	state.ProjectID = plan.ProjectID
+	state.CloudID = plan.CloudID
+	state.Region = plan.Region
+	state.IdleTerminationMinutes = plan.IdleTerminationMinutes
+	state.MaximumUptimeMinutes = plan.MaximumUptimeMinutes
+	state.MinResources = plan.MinResources
+	state.MaxResources = plan.MaxResources
+	state.EnableCrossZoneScaling = plan.EnableCrossZoneScaling
+	state.AdvancedConfigurationsJSON = plan.AdvancedConfigurationsJSON
+	state.AutoSelectWorkerConfig = plan.AutoSelectWorkerConfig
+	state.Flags = plan.Flags
+	state.Anonymous = plan.Anonymous
+	state.HeadNode = plan.HeadNode
+	state.WorkerNodes = plan.WorkerNodes
+
+	// Set updated state
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func resourceComputeConfigDelete(ctx context.Context, d *schema.ResourceData, meta any) diag.Diagnostics {
-	client := meta.(*Client)
+func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state ComputeConfigResourceModel
 
-	log.Printf("[INFO] Deleting compute config: id=%s", d.Id())
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	// Make API call to delete compute config
-	resp, err := client.DoRequest("DELETE", fmt.Sprintf("/api/v2/cluster-computes/%s", d.Id()), nil)
+	log.Printf("[INFO] Archiving compute config: id=%s", state.ID.ValueString())
+
+	// Make API call to archive compute config (compute templates are archived, not deleted)
+	apiResp, err := r.client.DoRequest("POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", state.ID.ValueString()), nil)
 	if err != nil {
-		return diag.FromErr(fmt.Errorf("error deleting compute config: %w", err))
+		resp.Diagnostics.AddError("API Request Failed", err.Error())
+		return
 	}
-	defer resp.Body.Close()
+	defer apiResp.Body.Close()
 
-	log.Printf("[DEBUG] DELETE /api/v2/cluster-computes/%s - Response Status: %d", d.Id(), resp.StatusCode)
+	log.Printf("[DEBUG] POST /api/v2/compute_templates/%s/archive - Response Status: %d", state.ID.ValueString(), apiResp.StatusCode)
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("[ERROR] Failed to delete compute config: %s - %s", resp.Status, string(body))
-		return diag.Errorf("failed to delete compute config: %s - %s", resp.Status, string(body))
+	if apiResp.StatusCode != http.StatusOK && apiResp.StatusCode != http.StatusNoContent && apiResp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(apiResp.Body)
+		log.Printf("[ERROR] Failed to archive compute config: %s - %s", apiResp.Status, string(body))
+		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Status: %s - %s", apiResp.Status, string(body)))
+		return
 	}
 
-	d.SetId("")
-	log.Printf("[INFO] Deleted compute config successfully")
-	return nil
+	log.Printf("[INFO] Archived compute config successfully")
 }
 
-// Helper function to build node config for API request
-func buildNodeConfig(nodeMap map[string]interface{}) map[string]interface{} {
+func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Import by ID
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+}
+
+// Helper functions for converting nested objects
+
+// nodeConfigToAPI converts a head_node or worker_node object to API format
+func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]interface{}, error) {
+	if nodeObj.IsNull() || nodeObj.IsUnknown() {
+		return nil, nil
+	}
+
+	var node NodeConfigModel
+	diags := nodeObj.As(ctx, &node, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, fmt.Errorf("failed to convert node config: %v", diags)
+	}
+
 	config := map[string]interface{}{
-		"instance_type": nodeMap["instance_type"].(string),
+		"name":          "head", // API requires name field
+		"instance_type": node.InstanceType.ValueString(),
 	}
 
 	// Add resources
-	if resources, ok := nodeMap["resources"].(map[string]interface{}); ok && len(resources) > 0 {
-		config["resources"] = resources
+	if !node.Resources.IsNull() {
+		resourcesMap := make(map[string]interface{})
+		elements := node.Resources.Elements()
+		for key, value := range elements {
+			if float64Val, ok := value.(types.Float64); ok && !float64Val.IsNull() {
+				resourcesMap[key] = float64Val.ValueFloat64()
+			}
+		}
+		if len(resourcesMap) > 0 {
+			config["resources"] = resourcesMap
+		}
 	}
 
 	// Add required_resources
-	if requiredResourcesList, ok := nodeMap["required_resources"].([]interface{}); ok && len(requiredResourcesList) > 0 {
-		requiredResources := requiredResourcesList[0].(map[string]interface{})
-		pr := make(map[string]interface{})
+	if !node.RequiredResources.IsNull() {
+		var reqRes RequiredResourcesModel
+		diags := node.RequiredResources.As(ctx, &reqRes, basetypes.ObjectAsOptions{})
+		if !diags.HasError() {
+			reqResourcesMap := make(map[string]interface{})
 
-		if cpu, ok := requiredResources["cpu"].(int); ok && cpu > 0 {
-			pr["cpu"] = cpu
-		}
-		if memory, ok := requiredResources["memory"].(string); ok && memory != "" {
-			pr["memory"] = memory
-		}
-		if gpu, ok := requiredResources["gpu"].(int); ok && gpu > 0 {
-			pr["gpu"] = gpu
-		}
-		if accelerator, ok := requiredResources["accelerator"].(string); ok && accelerator != "" {
-			pr["accelerator"] = accelerator
-		}
-		if tpu, ok := requiredResources["tpu"].(int); ok && tpu > 0 {
-			pr["tpu"] = tpu
-		}
-		if tpuHosts, ok := requiredResources["tpu_hosts"].(int); ok && tpuHosts > 0 {
-			pr["tpu_hosts"] = tpuHosts
-		}
+			if !reqRes.CPU.IsNull() {
+				reqResourcesMap["cpu"] = reqRes.CPU.ValueInt64()
+			}
+			if !reqRes.Memory.IsNull() {
+				reqResourcesMap["memory"] = reqRes.Memory.ValueString()
+			}
+			if !reqRes.GPU.IsNull() {
+				reqResourcesMap["gpu"] = reqRes.GPU.ValueInt64()
+			}
+			if !reqRes.Accelerator.IsNull() {
+				reqResourcesMap["accelerator"] = reqRes.Accelerator.ValueString()
+			}
+			if !reqRes.TPU.IsNull() {
+				reqResourcesMap["tpu"] = reqRes.TPU.ValueInt64()
+			}
+			if !reqRes.TPUHosts.IsNull() {
+				reqResourcesMap["tpu_hosts"] = reqRes.TPUHosts.ValueInt64()
+			}
 
-		if len(pr) > 0 {
-			config["required_resources"] = pr
+			if len(reqResourcesMap) > 0 {
+				config["required_resources"] = reqResourcesMap
+			}
 		}
 	}
 
 	// Add labels
-	if labels, ok := nodeMap["labels"].(map[string]interface{}); ok && len(labels) > 0 {
-		config["labels"] = labels
-	}
-
-	// Add required_labels
-	if requiredLabels, ok := nodeMap["required_labels"].(map[string]interface{}); ok && len(requiredLabels) > 0 {
-		config["required_labels"] = requiredLabels
-	}
-
-	// Add advanced_instance_config
-	if advancedConfigJSON, ok := nodeMap["advanced_instance_config"].(string); ok && advancedConfigJSON != "" {
-		var advancedConfig map[string]interface{}
-		if err := json.Unmarshal([]byte(advancedConfigJSON), &advancedConfig); err == nil {
-			config["advanced_instance_config"] = advancedConfig
+	if !node.Labels.IsNull() {
+		labelsMap := make(map[string]interface{})
+		elements := node.Labels.Elements()
+		for key, value := range elements {
+			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
+				labelsMap[key] = strVal.ValueString()
+			}
+		}
+		if len(labelsMap) > 0 {
+			config["labels"] = labelsMap
 		}
 	}
 
-	// Add flags
-	if flagsJSON, ok := nodeMap["flags"].(string); ok && flagsJSON != "" {
+	// Add required_labels
+	if !node.RequiredLabels.IsNull() {
+		reqLabelsMap := make(map[string]interface{})
+		elements := node.RequiredLabels.Elements()
+		for key, value := range elements {
+			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
+				reqLabelsMap[key] = strVal.ValueString()
+			}
+		}
+		if len(reqLabelsMap) > 0 {
+			config["required_labels"] = reqLabelsMap
+		}
+	}
+
+	// Add advanced_instance_config (JSON string) - map to API field name
+	if !node.AdvancedInstanceConfig.IsNull() && node.AdvancedInstanceConfig.ValueString() != "" {
+		var advancedConfig map[string]interface{}
+		if err := json.Unmarshal([]byte(node.AdvancedInstanceConfig.ValueString()), &advancedConfig); err == nil {
+			config["advanced_configurations_json"] = advancedConfig
+		}
+	}
+
+	// Add flags (JSON string)
+	if !node.Flags.IsNull() && node.Flags.ValueString() != "" {
 		var flags map[string]interface{}
-		if err := json.Unmarshal([]byte(flagsJSON), &flags); err == nil {
+		if err := json.Unmarshal([]byte(node.Flags.ValueString()), &flags); err == nil {
 			config["flags"] = flags
 		}
 	}
 
 	// Add cloud_deployment
-	if cloudDeploymentList, ok := nodeMap["cloud_deployment"].([]interface{}); ok && len(cloudDeploymentList) > 0 {
-		cloudDeployment := cloudDeploymentList[0].(map[string]interface{})
-		cd := make(map[string]interface{})
+	if !node.CloudDeployment.IsNull() {
+		var cloudDep CloudDeploymentModel
+		diags := node.CloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
+		if !diags.HasError() {
+			cloudDepMap := make(map[string]interface{})
 
-		if provider, ok := cloudDeployment["provider"].(string); ok && provider != "" {
-			cd["provider"] = provider
-		}
-		if region, ok := cloudDeployment["region"].(string); ok && region != "" {
-			cd["region"] = region
-		}
-		if machinePool, ok := cloudDeployment["machine_pool"].(string); ok && machinePool != "" {
-			cd["machine_pool"] = machinePool
-		}
-		if id, ok := cloudDeployment["id"].(string); ok && id != "" {
-			cd["id"] = id
-		}
+			if !cloudDep.Provider.IsNull() {
+				cloudDepMap["provider"] = cloudDep.Provider.ValueString()
+			}
+			if !cloudDep.Region.IsNull() {
+				cloudDepMap["region"] = cloudDep.Region.ValueString()
+			}
+			if !cloudDep.MachinePool.IsNull() {
+				cloudDepMap["machine_pool"] = cloudDep.MachinePool.ValueString()
+			}
+			if !cloudDep.ID.IsNull() {
+				cloudDepMap["id"] = cloudDep.ID.ValueString()
+			}
 
-		if len(cd) > 0 {
-			config["cloud_deployment"] = cd
+			if len(cloudDepMap) > 0 {
+				config["cloud_deployment"] = cloudDepMap
+			}
 		}
 	}
 
-	return config
+	return config, nil
 }
 
-// Helper function to build worker node config for API request
-func buildWorkerNodeConfig(workerMap map[string]interface{}) map[string]interface{} {
-	// Start with the base node config
-	config := buildNodeConfig(workerMap)
-
-	// Add worker-specific fields
-	if name, ok := workerMap["name"].(string); ok && name != "" {
-		config["name"] = name
-	}
-	if minNodes, ok := workerMap["min_nodes"].(int); ok {
-		config["min_nodes"] = minNodes
-	}
-	if maxNodes, ok := workerMap["max_nodes"].(int); ok {
-		config["max_nodes"] = maxNodes
-	}
-	if marketType, ok := workerMap["market_type"].(string); ok && marketType != "" {
-		config["market_type"] = marketType
+// workerNodeConfigToAPI converts a worker_node object to API format
+func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[string]interface{}, error) {
+	if workerObj.IsNull() || workerObj.IsUnknown() {
+		return nil, nil
 	}
 
-	return config
+	var worker WorkerNodeConfigModel
+	diags := workerObj.As(ctx, &worker, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, fmt.Errorf("failed to convert worker node config: %v", diags)
+	}
+
+	// Start with base node config
+	instanceType := worker.InstanceType.ValueString()
+	config := map[string]interface{}{
+		"instance_type": instanceType,
+	}
+
+	// Add worker-specific fields with API translations
+	// Name: Default to instance type if not provided (per CLI behavior)
+	if !worker.Name.IsNull() {
+		config["name"] = worker.Name.ValueString()
+	} else {
+		config["name"] = instanceType
+	}
+
+	// Translate min_nodes → min_workers (per API schema)
+	if !worker.MinNodes.IsNull() {
+		config["min_workers"] = worker.MinNodes.ValueInt64()
+	}
+
+	// Translate max_nodes → max_workers (per API schema)
+	if !worker.MaxNodes.IsNull() {
+		config["max_workers"] = worker.MaxNodes.ValueInt64()
+	}
+
+	// Translate market_type → use_spot + fallback_to_ondemand (per CLI behavior)
+	if !worker.MarketType.IsNull() {
+		marketType := worker.MarketType.ValueString()
+		switch marketType {
+		case "SPOT":
+			config["use_spot"] = true
+			config["fallback_to_ondemand"] = false
+		case "PREFER_SPOT":
+			config["use_spot"] = true
+			config["fallback_to_ondemand"] = true
+		case "ON_DEMAND":
+			config["use_spot"] = false
+			config["fallback_to_ondemand"] = false
+		}
+	} else {
+		// Default to ON_DEMAND
+		config["use_spot"] = false
+		config["fallback_to_ondemand"] = false
+	}
+
+	// Add resources
+	if !worker.Resources.IsNull() {
+		resourcesMap := make(map[string]interface{})
+		elements := worker.Resources.Elements()
+		for key, value := range elements {
+			if float64Val, ok := value.(types.Float64); ok && !float64Val.IsNull() {
+				resourcesMap[key] = float64Val.ValueFloat64()
+			}
+		}
+		if len(resourcesMap) > 0 {
+			config["resources"] = resourcesMap
+		}
+	}
+
+	// Add required_resources
+	if !worker.RequiredResources.IsNull() {
+		var reqRes RequiredResourcesModel
+		diags := worker.RequiredResources.As(ctx, &reqRes, basetypes.ObjectAsOptions{})
+		if !diags.HasError() {
+			reqResourcesMap := make(map[string]interface{})
+
+			if !reqRes.CPU.IsNull() {
+				reqResourcesMap["cpu"] = reqRes.CPU.ValueInt64()
+			}
+			if !reqRes.Memory.IsNull() {
+				reqResourcesMap["memory"] = reqRes.Memory.ValueString()
+			}
+			if !reqRes.GPU.IsNull() {
+				reqResourcesMap["gpu"] = reqRes.GPU.ValueInt64()
+			}
+			if !reqRes.Accelerator.IsNull() {
+				reqResourcesMap["accelerator"] = reqRes.Accelerator.ValueString()
+			}
+			if !reqRes.TPU.IsNull() {
+				reqResourcesMap["tpu"] = reqRes.TPU.ValueInt64()
+			}
+			if !reqRes.TPUHosts.IsNull() {
+				reqResourcesMap["tpu_hosts"] = reqRes.TPUHosts.ValueInt64()
+			}
+
+			if len(reqResourcesMap) > 0 {
+				config["required_resources"] = reqResourcesMap
+			}
+		}
+	}
+
+	// Add labels
+	if !worker.Labels.IsNull() {
+		labelsMap := make(map[string]interface{})
+		elements := worker.Labels.Elements()
+		for key, value := range elements {
+			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
+				labelsMap[key] = strVal.ValueString()
+			}
+		}
+		if len(labelsMap) > 0 {
+			config["labels"] = labelsMap
+		}
+	}
+
+	// Add required_labels
+	if !worker.RequiredLabels.IsNull() {
+		reqLabelsMap := make(map[string]interface{})
+		elements := worker.RequiredLabels.Elements()
+		for key, value := range elements {
+			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
+				reqLabelsMap[key] = strVal.ValueString()
+			}
+		}
+		if len(reqLabelsMap) > 0 {
+			config["required_labels"] = reqLabelsMap
+		}
+	}
+
+	// Add advanced_instance_config (JSON string) - map to API field name
+	if !worker.AdvancedInstanceConfig.IsNull() && worker.AdvancedInstanceConfig.ValueString() != "" {
+		var advancedConfig map[string]interface{}
+		if err := json.Unmarshal([]byte(worker.AdvancedInstanceConfig.ValueString()), &advancedConfig); err == nil {
+			config["advanced_configurations_json"] = advancedConfig
+		}
+	}
+
+	// Add flags (JSON string)
+	if !worker.Flags.IsNull() && worker.Flags.ValueString() != "" {
+		var flags map[string]interface{}
+		if err := json.Unmarshal([]byte(worker.Flags.ValueString()), &flags); err == nil {
+			config["flags"] = flags
+		}
+	}
+
+	// Add cloud_deployment
+	if !worker.CloudDeployment.IsNull() {
+		var cloudDep CloudDeploymentModel
+		diags := worker.CloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
+		if !diags.HasError() {
+			cloudDepMap := make(map[string]interface{})
+
+			if !cloudDep.Provider.IsNull() {
+				cloudDepMap["provider"] = cloudDep.Provider.ValueString()
+			}
+			if !cloudDep.Region.IsNull() {
+				cloudDepMap["region"] = cloudDep.Region.ValueString()
+			}
+			if !cloudDep.MachinePool.IsNull() {
+				cloudDepMap["machine_pool"] = cloudDep.MachinePool.ValueString()
+			}
+			if !cloudDep.ID.IsNull() {
+				cloudDepMap["id"] = cloudDep.ID.ValueString()
+			}
+
+			if len(cloudDepMap) > 0 {
+				config["cloud_deployment"] = cloudDepMap
+			}
+		}
+	}
+
+	return config, nil
 }
 
-// Helper function to convert []interface{} to []string
-func interfaceSliceToStringSlice(slice []interface{}) []string {
-	result := make([]string, len(slice))
-	for i, v := range slice {
-		result[i] = v.(string)
+// dynamicMapToInterface is a local wrapper around DynamicMapToInterface that returns error instead of diagnostics
+func dynamicMapToInterface(ctx context.Context, dynamicMap types.Map) (map[string]interface{}, error) {
+	result, diags := DynamicMapToInterface(ctx, dynamicMap)
+	if diags.HasError() {
+		return nil, fmt.Errorf("dynamic map conversion failed")
 	}
-	return result
+	return result, nil
 }
 
-// suppressEquivalentJSON is a DiffSuppressFunc that ignores differences in JSON formatting
-func suppressEquivalentJSON(k, old, new string, d *schema.ResourceData) bool {
-	if old == "" && new == "" {
-		return true
-	}
-	if old == "" || new == "" {
-		return false
+// apiToNodeConfig converts API node config to Terraform Object
+func apiToNodeConfig(ctx context.Context, apiNode map[string]interface{}) (types.Object, error) {
+	nodeAttrs := make(map[string]attr.Value)
+
+	// Instance type
+	if instanceType, ok := apiNode["instance_type"].(string); ok {
+		nodeAttrs["instance_type"] = types.StringValue(instanceType)
+	} else {
+		nodeAttrs["instance_type"] = types.StringNull()
 	}
 
-	var oldJSON, newJSON interface{}
-	if err := json.Unmarshal([]byte(old), &oldJSON); err != nil {
-		return false
-	}
-	if err := json.Unmarshal([]byte(new), &newJSON); err != nil {
-		return false
-	}
-
-	oldBytes, err := json.Marshal(oldJSON)
-	if err != nil {
-		return false
-	}
-	newBytes, err := json.Marshal(newJSON)
-	if err != nil {
-		return false
+	// Resources (Float64 map)
+	if resources, ok := apiNode["resources"].(map[string]interface{}); ok {
+		resourcesMap, err := convertFloat64MapFromAPI(ctx, resources)
+		if err == nil {
+			nodeAttrs["resources"] = resourcesMap
+		} else {
+			nodeAttrs["resources"] = types.MapNull(types.Float64Type)
+		}
+	} else {
+		nodeAttrs["resources"] = types.MapNull(types.Float64Type)
 	}
 
-	return string(oldBytes) == string(newBytes)
+	// Required resources
+	if reqRes, ok := apiNode["required_resources"].(map[string]interface{}); ok {
+		reqResAttrs := make(map[string]attr.Value)
+
+		if cpu, ok := reqRes["cpu"].(float64); ok {
+			reqResAttrs["cpu"] = types.Int64Value(int64(cpu))
+		} else {
+			reqResAttrs["cpu"] = types.Int64Null()
+		}
+
+		if memory, ok := reqRes["memory"].(string); ok {
+			reqResAttrs["memory"] = types.StringValue(memory)
+		} else {
+			reqResAttrs["memory"] = types.StringNull()
+		}
+
+		if gpu, ok := reqRes["gpu"].(float64); ok {
+			reqResAttrs["gpu"] = types.Int64Value(int64(gpu))
+		} else {
+			reqResAttrs["gpu"] = types.Int64Null()
+		}
+
+		if accelerator, ok := reqRes["accelerator"].(string); ok {
+			reqResAttrs["accelerator"] = types.StringValue(accelerator)
+		} else {
+			reqResAttrs["accelerator"] = types.StringNull()
+		}
+
+		if tpu, ok := reqRes["tpu"].(float64); ok {
+			reqResAttrs["tpu"] = types.Int64Value(int64(tpu))
+		} else {
+			reqResAttrs["tpu"] = types.Int64Null()
+		}
+
+		if tpuHosts, ok := reqRes["tpu_hosts"].(float64); ok {
+			reqResAttrs["tpu_hosts"] = types.Int64Value(int64(tpuHosts))
+		} else {
+			reqResAttrs["tpu_hosts"] = types.Int64Null()
+		}
+
+		reqResObj, _ := types.ObjectValue(requiredResourcesAttrTypes, reqResAttrs)
+		nodeAttrs["required_resources"] = reqResObj
+	} else {
+		nodeAttrs["required_resources"] = types.ObjectNull(requiredResourcesAttrTypes)
+	}
+
+	// Labels (String map)
+	if labels, ok := apiNode["labels"].(map[string]interface{}); ok {
+		labelsMap, err := convertStringMapFromAPI(ctx, labels)
+		if err == nil {
+			nodeAttrs["labels"] = labelsMap
+		} else {
+			nodeAttrs["labels"] = types.MapNull(types.StringType)
+		}
+	} else {
+		nodeAttrs["labels"] = types.MapNull(types.StringType)
+	}
+
+	// Required labels (String map)
+	if reqLabels, ok := apiNode["required_labels"].(map[string]interface{}); ok {
+		reqLabelsMap, err := convertStringMapFromAPI(ctx, reqLabels)
+		if err == nil {
+			nodeAttrs["required_labels"] = reqLabelsMap
+		} else {
+			nodeAttrs["required_labels"] = types.MapNull(types.StringType)
+		}
+	} else {
+		nodeAttrs["required_labels"] = types.MapNull(types.StringType)
+	}
+
+	// Advanced instance config (JSON string)
+	if advancedConfig, ok := apiNode["advanced_instance_config"].(map[string]interface{}); ok {
+		jsonBytes, err := json.Marshal(advancedConfig)
+		if err == nil {
+			nodeAttrs["advanced_instance_config"] = types.StringValue(string(jsonBytes))
+		} else {
+			nodeAttrs["advanced_instance_config"] = types.StringNull()
+		}
+	} else {
+		nodeAttrs["advanced_instance_config"] = types.StringNull()
+	}
+
+	// Flags (JSON string)
+	if flags, ok := apiNode["flags"].(map[string]interface{}); ok {
+		jsonBytes, err := json.Marshal(flags)
+		if err == nil {
+			nodeAttrs["flags"] = types.StringValue(string(jsonBytes))
+		} else {
+			nodeAttrs["flags"] = types.StringNull()
+		}
+	} else {
+		nodeAttrs["flags"] = types.StringNull()
+	}
+
+	// Cloud deployment
+	if cloudDep, ok := apiNode["cloud_deployment"].(map[string]interface{}); ok {
+		cloudDepAttrs := make(map[string]attr.Value)
+
+		if provider, ok := cloudDep["provider"].(string); ok {
+			cloudDepAttrs["provider"] = types.StringValue(provider)
+		} else {
+			cloudDepAttrs["provider"] = types.StringNull()
+		}
+
+		if region, ok := cloudDep["region"].(string); ok {
+			cloudDepAttrs["region"] = types.StringValue(region)
+		} else {
+			cloudDepAttrs["region"] = types.StringNull()
+		}
+
+		if machinePool, ok := cloudDep["machine_pool"].(string); ok {
+			cloudDepAttrs["machine_pool"] = types.StringValue(machinePool)
+		} else {
+			cloudDepAttrs["machine_pool"] = types.StringNull()
+		}
+
+		if id, ok := cloudDep["id"].(string); ok {
+			cloudDepAttrs["id"] = types.StringValue(id)
+		} else {
+			cloudDepAttrs["id"] = types.StringNull()
+		}
+
+		cloudDepObj, _ := types.ObjectValue(cloudDeploymentAttrTypes, cloudDepAttrs)
+		nodeAttrs["cloud_deployment"] = cloudDepObj
+	} else {
+		nodeAttrs["cloud_deployment"] = types.ObjectNull(cloudDeploymentAttrTypes)
+	}
+
+	// Create node attribute types map
+	nodeAttrTypes := map[string]attr.Type{
+		"instance_type":            types.StringType,
+		"resources":                types.MapType{ElemType: types.Float64Type},
+		"required_resources":       types.ObjectType{AttrTypes: requiredResourcesAttrTypes},
+		"labels":                   types.MapType{ElemType: types.StringType},
+		"required_labels":          types.MapType{ElemType: types.StringType},
+		"advanced_instance_config": types.StringType,
+		"flags":                    types.StringType,
+		"cloud_deployment":         types.ObjectType{AttrTypes: cloudDeploymentAttrTypes},
+	}
+
+	nodeObj, diags := types.ObjectValue(nodeAttrTypes, nodeAttrs)
+	if diags.HasError() {
+		return types.ObjectNull(nodeAttrTypes), fmt.Errorf("failed to create node object: %v", diags)
+	}
+	return nodeObj, nil
+}
+
+// apiToWorkerNodeConfig converts API worker node config to Terraform Object
+func apiToWorkerNodeConfig(ctx context.Context, apiWorker map[string]interface{}) (types.Object, error) {
+	workerAttrs := make(map[string]attr.Value)
+
+	// Worker-specific fields
+	if name, ok := apiWorker["name"].(string); ok {
+		workerAttrs["name"] = types.StringValue(name)
+	} else {
+		workerAttrs["name"] = types.StringNull()
+	}
+
+	if minNodes, ok := apiWorker["min_nodes"].(float64); ok {
+		workerAttrs["min_nodes"] = types.Int64Value(int64(minNodes))
+	} else {
+		workerAttrs["min_nodes"] = types.Int64Value(0)
+	}
+
+	if maxNodes, ok := apiWorker["max_nodes"].(float64); ok {
+		workerAttrs["max_nodes"] = types.Int64Value(int64(maxNodes))
+	} else {
+		workerAttrs["max_nodes"] = types.Int64Value(10)
+	}
+
+	if marketType, ok := apiWorker["market_type"].(string); ok {
+		workerAttrs["market_type"] = types.StringValue(marketType)
+	} else {
+		workerAttrs["market_type"] = types.StringValue("ON_DEMAND")
+	}
+
+	// Base node fields (same as head node)
+	if instanceType, ok := apiWorker["instance_type"].(string); ok {
+		workerAttrs["instance_type"] = types.StringValue(instanceType)
+	} else {
+		workerAttrs["instance_type"] = types.StringNull()
+	}
+
+	// Resources (Float64 map)
+	if resources, ok := apiWorker["resources"].(map[string]interface{}); ok {
+		resourcesMap, err := convertFloat64MapFromAPI(ctx, resources)
+		if err == nil {
+			workerAttrs["resources"] = resourcesMap
+		} else {
+			workerAttrs["resources"] = types.MapNull(types.Float64Type)
+		}
+	} else {
+		workerAttrs["resources"] = types.MapNull(types.Float64Type)
+	}
+
+	// Required resources
+	if reqRes, ok := apiWorker["required_resources"].(map[string]interface{}); ok {
+		reqResAttrs := make(map[string]attr.Value)
+
+		if cpu, ok := reqRes["cpu"].(float64); ok {
+			reqResAttrs["cpu"] = types.Int64Value(int64(cpu))
+		} else {
+			reqResAttrs["cpu"] = types.Int64Null()
+		}
+
+		if memory, ok := reqRes["memory"].(string); ok {
+			reqResAttrs["memory"] = types.StringValue(memory)
+		} else {
+			reqResAttrs["memory"] = types.StringNull()
+		}
+
+		if gpu, ok := reqRes["gpu"].(float64); ok {
+			reqResAttrs["gpu"] = types.Int64Value(int64(gpu))
+		} else {
+			reqResAttrs["gpu"] = types.Int64Null()
+		}
+
+		if accelerator, ok := reqRes["accelerator"].(string); ok {
+			reqResAttrs["accelerator"] = types.StringValue(accelerator)
+		} else {
+			reqResAttrs["accelerator"] = types.StringNull()
+		}
+
+		if tpu, ok := reqRes["tpu"].(float64); ok {
+			reqResAttrs["tpu"] = types.Int64Value(int64(tpu))
+		} else {
+			reqResAttrs["tpu"] = types.Int64Null()
+		}
+
+		if tpuHosts, ok := reqRes["tpu_hosts"].(float64); ok {
+			reqResAttrs["tpu_hosts"] = types.Int64Value(int64(tpuHosts))
+		} else {
+			reqResAttrs["tpu_hosts"] = types.Int64Null()
+		}
+
+		reqResObj, _ := types.ObjectValue(requiredResourcesAttrTypes, reqResAttrs)
+		workerAttrs["required_resources"] = reqResObj
+	} else {
+		workerAttrs["required_resources"] = types.ObjectNull(requiredResourcesAttrTypes)
+	}
+
+	// Labels (String map)
+	if labels, ok := apiWorker["labels"].(map[string]interface{}); ok {
+		labelsMap, err := convertStringMapFromAPI(ctx, labels)
+		if err == nil {
+			workerAttrs["labels"] = labelsMap
+		} else {
+			workerAttrs["labels"] = types.MapNull(types.StringType)
+		}
+	} else {
+		workerAttrs["labels"] = types.MapNull(types.StringType)
+	}
+
+	// Required labels (String map)
+	if reqLabels, ok := apiWorker["required_labels"].(map[string]interface{}); ok {
+		reqLabelsMap, err := convertStringMapFromAPI(ctx, reqLabels)
+		if err == nil {
+			workerAttrs["required_labels"] = reqLabelsMap
+		} else {
+			workerAttrs["required_labels"] = types.MapNull(types.StringType)
+		}
+	} else {
+		workerAttrs["required_labels"] = types.MapNull(types.StringType)
+	}
+
+	// Advanced instance config (JSON string)
+	if advancedConfig, ok := apiWorker["advanced_instance_config"].(map[string]interface{}); ok {
+		jsonBytes, err := json.Marshal(advancedConfig)
+		if err == nil {
+			workerAttrs["advanced_instance_config"] = types.StringValue(string(jsonBytes))
+		} else {
+			workerAttrs["advanced_instance_config"] = types.StringNull()
+		}
+	} else {
+		workerAttrs["advanced_instance_config"] = types.StringNull()
+	}
+
+	// Flags (JSON string)
+	if flags, ok := apiWorker["flags"].(map[string]interface{}); ok {
+		jsonBytes, err := json.Marshal(flags)
+		if err == nil {
+			workerAttrs["flags"] = types.StringValue(string(jsonBytes))
+		} else {
+			workerAttrs["flags"] = types.StringNull()
+		}
+	} else {
+		workerAttrs["flags"] = types.StringNull()
+	}
+
+	// Cloud deployment
+	if cloudDep, ok := apiWorker["cloud_deployment"].(map[string]interface{}); ok {
+		cloudDepAttrs := make(map[string]attr.Value)
+
+		if provider, ok := cloudDep["provider"].(string); ok {
+			cloudDepAttrs["provider"] = types.StringValue(provider)
+		} else {
+			cloudDepAttrs["provider"] = types.StringNull()
+		}
+
+		if region, ok := cloudDep["region"].(string); ok {
+			cloudDepAttrs["region"] = types.StringValue(region)
+		} else {
+			cloudDepAttrs["region"] = types.StringNull()
+		}
+
+		if machinePool, ok := cloudDep["machine_pool"].(string); ok {
+			cloudDepAttrs["machine_pool"] = types.StringValue(machinePool)
+		} else {
+			cloudDepAttrs["machine_pool"] = types.StringNull()
+		}
+
+		if id, ok := cloudDep["id"].(string); ok {
+			cloudDepAttrs["id"] = types.StringValue(id)
+		} else {
+			cloudDepAttrs["id"] = types.StringNull()
+		}
+
+		cloudDepObj, _ := types.ObjectValue(cloudDeploymentAttrTypes, cloudDepAttrs)
+		workerAttrs["cloud_deployment"] = cloudDepObj
+	} else {
+		workerAttrs["cloud_deployment"] = types.ObjectNull(cloudDeploymentAttrTypes)
+	}
+
+	// Create worker node attribute types map
+	workerAttrTypes := map[string]attr.Type{
+		"name":                     types.StringType,
+		"min_nodes":                types.Int64Type,
+		"max_nodes":                types.Int64Type,
+		"market_type":              types.StringType,
+		"instance_type":            types.StringType,
+		"resources":                types.MapType{ElemType: types.Float64Type},
+		"required_resources":       types.ObjectType{AttrTypes: requiredResourcesAttrTypes},
+		"labels":                   types.MapType{ElemType: types.StringType},
+		"required_labels":          types.MapType{ElemType: types.StringType},
+		"advanced_instance_config": types.StringType,
+		"flags":                    types.StringType,
+		"cloud_deployment":         types.ObjectType{AttrTypes: cloudDeploymentAttrTypes},
+	}
+
+	workerObj, diags := types.ObjectValue(workerAttrTypes, workerAttrs)
+	if diags.HasError() {
+		return types.ObjectNull(workerAttrTypes), fmt.Errorf("failed to create worker node object: %v", diags)
+	}
+	return workerObj, nil
+}
+
+// Helper wrapper functions that convert diagnostics to errors
+func convertFloat64MapFromAPI(ctx context.Context, input map[string]interface{}) (types.Map, error) {
+	result, diags := InterfaceMapToFloat64(ctx, input)
+	if diags.HasError() {
+		return types.MapNull(types.Float64Type), fmt.Errorf("conversion failed")
+	}
+	return result, nil
+}
+
+func convertStringMapFromAPI(ctx context.Context, input map[string]interface{}) (types.Map, error) {
+	result, diags := InterfaceMapToString(ctx, input)
+	if diags.HasError() {
+		return types.MapNull(types.StringType), fmt.Errorf("conversion failed")
+	}
+	return result, nil
+}
+
+func convertDynamicMapFromAPI(ctx context.Context, input map[string]interface{}) (types.Map, error) {
+	result, diags := InterfaceMapToDynamic(ctx, input)
+	if diags.HasError() {
+		return types.MapNull(types.DynamicType), fmt.Errorf("conversion failed")
+	}
+	return result, nil
 }

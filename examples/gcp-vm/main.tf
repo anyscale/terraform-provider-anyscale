@@ -24,11 +24,6 @@ resource "anyscale_cloud" "primary" {
   # No gcp_config, object_storage, or file_storage blocks
   # This creates an "empty" cloud - resources attached via anyscale_cloud_resource
 
-  timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
-  }
 }
 
 # Step 2: Attach cloud resource with configuration
@@ -74,9 +69,4 @@ resource "anyscale_cloud_resource" "primary" {
     }
   }
 
-  timeouts {
-    create = "30m"
-    update = "30m"
-    delete = "30m"
-  }
 }

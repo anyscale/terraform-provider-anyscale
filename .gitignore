@@ -81,3 +81,7 @@ credentials.json
 *.key
 .env
 .env.*
+
+# Claude local memory
+CLAUDE.local.md
+.claude/

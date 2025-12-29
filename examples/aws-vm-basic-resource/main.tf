@@ -6,11 +6,6 @@ resource "anyscale_cloud" "primary" {
   name = var.cloud_name
   # No file_storage block - EFS disabled
 
-  timeouts {
-    create = "5m"
-    update = "5m"
-    delete = "5m"
-  }
 }
 
 resource "anyscale_cloud_resource" "primary" {
@@ -37,9 +32,4 @@ resource "anyscale_cloud_resource" "primary" {
     region      = var.aws_region
   }
 
-  timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
-  }
 }

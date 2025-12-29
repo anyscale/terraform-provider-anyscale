@@ -76,10 +76,8 @@ type CloudDeploymentRequest struct {
 	GCPConfig        *GCPConfig        `json:"gcp_config,omitempty"`
 	AzureConfig      *AzureConfig      `json:"azure_config,omitempty"`
 	KubernetesConfig *KubernetesConfig `json:"kubernetes_config,omitempty"`
-	// Cloud-level settings that can be set when adding a resource
-	AutoAddUser             *bool `json:"auto_add_user,omitempty"`
-	LineageTrackingEnabled  *bool `json:"lineage_tracking_enabled,omitempty"`
-	IsAggregatedLogsEnabled *bool `json:"is_aggregated_logs_enabled,omitempty"`
+	// Note: Cloud-level settings (auto_add_user, lineage_tracking, log_ingestion)
+	// are set during cloud creation (POST /api/v2/clouds), NOT during add_resource
 }
 
 // ObjectStorage represents object storage configuration (S3, GCS, Azure Blob, S3-compatible)

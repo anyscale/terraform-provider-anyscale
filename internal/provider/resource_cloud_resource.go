@@ -1,383 +1,821 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// ResourceCloudResource returns the schema for the anyscale_cloud_resource resource
-func ResourceCloudResource() *schema.Resource {
-	return &schema.Resource{
-		CreateContext: resourceCloudResourceCreate,
-		ReadContext:   resourceCloudResourceRead,
-		UpdateContext: resourceCloudResourceUpdate,
-		DeleteContext: resourceCloudResourceDelete,
-		Importer: &schema.ResourceImporter{
-			StateContext: resourceCloudResourceImportState,
+// Ensure provider defined types fully satisfy framework interfaces.
+var (
+	_ resource.Resource                = &CloudResourceResource{}
+	_ resource.ResourceWithConfigure   = &CloudResourceResource{}
+	_ resource.ResourceWithImportState = &CloudResourceResource{}
+)
+
+// NewCloudResourceResource returns a new cloud resource resource.
+func NewCloudResourceResource() resource.Resource {
+	return &CloudResourceResource{}
+}
+
+// CloudResourceResource defines the resource implementation.
+type CloudResourceResource struct {
+	client *Client
+}
+
+// CloudResourceResourceModel describes the resource data model.
+type CloudResourceResourceModel struct {
+	// Parent reference
+	CloudID types.String `tfsdk:"cloud_id"`
+
+	// Resource identity
+	Name types.String `tfsdk:"name"`
+
+	// Compute configuration
+	CloudProvider types.String `tfsdk:"cloud_provider"`
+	ComputeStack  types.String `tfsdk:"compute_stack"`
+	Region        types.String `tfsdk:"region"`
+	IsPrivate     types.Bool   `tfsdk:"is_private"`
+
+	// Provider-specific configurations (nested)
+	AWSConfig        types.Object `tfsdk:"aws_config"`
+	GCPConfig        types.Object `tfsdk:"gcp_config"`
+	KubernetesConfig types.Object `tfsdk:"kubernetes_config"`
+
+	// Storage configurations
+	ObjectStorage types.Object `tfsdk:"object_storage"`
+	FileStorage   types.Object `tfsdk:"file_storage"`
+
+	// Computed fields
+	CloudResourceID   types.String `tfsdk:"cloud_resource_id"`
+	CloudDeploymentID types.String `tfsdk:"cloud_deployment_id"`
+	Status            types.String `tfsdk:"status"`
+	IsDefault         types.Bool   `tfsdk:"is_default"`
+
+	// Internal
+	ID types.String `tfsdk:"id"`
+}
+
+// AWSConfigModel represents AWS-specific configuration.
+type AWSConfigModel struct {
+	VPCID                   types.String `tfsdk:"vpc_id"`
+	SubnetIDs               types.List   `tfsdk:"subnet_ids"`
+	SubnetIDsToAZ           types.Map    `tfsdk:"subnet_ids_to_az"`
+	SecurityGroupIDs        types.List   `tfsdk:"security_group_ids"`
+	ControlplaneIAMRoleARN  types.String `tfsdk:"controlplane_iam_role_arn"`
+	DataplaneIAMRoleARN     types.String `tfsdk:"dataplane_iam_role_arn"`
+	ExternalID              types.String `tfsdk:"external_id"`
+	MemoryDBClusterName     types.String `tfsdk:"memorydb_cluster_name"`
+	MemoryDBClusterARN      types.String `tfsdk:"memorydb_cluster_arn"`
+	MemoryDBClusterEndpoint types.String `tfsdk:"memorydb_cluster_endpoint"`
+}
+
+// GCPConfigModel represents GCP-specific configuration.
+type GCPConfigModel struct {
+	ProjectID                      types.String `tfsdk:"project_id"`
+	HostProjectID                  types.String `tfsdk:"host_project_id"`
+	ProviderName                   types.String `tfsdk:"provider_name"`
+	VPCName                        types.String `tfsdk:"vpc_name"`
+	SubnetNames                    types.List   `tfsdk:"subnet_names"`
+	ControlplaneServiceAccountEmail types.String `tfsdk:"controlplane_service_account_email"`
+	DataplaneServiceAccountEmail   types.String `tfsdk:"dataplane_service_account_email"`
+	FirewallPolicyNames            types.List   `tfsdk:"firewall_policy_names"`
+	MemorystoreInstanceName        types.String `tfsdk:"memorystore_instance_name"`
+	MemorystoreEndpoint            types.String `tfsdk:"memorystore_endpoint"`
+}
+
+// KubernetesConfigModel represents Kubernetes-specific configuration.
+type KubernetesConfigModel struct {
+	AnyscaleOperatorIAMIdentity types.String `tfsdk:"anyscale_operator_iam_identity"`
+	Zones                       types.List   `tfsdk:"zones"`
+	Namespace                   types.String `tfsdk:"namespace"`
+	IngressHost                 types.String `tfsdk:"ingress_host"`
+	ClusterName                 types.String `tfsdk:"cluster_name"`
+	Context                     types.String `tfsdk:"context"`
+	KubeconfigPath              types.String `tfsdk:"kubeconfig_path"`
+}
+
+// ObjectStorageModel represents object storage configuration.
+type ObjectStorageModel struct {
+	BucketName types.String `tfsdk:"bucket_name"`
+	Region     types.String `tfsdk:"region"`
+	Endpoint   types.String `tfsdk:"endpoint"`
+}
+
+// FileStorageModel represents file storage configuration.
+type FileStorageModel struct {
+	FileStorageID types.String `tfsdk:"file_storage_id"`
+	MountPath     types.String `tfsdk:"mount_path"`
+	MountTargets  types.List   `tfsdk:"mount_targets"`
+}
+
+// MountTargetModel represents a mount target.
+type MountTargetModel struct {
+	Address types.String `tfsdk:"address"`
+	Zone    types.String `tfsdk:"zone"`
+}
+
+// Metadata returns the resource type name.
+func (r *CloudResourceResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_cloud_resource"
+}
+
+// Schema defines the resource schema.
+func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "Manages an Anyscale Cloud Resource deployment. This attaches infrastructure configuration to an existing Anyscale Cloud.",
+
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "Composite identifier in format cloud_id:resource_name",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			// ─── Parent Reference ─────────────────────────────────
+			"cloud_id": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "The cloud ID to attach this resource to.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+
+			// ─── Resource Identity ────────────────────────────────
+			"name": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "The name of the cloud resource. Auto-generated if not provided.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			// ─── Compute Configuration ────────────────────────────
+			"cloud_provider": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Cloud provider: AWS or GCP. Required for K8S compute_stack when aws_config/gcp_config is not provided. Inferred from aws_config/gcp_config if not specified.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"compute_stack": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Compute stack type: VM or K8S.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+
+			"region": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "The region for this cloud resource.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+
+			"is_private": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				MarkdownDescription: "Whether this is a private resource (private networking).",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
+			},
+
+			// ─── Computed Fields ──────────────────────────────────
+			"cloud_resource_id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"cloud_deployment_id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The cloud deployment ID assigned by Anyscale.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"status": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The current status of the cloud resource.",
+			},
+
+			"is_default": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this is the default resource for the cloud.",
+			},
 		},
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(30 * time.Minute),
-			Update: schema.DefaultTimeout(30 * time.Minute),
-			Delete: schema.DefaultTimeout(30 * time.Minute),
-		},
-
-		Schema: map[string]*schema.Schema{
-			// ─── Reference to Parent Cloud ─────────────────────────
-			"cloud_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The cloud ID to attach this resource to.",
-			},
-
-			// ─── Resource Identity ─────────────────────────────────
-			"name": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Computed:    true,
-				ForceNew:    true,
-				Description: "The name of the cloud resource. Auto-generated if not provided.",
-			},
-
-			// ─── Compute Configuration ─────────────────────────────
-			"cloud_provider": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Computed:    true,
-				ForceNew:    true,
-				Description: "Cloud provider: AWS or GCP. Required for K8S compute_stack when aws_config/gcp_config is not provided. Inferred from aws_config/gcp_config if not specified.",
-			},
-			"compute_stack": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "Compute stack type: VM or K8S.",
-			},
-			"region": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The region for this cloud resource.",
-			},
-			"is_private": {
-				Type:        schema.TypeBool,
-				Optional:    true,
-				Default:     false,
-				ForceNew:    true,
-				Description: "Whether this is a private resource (private networking).",
-			},
-
-			// ─── AWS Configuration (nested) ─────────────────────
-			"aws_config": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				MaxItems:    1,
-				Description: "AWS-specific configuration.",
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"vpc_id": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "The VPC ID where Anyscale resources will be deployed.",
+		Blocks: map[string]schema.Block{
+			// ─── AWS Configuration ────────────────────────────────
+			"aws_config": schema.SingleNestedBlock{
+				MarkdownDescription: "AWS-specific configuration.",
+				Attributes: map[string]schema.Attribute{
+					"vpc_id": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The VPC ID where Anyscale resources will be deployed.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"subnet_ids": {
-							Type:        schema.TypeList,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az.",
-							Elem:        &schema.Schema{Type: schema.TypeString},
+					},
+					"subnet_ids": schema.ListAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az.",
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
 						},
-						"subnet_ids_to_az": {
-							Type:        schema.TypeMap,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids.",
-							Elem:        &schema.Schema{Type: schema.TypeString},
+					},
+					"subnet_ids_to_az": schema.MapAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids.",
+						PlanModifiers: []planmodifier.Map{
+							mapplanmodifier.RequiresReplace(),
 						},
-						"security_group_ids": {
-							Type:        schema.TypeList,
-							Required:    true,
-							ForceNew:    true,
-							Description: "List of security group IDs for Anyscale resources.",
-							Elem:        &schema.Schema{Type: schema.TypeString},
+					},
+					"security_group_ids": schema.ListAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "List of security group IDs for Anyscale resources.",
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
 						},
-						"controlplane_iam_role_arn": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "IAM role ARN for Anyscale control plane (cross-account access).",
+					},
+					"controlplane_iam_role_arn": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "IAM role ARN for Anyscale control plane (cross-account access).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"dataplane_iam_role_arn": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "IAM role ARN for Anyscale data plane (cluster nodes).",
+					},
+					"dataplane_iam_role_arn": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "IAM role ARN for Anyscale data plane (cluster nodes).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"external_id": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "External ID for IAM role assumption (recommended for security).",
+					},
+					"external_id": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "External ID for IAM role assumption (recommended for security).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"memorydb_cluster_name": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "MemoryDB cluster name for Ray GCS fault tolerance.",
+					},
+					"memorydb_cluster_name": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "MemoryDB cluster name for Ray GCS fault tolerance.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"memorydb_cluster_arn": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "MemoryDB cluster ARN.",
+					},
+					"memorydb_cluster_arn": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "MemoryDB cluster ARN.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"memorydb_cluster_endpoint": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "MemoryDB cluster endpoint address.",
+					},
+					"memorydb_cluster_endpoint": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "MemoryDB cluster endpoint address.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
 					},
 				},
 			},
 
-			// ─── GCP Configuration (nested) ─────────────────────
-			"gcp_config": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				MaxItems:    1,
-				Description: "GCP-specific configuration.",
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"project_id": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "The GCP project ID.",
+			// ─── GCP Configuration ────────────────────────────────
+			"gcp_config": schema.SingleNestedBlock{
+				MarkdownDescription: "GCP-specific configuration.",
+				Attributes: map[string]schema.Attribute{
+					"project_id": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The GCP project ID.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"host_project_id": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "The host project ID for shared VPCs (optional).",
+					},
+					"host_project_id": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The host project ID for shared VPCs (optional).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"provider_name": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "Workload Identity Federation provider name.",
+					},
+					"provider_name": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Workload Identity Federation provider name.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"vpc_name": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "The VPC network name.",
+					},
+					"vpc_name": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The VPC network name.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"subnet_names": {
-							Type:        schema.TypeList,
-							Required:    true,
-							ForceNew:    true,
-							Description: "List of subnet names within the VPC for Anyscale resources.",
-							Elem:        &schema.Schema{Type: schema.TypeString},
+					},
+					"subnet_names": schema.ListAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "List of subnet names within the VPC for Anyscale resources.",
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
 						},
-						"controlplane_service_account_email": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "Service account email for Anyscale control plane.",
+					},
+					"controlplane_service_account_email": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Service account email for Anyscale control plane.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"dataplane_service_account_email": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "Service account email for Ray cluster nodes.",
+					},
+					"dataplane_service_account_email": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Service account email for Ray cluster nodes.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"firewall_policy_names": {
-							Type:        schema.TypeList,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "List of firewall policy names.",
-							Elem:        &schema.Schema{Type: schema.TypeString},
+					},
+					"firewall_policy_names": schema.ListAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "List of firewall policy names.",
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
 						},
-						"memorystore_instance_name": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "Memorystore instance name for Ray GCS fault tolerance.",
+					},
+					"memorystore_instance_name": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Memorystore instance name for Ray GCS fault tolerance.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"memorystore_endpoint": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "Memorystore endpoint address.",
+					},
+					"memorystore_endpoint": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Memorystore endpoint address.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
 					},
 				},
 			},
 
-			// ─── Kubernetes Configuration (nested) ──────────────
-			"kubernetes_config": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				MaxItems:    1,
-				Description: "Kubernetes-specific configuration. Required when compute_stack is K8S.",
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"anyscale_operator_iam_identity": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.",
+			// ─── Kubernetes Configuration ─────────────────────────
+			"kubernetes_config": schema.SingleNestedBlock{
+				MarkdownDescription: "Kubernetes-specific configuration. Required when compute_stack is K8S.",
+				Attributes: map[string]schema.Attribute{
+					"anyscale_operator_iam_identity": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"zones": {
-							Type:        schema.TypeList,
-							Optional:    true,
-							ForceNew:    true,
-							Elem:        &schema.Schema{Type: schema.TypeString},
-							Description: "List of availability zones for the Kubernetes cluster.",
+					},
+					"zones": schema.ListAttribute{
+						ElementType:         types.StringType,
+						Optional:            true,
+						MarkdownDescription: "List of availability zones for the Kubernetes cluster.",
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
 						},
-						"namespace": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Default:     "anyscale",
-							Description: "The Kubernetes namespace for Anyscale workloads.",
+					},
+					"namespace": schema.StringAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             stringdefault.StaticString("anyscale"),
+						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads.",
+					},
+					"ingress_host": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com).",
+					},
+					"cluster_name": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name).",
+					},
+					"context": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments).",
+					},
+					"kubeconfig_path": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments).",
+					},
+				},
+			},
+
+			// ─── Object Storage ───────────────────────────────────
+			"object_storage": schema.SingleNestedBlock{
+				MarkdownDescription: "Object storage configuration (S3, GCS).",
+				Attributes: map[string]schema.Attribute{
+					"bucket_name": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"ingress_host": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The ingress host for the Anyscale operator (e.g., anyscale.example.com).",
+					},
+					"region": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The bucket region (if different from cloud region).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
-						"cluster_name": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The Kubernetes cluster name (EKS, GKE, AKS cluster name).",
-						},
-						"context": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "Kubeconfig context to use (for Generic K8S deployments).",
-						},
-						"kubeconfig_path": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "Path to kubeconfig file (for Generic K8S deployments).",
+					},
+					"endpoint": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Custom S3-compatible endpoint (for MinIO, etc.).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
 					},
 				},
 			},
 
-			// ─── Object Storage (common abstraction) ────────────
-			"object_storage": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				MaxItems:    1,
-				Description: "Object storage configuration (S3, GCS).",
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"bucket_name": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS).",
-						},
-						"region": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "The bucket region (if different from cloud region).",
-						},
-						"endpoint": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							ForceNew:    true,
-							Description: "Custom S3-compatible endpoint (for MinIO, etc.).",
+			// ─── File Storage ─────────────────────────────────────
+			"file_storage": schema.SingleNestedBlock{
+				MarkdownDescription: "File storage configuration (EFS, Filestore, etc.).",
+				Attributes: map[string]schema.Attribute{
+					"file_storage_id": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "The file storage ID (EFS ID, Filestore name, etc.).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
 					},
+					"mount_path": schema.StringAttribute{
+						Optional:            true,
+						Computed:            true,
+						Default:             stringdefault.StaticString("/mnt/shared"),
+						MarkdownDescription: "The mount path for the file storage.",
+					},
 				},
-			},
-
-			// ─── File Storage (EFS, Filestore, etc.) ──────────────
-			"file_storage": {
-				Type:        schema.TypeList,
-				Optional:    true,
-				MaxItems:    1,
-				Description: "File storage configuration (EFS, Filestore, etc.).",
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"file_storage_id": {
-							Type:        schema.TypeString,
-							Required:    true,
-							ForceNew:    true,
-							Description: "The file storage ID (EFS ID, Filestore name, etc.).",
-						},
-						"mount_path": {
-							Type:        schema.TypeString,
-							Optional:    true,
-							Default:     "/mnt/shared",
-							Description: "The mount path for the file storage.",
-						},
-						"mount_targets": {
-							Type:        schema.TypeList,
-							Optional:    true,
-							Description: "List of mount targets with address and optional zone.",
-							Elem: &schema.Resource{
-								Schema: map[string]*schema.Schema{
-									"address": {
-										Type:        schema.TypeString,
-										Required:    true,
-										Description: "The IP address or DNS name of the mount target.",
-									},
-									"zone": {
-										Type:        schema.TypeString,
-										Optional:    true,
-										Description: "The zone of the mount target (optional).",
-									},
+				Blocks: map[string]schema.Block{
+					"mount_targets": schema.ListNestedBlock{
+						MarkdownDescription: "List of mount targets with address and optional zone.",
+						NestedObject: schema.NestedBlockObject{
+							Attributes: map[string]schema.Attribute{
+								"address": schema.StringAttribute{
+									Optional:            true,
+									MarkdownDescription: "The IP address or DNS name of the mount target.",
+								},
+								"zone": schema.StringAttribute{
+									Optional:            true,
+									MarkdownDescription: "The zone of the mount target (optional).",
 								},
 							},
 						},
 					},
 				},
 			},
-
-			// ─── Computed Fields ────────────────────────────────
-			"cloud_resource_id": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The unique cloud resource ID assigned by Anyscale.",
-			},
-			"cloud_deployment_id": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The cloud deployment ID assigned by Anyscale.",
-			},
-			"status": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "The current status of the cloud resource.",
-			},
-			"is_default": {
-				Type:        schema.TypeBool,
-				Computed:    true,
-				Description: "Whether this is the default resource for the cloud.",
-			},
 		},
 	}
 }
 
-// ─── Helper Functions ───────────────────────────────────────────────────────
+// Configure adds the provider configured client to the resource.
+func (r *CloudResourceResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	client, ok := req.ProviderData.(*Client)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+		)
+		return
+	}
+
+	r.client = client
+}
+
+// Create creates the resource and sets the initial Terraform state.
+func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan CloudResourceResourceModel
+
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cloudID := plan.CloudID.ValueString()
+	region := plan.Region.ValueString()
+	computeStack := plan.ComputeStack.ValueString()
+	isPrivate := plan.IsPrivate.ValueBool()
+
+	networkingMode := "PUBLIC"
+	if isPrivate {
+		networkingMode = "PRIVATE"
+	}
+
+	// Determine cloud provider from explicit field or infer from config blocks
+	provider := plan.CloudProvider.ValueString()
+	if provider == "" {
+		if !plan.AWSConfig.IsNull() {
+			provider = "AWS"
+		} else if !plan.GCPConfig.IsNull() {
+			provider = "GCP"
+		}
+	}
+
+	if provider == "" {
+		resp.Diagnostics.AddError(
+			"Provider Required",
+			"cloud_provider must be specified, or aws_config/gcp_config must be provided to infer the provider",
+		)
+		return
+	}
+
+	// Set inferred provider in state
+	plan.CloudProvider = types.StringValue(provider)
+
+	// Generate or use provided name
+	name := plan.Name.ValueString()
+	if name == "" {
+		name = fmt.Sprintf("%s-%s-%s",
+			strings.ToLower(computeStack),
+			strings.ToLower(provider),
+			strings.ToLower(region))
+	}
+
+	tflog.Info(ctx, "Creating Anyscale Cloud Resource",
+		map[string]any{
+			"cloud_id":      cloudID,
+			"name":          name,
+			"provider":      provider,
+			"region":        region,
+			"compute_stack": computeStack,
+		})
+
+	// Check if there's an existing default resource that we should update
+	existingDefault, err := r.findDefaultCloudResource(ctx, cloudID)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to check for existing default resource", map[string]any{"error": err.Error()})
+	} else if existingDefault != nil {
+		tflog.Info(ctx, "Found existing default resource, will update it instead of creating new", map[string]any{"name": existingDefault.Name})
+		name = existingDefault.Name
+	}
+
+	// Build deployment request
+	deployReq := CloudDeploymentRequest{
+		Name:           name,
+		Provider:       provider,
+		ComputeStack:   computeStack,
+		Region:         region,
+		NetworkingMode: networkingMode,
+	}
+
+	// Add provider-specific configuration
+	if err := r.addProviderConfig(ctx, &deployReq, &plan, provider, computeStack, &resp.Diagnostics); err != nil {
+		resp.Diagnostics.AddError("Configuration Error", err.Error())
+		return
+	}
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	jsonData, err := json.Marshal(deployReq)
+	if err != nil {
+		resp.Diagnostics.AddError("JSON Marshaling Error", err.Error())
+		return
+	}
+
+	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": string(jsonData)})
+
+	httpResp, err := r.client.DoRequest("PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(jsonData)))
+	if err != nil {
+		tflog.Error(ctx, "Failed to add cloud resource", map[string]any{"error": err.Error()})
+		resp.Diagnostics.AddError("API Request Failed", err.Error())
+		return
+	}
+	defer httpResp.Body.Close()
+
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		resp.Diagnostics.AddError("Response Read Error", err.Error())
+		return
+	}
+
+	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource response",
+		map[string]any{"status": httpResp.StatusCode, "body": string(body)})
+
+	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusCreated {
+		resp.Diagnostics.AddError(
+			"API Error",
+			fmt.Sprintf("Failed to add cloud resource: %s - %s", httpResp.Status, string(body)),
+		)
+		return
+	}
+
+	var deployResp CloudDeploymentResponse
+	if err := json.Unmarshal(body, &deployResp); err != nil {
+		resp.Diagnostics.AddError("JSON Unmarshal Error", err.Error())
+		return
+	}
+
+	// Set state from response
+	resourceName := deployResp.Result.Name
+	plan.ID = types.StringValue(fmt.Sprintf("%s:%s", cloudID, resourceName))
+	plan.Name = types.StringValue(resourceName)
+	plan.CloudResourceID = types.StringValue(deployResp.Result.CloudResourceID)
+	plan.CloudDeploymentID = types.StringValue(deployResp.Result.CloudDeploymentID)
+
+	// Initialize Status to known null - will be updated by readCloudResource if available
+	if plan.Status.IsUnknown() {
+		plan.Status = types.StringNull()
+	}
+
+	tflog.Info(ctx, "Cloud resource created successfully", map[string]any{"id": plan.ID.ValueString()})
+
+	// Wait for the parent cloud to become ready
+	createTimeout := 30 * time.Minute
+	if err := waitForCloudReady(ctx, r.client, cloudID, createTimeout); err != nil {
+		tflog.Error(ctx, "Failed waiting for parent cloud to be ready", map[string]any{"error": err.Error()})
+		resp.Diagnostics.AddError("Wait Error", err.Error())
+		return
+	}
+
+	// Read back the resource to get all computed fields
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &plan); err != nil {
+		resp.Diagnostics.AddError("Read Error", err.Error())
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// Read refreshes the Terraform state with the latest data.
+func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state CloudResourceResourceModel
+
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cloudID, resourceName, err := parseCloudResourceID(state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Parse Error", err.Error())
+		return
+	}
+
+	tflog.Info(ctx, "Reading Anyscale Cloud Resource", map[string]any{"cloud_id": cloudID, "name": resourceName})
+
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &state); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			tflog.Warn(ctx, "Cloud resource not found, removing from state", map[string]any{"cloud_id": cloudID, "name": resourceName})
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError("Read Error", err.Error())
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// Update updates the resource and sets the updated Terraform state on success.
+func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Most fields are ForceNew, so limited updates possible
+	tflog.Info(ctx, "Cloud resource update called - most fields are ForceNew")
+
+	var state CloudResourceResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Just re-read to refresh state
+	cloudID, resourceName, err := parseCloudResourceID(state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Parse Error", err.Error())
+		return
+	}
+
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &state); err != nil {
+		resp.Diagnostics.AddError("Read Error", err.Error())
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// Delete deletes the resource and removes the Terraform state on success.
+func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state CloudResourceResourceModel
+
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cloudID, resourceName, err := parseCloudResourceID(state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Parse Error", err.Error())
+		return
+	}
+
+	tflog.Info(ctx, "Deleting Anyscale Cloud Resource", map[string]any{"cloud_id": cloudID, "name": resourceName})
+
+	// Check if this is the default/primary resource
+	if state.IsDefault.ValueBool() {
+		tflog.Info(ctx, "Cloud resource is the primary resource - it will be deleted when the cloud is deleted", map[string]any{"name": resourceName})
+		return
+	}
+
+	deleteURL := fmt.Sprintf("/api/v2/clouds/%s/remove_resource?cloud_resource_name=%s",
+		cloudID, url.QueryEscape(resourceName))
+
+	httpResp, err := r.client.DoRequest("DELETE", deleteURL, nil)
+	if err != nil {
+		tflog.Error(ctx, "Failed to delete cloud resource", map[string]any{"error": err.Error()})
+		resp.Diagnostics.AddError("API Request Failed", err.Error())
+		return
+	}
+	defer httpResp.Body.Close()
+
+	tflog.Debug(ctx, "DELETE response", map[string]any{"status": httpResp.StatusCode})
+
+	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(httpResp.Body)
+		bodyStr := string(body)
+		tflog.Error(ctx, "Failed to delete cloud resource", map[string]any{"status": httpResp.Status, "body": bodyStr})
+
+		// Handle the case where the API tells us this is a primary resource
+		if httpResp.StatusCode == http.StatusBadRequest && strings.Contains(bodyStr, "primary resource") {
+			tflog.Info(ctx, "Cloud resource is the primary resource - it will be deleted when the cloud is deleted", map[string]any{"name": resourceName})
+			return
+		}
+
+		resp.Diagnostics.AddError(
+			"Delete Failed",
+			fmt.Sprintf("Failed to delete cloud resource: %s - %s", httpResp.Status, bodyStr),
+		)
+		return
+	}
+
+	tflog.Info(ctx, "Cloud resource deleted successfully", map[string]any{"cloud_id": cloudID, "name": resourceName})
+}
+
+// ImportState imports an existing resource into Terraform state.
+func (r *CloudResourceResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// ID format: cloud_id:resource_name
+	cloudID, resourceName, err := parseCloudResourceID(req.ID)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Import Error",
+			fmt.Sprintf("Invalid import ID format. Expected 'cloud_id:resource_name', got '%s'", req.ID),
+		)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_id"), cloudID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), resourceName)...)
+}
+
+// ─── Helper Functions ─────────────────────────────────────────────────────────
 
 // parseCloudResourceID parses a composite ID in format "cloud_id:resource_name"
 func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
@@ -388,245 +826,9 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// generateResourceName creates a resource name based on config
-func generateResourceName(computeStack, provider, region string) string {
-	return fmt.Sprintf("%s-%s-%s",
-		strings.ToLower(computeStack),
-		strings.ToLower(provider),
-		strings.ToLower(region))
-}
-
-// getProviderFromResourceData gets the cloud provider from explicit field or infers from aws_config/gcp_config
-func getProviderFromResourceData(d *schema.ResourceData) string {
-	// First check if cloud_provider is explicitly set
-	if provider, ok := d.GetOk("cloud_provider"); ok && provider.(string) != "" {
-		return strings.ToUpper(provider.(string))
-	}
-	// Otherwise infer from config blocks
-	if _, ok := d.GetOk("aws_config"); ok {
-		return "AWS"
-	}
-	if _, ok := d.GetOk("gcp_config"); ok {
-		return "GCP"
-	}
-	return ""
-}
-
-// getNetworkingModeFromResource determines networking mode based on is_private
-func getNetworkingModeFromResource(d *schema.ResourceData) string {
-	if d.Get("is_private").(bool) {
-		return "PRIVATE"
-	}
-	return "PUBLIC"
-}
-
-// ExpandAWSConfigFromResource extracts AWS configuration from cloud_resource schema
-func ExpandAWSConfigFromResource(d *schema.ResourceData) *AWSConfig {
-	v, ok := d.GetOk("aws_config")
-	if !ok || len(v.([]any)) == 0 {
-		return nil
-	}
-
-	config := v.([]any)[0].(map[string]any)
-
-	awsConfig := &AWSConfig{
-		VPCID:             config["vpc_id"].(string),
-		AnyscaleIAMRoleID: config["controlplane_iam_role_arn"].(string),
-		ClusterIAMRoleID:  config["dataplane_iam_role_arn"].(string),
-	}
-
-	// Handle subnet_ids_to_az map (preferred) or subnet_ids list
-	if subnetAZMap, ok := config["subnet_ids_to_az"].(map[string]any); ok && len(subnetAZMap) > 0 {
-		awsConfig.SubnetIDs = make([]string, 0, len(subnetAZMap))
-		awsConfig.Zones = make([]string, 0, len(subnetAZMap))
-		for subnetID, az := range subnetAZMap {
-			awsConfig.SubnetIDs = append(awsConfig.SubnetIDs, subnetID)
-			awsConfig.Zones = append(awsConfig.Zones, az.(string))
-		}
-	} else if subnetIDs, ok := config["subnet_ids"].([]any); ok && len(subnetIDs) > 0 {
-		awsConfig.SubnetIDs = make([]string, len(subnetIDs))
-		for i, v := range subnetIDs {
-			awsConfig.SubnetIDs[i] = v.(string)
-		}
-	}
-
-	// Security Group IDs
-	if sgIDs, ok := config["security_group_ids"].([]any); ok {
-		awsConfig.SecurityGroupIDs = make([]string, len(sgIDs))
-		for i, v := range sgIDs {
-			awsConfig.SecurityGroupIDs[i] = v.(string)
-		}
-	}
-
-	// Optional fields
-	if externalID, ok := config["external_id"].(string); ok && externalID != "" {
-		awsConfig.ExternalID = externalID
-	}
-	if memoryDBName, ok := config["memorydb_cluster_name"].(string); ok && memoryDBName != "" {
-		awsConfig.MemoryDBClusterName = &memoryDBName
-	}
-	if memoryDBARN, ok := config["memorydb_cluster_arn"].(string); ok && memoryDBARN != "" {
-		awsConfig.MemoryDBClusterARN = &memoryDBARN
-	}
-	if memoryDBEndpoint, ok := config["memorydb_cluster_endpoint"].(string); ok && memoryDBEndpoint != "" {
-		awsConfig.MemoryDBClusterEndpoint = &memoryDBEndpoint
-	}
-
-	return awsConfig
-}
-
-// ExpandGCPConfigFromResource extracts GCP configuration from cloud_resource schema
-func ExpandGCPConfigFromResource(d *schema.ResourceData) *GCPConfig {
-	v, ok := d.GetOk("gcp_config")
-	if !ok || len(v.([]any)) == 0 {
-		return nil
-	}
-
-	config := v.([]any)[0].(map[string]any)
-
-	gcpConfig := &GCPConfig{}
-
-	if projectID, ok := config["project_id"].(string); ok {
-		gcpConfig.ProjectID = projectID
-	}
-	if providerName, ok := config["provider_name"].(string); ok {
-		gcpConfig.ProviderName = providerName
-	}
-	if vpcName, ok := config["vpc_name"].(string); ok {
-		gcpConfig.VPCName = vpcName
-	}
-	if controlplaneSA, ok := config["controlplane_service_account_email"].(string); ok {
-		gcpConfig.AnyscaleServiceAccountEmail = controlplaneSA
-	}
-	if dataplaneSA, ok := config["dataplane_service_account_email"].(string); ok {
-		gcpConfig.ClusterServiceAccountEmail = dataplaneSA
-	}
-
-	if subnetNames, ok := config["subnet_names"].([]any); ok && len(subnetNames) > 0 {
-		var validNames []string
-		for _, v := range subnetNames {
-			if s, ok := v.(string); ok && s != "" {
-				validNames = append(validNames, s)
-			}
-		}
-		gcpConfig.SubnetNames = validNames
-	}
-
-	if fwPolicies, ok := config["firewall_policy_names"].([]any); ok && len(fwPolicies) > 0 {
-		var validPolicies []string
-		for _, v := range fwPolicies {
-			if s, ok := v.(string); ok && s != "" {
-				validPolicies = append(validPolicies, s)
-			}
-		}
-		gcpConfig.FirewallPolicyNames = validPolicies
-	}
-
-	if hostProjectID, ok := config["host_project_id"].(string); ok && hostProjectID != "" {
-		gcpConfig.HostProjectID = hostProjectID
-	}
-	if memorystoreName, ok := config["memorystore_instance_name"].(string); ok && memorystoreName != "" {
-		gcpConfig.MemorystoreInstanceName = memorystoreName
-	}
-	if memorystoreEndpoint, ok := config["memorystore_endpoint"].(string); ok && memorystoreEndpoint != "" {
-		gcpConfig.MemorystoreEndpoint = memorystoreEndpoint
-	}
-
-	return gcpConfig
-}
-
-// ExpandObjectStorageFromResource extracts object storage configuration from cloud_resource schema
-func ExpandObjectStorageFromResource(d *schema.ResourceData) *ObjectStorage {
-	v, ok := d.GetOk("object_storage")
-	if !ok || len(v.([]any)) == 0 {
-		return nil
-	}
-
-	config := v.([]any)[0].(map[string]any)
-
-	storage := &ObjectStorage{
-		BucketName: config["bucket_name"].(string),
-	}
-
-	if region, ok := config["region"].(string); ok && region != "" {
-		storage.Region = &region
-	}
-	if endpoint, ok := config["endpoint"].(string); ok && endpoint != "" {
-		storage.Endpoint = &endpoint
-	}
-
-	return storage
-}
-
-// ExpandFileStorageFromResource extracts file storage configuration from cloud_resource schema
-func ExpandFileStorageFromResource(d *schema.ResourceData) *FileStorage {
-	v, ok := d.GetOk("file_storage")
-	if !ok || len(v.([]any)) == 0 {
-		return nil
-	}
-
-	config := v.([]any)[0].(map[string]any)
-
-	storage := &FileStorage{
-		FileStorageID: config["file_storage_id"].(string),
-	}
-
-	if mountPath, ok := config["mount_path"].(string); ok && mountPath != "" {
-		storage.MountPath = mountPath
-	}
-
-	if mountTargets, ok := config["mount_targets"].([]any); ok && len(mountTargets) > 0 {
-		storage.MountTargets = make([]MountTarget, len(mountTargets))
-		for i, v := range mountTargets {
-			if targetMap, ok := v.(map[string]any); ok {
-				target := MountTarget{}
-				if addr, ok := targetMap["address"].(string); ok {
-					target.Address = addr
-				}
-				if zone, ok := targetMap["zone"].(string); ok {
-					target.Zone = zone
-				}
-				storage.MountTargets[i] = target
-			}
-		}
-	}
-
-	return storage
-}
-
-// ExpandKubernetesConfigFromResource extracts kubernetes_config and returns only the fields
-// that are accepted by the Anyscale API (anyscale_operator_iam_identity and zones).
-func ExpandKubernetesConfigFromResource(d *schema.ResourceData) *KubernetesConfig {
-	v, ok := d.GetOk("kubernetes_config")
-	if !ok || len(v.([]any)) == 0 {
-		return nil
-	}
-
-	config := v.([]any)[0].(map[string]any)
-
-	k8sConfig := &KubernetesConfig{}
-
-	// Only populate fields accepted by the API
-	if iamIdentity, ok := config["anyscale_operator_iam_identity"].(string); ok && iamIdentity != "" {
-		k8sConfig.AnyscaleOperatorIAMIdentity = iamIdentity
-	}
-
-	// Handle zones list
-	if zones, ok := config["zones"].([]any); ok && len(zones) > 0 {
-		k8sConfig.Zones = make([]string, len(zones))
-		for i, z := range zones {
-			k8sConfig.Zones[i] = z.(string)
-		}
-	}
-
-	return k8sConfig
-}
-
-// findDefaultCloudResource checks if the cloud has a single default resource.
-// This is used to detect if we should update an existing default resource instead of creating a new one.
-// Returns the default resource if found, nil if not found or if there are multiple resources.
-func findDefaultCloudResource(client *Client, cloudID string) (*CloudDeploymentResult, error) {
-	resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+// findDefaultCloudResource checks if the cloud has a single default resource
+func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cloudID string) (*CloudDeploymentResult, error) {
+	resp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -646,286 +848,39 @@ func findDefaultCloudResource(client *Client, cloudID string) (*CloudDeploymentR
 		return nil, err
 	}
 
-	// Only return the default resource if there's exactly one resource
-	// This indicates we're dealing with a fresh empty cloud with just the placeholder
 	if len(deploymentsResp.Results) == 1 && deploymentsResp.Results[0].IsDefault {
-		log.Printf("[DEBUG] Found single default resource: %s", deploymentsResp.Results[0].Name)
+		tflog.Debug(ctx, "Found single default resource", map[string]any{"name": deploymentsResp.Results[0].Name})
 		return &deploymentsResp.Results[0], nil
 	}
 
-	log.Printf("[DEBUG] Cloud has %d resources, not updating default", len(deploymentsResp.Results))
+	tflog.Debug(ctx, "Cloud has multiple resources or no default", map[string]any{"count": len(deploymentsResp.Results)})
 	return nil, nil
 }
 
-// ─── CRUD Operations ────────────────────────────────────────────────────────
-
-func resourceCloudResourceCreate(ctx context.Context, d *schema.ResourceData, m any) diag.Diagnostics {
-	client := m.(*Client)
-
-	cloudID := d.Get("cloud_id").(string)
-	region := d.Get("region").(string)
-	computeStack := d.Get("compute_stack").(string)
-	networkingMode := getNetworkingModeFromResource(d)
-	provider := getProviderFromResourceData(d)
-
-	if provider == "" {
-		return diag.Errorf("cloud_provider must be specified, or aws_config/gcp_config must be provided to infer the provider")
-	}
-
-	// Set the cloud_provider in state if it was inferred
-	d.Set("cloud_provider", provider)
-
-	// Generate or use provided name
-	name := d.Get("name").(string)
-	if name == "" {
-		name = generateResourceName(computeStack, provider, region)
-	}
-
-	log.Printf("[INFO] Creating Anyscale Cloud Resource: cloud_id=%s, name=%s, provider=%s, region=%s",
-		cloudID, name, provider, region)
-
-	// Check if there's an existing default resource that we should update instead of create
-	// This handles the case where an empty cloud was created with a placeholder default resource
-	existingDefault, err := findDefaultCloudResource(client, cloudID)
+// readCloudResource reads a cloud resource from the API and updates the state model
+func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel) error {
+	resp, err := r.client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 	if err != nil {
-		log.Printf("[WARN] Failed to check for existing default resource: %v", err)
-		// Continue with creation - the API will handle conflicts
-	} else if existingDefault != nil {
-		log.Printf("[INFO] Found existing default resource %s, will update it instead of creating new", existingDefault.Name)
-		// Use the existing default resource's name
-		name = existingDefault.Name
-	}
-
-	// Build deployment request
-	deployReq := CloudDeploymentRequest{
-		Name:           name,
-		Provider:       provider,
-		ComputeStack:   computeStack,
-		Region:         region,
-		NetworkingMode: networkingMode,
-	}
-
-	// Add provider-specific configuration
-	switch provider {
-	case "AWS":
-		// For K8S compute stack, aws_config is NOT required
-		// For VM compute stack, aws_config IS required
-		if computeStack == "K8S" {
-			// K8S requires: kubernetes_config, object_storage
-			// aws_config is optional for K8S
-			k8sConfig := ExpandKubernetesConfigFromResource(d)
-			if k8sConfig == nil {
-				return diag.Errorf("kubernetes_config is required when compute_stack is K8S")
-			}
-			if k8sConfig.AnyscaleOperatorIAMIdentity == "" {
-				return diag.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for AWS K8S clouds")
-			}
-			deployReq.KubernetesConfig = k8sConfig
-
-			// object_storage is required for K8S
-			objStorage := ExpandObjectStorageFromResource(d)
-			if objStorage == nil {
-				return diag.Errorf("object_storage is required when compute_stack is K8S")
-			}
-			bucketName := objStorage.BucketName
-			if !strings.HasPrefix(bucketName, "s3://") {
-				bucketName = "s3://" + bucketName
-			}
-			deployReq.ObjectStorage = &ObjectStorage{
-				BucketName: bucketName,
-				Region:     objStorage.Region,
-				Endpoint:   objStorage.Endpoint,
-			}
-
-			// aws_config is optional for K8S - add if provided
-			if awsConfig := ExpandAWSConfigFromResource(d); awsConfig != nil {
-				deployReq.AWSConfig = awsConfig
-			}
-
-			// file_storage (EFS) is optional
-			if fileStorage := ExpandFileStorageFromResource(d); fileStorage != nil {
-				deployReq.FileStorage = fileStorage
-			}
-		} else {
-			// VM compute stack - aws_config is required
-			awsConfig := ExpandAWSConfigFromResource(d)
-			if awsConfig == nil {
-				return diag.Errorf("aws_config is required when using AWS provider with VM compute_stack")
-			}
-			deployReq.AWSConfig = awsConfig
-
-			// Add object storage with S3 prefix
-			if objStorage := ExpandObjectStorageFromResource(d); objStorage != nil {
-				bucketName := objStorage.BucketName
-				if !strings.HasPrefix(bucketName, "s3://") {
-					bucketName = "s3://" + bucketName
-				}
-				deployReq.ObjectStorage = &ObjectStorage{
-					BucketName: bucketName,
-					Region:     objStorage.Region,
-					Endpoint:   objStorage.Endpoint,
-				}
-			}
-
-			// Add file storage (EFS)
-			if fileStorage := ExpandFileStorageFromResource(d); fileStorage != nil {
-				deployReq.FileStorage = fileStorage
-			}
-		}
-
-	case "GCP":
-		// For K8S compute stack, gcp_config is NOT required
-		// For VM compute stack, gcp_config IS required
-		if computeStack == "K8S" {
-			// K8S requires: kubernetes_config, object_storage
-			// gcp_config is optional for K8S
-			k8sConfig := ExpandKubernetesConfigFromResource(d)
-			if k8sConfig == nil {
-				return diag.Errorf("kubernetes_config is required when compute_stack is K8S")
-			}
-			if k8sConfig.AnyscaleOperatorIAMIdentity == "" {
-				return diag.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for GCP K8S clouds")
-			}
-			deployReq.KubernetesConfig = k8sConfig
-
-			// object_storage is required for K8S
-			objStorage := ExpandObjectStorageFromResource(d)
-			if objStorage == nil {
-				return diag.Errorf("object_storage is required when compute_stack is K8S")
-			}
-			bucketName := objStorage.BucketName
-			if !strings.HasPrefix(bucketName, "gs://") {
-				bucketName = "gs://" + bucketName
-			}
-			deployReq.ObjectStorage = &ObjectStorage{
-				BucketName: bucketName,
-				Region:     objStorage.Region,
-				Endpoint:   objStorage.Endpoint,
-			}
-
-			// gcp_config is optional for K8S - add if provided
-			if gcpConfig := ExpandGCPConfigFromResource(d); gcpConfig != nil {
-				deployReq.GCPConfig = gcpConfig
-			}
-
-			// file_storage (Filestore) is optional
-			if fileStorage := ExpandFileStorageFromResource(d); fileStorage != nil {
-				deployReq.FileStorage = fileStorage
-			}
-		} else {
-			// VM compute stack - gcp_config is required
-			gcpConfig := ExpandGCPConfigFromResource(d)
-			if gcpConfig == nil {
-				return diag.Errorf("gcp_config is required when using GCP provider with VM compute_stack")
-			}
-			deployReq.GCPConfig = gcpConfig
-
-			// Add object storage with GCS prefix
-			if objStorage := ExpandObjectStorageFromResource(d); objStorage != nil {
-				bucketName := objStorage.BucketName
-				if !strings.HasPrefix(bucketName, "gs://") {
-					bucketName = "gs://" + bucketName
-				}
-				deployReq.ObjectStorage = &ObjectStorage{
-					BucketName: bucketName,
-					Region:     objStorage.Region,
-					Endpoint:   objStorage.Endpoint,
-				}
-			}
-
-			// Add file storage (Filestore)
-			if fileStorage := ExpandFileStorageFromResource(d); fileStorage != nil {
-				deployReq.FileStorage = fileStorage
-			}
-		}
-	}
-
-	jsonData, err := json.Marshal(deployReq)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	log.Printf("[DEBUG] PUT /api/v2/clouds/%s/add_resource - Request: %s", cloudID, string(jsonData))
-
-	resp, err := client.DoRequest("PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Printf("[ERROR] Failed to add cloud resource: %v", err)
-		return diag.FromErr(err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	log.Printf("[DEBUG] PUT /api/v2/clouds/%s/add_resource - Response Status: %d, Body: %s", cloudID, resp.StatusCode, string(body))
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return diag.Errorf("failed to add cloud resource: %s - %s", resp.Status, string(body))
-	}
-
-	var deployResp CloudDeploymentResponse
-	if err := json.Unmarshal(body, &deployResp); err != nil {
-		return diag.FromErr(err)
-	}
-
-	// Set composite ID: cloud_id:resource_name
-	resourceName := deployResp.Result.Name
-	d.SetId(fmt.Sprintf("%s:%s", cloudID, resourceName))
-	d.Set("name", resourceName)
-	d.Set("cloud_resource_id", deployResp.Result.CloudResourceID)
-	d.Set("cloud_deployment_id", deployResp.Result.CloudDeploymentID)
-
-	log.Printf("[INFO] Cloud resource created successfully: id=%s", d.Id())
-
-	// Wait for the parent cloud to become ready
-	// The cloud transitions from CREATING/pending to ACTIVE/ready after the first resource is attached
-	createTimeout := d.Timeout(schema.TimeoutCreate)
-	if err := waitForCloudReady(ctx, client, cloudID, createTimeout); err != nil {
-		log.Printf("[ERROR] Failed waiting for parent cloud to be ready: %v", err)
-		return diag.FromErr(err)
-	}
-
-	return resourceCloudResourceRead(ctx, d, m)
-}
-
-func resourceCloudResourceRead(ctx context.Context, d *schema.ResourceData, m any) diag.Diagnostics {
-	client := m.(*Client)
-	var diags diag.Diagnostics
-
-	cloudID, resourceName, err := parseCloudResourceID(d.Id())
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	log.Printf("[INFO] Reading Anyscale Cloud Resource: cloud_id=%s, name=%s", cloudID, resourceName)
-
-	// Get all resources for the cloud
-	resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
-	if err != nil {
-		return diag.FromErr(err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		log.Printf("[WARN] Cloud not found, removing from state: cloud_id=%s", cloudID)
-		d.SetId("")
-		return diags
+		return fmt.Errorf("cloud not found")
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return diag.FromErr(err)
+		return err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return diag.Errorf("failed to read cloud resources: %s - %s", resp.Status, string(body))
+		return fmt.Errorf("failed to read cloud resources: %s - %s", resp.Status, string(body))
 	}
 
 	var deploymentsResp CloudDeploymentsResponse
 	if err := json.Unmarshal(body, &deploymentsResp); err != nil {
-		return diag.FromErr(err)
+		return err
 	}
 
 	// Find the resource by name
@@ -938,104 +893,548 @@ func resourceCloudResourceRead(ctx context.Context, d *schema.ResourceData, m an
 	}
 
 	if foundResource == nil {
-		log.Printf("[WARN] Cloud resource not found, removing from state: cloud_id=%s, name=%s", cloudID, resourceName)
-		d.SetId("")
-		return diags
+		return fmt.Errorf("cloud resource not found")
 	}
 
-	// Set state from API response
-	d.Set("cloud_id", cloudID)
-	d.Set("name", foundResource.Name)
-	d.Set("cloud_resource_id", foundResource.CloudResourceID)
-	d.Set("cloud_deployment_id", foundResource.CloudDeploymentID)
-	d.Set("compute_stack", foundResource.ComputeStack)
-	d.Set("region", foundResource.Region)
-	d.Set("is_default", foundResource.IsDefault)
+	// Update state from API response
+	state.CloudID = types.StringValue(cloudID)
+	state.Name = types.StringValue(foundResource.Name)
+	state.CloudResourceID = types.StringValue(foundResource.CloudResourceID)
+	state.CloudDeploymentID = types.StringValue(foundResource.CloudDeploymentID)
+	state.ComputeStack = types.StringValue(foundResource.ComputeStack)
+	state.Region = types.StringValue(foundResource.Region)
+	state.IsDefault = types.BoolValue(foundResource.IsDefault)
 
 	if foundResource.OperatorStatus != nil {
-		d.Set("status", *foundResource.OperatorStatus)
+		state.Status = types.StringValue(*foundResource.OperatorStatus)
+	} else {
+		state.Status = types.StringNull()
 	}
 
 	if foundResource.NetworkingMode == "PRIVATE" {
-		d.Set("is_private", true)
+		state.IsPrivate = types.BoolValue(true)
 	} else {
-		d.Set("is_private", false)
+		state.IsPrivate = types.BoolValue(false)
 	}
 
-	log.Printf("[INFO] Cloud resource read successfully: cloud_id=%s, name=%s", cloudID, resourceName)
-
-	return diags
+	tflog.Info(ctx, "Cloud resource read successfully", map[string]any{"cloud_id": cloudID, "name": resourceName})
+	return nil
 }
 
-func resourceCloudResourceUpdate(ctx context.Context, d *schema.ResourceData, m any) diag.Diagnostics {
-	// Most fields are ForceNew, so limited updates possible
-	log.Printf("[INFO] Cloud resource update called - most fields are ForceNew")
-	return resourceCloudResourceRead(ctx, d, m)
-}
+// addProviderConfig adds provider-specific configuration to the deployment request
+func (r *CloudResourceResource) addProviderConfig(ctx context.Context, deployReq *CloudDeploymentRequest, plan *CloudResourceResourceModel, provider, computeStack string, diags *diag.Diagnostics) error {
+	switch provider {
+	case "AWS":
+		if computeStack == "K8S" {
+			// K8S requires: kubernetes_config, object_storage
+			// aws_config is optional for K8S
+			if plan.KubernetesConfig.IsNull() {
+				return fmt.Errorf("kubernetes_config is required when compute_stack is K8S")
+			}
 
-func resourceCloudResourceDelete(ctx context.Context, d *schema.ResourceData, m any) diag.Diagnostics {
-	client := m.(*Client)
-	var diags diag.Diagnostics
+			k8sConfig, err := expandKubernetesConfig(ctx, plan.KubernetesConfig)
+			if err != nil {
+				return fmt.Errorf("failed to expand kubernetes_config: %w", err)
+			}
 
-	cloudID, resourceName, err := parseCloudResourceID(d.Id())
-	if err != nil {
-		return diag.FromErr(err)
-	}
+			if k8sConfig == nil || k8sConfig.AnyscaleOperatorIAMIdentity == "" {
+				return fmt.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for AWS K8S clouds")
+			}
+			deployReq.KubernetesConfig = k8sConfig
 
-	log.Printf("[INFO] Deleting Anyscale Cloud Resource: cloud_id=%s, name=%s", cloudID, resourceName)
+			// object_storage is required for K8S
+			if plan.ObjectStorage.IsNull() {
+				return fmt.Errorf("object_storage is required when compute_stack is K8S")
+			}
 
-	// Check if this is the default/primary resource
-	// Primary resources cannot be deleted independently - they are deleted with the cloud
-	if d.Get("is_default").(bool) {
-		log.Printf("[INFO] Cloud resource %s is the primary resource - it will be deleted when the cloud is deleted", resourceName)
-		d.SetId("")
-		return diags
-	}
+			objStorage, err := expandObjectStorage(ctx, plan.ObjectStorage)
+			if err != nil {
+				return fmt.Errorf("failed to expand object_storage: %w", err)
+			}
 
-	// DELETE /api/v2/clouds/{cloud_id}/remove_resource?cloud_resource_name=...
-	deleteURL := fmt.Sprintf("/api/v2/clouds/%s/remove_resource?cloud_resource_name=%s",
-		cloudID, url.QueryEscape(resourceName))
+			bucketName := objStorage.BucketName
+			if !strings.HasPrefix(bucketName, "s3://") {
+				bucketName = "s3://" + bucketName
+			}
+			deployReq.ObjectStorage = &ObjectStorage{
+				BucketName: bucketName,
+				Region:     objStorage.Region,
+				Endpoint:   objStorage.Endpoint,
+			}
 
-	resp, err := client.DoRequest("DELETE", deleteURL, nil)
-	if err != nil {
-		log.Printf("[ERROR] Failed to delete cloud resource: %v", err)
-		return diag.FromErr(err)
-	}
-	defer resp.Body.Close()
+			// aws_config is optional for K8S - add if provided
+			if !plan.AWSConfig.IsNull() {
+				awsConfig, err := expandAWSConfig(ctx, plan.AWSConfig)
+				if err != nil {
+					return fmt.Errorf("failed to expand aws_config: %w", err)
+				}
+				deployReq.AWSConfig = awsConfig
+			}
 
-	log.Printf("[DEBUG] DELETE %s - Response Status: %d", deleteURL, resp.StatusCode)
+			// file_storage (EFS) is optional
+			if !plan.FileStorage.IsNull() {
+				fileStorage, err := expandFileStorage(ctx, plan.FileStorage)
+				if err != nil {
+					return fmt.Errorf("failed to expand file_storage: %w", err)
+				}
+				deployReq.FileStorage = fileStorage
+			}
+		} else {
+			// VM compute stack - aws_config is required
+			if plan.AWSConfig.IsNull() {
+				return fmt.Errorf("aws_config is required when using AWS provider with VM compute_stack")
+			}
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
-		body, _ := io.ReadAll(resp.Body)
-		bodyStr := string(body)
-		log.Printf("[ERROR] Failed to delete cloud resource: %s - %s", resp.Status, bodyStr)
+			awsConfig, err := expandAWSConfig(ctx, plan.AWSConfig)
+			if err != nil {
+				return fmt.Errorf("failed to expand aws_config: %w", err)
+			}
+			deployReq.AWSConfig = awsConfig
 
-		// Handle the case where the API tells us this is a primary resource
-		// (in case is_default wasn't properly set in state)
-		if resp.StatusCode == http.StatusBadRequest && strings.Contains(bodyStr, "primary resource") {
-			log.Printf("[INFO] Cloud resource %s is the primary resource - it will be deleted when the cloud is deleted", resourceName)
-			d.SetId("")
-			return diags
+			// Add object storage with S3 prefix
+			if !plan.ObjectStorage.IsNull() {
+				objStorage, err := expandObjectStorage(ctx, plan.ObjectStorage)
+				if err != nil {
+					return fmt.Errorf("failed to expand object_storage: %w", err)
+				}
+				bucketName := objStorage.BucketName
+				if !strings.HasPrefix(bucketName, "s3://") {
+					bucketName = "s3://" + bucketName
+				}
+				deployReq.ObjectStorage = &ObjectStorage{
+					BucketName: bucketName,
+					Region:     objStorage.Region,
+					Endpoint:   objStorage.Endpoint,
+				}
+			}
+
+			// Add file storage (EFS)
+			if !plan.FileStorage.IsNull() {
+				fileStorage, err := expandFileStorage(ctx, plan.FileStorage)
+				if err != nil {
+					return fmt.Errorf("failed to expand file_storage: %w", err)
+				}
+				deployReq.FileStorage = fileStorage
+			}
 		}
 
-		return diag.Errorf("failed to delete cloud resource: %s - %s", resp.Status, bodyStr)
+	case "GCP":
+		if computeStack == "K8S" {
+			// K8S requires: kubernetes_config, object_storage
+			// gcp_config is optional for K8S
+			if plan.KubernetesConfig.IsNull() {
+				return fmt.Errorf("kubernetes_config is required when compute_stack is K8S")
+			}
+
+			k8sConfig, err := expandKubernetesConfig(ctx, plan.KubernetesConfig)
+			if err != nil {
+				return fmt.Errorf("failed to expand kubernetes_config: %w", err)
+			}
+
+			if k8sConfig == nil || k8sConfig.AnyscaleOperatorIAMIdentity == "" {
+				return fmt.Errorf("kubernetes_config.anyscale_operator_iam_identity is required for GCP K8S clouds")
+			}
+			deployReq.KubernetesConfig = k8sConfig
+
+			// object_storage is required for K8S
+			if plan.ObjectStorage.IsNull() {
+				return fmt.Errorf("object_storage is required when compute_stack is K8S")
+			}
+
+			objStorage, err := expandObjectStorage(ctx, plan.ObjectStorage)
+			if err != nil {
+				return fmt.Errorf("failed to expand object_storage: %w", err)
+			}
+
+			bucketName := objStorage.BucketName
+			if !strings.HasPrefix(bucketName, "gs://") {
+				bucketName = "gs://" + bucketName
+			}
+			deployReq.ObjectStorage = &ObjectStorage{
+				BucketName: bucketName,
+				Region:     objStorage.Region,
+				Endpoint:   objStorage.Endpoint,
+			}
+
+			// gcp_config is optional for K8S - add if provided
+			if !plan.GCPConfig.IsNull() {
+				gcpConfig, err := expandGCPConfig(ctx, plan.GCPConfig)
+				if err != nil {
+					return fmt.Errorf("failed to expand gcp_config: %w", err)
+				}
+				deployReq.GCPConfig = gcpConfig
+			}
+
+			// file_storage (Filestore) is optional
+			if !plan.FileStorage.IsNull() {
+				fileStorage, err := expandFileStorage(ctx, plan.FileStorage)
+				if err != nil {
+					return fmt.Errorf("failed to expand file_storage: %w", err)
+				}
+				deployReq.FileStorage = fileStorage
+			}
+		} else {
+			// VM compute stack - gcp_config is required
+			if plan.GCPConfig.IsNull() {
+				return fmt.Errorf("gcp_config is required when using GCP provider with VM compute_stack")
+			}
+
+			gcpConfig, err := expandGCPConfig(ctx, plan.GCPConfig)
+			if err != nil {
+				return fmt.Errorf("failed to expand gcp_config: %w", err)
+			}
+			deployReq.GCPConfig = gcpConfig
+
+			// Add object storage with GCS prefix
+			if !plan.ObjectStorage.IsNull() {
+				objStorage, err := expandObjectStorage(ctx, plan.ObjectStorage)
+				if err != nil {
+					return fmt.Errorf("failed to expand object_storage: %w", err)
+				}
+				bucketName := objStorage.BucketName
+				if !strings.HasPrefix(bucketName, "gs://") {
+					bucketName = "gs://" + bucketName
+				}
+				deployReq.ObjectStorage = &ObjectStorage{
+					BucketName: bucketName,
+					Region:     objStorage.Region,
+					Endpoint:   objStorage.Endpoint,
+				}
+			}
+
+			// Add file storage (Filestore)
+			if !plan.FileStorage.IsNull() {
+				fileStorage, err := expandFileStorage(ctx, plan.FileStorage)
+				if err != nil {
+					return fmt.Errorf("failed to expand file_storage: %w", err)
+				}
+				deployReq.FileStorage = fileStorage
+			}
+		}
 	}
 
-	log.Printf("[INFO] Cloud resource deleted successfully: cloud_id=%s, name=%s", cloudID, resourceName)
-
-	d.SetId("")
-	return diags
+	return nil
 }
 
-func resourceCloudResourceImportState(ctx context.Context, d *schema.ResourceData, m any) ([]*schema.ResourceData, error) {
-	// ID format: cloud_id:resource_name
-	cloudID, resourceName, err := parseCloudResourceID(d.Id())
-	if err != nil {
-		return nil, fmt.Errorf("invalid import ID format. Expected 'cloud_id:resource_name', got '%s'", d.Id())
+// expandAWSConfig extracts AWS configuration from the Terraform plan
+func expandAWSConfig(ctx context.Context, obj types.Object) (*AWSConfig, error) {
+	if obj.IsNull() || obj.IsUnknown() {
+		return nil, nil
 	}
 
-	d.Set("cloud_id", cloudID)
-	d.Set("name", resourceName)
+	var awsModel AWSConfigModel
+	diags := obj.As(ctx, &awsModel, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, fmt.Errorf("failed to convert aws_config: %v", diags)
+	}
 
-	return []*schema.ResourceData{d}, nil
+	awsConfig := &AWSConfig{
+		VPCID:             awsModel.VPCID.ValueString(),
+		AnyscaleIAMRoleID: awsModel.ControlplaneIAMRoleARN.ValueString(),
+		ClusterIAMRoleID:  awsModel.DataplaneIAMRoleARN.ValueString(),
+	}
+
+	// Handle subnet_ids_to_az map (preferred) or subnet_ids list
+	if !awsModel.SubnetIDsToAZ.IsNull() {
+		subnetAZMap := make(map[string]string)
+		diags = awsModel.SubnetIDsToAZ.ElementsAs(ctx, &subnetAZMap, false)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to convert subnet_ids_to_az: %v", diags)
+		}
+		if len(subnetAZMap) > 0 {
+			awsConfig.SubnetIDs = make([]string, 0, len(subnetAZMap))
+			awsConfig.Zones = make([]string, 0, len(subnetAZMap))
+			for subnetID, az := range subnetAZMap {
+				awsConfig.SubnetIDs = append(awsConfig.SubnetIDs, subnetID)
+				awsConfig.Zones = append(awsConfig.Zones, az)
+			}
+		}
+	} else if !awsModel.SubnetIDs.IsNull() {
+		var subnetIDs []string
+		diags = awsModel.SubnetIDs.ElementsAs(ctx, &subnetIDs, false)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to convert subnet_ids: %v", diags)
+		}
+		awsConfig.SubnetIDs = subnetIDs
+	}
+
+	// Security Group IDs
+	if !awsModel.SecurityGroupIDs.IsNull() {
+		var sgIDs []string
+		diags = awsModel.SecurityGroupIDs.ElementsAs(ctx, &sgIDs, false)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to convert security_group_ids: %v", diags)
+		}
+		awsConfig.SecurityGroupIDs = sgIDs
+	}
+
+	// Optional fields
+	if !awsModel.ExternalID.IsNull() {
+		awsConfig.ExternalID = awsModel.ExternalID.ValueString()
+	}
+	if !awsModel.MemoryDBClusterName.IsNull() {
+		name := awsModel.MemoryDBClusterName.ValueString()
+		awsConfig.MemoryDBClusterName = &name
+	}
+	if !awsModel.MemoryDBClusterARN.IsNull() {
+		arn := awsModel.MemoryDBClusterARN.ValueString()
+		awsConfig.MemoryDBClusterARN = &arn
+	}
+	if !awsModel.MemoryDBClusterEndpoint.IsNull() {
+		endpoint := awsModel.MemoryDBClusterEndpoint.ValueString()
+		awsConfig.MemoryDBClusterEndpoint = &endpoint
+	}
+
+	return awsConfig, nil
+}
+
+// expandGCPConfig extracts GCP configuration from the Terraform plan
+func expandGCPConfig(ctx context.Context, obj types.Object) (*GCPConfig, error) {
+	if obj.IsNull() || obj.IsUnknown() {
+		return nil, nil
+	}
+
+	var gcpModel GCPConfigModel
+	diags := obj.As(ctx, &gcpModel, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, fmt.Errorf("failed to convert gcp_config: %v", diags)
+	}
+
+	gcpConfig := &GCPConfig{
+		ProjectID:                   gcpModel.ProjectID.ValueString(),
+		ProviderName:                gcpModel.ProviderName.ValueString(),
+		VPCName:                     gcpModel.VPCName.ValueString(),
+		AnyscaleServiceAccountEmail: gcpModel.ControlplaneServiceAccountEmail.ValueString(),
+		ClusterServiceAccountEmail:  gcpModel.DataplaneServiceAccountEmail.ValueString(),
+	}
+
+	// Subnet names
+	if !gcpModel.SubnetNames.IsNull() {
+		var subnetNames []string
+		diags = gcpModel.SubnetNames.ElementsAs(ctx, &subnetNames, false)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to convert subnet_names: %v", diags)
+		}
+		gcpConfig.SubnetNames = subnetNames
+	}
+
+	// Firewall policy names
+	if !gcpModel.FirewallPolicyNames.IsNull() {
+		var fwPolicies []string
+		diags = gcpModel.FirewallPolicyNames.ElementsAs(ctx, &fwPolicies, false)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to convert firewall_policy_names: %v", diags)
+		}
+		gcpConfig.FirewallPolicyNames = fwPolicies
+	}
+
+	// Optional fields
+	if !gcpModel.HostProjectID.IsNull() {
+		gcpConfig.HostProjectID = gcpModel.HostProjectID.ValueString()
+	}
+	if !gcpModel.MemorystoreInstanceName.IsNull() {
+		gcpConfig.MemorystoreInstanceName = gcpModel.MemorystoreInstanceName.ValueString()
+	}
+	if !gcpModel.MemorystoreEndpoint.IsNull() {
+		gcpConfig.MemorystoreEndpoint = gcpModel.MemorystoreEndpoint.ValueString()
+	}
+
+	return gcpConfig, nil
+}
+
+// expandKubernetesConfig extracts Kubernetes configuration from the Terraform plan
+func expandKubernetesConfig(ctx context.Context, obj types.Object) (*KubernetesConfig, error) {
+	if obj.IsNull() || obj.IsUnknown() {
+		return nil, nil
+	}
+
+	var k8sModel KubernetesConfigModel
+	diags := obj.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, fmt.Errorf("failed to convert kubernetes_config: %v", diags)
+	}
+
+	k8sConfig := &KubernetesConfig{
+		AnyscaleOperatorIAMIdentity: k8sModel.AnyscaleOperatorIAMIdentity.ValueString(),
+	}
+
+	// Zones
+	if !k8sModel.Zones.IsNull() {
+		var zones []string
+		diags = k8sModel.Zones.ElementsAs(ctx, &zones, false)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to convert zones: %v", diags)
+		}
+		k8sConfig.Zones = zones
+	}
+
+	return k8sConfig, nil
+}
+
+// expandObjectStorage extracts object storage configuration from the Terraform plan
+func expandObjectStorage(ctx context.Context, obj types.Object) (*ObjectStorage, error) {
+	if obj.IsNull() || obj.IsUnknown() {
+		return nil, nil
+	}
+
+	var storageModel ObjectStorageModel
+	diags := obj.As(ctx, &storageModel, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, fmt.Errorf("failed to convert object_storage: %v", diags)
+	}
+
+	storage := &ObjectStorage{
+		BucketName: storageModel.BucketName.ValueString(),
+	}
+
+	if !storageModel.Region.IsNull() {
+		region := storageModel.Region.ValueString()
+		storage.Region = &region
+	}
+	if !storageModel.Endpoint.IsNull() {
+		endpoint := storageModel.Endpoint.ValueString()
+		storage.Endpoint = &endpoint
+	}
+
+	return storage, nil
+}
+
+// expandFileStorage extracts file storage configuration from the Terraform plan
+func expandFileStorage(ctx context.Context, obj types.Object) (*FileStorage, error) {
+	if obj.IsNull() || obj.IsUnknown() {
+		return nil, nil
+	}
+
+	var storageModel FileStorageModel
+	diags := obj.As(ctx, &storageModel, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, fmt.Errorf("failed to convert file_storage: %v", diags)
+	}
+
+	storage := &FileStorage{
+		FileStorageID: storageModel.FileStorageID.ValueString(),
+	}
+
+	if !storageModel.MountPath.IsNull() {
+		storage.MountPath = storageModel.MountPath.ValueString()
+	}
+
+	if !storageModel.MountTargets.IsNull() {
+		var mountTargetModels []MountTargetModel
+		diags = storageModel.MountTargets.ElementsAs(ctx, &mountTargetModels, false)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to convert mount_targets: %v", diags)
+		}
+
+		storage.MountTargets = make([]MountTarget, len(mountTargetModels))
+		for i, model := range mountTargetModels {
+			storage.MountTargets[i] = MountTarget{
+				Address: model.Address.ValueString(),
+				Zone:    model.Zone.ValueString(),
+			}
+		}
+	}
+
+	return storage, nil
+}
+
+// waitForCloudReady polls for cloud readiness using exponential backoff.
+// It waits until the cloud state is ACTIVE and status is ready, or until timeout.
+func waitForCloudReady(ctx context.Context, client *Client, cloudID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	pollCount := 0
+
+	// Exponential backoff configuration
+	const (
+		initialBackoff = 5 * time.Second
+		maxBackoff     = 60 * time.Second
+		backoffFactor  = 2.0
+	)
+	currentBackoff := initialBackoff
+
+	tflog.Info(ctx, "Waiting for cloud to be ready", map[string]any{"cloud_id": cloudID, "timeout": timeout.String()})
+
+	for time.Now().Before(deadline) {
+		pollCount++
+		tflog.Debug(ctx, "Polling cloud status", map[string]any{"poll_count": pollCount, "cloud_id": cloudID})
+
+		resp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+		if err != nil {
+			tflog.Error(ctx, "Failed to check cloud status", map[string]any{"error": err.Error()})
+			return err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+
+		tflog.Debug(ctx, "Cloud status response", map[string]any{"poll_count": pollCount, "status": resp.StatusCode})
+
+		// Handle rate limiting (429) with backoff
+		if resp.StatusCode == http.StatusTooManyRequests {
+			tflog.Warn(ctx, "Rate limited, backing off", map[string]any{"poll_count": pollCount, "backoff": currentBackoff.String()})
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(currentBackoff):
+				currentBackoff = time.Duration(float64(currentBackoff) * backoffFactor)
+				if currentBackoff > maxBackoff {
+					currentBackoff = maxBackoff
+				}
+				continue
+			}
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			tflog.Error(ctx, "Failed cloud status check", map[string]any{"poll_count": pollCount, "body": string(body)})
+			return fmt.Errorf("failed to check cloud status: %s - %s", resp.Status, string(body))
+		}
+
+		var cloudResp CloudResponse
+		if err := json.Unmarshal(body, &cloudResp); err != nil {
+			return err
+		}
+
+		status := cloudResp.Result.Status
+		state := cloudResp.Result.State
+
+		tflog.Info(ctx, "Cloud status check", map[string]any{"poll_count": pollCount, "status": status, "state": state})
+
+		// Also check cloud resources for debugging
+		resourcesResp, err := client.DoRequest("GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+		if err == nil {
+			resourcesBody, _ := io.ReadAll(resourcesResp.Body)
+			resourcesResp.Body.Close()
+			tflog.Debug(ctx, "Cloud resources", map[string]any{"poll_count": pollCount, "resources": string(resourcesBody)})
+		}
+
+		if status == "ready" && state == "ACTIVE" {
+			tflog.Info(ctx, "Cloud is ready", map[string]any{"poll_count": pollCount})
+			return nil
+		}
+
+		if status == "failed" || state == "FAILED" {
+			tflog.Error(ctx, "Cloud creation failed", map[string]any{"status": status, "state": state})
+			return fmt.Errorf("cloud creation failed with status: %s, state: %s", status, state)
+		}
+
+		tflog.Debug(ctx, "Cloud not ready yet, waiting before next poll", map[string]any{"backoff": currentBackoff.String()})
+
+		select {
+		case <-ctx.Done():
+			tflog.Error(ctx, "Context cancelled while waiting for cloud")
+			return ctx.Err()
+		case <-time.After(currentBackoff):
+			// Increase backoff for next iteration
+			currentBackoff = time.Duration(float64(currentBackoff) * backoffFactor)
+			if currentBackoff > maxBackoff {
+				currentBackoff = maxBackoff
+			}
+		}
+	}
+
+	tflog.Error(ctx, "Timeout waiting for cloud to be ready", map[string]any{"poll_count": pollCount})
+	return fmt.Errorf("timeout waiting for cloud to be ready")
 }

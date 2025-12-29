@@ -6,26 +6,27 @@ resource "anyscale_compute_config" "basic" {
   cloud_id = anyscale_cloud.primary.id
   # project_id is optional - omit to use organization default
 
-  idle_termination_minutes = 30
+  idle_termination_minutes  = 30
   enable_cross_zone_scaling = false
 
-  head_node {
+  head_node = {
     instance_type = "m5.2xlarge"
   }
 
-  worker_nodes {
-    instance_type = "m5.4xlarge"
-    min_nodes     = 1
-    max_nodes     = 5
-    market_type   = "ON_DEMAND"
-  }
-
-  worker_nodes {
-    instance_type = "m5.8xlarge"
-    min_nodes     = 0
-    max_nodes     = 3
-    market_type   = "PREFER_SPOT"
-  }
+  worker_nodes = [
+    {
+      instance_type = "m5.4xlarge"
+      min_nodes     = 1
+      max_nodes     = 5
+      market_type   = "ON_DEMAND"
+    },
+    {
+      instance_type = "m5.8xlarge"
+      min_nodes     = 0
+      max_nodes     = 3
+      market_type   = "PREFER_SPOT"
+    }
+  ]
 }
 
 # Advanced AWS Compute Config with custom resources and advanced configurations
@@ -36,8 +37,8 @@ resource "anyscale_compute_config" "advanced" {
   cloud_id = anyscale_cloud.primary.id
   # project_id is optional - omit to use organization default
 
-  idle_termination_minutes = 60
-  maximum_uptime_minutes   = 480
+  idle_termination_minutes  = 60
+  maximum_uptime_minutes    = 480
   enable_cross_zone_scaling = true
 
   # Resource constraints
@@ -53,15 +54,16 @@ resource "anyscale_compute_config" "advanced" {
   }
 
   # Cluster-level flags
-  flags = jsonencode({
-    "idle_termination_seconds"    = 300
-    "workload_starting_timeout"   = "30m"
-    "workload_recovering_timeout" = "20m"
-    "instance_selection_strategy" = "relaxed"
-  })
+  flags = {
+    idle_termination_seconds    = 300
+    workload_starting_timeout   = "30m"
+    workload_recovering_timeout = "20m"
+    instance_selection_strategy = "relaxed"
+  }
+
 
   # Advanced configurations for AWS
-  advanced_configurations_json = jsonencode({
+  advanced_configurations_json = {
     BlockDeviceMappings = [
       {
         DeviceName = "/dev/sda1"
@@ -72,9 +74,9 @@ resource "anyscale_compute_config" "advanced" {
         }
       }
     ]
-  })
+  }
 
-  head_node {
+  head_node = {
     instance_type = "m5.4xlarge"
 
     # Custom resources for head node
@@ -90,81 +92,81 @@ resource "anyscale_compute_config" "advanced" {
     }
   }
 
-  worker_nodes {
-    name          = "general-compute"
-    instance_type = "m5.4xlarge"
-    min_nodes     = 2
-    max_nodes     = 10
-    market_type   = "ON_DEMAND"
+  worker_nodes = [
+    {
+      name          = "general-compute"
+      instance_type = "m5.4xlarge"
+      min_nodes     = 2
+      max_nodes     = 10
+      market_type   = "ON_DEMAND"
 
-    # Custom resources
-    resources = {
-      "CPU"    = 16
-      "memory" = 64
-    }
-
-    # Labels for worker node scheduling
-    labels = {
-      "node_type" = "worker"
-      "workload"  = "general"
-    }
-
-    # Node-level advanced configuration
-    advanced_instance_config = jsonencode({
-      IamInstanceProfile = {
-        Name = "custom-worker-profile"
+      # Custom resources
+      resources = {
+        "CPU"    = 16
+        "memory" = 64
       }
-    })
-  }
 
-  worker_nodes {
-    name          = "gpu-workers"
-    instance_type = "g5.2xlarge"
-    min_nodes     = 0
-    max_nodes     = 5
-    market_type   = "SPOT"
+      # Labels for worker node scheduling
+      labels = {
+        "node_type" = "worker"
+        "workload"  = "general"
+      }
 
-    # Custom resources for GPU nodes
-    resources = {
-      "CPU"    = 8
-      "GPU"    = 1
-      "memory" = 32
+      # Node-level advanced configuration
+      advanced_instance_config = jsonencode({
+        IamInstanceProfile = {
+          Name = "custom-worker-profile"
+        }
+      })
+    },
+    {
+      name          = "gpu-workers"
+      instance_type = "g5.2xlarge"
+      min_nodes     = 0
+      max_nodes     = 5
+      market_type   = "SPOT"
+
+      # Custom resources for GPU nodes
+      resources = {
+        "CPU"    = 8
+        "GPU"    = 1
+        "memory" = 32
+      }
+
+      # Labels for GPU scheduling
+      labels = {
+        "node_type"   = "worker"
+        "accelerator" = "nvidia-a10g"
+        "workload"    = "ml-training"
+      }
+
+      required_labels = {
+        "ray.io/node-type" = "worker"
+      }
+    },
+    {
+      name          = "spot-workers"
+      instance_type = "m5.8xlarge"
+      min_nodes     = 0
+      max_nodes     = 20
+      market_type   = "PREFER_SPOT"
+
+      resources = {
+        "CPU"    = 32
+        "memory" = 128
+      }
+
+      labels = {
+        "node_type" = "worker"
+        "workload"  = "batch"
+      }
+
+      # Node-level flags
+      flags = jsonencode({
+        replacement_threshold = "15m"
+      })
     }
-
-    # Labels for GPU scheduling
-    labels = {
-      "node_type"      = "worker"
-      "accelerator"    = "nvidia-a10g"
-      "workload"       = "ml-training"
-    }
-
-    required_labels = {
-      "ray.io/node-type" = "worker"
-    }
-  }
-
-  worker_nodes {
-    name          = "spot-workers"
-    instance_type = "m5.8xlarge"
-    min_nodes     = 0
-    max_nodes     = 20
-    market_type   = "PREFER_SPOT"
-
-    resources = {
-      "CPU"    = 32
-      "memory" = 128
-    }
-
-    labels = {
-      "node_type" = "worker"
-      "workload"  = "batch"
-    }
-
-    # Node-level flags
-    flags = jsonencode({
-      "replacement_threshold" = "15m"
-    })
-  }
+  ]
 }
 
 # Multi-resource compute config example (experimental)
@@ -206,18 +208,20 @@ resource "anyscale_compute_config" "advanced" {
 
 resource "anyscale_compute_config" "anonymous" {
   # No name - will be anonymous
-  cloud_id   = anyscale_cloud.primary.id
-  anonymous  = true
+  cloud_id  = anyscale_cloud.primary.id
+  anonymous = true
 
-  head_node {
+  head_node = {
     instance_type = "m5.xlarge"
   }
 
-  worker_nodes {
-    instance_type = "m5.2xlarge"
-    min_nodes     = 0
-    max_nodes     = 3
-  }
+  worker_nodes = [
+    {
+      instance_type = "m5.2xlarge"
+      min_nodes     = 0
+      max_nodes     = 3
+    }
+  ]
 }
 
 # Compute config with custom instance type (free pod shapes for K8s)

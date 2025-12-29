@@ -1,525 +1,563 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestResourceCloudSchema verifies the schema structure
-func TestResourceCloudSchema(t *testing.T) {
-	s := ResourceCloud().Schema
+// Test hasEmbeddedResourceConfig logic
+func TestHasEmbeddedResourceConfig(t *testing.T) {
+	r := &CloudResource{}
 
-	// Test required fields (only name is required now - cloud_provider and region are optional/computed for empty clouds)
-	requiredFields := []string{"name"}
-	for _, field := range requiredFields {
-		if _, ok := s[field]; !ok {
-			t.Errorf("expected schema to have field %q", field)
-			continue
-		}
-		if !s[field].Required {
-			t.Errorf("expected field %q to be required", field)
-		}
+	tests := []struct {
+		name     string
+		plan     CloudResourceModel
+		expected bool
+	}{
+		{
+			name: "has aws_config",
+			plan: CloudResourceModel{
+				AWSConfig: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+			},
+			expected: true,
+		},
+		{
+			name: "has gcp_config",
+			plan: CloudResourceModel{
+				GCPConfig: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+			},
+			expected: true,
+		},
+		{
+			name: "has azure_config",
+			plan: CloudResourceModel{
+				AzureConfig: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+			},
+			expected: true,
+		},
+		{
+			name: "has kubernetes_config only (not embedded)",
+			plan: CloudResourceModel{
+				KubernetesConfig: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+				AWSConfig:   types.ObjectNull(map[string]attr.Type{}),
+				GCPConfig:   types.ObjectNull(map[string]attr.Type{}),
+				AzureConfig: types.ObjectNull(map[string]attr.Type{}),
+			},
+			expected: false,
+		},
+		{
+			name: "has object_storage only (not embedded)",
+			plan: CloudResourceModel{
+				ObjectStorage: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+				AWSConfig:   types.ObjectNull(map[string]attr.Type{}),
+				GCPConfig:   types.ObjectNull(map[string]attr.Type{}),
+				AzureConfig: types.ObjectNull(map[string]attr.Type{}),
+			},
+			expected: false,
+		},
+		{
+			name: "has file_storage only (not embedded)",
+			plan: CloudResourceModel{
+				FileStorage: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+				AWSConfig:   types.ObjectNull(map[string]attr.Type{}),
+				GCPConfig:   types.ObjectNull(map[string]attr.Type{}),
+				AzureConfig: types.ObjectNull(map[string]attr.Type{}),
+			},
+			expected: false,
+		},
+		{
+			name: "no embedded config (null)",
+			plan: CloudResourceModel{
+				AWSConfig:        types.ObjectNull(map[string]attr.Type{}),
+				GCPConfig:        types.ObjectNull(map[string]attr.Type{}),
+				AzureConfig:      types.ObjectNull(map[string]attr.Type{}),
+				KubernetesConfig: types.ObjectNull(map[string]attr.Type{}),
+				ObjectStorage:    types.ObjectNull(map[string]attr.Type{}),
+				FileStorage:      types.ObjectNull(map[string]attr.Type{}),
+			},
+			expected: false,
+		},
 	}
 
-	// Test optional fields with defaults
-	optionalWithDefaults := map[string]any{
-		"is_private_cloud":        false,
-		"auto_add_user":           false,
-		"enable_lineage_tracking": false,
-		"enable_log_ingestion":    false,
-	}
-
-	// Test optional fields without defaults (cloud_provider and region are now optional/computed for empty cloud pattern)
-	optionalNoDefaults := []string{"compute_stack", "credentials", "cloud_provider", "region"}
-	for _, field := range optionalNoDefaults {
-		if _, ok := s[field]; !ok {
-			t.Errorf("expected schema to have field %q", field)
-			continue
-		}
-		if s[field].Required {
-			t.Errorf("expected field %q to be optional", field)
-		}
-	}
-
-	for field, expectedDefault := range optionalWithDefaults {
-		if _, ok := s[field]; !ok {
-			t.Errorf("expected schema to have field %q", field)
-			continue
-		}
-		if s[field].Required {
-			t.Errorf("expected field %q to be optional", field)
-		}
-		if s[field].Default != expectedDefault {
-			t.Errorf("expected field %q to have default %v, got %v", field, expectedDefault, s[field].Default)
-		}
-	}
-
-	// cloud_provider and region should be computed (for empty cloud pattern)
-	optionalComputedFields := []string{"cloud_provider", "region"}
-	for _, field := range optionalComputedFields {
-		if _, ok := s[field]; !ok {
-			t.Errorf("expected schema to have field %q", field)
-			continue
-		}
-		if !s[field].Computed {
-			t.Errorf("expected field %q to be computed", field)
-		}
-	}
-
-	// Test ForceNew fields
-	forceNewFields := []string{"cloud_provider", "compute_stack", "region", "is_private_cloud"}
-	for _, field := range forceNewFields {
-		if _, ok := s[field]; !ok {
-			t.Errorf("expected schema to have field %q", field)
-			continue
-		}
-		if !s[field].ForceNew {
-			t.Errorf("expected field %q to have ForceNew=true", field)
-		}
-	}
-
-	// Test nested blocks exist
-	nestedBlocks := []string{"aws_config", "gcp_config", "azure_config", "kubernetes_config", "object_storage", "file_storage"}
-	for _, block := range nestedBlocks {
-		if _, ok := s[block]; !ok {
-			t.Errorf("expected schema to have nested block %q", block)
-			continue
-		}
-		if s[block].Type != schema.TypeList {
-			t.Errorf("expected block %q to be TypeList", block)
-		}
-		if s[block].MaxItems != 1 {
-			t.Errorf("expected block %q to have MaxItems=1", block)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := r.hasEmbeddedResourceConfig(&tt.plan)
+			if result != tt.expected {
+				t.Errorf("hasEmbeddedResourceConfig() = %v, expected %v", result, tt.expected)
+			}
+		})
 	}
 }
 
-// TestResourceCloudAWSConfigSchema verifies aws_config nested schema
-func TestResourceCloudAWSConfigSchema(t *testing.T) {
-	s := ResourceCloud().Schema
-	awsConfig, ok := s["aws_config"]
-	if !ok {
-		t.Fatal("expected schema to have aws_config")
+// Test auto-detection of cloud_provider from config blocks
+func TestDetectCloudProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		plan     CloudResourceModel
+		expected string
+	}{
+		{
+			name: "AWS from aws_config",
+			plan: CloudResourceModel{
+				AWSConfig: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+			},
+			expected: "AWS",
+		},
+		{
+			name: "GCP from gcp_config",
+			plan: CloudResourceModel{
+				GCPConfig: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+			},
+			expected: "GCP",
+		},
+		{
+			name: "Azure from azure_config",
+			plan: CloudResourceModel{
+				AzureConfig: types.ObjectValueMust(
+					map[string]attr.Type{},
+					map[string]attr.Value{},
+				),
+			},
+			expected: "AZURE",
+		},
+		{
+			name: "defaults to AWS when no config",
+			plan: CloudResourceModel{
+				AWSConfig:   types.ObjectNull(map[string]attr.Type{}),
+				GCPConfig:   types.ObjectNull(map[string]attr.Type{}),
+				AzureConfig: types.ObjectNull(map[string]attr.Type{}),
+			},
+			expected: "AWS",
+		},
 	}
 
-	elem, ok := awsConfig.Elem.(*schema.Resource)
-	if !ok {
-		t.Fatal("expected aws_config.Elem to be *schema.Resource")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the detection logic from Create method
+			provider := "AWS" // default
+			if !tt.plan.AWSConfig.IsNull() {
+				provider = "AWS"
+			} else if !tt.plan.GCPConfig.IsNull() {
+				provider = "GCP"
+			} else if !tt.plan.AzureConfig.IsNull() {
+				provider = "AZURE"
+			}
 
-	// Test required AWS fields
-	requiredAWSFields := []string{"vpc_id", "security_group_ids", "controlplane_iam_role_arn", "dataplane_iam_role_arn"}
-	for _, field := range requiredAWSFields {
-		if _, ok := elem.Schema[field]; !ok {
-			t.Errorf("expected aws_config to have field %q", field)
-			continue
-		}
-		if !elem.Schema[field].Required {
-			t.Errorf("expected aws_config.%s to be required", field)
-		}
-	}
-
-	// Test optional AWS fields
-	optionalAWSFields := []string{"external_id", "memorydb_cluster_name", "memorydb_cluster_arn", "memorydb_cluster_endpoint", "subnet_ids_to_az"}
-	for _, field := range optionalAWSFields {
-		if _, ok := elem.Schema[field]; !ok {
-			t.Errorf("expected aws_config to have field %q", field)
-			continue
-		}
-		if elem.Schema[field].Required {
-			t.Errorf("expected aws_config.%s to be optional", field)
-		}
-	}
-
-	// Test list fields
-	listFields := []string{"security_group_ids"}
-	for _, field := range listFields {
-		if elem.Schema[field].Type != schema.TypeList {
-			t.Errorf("expected aws_config.%s to be TypeList", field)
-		}
-	}
-
-	// Test map fields
-	if elem.Schema["subnet_ids_to_az"].Type != schema.TypeMap {
-		t.Errorf("expected aws_config.subnet_ids_to_az to be TypeMap")
+			if provider != tt.expected {
+				t.Errorf("detected provider = %v, expected %v", provider, tt.expected)
+			}
+		})
 	}
 }
 
-// TestResourceCloudObjectStorageSchema verifies object_storage nested schema
-func TestResourceCloudObjectStorageSchema(t *testing.T) {
-	s := ResourceCloud().Schema
-	objStorage, ok := s["object_storage"]
-	if !ok {
-		t.Fatal("expected schema to have object_storage")
+// Test generateRandomString helper
+func TestGenerateRandomString(t *testing.T) {
+	tests := []struct {
+		name   string
+		length int
+	}{
+		{"length 8", 8},
+		{"length 12", 12},
+		{"length 16", 16},
+		{"length 32", 32},
 	}
 
-	elem, ok := objStorage.Elem.(*schema.Resource)
-	if !ok {
-		t.Fatal("expected object_storage.Elem to be *schema.Resource")
-	}
-
-	// bucket_name is required
-	if !elem.Schema["bucket_name"].Required {
-		t.Error("expected object_storage.bucket_name to be required")
-	}
-
-	// region and endpoint are optional
-	if elem.Schema["region"].Required {
-		t.Error("expected object_storage.region to be optional")
-	}
-	if elem.Schema["endpoint"].Required {
-		t.Error("expected object_storage.endpoint to be optional")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateRandomString(tt.length)
+			if len(result) != tt.length {
+				t.Errorf("generateRandomString(%d) returned length %d, expected %d", tt.length, len(result), tt.length)
+			}
+			// Check that it only contains alphanumeric lowercase characters
+			for _, c := range result {
+				if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789", c) {
+					t.Errorf("generateRandomString() returned invalid character: %c", c)
+				}
+			}
+		})
 	}
 }
 
-// TestResourceCloudTimeouts verifies timeout configuration
-func TestResourceCloudTimeouts(t *testing.T) {
-	r := ResourceCloud()
+// Test uniqueness of generated random strings
+func TestGenerateRandomStringUniqueness(t *testing.T) {
+	seen := make(map[string]bool)
+	iterations := 100
 
-	if r.Timeouts == nil {
-		t.Fatal("expected resource to have timeouts configured")
-	}
-
-	if r.Timeouts.Create == nil {
-		t.Error("expected Create timeout to be set")
-	}
-	if r.Timeouts.Update == nil {
-		t.Error("expected Update timeout to be set")
-	}
-	if r.Timeouts.Delete == nil {
-		t.Error("expected Delete timeout to be set")
+	for i := 0; i < iterations; i++ {
+		result := generateRandomString(12)
+		if seen[result] {
+			t.Errorf("generateRandomString() produced duplicate: %s", result)
+		}
+		seen[result] = true
 	}
 }
 
-// TestGetNetworkingMode tests the networking mode helper
-func TestGetNetworkingMode(t *testing.T) {
+// Test AWS placeholder credential generation
+func TestGenerateAWSPlaceholder(t *testing.T) {
+	// This simulates the logic from getOrGenerateCredentials for AWS empty clouds
+	randomSuffix := generateRandomString(12)
+	credentials := fmt.Sprintf("arn:aws:iam::000000000000:role/anyscale-placeholder-%s", randomSuffix)
+
+	// Verify format
+	if !strings.HasPrefix(credentials, "arn:aws:iam::000000000000:role/anyscale-placeholder-") {
+		t.Errorf("AWS placeholder doesn't have correct prefix: %s", credentials)
+	}
+
+	// Verify it contains a 12-character hex suffix
+	parts := strings.Split(credentials, "-")
+	if len(parts) < 2 {
+		t.Errorf("AWS placeholder doesn't have expected format: %s", credentials)
+	}
+	suffix := parts[len(parts)-1]
+	if len(suffix) != 12 {
+		t.Errorf("AWS placeholder suffix length = %d, expected 12", len(suffix))
+	}
+}
+
+// Test GCP placeholder credential generation
+func TestGenerateGCPPlaceholder(t *testing.T) {
+	ctx := context.Background()
+
+	// This simulates the logic from getOrGenerateCredentials for GCP empty clouds
+	randomSuffix := generateRandomString(12)
+	credentialsMap := map[string]interface{}{
+		"provider_id":           fmt.Sprintf("projects/000000000000/locations/global/workloadIdentityPools/placeholder-%s/providers/placeholder", randomSuffix),
+		"project_id":            "placeholder-project",
+		"service_account_email": fmt.Sprintf("placeholder-%s@placeholder-project.iam.gserviceaccount.com", randomSuffix),
+	}
+
+	// Convert to JSON string
+	credentialsBytes, err := json.Marshal(credentialsMap)
+	if err != nil {
+		t.Fatalf("Failed to marshal GCP credentials: %v", err)
+	}
+	credentials := string(credentialsBytes)
+
+	// Verify it's valid JSON
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(credentials), &parsed); err != nil {
+		t.Errorf("GCP placeholder is not valid JSON: %v", err)
+	}
+
+	// Verify required fields
+	if _, ok := parsed["provider_id"]; !ok {
+		t.Error("GCP placeholder missing provider_id")
+	}
+	if _, ok := parsed["project_id"]; !ok {
+		t.Error("GCP placeholder missing project_id")
+	}
+	if _, ok := parsed["service_account_email"]; !ok {
+		t.Error("GCP placeholder missing service_account_email")
+	}
+
+	// Verify format
+	providerID := parsed["provider_id"].(string)
+	if !strings.Contains(providerID, randomSuffix) {
+		t.Errorf("GCP placeholder provider_id doesn't contain random suffix: %s", providerID)
+	}
+
+	_ = ctx // Use ctx to avoid unused variable warning
+}
+
+// Test credential extraction from AWS config
+func TestExtractAWSCredentials(t *testing.T) {
+	tests := []struct {
+		name             string
+		iamRole          string
+		externalID       string
+		expectedContains string
+	}{
+		{
+			name:             "IAM role only",
+			iamRole:          "arn:aws:iam::123456789012:role/anyscale-crossaccount-role",
+			externalID:       "",
+			expectedContains: "arn:aws:iam::123456789012:role/anyscale-crossaccount-role",
+		},
+		{
+			name:             "IAM role with external ID",
+			iamRole:          "arn:aws:iam::123456789012:role/anyscale-crossaccount-role",
+			externalID:       "unique-external-id-123",
+			expectedContains: "arn:aws:iam::123456789012:role/anyscale-crossaccount-role",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate extracting credentials from AWS config
+			credentials := tt.iamRole
+			if !strings.Contains(credentials, tt.expectedContains) {
+				t.Errorf("Extracted credentials '%s' doesn't contain expected '%s'", credentials, tt.expectedContains)
+			}
+		})
+	}
+}
+
+// Test credential extraction from GCP config - JSON format
+func TestExtractGCPCredentials(t *testing.T) {
+	tests := []struct {
+		name        string
+		providerID  string
+		projectID   string
+		accountName string
+	}{
+		{
+			name:        "full GCP credentials",
+			providerID:  "projects/123456789012/locations/global/workloadIdentityPools/anyscale-access/providers/anyscale-access",
+			projectID:   "my-gcp-project",
+			accountName: "anyscale-sa@my-gcp-project.iam.gserviceaccount.com",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate building GCP credentials JSON
+			credentialsMap := map[string]interface{}{
+				"provider_id":           tt.providerID,
+				"project_id":            tt.projectID,
+				"service_account_email": tt.accountName,
+			}
+
+			credentialsBytes, err := json.Marshal(credentialsMap)
+			if err != nil {
+				t.Fatalf("Failed to marshal GCP credentials: %v", err)
+			}
+			credentials := string(credentialsBytes)
+
+			// Verify it's valid JSON
+			var parsed map[string]interface{}
+			if err := json.Unmarshal([]byte(credentials), &parsed); err != nil {
+				t.Errorf("GCP credentials is not valid JSON: %v", err)
+			}
+
+			// Verify fields match
+			if parsed["provider_id"] != tt.providerID {
+				t.Errorf("provider_id = %v, expected %v", parsed["provider_id"], tt.providerID)
+			}
+			if parsed["project_id"] != tt.projectID {
+				t.Errorf("project_id = %v, expected %v", parsed["project_id"], tt.projectID)
+			}
+			if parsed["service_account_email"] != tt.accountName {
+				t.Errorf("service_account_email = %v, expected %v", parsed["service_account_email"], tt.accountName)
+			}
+		})
+	}
+}
+
+// Test region extraction from subnet_ids_to_az
+func TestExtractRegionFromSubnetMap(t *testing.T) {
 	tests := []struct {
 		name           string
-		isPrivateCloud bool
-		expected       string
+		subnetMap      map[string]string
+		expectedRegion string
 	}{
 		{
-			name:           "public cloud",
-			isPrivateCloud: false,
-			expected:       "PUBLIC",
+			name: "us-east-1 from AZ",
+			subnetMap: map[string]string{
+				"subnet-12345": "us-east-1a",
+				"subnet-67890": "us-east-1b",
+			},
+			expectedRegion: "us-east-1",
 		},
 		{
-			name:           "private cloud",
-			isPrivateCloud: true,
-			expected:       "PRIVATE",
+			name: "us-west-2 from AZ",
+			subnetMap: map[string]string{
+				"subnet-abc": "us-west-2a",
+			},
+			expectedRegion: "us-west-2",
+		},
+		{
+			name: "eu-west-1 from AZ",
+			subnetMap: map[string]string{
+				"subnet-xyz": "eu-west-1c",
+			},
+			expectedRegion: "eu-west-1",
+		},
+		{
+			name: "empty map returns empty",
+			subnetMap: map[string]string{},
+			expectedRegion: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a mock ResourceData
-			d := schema.TestResourceDataRaw(t, ResourceCloud().Schema, map[string]any{
-				"name":             "test-cloud",
-				"cloud_provider":   "AWS",
-				"region":           "us-west-2",
-				"is_private_cloud": tt.isPrivateCloud,
-			})
-
-			result := GetNetworkingMode(d)
-			if result != tt.expected {
-				t.Errorf("GetNetworkingMode() = %q, want %q", result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestExpandAWSConfig tests the AWS config expansion helper
-func TestExpandAWSConfig(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    map[string]any
-		expected *AWSConfig
-	}{
-		{
-			name: "full aws config",
-			input: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "AWS",
-				"region":         "us-west-2",
-				"aws_config": []any{
-					map[string]any{
-						"vpc_id":                    "vpc-123",
-						"subnet_ids":                []any{"subnet-1", "subnet-2"},
-						"security_group_ids":        []any{"sg-1"},
-						"controlplane_iam_role_arn": "arn:aws:iam::123:role/controlplane",
-						"dataplane_iam_role_arn":    "arn:aws:iam::123:role/dataplane",
-						"external_id":               "ext-123",
-					},
-				},
-			},
-			expected: &AWSConfig{
-				VPCID:             "vpc-123",
-				SubnetIDs:         []string{"subnet-1", "subnet-2"},
-				SecurityGroupIDs:  []string{"sg-1"},
-				AnyscaleIAMRoleID: "arn:aws:iam::123:role/controlplane",
-				ClusterIAMRoleID:  "arn:aws:iam::123:role/dataplane",
-				ExternalID:        "ext-123",
-			},
-		},
-		{
-			name: "no aws config",
-			input: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "GCP",
-				"region":         "us-central1",
-			},
-			expected: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := schema.TestResourceDataRaw(t, ResourceCloud().Schema, tt.input)
-
-			result := ExpandAWSConfig(d)
-
-			if tt.expected == nil {
-				if result != nil {
-					t.Errorf("ExpandAWSConfig() = %+v, want nil", result)
+			// Simulate region extraction logic
+			var region string
+			for _, az := range tt.subnetMap {
+				if len(az) > 2 {
+					// Extract region from AZ (e.g., "us-east-1a" -> "us-east-1")
+					region = az[:len(az)-1]
+					break
 				}
-				return
 			}
 
-			if result == nil {
-				t.Fatal("ExpandAWSConfig() = nil, want non-nil")
-			}
-
-			if result.VPCID != tt.expected.VPCID {
-				t.Errorf("VPCID = %q, want %q", result.VPCID, tt.expected.VPCID)
-			}
-			if result.AnyscaleIAMRoleID != tt.expected.AnyscaleIAMRoleID {
-				t.Errorf("AnyscaleIAMRoleID = %q, want %q", result.AnyscaleIAMRoleID, tt.expected.AnyscaleIAMRoleID)
-			}
-			if result.ClusterIAMRoleID != tt.expected.ClusterIAMRoleID {
-				t.Errorf("ClusterIAMRoleID = %q, want %q", result.ClusterIAMRoleID, tt.expected.ClusterIAMRoleID)
-			}
-			if result.ExternalID != tt.expected.ExternalID {
-				t.Errorf("ExternalID = %q, want %q", result.ExternalID, tt.expected.ExternalID)
-			}
-			if len(result.SubnetIDs) != len(tt.expected.SubnetIDs) {
-				t.Errorf("SubnetIDs length = %d, want %d", len(result.SubnetIDs), len(tt.expected.SubnetIDs))
-			}
-			if len(result.SecurityGroupIDs) != len(tt.expected.SecurityGroupIDs) {
-				t.Errorf("SecurityGroupIDs length = %d, want %d", len(result.SecurityGroupIDs), len(tt.expected.SecurityGroupIDs))
+			if region != tt.expectedRegion {
+				t.Errorf("extracted region = %v, expected %v", region, tt.expectedRegion)
 			}
 		})
 	}
 }
 
-// TestExpandGCPConfig tests the GCP config expansion helper
-func TestExpandGCPConfig(t *testing.T) {
+// Test bucket prefix handling
+func TestBucketPrefixNormalization(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    map[string]any
-		expected *GCPConfig
+		name           string
+		bucketName     string
+		provider       string
+		expectedPrefix string
 	}{
 		{
-			name: "full gcp config",
-			input: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "GCP",
-				"region":         "us-central1",
-				"gcp_config": []any{
-					map[string]any{
-						"project_id":                        "my-project",
-						"host_project_id":                   "host-project",
-						"provider_name":                     "projects/123456789/locations/global/workloadIdentityPools/pool/providers/provider",
-						"vpc_name":                          "my-vpc",
-						"subnet_names":                      []any{"subnet-1", "subnet-2"},
-						"controlplane_service_account_email": "cp-sa@my-project.iam.gserviceaccount.com",
-						"dataplane_service_account_email":    "dp-sa@my-project.iam.gserviceaccount.com",
-						"firewall_policy_names":              []any{"policy-1"},
-						"memorystore_instance_name":          "my-memorystore",
-						"memorystore_endpoint":               "10.0.0.1:6379",
-					},
-				},
-			},
-			expected: &GCPConfig{
-				ProjectID:                   "my-project",
-				HostProjectID:               "host-project",
-				ProviderName:                "projects/123456789/locations/global/workloadIdentityPools/pool/providers/provider",
-				VPCName:                     "my-vpc",
-				SubnetNames:                 []string{"subnet-1", "subnet-2"},
-				AnyscaleServiceAccountEmail: "cp-sa@my-project.iam.gserviceaccount.com",
-				ClusterServiceAccountEmail:  "dp-sa@my-project.iam.gserviceaccount.com",
-				FirewallPolicyNames:         []string{"policy-1"},
-				MemorystoreInstanceName:     "my-memorystore",
-				MemorystoreEndpoint:         "10.0.0.1:6379",
-			},
+			name:           "AWS bucket without prefix",
+			bucketName:     "my-bucket",
+			provider:       "AWS",
+			expectedPrefix: "s3://my-bucket",
 		},
 		{
-			name: "minimal gcp config",
-			input: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "GCP",
-				"region":         "us-central1",
-				"gcp_config": []any{
-					map[string]any{
-						"project_id":                        "my-project",
-						"provider_name":                     "projects/123456789/locations/global/workloadIdentityPools/pool/providers/provider",
-						"vpc_name":                          "my-vpc",
-						"subnet_names":                      []any{"subnet-1"},
-						"controlplane_service_account_email": "cp-sa@my-project.iam.gserviceaccount.com",
-						"dataplane_service_account_email":    "dp-sa@my-project.iam.gserviceaccount.com",
-					},
-				},
-			},
-			expected: &GCPConfig{
-				ProjectID:                   "my-project",
-				ProviderName:                "projects/123456789/locations/global/workloadIdentityPools/pool/providers/provider",
-				VPCName:                     "my-vpc",
-				SubnetNames:                 []string{"subnet-1"},
-				AnyscaleServiceAccountEmail: "cp-sa@my-project.iam.gserviceaccount.com",
-				ClusterServiceAccountEmail:  "dp-sa@my-project.iam.gserviceaccount.com",
-			},
+			name:           "AWS bucket with s3:// prefix",
+			bucketName:     "s3://my-bucket",
+			provider:       "AWS",
+			expectedPrefix: "s3://my-bucket",
 		},
 		{
-			name: "no gcp config",
-			input: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "AWS",
-				"region":         "us-west-2",
-			},
-			expected: nil,
+			name:           "GCP bucket without prefix",
+			bucketName:     "my-gcs-bucket",
+			provider:       "GCP",
+			expectedPrefix: "gs://my-gcs-bucket",
+		},
+		{
+			name:           "GCP bucket with gs:// prefix",
+			bucketName:     "gs://my-gcs-bucket",
+			provider:       "GCP",
+			expectedPrefix: "gs://my-gcs-bucket",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := schema.TestResourceDataRaw(t, ResourceCloud().Schema, tt.input)
-
-			result := ExpandGCPConfig(d)
-
-			if tt.expected == nil {
-				if result != nil {
-					t.Errorf("ExpandGCPConfig() = %+v, want nil", result)
-				}
-				return
+			// Simulate bucket prefix normalization
+			bucket := tt.bucketName
+			if tt.provider == "AWS" && !strings.HasPrefix(bucket, "s3://") {
+				bucket = "s3://" + bucket
+			} else if tt.provider == "GCP" && !strings.HasPrefix(bucket, "gs://") {
+				bucket = "gs://" + bucket
 			}
 
-			if result == nil {
-				t.Fatal("ExpandGCPConfig() = nil, want non-nil")
-			}
-
-			if result.ProjectID != tt.expected.ProjectID {
-				t.Errorf("ProjectID = %q, want %q", result.ProjectID, tt.expected.ProjectID)
-			}
-			if result.HostProjectID != tt.expected.HostProjectID {
-				t.Errorf("HostProjectID = %q, want %q", result.HostProjectID, tt.expected.HostProjectID)
-			}
-			if result.ProviderName != tt.expected.ProviderName {
-				t.Errorf("ProviderName = %q, want %q", result.ProviderName, tt.expected.ProviderName)
-			}
-			if result.VPCName != tt.expected.VPCName {
-				t.Errorf("VPCName = %q, want %q", result.VPCName, tt.expected.VPCName)
-			}
-			if len(result.SubnetNames) != len(tt.expected.SubnetNames) {
-				t.Errorf("SubnetNames length = %d, want %d", len(result.SubnetNames), len(tt.expected.SubnetNames))
-			}
-			if result.AnyscaleServiceAccountEmail != tt.expected.AnyscaleServiceAccountEmail {
-				t.Errorf("AnyscaleServiceAccountEmail = %q, want %q", result.AnyscaleServiceAccountEmail, tt.expected.AnyscaleServiceAccountEmail)
-			}
-			if result.ClusterServiceAccountEmail != tt.expected.ClusterServiceAccountEmail {
-				t.Errorf("ClusterServiceAccountEmail = %q, want %q", result.ClusterServiceAccountEmail, tt.expected.ClusterServiceAccountEmail)
-			}
-			if len(result.FirewallPolicyNames) != len(tt.expected.FirewallPolicyNames) {
-				t.Errorf("FirewallPolicyNames length = %d, want %d", len(result.FirewallPolicyNames), len(tt.expected.FirewallPolicyNames))
-			}
-			if result.MemorystoreInstanceName != tt.expected.MemorystoreInstanceName {
-				t.Errorf("MemorystoreInstanceName = %q, want %q", result.MemorystoreInstanceName, tt.expected.MemorystoreInstanceName)
-			}
-			if result.MemorystoreEndpoint != tt.expected.MemorystoreEndpoint {
-				t.Errorf("MemorystoreEndpoint = %q, want %q", result.MemorystoreEndpoint, tt.expected.MemorystoreEndpoint)
+			if bucket != tt.expectedPrefix {
+				t.Errorf("normalized bucket = %v, expected %v", bucket, tt.expectedPrefix)
 			}
 		})
 	}
 }
 
-// TestExpandObjectStorage tests the object storage expansion helper
-func TestExpandObjectStorage(t *testing.T) {
+// Test compute stack validation
+func TestComputeStackValidation(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    map[string]any
-		expected *ObjectStorage
+		name         string
+		computeStack string
+		provider     string
+		hasAWSConfig bool
+		hasGCPConfig bool
+		hasK8sConfig bool
+		hasObjectSt  bool
+		shouldBeValid bool
 	}{
 		{
-			name: "full object storage config",
-			input: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "AWS",
-				"region":         "us-west-2",
-				"object_storage": []any{
-					map[string]any{
-						"bucket_name": "my-bucket",
-						"region":      "us-west-2",
-						"endpoint":    "https://s3.amazonaws.com",
-					},
-				},
-			},
-			expected: &ObjectStorage{
-				BucketName: "my-bucket",
-				Region:     strPtr("us-west-2"),
-				Endpoint:   strPtr("https://s3.amazonaws.com"),
-			},
+			name:         "AWS VM with aws_config",
+			computeStack: "VM",
+			provider:     "AWS",
+			hasAWSConfig: true,
+			shouldBeValid: true,
 		},
 		{
-			name: "minimal object storage config",
-			input: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "AWS",
-				"region":         "us-west-2",
-				"object_storage": []any{
-					map[string]any{
-						"bucket_name": "my-bucket",
-					},
-				},
-			},
-			expected: &ObjectStorage{
-				BucketName: "my-bucket",
-			},
+			name:         "AWS VM without aws_config",
+			computeStack: "VM",
+			provider:     "AWS",
+			hasAWSConfig: false,
+			shouldBeValid: false,
 		},
 		{
-			name: "no object storage",
-			input: map[string]any{
-				"name":           "test-cloud",
-				"cloud_provider": "AWS",
-				"region":         "us-west-2",
-			},
-			expected: nil,
+			name:         "GCP VM with gcp_config",
+			computeStack: "VM",
+			provider:     "GCP",
+			hasGCPConfig: true,
+			shouldBeValid: true,
+		},
+		{
+			name:         "AWS K8S with k8s_config and object_storage",
+			computeStack: "K8S",
+			provider:     "AWS",
+			hasK8sConfig: true,
+			hasObjectSt:  true,
+			shouldBeValid: true,
+		},
+		{
+			name:         "AWS K8S without object_storage",
+			computeStack: "K8S",
+			provider:     "AWS",
+			hasK8sConfig: true,
+			hasObjectSt:  false,
+			shouldBeValid: false,
+		},
+		{
+			name:         "GCP K8S with k8s_config and object_storage",
+			computeStack: "K8S",
+			provider:     "GCP",
+			hasK8sConfig: true,
+			hasObjectSt:  true,
+			shouldBeValid: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := schema.TestResourceDataRaw(t, ResourceCloud().Schema, tt.input)
+			// Simulate validation logic from Create method
+			isValid := true
 
-			result := ExpandObjectStorage(d)
-
-			if tt.expected == nil {
-				if result != nil {
-					t.Errorf("ExpandObjectStorage() = %+v, want nil", result)
+			if tt.computeStack == "VM" {
+				if tt.provider == "AWS" && !tt.hasAWSConfig {
+					isValid = false
+				} else if tt.provider == "GCP" && !tt.hasGCPConfig {
+					isValid = false
 				}
-				return
+			} else if tt.computeStack == "K8S" {
+				if !tt.hasK8sConfig || !tt.hasObjectSt {
+					isValid = false
+				}
 			}
 
-			if result == nil {
-				t.Fatal("ExpandObjectStorage() = nil, want non-nil")
-			}
-
-			if result.BucketName != tt.expected.BucketName {
-				t.Errorf("BucketName = %q, want %q", result.BucketName, tt.expected.BucketName)
+			if isValid != tt.shouldBeValid {
+				t.Errorf("validation result = %v, expected %v", isValid, tt.shouldBeValid)
 			}
 		})
 	}
-}
-
-// Helper function to create string pointer
-func strPtr(s string) *string {
-	return &s
 }

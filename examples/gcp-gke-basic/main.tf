@@ -14,11 +14,6 @@ resource "anyscale_cloud" "primary" {
   name = var.cloud_name
 
 
-  timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
-  }
 }
 
 resource "anyscale_cloud_resource" "primary" {

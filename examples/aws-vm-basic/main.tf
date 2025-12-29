@@ -28,9 +28,4 @@ resource "anyscale_cloud" "primary" {
 
   # No file_storage block - EFS disabled
 
-  timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
-  }
 }
