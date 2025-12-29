@@ -6,26 +6,27 @@ resource "anyscale_compute_config" "basic" {
   cloud_id = anyscale_cloud.primary.id
   # project_id is optional - omit to use organization default
 
-  idle_termination_minutes = 30
+  idle_termination_minutes  = 30
   enable_cross_zone_scaling = false
 
-  head_node {
+  head_node = {
     instance_type = "n2-standard-8"
   }
 
-  worker_nodes {
-    instance_type = "n2-standard-16"
-    min_nodes     = 1
-    max_nodes     = 5
-    market_type   = "ON_DEMAND"
-  }
-
-  worker_nodes {
-    instance_type = "n2-standard-32"
-    min_nodes     = 0
-    max_nodes     = 3
-    market_type   = "PREFER_SPOT"
-  }
+  worker_nodes = [
+    {
+      instance_type = "n2-standard-16"
+      min_nodes     = 1
+      max_nodes     = 5
+      market_type   = "ON_DEMAND"
+    },
+    {
+      instance_type = "n2-standard-32"
+      min_nodes     = 0
+      max_nodes     = 3
+      market_type   = "PREFER_SPOT"
+    }
+  ]
 }
 
 # Advanced GCP Compute Config with custom resources and advanced configurations
@@ -36,8 +37,8 @@ resource "anyscale_compute_config" "advanced" {
   cloud_id = anyscale_cloud.primary.id
   # project_id is optional - omit to use organization default
 
-  idle_termination_minutes = 60
-  maximum_uptime_minutes   = 480
+  idle_termination_minutes  = 60
+  maximum_uptime_minutes    = 480
   enable_cross_zone_scaling = true
 
   # Resource constraints
@@ -53,15 +54,15 @@ resource "anyscale_compute_config" "advanced" {
   }
 
   # Cluster-level flags
-  flags = jsonencode({
+  flags = {
     "idle_termination_seconds"    = 300
     "workload_starting_timeout"   = "30m"
     "workload_recovering_timeout" = "20m"
     "instance_selection_strategy" = "relaxed"
-  })
+  }
 
   # Advanced configurations for GCP
-  advanced_configurations_json = jsonencode({
+  advanced_configurations_json = {
     instance_properties = {
       disks = [
         {
@@ -74,9 +75,9 @@ resource "anyscale_compute_config" "advanced" {
         }
       ]
     }
-  })
+  }
 
-  head_node {
+  head_node = {
     instance_type = "n2-standard-16"
 
     # Custom resources for head node
@@ -92,86 +93,78 @@ resource "anyscale_compute_config" "advanced" {
     }
   }
 
-  worker_nodes {
-    name          = "general-compute"
-    instance_type = "n2-standard-16"
-    min_nodes     = 2
-    max_nodes     = 10
-    market_type   = "ON_DEMAND"
+  worker_nodes = [
+    {
+      name          = "general-compute"
+      instance_type = "n2-standard-16"
+      min_nodes     = 2
+      max_nodes     = 10
+      market_type   = "ON_DEMAND"
 
-    # Custom resources
-    resources = {
-      "CPU"    = 16
-      "memory" = 64
-    }
-
-    # Labels for worker node scheduling
-    labels = {
-      "node_type" = "worker"
-      "workload"  = "general"
-    }
-  }
-
-  worker_nodes {
-    name          = "gpu-workers"
-    instance_type = "n1-standard-8"
-    min_nodes     = 0
-    max_nodes     = 5
-    market_type   = "SPOT"
-
-    # Custom resources for GPU nodes
-    resources = {
-      "CPU"    = 8
-      "GPU"    = 1
-      "memory" = 32
-    }
-
-    # Labels for GPU scheduling
-    labels = {
-      "node_type"      = "worker"
-      "accelerator"    = "nvidia-tesla-t4"
-      "workload"       = "ml-training"
-    }
-
-    required_labels = {
-      "ray.io/node-type" = "worker"
-    }
-
-    # GCP specific advanced instance config for GPU
-    advanced_instance_config = jsonencode({
-      instance_properties = {
-        guest_accelerators = [
-          {
-            accelerator_type  = "nvidia-tesla-t4"
-            accelerator_count = 1
-          }
-        ]
+      # Custom resources
+      resources = {
+        "CPU"    = 16
+        "memory" = 64
       }
-    })
-  }
 
-  worker_nodes {
-    name          = "spot-workers"
-    instance_type = "n2-standard-32"
-    min_nodes     = 0
-    max_nodes     = 20
-    market_type   = "PREFER_SPOT"
+      # Labels for worker node scheduling
+      labels = {
+        "node_type" = "worker"
+        "workload"  = "general"
+      }
+    },
+    {
+      name          = "gpu-workers"
+      instance_type = "n1-standard-8"
+      min_nodes     = 0
+      max_nodes     = 5
+      market_type   = "SPOT"
 
-    resources = {
-      "CPU"    = 32
-      "memory" = 128
+      # Custom resources for GPU nodes
+      resources = {
+        "CPU"    = 8
+        "GPU"    = 1
+        "memory" = 32
+      }
+
+      # Labels for GPU scheduling
+      labels = {
+        "node_type"   = "worker"
+        "accelerator" = "nvidia-tesla-t4"
+        "workload"    = "ml-training"
+      }
+
+      required_labels = {
+        "ray.io/node-type" = "worker"
+      }
+
+      # Note: GCP GPU configuration (guest_accelerators) cannot be set via advanced_instance_config
+      # The API derives GPU configuration from instance type and other sources
+      # For GPU instances, use appropriate GPU-capable instance types
+    },
+    {
+      name          = "spot-workers"
+      instance_type = "n2-standard-32"
+      min_nodes     = 0
+      max_nodes     = 20
+      market_type   = "PREFER_SPOT"
+
+      resources = {
+        "CPU"    = 32
+        "memory" = 128
+      }
+
+      labels = {
+        "node_type" = "worker"
+        "workload"  = "batch"
+      }
+
+      # Node-level flags
+      flags = jsonencode({
+        "replacement_threshold" = "15m"
+      })
     }
-
-    labels = {
-      "node_type" = "worker"
-      "workload"  = "batch"
-    }
-
-    # Node-level flags
-    flags = jsonencode({
-      "replacement_threshold" = "15m"
-    })
-  }
+  ]
 }
 
 # Anonymous compute config example
@@ -179,18 +172,20 @@ resource "anyscale_compute_config" "advanced" {
 
 resource "anyscale_compute_config" "anonymous" {
   # No name - will be anonymous
-  cloud_id   = anyscale_cloud.primary.id
-  anonymous  = true
+  cloud_id  = anyscale_cloud.primary.id
+  anonymous = true
 
-  head_node {
+  head_node = {
     instance_type = "n2-standard-4"
   }
 
-  worker_nodes {
-    instance_type = "n2-standard-8"
-    min_nodes     = 0
-    max_nodes     = 3
-  }
+  worker_nodes = [
+    {
+      instance_type = "n2-standard-8"
+      min_nodes     = 0
+      max_nodes     = 3
+    }
+  ]
 }
 
 # Compute config with custom instance type (free pod shapes for GKE)
@@ -261,7 +256,7 @@ resource "anyscale_compute_config" "anonymous" {
 #     }
 #
 #     # Alternative: explicit node selectors
-#     # advanced_instance_config = jsonencode({
+#     # advanced_instance_config = ({
 #     #   spec = {
 #     #     nodeSelector = {
 #     #       "cloud.google.com/gke-tpu-topology"     = "2x2"

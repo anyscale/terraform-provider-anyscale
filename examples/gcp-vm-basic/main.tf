@@ -1,7 +1,7 @@
 # GCP Basic Test Scenario
 # No Filestore, No Memorystore - Minimal GCP cloud configuration
 
-resource "anyscale_cloud" "test" {
+resource "anyscale_cloud" "primary" {
   # Common Fields
   name           = var.cloud_name
   cloud_provider = "GCP"
@@ -32,9 +32,4 @@ resource "anyscale_cloud" "test" {
 
   # No file_storage block - Filestore disabled
 
-  timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
-  }
 }
