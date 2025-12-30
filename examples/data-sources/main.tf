@@ -104,3 +104,66 @@ output "config_uses_correct_cloud" {
   value       = data.anyscale_compute_config.dev_config.cloud_id == data.anyscale_cloud.dev.id
   description = "Verify the compute config is using the dev cloud"
 }
+
+# Example 7: List all clouds
+data "anyscale_clouds" "all" {
+}
+
+output "all_clouds_count" {
+  value       = length(data.anyscale_clouds.all.clouds)
+  description = "Total number of clouds in the organization"
+}
+
+output "all_cloud_names" {
+  value       = [for cloud in data.anyscale_clouds.all.clouds : cloud.name]
+  description = "List of all cloud names"
+}
+
+# Example 8: Filter clouds by provider
+data "anyscale_clouds" "aws_clouds" {
+  cloud_provider = "AWS"
+}
+
+output "aws_cloud_count" {
+  value       = length(data.anyscale_clouds.aws_clouds.clouds)
+  description = "Number of AWS clouds"
+}
+
+# Example 9: Filter clouds by region
+data "anyscale_clouds" "us_east_clouds" {
+  region = "us-east-2"
+}
+
+output "us_east_cloud_names" {
+  value       = [for cloud in data.anyscale_clouds.us_east_clouds.clouds : cloud.name]
+  description = "Clouds in us-east-2"
+}
+
+# Example 10: Filter by name pattern
+data "anyscale_clouds" "production_clouds" {
+  name_contains = "production"
+}
+
+output "production_clouds" {
+  value = [
+    for cloud in data.anyscale_clouds.production_clouds.clouds : {
+      name          = cloud.name
+      cloud_provider = cloud.cloud_provider
+      region        = cloud.region
+      status        = cloud.status
+    }
+  ]
+  description = "Production clouds with key details"
+}
+
+# Example 11: Find default cloud
+data "anyscale_clouds" "all_defaults" {
+}
+
+output "default_cloud" {
+  value = [
+    for cloud in data.anyscale_clouds.all_defaults.clouds : cloud.name
+    if cloud.is_default
+  ]
+  description = "Default cloud name"
+}

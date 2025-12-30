@@ -140,6 +140,7 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewCloudDataSource,
+		NewCloudsDataSource,
 		NewComputeConfigDataSource,
 		NewProjectDataSource,
 		NewProjectsDataSource,

@@ -25,6 +25,41 @@ resource "anyscale_compute_config" "example" {
 }
 ```
 
+### `anyscale_clouds`
+
+List and filter Anyscale Clouds.
+
+**Use cases:**
+- List all clouds in your organization
+- Filter clouds by provider (AWS, GCP, AZURE, etc.)
+- Filter clouds by region
+- Find clouds matching a name pattern
+- Identify default clouds or clouds with specific features
+
+**Example:**
+```terraform
+# List all AWS clouds
+data "anyscale_clouds" "aws_clouds" {
+  cloud_provider = "AWS"
+}
+
+output "aws_cloud_names" {
+  value = [for cloud in data.anyscale_clouds.aws_clouds.clouds : cloud.name]
+}
+
+# Filter by name pattern
+data "anyscale_clouds" "production" {
+  name_contains = "production"
+}
+
+# Find default cloud
+data "anyscale_clouds" "all" {}
+
+locals {
+  default_cloud = [for cloud in data.anyscale_clouds.all.clouds : cloud if cloud.is_default][0]
+}
+```
+
 ### `anyscale_compute_config`
 
 Look up an existing Anyscale Compute Configuration by ID or name.
