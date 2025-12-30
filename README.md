@@ -14,7 +14,7 @@ A Terraform provider for managing Anyscale resources via the Anyscale API v2, bu
 
 - **Flexible Authentication**: Environment variable, credentials file, or provider configuration
 
-## Framework Migration
+## Framework
 
 **Version 0.1.0+** uses the [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework) instead of SDK v2. Key improvements:
 
@@ -109,210 +109,46 @@ provider "anyscale" {
 
 ### anyscale_cloud
 
-Creates and manages an Anyscale Cloud with all-in-one or empty cloud patterns.
+Creates and manages an Anyscale Cloud with all-in-one or empty cloud patterns. Supports AWS VM, GCP VM, AWS EKS (K8S), and GCP GKE (K8S) deployments.
 
-#### Example: AWS VM Cloud (All-in-One Pattern)
-
-```hcl
-resource "anyscale_cloud" "aws_example" {
-  name           = "my-terraform-cloud"
-  cloud_provider = "AWS"
-  region         = "us-east-2"
-  compute_stack  = "VM"
-
-  # Cloud-level settings
-  auto_add_user           = false
-  enable_lineage_tracking = false
-  enable_log_ingestion    = false
-  is_private_cloud        = false
-
-  # AWS-specific configuration
-  aws_config {
-    vpc_id                    = "vpc-0343edeee0eab27c3"
-    subnet_ids_to_az = {
-      "subnet-086ac7bba68e3c1c3" = "us-east-2a"
-      "subnet-08a309019a027ec72" = "us-east-2b"
-      "subnet-06a825a292bd4d476" = "us-east-2c"
-    }
-    security_group_ids       = ["sg-064dac0ed5cffc779"]
-    controlplane_iam_role_arn = "arn:aws:iam::367974485317:role/anyscale-crossacct-role"
-    dataplane_iam_role_arn    = "arn:aws:iam::367974485317:role/anyscale-cluster-node-role"
-    external_id               = "org_abc123-external-id"
-  }
-
-  # Object storage configuration
-  object_storage {
-    bucket_name = "my-anyscale-bucket"  # s3:// prefix added automatically
-    region      = "us-east-2"
-  }
-}
-
-output "cloud_id" {
-  value = anyscale_cloud.aws_example.id
-}
-```
-
-#### Example: GCP VM Cloud
-
-```hcl
-resource "anyscale_cloud" "gcp_example" {
-  name           = "my-gcp-cloud"
-  cloud_provider = "GCP"
-  region         = "us-central1"
-  compute_stack  = "VM"
-
-  gcp_config {
-    project_id                  = "my-project-123"
-    provider_name               = "projects/123/locations/global/workloadIdentityPools/anyscale/providers/anyscale"
-    vpc_name                    = "anyscale-vpc"
-    subnet_names                = ["anyscale-subnet-us-central1"]
-    anyscale_service_account_email = "anyscale@my-project.iam.gserviceaccount.com"
-    cluster_service_account_email  = "cluster@my-project.iam.gserviceaccount.com"
-  }
-
-  object_storage {
-    bucket_name = "my-gcs-bucket"  # gs:// prefix added automatically
-  }
-}
-```
-
-#### Example: AWS EKS (Kubernetes)
-
-```hcl
-resource "anyscale_cloud" "eks_example" {
-  name           = "my-eks-cloud"
-  cloud_provider = "AWS"
-  region         = "us-west-2"
-  compute_stack  = "K8S"
-
-  kubernetes_config {
-    anyscale_operator_iam_identity = "arn:aws:iam::367974485317:role/anyscale-eks-operator-role"
-    zones                          = ["us-west-2a", "us-west-2b"]
-  }
-
-  object_storage {
-    bucket_name = "my-eks-bucket"
-    region      = "us-west-2"
-  }
-}
-```
-
-#### Example: Empty Cloud (Split Deployment Pattern)
-
-```hcl
-# Step 1: Create empty cloud
-resource "anyscale_cloud" "empty" {
-  name           = "my-empty-cloud"
-  cloud_provider = "AWS"
-  region         = "us-east-2"
-
-  # No config blocks = empty cloud
-  # Resources added via anyscale_cloud_resource
-}
-
-# Step 2: Add resource deployment
-resource "anyscale_cloud_resource" "deployment" {
-  cloud_id      = anyscale_cloud.empty.id
-  resource_name = "vm-aws-us-east-2"
-  compute_stack = "VM"
-
-  aws_config {
-    # ... same as anyscale_cloud aws_config
-  }
-
-  object_storage {
-    # ... same as anyscale_cloud object_storage
-  }
-}
-```
+**Examples**: See [`examples/aws-vm-basic/`](examples/aws-vm-basic/), [`examples/gcp-vm-basic/`](examples/gcp-vm-basic/), [`examples/aws-eks-basic/`](examples/aws-eks-basic/), and [`examples/gcp-gke-basic/`](examples/gcp-gke-basic/) for complete examples.
 
 ### anyscale_cloud_resource
 
-Manages cloud resource deployments separately from the cloud itself (split pattern).
-
-#### Example: AWS VM Resource
-
-```hcl
-resource "anyscale_cloud_resource" "aws_vm" {
-  cloud_id      = "cld_abc123"
-  resource_name = "vm-aws-us-east-2"
-  compute_stack = "VM"
-
-  aws_config {
-    vpc_id                    = "vpc-0343edeee0eab27c3"
-    subnet_ids_to_az = {
-      "subnet-086ac" = "us-east-2a"
-      "subnet-08a30" = "us-east-2b"
-    }
-    security_group_ids       = ["sg-064dac0ed5cffc779"]
-    controlplane_iam_role_arn = "arn:aws:iam::xxx:role/crossacct"
-    dataplane_iam_role_arn    = "arn:aws:iam::xxx:role/cluster-node"
-  }
-
-  object_storage {
-    bucket_name = "my-bucket"
-  }
-}
-```
+Manages cloud resource deployments separately from the cloud itself (split deployment pattern). Use this when you need to add multiple resource deployments to a single cloud.
 
 **Import**: Use composite ID format `cloud_id:resource_name`
-
 ```bash
 terraform import anyscale_cloud_resource.aws_vm "cld_abc123:vm-aws-us-east-2"
 ```
 
+**Examples**: See [`examples/aws-vm-basic-resource/`](examples/aws-vm-basic-resource/) for split deployment pattern examples.
+
 ### anyscale_compute_config
 
-Creates cluster templates (compute configurations).
+Creates cluster templates (compute configurations) with native HCL syntax for flags and advanced configurations.
 
-#### Example: Compute Config with Native HCL Flags
+**Examples**: See [`examples/aws-vm-basic/`](examples/aws-vm-basic/) and [`examples/gcp-vm-basic/`](examples/gcp-vm-basic/) for compute config examples.
 
-```hcl
-resource "anyscale_compute_config" "example" {
-  name        = "my-compute-config"
-  cloud_id    = anyscale_cloud.aws_example.id
+For more examples, see the [`examples/`](examples/) directory.
 
-  # Native HCL syntax - no jsonencode needed!
-  flags = {
-    "ray-cluster-ray-version"           = "2.9.0"
-    "ray-cluster-kubernetes-namespace"  = "anyscale"
-  }
+## Examples
 
-  # Native HCL for advanced configurations
-  advanced_configurations_json = {
-    ray_head_node = {
-      instance_type = "m5.large"
-      min_instances = 1
-      max_instances = 1
-    }
-    ray_worker_nodes = [
-      {
-        instance_type = "m5.xlarge"
-        min_instances = 0
-        max_instances = 10
-      }
-    ]
-  }
-}
-```
+See the [`examples/`](examples/) directory for complete, working examples:
 
-## API Operations
+- **AWS VM**: [`examples/aws-vm-basic/`](examples/aws-vm-basic/) - Basic AWS VM cloud
+- **GCP VM**: [`examples/gcp-vm-basic/`](examples/gcp-vm-basic/) - Basic GCP VM cloud
+- **AWS EKS**: [`examples/aws-eks-basic/`](examples/aws-eks-basic/) - AWS EKS (K8S) cloud
+- **GCP GKE**: [`examples/gcp-gke-basic/`](examples/gcp-gke-basic/) - GCP GKE (K8S) cloud
+- **Split Deployment**: [`examples/aws-vm-basic-resource/`](examples/aws-vm-basic-resource/) - Empty cloud with separate resource deployment
 
-### Cloud Lifecycle
+## Cloud Lifecycle
 
-1. **Create Cloud**: `POST /api/v2/clouds` - Creates minimal cloud
-2. **Add Resource** (optional): `PUT /api/v2/clouds/{id}/add_resource` - Deploys infrastructure
-3. **Poll Ready**: Waits for cloud state=ACTIVE and status=ready (up to 30min)
-4. **Read Cloud**: `GET /api/v2/clouds/{id}` - Retrieves cloud details
-5. **Delete Cloud**: `DELETE /api/v2/clouds/{id}` - Deletes cloud
-
-### Two-Phase Create Pattern
-
-For all-in-one clouds, the provider automatically:
-1. Creates a minimal cloud (Step 1)
-2. Adds the resource deployment (Step 2)
-3. Polls until ready (Step 3)
-4. Reads final state
+The provider handles the full cloud lifecycle automatically:
+- Creates minimal cloud via API
+- Adds resource deployment (for all-in-one patterns)
+- Polls until cloud is ready (up to 30 minutes)
+- Manages updates and deletions
 
 ## Development
 
@@ -322,42 +158,13 @@ For all-in-one clouds, the provider automatically:
 make build
 ```
 
-### Testing
-
-```bash
-# Unit tests (88 tests)
-make test
-
-# Acceptance tests (requires AWS credentials)
-make testacc
-
-# Specific scenario test
-make test-aws-vm-basic
-```
-
 ### Project Structure
 
 ```
-├── main.go                           # Provider entry point
-├── internal/provider/
-│   ├── provider.go                   # Provider schema and config
-│   ├── client.go                     # Anyscale API client
-│   ├── models.go                     # API models
-│   ├── resource_cloud.go             # Cloud resource (1,275 lines)
-│   ├── resource_cloud_resource.go    # Cloud resource deployment (1,432 lines)
-│   ├── resource_compute_config.go    # Compute config resource
-│   ├── resource_cloud_test.go        # Unit tests (43 tests)
-│   ├── resource_cloud_resource_test.go # Unit tests (27 tests)
-│   ├── resource_cloud_acc_test.go    # Acceptance tests
-│   └── resource_cloud_resource_acc_test.go
-├── examples/
-│   ├── aws-vm-basic/                 # Basic AWS VM cloud
-│   ├── aws-vm/                       # Full AWS VM with modules
-│   ├── aws-eks-basic/                # AWS EKS (K8S) cloud
-│   ├── gcp-vm-basic/                 # Basic GCP VM cloud
-│   ├── gcp-gke-basic/                # GCP GKE (K8S) cloud
-│   └── aws-vm-basic-resource/        # Split deployment example
-└── docs/                             # Generated documentation
+├── main.go                    # Provider entry point
+├── internal/provider/         # Provider implementation
+├── examples/                  # Example configurations
+└── docs/                      # Generated documentation
 ```
 
 ## Migration from SDK v2 (v0.0.x → v0.1.0+)
@@ -415,57 +222,18 @@ flags = {
 - `flags` and `advanced_configurations_json` support native HCL
 - Same state structure, improved type safety
 
-## Comparison with CLI
-
-Provider mirrors `anyscale cloud register` CLI functionality:
+## Testing
 
 ```bash
-# CLI command
-anyscale cloud register --provider aws \
-  --name my-cloud \
-  --region us-east-2 \
-  --vpc-id vpc-xxx \
-  --subnet-ids subnet-a,subnet-b \
-  --security-group-ids sg-xxx
+# Unit tests
+make test
 
-# Equivalent Terraform
-resource "anyscale_cloud" "my_cloud" {
-  name           = "my-cloud"
-  cloud_provider = "AWS"
-  region         = "us-east-2"
+# Acceptance tests (requires AWS credentials)
+make testacc
 
-  aws_config {
-    vpc_id             = "vpc-xxx"
-    subnet_ids_to_az   = {
-      "subnet-a" = "us-east-2a"
-      "subnet-b" = "us-east-2b"
-    }
-    security_group_ids = ["sg-xxx"]
-    # ... other required fields
-  }
-}
+# Specific scenario test
+make test-aws-vm-basic
 ```
-
-## Testing Matrix
-
-### Unit Tests (88 total)
-
-- Cloud helper functions (43 tests)
-- Cloud resource expand helpers (27 tests)
-- Compute config helpers (18 tests)
-
-### Acceptance Tests
-
-- AWS VM basic (all-in-one)
-- AWS VM empty cloud
-- GCP VM basic
-- AWS K8S basic
-- Cloud resource AWS VM
-- Cloud resource with file storage
-
-### Integration Tests
-
-- `make test-aws-vm-basic` - Full end-to-end AWS provisioning
 
 ## Contributing
 
