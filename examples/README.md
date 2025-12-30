@@ -4,32 +4,145 @@ This directory contains example configurations demonstrating how to use the Anys
 
 ## Available Examples
 
-### [basic-anyscale-cloud](./basic-anyscale-cloud/)
+### Cloud Resources
 
-A minimal example showing how to register an existing AWS infrastructure as an Anyscale Cloud.
+#### [aws-vm-basic](./aws-vm-basic/)
 
-**Use this when**: You already have AWS resources (VPC, subnets, security groups, IAM roles, S3 bucket) and just want to register them with Anyscale.
+Basic AWS VM cloud example using the all-in-one deployment pattern. Creates an Anyscale Cloud with AWS VM compute stack using existing AWS infrastructure.
 
-**What it does**:
-- Registers an Anyscale Cloud using existing AWS resources
-- No AWS infrastructure creation
+**Use this when**: You want to register an AWS VM cloud with Anyscale using existing VPC, subnets, security groups, and IAM roles.
 
-**Time to complete**: ~5-10 minutes
+**What it demonstrates**:
+- Creating an `anyscale_cloud` resource with AWS VM configuration
+- Using existing AWS infrastructure (VPC, subnets, security groups, IAM roles)
+- Object storage configuration
+- Compute config creation
 
-### [basic-commonname](./basic-commonname/)
+#### [aws-vm](./aws-vm/)
 
-A complete end-to-end example that creates AWS infrastructure and registers it as an Anyscale Cloud.
+Full AWS VM example with AWS Cloud Foundation modules. Creates both AWS infrastructure and Anyscale Cloud resources.
 
-**Use this when**: You want to create everything from scratch in a single Terraform configuration.
+**Use this when**: You want a complete end-to-end example that creates AWS infrastructure and registers it with Anyscale.
 
-**What it does**:
-- Creates VPC with public subnets
-- Creates security groups
-- Creates IAM roles (cross-account and cluster node)
-- Creates S3 bucket
-- Registers the cloud with Anyscale
+**What it demonstrates**:
+- Creating AWS infrastructure using Anyscale Cloud Foundation modules
+- Registering the cloud with Anyscale
+- Full integration between AWS and Anyscale resources
 
-**Time to complete**: ~10-15 minutes
+#### [aws-vm-basic-resource](./aws-vm-basic-resource/)
+
+AWS VM cloud using the split deployment pattern. Demonstrates creating an empty cloud first, then adding a resource deployment separately.
+
+**Use this when**: You want to use the split deployment pattern where the cloud and resource deployment are managed separately.
+
+**What it demonstrates**:
+- Creating an empty `anyscale_cloud` resource
+- Adding a resource deployment via `anyscale_cloud_resource`
+- Split deployment pattern workflow
+
+#### [gcp-vm-basic](./gcp-vm-basic/)
+
+Basic GCP VM cloud example. Creates an Anyscale Cloud with GCP VM compute stack.
+
+**Use this when**: You want to register a GCP VM cloud with Anyscale using existing GCP infrastructure.
+
+**What it demonstrates**:
+- Creating an `anyscale_cloud` resource with GCP VM configuration
+- GCP-specific configuration (project, VPC, subnets, service accounts)
+- Object storage configuration with GCS
+- Compute config creation
+
+#### [gcp-vm](./gcp-vm/)
+
+Full GCP VM example with GCP Cloud Foundation modules. Creates both GCP infrastructure and Anyscale Cloud resources.
+
+**Use this when**: You want a complete end-to-end example that creates GCP infrastructure and registers it with Anyscale.
+
+**What it demonstrates**:
+- Creating GCP infrastructure using Anyscale Cloud Foundation modules
+- Registering the cloud with Anyscale
+- Full integration between GCP and Anyscale resources
+
+### Kubernetes Examples
+
+#### [aws-eks-basic](./aws-eks-basic/)
+
+AWS EKS (Kubernetes) cloud example. Creates an Anyscale Cloud with AWS EKS compute stack.
+
+**Use this when**: You want to register an AWS EKS cluster with Anyscale.
+
+**What it demonstrates**:
+- Creating an `anyscale_cloud` resource with K8S compute stack
+- Kubernetes configuration for AWS EKS
+- Object storage configuration
+
+#### [gcp-gke-basic](./gcp-gke-basic/)
+
+GCP GKE (Kubernetes) cloud example. Creates an Anyscale Cloud with GCP GKE compute stack.
+
+**Use this when**: You want to register a GCP GKE cluster with Anyscale.
+
+**What it demonstrates**:
+- Creating an `anyscale_cloud` resource with K8S compute stack
+- Kubernetes configuration for GCP GKE
+- Object storage configuration
+
+### Advanced Examples
+
+#### [multi-resource-cloud-basic](./multi-resource-cloud-basic/)
+
+Example demonstrating multiple resource deployments in a single cloud. Shows how to add multiple compute stacks to one cloud.
+
+**Use this when**: You need multiple resource deployments (e.g., multiple regions or compute stacks) in a single Anyscale Cloud.
+
+**What it demonstrates**:
+- Creating a cloud with multiple resource deployments
+- Managing multiple `anyscale_cloud_resource` resources
+- Multi-resource cloud patterns
+
+### Data Sources
+
+#### [data-sources](./data-sources/)
+
+Examples demonstrating how to use Anyscale data sources to look up existing resources.
+
+**Use this when**: You need to reference existing Anyscale resources (clouds, compute configs, projects) in your Terraform configuration.
+
+**What it demonstrates**:
+- Using `anyscale_cloud` data source
+- Using `anyscale_clouds` data source
+- Using `anyscale_compute_config` data source
+- Using `anyscale_project` and `anyscale_projects` data sources
+
+See the [data-sources README](./data-sources/README.md) for detailed documentation.
+
+### Resource Examples
+
+#### [resources/anyscale_cloud](./resources/anyscale_cloud/)
+
+Minimal example showing just the `anyscale_cloud` resource configuration.
+
+**Use this when**: You want a simple, focused example of the `anyscale_cloud` resource without additional infrastructure.
+
+#### [resources/anyscale_cloud_resource](./resources/anyscale_cloud_resource/)
+
+Minimal example showing just the `anyscale_cloud_resource` resource configuration.
+
+**Use this when**: You want a simple, focused example of the `anyscale_cloud_resource` resource.
+
+#### [resources/anyscale_compute_config](./resources/anyscale_compute_config/)
+
+Minimal example showing just the `anyscale_compute_config` resource configuration.
+
+**Use this when**: You want a simple, focused example of the `anyscale_compute_config` resource.
+
+### Provider Configuration
+
+#### [provider](./provider/)
+
+Example showing basic provider configuration.
+
+**Use this when**: You want to see how to configure the Anyscale provider.
 
 ## Getting Started
 
@@ -37,13 +150,10 @@ A complete end-to-end example that creates AWS infrastructure and registers it a
 
 2. **Navigate to the example directory**:
    ```bash
-   cd basic-commonname/  # or basic-anyscale-cloud/
+   cd aws-vm-basic/  # or your chosen example
    ```
 
-3. **Read the example's README**:
-   Each example has detailed instructions in its own README.md
-
-4. **Set up authentication**:
+3. **Set up authentication**:
 
    Either set the environment variable:
    ```bash
@@ -57,38 +167,45 @@ A complete end-to-end example that creates AWS infrastructure and registers it a
    }
    ```
 
-5. **Configure your variables**:
-   Create a `terraform.tfvars` file with your values (see example README for required variables)
+   Or use:
+   ```json
+   {
+     "token": "your-token-here"
+   }
+   ```
 
-6. **Run Terraform**:
+4. **Configure your variables**:
+   Create a `terraform.tfvars` file with your values (see example directory for required variables)
+
+5. **Run Terraform**:
    ```bash
    terraform init
    terraform plan
    terraform apply
    ```
 
-## Example Comparison
-
-| Feature | basic-anyscale-cloud | basic-commonname |
-|---------|---------------------|------------------|
-| Creates AWS VPC | ❌ No | ✅ Yes |
-| Creates AWS Subnets | ❌ No | ✅ Yes |
-| Creates Security Groups | ❌ No | ✅ Yes |
-| Creates IAM Roles | ❌ No | ✅ Yes |
-| Creates S3 Bucket | ❌ No | ✅ Yes |
-| Registers Anyscale Cloud | ✅ Yes | ✅ Yes |
-| Best for | Existing infrastructure | New deployments |
-| Complexity | Simple | Moderate |
-
 ## Prerequisites
 
 All examples require:
 
 - **Terraform**: >= 1.9
-- **AWS Credentials**: Configured for Terraform
+- **Cloud Provider Credentials**: Configured for Terraform (AWS, GCP, etc.)
 - **Anyscale Authentication**: Via `ANYSCALE_CLI_TOKEN` env var or credentials file
-- **Anyscale Organization ID**: Required for IAM trust policies
-- **Anyscale External ID**: Required for IAM trust policies
+- **Anyscale Organization ID**: Required for IAM trust policies (AWS/GCP examples)
+- **Anyscale External ID**: Required for IAM trust policies (AWS/GCP examples)
+
+## Example Comparison
+
+| Example | Cloud Provider | Compute Stack | Pattern | Infrastructure Creation |
+|---------|---------------|---------------|---------|------------------------|
+| `aws-vm-basic` | AWS | VM | All-in-one | Uses existing |
+| `aws-vm` | AWS | VM | All-in-one | Creates via modules |
+| `aws-vm-basic-resource` | AWS | VM | Split | Uses existing |
+| `gcp-vm-basic` | GCP | VM | All-in-one | Uses existing |
+| `gcp-vm` | GCP | VM | All-in-one | Creates via modules |
+| `aws-eks-basic` | AWS | K8S | All-in-one | Uses existing EKS |
+| `gcp-gke-basic` | GCP | K8S | All-in-one | Uses existing GKE |
+| `multi-resource-cloud-basic` | AWS | VM | Split | Uses existing |
 
 ## Common Variables
 
@@ -96,15 +213,15 @@ Most examples use these common variables:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `aws_region` | AWS region | `"us-east-2"` |
-| `cloud_name` | Name for the cloud | `"my-terraform-cloud"` |
+| `cloud_name` | Name for the Anyscale Cloud | `"my-terraform-cloud"` |
 | `anyscale_org_id` | Your Anyscale org ID | `"org_abc123xyz"` |
 | `anyscale_external_id` | External ID for IAM | `"my-external-id-12345"` |
+| `region` | Cloud provider region | `"us-east-2"` (AWS) or `"us-central1"` (GCP) |
 
 ## Support
 
 For issues or questions:
-- Check the example's README for troubleshooting tips
+- Check the example's directory for specific README files
 - Refer to the [main provider README](../README.md)
 - Review the [Anyscale documentation](https://docs.anyscale.com/)
 
@@ -114,9 +231,9 @@ To add a new example:
 
 1. Create a new subdirectory under `examples/`
 2. Include at minimum:
-   - `main.tf` - Main configuration
+   - `main.tf` or resource-specific `.tf` files - Main configuration
    - `variables.tf` - Variable definitions
    - `outputs.tf` - Output definitions
    - `versions.tf` - Provider requirements
-   - `README.md` - Usage instructions
-3. Follow the naming convention: `basic-*` for simple examples, `advanced-*` for complex ones
+   - `README.md` - Usage instructions (recommended)
+3. Follow the naming convention: `*-basic` for simple examples, descriptive names for specific use cases
