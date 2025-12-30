@@ -89,7 +89,7 @@ provider_installation {
 terraform {
   required_providers {
     anyscale = {
-      source = "github.com/brent/anyscale"
+      source = "github.com/anyscale/terraform-provider-anyscale"
       version = "~> 0.1"
     }
   }
