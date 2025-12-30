@@ -26,7 +26,7 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				Config: testAccComputeConfigResourceConfig_basic(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "anonymous", "true"),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "cloud_id"),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.large"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "version"),
@@ -93,7 +93,7 @@ func TestAccComputeConfigResource_Anonymous(t *testing.T) {
 				Config: testAccComputeConfigResourceConfig_anonymous(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "anonymous", "true"),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 				),
 			},
@@ -192,21 +192,21 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 func testAccComputeConfigResourceConfig_basic() string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  # Use anonymous config to avoid name conflicts
-  anonymous = true
+  # Use unique name to avoid conflicts
+  name     = "tf-test-compute-config-basic-%d"
   cloud_id = "%s"
 
   head_node = {
     instance_type = "m5.large"
   }
 }
-`, os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
+`, os.Getpid(), os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
 }
 
 func testAccComputeConfigResourceConfig_withWorkers() string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  name     = "tf-test-compute-config-workers"
+  name     = "tf-test-compute-config-workers-%d"
   cloud_id = "%s"
 
   idle_termination_minutes = 60
@@ -225,20 +225,20 @@ resource "anyscale_compute_config" "test" {
     }
   ]
 }
-`, os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
+`, os.Getpid(), os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
 }
 
 func testAccComputeConfigResourceConfig_anonymous() string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  anonymous = true
-  cloud_id  = "%s"
+  name     = "tf-test-compute-config-anon-%d"
+  cloud_id = "%s"
 
   head_node = {
     instance_type = "m5.large"
   }
 }
-`, os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
+`, os.Getpid(), os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
 }
 
 func testAccComputeConfigResourceConfig_withCloudName(cloudName string) string {

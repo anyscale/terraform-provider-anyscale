@@ -147,10 +147,10 @@ data "anyscale_clouds" "production_clouds" {
 output "production_clouds" {
   value = [
     for cloud in data.anyscale_clouds.production_clouds.clouds : {
-      name          = cloud.name
+      name           = cloud.name
       cloud_provider = cloud.cloud_provider
-      region        = cloud.region
-      status        = cloud.status
+      region         = cloud.region
+      status         = cloud.status
     }
   ]
   description = "Production clouds with key details"

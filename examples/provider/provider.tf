@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     anyscale = {
-      source = "github.com/brent/anyscale"
+      source  = "github.com/brent/anyscale"
       version = "~> 0.1"
     }
   }

@@ -245,7 +245,7 @@ type ProjectResult struct {
 	Name            string  `json:"name"`
 	Description     *string `json:"description"`
 	ParentCloudID   string  `json:"parent_cloud_id"`
-	CreatorID       string  `json:"creator_id"`
+	CreatorID       *string `json:"creator_id,omitempty"`
 	CreatedAt       string  `json:"created_at"`
 	LastUsedCloudID *string `json:"last_used_cloud_id,omitempty"`
 	IsDefault       bool    `json:"is_default"`

@@ -322,10 +322,15 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 				ID:            types.StringValue(project.ID),
 				Name:          types.StringValue(project.Name),
 				CloudID:       types.StringValue(project.ParentCloudID),
-				CreatorID:     types.StringValue(project.CreatorID),
 				CreatedAt:     types.StringValue(project.CreatedAt),
 				IsDefault:     types.BoolValue(project.IsDefault),
 				DirectoryName: types.StringValue(project.DirectoryName),
+			}
+
+			if project.CreatorID != nil {
+				projectModel.CreatorID = types.StringValue(*project.CreatorID)
+			} else {
+				projectModel.CreatorID = types.StringNull()
 			}
 
 			if project.Description != nil {

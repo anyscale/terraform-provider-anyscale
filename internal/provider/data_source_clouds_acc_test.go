@@ -299,7 +299,8 @@ data "anyscale_clouds" "test" {
 func testAccCloudsDataSourceFindSpecificCloudConfig(cloudName string) string {
 	return fmt.Sprintf(`
 data "anyscale_clouds" "test" {
-  name_contains = "%s"
+  name_contains   = "%s"
+  cloud_provider  = "GCP"
 }
 
 # Verify we can use the clouds data source to get cloud ID

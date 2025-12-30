@@ -10,6 +10,8 @@ build/
 *.dylib
 *.test
 *.out
+.go/
+.go-build/
 
 # Go workspace
 go.work

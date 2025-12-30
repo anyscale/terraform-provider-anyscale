@@ -254,7 +254,12 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		config.Description = types.StringNull()
 	}
 
-	config.CreatorID = types.StringValue(project.CreatorID)
+	if project.CreatorID != nil {
+		config.CreatorID = types.StringValue(*project.CreatorID)
+	} else {
+		config.CreatorID = types.StringNull()
+	}
+
 	config.CreatedAt = types.StringValue(project.CreatedAt)
 
 	if project.LastUsedCloudID != nil {
@@ -324,45 +329,65 @@ func (d *ProjectDataSource) findProjectByName(ctx context.Context, name string, 
 		params.Add("parent_cloud_id", cloudID)
 	}
 
-	path := "/api/v2/projects"
-	if len(params) > 0 {
-		path = fmt.Sprintf("%s?%s", path, params.Encode())
-	}
-
-	httpResp, err := d.client.DoRequest(ctx, "GET", path, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list projects: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		return "", fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var projectsResp ProjectsListResponse
-	if err := json.Unmarshal(bodyBytes, &projectsResp); err != nil {
-		return "", fmt.Errorf("failed to parse projects response: %w", err)
-	}
-
-	// Find exact name match
+	// Find exact name match across all pages
 	var matchedProjectID string
 	var latestCreatedAt string
 	matchCount := 0
+	nextToken := ""
 
-	for _, project := range projectsResp.Results {
-		if project.Name == name {
-			matchCount++
-			if matchedProjectID == "" || project.CreatedAt > latestCreatedAt {
-				matchedProjectID = project.ID
-				latestCreatedAt = project.CreatedAt
+	for {
+		// Add paging token if we have one
+		queryParams := url.Values{}
+		for k, v := range params {
+			queryParams[k] = v
+		}
+		if nextToken != "" {
+			queryParams.Add("paging_token", nextToken)
+		}
+
+		path := "/api/v2/projects"
+		if len(queryParams) > 0 {
+			path = fmt.Sprintf("%s?%s", path, queryParams.Encode())
+		}
+
+		httpResp, err := d.client.DoRequest(ctx, "GET", path, nil)
+		if err != nil {
+			return "", fmt.Errorf("failed to list projects: %w", err)
+		}
+
+		if httpResp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(httpResp.Body)
+			httpResp.Body.Close()
+			return "", fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
+		}
+
+		bodyBytes, err := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("failed to read response: %w", err)
+		}
+
+		var projectsResp ProjectsListResponse
+		if err := json.Unmarshal(bodyBytes, &projectsResp); err != nil {
+			return "", fmt.Errorf("failed to parse projects response: %w", err)
+		}
+
+		// Search for exact name match in this page
+		for _, project := range projectsResp.Results {
+			if project.Name == name {
+				matchCount++
+				if matchedProjectID == "" || project.CreatedAt > latestCreatedAt {
+					matchedProjectID = project.ID
+					latestCreatedAt = project.CreatedAt
+				}
 			}
 		}
+
+		// Check for pagination
+		if projectsResp.Metadata.NextPagingToken == nil || *projectsResp.Metadata.NextPagingToken == "" {
+			break
+		}
+		nextToken = *projectsResp.Metadata.NextPagingToken
 	}
 
 	if matchedProjectID == "" {

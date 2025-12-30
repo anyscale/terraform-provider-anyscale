@@ -23,7 +23,7 @@ resource "anyscale_compute_config" "example" {
         min_instances = 0
         max_instances = 10
         resources = {
-          CPU = 4
+          CPU    = 4
           memory = 16
         }
       }

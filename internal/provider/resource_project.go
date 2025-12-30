@@ -593,7 +593,12 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 		model.Description = types.StringNull()
 	}
 
-	model.CreatorID = types.StringValue(result.CreatorID)
+	if result.CreatorID != nil {
+		model.CreatorID = types.StringValue(*result.CreatorID)
+	} else {
+		model.CreatorID = types.StringNull()
+	}
+
 	model.CreatedAt = types.StringValue(result.CreatedAt)
 
 	if result.LastUsedCloudID != nil {
