@@ -2,12 +2,14 @@
 
 A Terraform provider for managing Anyscale resources via the Anyscale API v2, built with the [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework).
 
+This is a work in progress.
+
 ## Features
 
 - **WIP Anyscale Platform Support**:
   - Anyscale Clouds (self contained deployment pattern)
-  - Cloud resource deployment (split deployment pattern)
-  - Compute configurations (cluster templates)
+  - Cloud resource deployment(s) (split deployment pattern)
+  - Compute configurations
   - Projects
 
 - **Automatic Detection**: Cloud provider and region auto-detected from configuration blocks
