@@ -167,3 +167,43 @@ output "default_cloud" {
   ]
   description = "Default cloud name"
 }
+
+# Example 12: Get current user information
+data "anyscale_user" "current" {
+}
+
+output "current_user_id" {
+  value       = data.anyscale_user.current.id
+  description = "The ID of the current authenticated user"
+}
+
+output "current_user_email" {
+  value       = data.anyscale_user.current.email
+  description = "The email of the current authenticated user"
+}
+
+output "current_user_permission_level" {
+  value       = data.anyscale_user.current.organization_permission_level
+  description = "The organization permission level of the current user"
+}
+
+output "current_user_organizations" {
+  value = [
+    for org in data.anyscale_user.current.organizations : {
+      name             = org.name
+      id               = org.id
+      default_cloud_id = org.default_cloud_id
+    }
+  ]
+  description = "Organizations the current user belongs to"
+}
+
+output "current_user_accessible_clouds" {
+  value       = data.anyscale_user.current.cloud_ids
+  description = "List of cloud IDs the current user has access to"
+}
+
+output "current_user_cloud_count" {
+  value       = length(data.anyscale_user.current.cloud_ids)
+  description = "Number of clouds the current user has access to"
+}
