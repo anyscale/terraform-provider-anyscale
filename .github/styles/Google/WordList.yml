@@ -1,0 +1,77 @@
+extends: substitution
+message: "Use '%s' instead of '%s'."
+link: 'https://developers.google.com/style/word-list'
+level: warning
+ignorecase: false
+action:
+  name: replace
+swap:
+  '(?:API Console|dev|developer) key': API key
+  '(?:cell ?phone|smart ?phone)': phone|mobile phone
+  '(?:dev|developer|APIs) console': API console
+  '(?:e-mail|Email|E-mail)': email
+  '(?:file ?path|path ?name)': path
+  '(?:kill|abort)': stop|exit|cancel|end|terminate
+  '(?:OAuth ?2|Oauth)': OAuth 2.0
+  '(?:ok|Okay)': OK|okay
+  '(?:WiFi|wifi)': Wi-Fi
+  '[\.]+apk': APK
+  '3\-D': 3D
+  'Google (?:I\-O|IO)': Google I/O
+  'tap (?:&|and) hold': touch and hold
+  'un(?:check|select)': clear
+  \+: and
+  above: preceding
+  account name: username
+  action bar: app bar
+  Ajax: AJAX
+  Android device: Android-powered device
+  android: Android
+  API explorer: APIs Explorer
+  application: app
+  approx\.: approximately
+  authN: authentication
+  authZ: authorization
+  autoupdate: automatically update
+  bursty: intermittent
+  cellular data: mobile data
+  cellular network: mobile network
+  chapter: documents|pages|sections
+  check box: checkbox
+  check: select
+  click on: click|click in
+  Container Engine: Kubernetes Engine
+  content type: media type
+  curated roles: predefined roles
+  data are: data is
+  disabled?: turn off|off
+  ephemeral IP address: ephemeral external IP address
+  fewer data: less data
+  file name: filename
+  firewalls: firewall rules
+  functionality: capability|feature
+  Google account: Google Account
+  Google accounts: Google Accounts
+  Googling: search with Google
+  grayed-out: unavailable
+  HTTPs: HTTPS
+  HuggingFace: Hugging Face
+  in order to: to
+  k8s: Kubernetes
+  long press: touch and hold
+  open-source: open source
+  regex: regular expression
+  SFT: supervised fine tuning
+  SHA1: SHA-1|HAS-SHA1
+  sign into: sign in to
+  sign-?on: single sign-on
+  static IP address: static external IP address
+  stylesheet: style sheet
+  synch: sync
+  tablename: table name
+  tablet: device
+  url:  URL
+  vision language: vision-language
+  vs\.: versus
+  Weights and Biases: Weights & Biases
+  World Wide Web: web

@@ -1,0 +1,19 @@
+# Custom Anyscale style that implements the Google `timeless` style.
+extends: existence
+message: "Avoid using '%s'."
+link: 'https://developers.google.com/style/timeless-documentation'
+ignorecase: true
+level: warning
+tokens:
+  - as of this writing
+  - does not yet
+  - eventually
+  - future
+  - in the future
+  - latest
+  - newer
+  - older
+  - presently, at present
+  - soon
+  - currently, current
+
