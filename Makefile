@@ -10,10 +10,15 @@ GOLANGCI_LINT := golangci-lint
 TFPLUGINDOCS := tfplugindocs
 
 # Get version info
-VERSION ?= 0.0.1
+# Auto-detect version from git tags (e.g., v0.1.0 -> 0.1.0)
+# Falls back to VERSION env var, then to 0.0.1
+GIT_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+VERSION ?= $(if $(GIT_TAG),$(GIT_TAG),0.0.1)
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)"
+# Set version in both main.version and provider.Version for compatibility
+LDFLAGS := -ldflags "-X main.version=$(VERSION) -X github.com/brent/terraform-provider-anyscale/internal/provider.Version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)"
 
 # Default target
 .DEFAULT_GOAL := help
@@ -38,12 +43,14 @@ help: ## Show this help message
 .PHONY: build
 build: ## Build the provider binary
 	@echo "==> Building $(BINARY_NAME)..."
+	@echo "==> Version: $(VERSION) (from $(if $(GIT_TAG),git tag: $(GIT_TAG),default/override))"
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY_NAME)
 	@echo "==> Build complete: $(BINARY_NAME)"
 
 .PHONY: build-dir
 build-dir: ## Build the provider binary to build directory
 	@echo "==> Building $(BINARY_NAME) to $(BUILD_DIR)..."
+	@echo "==> Version: $(VERSION) (from $(if $(GIT_TAG),git tag: $(GIT_TAG),default/override))"
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)
 	@echo "==> Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
@@ -350,6 +357,28 @@ apply-gcp-gke-basic: build ## Apply GCP GKE basic only
 .PHONY: destroy-gcp-gke-basic
 destroy-gcp-gke-basic: ## Destroy GCP GKE basic
 	cd examples/gcp-gke-basic && terraform destroy -auto-approve
+
+# ============================================================================
+# VERSION HELPERS
+# ============================================================================
+
+.PHONY: version
+version: ## Show current version information
+	@echo "Current Version Information:"
+	@echo "  VERSION: $(VERSION)"
+	@echo "  Git Tag: $(if $(GIT_TAG),$(GIT_TAG),none found)"
+	@echo "  Git Version: $(if $(GIT_VERSION),$(GIT_VERSION),unknown)"
+	@echo "  Commit: $(COMMIT)"
+	@echo "  Build Date: $(BUILD_DATE)"
+
+.PHONY: version-check
+version-check: ## Check if version is set correctly (useful for CI)
+	@if [ "$(VERSION)" = "0.0.1" ] && [ -z "$(GIT_TAG)" ]; then \
+		echo "WARNING: No git tag found and VERSION is default (0.0.1)"; \
+		echo "Consider creating a git tag: git tag -a v0.1.0 -m 'Release 0.1.0'"; \
+		exit 1; \
+	fi
+	@echo "Version check passed: $(VERSION)"
 
 # ============================================================================
 # RELEASE (placeholder for future CI/CD)
