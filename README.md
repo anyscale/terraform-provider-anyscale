@@ -4,18 +4,15 @@ A Terraform provider for managing Anyscale resources via the Anyscale API v2, bu
 
 ## Features
 
-- **Full Anyscale Platform Support**:
-  - Cloud infrastructure management (AWS, GCP, Azure VM and Kubernetes stacks)
-  - Compute configurations (cluster templates)
+- **WIP Anyscale Platform Support**:
+  - Anyscale Clouds (self contained deployment pattern)
   - Cloud resource deployment (split deployment pattern)
-
-- **Native HCL Syntax**: No more `jsonencode()` for complex fields like `flags` and `advanced_configurations_json`
+  - Compute configurations (cluster templates)
+  - Projects
 
 - **Automatic Detection**: Cloud provider and region auto-detected from configuration blocks
 
 - **Flexible Authentication**: Environment variable, credentials file, or provider configuration
-
-- **Production-Ready**: Comprehensive test coverage with unit and acceptance tests
 
 ## Framework Migration
 
