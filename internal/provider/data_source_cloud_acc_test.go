@@ -9,15 +9,9 @@ import (
 )
 
 func TestAccCloudDataSource_ByID(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
-	// Get a test cloud ID from environment
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -39,9 +33,7 @@ func TestAccCloudDataSource_ByID(t *testing.T) {
 }
 
 func TestAccCloudDataSource_ByName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -66,14 +58,9 @@ func TestAccCloudDataSource_ByName(t *testing.T) {
 }
 
 func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

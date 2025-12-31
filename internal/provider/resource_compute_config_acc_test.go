@@ -13,9 +13,7 @@ import (
 
 func TestAccComputeConfigResource_Basic(t *testing.T) {
 	// Skip if acceptance tests are not enabled
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -57,9 +55,7 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -81,9 +77,7 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_Anonymous(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -102,9 +96,7 @@ func TestAccComputeConfigResource_Anonymous(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -126,23 +118,6 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 			},
 		},
 	})
-}
-
-// testAccPreCheck validates that required environment variables are set
-func testAccPreCheck(t *testing.T) {
-	// Check for authentication
-	token := os.Getenv("ANYSCALE_CLI_TOKEN")
-	if token == "" {
-		// Try credentials file
-		if _, err := GetAuthToken(); err != nil {
-			t.Fatalf("ANYSCALE_CLI_TOKEN must be set or ~/.anyscale/credentials.json must exist for acceptance tests")
-		}
-	}
-
-	// Check for a test cloud ID
-	if os.Getenv("ANYSCALE_TEST_CLOUD_ID") == "" {
-		t.Fatal("ANYSCALE_TEST_CLOUD_ID must be set for acceptance tests. Create a cloud in your Anyscale account and set its ID.")
-	}
 }
 
 // testAccCheckComputeConfigExistsInAPI verifies the compute config exists in the API
