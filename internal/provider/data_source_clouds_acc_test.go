@@ -267,6 +267,7 @@ data "anyscale_clouds" "test" {
 `, provider)
 }
 
+// nolint:unused
 func testAccCloudsDataSourceFilterByRegionConfig(region string) string {
 	return fmt.Sprintf(`
 data "anyscale_clouds" "test" {
