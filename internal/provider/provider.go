@@ -133,6 +133,9 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewCloudResourceResource,
 		NewCloudResource,
 		NewProjectResource,
+		NewOrganizationInvitationResource,
+		NewOrganizationCollaboratorResource,
+		NewPolicyBindingResource,
 	}
 }
 
@@ -142,8 +145,14 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewCloudDataSource,
 		NewCloudsDataSource,
 		NewComputeConfigDataSource,
+		NewOrganizationUserDataSource,
+		NewOrganizationUsersDataSource,
+		NewPolicyBindingDataSource,
+		NewPolicyBindingsDataSource,
 		NewProjectDataSource,
 		NewProjectsDataSource,
 		NewUserDataSource,
+		NewUserGroupDataSource,
+		NewUserGroupsDataSource,
 	}
 }
