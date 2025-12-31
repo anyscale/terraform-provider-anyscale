@@ -1,5 +1,5 @@
 version: "2"
 
-# linters:
-#   disable:
-#     - errcheck
+linters:
+  disable:
+    - errcheck
