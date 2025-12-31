@@ -142,8 +142,14 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewCloudDataSource,
 		NewCloudsDataSource,
 		NewComputeConfigDataSource,
+		NewOrganizationUserDataSource,
+		NewOrganizationUsersDataSource,
+		NewPolicyBindingDataSource,
+		NewPolicyBindingsDataSource,
 		NewProjectDataSource,
 		NewProjectsDataSource,
 		NewUserDataSource,
+		NewUserGroupDataSource,
+		NewUserGroupsDataSource,
 	}
 }
