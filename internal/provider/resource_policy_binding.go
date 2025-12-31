@@ -348,7 +348,11 @@ func (r *PolicyBindingResource) Delete(ctx context.Context, req resource.DeleteR
 		httpResp.StatusCode != http.StatusAccepted &&
 		httpResp.StatusCode != http.StatusNoContent &&
 		httpResp.StatusCode != http.StatusNotFound {
-		body, _ := io.ReadAll(httpResp.Body)
+		body, err := io.ReadAll(httpResp.Body)
+		if err != nil {
+			resp.Diagnostics.AddError("Read Error", err.Error())
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Error deleting policy binding",
 			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(body)),

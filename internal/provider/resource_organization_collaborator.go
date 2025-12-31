@@ -343,7 +343,13 @@ func (r *OrganizationCollaboratorResource) Delete(ctx context.Context, req resou
 	if httpResp.StatusCode != http.StatusOK &&
 		httpResp.StatusCode != http.StatusNoContent &&
 		httpResp.StatusCode != http.StatusNotFound {
-		body, _ := io.ReadAll(httpResp.Body)
+		body, err := io.ReadAll(httpResp.Body)
+		if err != nil {
+			tflog.Error(ctx, "Failed to read response", map[string]any{"error": err.Error()})
+			resp.Diagnostics.AddError("Read Error", err.Error())
+			return
+		}
+
 		resp.Diagnostics.AddError(
 			"Error removing collaborator",
 			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(body)),
@@ -415,14 +421,13 @@ func (r *OrganizationCollaboratorResource) findCollaboratorByID(ctx context.Cont
 	}
 	defer httpResp.Body.Close()
 
-	if httpResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
-	}
-
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error reading response: %w", err)
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
 	}
 
 	var listResp OrganizationCollaboratorsListResponse
@@ -450,6 +455,7 @@ func (r *OrganizationCollaboratorResource) findCollaboratorByID(ctx context.Cont
 }
 
 // findCollaboratorByEmail fetches a collaborator by email (convenience function)
+// nolint:unused
 func (r *OrganizationCollaboratorResource) findCollaboratorByEmail(ctx context.Context, email string) (*OrganizationCollaboratorResult, error) {
 	encodedEmail := url.QueryEscape(email)
 	httpResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/organization_collaborators?email=%s", encodedEmail), nil)
@@ -458,14 +464,13 @@ func (r *OrganizationCollaboratorResource) findCollaboratorByEmail(ctx context.C
 	}
 	defer httpResp.Body.Close()
 
-	if httpResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
-	}
-
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error reading response: %w", err)
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
 	}
 
 	var listResp OrganizationCollaboratorsListResponse
