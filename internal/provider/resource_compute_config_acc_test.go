@@ -13,9 +13,9 @@ import (
 
 func TestAccComputeConfigResource_Basic(t *testing.T) {
 	// Skip if acceptance tests are not enabled
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
+
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -23,7 +23,7 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: testAccComputeConfigResourceConfig_basic(),
+				Config: testAccComputeConfigResourceConfig_basic(cloudID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
@@ -57,16 +57,16 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
+
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_withWorkers(),
+				Config: testAccComputeConfigResourceConfig_withWorkers(cloudID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "1"),
@@ -81,16 +81,16 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_Anonymous(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
+
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_anonymous(),
+				Config: testAccComputeConfigResourceConfig_anonymous(cloudID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
@@ -102,9 +102,7 @@ func TestAccComputeConfigResource_Anonymous(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -126,23 +124,6 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 			},
 		},
 	})
-}
-
-// testAccPreCheck validates that required environment variables are set
-func testAccPreCheck(t *testing.T) {
-	// Check for authentication
-	token := os.Getenv("ANYSCALE_CLI_TOKEN")
-	if token == "" {
-		// Try credentials file
-		if _, err := GetAuthToken(); err != nil {
-			t.Fatalf("ANYSCALE_CLI_TOKEN must be set or ~/.anyscale/credentials.json must exist for acceptance tests")
-		}
-	}
-
-	// Check for a test cloud ID
-	if os.Getenv("ANYSCALE_TEST_CLOUD_ID") == "" {
-		t.Fatal("ANYSCALE_TEST_CLOUD_ID must be set for acceptance tests. Create a cloud in your Anyscale account and set its ID.")
-	}
 }
 
 // testAccCheckComputeConfigExistsInAPI verifies the compute config exists in the API
@@ -189,7 +170,7 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 
 // Configuration templates for tests
 
-func testAccComputeConfigResourceConfig_basic() string {
+func testAccComputeConfigResourceConfig_basic(cloudID string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   # Use unique name to avoid conflicts
@@ -200,10 +181,10 @@ resource "anyscale_compute_config" "test" {
     instance_type = "m5.large"
   }
 }
-`, os.Getpid(), os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
+`, os.Getpid(), cloudID)
 }
 
-func testAccComputeConfigResourceConfig_withWorkers() string {
+func testAccComputeConfigResourceConfig_withWorkers(cloudID string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name     = "tf-test-compute-config-workers-%d"
@@ -225,10 +206,10 @@ resource "anyscale_compute_config" "test" {
     }
   ]
 }
-`, os.Getpid(), os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
+`, os.Getpid(), cloudID)
 }
 
-func testAccComputeConfigResourceConfig_anonymous() string {
+func testAccComputeConfigResourceConfig_anonymous(cloudID string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name     = "tf-test-compute-config-anon-%d"
@@ -238,7 +219,7 @@ resource "anyscale_compute_config" "test" {
     instance_type = "m5.large"
   }
 }
-`, os.Getpid(), os.Getenv("ANYSCALE_TEST_CLOUD_ID"))
+`, os.Getpid(), cloudID)
 }
 
 func testAccComputeConfigResourceConfig_withCloudName(cloudName string) string {

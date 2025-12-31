@@ -274,9 +274,12 @@ type ProjectCollaboratorListResponse struct {
 
 // ProjectCollaboratorResult represents a collaborator from the API
 type ProjectCollaboratorResult struct {
-	IdentityID      string `json:"identity_id"`
-	UserID          string `json:"user_id"`
-	Email           string `json:"email"`
+	ID              string `json:"id"` // This is the identity ID
+	Value           struct {
+		ID    string `json:"id"`    // This is the user ID
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	} `json:"value"`
 	PermissionLevel string `json:"permission_level"`
 }
 

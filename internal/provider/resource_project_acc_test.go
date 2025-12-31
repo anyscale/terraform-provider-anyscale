@@ -11,15 +11,9 @@ import (
 )
 
 func TestAccProjectResource_Basic(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-project-basic-%d", os.Getpid())
 
@@ -54,15 +48,9 @@ func TestAccProjectResource_Basic(t *testing.T) {
 }
 
 func TestAccProjectResource_WithDescription(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-project-desc-%d", os.Getpid())
 	description := "Test project with description"
@@ -84,10 +72,7 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 }
 
 func TestAccProjectResource_WithCloudName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -113,15 +98,9 @@ func TestAccProjectResource_WithCloudName(t *testing.T) {
 }
 
 func TestAccProjectResource_WithCollaborators(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	// Note: This test requires valid test user emails
 	// Skip if not provided
@@ -255,4 +234,49 @@ resource "anyscale_project" "test" {
   }
 }
 `, projectName, cloudID, email1)
+}
+
+func TestAccProjectResource_WithUserDataSource(t *testing.T) {
+	skipIfNotAcceptanceTest(t)
+
+	cloudID := getTestCloudID(t)
+	projectName := fmt.Sprintf("tfacc-test-project-datasource-%d", os.Getpid())
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create project with current user as collaborator using data source
+			{
+				Config: testAccProjectResourceWithUserDataSourceConfig(cloudID, projectName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_project.test", "name", projectName),
+					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "1"),
+					resource.TestCheckResourceAttrPair(
+						"anyscale_project.test", "collaborator.0.email",
+						"data.anyscale_user.current", "email",
+					),
+					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.0.permission_level", "owner"),
+					testAccCheckProjectExistsInAPI("anyscale_project.test"),
+				),
+			},
+		},
+	})
+}
+
+func testAccProjectResourceWithUserDataSourceConfig(cloudID, projectName string) string {
+	return fmt.Sprintf(`
+data "anyscale_user" "current" {}
+
+resource "anyscale_project" "test" {
+  name        = "%s"
+  cloud_id    = "%s"
+  description = "Test project using user data source"
+
+  collaborator {
+    email            = data.anyscale_user.current.email
+    permission_level = "owner"
+  }
+}
+`, projectName, cloudID)
 }

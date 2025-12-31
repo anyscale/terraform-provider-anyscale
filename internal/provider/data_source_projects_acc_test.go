@@ -9,17 +9,16 @@ import (
 )
 
 func TestAccProjectsDataSource_NoFilters(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
+
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProjectsDataSourceNoFiltersConfig(),
+				Config: testAccProjectsDataSourceNoFiltersConfig(cloudID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Should return at least some projects
 					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.#"),
@@ -30,15 +29,9 @@ func TestAccProjectsDataSource_NoFilters(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	projectName1 := fmt.Sprintf("tfacc-test-ds-projects-1-%d", os.Getpid())
 	projectName2 := fmt.Sprintf("tfacc-test-ds-projects-2-%d", os.Getpid())
@@ -59,15 +52,12 @@ func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
+	cloudID := getTestCloudID(t)
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudID == "" || cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
+	if cloudName == "" {
+		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
 	}
 
 	projectName := fmt.Sprintf("tfacc-test-ds-projects-cloudname-%d", os.Getpid())
@@ -87,15 +77,9 @@ func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	uniquePrefix := fmt.Sprintf("tfacc-unique-prefix-%d", os.Getpid())
 	projectName1 := fmt.Sprintf("%s-project-1", uniquePrefix)
@@ -117,15 +101,9 @@ func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-ds-projects-nodefault-%d", os.Getpid())
 
@@ -147,15 +125,9 @@ func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-ds-projects-fields-%d", os.Getpid())
 	description := "Test project for data source fields"
@@ -186,11 +158,12 @@ func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
 
 // Configuration templates
 
-func testAccProjectsDataSourceNoFiltersConfig() string {
-	return `
+func testAccProjectsDataSourceNoFiltersConfig(cloudID string) string {
+	return fmt.Sprintf(`
 data "anyscale_projects" "test" {
+  cloud_id = "%s"
 }
-`
+`, cloudID)
 }
 
 func testAccProjectsDataSourceFilterByCloudIDConfig(cloudID, projectName1, projectName2 string) string {

@@ -9,15 +9,9 @@ import (
 )
 
 func TestAccProjectDataSource_ByID(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-ds-project-id-%d", os.Getpid())
 
@@ -45,15 +39,9 @@ func TestAccProjectDataSource_ByID(t *testing.T) {
 }
 
 func TestAccProjectDataSource_ByName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-ds-project-name-%d", os.Getpid())
 
@@ -75,15 +63,9 @@ func TestAccProjectDataSource_ByName(t *testing.T) {
 }
 
 func TestAccProjectDataSource_ByNameWithCloudFilter(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-ds-project-filter-%d", os.Getpid())
 
@@ -103,15 +85,12 @@ func TestAccProjectDataSource_ByNameWithCloudFilter(t *testing.T) {
 }
 
 func TestAccProjectDataSource_ByNameWithCloudName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
+	cloudID := getTestCloudID(t)
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudID == "" || cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
+	if cloudName == "" {
+		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
 	}
 
 	projectName := fmt.Sprintf("tfacc-test-ds-project-cloudname-%d", os.Getpid())
@@ -132,15 +111,9 @@ func TestAccProjectDataSource_ByNameWithCloudName(t *testing.T) {
 }
 
 func TestAccProjectDataSource_WithCollaborators(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	testEmail := os.Getenv("ANYSCALE_TEST_USER_EMAIL_1")
 	if testEmail == "" {

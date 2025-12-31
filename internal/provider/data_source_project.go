@@ -459,10 +459,10 @@ func (d *ProjectDataSource) getCollaborators(ctx context.Context, projectID stri
 	collaborators := make([]ProjectDataSourceCollaboratorModel, 0, len(collabResp.Results))
 	for _, collab := range collabResp.Results {
 		collaborators = append(collaborators, ProjectDataSourceCollaboratorModel{
-			Email:           types.StringValue(collab.Email),
+			Email:           types.StringValue(collab.Value.Email),
 			PermissionLevel: types.StringValue(collab.PermissionLevel),
-			IdentityID:      types.StringValue(collab.IdentityID),
-			UserID:          types.StringValue(collab.UserID),
+			IdentityID:      types.StringValue(collab.ID),
+			UserID:          types.StringValue(collab.Value.ID),
 		})
 	}
 

@@ -9,14 +9,9 @@ import (
 )
 
 func TestAccComputeConfigDataSource_ByID(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -47,14 +42,9 @@ func TestAccComputeConfigDataSource_ByID(t *testing.T) {
 }
 
 func TestAccComputeConfigDataSource_ByName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	// Use timestamp to ensure unique name for each test run
 	configName := fmt.Sprintf("tf-test-datasource-by-name-%d", os.Getpid())
@@ -86,14 +76,9 @@ func TestAccComputeConfigDataSource_ByName(t *testing.T) {
 }
 
 func TestAccComputeConfigDataSource_AsTemplate(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -118,14 +103,12 @@ func TestAccComputeConfigDataSource_AsTemplate(t *testing.T) {
 }
 
 func TestAccComputeConfigDataSource_ByNameWithCloudName(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
+	cloudID := getTestCloudID(t)
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudID == "" || cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_CLOUD_NAME must be set for this test")
+	if cloudName == "" {
+		t.Skip("ANYSCALE_TEST_CLOUD_NAME must be set for this test")
 	}
 
 	configName := fmt.Sprintf("tf-test-datasource-cloudname-%d", os.Getpid())

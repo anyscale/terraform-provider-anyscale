@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -16,10 +15,7 @@ import (
 
 // TestAccCloudResource_AWS_Basic tests basic AWS cloud creation with all-in-one pattern
 func TestAccCloudResource_AWS_Basic(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-aws-basic"
 
@@ -69,10 +65,7 @@ func TestAccCloudResource_AWS_Basic(t *testing.T) {
 
 // TestAccCloudResource_AWS_EmptyCloud tests AWS empty cloud pattern
 func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-aws-empty"
 
@@ -97,10 +90,7 @@ func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 
 // TestAccCloudResource_GCP_Basic tests basic GCP cloud creation
 func TestAccCloudResource_GCP_Basic(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-gcp-basic"
 
@@ -142,10 +132,7 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 
 // TestAccCloudResource_AWS_K8S tests AWS K8S cloud creation
 func TestAccCloudResource_AWS_K8S(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-aws-k8s"
 
@@ -280,31 +267,6 @@ func testAccCheckCloudAttributes(resourceName, expectedName, expectedProvider, e
 
 		return nil
 	}
-}
-
-// Helper function to get an authenticated test client
-func getTestClient() (*Client, error) {
-	// Get API URL from environment or use default
-	apiURL := os.Getenv("ANYSCALE_API_URL")
-	if apiURL == "" {
-		apiURL = "https://console.anyscale.com"
-	}
-
-	// Get token from environment or credentials file
-	token := os.Getenv("ANYSCALE_CLI_TOKEN")
-	if token == "" {
-		var err error
-		token, err = GetAuthToken()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
-	}
-
-	if token == "" {
-		return nil, fmt.Errorf("no authentication token available")
-	}
-
-	return NewClientWithToken(apiURL, token), nil
 }
 
 // Configuration templates

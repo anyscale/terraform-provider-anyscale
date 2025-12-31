@@ -1,16 +1,13 @@
 package provider
 
 import (
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccUserDataSource_Basic(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -32,9 +29,7 @@ func TestAccUserDataSource_Basic(t *testing.T) {
 }
 
 func TestAccUserDataSource_OrganizationData(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -59,9 +54,7 @@ func TestAccUserDataSource_OrganizationData(t *testing.T) {
 }
 
 func TestAccUserDataSource_CloudAccess(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -79,9 +72,7 @@ func TestAccUserDataSource_CloudAccess(t *testing.T) {
 }
 
 func TestAccUserDataSource_UserGroups(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -99,14 +90,9 @@ func TestAccUserDataSource_UserGroups(t *testing.T) {
 }
 
 func TestAccUserDataSource_WithCloudReference(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -128,9 +114,7 @@ func TestAccUserDataSource_WithCloudReference(t *testing.T) {
 }
 
 func TestAccUserDataSource_MultipleFields(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -156,9 +140,7 @@ func TestAccUserDataSource_MultipleFields(t *testing.T) {
 }
 
 func TestAccUserDataSource_OutputsWork(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("TF_ACC not set, skipping acceptance test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },

@@ -9,10 +9,7 @@ import (
 )
 
 func TestAccCloudsDataSource_NoFilters(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -30,16 +27,7 @@ func TestAccCloudsDataSource_NoFilters(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByProvider(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
-
-	// Use the test cloud to determine provider
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -66,15 +54,9 @@ func TestAccCloudsDataSource_FilterByProvider(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -92,10 +74,7 @@ func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -125,15 +104,7 @@ func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
-
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -167,15 +138,12 @@ func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
+	cloudID := getTestCloudID(t)
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudID == "" || cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
+	if cloudName == "" {
+		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -197,15 +165,9 @@ func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_MultipleFilters(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	skipIfNotAcceptanceTest(t)
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := getTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -224,15 +186,7 @@ func TestAccCloudsDataSource_MultipleFilters(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByProviderAndRegion(t *testing.T) {
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
-
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	skipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
