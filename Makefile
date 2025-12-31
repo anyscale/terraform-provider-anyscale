@@ -152,7 +152,7 @@ deps-update: ## Update all dependencies
 docs: ## Generate provider documentation
 	@echo "==> Generating documentation..."
 	@if command -v $(TFPLUGINDOCS) >/dev/null 2>&1; then \
-		$(TFPLUGINDOCS) generate; \
+		$(TFPLUGINDOCS) generate --provider-name $(BINARY_NAME); \
 	else \
 		echo "tfplugindocs not installed. Install with: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest"; \
 		exit 1; \
