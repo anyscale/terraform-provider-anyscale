@@ -612,7 +612,15 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 
 	// Only fetch collaborators if they were specified in the configuration
 	// This avoids inconsistency with auto-added creator collaborator
+	tflog.Debug(ctx, "Checking whether to fetch collaborators", map[string]any{
+		"project_id":              projectID,
+		"model_collaborators_len": len(model.Collaborators),
+	})
+
 	if len(model.Collaborators) > 0 {
+		tflog.Debug(ctx, "Fetching collaborators for project", map[string]any{
+			"project_id": projectID,
+		})
 		collaborators, err := r.getCollaborators(ctx, projectID)
 		if err != nil {
 			tflog.Warn(ctx, "Failed to get collaborators", map[string]any{
@@ -622,8 +630,16 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 			// Continue without collaborators rather than failing
 			model.Collaborators = []ProjectCollaboratorModel{}
 		} else {
+			tflog.Debug(ctx, "Successfully fetched collaborators", map[string]any{
+				"project_id": projectID,
+				"count":      len(collaborators),
+			})
 			model.Collaborators = collaborators
 		}
+	} else {
+		tflog.Debug(ctx, "Skipping collaborator fetch (none specified in config)", map[string]any{
+			"project_id": projectID,
+		})
 	}
 
 	return nil
@@ -631,6 +647,10 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 
 // getCollaborators fetches the list of collaborators for a project.
 func (r *ProjectResource) getCollaborators(ctx context.Context, projectID string) ([]ProjectCollaboratorModel, error) {
+	tflog.Debug(ctx, "Fetching collaborators", map[string]any{
+		"project_id": projectID,
+	})
+
 	httpResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collaborators: %w", err)
@@ -647,21 +667,43 @@ func (r *ProjectResource) getCollaborators(ctx context.Context, projectID string
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	tflog.Debug(ctx, "Raw collaborators API response", map[string]any{
+		"project_id": projectID,
+		"response":   string(bodyBytes),
+	})
+
 	var collabResp ProjectCollaboratorListResponse
 	if err := json.Unmarshal(bodyBytes, &collabResp); err != nil {
 		return nil, fmt.Errorf("failed to parse collaborators response: %w", err)
 	}
 
+	tflog.Debug(ctx, "Parsed collaborators response", map[string]any{
+		"project_id": projectID,
+		"count":      len(collabResp.Results),
+	})
+
 	// Map to model
 	collaborators := make([]ProjectCollaboratorModel, 0, len(collabResp.Results))
-	for _, collab := range collabResp.Results {
+	for i, collab := range collabResp.Results {
+		tflog.Debug(ctx, "Mapping collaborator", map[string]any{
+			"index":            i,
+			"email":            collab.Value.Email,
+			"permission_level": collab.PermissionLevel,
+			"identity_id":      collab.ID,
+			"user_id":          collab.Value.ID,
+		})
 		collaborators = append(collaborators, ProjectCollaboratorModel{
-			Email:           types.StringValue(collab.Email),
+			Email:           types.StringValue(collab.Value.Email),
 			PermissionLevel: types.StringValue(collab.PermissionLevel),
-			IdentityID:      types.StringValue(collab.IdentityID),
-			UserID:          types.StringValue(collab.UserID),
+			IdentityID:      types.StringValue(collab.ID),
+			UserID:          types.StringValue(collab.Value.ID),
 		})
 	}
+
+	tflog.Debug(ctx, "Returning collaborators", map[string]any{
+		"project_id": projectID,
+		"count":      len(collaborators),
+	})
 
 	return collaborators, nil
 }
@@ -701,6 +743,17 @@ func (r *ProjectResource) createCollaborators(ctx context.Context, projectID str
 	}
 	defer httpResp.Body.Close()
 
+	// Accept 409 Conflict as success since it means the user already has permissions
+	// This can happen when the API automatically adds the project creator as a collaborator
+	if httpResp.StatusCode == http.StatusConflict {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		tflog.Info(ctx, "Collaborator already exists (409), treating as success", map[string]any{
+			"project_id": projectID,
+			"response":   string(bodyBytes),
+		})
+		return nil
+	}
+
 	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusCreated {
 		bodyBytes, _ := io.ReadAll(httpResp.Body)
 		return fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
@@ -708,7 +761,7 @@ func (r *ProjectResource) createCollaborators(ctx context.Context, projectID str
 
 	tflog.Info(ctx, "Collaborators created successfully", map[string]any{
 		"project_id": projectID,
-		"count":      len(collaborators),
+		"count":      len(entries),
 	})
 
 	return nil

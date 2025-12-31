@@ -11,12 +11,14 @@ import (
 func TestAccProjectsDataSource_NoFilters(t *testing.T) {
 	skipIfNotAcceptanceTest(t)
 
+	cloudID := getTestCloudID(t)
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProjectsDataSourceNoFiltersConfig(),
+				Config: testAccProjectsDataSourceNoFiltersConfig(cloudID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Should return at least some projects
 					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.#"),
@@ -156,11 +158,12 @@ func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
 
 // Configuration templates
 
-func testAccProjectsDataSourceNoFiltersConfig() string {
-	return `
+func testAccProjectsDataSourceNoFiltersConfig(cloudID string) string {
+	return fmt.Sprintf(`
 data "anyscale_projects" "test" {
+  cloud_id = "%s"
 }
-`
+`, cloudID)
 }
 
 func testAccProjectsDataSourceFilterByCloudIDConfig(cloudID, projectName1, projectName2 string) string {
