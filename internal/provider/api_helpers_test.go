@@ -18,7 +18,7 @@ func TestDoRequestAndParse(t *testing.T) {
 		// Create a test server
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"result": {"id": "test-123", "name": "test"}}`))
+			_, _ = w.Write([]byte(`{"result": {"id": "test-123", "name": "test"}}`))
 		}))
 		defer server.Close()
 
@@ -47,7 +47,7 @@ func TestDoRequestAndParse(t *testing.T) {
 	t.Run("successful request with custom status", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusCreated)
-			w.Write([]byte(`{"result": {"id": "created-123"}}`))
+			_, _ = w.Write([]byte(`{"result": {"id": "created-123"}}`))
 		}))
 		defer server.Close()
 
@@ -72,7 +72,7 @@ func TestDoRequestAndParse(t *testing.T) {
 	t.Run("unexpected status code", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"error": "bad request"}`))
+			_, _ = w.Write([]byte(`{"error": "bad request"}`))
 		}))
 		defer server.Close()
 
@@ -97,7 +97,7 @@ func TestDoRequestAndParse(t *testing.T) {
 	t.Run("invalid JSON response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`invalid json`))
+			_, _ = w.Write([]byte(`invalid json`))
 		}))
 		defer server.Close()
 
@@ -126,7 +126,7 @@ func TestDoRequestRaw(t *testing.T) {
 	t.Run("successful request", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`test body`))
+			_, _ = w.Write([]byte(`test body`))
 		}))
 		defer server.Close()
 
@@ -145,7 +145,7 @@ func TestDoRequestRaw(t *testing.T) {
 	t.Run("multiple expected statuses", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusCreated)
-			w.Write([]byte(`created`))
+			_, _ = w.Write([]byte(`created`))
 		}))
 		defer server.Close()
 
@@ -164,7 +164,7 @@ func TestDoRequestRaw(t *testing.T) {
 	t.Run("unexpected status", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`error`))
+			_, _ = w.Write([]byte(`error`))
 		}))
 		defer server.Close()
 
@@ -218,7 +218,7 @@ func TestPaginatedRequest(t *testing.T) {
 	t.Run("single page", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [{"id": "1"}, {"id": "2"}],
 				"metadata": {"total": 2, "next_paging_token": null}
 			}`))
@@ -266,12 +266,12 @@ func TestPaginatedRequest(t *testing.T) {
 
 			if requestCount == 1 {
 				nextToken := "page2"
-				w.Write([]byte(fmt.Sprintf(`{
+				_, _ = fmt.Fprintf(w, `{
 					"results": [{"id": "1"}, {"id": "2"}],
 					"metadata": {"total": 4, "next_paging_token": "%s"}
-				}`, nextToken)))
+				}`, nextToken)
 			} else {
-				w.Write([]byte(`{
+				_, _ = w.Write([]byte(`{
 					"results": [{"id": "3"}, {"id": "4"}],
 					"metadata": {"total": 4, "next_paging_token": null}
 				}`))
@@ -319,7 +319,7 @@ func TestPaginatedRequest(t *testing.T) {
 	t.Run("parse error", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`invalid json`))
+			_, _ = w.Write([]byte(`invalid json`))
 		}))
 		defer server.Close()
 

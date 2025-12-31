@@ -341,7 +341,7 @@ func (r *PolicyBindingResource) Delete(ctx context.Context, req resource.DeleteR
 		)
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	// Handle response - 404 is OK (already gone)
 	if httpResp.StatusCode != http.StatusOK &&
@@ -473,7 +473,7 @@ func (r *PolicyBindingResource) setPolicyBinding(ctx context.Context, model *Pol
 	if err != nil {
 		return fmt.Errorf("error sending request: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -497,7 +497,7 @@ func (r *PolicyBindingResource) readPolicyBinding(ctx context.Context, model *Po
 	if err != nil {
 		return fmt.Errorf("error fetching policy: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	if httpResp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("policy not found")

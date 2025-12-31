@@ -159,7 +159,7 @@ func testAccCheckProjectExistsInAPI(resourceName string) resource.TestCheckFunc 
 		if err != nil {
 			return fmt.Errorf("failed to get project: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != 200 {
 			return fmt.Errorf("project not found in API: status %d", resp.StatusCode)

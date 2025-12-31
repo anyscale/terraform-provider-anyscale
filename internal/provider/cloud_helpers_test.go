@@ -18,7 +18,7 @@ func TestResolveCloudNameToID(t *testing.T) {
 			}
 
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [
 					{
 						"id": "cloud-123",
@@ -56,7 +56,7 @@ func TestResolveCloudNameToID(t *testing.T) {
 	t.Run("multiple clouds with same name - returns most recent", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [
 					{
 						"id": "cloud-old",
@@ -100,7 +100,7 @@ func TestResolveCloudNameToID(t *testing.T) {
 	t.Run("cloud not found", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [
 					{
 						"id": "cloud-123",
@@ -132,7 +132,7 @@ func TestResolveCloudNameToID(t *testing.T) {
 	t.Run("API error", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error": "internal server error"}`))
+			_, _ = w.Write([]byte(`{"error": "internal server error"}`))
 		}))
 		defer server.Close()
 
@@ -151,7 +151,7 @@ func TestResolveCloudNameToID(t *testing.T) {
 	t.Run("invalid JSON response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`invalid json`))
+			_, _ = w.Write([]byte(`invalid json`))
 		}))
 		defer server.Close()
 
@@ -170,7 +170,7 @@ func TestResolveCloudNameToID(t *testing.T) {
 	t.Run("empty results", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [],
 				"metadata": {
 					"total": 0,
@@ -195,7 +195,7 @@ func TestResolveCloudNameToID(t *testing.T) {
 	t.Run("case sensitive matching", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [
 					{
 						"id": "cloud-123",

@@ -86,7 +86,7 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
@@ -152,7 +152,7 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
@@ -280,22 +280,4 @@ func skipIfNotAcceptanceTest(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 	}
-}
-
-// testResourceName generates a unique resource name for testing
-// Uses the process ID to ensure uniqueness across parallel test runs
-// Example: testResourceName("project") returns "tfacc-project-12345"
-func testResourceName(prefix string) string {
-	return fmt.Sprintf("tfacc-%s-%d", prefix, os.Getpid())
-}
-
-// getTestCloudName returns the cloud name from ANYSCALE_TEST_CLOUD_NAME environment variable
-// Returns empty string if not set (caller should handle appropriately)
-// This is useful for tests that specifically need to test cloud name resolution
-func getTestCloudName(t *testing.T) string {
-	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudName != "" {
-		t.Logf("Using test cloud name from ANYSCALE_TEST_CLOUD_NAME: %s", cloudName)
-	}
-	return cloudName
 }

@@ -36,7 +36,7 @@ func AddHTTPError(diags *diag.Diagnostics, operation string, statusCode int, bod
 //	}
 func AddAPIError(diags *diag.Diagnostics, operation string, err error) {
 	diags.AddError(
-		fmt.Sprintf("API Request Failed"),
+		"API Request Failed",
 		fmt.Sprintf("Failed to %s: %s", operation, err.Error()),
 	)
 }

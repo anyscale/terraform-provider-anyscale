@@ -244,7 +244,7 @@ func TestHandleAPIErrorIntegration(t *testing.T) {
 	// Test with real HTTP response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "validation failed"}`))
+		_, _ = w.Write([]byte(`{"error": "validation failed"}`))
 	}))
 	defer server.Close()
 
@@ -252,7 +252,7 @@ func TestHandleAPIErrorIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to make test request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var diags diag.Diagnostics
 	bodyBytes := []byte(`{"error": "validation failed"}`)

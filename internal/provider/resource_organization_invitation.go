@@ -177,7 +177,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		)
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -354,7 +354,7 @@ func (r *OrganizationInvitationResource) Delete(ctx context.Context, req resourc
 		)
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	// Handle response
 	if httpResp.StatusCode != http.StatusOK &&
@@ -422,7 +422,7 @@ func (r *OrganizationInvitationResource) getInvitationByID(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	if httpResp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("invitation not found")

@@ -144,7 +144,7 @@ func testAccCheckInvitationExistsInAPI(resourceName string) resource.TestCheckFu
 		if err != nil {
 			return fmt.Errorf("Error fetching invitation: %s", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != 200 {
 			return fmt.Errorf("Invitation not found in API (status %d)", resp.StatusCode)
@@ -167,7 +167,7 @@ func testAccCheckInvitationDoesNotExist(email string) resource.TestCheckFunc {
 		if err != nil {
 			return fmt.Errorf("Error checking invitations: %s", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		// If we get 404 or empty list, the invitation doesn't exist (good)
 		// If we get results, the invitation still exists (bad)
