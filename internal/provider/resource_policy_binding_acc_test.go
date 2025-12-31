@@ -334,7 +334,7 @@ func testAccCheckPolicyBindingExistsInAPI(resourceName string) resource.TestChec
 		if err != nil {
 			return fmt.Errorf("Error fetching policy binding: %s", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != 200 {
 			return fmt.Errorf("Policy binding not found in API (status %d)", resp.StatusCode)
@@ -357,7 +357,7 @@ func testAccCheckPolicyBindingIsEmpty(resourceID, resourceType string) resource.
 		if err != nil {
 			return fmt.Errorf("Error fetching policy binding: %s", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		// If 404, policy doesn't exist (empty bindings were applied)
 		if resp.StatusCode == 404 {

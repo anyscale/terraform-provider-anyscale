@@ -257,7 +257,7 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 		)
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -337,7 +337,7 @@ func (r *OrganizationCollaboratorResource) Delete(ctx context.Context, req resou
 		)
 		return
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	// Handle response - treat 404 as success (already removed)
 	if httpResp.StatusCode != http.StatusOK &&
@@ -419,7 +419,7 @@ func (r *OrganizationCollaboratorResource) findCollaboratorByID(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -462,7 +462,7 @@ func (r *OrganizationCollaboratorResource) findCollaboratorByEmail(ctx context.C
 	if err != nil {
 		return nil, err
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {

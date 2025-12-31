@@ -185,7 +185,7 @@ func testAccCheckCollaboratorExistsInAPI(resourceName string) resource.TestCheck
 		if err != nil {
 			return fmt.Errorf("Error fetching collaborators: %s", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != 200 {
 			return fmt.Errorf("Collaborators list failed (status %d)", resp.StatusCode)
@@ -229,7 +229,7 @@ func testAccCheckCollaboratorDoesNotExist(identityID string) resource.TestCheckF
 		if err != nil {
 			return fmt.Errorf("Error fetching collaborators: %s", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		// If we can list collaborators, assume the deleted one is not in the list
 		// In a real test, we'd parse the response and verify the ID is absent
