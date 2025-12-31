@@ -74,12 +74,12 @@ func TestCloudReferenceValidation(t *testing.T) {
 // TestCollaboratorSyncLogic tests the logic for determining collaborator adds/updates/removes
 func TestCollaboratorSyncLogic(t *testing.T) {
 	tests := []struct {
-		name               string
-		planned            []ProjectCollaboratorModel
-		current            []ProjectCollaboratorModel
-		expectedAdds       []string // emails
-		expectedUpdates    []string // emails
-		expectedRemoves    []string // emails
+		name            string
+		planned         []ProjectCollaboratorModel
+		current         []ProjectCollaboratorModel
+		expectedAdds    []string // emails
+		expectedUpdates []string // emails
+		expectedRemoves []string // emails
 	}{
 		{
 			name: "add new collaborator",
@@ -95,7 +95,7 @@ func TestCollaboratorSyncLogic(t *testing.T) {
 			expectedRemoves: []string{},
 		},
 		{
-			name: "remove collaborator",
+			name:    "remove collaborator",
 			planned: []ProjectCollaboratorModel{},
 			current: []ProjectCollaboratorModel{
 				{

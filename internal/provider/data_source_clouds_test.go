@@ -10,9 +10,9 @@ import (
 // TestCloudsFilterParameterBuilding tests building query parameters from filters
 func TestCloudsFilterParameterBuilding(t *testing.T) {
 	tests := []struct {
-		name            string
-		config          CloudsDataSourceModel
-		expectedParams  map[string]string
+		name           string
+		config         CloudsDataSourceModel
+		expectedParams map[string]string
 	}{
 		{
 			name: "name_contains filter",
@@ -190,8 +190,8 @@ func TestCloudsPaginationHandling(t *testing.T) {
 			expectHasMore: true,
 		},
 		{
-			name: "no next page - nil token",
-			nextToken: nil,
+			name:          "no next page - nil token",
+			nextToken:     nil,
 			expectHasMore: false,
 		},
 		{

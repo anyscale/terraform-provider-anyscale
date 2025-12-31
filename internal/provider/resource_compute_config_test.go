@@ -340,9 +340,9 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 // TestMarketTypeTranslation specifically tests the market type translation logic
 func TestMarketTypeTranslation(t *testing.T) {
 	tests := []struct {
-		name                    string
-		marketType              string
-		expectedUseSpot         bool
+		name                     string
+		marketType               string
+		expectedUseSpot          bool
 		expectedFallbackOnDemand bool
 	}{
 		{
@@ -674,8 +674,8 @@ func TestNodeLabelsConversion(t *testing.T) {
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 		},
 		map[string]attr.Value{
-			"instance_type": types.StringValue("m5.xlarge"),
-			"resources":     types.MapNull(types.Float64Type),
+			"instance_type":      types.StringValue("m5.xlarge"),
+			"resources":          types.MapNull(types.Float64Type),
 			"required_resources": types.ObjectNull(map[string]attr.Type{}),
 			"labels": types.MapValueMust(
 				types.StringType,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -528,10 +527,9 @@ func (r *CloudResourceResource) Configure(ctx context.Context, req resource.Conf
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
+			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData))
 		return
 	}
 
@@ -553,12 +551,11 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		cloudName := plan.CloudName.ValueString()
 		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
 
-		resolvedID, err := r.resolveCloudNameToID(ctx, cloudName)
+		resolvedID, err := ResolveCloudNameToID(ctx, r.client, cloudName)
 		if err != nil {
-			resp.Diagnostics.AddError(
+			AddConfigError(&resp.Diagnostics,
 				"Cloud Name Resolution Failed",
-				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
-			)
+				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()))
 			return
 		}
 		cloudID = resolvedID
@@ -585,10 +582,9 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	if provider == "" {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Provider Required",
-			"cloud_provider must be specified, or aws_config/gcp_config must be provided to infer the provider",
-		)
+			"cloud_provider must be specified, or aws_config/gcp_config must be provided to infer the provider")
 		return
 	}
 
@@ -633,7 +629,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 
 	// Add provider-specific configuration
 	if err := r.addProviderConfig(ctx, &deployReq, &plan, provider, computeStack, &resp.Diagnostics); err != nil {
-		resp.Diagnostics.AddError("Configuration Error", err.Error())
+		AddConfigError(&resp.Diagnostics, "Configuration Error", err.Error())
 		return
 	}
 
@@ -641,47 +637,27 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	jsonData, err := json.Marshal(deployReq)
+	reqBody, err := MarshalRequestBody(deployReq)
 	if err != nil {
-		resp.Diagnostics.AddError("JSON Marshaling Error", err.Error())
+		AddJSONError(&resp.Diagnostics, "marshal", "cloud resource request", err)
 		return
 	}
 
 	// Log sanitized request (redact sensitive fields like credentials)
+	jsonData, _ := json.Marshal(deployReq)
 	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": SanitizeJSONForLog(string(jsonData))})
 
-	httpResp, err := r.client.DoRequest(ctx, "PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(jsonData)))
+	deployResp, err := DoRequestAndParse[CloudDeploymentResponse](
+		ctx,
+		r.client,
+		"PUT",
+		fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID),
+		reqBody,
+		http.StatusOK,
+		http.StatusCreated,
+	)
 	if err != nil {
-		tflog.Error(ctx, "Failed to add cloud resource", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := httpResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", err.Error())
-		return
-	}
-
-	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource response",
-		map[string]any{"status": httpResp.StatusCode, "body": string(body)})
-
-	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusCreated {
-		resp.Diagnostics.AddError(
-			"API Error",
-			fmt.Sprintf("Failed to add cloud resource: %s - %s", httpResp.Status, string(body)),
-		)
-		return
-	}
-
-	var deployResp CloudDeploymentResponse
-	if err := json.Unmarshal(body, &deployResp); err != nil {
-		resp.Diagnostics.AddError("JSON Unmarshal Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "add cloud resource", err)
 		return
 	}
 
@@ -703,13 +679,13 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	createTimeout := 30 * time.Minute
 	if err := waitForCloudReady(ctx, r.client, cloudID, createTimeout); err != nil {
 		tflog.Error(ctx, "Failed waiting for parent cloud to be ready", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("Wait Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "wait for cloud to be ready", err)
 		return
 	}
 
 	// Read back the resource to get all computed fields
 	if err := r.readCloudResource(ctx, cloudID, resourceName, &plan); err != nil {
-		resp.Diagnostics.AddError("Read Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "read cloud resource after creation", err)
 		return
 	}
 
@@ -727,7 +703,7 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 
 	cloudID, resourceName, err := parseCloudResourceID(state.ID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Parse Error", err.Error())
+		AddConfigError(&resp.Diagnostics, "Parse Error", err.Error())
 		return
 	}
 
@@ -739,7 +715,7 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Read Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "read cloud resource", err)
 		return
 	}
 
@@ -760,12 +736,12 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 	// Just re-read to refresh state
 	cloudID, resourceName, err := parseCloudResourceID(state.ID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Parse Error", err.Error())
+		AddConfigError(&resp.Diagnostics, "Parse Error", err.Error())
 		return
 	}
 
 	if err := r.readCloudResource(ctx, cloudID, resourceName, &state); err != nil {
-		resp.Diagnostics.AddError("Read Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "read cloud resource", err)
 		return
 	}
 
@@ -783,7 +759,7 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 
 	cloudID, resourceName, err := parseCloudResourceID(state.ID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Parse Error", err.Error())
+		AddConfigError(&resp.Diagnostics, "Parse Error", err.Error())
 		return
 	}
 
@@ -798,41 +774,19 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 	deleteURL := fmt.Sprintf("/api/v2/clouds/%s/remove_resource?cloud_resource_name=%s",
 		cloudID, url.QueryEscape(resourceName))
 
-	httpResp, err := r.client.DoRequest(ctx, "DELETE", deleteURL, nil)
+	bodyBytes, err := DoRequestRaw(ctx, r.client, "DELETE", deleteURL, nil,
+		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
 	if err != nil {
-		tflog.Error(ctx, "Failed to delete cloud resource", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := httpResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	tflog.Debug(ctx, "DELETE response", map[string]any{"status": httpResp.StatusCode})
-
-	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusNotFound {
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			tflog.Error(ctx, "Failed to read response", map[string]any{"error": err.Error()})
-			resp.Diagnostics.AddError("Read Error", err.Error())
-			return
-		}
-
-		bodyStr := string(body)
-		tflog.Error(ctx, "Failed to delete cloud resource", map[string]any{"status": httpResp.Status, "body": bodyStr})
+		bodyStr := string(bodyBytes)
+		tflog.Error(ctx, "Failed to delete cloud resource", map[string]any{"error": err.Error(), "body": bodyStr})
 
 		// Handle the case where the API tells us this is a primary resource
-		if httpResp.StatusCode == http.StatusBadRequest && strings.Contains(bodyStr, "primary resource") {
+		if strings.Contains(bodyStr, "primary resource") {
 			tflog.Info(ctx, "Cloud resource is the primary resource - it will be deleted when the cloud is deleted", map[string]any{"name": resourceName})
 			return
 		}
 
-		resp.Diagnostics.AddError(
-			"Delete Failed",
-			fmt.Sprintf("Failed to delete cloud resource: %s - %s", httpResp.Status, bodyStr),
-		)
+		AddAPIError(&resp.Diagnostics, "delete cloud resource", err)
 		return
 	}
 
@@ -844,10 +798,9 @@ func (r *CloudResourceResource) ImportState(ctx context.Context, req resource.Im
 	// ID format: cloud_id:resource_name
 	cloudID, resourceName, err := parseCloudResourceID(req.ID)
 	if err != nil {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Import Error",
-			fmt.Sprintf("Invalid import ID format. Expected 'cloud_id:resource_name', got '%s'", req.ID),
-		)
+			fmt.Sprintf("Invalid import ID format. Expected 'cloud_id:resource_name', got '%s'", req.ID))
 		return
 	}
 
@@ -869,28 +822,15 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 
 // findDefaultCloudResource checks if the cloud has a single default resource
 func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cloudID string) (*CloudDeploymentResult, error) {
-	resp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+	deploymentsResp, err := DoRequestAndParse[CloudDeploymentsResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID),
+		nil,
+	)
 	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list cloud resources: %s - %s", resp.Status, string(body))
-	}
-
-	var deploymentsResp CloudDeploymentsResponse
-	if err := json.Unmarshal(body, &deploymentsResp); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list cloud resources: %w", err)
 	}
 
 	if len(deploymentsResp.Results) == 1 && deploymentsResp.Results[0].IsDefault {
@@ -904,32 +844,20 @@ func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cl
 
 // readCloudResource reads a cloud resource from the API and updates the state model
 func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel) error {
-	resp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+	deploymentsResp, err := DoRequestAndParse[CloudDeploymentsResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID),
+		nil,
+		http.StatusOK,
+		http.StatusNotFound,
+	)
 	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+		if strings.Contains(err.Error(), "404") {
+			return fmt.Errorf("cloud not found")
 		}
-	}()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("cloud not found")
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to read cloud resources: %s - %s", resp.Status, string(body))
-	}
-
-	var deploymentsResp CloudDeploymentsResponse
-	if err := json.Unmarshal(body, &deploymentsResp); err != nil {
-		return err
+		return fmt.Errorf("failed to read cloud resources: %w", err)
 	}
 
 	// Find the resource by name
@@ -1407,45 +1335,30 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		pollCount++
 		tflog.Debug(ctx, "Polling cloud status", map[string]any{"poll_count": pollCount, "cloud_id": cloudID})
 
-		resp, err := client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+		bodyBytes, err := DoRequestRaw(ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
+			http.StatusOK, http.StatusTooManyRequests)
 		if err != nil {
-			tflog.Error(ctx, "Failed to check cloud status", map[string]any{"error": err.Error()})
-			return err
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-		if err != nil {
-			return err
-		}
-
-		tflog.Debug(ctx, "Cloud status response", map[string]any{"poll_count": pollCount, "status": resp.StatusCode})
-
-		// Handle rate limiting (429) with backoff
-		if resp.StatusCode == http.StatusTooManyRequests {
-			tflog.Warn(ctx, "Rate limited, backing off", map[string]any{"poll_count": pollCount, "backoff": currentBackoff.String()})
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(currentBackoff):
-				currentBackoff = time.Duration(float64(currentBackoff) * backoffFactor)
-				if currentBackoff > maxBackoff {
-					currentBackoff = maxBackoff
+			// Handle rate limiting (429) with backoff
+			if strings.Contains(err.Error(), "429") {
+				tflog.Warn(ctx, "Rate limited, backing off", map[string]any{"poll_count": pollCount, "backoff": currentBackoff.String()})
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(currentBackoff):
+					currentBackoff = time.Duration(float64(currentBackoff) * backoffFactor)
+					if currentBackoff > maxBackoff {
+						currentBackoff = maxBackoff
+					}
+					continue
 				}
-				continue
 			}
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			tflog.Error(ctx, "Failed cloud status check", map[string]any{"poll_count": pollCount, "body": string(body)})
-			return fmt.Errorf("failed to check cloud status: %s - %s", resp.Status, string(body))
+			tflog.Error(ctx, "Failed to check cloud status", map[string]any{"error": err.Error()})
+			return fmt.Errorf("failed to check cloud status: %w", err)
 		}
 
 		var cloudResp CloudResponse
-		if err := json.Unmarshal(body, &cloudResp); err != nil {
-			return err
+		if err := json.Unmarshal(bodyBytes, &cloudResp); err != nil {
+			return fmt.Errorf("failed to parse cloud response: %w", err)
 		}
 
 		status := cloudResp.Result.Status
@@ -1454,12 +1367,8 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		tflog.Info(ctx, "Cloud status check", map[string]any{"poll_count": pollCount, "status": status, "state": state})
 
 		// Also check cloud resources for debugging
-		resourcesResp, err := client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+		resourcesBody, err := DoRequestRaw(ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 		if err == nil {
-			resourcesBody, _ := io.ReadAll(resourcesResp.Body)
-			if closeErr := resourcesResp.Body.Close(); closeErr != nil {
-				tflog.Warn(ctx, "Failed to close resources response body", map[string]any{"error": closeErr.Error()})
-			}
 			tflog.Debug(ctx, "Cloud resources", map[string]any{"poll_count": pollCount, "resources": string(resourcesBody)})
 		}
 
@@ -1490,71 +1399,4 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 
 	tflog.Error(ctx, "Timeout waiting for cloud to be ready", map[string]any{"poll_count": pollCount})
 	return fmt.Errorf("timeout waiting for cloud to be ready")
-}
-
-// resolveCloudNameToID looks up a cloud by name and returns its ID
-func (r *CloudResourceResource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
-	resp, err := r.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	// Find clouds with matching name
-	// If multiple exist, return the most recently created one
-	var matchedCloudID string
-	var latestCreatedAt string
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
-			}
-		}
-	}
-
-	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
-	}
-
-	if len(cloudsResp.Results) > 1 {
-		tflog.Warn(ctx, "Multiple clouds found with same name, using most recent", map[string]any{
-			"cloud_name": cloudName,
-			"cloud_id":   matchedCloudID,
-			"created_at": latestCreatedAt,
-		})
-	}
-
-	tflog.Info(ctx, "Resolved cloud name to ID", map[string]any{
-		"cloud_name": cloudName,
-		"cloud_id":   matchedCloudID,
-	})
-
-	return matchedCloudID, nil
 }

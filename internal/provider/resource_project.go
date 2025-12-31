@@ -2,9 +2,7 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -204,10 +202,8 @@ func (r *ProjectResource) Configure(ctx context.Context, req resource.ConfigureR
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
+		AddConfigError(&resp.Diagnostics, "Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData))
 		return
 	}
 
@@ -226,18 +222,14 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 
 	// Validate cloud reference
 	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
-		resp.Diagnostics.AddError(
-			"Cloud Reference Required",
-			"Either 'cloud_id' or 'cloud_name' must be specified to create a project.",
-		)
+		AddConfigError(&resp.Diagnostics, "Cloud Reference Required",
+			"Either 'cloud_id' or 'cloud_name' must be specified to create a project.")
 		return
 	}
 
 	if !plan.CloudID.IsNull() && !plan.CloudName.IsNull() {
-		resp.Diagnostics.AddError(
-			"Conflicting Cloud Reference",
-			"Cannot specify both 'cloud_id' and 'cloud_name'. Please provide only one.",
-		)
+		AddConfigError(&resp.Diagnostics, "Conflicting Cloud Reference",
+			"Cannot specify both 'cloud_id' and 'cloud_name'. Please provide only one.")
 		return
 	}
 
@@ -247,12 +239,10 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		cloudName := plan.CloudName.ValueString()
 		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
 
-		resolvedID, err := r.resolveCloudNameToID(ctx, cloudName)
+		resolvedID, err := ResolveCloudNameToID(ctx, r.client, cloudName)
 		if err != nil {
-			resp.Diagnostics.AddError(
-				"Cloud Name Resolution Failed",
-				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
-			)
+			AddConfigError(&resp.Diagnostics, "Cloud Name Resolution Failed",
+				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()))
 			return
 		}
 		cloudID = resolvedID
@@ -273,12 +263,9 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	// Marshal request to JSON
-	reqBody, err := json.Marshal(createReq)
+	reqBody, err := MarshalRequestBody(createReq)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Request Serialization Error",
-			fmt.Sprintf("Failed to serialize project create request: %s", err.Error()),
-		)
+		AddJSONError(&resp.Diagnostics, "marshal", "project create request", err)
 		return
 	}
 
@@ -288,46 +275,17 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 	})
 
 	// Create project
-	httpResp, err := r.client.DoRequest(ctx, "POST", "/api/v2/projects", strings.NewReader(string(reqBody)))
+	projectResp, err := DoRequestAndParse[ProjectResponse](
+		ctx,
+		r.client,
+		"POST",
+		"/api/v2/projects",
+		reqBody,
+		http.StatusCreated,
+		http.StatusOK,
+	)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"API Request Error",
-			fmt.Sprintf("Failed to create project: %s", err.Error()),
-		)
-		return
-	}
-	defer func() {
-		if closeErr := httpResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	// Check for errors
-	if httpResp.StatusCode != http.StatusCreated && httpResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		resp.Diagnostics.AddError(
-			"Project Creation Failed",
-			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes)),
-		)
-		return
-	}
-
-	// Parse response
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Response Read Error",
-			fmt.Sprintf("Failed to read response body: %s", err.Error()),
-		)
-		return
-	}
-
-	var projectResp ProjectResponse
-	if err := json.Unmarshal(bodyBytes, &projectResp); err != nil {
-		resp.Diagnostics.AddError(
-			"Response Parse Error",
-			fmt.Sprintf("Failed to parse project response: %s", err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "create project", err)
 		return
 	}
 
@@ -339,20 +297,14 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 	// Create collaborators if specified
 	if len(plan.Collaborators) > 0 {
 		if err := r.createCollaborators(ctx, projectID, plan.Collaborators); err != nil {
-			resp.Diagnostics.AddError(
-				"Collaborator Creation Failed",
-				fmt.Sprintf("Project created but failed to add collaborators: %s", err.Error()),
-			)
+			AddAPIError(&resp.Diagnostics, "add collaborators (project created)", err)
 			// Continue to read state even if collaborators failed
 		}
 	}
 
 	// Read back full state
 	if err := r.readProject(ctx, projectID, &plan); err != nil {
-		resp.Diagnostics.AddError(
-			"Read After Create Failed",
-			fmt.Sprintf("Project created but failed to read back state: %s", err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "read project after create", err)
 		return
 	}
 
@@ -380,10 +332,7 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 			return
 		}
 
-		resp.Diagnostics.AddError(
-			"Read Error",
-			fmt.Sprintf("Failed to read project: %s", err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "read project", err)
 		return
 	}
 
@@ -408,19 +357,13 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	// Only collaborators can be updated; other fields require replacement
 	if err := r.syncCollaborators(ctx, projectID, plan.Collaborators, state.Collaborators); err != nil {
-		resp.Diagnostics.AddError(
-			"Collaborator Update Failed",
-			fmt.Sprintf("Failed to update collaborators: %s", err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "update collaborators", err)
 		return
 	}
 
 	// Read back full state
 	if err := r.readProject(ctx, projectID, &plan); err != nil {
-		resp.Diagnostics.AddError(
-			"Read After Update Failed",
-			fmt.Sprintf("Update succeeded but failed to read back state: %s", err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "read project after update", err)
 		return
 	}
 
@@ -443,27 +386,18 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 	tflog.Info(ctx, "Deleting project", map[string]any{"project_id": projectID})
 
 	// Delete project
-	httpResp, err := r.client.DoRequest(ctx, "DELETE", fmt.Sprintf("/api/v2/projects/%s", projectID), nil)
+	_, err := DoRequestRaw(
+		ctx,
+		r.client,
+		"DELETE",
+		fmt.Sprintf("/api/v2/projects/%s", projectID),
+		nil,
+		http.StatusOK,
+		http.StatusNoContent,
+		http.StatusNotFound,
+	)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"API Request Error",
-			fmt.Sprintf("Failed to delete project: %s", err.Error()),
-		)
-		return
-	}
-	defer func() {
-		if closeErr := httpResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	// Handle response
-	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusNotFound {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		resp.Diagnostics.AddError(
-			"Project Deletion Failed",
-			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes)),
-		)
+		AddAPIError(&resp.Diagnostics, "delete project", err)
 		return
 	}
 
@@ -478,101 +412,25 @@ func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportSt
 
 // Helper functions
 
-// resolveCloudNameToID resolves a cloud name to a cloud ID.
-func (r *ProjectResource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
-	tflog.Debug(ctx, "Resolving cloud name to ID", map[string]any{"cloud_name": cloudName})
-
-	httpResp, err := r.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		return "", fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var cloudsResp CloudsListResponse
-	if err := json.Unmarshal(bodyBytes, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse clouds response: %w", err)
-	}
-
-	// Find matching cloud(s)
-	var matchedCloudID string
-	var latestCreatedAt string
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
-			}
-		}
-	}
-
-	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
-	}
-
-	if latestCreatedAt != "" {
-		// Check if there were multiple matches
-		matchCount := 0
-		for _, cloud := range cloudsResp.Results {
-			if cloud.Name == cloudName {
-				matchCount++
-			}
-		}
-		if matchCount > 1 {
-			tflog.Warn(ctx, "Multiple clouds found with same name, using most recent", map[string]any{
-				"cloud_name": cloudName,
-				"count":      matchCount,
-				"selected":   matchedCloudID,
-			})
-		}
-	}
-
-	tflog.Info(ctx, "Resolved cloud name to ID", map[string]any{
-		"cloud_name": cloudName,
-		"cloud_id":   matchedCloudID,
-	})
-
-	return matchedCloudID, nil
-}
-
 // readProject reads a project's details and collaborators into the model.
 func (r *ProjectResource) readProject(ctx context.Context, projectID string, model *ProjectResourceModel) error {
 	tflog.Debug(ctx, "Reading project", map[string]any{"project_id": projectID})
 
 	// Get project details
-	httpResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil)
+	projectResp, err := DoRequestAndParse[ProjectResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/api/v2/projects/%s", projectID),
+		nil,
+		http.StatusOK,
+	)
 	if err != nil {
+		// Check for 404
+		if strings.Contains(err.Error(), "404") {
+			return fmt.Errorf("project not found (404)")
+		}
 		return fmt.Errorf("failed to get project: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("project not found (404)")
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		return fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var projectResp ProjectResponse
-	if err := json.Unmarshal(bodyBytes, &projectResp); err != nil {
-		return fmt.Errorf("failed to parse project response: %w", err)
 	}
 
 	// Map to model
@@ -651,30 +509,16 @@ func (r *ProjectResource) getCollaborators(ctx context.Context, projectID string
 		"project_id": projectID,
 	})
 
-	httpResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil)
+	collabResp, err := DoRequestAndParse[ProjectCollaboratorListResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID),
+		nil,
+		http.StatusOK,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collaborators: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	tflog.Debug(ctx, "Raw collaborators API response", map[string]any{
-		"project_id": projectID,
-		"response":   string(bodyBytes),
-	})
-
-	var collabResp ProjectCollaboratorListResponse
-	if err := json.Unmarshal(bodyBytes, &collabResp); err != nil {
-		return nil, fmt.Errorf("failed to parse collaborators response: %w", err)
 	}
 
 	tflog.Debug(ctx, "Parsed collaborators response", map[string]any{
@@ -732,31 +576,31 @@ func (r *ProjectResource) createCollaborators(ctx context.Context, projectID str
 		})
 	}
 
-	reqBody, err := json.Marshal(entries)
+	reqBody, err := MarshalRequestBody(entries)
 	if err != nil {
 		return fmt.Errorf("failed to serialize collaborators request: %w", err)
 	}
 
-	httpResp, err := r.client.DoRequest(ctx, "POST", fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID), strings.NewReader(string(reqBody)))
+	_, err = DoRequestRaw(
+		ctx,
+		r.client,
+		"POST",
+		fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID),
+		reqBody,
+		http.StatusOK,
+		http.StatusNoContent,
+		http.StatusCreated,
+		http.StatusConflict, // Accept 409 Conflict as success
+	)
 	if err != nil {
+		// Check if it's a 409 Conflict (already exists)
+		if strings.Contains(err.Error(), "409") {
+			tflog.Info(ctx, "Collaborator already exists (409), treating as success", map[string]any{
+				"project_id": projectID,
+			})
+			return nil
+		}
 		return fmt.Errorf("failed to create collaborators: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	// Accept 409 Conflict as success since it means the user already has permissions
-	// This can happen when the API automatically adds the project creator as a collaborator
-	if httpResp.StatusCode == http.StatusConflict {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		tflog.Info(ctx, "Collaborator already exists (409), treating as success", map[string]any{
-			"project_id": projectID,
-			"response":   string(bodyBytes),
-		})
-		return nil
-	}
-
-	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusCreated {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		return fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
 	}
 
 	tflog.Info(ctx, "Collaborators created successfully", map[string]any{
@@ -823,20 +667,23 @@ func (r *ProjectResource) syncCollaborators(ctx context.Context, projectID strin
 			PermissionLevel: collab.PermissionLevel.ValueString(),
 		}
 
-		reqBody, err := json.Marshal(updateReq)
+		reqBody, err := MarshalRequestBody(updateReq)
 		if err != nil {
 			return fmt.Errorf("failed to serialize update request: %w", err)
 		}
 
 		identityID := collab.IdentityID.ValueString()
-		httpResp, err := r.client.DoRequest(ctx, "PUT", fmt.Sprintf("/api/v2/projects/%s/collaborators/%s", projectID, identityID), strings.NewReader(string(reqBody)))
+		_, err = DoRequestRaw(
+			ctx,
+			r.client,
+			"PUT",
+			fmt.Sprintf("/api/v2/projects/%s/collaborators/%s", projectID, identityID),
+			reqBody,
+			http.StatusOK,
+			http.StatusNoContent,
+		)
 		if err != nil {
 			return fmt.Errorf("failed to update collaborator %s: %w", collab.Email.ValueString(), err)
-		}
-		httpResp.Body.Close()
-
-		if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent {
-			return fmt.Errorf("failed to update collaborator %s: status %d", collab.Email.ValueString(), httpResp.StatusCode)
 		}
 	}
 
@@ -844,14 +691,18 @@ func (r *ProjectResource) syncCollaborators(ctx context.Context, projectID strin
 		tflog.Info(ctx, "Removing collaborator", map[string]any{"email": collab.Email.ValueString()})
 
 		identityID := collab.IdentityID.ValueString()
-		httpResp, err := r.client.DoRequest(ctx, "DELETE", fmt.Sprintf("/api/v2/projects/%s/collaborators/%s", projectID, identityID), nil)
+		_, err := DoRequestRaw(
+			ctx,
+			r.client,
+			"DELETE",
+			fmt.Sprintf("/api/v2/projects/%s/collaborators/%s", projectID, identityID),
+			nil,
+			http.StatusOK,
+			http.StatusNoContent,
+			http.StatusNotFound,
+		)
 		if err != nil {
 			return fmt.Errorf("failed to remove collaborator %s: %w", collab.Email.ValueString(), err)
-		}
-		httpResp.Body.Close()
-
-		if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusNotFound {
-			return fmt.Errorf("failed to remove collaborator %s: status %d", collab.Email.ValueString(), httpResp.StatusCode)
 		}
 	}
 
