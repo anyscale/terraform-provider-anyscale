@@ -47,9 +47,9 @@ type ProjectResourceModel struct {
 	CloudName types.String `tfsdk:"cloud_name"`
 
 	// Core attributes
-	Name                     types.String `tfsdk:"name"`
-	Description              types.String `tfsdk:"description"`
-	InitialClusterConfigID   types.String `tfsdk:"initial_cluster_config_id"`
+	Name                   types.String `tfsdk:"name"`
+	Description            types.String `tfsdk:"description"`
+	InitialClusterConfigID types.String `tfsdk:"initial_cluster_config_id"`
 
 	// Nested collaborators
 	Collaborators []ProjectCollaboratorModel `tfsdk:"collaborator"`

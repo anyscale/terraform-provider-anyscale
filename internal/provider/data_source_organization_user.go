@@ -119,7 +119,7 @@ func (d *OrganizationUserDataSource) Configure(ctx context.Context, req datasour
 func (d *OrganizationUserDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var config OrganizationUserDataSourceModel
 
-	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...	)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}

@@ -324,7 +324,7 @@ func (r *OrganizationCollaboratorResource) Delete(ctx context.Context, req resou
 	identityID := state.ID.ValueString()
 
 	tflog.Info(ctx, "Removing organization collaborator", map[string]interface{}{
-		"identity_id":   identityID,
+		"identity_id":  identityID,
 		"email_domain": getEmailDomain(state.Email.ValueString()),
 	})
 
@@ -341,8 +341,8 @@ func (r *OrganizationCollaboratorResource) Delete(ctx context.Context, req resou
 
 	// Handle response - treat 404 as success (already removed)
 	if httpResp.StatusCode != http.StatusOK &&
-	   httpResp.StatusCode != http.StatusNoContent &&
-	   httpResp.StatusCode != http.StatusNotFound {
+		httpResp.StatusCode != http.StatusNoContent &&
+		httpResp.StatusCode != http.StatusNotFound {
 		body, _ := io.ReadAll(httpResp.Body)
 		resp.Diagnostics.AddError(
 			"Error removing collaborator",

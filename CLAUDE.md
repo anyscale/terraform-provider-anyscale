@@ -145,11 +145,11 @@ make testacc-cover
 ### Credentials
 Acceptance tests must authenticate using the same resolution order as the provider:
 1.	ANYSCALE_CLI_TOKEN
-2.	~/.anyscale/credentials.json (from `anyscale login`)
+2.	`~/.anyscale/credentials.json` from `anyscale login`
 
 **Never print or log raw tokens.**
 
-### Test Cloud Selection (preferred behavior: auto-discover)
+### Test cloud selection - preferred behavior: auto-discover
 
 Acceptance tests should be able to run without manually setting cloud IDs. Using the credentials, access the Anyscale APIs to list all clouds at:
 https://console.anyscale.com/api/v2/docs#/default/list_clouds_api_v2_clouds__get
@@ -158,7 +158,7 @@ Optional overrides:
 - `ANYSCALE_TEST_CLOUD_ID` — pin tests to an existing cloud ID (validated to exist).
 - `ANYSCALE_TEST_CLOUD_NAME` — pin tests by cloud name (must resolve uniquely).
 
-If neither is set, tests should:
+If neither are set, tests should:
 1.	Discover an existing test cloud (e.g., by name prefix/tag such as tf-acc-*), or
 2.	Create an ephemeral test cloud, then reuse it during the test run.
 

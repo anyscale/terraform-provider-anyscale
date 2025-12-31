@@ -219,10 +219,10 @@ type DeploymentMetadata struct {
 
 // CreateProjectRequest is the request body for creating a project
 type CreateProjectRequest struct {
-	Name                     string  `json:"name"`
-	ParentCloudID            string  `json:"parent_cloud_id"`
-	Description              *string `json:"description,omitempty"`
-	InitialClusterConfigID   *string `json:"cluster_config,omitempty"` // Note: API uses 'cluster_config' not 'initial_cluster_config'
+	Name                   string  `json:"name"`
+	ParentCloudID          string  `json:"parent_cloud_id"`
+	Description            *string `json:"description,omitempty"`
+	InitialClusterConfigID *string `json:"cluster_config,omitempty"` // Note: API uses 'cluster_config' not 'initial_cluster_config'
 }
 
 // ProjectResponse represents a single project from the Anyscale API
@@ -326,8 +326,8 @@ type UpdateOrganizationCollaboratorRequest struct {
 // OrganizationCollaboratorResult represents a collaborator from the API
 // Note: The data source already has models for this, but we define it here for completeness
 type OrganizationCollaboratorResult struct {
-	ID              string  `json:"id"`               // identity_id
-	UserID          *string `json:"user_id"`          // Can be null for some user types
+	ID              string  `json:"id"`      // identity_id
+	UserID          *string `json:"user_id"` // Can be null for some user types
 	Email           string  `json:"email"`
 	Name            *string `json:"name"`             // Can be null
 	PermissionLevel string  `json:"permission_level"` // "owner" or "collaborator"
@@ -341,4 +341,41 @@ type OrganizationCollaboratorsListResponse struct {
 		Total           int     `json:"total"`
 		NextPagingToken *string `json:"next_paging_token"`
 	} `json:"metadata"`
+}
+
+// Policy Binding API Models
+
+// SetPolicyBindingRequest is the request body for setting policy bindings
+type SetPolicyBindingRequest struct {
+	Bindings []PolicyBindingEntry `json:"bindings"`
+}
+
+// PolicyBindingEntry represents a single role binding
+type PolicyBindingEntry struct {
+	RoleName   string   `json:"role_name"`
+	Principals []string `json:"principals"` // List of user group IDs (ug_*)
+}
+
+// PolicyBindingResponse represents a single policy binding from the API
+type PolicyBindingResponse struct {
+	Result PolicyBindingResult `json:"result"`
+}
+
+// PolicyBindingResult represents the policy data
+type PolicyBindingResult struct {
+	Bindings   []PolicyBindingEntry `json:"bindings"`
+	SyncStatus *string              `json:"sync_status,omitempty"`
+}
+
+// PolicyBindingsListResponse represents the response from listing all policies
+type PolicyBindingsListResponse struct {
+	Results []PolicyBindingWithMetadata `json:"results"`
+}
+
+// PolicyBindingWithMetadata includes resource identification
+type PolicyBindingWithMetadata struct {
+	ResourceID   string               `json:"resource_id"`
+	ResourceType string               `json:"resource_type"`
+	Bindings     []PolicyBindingEntry `json:"bindings"`
+	SyncStatus   string               `json:"sync_status"`
 }

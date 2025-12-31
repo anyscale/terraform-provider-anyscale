@@ -357,9 +357,9 @@ func (r *OrganizationInvitationResource) Delete(ctx context.Context, req resourc
 
 	// Handle response
 	if httpResp.StatusCode != http.StatusOK &&
-	   httpResp.StatusCode != http.StatusAccepted &&
-	   httpResp.StatusCode != http.StatusNoContent &&
-	   httpResp.StatusCode != http.StatusNotFound {
+		httpResp.StatusCode != http.StatusAccepted &&
+		httpResp.StatusCode != http.StatusNoContent &&
+		httpResp.StatusCode != http.StatusNotFound {
 		body, _ := io.ReadAll(httpResp.Body)
 		resp.Diagnostics.AddError(
 			"Error invalidating invitation",

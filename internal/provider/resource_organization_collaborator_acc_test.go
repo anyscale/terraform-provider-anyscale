@@ -22,7 +22,7 @@ func TestAccOrganizationCollaboratorResource_CreateFails(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				Config:      testAccOrganizationCollaboratorResourceConfig("collaborator"),
 				ExpectError: regexp.MustCompile("Direct Creation Not Supported"),
 			},
 		},
@@ -47,7 +47,7 @@ func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Import existing collaborator
 			{
-				Config: testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				Config:            testAccOrganizationCollaboratorResourceConfig("collaborator"),
 				ResourceName:      "anyscale_organization_collaborator.test",
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -75,7 +75,7 @@ func TestAccOrganizationCollaboratorResource_UpdatePermission(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Import as collaborator
 			{
-				Config: testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				Config:        testAccOrganizationCollaboratorResourceConfig("collaborator"),
 				ResourceName:  "anyscale_organization_collaborator.test",
 				ImportState:   true,
 				ImportStateId: testIdentityID,
@@ -128,7 +128,7 @@ func TestAccOrganizationCollaboratorResource_Delete(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Import collaborator
 			{
-				Config: testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				Config:        testAccOrganizationCollaboratorResourceConfig("collaborator"),
 				ResourceName:  "anyscale_organization_collaborator.test",
 				ImportState:   true,
 				ImportStateId: testIdentityID,
