@@ -64,7 +64,7 @@ provider_installation {
 }
 ```
 
-**Note**: When using `dev_overrides`, Terraform uses your local binary instead of downloading from registry.
+**Note**: when using `dev_overrides`, skip `terraform init` and go directly to `terraform plan`/`apply`.
 
 ## Usage
 

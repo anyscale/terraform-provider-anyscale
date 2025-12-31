@@ -302,13 +302,12 @@ func (r *OrganizationInvitationResource) Read(ctx context.Context, req resource.
 	status := computeInvitationStatus(invitation.AcceptedAt, invitation.ExpiresAt)
 	state.Status = types.StringValue(status)
 
-	switch status {
-	case "expired":
+	if status == "expired" {
 		tflog.Warn(ctx, "Invitation has expired", map[string]interface{}{
 			"invitation_id": invitationID,
 			"expires_at":    invitation.ExpiresAt,
 		})
-	case "accepted":
+	} else if status == "accepted" {
 		tflog.Info(ctx, "Invitation has been accepted", map[string]interface{}{
 			"invitation_id": invitationID,
 			"accepted_at":   *invitation.AcceptedAt,
@@ -361,13 +360,7 @@ func (r *OrganizationInvitationResource) Delete(ctx context.Context, req resourc
 		httpResp.StatusCode != http.StatusAccepted &&
 		httpResp.StatusCode != http.StatusNoContent &&
 		httpResp.StatusCode != http.StatusNotFound {
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			tflog.Error(ctx, "Failed to read response", map[string]any{"error": err.Error()})
-			resp.Diagnostics.AddError("Read Error", err.Error())
-			return
-		}
-
+		body, _ := io.ReadAll(httpResp.Body)
 		resp.Diagnostics.AddError(
 			"Error invalidating invitation",
 			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(body)),

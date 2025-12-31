@@ -239,13 +239,14 @@ func (d *ProjectsDataSource) resolveCloudNameToID(ctx context.Context, cloudName
 	}
 	defer httpResp.Body.Close()
 
+	if httpResp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		return "", fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
+	}
+
 	bodyBytes, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
 	}
 
 	var cloudsResp CloudsListResponse
@@ -298,14 +299,16 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 			return nil, fmt.Errorf("failed to list projects: %w", err)
 		}
 
+		if httpResp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(httpResp.Body)
+			httpResp.Body.Close()
+			return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
+		}
+
 		bodyBytes, err := io.ReadAll(httpResp.Body)
 		httpResp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response: %w", err)
-		}
-
-		if httpResp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
 		}
 
 		var projectsResp ProjectsListResponse

@@ -911,13 +911,7 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	}()
 
 	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusNotFound {
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			tflog.Error(ctx, "Failed to read response", map[string]any{"error": err.Error()})
-			resp.Diagnostics.AddError("Read Error", err.Error())
-			return
-		}
-
+		body, _ := io.ReadAll(httpResp.Body)
 		tflog.Error(ctx, "Failed to delete cloud", map[string]any{"status": httpResp.Status, "body": string(body)})
 		resp.Diagnostics.AddError(
 			"Delete Failed",
