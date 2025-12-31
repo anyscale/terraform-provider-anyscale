@@ -1,11 +1,9 @@
-# Pre-commit hooks for Terraform code quality
+# Pre-commit hooks for Terraform Provider
 #
 # Install: pre-commit install
 # Run manually: pre-commit run --all-files
 # Update hooks: pre-commit autoupdate
 repos:
-  # Terraform formatting and validation
-
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -21,3 +19,19 @@ repos:
         name: Check for merge conflicts
       - id: detect-private-key
         name: Detect private keys
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: go fmt ./...
+        language: system
+        pass_filenames: false
+        files: "^(.*).go$"
+
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.7.2  # or whatever version you're using
+    hooks:
+      - id: golangci-lint
+        # Optional: run on all files (CI) instead of just staged
+        args: [--timeout=5m]
