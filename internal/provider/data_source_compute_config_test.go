@@ -221,7 +221,7 @@ func TestComputeConfigBooleanDefaults(t *testing.T) {
 func TestComputeConfigNullableFields(t *testing.T) {
 	model := ComputeConfigDataSourceModel{
 		ID:                   types.StringValue("ccfg_123"),
-		MaximumUptimeMinutes: types.Int64Null(), // Might not be set
+		MaximumUptimeMinutes: types.Int64Null(),  // Might not be set
 		ProjectID:            types.StringNull(), // Might not be associated with a project
 	}
 

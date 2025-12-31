@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 
@@ -172,10 +171,8 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 
 	// Validate inputs
 	if config.ID.IsNull() && config.Name.IsNull() {
-		resp.Diagnostics.AddError(
-			"Missing Required Attribute",
-			"Either 'id' or 'name' must be specified to look up a project.",
-		)
+		AddConfigError(&resp.Diagnostics, "Missing Required Attribute",
+			"Either 'id' or 'name' must be specified to look up a project.")
 		return
 	}
 
@@ -185,12 +182,9 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		cloudName := config.CloudName.ValueString()
 		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
 
-		resolvedID, err := d.resolveCloudNameToID(ctx, cloudName)
+		resolvedID, err := ResolveCloudNameToID(ctx, d.client, cloudName)
 		if err != nil {
-			resp.Diagnostics.AddError(
-				"Cloud Name Resolution Failed",
-				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
-			)
+			AddAPIError(&resp.Diagnostics, "resolve cloud name", err)
 			return
 		}
 		cloudID = resolvedID
@@ -214,10 +208,7 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 
 		projectID, err = d.findProjectByName(ctx, projectName, cloudID)
 		if err != nil {
-			resp.Diagnostics.AddError(
-				"Project Not Found",
-				fmt.Sprintf("Failed to find project with name '%s': %s", projectName, err.Error()),
-			)
+			AddAPIError(&resp.Diagnostics, "find project by name", err)
 			return
 		}
 	}
@@ -225,10 +216,7 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	// Fetch project details
 	project, err := d.getProject(ctx, projectID)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to Read Project",
-			fmt.Sprintf("Failed to read project '%s': %s", projectID, err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "read project", err)
 		return
 	}
 
@@ -278,48 +266,6 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 
 // Helper functions
 
-// resolveCloudNameToID resolves a cloud name to a cloud ID.
-func (d *ProjectDataSource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
-	httpResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
-	var cloudsResp CloudsListResponse
-	if err := json.Unmarshal(bodyBytes, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse clouds response: %w", err)
-	}
-
-	// Find matching cloud(s)
-	var matchedCloudID string
-	var latestCreatedAt string
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
-			}
-		}
-	}
-
-	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
-	}
-
-	return matchedCloudID, nil
-}
-
 // findProjectByName searches for a project by name with optional cloud filter.
 func (d *ProjectDataSource) findProjectByName(ctx context.Context, name string, cloudID string) (string, error) {
 	// Build query parameters
@@ -328,105 +274,55 @@ func (d *ProjectDataSource) findProjectByName(ctx context.Context, name string, 
 		params.Add("parent_cloud_id", cloudID)
 	}
 
-	// Find exact name match across all pages
+	// Use PaginatedRequest to fetch all projects
+	results, err := PaginatedRequest(ctx, d.client, "/api/v2/projects", params,
+		func(body []byte) ([]ProjectResult, *string, error) {
+			var projectsResp ProjectsListResponse
+			if err := json.Unmarshal(body, &projectsResp); err != nil {
+				return nil, nil, err
+			}
+			return projectsResp.Results, projectsResp.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to list projects: %w", err)
+	}
+
+	// Find exact name match
 	var matchedProjectID string
 	var latestCreatedAt string
 	matchCount := 0
-	nextToken := ""
 
-	for {
-		// Add paging token if we have one
-		queryParams := url.Values{}
-		for k, v := range params {
-			queryParams[k] = v
-		}
-		if nextToken != "" {
-			queryParams.Add("paging_token", nextToken)
-		}
-
-		path := "/api/v2/projects"
-		if len(queryParams) > 0 {
-			path = fmt.Sprintf("%s?%s", path, queryParams.Encode())
-		}
-
-		httpResp, err := d.client.DoRequest(ctx, "GET", path, nil)
-		if err != nil {
-			return "", fmt.Errorf("failed to list projects: %w", err)
-		}
-
-		bodyBytes, err := io.ReadAll(httpResp.Body)
-		httpResp.Body.Close()
-		if err != nil {
-			return "", fmt.Errorf("failed to read response: %w", err)
-		}
-
-		if httpResp.StatusCode != http.StatusOK {
-			return "", fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-		}
-
-		var projectsResp ProjectsListResponse
-		if err := json.Unmarshal(bodyBytes, &projectsResp); err != nil {
-			return "", fmt.Errorf("failed to parse projects response: %w", err)
-		}
-
-		// Search for exact name match in this page
-		for _, project := range projectsResp.Results {
-			if project.Name == name {
-				matchCount++
-				if matchedProjectID == "" || project.CreatedAt > latestCreatedAt {
-					matchedProjectID = project.ID
-					latestCreatedAt = project.CreatedAt
-				}
+	for _, project := range results {
+		if project.Name == name {
+			matchCount++
+			if matchedProjectID == "" || project.CreatedAt > latestCreatedAt {
+				matchedProjectID = project.ID
+				latestCreatedAt = project.CreatedAt
 			}
 		}
-
-		// Check for pagination
-		if projectsResp.Metadata.NextPagingToken == nil || *projectsResp.Metadata.NextPagingToken == "" {
-			break
-		}
-		nextToken = *projectsResp.Metadata.NextPagingToken
 	}
 
 	if matchedProjectID == "" {
 		return "", fmt.Errorf("no project found with name '%s'", name)
 	}
 
-	if matchCount > 1 {
-		tflog.Warn(ctx, "Multiple projects found with same name, using most recent", map[string]any{
-			"project_name": name,
-			"count":        matchCount,
-			"selected_id":  matchedProjectID,
-		})
-	}
+	WarnIfMultipleMatches(ctx, "project", name, matchCount, matchedProjectID)
 
 	return matchedProjectID, nil
 }
 
 // getProject fetches a single project by ID.
 func (d *ProjectDataSource) getProject(ctx context.Context, projectID string) (*ProjectResult, error) {
-	httpResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil)
+	projectResp, err := DoRequestAndParse[ProjectResponse](
+		ctx, d.client, "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil, http.StatusOK,
+	)
 	if err != nil {
+		// Check for 404
+		if err.Error() == "unexpected status 404: {\"detail\":\"Project not found\"}" {
+			return nil, fmt.Errorf("project not found")
+		}
 		return nil, fmt.Errorf("failed to get project: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("project not found")
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var projectResp ProjectResponse
-	if err := json.Unmarshal(bodyBytes, &projectResp); err != nil {
-		return nil, fmt.Errorf("failed to parse project response: %w", err)
 	}
 
 	return &projectResp.Result, nil
@@ -434,25 +330,11 @@ func (d *ProjectDataSource) getProject(ctx context.Context, projectID string) (*
 
 // getCollaborators fetches the list of collaborators for a project.
 func (d *ProjectDataSource) getCollaborators(ctx context.Context, projectID string) ([]ProjectDataSourceCollaboratorModel, error) {
-	httpResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil)
+	collabResp, err := DoRequestAndParse[ProjectCollaboratorListResponse](
+		ctx, d.client, "GET", fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil, http.StatusOK,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collaborators: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var collabResp ProjectCollaboratorListResponse
-	if err := json.Unmarshal(bodyBytes, &collabResp); err != nil {
-		return nil, fmt.Errorf("failed to parse collaborators response: %w", err)
 	}
 
 	// Map to model

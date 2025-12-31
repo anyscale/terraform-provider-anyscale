@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -169,12 +167,9 @@ func (d *ProjectsDataSource) Read(ctx context.Context, req datasource.ReadReques
 		cloudName := config.CloudName.ValueString()
 		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
 
-		resolvedID, err := d.resolveCloudNameToID(ctx, cloudName)
+		resolvedID, err := ResolveCloudNameToID(ctx, d.client, cloudName)
 		if err != nil {
-			resp.Diagnostics.AddError(
-				"Cloud Name Resolution Failed",
-				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
-			)
+			AddAPIError(&resp.Diagnostics, "resolve cloud name", err)
 			return
 		}
 		cloudID = resolvedID
@@ -213,10 +208,7 @@ func (d *ProjectsDataSource) Read(ctx context.Context, req datasource.ReadReques
 	// Fetch projects
 	projects, err := d.fetchProjects(ctx, params)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to List Projects",
-			fmt.Sprintf("Failed to fetch projects: %s", err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "list projects", err)
 		return
 	}
 
@@ -231,130 +223,53 @@ func (d *ProjectsDataSource) Read(ctx context.Context, req datasource.ReadReques
 
 // Helper functions
 
-// resolveCloudNameToID resolves a cloud name to a cloud ID.
-func (d *ProjectsDataSource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
-	httpResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
-	var cloudsResp CloudsListResponse
-	if err := json.Unmarshal(bodyBytes, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse clouds response: %w", err)
-	}
-
-	// Find matching cloud(s)
-	var matchedCloudID string
-	var latestCreatedAt string
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
-			}
-		}
-	}
-
-	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
-	}
-
-	return matchedCloudID, nil
-}
-
-// fetchProjects fetches projects with the given query parameters, handling pagination if needed.
+// fetchProjects fetches projects with the given query parameters, handling pagination automatically.
 func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Values) ([]ProjectSummaryModel, error) {
-	allProjects := []ProjectSummaryModel{}
-	nextToken := ""
-
-	for {
-		// Add paging token if we have one
-		queryParams := url.Values{}
-		for k, v := range params {
-			queryParams[k] = v
-		}
-		if nextToken != "" {
-			queryParams.Add("paging_token", nextToken)
-		}
-
-		path := "/api/v2/projects"
-		if len(queryParams) > 0 {
-			path = fmt.Sprintf("%s?%s", path, queryParams.Encode())
-		}
-
-		httpResp, err := d.client.DoRequest(ctx, "GET", path, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list projects: %w", err)
-		}
-
-		bodyBytes, err := io.ReadAll(httpResp.Body)
-		httpResp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read response: %w", err)
-		}
-
-		if httpResp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-		}
-
-		var projectsResp ProjectsListResponse
-		if err := json.Unmarshal(bodyBytes, &projectsResp); err != nil {
-			return nil, fmt.Errorf("failed to parse projects response: %w", err)
-		}
-
-		// Convert to model
-		for _, project := range projectsResp.Results {
-			projectModel := ProjectSummaryModel{
-				ID:            types.StringValue(project.ID),
-				Name:          types.StringValue(project.Name),
-				CloudID:       types.StringValue(project.ParentCloudID),
-				CreatedAt:     types.StringValue(project.CreatedAt),
-				IsDefault:     types.BoolValue(project.IsDefault),
-				DirectoryName: types.StringValue(project.DirectoryName),
+	// Use PaginatedRequest helper to handle pagination
+	results, err := PaginatedRequest(ctx, d.client, "/api/v2/projects", params,
+		func(body []byte) ([]ProjectResult, *string, error) {
+			var projectsResp ProjectsListResponse
+			if err := json.Unmarshal(body, &projectsResp); err != nil {
+				return nil, nil, err
 			}
+			return projectsResp.Results, projectsResp.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 
-			if project.CreatorID != nil {
-				projectModel.CreatorID = types.StringValue(*project.CreatorID)
-			} else {
-				projectModel.CreatorID = types.StringNull()
-			}
-
-			if project.Description != nil {
-				projectModel.Description = types.StringValue(*project.Description)
-			} else {
-				projectModel.Description = types.StringNull()
-			}
-
-			if project.LastUsedCloudID != nil {
-				projectModel.LastUsedCloudID = types.StringValue(*project.LastUsedCloudID)
-			} else {
-				projectModel.LastUsedCloudID = types.StringNull()
-			}
-
-			allProjects = append(allProjects, projectModel)
+	// Convert to model
+	allProjects := make([]ProjectSummaryModel, 0, len(results))
+	for _, project := range results {
+		projectModel := ProjectSummaryModel{
+			ID:            types.StringValue(project.ID),
+			Name:          types.StringValue(project.Name),
+			CloudID:       types.StringValue(project.ParentCloudID),
+			CreatedAt:     types.StringValue(project.CreatedAt),
+			IsDefault:     types.BoolValue(project.IsDefault),
+			DirectoryName: types.StringValue(project.DirectoryName),
 		}
 
-		// Check for pagination
-		if projectsResp.Metadata.NextPagingToken == nil || *projectsResp.Metadata.NextPagingToken == "" {
-			break
+		if project.CreatorID != nil {
+			projectModel.CreatorID = types.StringValue(*project.CreatorID)
+		} else {
+			projectModel.CreatorID = types.StringNull()
 		}
-		nextToken = *projectsResp.Metadata.NextPagingToken
 
-		tflog.Debug(ctx, "Fetching next page of projects", map[string]any{
-			"next_token": nextToken,
-			"fetched":    len(allProjects),
-		})
+		if project.Description != nil {
+			projectModel.Description = types.StringValue(*project.Description)
+		} else {
+			projectModel.Description = types.StringNull()
+		}
+
+		if project.LastUsedCloudID != nil {
+			projectModel.LastUsedCloudID = types.StringValue(*project.LastUsedCloudID)
+		} else {
+			projectModel.LastUsedCloudID = types.StringNull()
+		}
+
+		allProjects = append(allProjects, projectModel)
 	}
 
 	return allProjects, nil

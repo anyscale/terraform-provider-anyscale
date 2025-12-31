@@ -111,12 +111,12 @@ func TestCloudDataSourceNameResolutionLogic(t *testing.T) {
 func TestCloudDataSourceModelMapping(t *testing.T) {
 	// Simulate API response
 	apiResult := struct {
-		ID        string
-		Name      string
-		Provider  string
-		Region    string
-		Status    string
-		State     string
+		ID       string
+		Name     string
+		Provider string
+		Region   string
+		Status   string
+		State    string
 	}{
 		ID:       "cld_abc123",
 		Name:     "production-cloud",
@@ -238,10 +238,10 @@ func TestCloudStateMapping(t *testing.T) {
 // TestCloudNullableFields tests handling of optional/nullable fields
 func TestCloudNullableFields(t *testing.T) {
 	model := CloudDataSourceModel{
-		ID:                  types.StringValue("cld_123"),
-		Name:                types.StringValue("test-cloud"),
-		Status:              types.StringNull(), // Status might not be present
-		CloudDeploymentID:   types.StringNull(), // Deployment ID might not be present
+		ID:                types.StringValue("cld_123"),
+		Name:              types.StringValue("test-cloud"),
+		Status:            types.StringNull(), // Status might not be present
+		CloudDeploymentID: types.StringNull(), // Deployment ID might not be present
 	}
 
 	if !model.Status.IsNull() {

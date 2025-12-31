@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -178,7 +176,7 @@ func (d *CloudsDataSource) Configure(ctx context.Context, req datasource.Configu
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Unexpected Data Source Configure Type",
 			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
@@ -220,10 +218,7 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	// Fetch clouds
 	clouds, err := d.fetchClouds(ctx, params)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to List Clouds",
-			fmt.Sprintf("Failed to fetch clouds: %s", err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "list clouds", err)
 		return
 	}
 
@@ -238,82 +233,44 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 
 // fetchClouds fetches clouds with the given query parameters, handling pagination if needed.
 func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values) ([]CloudSummaryModel, error) {
-	allClouds := []CloudSummaryModel{}
-	nextToken := ""
-
-	for {
-		// Add paging token if we have one
-		queryParams := url.Values{}
-		for k, v := range params {
-			queryParams[k] = v
-		}
-		if nextToken != "" {
-			queryParams.Add("paging_token", nextToken)
-		}
-
-		path := "/api/v2/clouds"
-		if len(queryParams) > 0 {
-			path = fmt.Sprintf("%s?%s", path, queryParams.Encode())
-		}
-
-		httpResp, err := d.client.DoRequest(ctx, "GET", path, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list clouds: %w", err)
-		}
-
-		if httpResp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(httpResp.Body)
-			httpResp.Body.Close()
-			return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(bodyBytes))
-		}
-
-		bodyBytes, err := io.ReadAll(httpResp.Body)
-		httpResp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read response: %w", err)
-		}
-
-		var cloudsResp CloudsListResponse
-		if err := json.Unmarshal(bodyBytes, &cloudsResp); err != nil {
-			return nil, fmt.Errorf("failed to parse clouds response: %w", err)
-		}
-
-		// Convert to model
-		for _, cloud := range cloudsResp.Results {
-			cloudModel := CloudSummaryModel{
-				ID:                      types.StringValue(cloud.ID),
-				Name:                    types.StringValue(cloud.Name),
-				CloudProvider:           types.StringValue(cloud.Provider),
-				ComputeStack:            types.StringValue(cloud.ComputeStack),
-				Region:                  types.StringValue(cloud.Region),
-				Status:                  types.StringValue(cloud.Status),
-				State:                   types.StringValue(cloud.State),
-				CreatedAt:               types.StringValue(cloud.CreatedAt),
-				CreatorID:               types.StringValue(cloud.CreatorID),
-				IsDefault:               types.BoolValue(cloud.IsDefault),
-				IsK8s:                   types.BoolValue(cloud.IsK8s),
-				IsAIOA:                  types.BoolValue(cloud.IsAIOA),
-				IsBringYourOwnResource:  types.BoolValue(cloud.IsBringYourOwnResource),
-				IsPrivateCloud:          types.BoolValue(cloud.IsPrivateCloud),
-				IsPrivateServiceCloud:   types.BoolValue(cloud.IsPrivateServiceCloud),
-				AutoAddUser:             types.BoolValue(cloud.AutoAddUser),
-				LineageTrackingEnabled:  types.BoolValue(cloud.LineageTrackingEnabled),
-				IsAggregatedLogsEnabled: types.BoolValue(cloud.IsAggregatedLogsEnabled),
+	// Use PaginatedRequest helper to fetch all clouds
+	cloudResults, err := PaginatedRequest(ctx, d.client, "/api/v2/clouds", params,
+		func(body []byte) ([]CloudResult, *string, error) {
+			var cloudsResp CloudsListResponse
+			if err := json.Unmarshal(body, &cloudsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
 			}
+			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 
-			allClouds = append(allClouds, cloudModel)
+	// Convert CloudResults to CloudSummaryModels
+	allClouds := make([]CloudSummaryModel, 0, len(cloudResults))
+	for _, cloud := range cloudResults {
+		cloudModel := CloudSummaryModel{
+			ID:                      types.StringValue(cloud.ID),
+			Name:                    types.StringValue(cloud.Name),
+			CloudProvider:           types.StringValue(cloud.Provider),
+			ComputeStack:            types.StringValue(cloud.ComputeStack),
+			Region:                  types.StringValue(cloud.Region),
+			Status:                  types.StringValue(cloud.Status),
+			State:                   types.StringValue(cloud.State),
+			CreatedAt:               types.StringValue(cloud.CreatedAt),
+			CreatorID:               types.StringValue(cloud.CreatorID),
+			IsDefault:               types.BoolValue(cloud.IsDefault),
+			IsK8s:                   types.BoolValue(cloud.IsK8s),
+			IsAIOA:                  types.BoolValue(cloud.IsAIOA),
+			IsBringYourOwnResource:  types.BoolValue(cloud.IsBringYourOwnResource),
+			IsPrivateCloud:          types.BoolValue(cloud.IsPrivateCloud),
+			IsPrivateServiceCloud:   types.BoolValue(cloud.IsPrivateServiceCloud),
+			AutoAddUser:             types.BoolValue(cloud.AutoAddUser),
+			LineageTrackingEnabled:  types.BoolValue(cloud.LineageTrackingEnabled),
+			IsAggregatedLogsEnabled: types.BoolValue(cloud.IsAggregatedLogsEnabled),
 		}
-
-		// Check for pagination
-		if cloudsResp.Metadata.NextPagingToken == nil || *cloudsResp.Metadata.NextPagingToken == "" {
-			break
-		}
-		nextToken = *cloudsResp.Metadata.NextPagingToken
-
-		tflog.Debug(ctx, "Fetching next page of clouds", map[string]any{
-			"next_token": nextToken,
-			"fetched":    len(allClouds),
-		})
+		allClouds = append(allClouds, cloudModel)
 	}
 
 	return allClouds, nil

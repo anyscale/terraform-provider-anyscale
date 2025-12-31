@@ -20,8 +20,8 @@ func TestProjectsFilterParameterBuilding(t *testing.T) {
 				NameContains: types.StringValue("prod"),
 			},
 			expectedParams: map[string]string{
-				"name_contains":     "prod",
-				"include_defaults":  "true",
+				"name_contains":    "prod",
+				"include_defaults": "true",
 			},
 		},
 		{
@@ -30,8 +30,8 @@ func TestProjectsFilterParameterBuilding(t *testing.T) {
 				CreatorID: types.StringValue("user_123"),
 			},
 			expectedParams: map[string]string{
-				"creator_id":        "user_123",
-				"include_defaults":  "true",
+				"creator_id":       "user_123",
+				"include_defaults": "true",
 			},
 		},
 		{
@@ -40,8 +40,8 @@ func TestProjectsFilterParameterBuilding(t *testing.T) {
 				CloudID: types.StringValue("cld_456"),
 			},
 			expectedParams: map[string]string{
-				"parent_cloud_id":   "cld_456",
-				"include_defaults":  "true",
+				"parent_cloud_id":  "cld_456",
+				"include_defaults": "true",
 			},
 		},
 		{
@@ -50,7 +50,7 @@ func TestProjectsFilterParameterBuilding(t *testing.T) {
 				IncludeDefaults: types.BoolValue(false),
 			},
 			expectedParams: map[string]string{
-				"include_defaults":  "false",
+				"include_defaults": "false",
 			},
 		},
 		{
@@ -62,10 +62,10 @@ func TestProjectsFilterParameterBuilding(t *testing.T) {
 				IncludeDefaults: types.BoolValue(true),
 			},
 			expectedParams: map[string]string{
-				"name_contains":     "test",
-				"creator_id":        "user_789",
-				"parent_cloud_id":   "cld_abc",
-				"include_defaults":  "true",
+				"name_contains":    "test",
+				"creator_id":       "user_789",
+				"parent_cloud_id":  "cld_abc",
+				"include_defaults": "true",
 			},
 		},
 	}
@@ -123,25 +123,25 @@ func TestProjectSummaryMapping(t *testing.T) {
 		IsDefault       bool
 		DirectoryName   string
 	}{
-		ID:          "prj_abc",
-		Name:        "production",
-		Description: func() *string { s := "Production project"; return &s }(),
-		CloudID:     "cld_def",
-		CreatorID:   "user_123",
-		CreatedAt:   "2024-01-01T00:00:00Z",
+		ID:              "prj_abc",
+		Name:            "production",
+		Description:     func() *string { s := "Production project"; return &s }(),
+		CloudID:         "cld_def",
+		CreatorID:       "user_123",
+		CreatedAt:       "2024-01-01T00:00:00Z",
 		LastUsedCloudID: func() *string { s := "cld_def"; return &s }(),
 		IsDefault:       false,
 		DirectoryName:   "production-dir",
 	}
 
 	model := ProjectSummaryModel{
-		ID:              types.StringValue(apiProject.ID),
-		Name:            types.StringValue(apiProject.Name),
-		CloudID:         types.StringValue(apiProject.CloudID),
-		CreatorID:       types.StringValue(apiProject.CreatorID),
-		CreatedAt:       types.StringValue(apiProject.CreatedAt),
-		IsDefault:       types.BoolValue(apiProject.IsDefault),
-		DirectoryName:   types.StringValue(apiProject.DirectoryName),
+		ID:            types.StringValue(apiProject.ID),
+		Name:          types.StringValue(apiProject.Name),
+		CloudID:       types.StringValue(apiProject.CloudID),
+		CreatorID:     types.StringValue(apiProject.CreatorID),
+		CreatedAt:     types.StringValue(apiProject.CreatedAt),
+		IsDefault:     types.BoolValue(apiProject.IsDefault),
+		DirectoryName: types.StringValue(apiProject.DirectoryName),
 	}
 
 	if apiProject.Description != nil {

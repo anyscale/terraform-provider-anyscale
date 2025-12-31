@@ -1,11 +1,9 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 
@@ -390,7 +388,8 @@ func (r *ComputeConfigResource) Configure(ctx context.Context, req resource.Conf
 	client, ok := req.ProviderData.(*Client)
 
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(
+			&resp.Diagnostics,
 			"Unexpected Resource Configure Type",
 			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
@@ -410,7 +409,8 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 
 	// Validate that either cloud_id or cloud_name is provided
 	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
-		resp.Diagnostics.AddError(
+		AddConfigError(
+			&resp.Diagnostics,
 			"Missing Required Attribute",
 			"Either 'cloud_id' or 'cloud_name' must be specified.",
 		)
@@ -423,9 +423,10 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		cloudName := plan.CloudName.ValueString()
 		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
 
-		resolvedID, err := r.resolveCloudNameToID(ctx, cloudName)
+		resolvedID, err := ResolveCloudNameToID(ctx, r.client, cloudName)
 		if err != nil {
-			resp.Diagnostics.AddError(
+			AddConfigError(
+				&resp.Diagnostics,
 				"Cloud Name Resolution Failed",
 				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
 			)
@@ -499,7 +500,7 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	if !plan.AdvancedConfigurationsJSON.IsNull() {
 		advancedConfig, err := DynamicToInterface(ctx, plan.AdvancedConfigurationsJSON)
 		if err != nil {
-			resp.Diagnostics.AddError("Failed to Convert Advanced Configurations", err.Error())
+			AddConfigError(&resp.Diagnostics, "Failed to Convert Advanced Configurations", err.Error())
 			return
 		}
 		config["advanced_configurations_json"] = advancedConfig
@@ -512,7 +513,7 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		var err error
 		flags, err = DynamicToInterface(ctx, plan.Flags)
 		if err != nil {
-			resp.Diagnostics.AddError("Failed to Convert Flags", err.Error())
+			AddConfigError(&resp.Diagnostics, "Failed to Convert Flags", err.Error())
 			return
 		}
 		if flags == nil {
@@ -535,7 +536,7 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	if !plan.HeadNode.IsNull() {
 		headNodeConfig, err := nodeConfigToAPI(ctx, plan.HeadNode)
 		if err != nil {
-			resp.Diagnostics.AddError("Failed to Convert Head Node", err.Error())
+			AddConfigError(&resp.Diagnostics, "Failed to Convert Head Node", err.Error())
 			return
 		}
 		if headNodeConfig != nil {
@@ -551,13 +552,13 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		for _, workerNodeValue := range workerNodeElements {
 			workerNodeObj, ok := workerNodeValue.(types.Object)
 			if !ok {
-				resp.Diagnostics.AddError("Invalid Worker Node", "Expected types.Object for worker node")
+				AddConfigError(&resp.Diagnostics, "Invalid Worker Node", "Expected types.Object for worker node")
 				return
 			}
 
 			workerConfig, err := workerNodeConfigToAPI(ctx, workerNodeObj)
 			if err != nil {
-				resp.Diagnostics.AddError("Failed to Convert Worker Node", err.Error())
+				AddConfigError(&resp.Diagnostics, "Failed to Convert Worker Node", err.Error())
 				return
 			}
 			if workerConfig != nil {
@@ -571,49 +572,27 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	// Make API call to create compute config
-	jsonData, err := json.Marshal(createRequest)
+	reqBody, err := MarshalRequestBody(createRequest)
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to Marshal Request", err.Error())
+		AddJSONError(&resp.Diagnostics, "marshal", "compute config request", err)
 		return
 	}
 
-	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Request: %s", string(jsonData))
+	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Creating compute config")
 
-	apiResp, err := r.client.DoRequest(ctx, "POST", "/api/v2/compute_templates/", bytes.NewBuffer(jsonData))
+	apiResult, err := DoRequestAndParse[map[string]interface{}](
+		ctx, r.client, "POST", "/api/v2/compute_templates/", reqBody,
+		http.StatusOK, http.StatusCreated,
+	)
 	if err != nil {
-		log.Printf("[ERROR] Failed to create compute config: %v", err)
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			log.Printf("[WARN] Failed to close response body: %v", closeErr)
-		}
-	}()
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to Read Response", err.Error())
-		return
-	}
-
-	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Response Status: %d, Body: %s", apiResp.StatusCode, string(body))
-
-	if apiResp.StatusCode != http.StatusOK && apiResp.StatusCode != http.StatusCreated {
-		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Status: %s - %s", apiResp.Status, string(body)))
-		return
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		resp.Diagnostics.AddError("Failed to Parse Response", err.Error())
+		AddAPIError(&resp.Diagnostics, "create compute config", err)
 		return
 	}
 
 	// Extract result from response
-	resultData, ok := result["result"].(map[string]interface{})
+	resultData, ok := (*apiResult)["result"].(map[string]interface{})
 	if !ok {
-		resp.Diagnostics.AddError("Invalid Response", "API did not return expected result structure")
+		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return expected result structure")
 		return
 	}
 
@@ -622,7 +601,7 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		plan.ID = types.StringValue(id)
 		log.Printf("[INFO] Created compute config: id=%s", id)
 	} else {
-		resp.Diagnostics.AddError("Invalid Response", "API did not return an ID")
+		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return an ID")
 		return
 	}
 
@@ -650,46 +629,25 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Make API call to get compute config
-	apiResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil)
+	apiResult, err := DoRequestAndParse[map[string]interface{}](
+		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil,
+		http.StatusOK, http.StatusNotFound,
+	)
 	if err != nil {
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			log.Printf("[WARN] Failed to close response body: %v", closeErr)
+		// Check if it's a 404 - resource was deleted
+		if apiResult == nil {
+			log.Printf("[WARN] Compute config not found, removing from state: id=%s", state.ID.ValueString())
+			resp.State.RemoveResource(ctx)
+			return
 		}
-	}()
-
-	if apiResp.StatusCode == http.StatusNotFound {
-		log.Printf("[WARN] Compute config not found, removing from state: id=%s", state.ID.ValueString())
-		resp.State.RemoveResource(ctx)
-		return
-	}
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to Read Response", err.Error())
-		return
-	}
-
-	log.Printf("[DEBUG] GET /api/v2/compute_templates/%s - Response Status: %d", state.ID.ValueString(), apiResp.StatusCode)
-
-	if apiResp.StatusCode != http.StatusOK {
-		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Status: %s - %s", apiResp.Status, string(body)))
-		return
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		resp.Diagnostics.AddError("Failed to Parse Response", err.Error())
+		AddAPIError(&resp.Diagnostics, "read compute config", err)
 		return
 	}
 
 	// Extract result from response
-	resultData, ok := result["result"].(map[string]interface{})
+	resultData, ok := (*apiResult)["result"].(map[string]interface{})
 	if !ok {
-		resp.Diagnostics.AddError("Invalid Response", "API did not return expected result structure")
+		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return expected result structure")
 		return
 	}
 
@@ -800,38 +758,17 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 	// For actual changes, Terraform should destroy and recreate (ForceNew plan modifiers)
 
 	// Read back current state from API to ensure we have latest values
-	apiResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil)
+	apiResult, err := DoRequestAndParse[map[string]interface{}](
+		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil,
+	)
 	if err != nil {
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			log.Printf("[WARN] Failed to close response body: %v", closeErr)
-		}
-	}()
-
-	if apiResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(apiResp.Body)
-		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Status: %s - %s", apiResp.Status, string(body)))
+		AddAPIError(&resp.Diagnostics, "read compute config for update", err)
 		return
 	}
 
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to Read Response", err.Error())
-		return
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		resp.Diagnostics.AddError("Failed to Parse Response", err.Error())
-		return
-	}
-
-	resultData, ok := result["result"].(map[string]interface{})
+	resultData, ok := (*apiResult)["result"].(map[string]interface{})
 	if !ok {
-		resp.Diagnostics.AddError("Invalid Response", "API did not return expected result structure")
+		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return expected result structure")
 		return
 	}
 
@@ -873,23 +810,12 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 	log.Printf("[INFO] Archiving compute config: id=%s", state.ID.ValueString())
 
 	// Make API call to archive compute config (compute templates are archived, not deleted)
-	apiResp, err := r.client.DoRequest(ctx, "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", state.ID.ValueString()), nil)
+	_, err := DoRequestRaw(
+		ctx, r.client, "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", state.ID.ValueString()), nil,
+		http.StatusOK, http.StatusNoContent, http.StatusNotFound,
+	)
 	if err != nil {
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			log.Printf("[WARN] Failed to close response body: %v", closeErr)
-		}
-	}()
-
-	log.Printf("[DEBUG] POST /api/v2/compute_templates/%s/archive - Response Status: %d", state.ID.ValueString(), apiResp.StatusCode)
-
-	if apiResp.StatusCode != http.StatusOK && apiResp.StatusCode != http.StatusNoContent && apiResp.StatusCode != http.StatusNotFound {
-		body, _ := io.ReadAll(apiResp.Body)
-		log.Printf("[ERROR] Failed to archive compute config: %s - %s", apiResp.Status, string(body))
-		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Status: %s - %s", apiResp.Status, string(body)))
+		AddAPIError(&resp.Diagnostics, "archive compute config", err)
 		return
 	}
 
@@ -1212,71 +1138,4 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 	}
 
 	return config, nil
-}
-
-// resolveCloudNameToID looks up a cloud by name and returns its ID
-func (r *ComputeConfigResource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
-	resp, err := r.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			log.Printf("[WARN] Failed to close response body: %v", closeErr)
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	// Find clouds with matching name
-	// If multiple exist, return the most recently created one
-	var matchedCloudID string
-	var latestCreatedAt string
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
-			}
-		}
-	}
-
-	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
-	}
-
-	if len(cloudsResp.Results) > 1 {
-		tflog.Warn(ctx, "Multiple clouds found with same name, using most recent", map[string]any{
-			"cloud_name": cloudName,
-			"cloud_id":   matchedCloudID,
-			"created_at": latestCreatedAt,
-		})
-	}
-
-	tflog.Info(ctx, "Resolved cloud name to ID", map[string]any{
-		"cloud_name": cloudName,
-		"cloud_id":   matchedCloudID,
-	})
-
-	return matchedCloudID, nil
 }

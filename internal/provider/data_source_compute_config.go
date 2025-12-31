@@ -2,11 +2,8 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -138,7 +135,7 @@ func (d *ComputeConfigDataSource) Configure(ctx context.Context, req datasource.
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Unexpected Data Source Configure Type",
 			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
@@ -159,7 +156,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 
 	// Validate that either ID or Name is provided
 	if config.ID.IsNull() && config.Name.IsNull() {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Missing Required Attribute",
 			"Either 'id' or 'name' must be specified to look up a compute config.",
 		)
@@ -185,9 +182,9 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 			cloudName := config.CloudName.ValueString()
 			tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
 
-			cloudID, err = d.resolveCloudNameToID(ctx, cloudName)
+			cloudID, err = ResolveCloudNameToID(ctx, d.client, cloudName)
 			if err != nil {
-				resp.Diagnostics.AddError(
+				AddConfigError(&resp.Diagnostics,
 					"Cloud Name Resolution Failed",
 					fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
 				)
@@ -199,15 +196,12 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 
 		configID, err = d.findComputeConfigByName(ctx, name, cloudID)
 		if err != nil {
-			resp.Diagnostics.AddError(
-				"Compute Config Lookup Failed",
-				fmt.Sprintf("Failed to find compute config with name '%s': %s", name, err.Error()),
-			)
+			AddAPIError(&resp.Diagnostics, "find compute config", err)
 			return
 		}
 
 		if configID == "" {
-			resp.Diagnostics.AddError(
+			AddConfigError(&resp.Diagnostics,
 				"Compute Config Not Found",
 				fmt.Sprintf("No compute config found with name '%s'", name),
 			)
@@ -216,52 +210,26 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	}
 
 	// Fetch compute config details from API
-	apiResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", configID), nil)
+	type ComputeConfigResponse struct {
+		Result map[string]interface{} `json:"result"`
+	}
+
+	computeResp, err := DoRequestAndParse[ComputeConfigResponse](
+		ctx,
+		d.client,
+		"GET",
+		fmt.Sprintf("/api/v2/compute_templates/%s", configID),
+		nil,
+		http.StatusOK,
+	)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch compute config", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	if apiResp.StatusCode == http.StatusNotFound {
-		resp.Diagnostics.AddError(
-			"Compute Config Not Found",
-			fmt.Sprintf("Compute config with ID '%s' not found in Anyscale", configID),
-		)
-		return
-	}
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", err.Error())
-		return
-	}
-
-	if apiResp.StatusCode != http.StatusOK {
-		resp.Diagnostics.AddError(
-			"API Error",
-			fmt.Sprintf("Failed to read compute config: %s - %s", apiResp.Status, string(body)),
-		)
-		return
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		resp.Diagnostics.AddError("JSON Unmarshal Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "fetch compute config", err)
 		return
 	}
 
 	// Extract result from response
-	resultData, ok := result["result"].(map[string]interface{})
-	if !ok {
-		resp.Diagnostics.AddError("Invalid Response", "API did not return expected result structure")
-		return
-	}
+	resultData := computeResp.Result
 
 	// Populate the data source model
 	config.ID = types.StringValue(resultData["id"].(string))
@@ -303,25 +271,21 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 			config.CloudID = types.StringValue(cloudID)
 
 			// Fetch cloud name for the cloud_id
-			cloudResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+			type CloudResponse struct {
+				Result map[string]interface{} `json:"result"`
+			}
+
+			cloudResp, err := DoRequestAndParse[CloudResponse](
+				ctx,
+				d.client,
+				"GET",
+				fmt.Sprintf("/api/v2/clouds/%s", cloudID),
+				nil,
+				http.StatusOK,
+			)
 			if err == nil {
-				defer func() {
-					if closeErr := cloudResp.Body.Close(); closeErr != nil {
-						tflog.Warn(ctx, "Failed to close cloud response body", map[string]any{"error": closeErr.Error()})
-					}
-				}()
-				if cloudResp.StatusCode == http.StatusOK {
-					cloudBody, err := io.ReadAll(cloudResp.Body)
-					if err == nil {
-						var cloudResult map[string]interface{}
-						if err := json.Unmarshal(cloudBody, &cloudResult); err == nil {
-							if cloudData, ok := cloudResult["result"].(map[string]interface{}); ok {
-								if cloudName, ok := cloudData["name"].(string); ok {
-									config.CloudName = types.StringValue(cloudName)
-								}
-							}
-						}
-					}
+				if cloudName, ok := cloudResp.Result["name"].(string); ok {
+					config.CloudName = types.StringValue(cloudName)
 				}
 			}
 			// If we can't fetch cloud name, just leave it null - it's not critical
@@ -382,31 +346,12 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 		searchPayload["cloud_id"] = cloudID
 	}
 
-	searchBody, err := json.Marshal(searchPayload)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal search request: %w", err)
-	}
-
-	resp, err := d.client.DoRequest(ctx, "POST", "/api/v2/compute_templates/search", strings.NewReader(string(searchBody)))
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
+	searchBody, err := MarshalRequestBody(searchPayload)
 	if err != nil {
 		return "", err
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to search compute configs: %s - %s", resp.Status, string(body))
-	}
-
-	var searchResp struct {
+	type SearchResponse struct {
 		Results []struct {
 			ID        string `json:"id"`
 			Name      string `json:"name"`
@@ -415,7 +360,15 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 		} `json:"results"`
 	}
 
-	if err := json.Unmarshal(body, &searchResp); err != nil {
+	searchResp, err := DoRequestAndParse[SearchResponse](
+		ctx,
+		d.client,
+		"POST",
+		"/api/v2/compute_templates/search",
+		searchBody,
+		http.StatusOK,
+	)
+	if err != nil {
 		return "", err
 	}
 
@@ -434,15 +387,7 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 		}
 	}
 
-	if len(searchResp.Results) > 1 {
-		// Log warning if multiple configs with same name exist
-		tflog.Warn(ctx, "Multiple compute configs found with same name, returning most recent", map[string]any{
-			"name":       name,
-			"config_id":  matchedConfigID,
-			"created_at": latestCreatedAt,
-			"count":      len(searchResp.Results),
-		})
-	}
+	WarnIfMultipleMatches(ctx, "compute config", name, len(searchResp.Results), matchedConfigID)
 
 	tflog.Info(ctx, "Found compute config by name", map[string]any{
 		"name":      name,
@@ -450,71 +395,4 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 	})
 
 	return matchedConfigID, nil
-}
-
-// resolveCloudNameToID looks up a cloud by name and returns its ID
-func (d *ComputeConfigDataSource) resolveCloudNameToID(ctx context.Context, cloudName string) (string, error) {
-	resp, err := d.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	// Find clouds with matching name
-	// If multiple exist, return the most recently created one
-	var matchedCloudID string
-	var latestCreatedAt string
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
-			}
-		}
-	}
-
-	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
-	}
-
-	if len(cloudsResp.Results) > 1 {
-		tflog.Warn(ctx, "Multiple clouds found with same name, using most recent", map[string]any{
-			"cloud_name": cloudName,
-			"cloud_id":   matchedCloudID,
-			"created_at": latestCreatedAt,
-		})
-	}
-
-	tflog.Info(ctx, "Resolved cloud name to ID", map[string]any{
-		"cloud_name": cloudName,
-		"cloud_id":   matchedCloudID,
-	})
-
-	return matchedCloudID, nil
 }
