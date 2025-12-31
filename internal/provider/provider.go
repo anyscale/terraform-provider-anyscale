@@ -133,6 +133,8 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewCloudResourceResource,
 		NewCloudResource,
 		NewProjectResource,
+		NewOrganizationInvitationResource,
+		NewOrganizationCollaboratorResource,
 	}
 }
 

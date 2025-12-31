@@ -284,3 +284,61 @@ type ProjectCollaboratorResult struct {
 type ProjectCollaboratorUpdateRequest struct {
 	PermissionLevel string `json:"permission_level"`
 }
+
+// Organization Invitation API Models
+
+// CreateOrganizationInvitationRequest is the request body for creating an invitation
+type CreateOrganizationInvitationRequest struct {
+	Email string `json:"email"`
+}
+
+// OrganizationInvitationResponse represents a single invitation from the API
+type OrganizationInvitationResponse struct {
+	Result OrganizationInvitationResult `json:"result"`
+}
+
+// OrganizationInvitationsListResponse represents the response from listing invitations
+type OrganizationInvitationsListResponse struct {
+	Results  []OrganizationInvitationResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// OrganizationInvitationResult represents an invitation
+type OrganizationInvitationResult struct {
+	ID             string  `json:"id"` // invitation_id
+	Email          string  `json:"email"`
+	OrganizationID string  `json:"organization_id"`
+	CreatedAt      string  `json:"created_at"`
+	ExpiresAt      string  `json:"expires_at"`
+	AcceptedAt     *string `json:"accepted_at"` // null if not accepted
+}
+
+// Organization Collaborator API Models
+
+// UpdateOrganizationCollaboratorRequest is the request body for updating a collaborator
+type UpdateOrganizationCollaboratorRequest struct {
+	PermissionLevel string `json:"permission_level"` // "owner" or "collaborator"
+}
+
+// OrganizationCollaboratorResult represents a collaborator from the API
+// Note: The data source already has models for this, but we define it here for completeness
+type OrganizationCollaboratorResult struct {
+	ID              string  `json:"id"`               // identity_id
+	UserID          *string `json:"user_id"`          // Can be null for some user types
+	Email           string  `json:"email"`
+	Name            *string `json:"name"`             // Can be null
+	PermissionLevel string  `json:"permission_level"` // "owner" or "collaborator"
+	CreatedAt       string  `json:"created_at"`
+}
+
+// OrganizationCollaboratorsListResponse represents the response from listing collaborators
+type OrganizationCollaboratorsListResponse struct {
+	Results  []OrganizationCollaboratorResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
