@@ -169,7 +169,8 @@ resource "anyscale_compute_config" "test" {
 }
 
 data "anyscale_compute_config" "test" {
-  id = anyscale_compute_config.test.id
+  # Use config_id (version-specific API ID) for lookup, not id (which is the name)
+  id = anyscale_compute_config.test.config_id
 }
 `, configName, cloudID)
 }
@@ -219,7 +220,8 @@ resource "anyscale_compute_config" "base" {
 }
 
 data "anyscale_compute_config" "template" {
-  id = anyscale_compute_config.base.id
+  # Use config_id (version-specific API ID) for lookup, not id (which is the name)
+  id = anyscale_compute_config.base.config_id
 }
 
 resource "anyscale_compute_config" "derived" {

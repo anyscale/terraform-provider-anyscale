@@ -1,9 +1,12 @@
 package provider
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 // TestComputeConfigLookupValidation tests validation of ID vs Name lookup
@@ -61,63 +64,6 @@ func TestComputeConfigLookupValidation(t *testing.T) {
 	}
 }
 
-// TestComputeConfigAnonymousHandling tests handling of anonymous configs
-func TestComputeConfigAnonymousHandling(t *testing.T) {
-	tests := []struct {
-		name              string
-		anonymous         bool
-		apiName           string
-		expectedName      types.String
-		expectedAnonymous types.Bool
-	}{
-		{
-			name:              "anonymous config - no name",
-			anonymous:         true,
-			apiName:           "auto-generated-name",
-			expectedName:      types.StringNull(),
-			expectedAnonymous: types.BoolValue(true),
-		},
-		{
-			name:              "named config",
-			anonymous:         false,
-			apiName:           "my-config",
-			expectedName:      types.StringValue("my-config"),
-			expectedAnonymous: types.BoolValue(false),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the anonymous config handling logic
-			var model ComputeConfigDataSourceModel
-
-			if tt.anonymous {
-				model.Anonymous = types.BoolValue(true)
-				model.Name = types.StringNull() // Don't expose auto-generated name
-			} else {
-				model.Anonymous = types.BoolValue(false)
-				model.Name = types.StringValue(tt.apiName)
-			}
-
-			if model.Anonymous != tt.expectedAnonymous {
-				if model.Anonymous.IsNull() != tt.expectedAnonymous.IsNull() {
-					t.Errorf("Anonymous null state = %v, want %v", model.Anonymous.IsNull(), tt.expectedAnonymous.IsNull())
-				} else if !model.Anonymous.IsNull() && model.Anonymous.ValueBool() != tt.expectedAnonymous.ValueBool() {
-					t.Errorf("Anonymous = %v, want %v", model.Anonymous.ValueBool(), tt.expectedAnonymous.ValueBool())
-				}
-			}
-
-			if model.Name != tt.expectedName {
-				if model.Name.IsNull() != tt.expectedName.IsNull() {
-					t.Errorf("Name null state = %v, want %v", model.Name.IsNull(), tt.expectedName.IsNull())
-				} else if !model.Name.IsNull() && model.Name.ValueString() != tt.expectedName.ValueString() {
-					t.Errorf("Name = %v, want %v", model.Name.ValueString(), tt.expectedName.ValueString())
-				}
-			}
-		})
-	}
-}
-
 // TestComputeConfigCloudFiltering tests cloud ID and name filtering
 func TestComputeConfigCloudFiltering(t *testing.T) {
 	tests := []struct {
@@ -168,7 +114,9 @@ func TestComputeConfigCloudFiltering(t *testing.T) {
 func TestComputeConfigFieldMapping(t *testing.T) {
 	model := ComputeConfigDataSourceModel{
 		ID:                     types.StringValue("ccfg_123"),
+		ConfigID:               types.StringValue("ccfg_123"),
 		Name:                   types.StringValue("my-config"),
+		NameVersion:            types.StringValue("my-config:3"),
 		CloudID:                types.StringValue("cld_456"),
 		CloudName:              types.StringValue("my-cloud"),
 		Region:                 types.StringValue("us-west-2"),
@@ -176,16 +124,22 @@ func TestComputeConfigFieldMapping(t *testing.T) {
 		MaximumUptimeMinutes:   types.Int64Value(480),
 		EnableCrossZoneScaling: types.BoolValue(true),
 		AutoSelectWorkerConfig: types.BoolValue(false),
-		Anonymous:              types.BoolValue(false),
 		ProjectID:              types.StringValue("prj_789"),
 		Version:                types.Int64Value(3),
 		CreatedAt:              types.StringValue("2024-01-01T00:00:00Z"),
 		LastModifiedAt:         types.StringValue("2024-01-02T00:00:00Z"),
+		Versions:               types.ListNull(types.Int64Type), // Would be populated from API
 	}
 
 	// Verify all fields are correctly set
 	if model.ID.ValueString() != "ccfg_123" {
 		t.Errorf("ID = %v, want 'ccfg_123'", model.ID.ValueString())
+	}
+	if model.ConfigID.ValueString() != "ccfg_123" {
+		t.Errorf("ConfigID = %v, want 'ccfg_123'", model.ConfigID.ValueString())
+	}
+	if model.NameVersion.ValueString() != "my-config:3" {
+		t.Errorf("NameVersion = %v, want 'my-config:3'", model.NameVersion.ValueString())
 	}
 	if model.Region.ValueString() != "us-west-2" {
 		t.Errorf("Region = %v, want 'us-west-2'", model.Region.ValueString())
@@ -206,7 +160,6 @@ func TestComputeConfigBooleanDefaults(t *testing.T) {
 	model := ComputeConfigDataSourceModel{
 		EnableCrossZoneScaling: types.BoolValue(false), // Should default to false
 		AutoSelectWorkerConfig: types.BoolValue(false), // Should default to false
-		Anonymous:              types.BoolValue(false),
 	}
 
 	if model.EnableCrossZoneScaling.ValueBool() != false {
@@ -294,4 +247,120 @@ func TestComputeConfigIdleTerminationValues(t *testing.T) {
 			}
 		})
 	}
+}
+
+// =============================================================================
+// Acceptance Tests
+// =============================================================================
+
+// TestAccComputeConfigDataSource_Basic tests looking up a compute config by name
+func TestAccComputeConfigDataSource_Basic(t *testing.T) {
+	skipIfNotAcceptanceTest(t)
+
+	cloudID := getTestCloudID(t)
+	configName := fmt.Sprintf("tf-test-ds-compute-config-%d", os.Getpid())
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigDataSourceConfig_basic(cloudID, configName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Verify resource was created
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
+
+					// Verify data source lookup by name
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "name", configName),
+					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.by_name", "id"),
+					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.by_name", "config_id"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "version", "1"),
+					// Verify name_version format
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "name_version", configName+":1"),
+					// Verify versions list contains at least version 1
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.#", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.0", "1"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccComputeConfigDataSource_WithVersions tests that version-related attributes
+// are populated correctly after updates to a compute config.
+// Note: The Anyscale API search may not return all historical versions, so we verify
+// that the current version is correctly reflected in both version and name_version.
+func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
+	skipIfNotAcceptanceTest(t)
+
+	cloudID := getTestCloudID(t)
+	configName := fmt.Sprintf("tf-test-ds-versions-%d", os.Getpid())
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create initial compute config
+			{
+				Config: testAccComputeConfigDataSourceConfig_versioned(cloudID, configName, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "version", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "name_version", configName+":1"),
+					// Versions list should contain at least the current version
+					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.lookup", "versions.#"),
+				),
+			},
+			// Step 2: Update to create version 2
+			{
+				Config: testAccComputeConfigDataSourceConfig_versioned(cloudID, configName, "m5.xlarge"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "2"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "version", "2"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "name_version", configName+":2"),
+					// Versions list should contain at least the current version
+					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.lookup", "versions.#"),
+				),
+			},
+		},
+	})
+}
+
+func testAccComputeConfigDataSourceConfig_basic(cloudID, configName string) string {
+	return fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+}
+
+data "anyscale_compute_config" "by_name" {
+  name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+`, configName, cloudID)
+}
+
+func testAccComputeConfigDataSourceConfig_versioned(cloudID, configName, instanceType string) string {
+	return fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  head_node = {
+    instance_type = "%s"
+  }
+}
+
+data "anyscale_compute_config" "lookup" {
+  name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+`, configName, cloudID, instanceType)
 }

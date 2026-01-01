@@ -167,13 +167,10 @@ resource "anyscale_compute_config" "advanced" {
   ]
 }
 
-# Anonymous compute config example
-# Anonymous configs don't show up in the list of cluster configs
-
-resource "anyscale_compute_config" "anonymous" {
-  # No name - will be anonymous
-  cloud_id  = anyscale_cloud.primary.id
-  anonymous = true
+# Simple compute config example
+resource "anyscale_compute_config" "simple" {
+  name     = "tf-example-simple-config"
+  cloud_id = anyscale_cloud.primary.id
 
   head_node = {
     instance_type = "n2-standard-4"
