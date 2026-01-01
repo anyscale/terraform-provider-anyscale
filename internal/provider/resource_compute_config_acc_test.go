@@ -90,7 +90,7 @@ func TestAccComputeConfigResource_Anonymous(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_anonymous(cloudID),
+				Config: testAccComputeConfigResourceConfig_minimal(cloudID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
@@ -134,7 +134,14 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 			return fmt.Errorf("not found: %s", resourceName)
 		}
 
-		if rs.Primary.ID == "" {
+		// Use config_id for API lookup (version-specific ID)
+		configID := rs.Primary.Attributes["config_id"]
+		if configID == "" {
+			// Fallback to primary ID for backwards compatibility
+			configID = rs.Primary.ID
+		}
+
+		if configID == "" {
 			return fmt.Errorf("no Compute Config ID is set")
 		}
 
@@ -145,7 +152,6 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 		}
 
 		// Make API call to verify compute config exists
-		configID := rs.Primary.ID
 		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/compute_templates/%s", configID), nil)
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
@@ -209,10 +215,10 @@ resource "anyscale_compute_config" "test" {
 `, os.Getpid(), cloudID)
 }
 
-func testAccComputeConfigResourceConfig_anonymous(cloudID string) string {
+func testAccComputeConfigResourceConfig_minimal(cloudID string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  name     = "tf-test-compute-config-anon-%d"
+  name     = "tf-test-compute-config-minimal-%d"
   cloud_id = "%s"
 
   head_node = {
@@ -234,4 +240,100 @@ resource "anyscale_compute_config" "test" {
   }
 }
 `, configName, cloudName)
+}
+
+// TestAccComputeConfigResource_Update tests that updating a compute config
+// creates a new version with the updated configuration.
+func TestAccComputeConfigResource_Update(t *testing.T) {
+	skipIfNotAcceptanceTest(t)
+
+	cloudID := getTestCloudID(t)
+	configName := fmt.Sprintf("tf-test-compute-config-update-%d", os.Getpid())
+
+	var initialConfigID string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create initial compute config with m5.large
+			{
+				Config: testAccComputeConfigResourceConfig_update(cloudID, configName, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// ID should be the name (stable across versions)
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "id", configName),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "config_id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.large"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
+					// Verify name_version format
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name_version", configName+":1"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					// Capture initial config_id for comparison
+					testAccCaptureComputeConfigID("anyscale_compute_config.test", &initialConfigID),
+				),
+			},
+			// Update to m5.xlarge - should create a new version
+			{
+				Config: testAccComputeConfigResourceConfig_update(cloudID, configName, "m5.xlarge"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// ID should still be the name (stable)
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "id", configName),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "config_id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.xlarge"),
+					// Version should be incremented
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "2"),
+					// Verify name_version is updated
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name_version", configName+":2"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					// Verify config_id changed (new version = new config_id)
+					testAccCheckComputeConfigIDChanged("anyscale_compute_config.test", &initialConfigID),
+				),
+			},
+		},
+	})
+}
+
+// testAccCaptureComputeConfigID captures the config_id for later comparison
+func testAccCaptureComputeConfigID(resourceName string, configID *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("not found: %s", resourceName)
+		}
+
+		*configID = rs.Primary.Attributes["config_id"]
+		return nil
+	}
+}
+
+// testAccCheckComputeConfigIDChanged verifies that config_id has changed from the initial value
+func testAccCheckComputeConfigIDChanged(resourceName string, initialConfigID *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("not found: %s", resourceName)
+		}
+
+		currentConfigID := rs.Primary.Attributes["config_id"]
+		if currentConfigID == *initialConfigID {
+			return fmt.Errorf("compute config config_id should have changed after update, but still is %s", currentConfigID)
+		}
+
+		return nil
+	}
+}
+
+func testAccComputeConfigResourceConfig_update(cloudID, configName, instanceType string) string {
+	return fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  head_node = {
+    instance_type = "%s"
+  }
+}
+`, configName, cloudID, instanceType)
 }

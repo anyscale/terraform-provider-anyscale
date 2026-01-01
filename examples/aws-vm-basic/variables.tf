@@ -91,18 +91,6 @@ variable "cloud_name" {
   default     = "tf-aws-basic-test"
 }
 
-variable "is_private_cloud" {
-  description = "Whether this is a private cloud"
-  type        = bool
-  default     = false
-}
-
-variable "auto_add_user" {
-  description = "Whether to automatically add users"
-  type        = bool
-  default     = false
-}
-
 variable "anyscale_s3_force_destroy" {
   description = "Force destroy S3 bucket for testing"
   type        = bool

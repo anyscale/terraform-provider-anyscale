@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -35,7 +36,9 @@ type ComputeConfigResource struct {
 
 // ComputeConfigResourceModel describes the resource data model.
 type ComputeConfigResourceModel struct {
-	ID                         types.String  `tfsdk:"id"`
+	ID                         types.String  `tfsdk:"id"`           // Terraform resource ID (same as name for stability across versions)
+	ConfigID                   types.String  `tfsdk:"config_id"`    // Version-specific API ID (changes with each version)
+	NameVersion                types.String  `tfsdk:"name_version"` // Formatted as "name:version" for use with Anyscale APIs
 	Name                       types.String  `tfsdk:"name"`
 	ProjectID                  types.String  `tfsdk:"project_id"`
 	CloudID                    types.String  `tfsdk:"cloud_id"`
@@ -50,7 +53,6 @@ type ComputeConfigResourceModel struct {
 	AdvancedConfigurationsJSON types.Dynamic `tfsdk:"advanced_configurations_json"` // Dynamic (supports nested objects with mixed types)
 	AutoSelectWorkerConfig     types.Bool    `tfsdk:"auto_select_worker_config"`
 	Flags                      types.Dynamic `tfsdk:"flags"` // Dynamic (supports mixed value types) - KEY FEATURE!
-	Anonymous                  types.Bool    `tfsdk:"anonymous"`
 	Version                    types.Int64   `tfsdk:"version"`
 	CreatedAt                  types.String  `tfsdk:"created_at"`
 	LastModifiedAt             types.String  `tfsdk:"last_modified_at"`
@@ -114,16 +116,26 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				Description:         "The unique identifier of the compute config.",
-				MarkdownDescription: "The unique identifier of the compute config.",
+				Description:         "The unique identifier of the compute config (same as name, stable across versions).",
+				MarkdownDescription: "The unique identifier of the compute config (same as name, stable across versions).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"config_id": schema.StringAttribute{
+				Computed:            true,
+				Description:         "The version-specific API ID of the compute config. Changes with each version update.",
+				MarkdownDescription: "The version-specific API ID of the compute config. Changes with each version update.",
+			},
+			"name_version": schema.StringAttribute{
+				Computed:            true,
+				Description:         "The compute config name and version formatted as 'name:version' for use with Anyscale APIs.",
+				MarkdownDescription: "The compute config name and version formatted as `name:version` for use with Anyscale APIs.",
+			},
 			"name": schema.StringAttribute{
-				Optional:            true,
-				Description:         "The name of the compute config. If not provided, an anonymous config will be created.",
-				MarkdownDescription: "The name of the compute config. If not provided, an anonymous config will be created.",
+				Required:            true,
+				Description:         "The name of the compute config.",
+				MarkdownDescription: "The name of the compute config.",
 			},
 			"project_id": schema.StringAttribute{
 				Optional:            true,
@@ -201,13 +213,6 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				Optional:            true,
 				Description:         "A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.",
 				MarkdownDescription: "A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.",
-			},
-			"anonymous": schema.BoolAttribute{
-				Optional:            true,
-				Computed:            true,
-				Default:             booldefault.StaticBool(false),
-				Description:         "An anonymous compute config does not show up in the list of cluster configs.",
-				MarkdownDescription: "An anonymous compute config does not show up in the list of cluster configs.",
 			},
 			"version": schema.Int64Attribute{
 				Computed:            true,
@@ -399,22 +404,21 @@ func (r *ComputeConfigResource) Configure(ctx context.Context, req resource.Conf
 	r.client = client
 }
 
-func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan ComputeConfigResourceModel
-
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
+// buildComputeConfigRequest builds the API request body for creating/updating a compute config.
+// Returns the request body and cloud_id, or an error via diagnostics.
+func (r *ComputeConfigResource) buildComputeConfigRequest(
+	ctx context.Context,
+	plan *ComputeConfigResourceModel,
+	diags *diag.Diagnostics,
+) (map[string]interface{}, string) {
 	// Validate that either cloud_id or cloud_name is provided
 	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
 		AddConfigError(
-			&resp.Diagnostics,
+			diags,
 			"Missing Required Attribute",
 			"Either 'cloud_id' or 'cloud_name' must be specified.",
 		)
-		return
+		return nil, ""
 	}
 
 	// Resolve cloud_name to cloud_id if needed
@@ -426,32 +430,29 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		resolvedID, err := ResolveCloudNameToID(ctx, r.client, cloudName)
 		if err != nil {
 			AddConfigError(
-				&resp.Diagnostics,
+				diags,
 				"Cloud Name Resolution Failed",
 				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
 			)
-			return
+			return nil, ""
 		}
 		cloudID = resolvedID
 		plan.CloudID = types.StringValue(cloudID)
 	}
 
 	// Build the API request
-	tflog.Debug(ctx, "Building create request", map[string]any{
-		"cloud_id":  cloudID,
-		"anonymous": plan.Anonymous.ValueBool(),
+	tflog.Debug(ctx, "Building compute config request", map[string]any{
+		"cloud_id": cloudID,
+		"name":     plan.Name.ValueString(),
 	})
 
 	createRequest := map[string]interface{}{
-		"anonymous": plan.Anonymous.ValueBool(),
+		"name":        plan.Name.ValueString(),
+		"anonymous":   false, // Always false since name is required for Terraform-managed resources
+		"new_version": true,  // Always create a new version (required for updates to work)
 		"config": map[string]interface{}{
 			"cloud_id": cloudID,
 		},
-	}
-
-	// Add optional name
-	if !plan.Name.IsNull() {
-		createRequest["name"] = plan.Name.ValueString()
 	}
 
 	// Add optional project_id
@@ -478,10 +479,10 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 
 	// Add allowed_azs
 	if !plan.AllowedAZs.IsNull() {
-		allowedAzs, diags := StringListToInterface(ctx, plan.AllowedAZs)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
+		allowedAzs, azDiags := StringListToInterface(ctx, plan.AllowedAZs)
+		diags.Append(azDiags...)
+		if diags.HasError() {
+			return nil, ""
 		}
 		config["allowed_azs"] = allowedAzs
 	}
@@ -500,8 +501,8 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	if !plan.AdvancedConfigurationsJSON.IsNull() {
 		advancedConfig, err := DynamicToInterface(ctx, plan.AdvancedConfigurationsJSON)
 		if err != nil {
-			AddConfigError(&resp.Diagnostics, "Failed to Convert Advanced Configurations", err.Error())
-			return
+			AddConfigError(diags, "Failed to Convert Advanced Configurations", err.Error())
+			return nil, ""
 		}
 		config["advanced_configurations_json"] = advancedConfig
 	}
@@ -513,8 +514,8 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		var err error
 		flags, err = DynamicToInterface(ctx, plan.Flags)
 		if err != nil {
-			AddConfigError(&resp.Diagnostics, "Failed to Convert Flags", err.Error())
-			return
+			AddConfigError(diags, "Failed to Convert Flags", err.Error())
+			return nil, ""
 		}
 		if flags == nil {
 			flags = make(map[string]interface{})
@@ -536,8 +537,8 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	if !plan.HeadNode.IsNull() {
 		headNodeConfig, err := nodeConfigToAPI(ctx, plan.HeadNode)
 		if err != nil {
-			AddConfigError(&resp.Diagnostics, "Failed to Convert Head Node", err.Error())
-			return
+			AddConfigError(diags, "Failed to Convert Head Node", err.Error())
+			return nil, ""
 		}
 		if headNodeConfig != nil {
 			config["head_node_type"] = headNodeConfig
@@ -552,14 +553,14 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		for _, workerNodeValue := range workerNodeElements {
 			workerNodeObj, ok := workerNodeValue.(types.Object)
 			if !ok {
-				AddConfigError(&resp.Diagnostics, "Invalid Worker Node", "Expected types.Object for worker node")
-				return
+				AddConfigError(diags, "Invalid Worker Node", "Expected types.Object for worker node")
+				return nil, ""
 			}
 
 			workerConfig, err := workerNodeConfigToAPI(ctx, workerNodeObj)
 			if err != nil {
-				AddConfigError(&resp.Diagnostics, "Failed to Convert Worker Node", err.Error())
-				return
+				AddConfigError(diags, "Failed to Convert Worker Node", err.Error())
+				return nil, ""
 			}
 			if workerConfig != nil {
 				workerConfigs = append(workerConfigs, workerConfig)
@@ -569,6 +570,23 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		if len(workerConfigs) > 0 {
 			config["worker_node_types"] = workerConfigs
 		}
+	}
+
+	return createRequest, cloudID
+}
+
+func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan ComputeConfigResourceModel
+
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Build the request
+	createRequest, _ := r.buildComputeConfigRequest(ctx, &plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Make API call to create compute config
@@ -596,18 +614,23 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	// Set the ID
-	if id, ok := resultData["id"].(string); ok {
-		plan.ID = types.StringValue(id)
-		log.Printf("[INFO] Created compute config: id=%s", id)
-	} else {
+	// Set the IDs:
+	// - ID = name (stable across versions, used as Terraform resource identifier)
+	// - ConfigID = API ID (version-specific, changes with each update)
+	configID, ok := resultData["id"].(string)
+	if !ok || configID == "" {
 		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return an ID")
 		return
 	}
+	plan.ID = types.StringValue(plan.Name.ValueString()) // Use name as stable Terraform ID
+	plan.ConfigID = types.StringValue(configID)          // Store version-specific ID
+	log.Printf("[INFO] Created compute config: name=%s, config_id=%s", plan.Name.ValueString(), configID)
 
 	// Extract computed fields from create response
 	if version, ok := resultData["version"].(float64); ok {
 		plan.Version = types.Int64Value(int64(version))
+		// Set name_version formatted as "name:version" for use with Anyscale APIs
+		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), int64(version)))
 	}
 	if createdAt, ok := resultData["created_at"].(string); ok {
 		plan.CreatedAt = types.StringValue(createdAt)
@@ -628,15 +651,22 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
+	// Use ConfigID for API lookup (version-specific ID)
+	// Fall back to ID if ConfigID is not set (for backwards compatibility or import)
+	lookupID := state.ConfigID.ValueString()
+	if lookupID == "" {
+		lookupID = state.ID.ValueString()
+	}
+
 	// Make API call to get compute config
 	apiResult, err := DoRequestAndParse[map[string]interface{}](
-		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil,
+		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", lookupID), nil,
 		http.StatusOK, http.StatusNotFound,
 	)
 	if err != nil {
 		// Check if it's a 404 - resource was deleted
 		if apiResult == nil {
-			log.Printf("[WARN] Compute config not found, removing from state: id=%s", state.ID.ValueString())
+			log.Printf("[WARN] Compute config not found, removing from state: config_id=%s", lookupID)
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -651,22 +681,22 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
+	// Update ConfigID from API response (in case it changed)
+	if apiID, ok := resultData["id"].(string); ok {
+		state.ConfigID = types.StringValue(apiID)
+	}
+
 	// Update state with response
-	// For anonymous configs, don't read back the auto-generated name
-	if anonymous, ok := resultData["anonymous"].(bool); ok && anonymous {
-		state.Name = types.StringNull()
-	} else if name, ok := resultData["name"].(string); ok {
+	if name, ok := resultData["name"].(string); ok {
 		state.Name = types.StringValue(name)
-	} else {
-		state.Name = types.StringNull()
+		// ID should match name (stable identifier)
+		state.ID = types.StringValue(name)
 	}
 
 	if version, ok := resultData["version"].(float64); ok {
 		state.Version = types.Int64Value(int64(version))
-	}
-
-	if anonymous, ok := resultData["anonymous"].(bool); ok {
-		state.Anonymous = types.BoolValue(anonymous)
+		// Set name_version formatted as "name:version" for use with Anyscale APIs
+		state.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", state.Name.ValueString(), int64(version)))
 	}
 
 	if createdAt, ok := resultData["created_at"].(string); ok {
@@ -753,16 +783,37 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	// Compute configs are immutable in the API - there's no PUT/PATCH endpoint
-	// The only "updates" we handle are cosmetic state differences (like flags formatting)
-	// For actual changes, Terraform should destroy and recreate (ForceNew plan modifiers)
+	// Anyscale compute configs support versioning - updates create a new version with the same name.
+	// The API handles this via POST with new_version=true and the same name.
+	// This gives us a new ID and incremented version number.
 
-	// Read back current state from API to ensure we have latest values
+	tflog.Info(ctx, "Updating compute config by creating new version", map[string]any{
+		"name":          plan.Name.ValueString(),
+		"old_config_id": state.ConfigID.ValueString(),
+		"old_version":   state.Version.ValueInt64(),
+	})
+
+	// Build the request using the same helper as Create
+	updateRequest, _ := r.buildComputeConfigRequest(ctx, &plan, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Make API call to create new version
+	reqBody, err := MarshalRequestBody(updateRequest)
+	if err != nil {
+		AddJSONError(&resp.Diagnostics, "marshal", "compute config update request", err)
+		return
+	}
+
+	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Creating new version of compute config")
+
 	apiResult, err := DoRequestAndParse[map[string]interface{}](
-		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", state.ID.ValueString()), nil,
+		ctx, r.client, "POST", "/api/v2/compute_templates/", reqBody,
+		http.StatusOK, http.StatusCreated,
 	)
 	if err != nil {
-		AddAPIError(&resp.Diagnostics, "read compute config for update", err)
+		AddAPIError(&resp.Diagnostics, "update compute config (create new version)", err)
 		return
 	}
 
@@ -772,31 +823,37 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	// Only update the computed fields from API, keep everything else from plan
-	// This prevents drift from API's representation vs our config
-	state.Version = types.Int64Value(int64(resultData["version"].(float64)))
-	state.CreatedAt = types.StringValue(resultData["created_at"].(string))
-	state.LastModifiedAt = types.StringValue(resultData["last_modified_at"].(string))
+	// Extract the new config ID - this changes with each version
+	newConfigID, ok := resultData["id"].(string)
+	if !ok || newConfigID == "" {
+		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return an ID for the new version")
+		return
+	}
 
-	// Keep all other fields from plan (they haven't actually changed)
-	state.Name = plan.Name
-	state.ProjectID = plan.ProjectID
-	state.CloudID = plan.CloudID
-	state.Region = plan.Region
-	state.IdleTerminationMinutes = plan.IdleTerminationMinutes
-	state.MaximumUptimeMinutes = plan.MaximumUptimeMinutes
-	state.MinResources = plan.MinResources
-	state.MaxResources = plan.MaxResources
-	state.EnableCrossZoneScaling = plan.EnableCrossZoneScaling
-	state.AdvancedConfigurationsJSON = plan.AdvancedConfigurationsJSON
-	state.AutoSelectWorkerConfig = plan.AutoSelectWorkerConfig
-	state.Flags = plan.Flags
-	state.Anonymous = plan.Anonymous
-	state.HeadNode = plan.HeadNode
-	state.WorkerNodes = plan.WorkerNodes
+	tflog.Info(ctx, "Created new compute config version", map[string]any{
+		"name":          plan.Name.ValueString(),
+		"new_config_id": newConfigID,
+		"new_version":   resultData["version"],
+	})
+
+	// Update state with new computed values
+	// ID stays the same (name), ConfigID changes to new version-specific ID
+	plan.ID = types.StringValue(plan.Name.ValueString()) // Keep ID = name (stable)
+	plan.ConfigID = types.StringValue(newConfigID)       // Update version-specific ID
+	if version, ok := resultData["version"].(float64); ok {
+		plan.Version = types.Int64Value(int64(version))
+		// Set name_version formatted as "name:version" for use with Anyscale APIs
+		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), int64(version)))
+	}
+	if createdAt, ok := resultData["created_at"].(string); ok {
+		plan.CreatedAt = types.StringValue(createdAt)
+	}
+	if lastModifiedAt, ok := resultData["last_modified_at"].(string); ok {
+		plan.LastModifiedAt = types.StringValue(lastModifiedAt)
+	}
 
 	// Set updated state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -807,11 +864,18 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 
-	log.Printf("[INFO] Archiving compute config: id=%s", state.ID.ValueString())
+	// Use ConfigID for the archive API call (version-specific ID)
+	configID := state.ConfigID.ValueString()
+	if configID == "" {
+		// Fallback to ID for backwards compatibility
+		configID = state.ID.ValueString()
+	}
+
+	log.Printf("[INFO] Archiving compute config: name=%s, config_id=%s", state.Name.ValueString(), configID)
 
 	// Make API call to archive compute config (compute templates are archived, not deleted)
 	_, err := DoRequestRaw(
-		ctx, r.client, "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", state.ID.ValueString()), nil,
+		ctx, r.client, "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", configID), nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 	)
 	if err != nil {
@@ -823,8 +887,9 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by ID
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	// Import accepts the version-specific config ID (e.g., "cpt_xxx")
+	// We set it as config_id, and Read will populate id (name) from the API response
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), req.ID)...)
 }
 
 // Helper functions for converting nested objects

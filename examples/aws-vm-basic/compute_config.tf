@@ -10,12 +10,12 @@ resource "anyscale_compute_config" "basic" {
   enable_cross_zone_scaling = false
 
   head_node = {
-    instance_type = "m5.2xlarge"
+    instance_type = "m7a.2xlarge"
   }
 
   worker_nodes = [
     {
-      instance_type = "m5.4xlarge"
+      instance_type = "m8a.4xlarge"
       min_nodes     = 1
       max_nodes     = 5
       market_type   = "ON_DEMAND"
@@ -31,7 +31,6 @@ resource "anyscale_compute_config" "basic" {
 
 # Advanced AWS Compute Config with custom resources and advanced configurations
 # Demonstrates resource constraints, advanced instance configs, and flags
-
 resource "anyscale_compute_config" "advanced" {
   name     = "${var.cloud_name}-advanced-compute"
   cloud_id = anyscale_cloud.primary.id
@@ -168,6 +167,40 @@ resource "anyscale_compute_config" "advanced" {
     }
   ]
 }
+
+# Multi-resource compute config example (experimental)
+# Note: This requires multiple cloud resources to be configured
+
+# Uncomment if you have multiple cloud resources configured
+# resource "anyscale_compute_config" "multi_resource" {
+#   name       = "${var.cloud_name}-multi-resource-compute"
+#   cloud_id   = anyscale_cloud.primary.id
+#   project_id = var.anyscale_project_id
+#
+#   idle_termination_minutes = 30
+#
+#   head_node {
+#     instance_type = "m5.2xlarge"
+#
+#     # Target specific deployment
+#     cloud_deployment {
+#       region = "us-west-2"
+#       provider = "aws"
+#     }
+#   }
+#
+#   worker_nodes {
+#     instance_type = "m5.4xlarge"
+#     min_nodes     = 1
+#     max_nodes     = 5
+#
+#     # Target specific deployment
+#     cloud_deployment {
+#       region = "us-west-2"
+#       provider = "aws"
+#     }
+#   }
+# }
 
 # Simple compute config example
 resource "anyscale_compute_config" "simple" {

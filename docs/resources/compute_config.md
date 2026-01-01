@@ -95,12 +95,12 @@ output "compute_config_id" {
 ### Required
 
 - `head_node` (Attributes) Configuration for the head node of the cluster. (see [below for nested schema](#nestedatt--head_node))
+- `name` (String) The name of the compute config.
 
 ### Optional
 
 - `advanced_configurations_json` (Dynamic) Advanced configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.
 - `allowed_azs` (List of String) The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.
-- `anonymous` (Boolean) An anonymous compute config does not show up in the list of cluster configs.
 - `auto_select_worker_config` (Boolean) If set to true, worker node groups will automatically be selected based on workload.
 - `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified.
 - `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id.
@@ -110,16 +110,17 @@ output "compute_config_id" {
 - `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`)
 - `maximum_uptime_minutes` (Number) If set to a positive number, Anyscale will terminate the cluster this many minutes after cluster start.
 - `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`)
-- `name` (String) The name of the compute config. If not provided, an anonymous config will be created.
 - `project_id` (String) The project ID to associate the compute config with.
 - `region` (String) The region to launch clusters in. Defaults to `USE_CLOUD` which uses the cloud's default region.
 - `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests. (see [below for nested schema](#nestedatt--worker_nodes))
 
 ### Read-Only
 
+- `config_id` (String) The version-specific API ID of the compute config. Changes with each version update.
 - `created_at` (String) The timestamp when the compute config was created.
-- `id` (String) The unique identifier of the compute config.
+- `id` (String) The unique identifier of the compute config (same as name, stable across versions).
 - `last_modified_at` (String) The timestamp when the compute config was last modified.
+- `name_version` (String) The compute config name and version formatted as `name:version` for use with Anyscale APIs.
 - `version` (Number) The version number of this compute config.
 
 <a id="nestedatt--head_node"></a>

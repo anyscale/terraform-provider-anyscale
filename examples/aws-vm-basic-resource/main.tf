@@ -5,14 +5,14 @@ resource "anyscale_cloud" "primary" {
   # Common Fields
   name = var.cloud_name
   # No file_storage block - EFS disabled
-
+  auto_add_user = var.auto_add_user
 }
 
 resource "anyscale_cloud_resource" "primary" {
   cloud_id      = anyscale_cloud.primary.id
   region        = var.aws_region
   compute_stack = "VM"
-  is_private    = false
+  is_private    = var.is_private_cloud
 
   # AWS Configuration
   aws_config {
