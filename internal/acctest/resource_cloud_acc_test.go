@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/brent/terraform-provider-anyscale/internal/provider"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -19,13 +20,15 @@ func TestAccCloudResource_AWS_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-aws-basic"
+	// Generate random suffix for IAM roles to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: testAccCloudResourceAWSBasicConfig(cloudName),
+				Config: testAccCloudResourceAWSBasicConfig(cloudName, randSuffix),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "AWS"),
@@ -94,12 +97,14 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-gcp-basic"
+	// Generate random suffix for service accounts to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceGCPBasicConfig(cloudName),
+				Config: testAccCloudResourceGCPBasicConfig(cloudName, randSuffix),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "GCP"),
@@ -136,12 +141,14 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-aws-k8s"
+	// Generate random suffix for IAM roles to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceAWSK8SConfig(cloudName),
+				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "AWS"),
@@ -272,7 +279,7 @@ func testAccCheckCloudAttributes(resourceName, expectedName, expectedProvider, e
 
 // Configuration templates
 
-func testAccCloudResourceAWSBasicConfig(name string) string {
+func testAccCloudResourceAWSBasicConfig(name, randSuffix string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
   name           = "%s"
@@ -285,8 +292,8 @@ resource "anyscale_cloud" "test" {
     subnet_ids         = ["subnet-test1", "subnet-test2"]
     security_group_ids = ["sg-test1"]
 
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/anyscale-crossaccount-role"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/anyscale-cluster-node-role"
+    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/tfacc-aws-basic-crossaccount-%s"
+    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/tfacc-aws-basic-cluster-node-%s"
     external_id               = "anyscale-external-id-test"
 
     subnet_ids_to_az = {
@@ -295,7 +302,7 @@ resource "anyscale_cloud" "test" {
     }
   }
 }
-`, name)
+`, name, randSuffix, randSuffix)
 }
 
 func testAccCloudResourceAWSEmptyConfig(name string) string {
@@ -308,7 +315,7 @@ resource "anyscale_cloud" "test" {
 `, name)
 }
 
-func testAccCloudResourceGCPBasicConfig(name string) string {
+func testAccCloudResourceGCPBasicConfig(name, randSuffix string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
   name           = "%s"
@@ -321,15 +328,15 @@ resource "anyscale_cloud" "test" {
     vpc_name                          = "anyscale-vpc"
     subnet_names                      = ["anyscale-subnet-1", "anyscale-subnet-2"]
     firewall_policy_names             = ["anyscale-fw-ssh"]
-    provider_name                     = "projects/123456789012/locations/global/workloadIdentityPools/anyscale-pool/providers/anyscale-provider"
-    controlplane_service_account_email = "anyscale-cp@my-gcp-project.iam.gserviceaccount.com"
-    dataplane_service_account_email    = "anyscale-dp@my-gcp-project.iam.gserviceaccount.com"
+    provider_name                     = "projects/123456789012/locations/global/workloadIdentityPools/tfacc-gcp-basic-pool-%s/providers/tfacc-gcp-basic-prov-%s"
+    controlplane_service_account_email = "tfacc-gcp-basic-cp-%s@my-gcp-project.iam.gserviceaccount.com"
+    dataplane_service_account_email    = "tfacc-gcp-basic-dp-%s@my-gcp-project.iam.gserviceaccount.com"
   }
 }
-`, name)
+`, name, randSuffix, randSuffix, randSuffix, randSuffix)
 }
 
-func testAccCloudResourceAWSK8SConfig(name string) string {
+func testAccCloudResourceAWSK8SConfig(name, randSuffix string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
   name           = "%s"
@@ -339,13 +346,13 @@ resource "anyscale_cloud" "test" {
 
   kubernetes_config {
     namespace                       = "anyscale"
-    anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/anyscale-operator-role"
+    anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/tfacc-aws-k8s-operator-%s"
     zones                           = ["us-east-2a", "us-east-2b"]
   }
 
   object_storage {
-    bucket_name = "anyscale-test-bucket"
+    bucket_name = "tfacc-aws-k8s-bucket-%s"
   }
 }
-`, name)
+`, name, randSuffix, randSuffix)
 }

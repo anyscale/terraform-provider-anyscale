@@ -39,6 +39,8 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				ResourceName:      "anyscale_compute_config.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+				// Import using config_id (version-specific API ID), not name
+				ImportStateIdFunc: testAccComputeConfigImportStateIdFunc("anyscale_compute_config.test"),
 				// These fields are not returned by the API read operation
 				// TODO: Implement full state reconstruction from API response
 				ImportStateVerifyIgnore: []string{
@@ -124,6 +126,24 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 			},
 		},
 	})
+}
+
+// testAccComputeConfigImportStateIdFunc returns the config_id for import (not name)
+// The compute config API requires the version-specific config_id (e.g., "cpt_xxx") for lookup
+func testAccComputeConfigImportStateIdFunc(resourceName string) resource.ImportStateIdFunc {
+	return func(s *terraform.State) (string, error) {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return "", fmt.Errorf("not found: %s", resourceName)
+		}
+
+		configID := rs.Primary.Attributes["config_id"]
+		if configID == "" {
+			return "", fmt.Errorf("config_id is empty")
+		}
+
+		return configID, nil
+	}
 }
 
 // testAccCheckComputeConfigExistsInAPI verifies the compute config exists in the API
