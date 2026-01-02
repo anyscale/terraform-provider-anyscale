@@ -25,58 +25,61 @@ var ProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, erro
 
 var (
 	// Cache for test cloud ID to avoid repeated API calls
-	cachedTestCloudID     string
-	cachedTestCloudIDOnce sync.Once
+	cachedTestCloudID string
+	cloudIDMutex      sync.Mutex
 
 	// Cache for any cloud ID (fallback for data source tests)
-	cachedAnyCloudID     string
-	cachedAnyCloudIDOnce sync.Once
+	cachedAnyCloudID string
+	anyCloudIDMutex  sync.Mutex
 )
 
 // GetTestCloudID returns a test cloud ID with the following priority:
 // 1. ANYSCALE_TEST_CLOUD_ID environment variable (explicit override)
 // 2. ANYSCALE_TEST_CLOUD_NAME environment variable (resolve name to ID)
-// 3. Auto-discover a cloud with "tfprovider" or "test" in the name
+// 3. Auto-discover any available cloud (prefers test-named clouds)
 //
 // The result is cached after the first successful resolution.
+// Unlike sync.Once, this will retry on failure.
 func GetTestCloudID(t *testing.T) string {
+	cloudIDMutex.Lock()
+	defer cloudIDMutex.Unlock()
+
+	// Return cached value if available
+	if cachedTestCloudID != "" {
+		return cachedTestCloudID
+	}
+
 	var cloudID string
 	var err error
 
-	cachedTestCloudIDOnce.Do(func() {
-		// Priority 1: Explicit cloud ID
-		if envCloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID"); envCloudID != "" {
-			t.Logf("Using test cloud ID from ANYSCALE_TEST_CLOUD_ID: %s", envCloudID)
-			cachedTestCloudID = envCloudID
-			return
-		}
-
-		// Priority 2: Cloud name to resolve
-		if envCloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); envCloudName != "" {
-			t.Logf("Resolving test cloud name from ANYSCALE_TEST_CLOUD_NAME: %s", envCloudName)
-			cloudID, err = resolveCloudNameToID(t, envCloudName)
-			if err != nil {
-				t.Logf("Warning: Failed to resolve cloud name '%s': %v", envCloudName, err)
-			} else {
-				cachedTestCloudID = cloudID
-				return
-			}
-		}
-
-		// Priority 3: Auto-discover
-		t.Logf("Auto-discovering test cloud (looking for clouds with 'tfprovider' or 'test' in name)")
-		cloudID, err = autoDiscoverTestCloud(t)
-		if err != nil {
-			t.Logf("Warning: Failed to auto-discover test cloud: %v", err)
-		} else {
-			cachedTestCloudID = cloudID
-		}
-	})
-
-	if cachedTestCloudID == "" {
-		t.Skip("No test cloud ID available. Set ANYSCALE_TEST_CLOUD_ID or ANYSCALE_TEST_CLOUD_NAME, or ensure a cloud with 'tfprovider' or 'test' in the name exists.")
+	// Priority 1: Explicit cloud ID
+	if envCloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID"); envCloudID != "" {
+		t.Logf("Using test cloud ID from ANYSCALE_TEST_CLOUD_ID: %s", envCloudID)
+		cachedTestCloudID = envCloudID
+		return cachedTestCloudID
 	}
 
+	// Priority 2: Cloud name to resolve
+	if envCloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); envCloudName != "" {
+		t.Logf("Resolving test cloud name from ANYSCALE_TEST_CLOUD_NAME: %s", envCloudName)
+		cloudID, err = resolveCloudNameToID(t, envCloudName)
+		if err != nil {
+			t.Logf("Warning: Failed to resolve cloud name '%s': %v", envCloudName, err)
+		} else {
+			cachedTestCloudID = cloudID
+			return cachedTestCloudID
+		}
+	}
+
+	// Priority 3: Auto-discover
+	t.Logf("Auto-discovering test cloud...")
+	cloudID, err = autoDiscoverTestCloud(t)
+	if err != nil {
+		t.Logf("Warning: Failed to auto-discover test cloud: %v", err)
+		t.Skip("No test cloud ID available. Set ANYSCALE_TEST_CLOUD_ID or ANYSCALE_TEST_CLOUD_NAME, or ensure at least one cloud exists in the account.")
+	}
+
+	cachedTestCloudID = cloudID
 	return cachedTestCloudID
 }
 
@@ -244,58 +247,64 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 // This is useful for data source tests that just need a valid cloud to query.
 // The result is cached after the first successful call.
 func GetAnyCloudID(t *testing.T) string {
-	cachedAnyCloudIDOnce.Do(func() {
-		client, err := GetTestClient()
-		if err != nil {
-			t.Logf("Warning: Failed to get test client: %v", err)
-			return
-		}
+	anyCloudIDMutex.Lock()
+	defer anyCloudIDMutex.Unlock()
 
-		resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
-		if err != nil {
-			t.Logf("Warning: Failed to list clouds: %v", err)
-			return
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		if resp.StatusCode != 200 {
-			body, _ := io.ReadAll(resp.Body)
-			t.Logf("Warning: API returned status %d: %s", resp.StatusCode, string(body))
-			return
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Logf("Warning: Failed to read response: %v", err)
-			return
-		}
-
-		var cloudsResp struct {
-			Results []struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			} `json:"results"`
-		}
-
-		if err := json.Unmarshal(body, &cloudsResp); err != nil {
-			t.Logf("Warning: Failed to parse clouds response: %v", err)
-			return
-		}
-
-		if len(cloudsResp.Results) == 0 {
-			t.Logf("Warning: No clouds found in the account")
-			return
-		}
-
-		// Return the first available cloud
-		cachedAnyCloudID = cloudsResp.Results[0].ID
-		t.Logf("Using cloud for data source test: %s (ID: %s)", cloudsResp.Results[0].Name, cachedAnyCloudID)
-	})
-
-	if cachedAnyCloudID == "" {
-		t.Skip("No cloud available. Ensure at least one cloud exists in the account.")
+	// Return cached value if available
+	if cachedAnyCloudID != "" {
+		return cachedAnyCloudID
 	}
 
+	client, err := GetTestClient()
+	if err != nil {
+		t.Logf("Warning: Failed to get test client: %v", err)
+		t.Skip("No cloud available - failed to get test client.")
+		return ""
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		t.Logf("Warning: Failed to list clouds: %v", err)
+		t.Skip("No cloud available - failed to list clouds.")
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Logf("Warning: API returned status %d: %s", resp.StatusCode, string(body))
+		t.Skip("No cloud available - API error.")
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Logf("Warning: Failed to read response: %v", err)
+		t.Skip("No cloud available - failed to read response.")
+		return ""
+	}
+
+	var cloudsResp struct {
+		Results []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		t.Logf("Warning: Failed to parse clouds response: %v", err)
+		t.Skip("No cloud available - failed to parse response.")
+		return ""
+	}
+
+	if len(cloudsResp.Results) == 0 {
+		t.Skip("No cloud available - no clouds found in the account.")
+		return ""
+	}
+
+	// Return the first available cloud
+	cachedAnyCloudID = cloudsResp.Results[0].ID
+	t.Logf("Using cloud for data source test: %s (ID: %s)", cloudsResp.Results[0].Name, cachedAnyCloudID)
 	return cachedAnyCloudID
 }
 
