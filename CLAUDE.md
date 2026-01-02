@@ -126,11 +126,13 @@ terraform apply
 
 - Prefer:
 	- Unit tests for schema validation and model conversions.
-	- Acceptance tests using resource.Test.
+	- Acceptance tests using resource.
+	- Test.
 
 ### Acceptance Tests
 
 Acceptance tests run real API calls against Anyscale and require credentials.
+They are found in `internal/acctest`
 
 ```bash
 make testacc

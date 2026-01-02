@@ -55,10 +55,7 @@ func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
-	}
+	cloudName := GetTestCloudName(t)
 
 	projectName := fmt.Sprintf("tfacc-test-ds-projects-cloudname-%d", os.Getpid())
 
