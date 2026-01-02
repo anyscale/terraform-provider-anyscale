@@ -17,6 +17,13 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 		return
 	}
 
+	// Skip by default to avoid rate limits (20 invitations per 24 hours)
+	// Set ANYSCALE_TEST_INVITATIONS=1 to run these tests
+	if os.Getenv("ANYSCALE_TEST_INVITATIONS") == "" {
+		t.Skip("Skipping invitation tests to avoid rate limits. Set ANYSCALE_TEST_INVITATIONS=1 to run.")
+		return
+	}
+
 	// Use a unique email for testing
 	testEmail := fmt.Sprintf("tfacc-invite-basic-%d@example.com", os.Getpid())
 
@@ -56,6 +63,12 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 		return
 	}
 
+	// Skip by default to avoid rate limits (20 invitations per 24 hours)
+	if os.Getenv("ANYSCALE_TEST_INVITATIONS") == "" {
+		t.Skip("Skipping invitation tests to avoid rate limits. Set ANYSCALE_TEST_INVITATIONS=1 to run.")
+		return
+	}
+
 	testEmail1 := fmt.Sprintf("tfacc-invite-replace1-%d@example.com", os.Getpid())
 	testEmail2 := fmt.Sprintf("tfacc-invite-replace2-%d@example.com", os.Getpid())
 
@@ -85,6 +98,12 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
+		return
+	}
+
+	// Skip by default to avoid rate limits (20 invitations per 24 hours)
+	if os.Getenv("ANYSCALE_TEST_INVITATIONS") == "" {
+		t.Skip("Skipping invitation tests to avoid rate limits. Set ANYSCALE_TEST_INVITATIONS=1 to run.")
 		return
 	}
 
