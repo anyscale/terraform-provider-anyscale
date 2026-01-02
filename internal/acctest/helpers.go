@@ -414,6 +414,7 @@ type InstanceTypeSet struct {
 // GetConfiguredCloud returns a cloud that has cloud resources configured.
 // This is required for tests that attach machine pools or need a fully configured cloud.
 // Returns CloudInfo so tests can adapt instance types based on provider.
+// Falls back to any cloud with a known provider if no fully configured clouds exist.
 func GetConfiguredCloud(t *testing.T) CloudInfo {
 	client, err := GetTestClient()
 	if err != nil {
@@ -455,7 +456,7 @@ func GetConfiguredCloud(t *testing.T) CloudInfo {
 		return CloudInfo{}
 	}
 
-	// Look for clouds with cloud resources configured
+	// Priority 1: Look for clouds with cloud resources configured
 	for _, cloud := range cloudsResp.Results {
 		if len(cloud.CloudResources) > 0 {
 			t.Logf("Found configured cloud: %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
@@ -467,63 +468,43 @@ func GetConfiguredCloud(t *testing.T) CloudInfo {
 		}
 	}
 
-	t.Skip("No configured cloud available - no clouds with cloud resources found.")
+	// Priority 2: Fall back to any cloud with a known provider (AWS or GCP)
+	for _, cloud := range cloudsResp.Results {
+		if cloud.Provider == "AWS" || cloud.Provider == "GCP" {
+			t.Logf("Found cloud without cloud_resources (may not work for all tests): %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
+			return CloudInfo{
+				ID:       cloud.ID,
+				Name:     cloud.Name,
+				Provider: cloud.Provider,
+			}
+		}
+	}
+
+	// Priority 3: Fall back to any cloud, defaulting to AWS instance types
+	if len(cloudsResp.Results) > 0 {
+		cloud := cloudsResp.Results[0]
+		provider := cloud.Provider
+		if provider == "" {
+			provider = "AWS" // Default to AWS instance types
+		}
+		t.Logf("Found cloud without known provider (using %s defaults): %s (ID: %s)", provider, cloud.Name, cloud.ID)
+		return CloudInfo{
+			ID:       cloud.ID,
+			Name:     cloud.Name,
+			Provider: provider,
+		}
+	}
+
+	t.Skip("No configured cloud available - no clouds found in the account.")
 	return CloudInfo{}
 }
 
 // GetConfiguredCloudID returns a cloud ID that has cloud resources configured.
 // This is required for tests that attach machine pools or need a fully configured cloud.
+// Falls back to any cloud if no fully configured clouds exist.
 func GetConfiguredCloudID(t *testing.T) string {
-	client, err := GetTestClient()
-	if err != nil {
-		t.Skip("No configured cloud available - failed to get test client.")
-		return ""
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		t.Skip("No configured cloud available - failed to list clouds.")
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		t.Skip("No configured cloud available - API error.")
-		return ""
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Skip("No configured cloud available - failed to read response.")
-		return ""
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID             string `json:"id"`
-			Name           string `json:"name"`
-			Provider       string `json:"provider"`
-			CloudResources []struct {
-				ID string `json:"id"`
-			} `json:"cloud_resources"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		t.Skip("No configured cloud available - failed to parse response.")
-		return ""
-	}
-
-	// Look for clouds with cloud resources configured
-	for _, cloud := range cloudsResp.Results {
-		if len(cloud.CloudResources) > 0 {
-			t.Logf("Found configured cloud: %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
-			return cloud.ID
-		}
-	}
-
-	t.Skip("No configured cloud available - no clouds with cloud resources found.")
-	return ""
+	cloud := GetConfiguredCloud(t)
+	return cloud.ID
 }
 
 // GetTestClient returns an authenticated client for testing
