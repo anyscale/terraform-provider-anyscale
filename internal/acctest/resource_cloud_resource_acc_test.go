@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/brent/terraform-provider-anyscale/internal/provider"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -20,13 +21,15 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 
 	cloudName := "tfacc-test-cloud-res-aws"
 	resourceName := "default"
+	// Generate random suffix for IAM roles to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: testAccCloudResourceResourceAWSConfig(cloudName, resourceName),
+				Config: testAccCloudResourceResourceAWSConfig(cloudName, resourceName, randSuffix),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_cloud_resource.test", "cloud_id"),
 					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "name", resourceName),
@@ -64,12 +67,14 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 
 	cloudName := "tfacc-test-cloud-res-gcp"
 	resourceName := "default"
+	// Generate random suffix for service accounts to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceResourceGCPConfig(cloudName, resourceName),
+				Config: testAccCloudResourceResourceGCPConfig(cloudName, resourceName, randSuffix),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_cloud_resource.test", "cloud_id"),
 					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "name", resourceName),
@@ -100,12 +105,14 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 
 	cloudName := "tfacc-test-cloud-res-k8s"
 	resourceName := "default"
+	// Generate random suffix for IAM roles to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceResourceK8SConfig(cloudName, resourceName),
+				Config: testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_cloud_resource.test", "cloud_id"),
 					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "name", resourceName),
@@ -123,14 +130,16 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-cloud-res-fs"
-	resourceName := "with-file-storage"
+	// Generate random suffix for cloud resources to allow parallel test runs and avoid conflicts
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
+	cloudName := fmt.Sprintf("tfacc-test-cloud-res-fs-%s", randSuffix)
+	resourceName := fmt.Sprintf("with-file-storage-%s", randSuffix)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName),
+				Config: testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_cloud_resource.test", "cloud_id"),
 					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "name", resourceName),
@@ -328,7 +337,7 @@ func testAccCloudResourceImportStateIdFunc(resourceName string) resource.ImportS
 
 // Configuration templates
 
-func testAccCloudResourceResourceAWSConfig(cloudName, resourceName string) string {
+func testAccCloudResourceResourceAWSConfig(cloudName, resourceName, randSuffix string) string {
 	return fmt.Sprintf(`
 # First create an empty cloud
 resource "anyscale_cloud" "test_cloud" {
@@ -350,8 +359,8 @@ resource "anyscale_cloud_resource" "test" {
     subnet_ids         = ["subnet-test1", "subnet-test2"]
     security_group_ids = ["sg-test1"]
 
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/anyscale-crossaccount-role"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/anyscale-cluster-node-role"
+    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/tfacc-cloudres-aws-crossaccount-%s"
+    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/tfacc-cloudres-aws-cluster-node-%s"
     external_id               = "anyscale-external-id-test"
 
     subnet_ids_to_az = {
@@ -361,13 +370,13 @@ resource "anyscale_cloud_resource" "test" {
   }
 
   object_storage {
-    bucket_name = "anyscale-test-bucket-aws"
+    bucket_name = "tfacc-cres-aws-bucket-%s"
   }
 }
-`, cloudName, resourceName)
+`, cloudName, resourceName, randSuffix, randSuffix, randSuffix)
 }
 
-func testAccCloudResourceResourceGCPConfig(cloudName, resourceName string) string {
+func testAccCloudResourceResourceGCPConfig(cloudName, resourceName, randSuffix string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
@@ -387,19 +396,19 @@ resource "anyscale_cloud_resource" "test" {
     vpc_name                          = "anyscale-vpc"
     subnet_names                      = ["anyscale-subnet-1", "anyscale-subnet-2"]
     firewall_policy_names             = ["anyscale-fw-ssh"]
-    provider_name                     = "projects/123456789012/locations/global/workloadIdentityPools/anyscale-pool/providers/anyscale-provider"
-    controlplane_service_account_email = "anyscale-cp@my-gcp-project.iam.gserviceaccount.com"
-    dataplane_service_account_email    = "anyscale-dp@my-gcp-project.iam.gserviceaccount.com"
+    provider_name                     = "projects/123456789012/locations/global/workloadIdentityPools/tf-cres-gcp-pool-%s/providers/tf-cres-gcp-prov-%s"
+    controlplane_service_account_email = "tf-cres-gcp-cp-%s@my-gcp-project.iam.gserviceaccount.com"
+    dataplane_service_account_email    = "tf-cres-gcp-dp-%s@my-gcp-project.iam.gserviceaccount.com"
   }
 
   object_storage {
-    bucket_name = "anyscale-test-bucket-gcp"
+    bucket_name = "tfacc-cres-gcp-bucket-%s"
   }
 }
-`, cloudName, resourceName)
+`, cloudName, resourceName, randSuffix, randSuffix, randSuffix, randSuffix, randSuffix)
 }
 
-func testAccCloudResourceResourceK8SConfig(cloudName, resourceName string) string {
+func testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
@@ -417,18 +426,18 @@ resource "anyscale_cloud_resource" "test" {
 
   kubernetes_config {
     namespace                       = "anyscale"
-    anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/anyscale-operator-role"
+    anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/tfacc-cloudres-k8s-operator-%s"
     zones                           = ["us-east-2a", "us-east-2b"]
   }
 
   object_storage {
-    bucket_name = "anyscale-test-bucket-k8s"
+    bucket_name = "tfacc-cres-k8s-bucket-%s"
   }
 }
-`, cloudName, resourceName)
+`, cloudName, resourceName, randSuffix, randSuffix)
 }
 
-func testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName string) string {
+func testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
@@ -448,8 +457,8 @@ resource "anyscale_cloud_resource" "test" {
     subnet_ids         = ["subnet-test1", "subnet-test2"]
     security_group_ids = ["sg-test1"]
 
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/anyscale-crossaccount-role"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/anyscale-cluster-node-role"
+    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/tfacc-cloudres-fs-crossaccount-%s"
+    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/tfacc-cloudres-fs-cluster-node-%s"
     external_id               = "anyscale-external-id-test"
 
     subnet_ids_to_az = {
@@ -459,7 +468,7 @@ resource "anyscale_cloud_resource" "test" {
   }
 
   object_storage {
-    bucket_name = "anyscale-test-bucket-aws-fs"
+    bucket_name = "tfacc-cres-fs-bucket-%s"
   }
 
   file_storage {
@@ -470,5 +479,5 @@ resource "anyscale_cloud_resource" "test" {
     }
   }
 }
-`, cloudName, resourceName)
+`, cloudName, resourceName, randSuffix, randSuffix, randSuffix)
 }

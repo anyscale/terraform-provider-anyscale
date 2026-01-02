@@ -898,6 +898,15 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	cloudID := state.ID.ValueString()
 	tflog.Info(ctx, "Deleting Anyscale Cloud", map[string]any{"id": cloudID})
 
+	// Before deleting the cloud, detach any machine pools that are attached to it
+	if err := r.detachMachinePoolsFromCloud(ctx, cloudID); err != nil {
+		tflog.Warn(ctx, "Failed to detach machine pools from cloud", map[string]any{
+			"cloud_id": cloudID,
+			"error":    err.Error(),
+		})
+		// Continue with deletion - the API will tell us if we can't delete
+	}
+
 	httpResp, err := r.client.DoRequest(ctx, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to delete cloud", map[string]any{"error": err.Error()})
@@ -927,6 +936,67 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	}
 
 	tflog.Info(ctx, "Cloud deleted successfully", map[string]any{"id": cloudID})
+}
+
+// detachMachinePoolsFromCloud detaches all machine pools attached to the given cloud.
+func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID string) error {
+	tflog.Debug(ctx, "Listing machine pools to check for attachments", map[string]any{"cloud_id": cloudID})
+
+	// List all machine pools
+	listResp, err := DoRequestAndParse[ListMachinePoolsResponse](
+		ctx,
+		r.client,
+		"GET",
+		"/api/v2/machine_pools/",
+		nil,
+		http.StatusOK,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to list machine pools: %w", err)
+	}
+
+	// Find and detach pools attached to this cloud
+	for _, pool := range listResp.Result.MachinePools {
+		for _, attachedCloudID := range pool.CloudIDs {
+			if attachedCloudID == cloudID {
+				tflog.Info(ctx, "Detaching machine pool from cloud", map[string]any{
+					"pool":     pool.MachinePoolName,
+					"cloud_id": cloudID,
+				})
+
+				detachReq := DetachMachinePoolFromCloudRequest{
+					MachinePoolName: pool.MachinePoolName,
+					CloudID:         cloudID,
+				}
+
+				reqBody, err := MarshalRequestBody(detachReq)
+				if err != nil {
+					return fmt.Errorf("failed to marshal detach request: %w", err)
+				}
+
+				_, err = DoRequestRaw(
+					ctx,
+					r.client,
+					"POST",
+					"/api/v2/machine_pools/detach",
+					reqBody,
+					http.StatusOK,
+					http.StatusNotFound,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to detach machine pool %s: %w", pool.MachinePoolName, err)
+				}
+
+				tflog.Info(ctx, "Machine pool detached from cloud", map[string]any{
+					"pool":     pool.MachinePoolName,
+					"cloud_id": cloudID,
+				})
+				break // Move to next pool
+			}
+		}
+	}
+
+	return nil
 }
 
 // ImportState imports an existing resource into Terraform state.

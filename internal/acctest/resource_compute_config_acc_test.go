@@ -15,7 +15,9 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 	// Skip if acceptance tests are not enabled
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// Get a configured cloud and use appropriate instance types
+	cloud := GetConfiguredCloud(t)
+	instanceTypes := cloud.InstanceTypes()
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -23,12 +25,12 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: testAccComputeConfigResourceConfig_basic(cloudID),
+				Config: testAccComputeConfigResourceConfig_basic(cloud.ID, instanceTypes.Small),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "cloud_id"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.large"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", instanceTypes.Small),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "version"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "created_at"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
@@ -39,6 +41,8 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				ResourceName:      "anyscale_compute_config.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+				// Import using config_id (version-specific API ID), not name
+				ImportStateIdFunc: testAccComputeConfigImportStateIdFunc("anyscale_compute_config.test"),
 				// These fields are not returned by the API read operation
 				// TODO: Implement full state reconstruction from API response
 				ImportStateVerifyIgnore: []string{
@@ -59,18 +63,20 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// Get a configured cloud and use appropriate instance types
+	cloud := GetConfiguredCloud(t)
+	instanceTypes := cloud.InstanceTypes()
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_withWorkers(cloudID),
+				Config: testAccComputeConfigResourceConfig_withWorkers(cloud.ID, instanceTypes.Small, instanceTypes.Medium),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "1"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.instance_type", "m5.xlarge"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.instance_type", instanceTypes.Medium),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.min_nodes", "0"),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.max_nodes", "10"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
@@ -83,14 +89,16 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 func TestAccComputeConfigResource_Anonymous(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// Get a configured cloud and use appropriate instance types
+	cloud := GetConfiguredCloud(t)
+	instanceTypes := cloud.InstanceTypes()
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_minimal(cloudID),
+				Config: testAccComputeConfigResourceConfig_minimal(cloud.ID, instanceTypes.Small),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
@@ -124,6 +132,24 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 			},
 		},
 	})
+}
+
+// testAccComputeConfigImportStateIdFunc returns the config_id for import (not name)
+// The compute config API requires the version-specific config_id (e.g., "cpt_xxx") for lookup
+func testAccComputeConfigImportStateIdFunc(resourceName string) resource.ImportStateIdFunc {
+	return func(s *terraform.State) (string, error) {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return "", fmt.Errorf("not found: %s", resourceName)
+		}
+
+		configID := rs.Primary.Attributes["config_id"]
+		if configID == "" {
+			return "", fmt.Errorf("config_id is empty")
+		}
+
+		return configID, nil
+	}
 }
 
 // testAccCheckComputeConfigExistsInAPI verifies the compute config exists in the API
@@ -176,7 +202,7 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 
 // Configuration templates for tests
 
-func testAccComputeConfigResourceConfig_basic(cloudID string) string {
+func testAccComputeConfigResourceConfig_basic(cloudID, instanceType string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   # Use unique name to avoid conflicts
@@ -184,13 +210,13 @@ resource "anyscale_compute_config" "test" {
   cloud_id = "%s"
 
   head_node = {
-    instance_type = "m5.large"
+    instance_type = "%s"
   }
 }
-`, os.Getpid(), cloudID)
+`, os.Getpid(), cloudID, instanceType)
 }
 
-func testAccComputeConfigResourceConfig_withWorkers(cloudID string) string {
+func testAccComputeConfigResourceConfig_withWorkers(cloudID, headInstanceType, workerInstanceType string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name     = "tf-test-compute-config-workers-%d"
@@ -199,33 +225,33 @@ resource "anyscale_compute_config" "test" {
   idle_termination_minutes = 60
 
   head_node = {
-    instance_type = "m5.large"
+    instance_type = "%s"
   }
 
   worker_nodes = [
     {
       name          = "worker-group-1"
-      instance_type = "m5.xlarge"
+      instance_type = "%s"
       min_nodes     = 0
       max_nodes     = 10
       market_type   = "ON_DEMAND"
     }
   ]
 }
-`, os.Getpid(), cloudID)
+`, os.Getpid(), cloudID, headInstanceType, workerInstanceType)
 }
 
-func testAccComputeConfigResourceConfig_minimal(cloudID string) string {
+func testAccComputeConfigResourceConfig_minimal(cloudID, instanceType string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name     = "tf-test-compute-config-minimal-%d"
   cloud_id = "%s"
 
   head_node = {
-    instance_type = "m5.large"
+    instance_type = "%s"
   }
 }
-`, os.Getpid(), cloudID)
+`, os.Getpid(), cloudID, instanceType)
 }
 
 func testAccComputeConfigResourceConfig_withCloudName(cloudName string) string {
@@ -247,7 +273,9 @@ resource "anyscale_compute_config" "test" {
 func TestAccComputeConfigResource_Update(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// Get a configured cloud and use appropriate instance types
+	cloud := GetConfiguredCloud(t)
+	instanceTypes := cloud.InstanceTypes()
 	configName := fmt.Sprintf("tf-test-compute-config-update-%d", os.Getpid())
 
 	var initialConfigID string
@@ -256,15 +284,15 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create initial compute config with m5.large
+			// Create initial compute config with small instance
 			{
-				Config: testAccComputeConfigResourceConfig_update(cloudID, configName, "m5.large"),
+				Config: testAccComputeConfigResourceConfig_update(cloud.ID, configName, instanceTypes.Small),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// ID should be the name (stable across versions)
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "id", configName),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "config_id"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.large"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", instanceTypes.Small),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
 					// Verify name_version format
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name_version", configName+":1"),
@@ -273,15 +301,15 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 					testAccCaptureComputeConfigID("anyscale_compute_config.test", &initialConfigID),
 				),
 			},
-			// Update to m5.xlarge - should create a new version
+			// Update to medium instance - should create a new version
 			{
-				Config: testAccComputeConfigResourceConfig_update(cloudID, configName, "m5.xlarge"),
+				Config: testAccComputeConfigResourceConfig_update(cloud.ID, configName, instanceTypes.Medium),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// ID should still be the name (stable)
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "id", configName),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "config_id"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.xlarge"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", instanceTypes.Medium),
 					// Version should be incremented
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "2"),
 					// Verify name_version is updated

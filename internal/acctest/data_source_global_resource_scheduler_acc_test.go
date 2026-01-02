@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"fmt"
@@ -9,13 +9,13 @@ import (
 )
 
 func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			// Create a global resource scheduler first, then read it via data source
@@ -33,18 +33,20 @@ func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	// Get a configured cloud and use appropriate instance types
+	cloud := GetConfiguredCloud(t)
+	instanceTypes := cloud.InstanceTypes()
 	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-spec-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccGlobalResourceSchedulerDataSourceWithSpecConfig(schedulerName, cloudID),
+				Config: testAccGlobalResourceSchedulerDataSourceWithSpecConfig(schedulerName, cloud.ID, instanceTypes),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.anyscale_global_resource_scheduler.test", "name", schedulerName),
 					resource.TestCheckResourceAttr("data.anyscale_global_resource_scheduler.test", "spec.#", "1"),
@@ -57,13 +59,13 @@ func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := fmt.Sprintf("tfacc-test-pools-ds-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			// Create a global resource scheduler first, then list all
@@ -79,13 +81,13 @@ func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulersDataSource_WithFilter(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := fmt.Sprintf("tfacc-test-pools-filter-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -113,7 +115,7 @@ data "anyscale_global_resource_scheduler" "test" {
 `, schedulerName)
 }
 
-func testAccGlobalResourceSchedulerDataSourceWithSpecConfig(schedulerName, cloudID string) string {
+func testAccGlobalResourceSchedulerDataSourceWithSpecConfig(schedulerName, cloudID string, instanceTypes InstanceTypeSet) string {
 	return fmt.Sprintf(`
 resource "anyscale_global_resource_scheduler" "test" {
   name = "%s"
@@ -127,7 +129,7 @@ resource "anyscale_global_resource_scheduler" "test" {
       name = "RES-8CPU-32GB"
 
       launch_template {
-        instance_type = "m5.2xlarge"
+        instance_type = "%s"
         market_type   = "ON_DEMAND"
       }
 
@@ -147,7 +149,7 @@ resource "anyscale_global_resource_scheduler" "test" {
 data "anyscale_global_resource_scheduler" "test" {
   name = anyscale_global_resource_scheduler.test.name
 }
-`, schedulerName, cloudID)
+`, schedulerName, cloudID, instanceTypes.Large)
 }
 
 func testAccGlobalResourceSchedulersDataSourceConfig(schedulerName string) string {
