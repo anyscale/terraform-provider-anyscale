@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"context"
@@ -11,13 +11,13 @@ import (
 )
 
 func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := fmt.Sprintf("tfacc-test-pool-basic-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing
@@ -43,14 +43,14 @@ func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 	schedulerName := fmt.Sprintf("tfacc-test-pool-spec-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			// Create with spec (requires cloud attachment for ANYSCALE_MANAGED)
@@ -78,14 +78,14 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 	schedulerName := fmt.Sprintf("tfacc-test-pool-cloud-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			// Create with cloud attachment
@@ -104,7 +104,7 @@ func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -114,8 +114,8 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 	schedulerName := fmt.Sprintf("tfacc-test-pool-cloudname-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -133,14 +133,14 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 	schedulerName := fmt.Sprintf("tfacc-test-pool-full-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			// Create with full configuration
@@ -175,7 +175,7 @@ func testAccCheckGlobalResourceSchedulerExistsInAPI(resourceName string) resourc
 			return fmt.Errorf("global resource scheduler name not set")
 		}
 
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("failed to get test client: %w", err)
 		}
@@ -196,7 +196,7 @@ func testAccCheckGlobalResourceSchedulerExistsInAPI(resourceName string) resourc
 }
 
 func testAccCheckGlobalResourceSchedulerDestroy(s *terraform.State) error {
-	client, err := getTestClient()
+	client, err := GetTestClient()
 	if err != nil {
 		return fmt.Errorf("failed to get test client: %w", err)
 	}

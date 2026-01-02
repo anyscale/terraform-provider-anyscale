@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"fmt"
@@ -9,13 +9,13 @@ import (
 )
 
 func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			// Create a global resource scheduler first, then read it via data source
@@ -33,14 +33,14 @@ func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-spec-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			{
@@ -57,13 +57,13 @@ func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := fmt.Sprintf("tfacc-test-pools-ds-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			// Create a global resource scheduler first, then list all
@@ -79,13 +79,13 @@ func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulersDataSource_WithFilter(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := fmt.Sprintf("tfacc-test-pools-filter-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			{
