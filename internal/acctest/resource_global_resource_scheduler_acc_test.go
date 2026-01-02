@@ -45,8 +45,9 @@ func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	// This test uses AWS-specific instance types (m5.2xlarge)
-	cloudID := GetAWSCloudID(t)
+	// Get a configured cloud and use appropriate instance types
+	cloud := GetConfiguredCloud(t)
+	instanceTypes := cloud.InstanceTypes()
 	schedulerName := fmt.Sprintf("tfacc-test-pool-spec-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
@@ -56,7 +57,7 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create with spec (requires cloud attachment for ANYSCALE_MANAGED)
 			{
-				Config: testAccGlobalResourceSchedulerResourceWithSpecConfig(schedulerName, cloudID),
+				Config: testAccGlobalResourceSchedulerResourceWithSpecConfig(schedulerName, cloud.ID, instanceTypes),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_global_resource_scheduler.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "name", schedulerName),
@@ -68,7 +69,7 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 			},
 			// Update spec
 			{
-				Config: testAccGlobalResourceSchedulerResourceWithUpdatedSpecConfig(schedulerName, cloudID),
+				Config: testAccGlobalResourceSchedulerResourceWithUpdatedSpecConfig(schedulerName, cloud.ID, instanceTypes),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "spec.0.machine_type.#", "2"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
@@ -81,7 +82,8 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// This test requires a cloud with cloud resources configured
+	cloud := GetConfiguredCloud(t)
 	schedulerName := fmt.Sprintf("tfacc-test-pool-cloud-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
@@ -91,12 +93,12 @@ func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create with cloud attachment
 			{
-				Config: testAccGlobalResourceSchedulerResourceWithCloudAttachmentConfig(schedulerName, cloudID),
+				Config: testAccGlobalResourceSchedulerResourceWithCloudAttachmentConfig(schedulerName, cloud.ID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_global_resource_scheduler.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "name", schedulerName),
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "cloud_attachment.#", "1"),
-					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "cloud_attachment.0.cloud_id", cloudID),
+					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "cloud_attachment.0.cloud_id", cloud.ID),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
 			},
@@ -136,8 +138,9 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	// This test uses AWS-specific instance types and zones (m5.2xlarge, us-west-2a)
-	cloudID := GetAWSCloudID(t)
+	// Get a configured cloud and use appropriate instance types
+	cloud := GetConfiguredCloud(t)
+	instanceTypes := cloud.InstanceTypes()
 	schedulerName := fmt.Sprintf("tfacc-test-pool-full-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
@@ -147,7 +150,7 @@ func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create with full configuration
 			{
-				Config: testAccGlobalResourceSchedulerResourceFullConfig(schedulerName, cloudID),
+				Config: testAccGlobalResourceSchedulerResourceFullConfig(schedulerName, cloud.ID, instanceTypes),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_global_resource_scheduler.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "name", schedulerName),
@@ -237,7 +240,7 @@ resource "anyscale_global_resource_scheduler" "test" {
 `, schedulerName)
 }
 
-func testAccGlobalResourceSchedulerResourceWithSpecConfig(schedulerName, cloudID string) string {
+func testAccGlobalResourceSchedulerResourceWithSpecConfig(schedulerName, cloudID string, instanceTypes InstanceTypeSet) string {
 	return fmt.Sprintf(`
 resource "anyscale_global_resource_scheduler" "test" {
   name = "%s"
@@ -251,7 +254,7 @@ resource "anyscale_global_resource_scheduler" "test" {
       name = "RES-8CPU-32GB"
 
       launch_template {
-        instance_type = "m5.2xlarge"
+        instance_type = "%s"
         market_type   = "ON_DEMAND"
       }
 
@@ -267,10 +270,10 @@ resource "anyscale_global_resource_scheduler" "test" {
     }
   }
 }
-`, schedulerName, cloudID)
+`, schedulerName, cloudID, instanceTypes.Large)
 }
 
-func testAccGlobalResourceSchedulerResourceWithUpdatedSpecConfig(schedulerName, cloudID string) string {
+func testAccGlobalResourceSchedulerResourceWithUpdatedSpecConfig(schedulerName, cloudID string, instanceTypes InstanceTypeSet) string {
 	return fmt.Sprintf(`
 resource "anyscale_global_resource_scheduler" "test" {
   name = "%s"
@@ -284,7 +287,7 @@ resource "anyscale_global_resource_scheduler" "test" {
       name = "RES-8CPU-32GB"
 
       launch_template {
-        instance_type = "m5.2xlarge"
+        instance_type = "%s"
         market_type   = "ON_DEMAND"
       }
 
@@ -303,7 +306,7 @@ resource "anyscale_global_resource_scheduler" "test" {
       name = "RES-4CPU-16GB"
 
       launch_template {
-        instance_type = "m5.xlarge"
+        instance_type = "%s"
         market_type   = "SPOT"
       }
 
@@ -319,7 +322,7 @@ resource "anyscale_global_resource_scheduler" "test" {
     }
   }
 }
-`, schedulerName, cloudID)
+`, schedulerName, cloudID, instanceTypes.Large, instanceTypes.Medium)
 }
 
 func testAccGlobalResourceSchedulerResourceWithCloudAttachmentConfig(schedulerName, cloudID string) string {
@@ -346,7 +349,7 @@ resource "anyscale_global_resource_scheduler" "test" {
 `, schedulerName, cloudName)
 }
 
-func testAccGlobalResourceSchedulerResourceFullConfig(schedulerName, cloudID string) string {
+func testAccGlobalResourceSchedulerResourceFullConfig(schedulerName, cloudID string, instanceTypes InstanceTypeSet) string {
 	return fmt.Sprintf(`
 resource "anyscale_global_resource_scheduler" "test" {
   name                              = "%s"
@@ -361,9 +364,9 @@ resource "anyscale_global_resource_scheduler" "test" {
       name = "RES-8CPU-32GB"
 
       launch_template {
-        instance_type = "m5.2xlarge"
+        instance_type = "%s"
         market_type   = "ON_DEMAND"
-        zones         = ["us-west-2a", "us-west-2b"]
+        zones         = ["%s", "%s"]
       }
 
       recycle_policy {
@@ -390,5 +393,5 @@ resource "anyscale_global_resource_scheduler" "test" {
     }
   }
 }
-`, schedulerName, cloudID)
+`, schedulerName, cloudID, instanceTypes.Large, instanceTypes.Zones[0], instanceTypes.Zones[1])
 }

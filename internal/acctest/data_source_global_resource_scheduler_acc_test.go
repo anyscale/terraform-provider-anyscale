@@ -35,8 +35,9 @@ func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
 func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	// This test uses AWS-specific instance types (m5.2xlarge)
-	cloudID := GetAWSCloudID(t)
+	// Get a configured cloud and use appropriate instance types
+	cloud := GetConfiguredCloud(t)
+	instanceTypes := cloud.InstanceTypes()
 	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-spec-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
@@ -45,7 +46,7 @@ func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccGlobalResourceSchedulerDataSourceWithSpecConfig(schedulerName, cloudID),
+				Config: testAccGlobalResourceSchedulerDataSourceWithSpecConfig(schedulerName, cloud.ID, instanceTypes),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.anyscale_global_resource_scheduler.test", "name", schedulerName),
 					resource.TestCheckResourceAttr("data.anyscale_global_resource_scheduler.test", "spec.#", "1"),
@@ -114,7 +115,7 @@ data "anyscale_global_resource_scheduler" "test" {
 `, schedulerName)
 }
 
-func testAccGlobalResourceSchedulerDataSourceWithSpecConfig(schedulerName, cloudID string) string {
+func testAccGlobalResourceSchedulerDataSourceWithSpecConfig(schedulerName, cloudID string, instanceTypes InstanceTypeSet) string {
 	return fmt.Sprintf(`
 resource "anyscale_global_resource_scheduler" "test" {
   name = "%s"
@@ -128,7 +129,7 @@ resource "anyscale_global_resource_scheduler" "test" {
       name = "RES-8CPU-32GB"
 
       launch_template {
-        instance_type = "m5.2xlarge"
+        instance_type = "%s"
         market_type   = "ON_DEMAND"
       }
 
@@ -148,7 +149,7 @@ resource "anyscale_global_resource_scheduler" "test" {
 data "anyscale_global_resource_scheduler" "test" {
   name = anyscale_global_resource_scheduler.test.name
 }
-`, schedulerName, cloudID)
+`, schedulerName, cloudID, instanceTypes.Large)
 }
 
 func testAccGlobalResourceSchedulersDataSourceConfig(schedulerName string) string {

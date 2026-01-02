@@ -309,7 +309,7 @@ func GetAnyCloudID(t *testing.T) string {
 }
 
 // GetAWSCloudID returns an AWS cloud ID for tests that require AWS-specific features.
-// This searches for clouds with provider type AWS.
+// This searches for clouds with provider type AWS that have cloud resources configured.
 func GetAWSCloudID(t *testing.T) string {
 	client, err := GetTestClient()
 	if err != nil {
@@ -337,9 +337,12 @@ func GetAWSCloudID(t *testing.T) string {
 
 	var cloudsResp struct {
 		Results []struct {
-			ID       string `json:"id"`
-			Name     string `json:"name"`
-			Provider string `json:"provider"`
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			Provider       string `json:"provider"`
+			CloudResources []struct {
+				ID string `json:"id"`
+			} `json:"cloud_resources"`
 		} `json:"results"`
 	}
 
@@ -348,15 +351,178 @@ func GetAWSCloudID(t *testing.T) string {
 		return ""
 	}
 
-	// Look for AWS clouds
+	// Look for AWS clouds with cloud resources configured
+	for _, cloud := range cloudsResp.Results {
+		if cloud.Provider == "AWS" && len(cloud.CloudResources) > 0 {
+			t.Logf("Found AWS cloud with resources: %s (ID: %s)", cloud.Name, cloud.ID)
+			return cloud.ID
+		}
+	}
+
+	// Fallback: AWS cloud without resources (may not work for all tests)
 	for _, cloud := range cloudsResp.Results {
 		if cloud.Provider == "AWS" {
-			t.Logf("Found AWS cloud: %s (ID: %s)", cloud.Name, cloud.ID)
+			t.Logf("Found AWS cloud (no resources): %s (ID: %s)", cloud.Name, cloud.ID)
 			return cloud.ID
 		}
 	}
 
 	t.Skip("No AWS cloud available - no AWS clouds found in the account.")
+	return ""
+}
+
+// CloudInfo contains information about a discovered cloud
+type CloudInfo struct {
+	ID       string
+	Name     string
+	Provider string // "AWS" or "GCP"
+}
+
+// InstanceTypes returns appropriate instance types for the cloud provider
+func (c CloudInfo) InstanceTypes() InstanceTypeSet {
+	if c.Provider == "GCP" {
+		return InstanceTypeSet{
+			Small:    "n2-standard-2",
+			Medium:   "n2-standard-4",
+			Large:    "n2-standard-8",
+			XLarge:   "n2-standard-16",
+			Zones:    []string{"us-central1-a", "us-central1-b"},
+			Provider: "GCP",
+		}
+	}
+	// Default to AWS
+	return InstanceTypeSet{
+		Small:    "m5.large",
+		Medium:   "m5.xlarge",
+		Large:    "m5.2xlarge",
+		XLarge:   "m5.4xlarge",
+		Zones:    []string{"us-west-2a", "us-west-2b"},
+		Provider: "AWS",
+	}
+}
+
+// InstanceTypeSet contains instance types for a specific cloud provider
+type InstanceTypeSet struct {
+	Small    string   // 2 vCPU equivalent
+	Medium   string   // 4 vCPU equivalent
+	Large    string   // 8 vCPU equivalent
+	XLarge   string   // 16 vCPU equivalent
+	Zones    []string // Example availability zones
+	Provider string
+}
+
+// GetConfiguredCloud returns a cloud that has cloud resources configured.
+// This is required for tests that attach machine pools or need a fully configured cloud.
+// Returns CloudInfo so tests can adapt instance types based on provider.
+func GetConfiguredCloud(t *testing.T) CloudInfo {
+	client, err := GetTestClient()
+	if err != nil {
+		t.Skip("No configured cloud available - failed to get test client.")
+		return CloudInfo{}
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		t.Skip("No configured cloud available - failed to list clouds.")
+		return CloudInfo{}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Skip("No configured cloud available - API error.")
+		return CloudInfo{}
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Skip("No configured cloud available - failed to read response.")
+		return CloudInfo{}
+	}
+
+	var cloudsResp struct {
+		Results []struct {
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			Provider       string `json:"provider"`
+			CloudResources []struct {
+				ID string `json:"id"`
+			} `json:"cloud_resources"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		t.Skip("No configured cloud available - failed to parse response.")
+		return CloudInfo{}
+	}
+
+	// Look for clouds with cloud resources configured
+	for _, cloud := range cloudsResp.Results {
+		if len(cloud.CloudResources) > 0 {
+			t.Logf("Found configured cloud: %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
+			return CloudInfo{
+				ID:       cloud.ID,
+				Name:     cloud.Name,
+				Provider: cloud.Provider,
+			}
+		}
+	}
+
+	t.Skip("No configured cloud available - no clouds with cloud resources found.")
+	return CloudInfo{}
+}
+
+// GetConfiguredCloudID returns a cloud ID that has cloud resources configured.
+// This is required for tests that attach machine pools or need a fully configured cloud.
+func GetConfiguredCloudID(t *testing.T) string {
+	client, err := GetTestClient()
+	if err != nil {
+		t.Skip("No configured cloud available - failed to get test client.")
+		return ""
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		t.Skip("No configured cloud available - failed to list clouds.")
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Skip("No configured cloud available - API error.")
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Skip("No configured cloud available - failed to read response.")
+		return ""
+	}
+
+	var cloudsResp struct {
+		Results []struct {
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			Provider       string `json:"provider"`
+			CloudResources []struct {
+				ID string `json:"id"`
+			} `json:"cloud_resources"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		t.Skip("No configured cloud available - failed to parse response.")
+		return ""
+	}
+
+	// Look for clouds with cloud resources configured
+	for _, cloud := range cloudsResp.Results {
+		if len(cloud.CloudResources) > 0 {
+			t.Logf("Found configured cloud: %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
+			return cloud.ID
+		}
+	}
+
+	t.Skip("No configured cloud available - no clouds with cloud resources found.")
 	return ""
 }
 
