@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"fmt"
@@ -9,13 +9,13 @@ import (
 )
 
 func TestAccProjectsDataSource_NoFilters(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectsDataSourceNoFiltersConfig(cloudID),
@@ -29,16 +29,16 @@ func TestAccProjectsDataSource_NoFilters(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	projectName1 := fmt.Sprintf("tfacc-test-ds-projects-1-%d", os.Getpid())
 	projectName2 := fmt.Sprintf("tfacc-test-ds-projects-2-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectsDataSourceFilterByCloudIDConfig(cloudID, projectName1, projectName2),
@@ -52,9 +52,9 @@ func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
 		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
@@ -63,8 +63,8 @@ func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
 	projectName := fmt.Sprintf("tfacc-test-ds-projects-cloudname-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectsDataSourceFilterByCloudNameConfig(cloudID, cloudName, projectName),
@@ -77,17 +77,17 @@ func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	uniquePrefix := fmt.Sprintf("tfacc-unique-prefix-%d", os.Getpid())
 	projectName1 := fmt.Sprintf("%s-project-1", uniquePrefix)
 	projectName2 := fmt.Sprintf("%s-project-2", uniquePrefix)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectsDataSourceFilterByNameContainsConfig(cloudID, projectName1, projectName2, uniquePrefix),
@@ -101,15 +101,15 @@ func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-ds-projects-nodefault-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectsDataSourceExcludeDefaultsConfig(cloudID, projectName),
@@ -125,16 +125,16 @@ func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-ds-projects-fields-%d", os.Getpid())
 	description := "Test project for data source fields"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectsDataSourceProjectFieldsConfig(cloudID, projectName, description),

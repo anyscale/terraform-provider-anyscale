@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"context"
@@ -28,8 +28,8 @@ func TestAccPolicyBindingResource_CloudBasic(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create with readonly role
 			{
@@ -78,8 +78,8 @@ func TestAccPolicyBindingResource_ProjectBasic(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create with readonly role
 			{
@@ -121,8 +121,8 @@ func TestAccPolicyBindingResource_InvalidRoleForCloud(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccPolicyBindingResourceConfig(testCloudID, testGroupID, "cloud", "owner"),
@@ -146,8 +146,8 @@ func TestAccPolicyBindingResource_InvalidRoleForProject(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccPolicyBindingResourceConfig(testProjectID, testGroupID, "project", "collaborator"),
@@ -177,8 +177,8 @@ func TestAccPolicyBindingResource_MultipleBindings(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingResourceConfigMultiple(testCloudID, testGroupID1, testGroupID2),
@@ -205,8 +205,8 @@ func TestAccPolicyBindingResource_EmptyBindings(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create with bindings
 			{
@@ -240,8 +240,8 @@ func TestAccPolicyBindingResource_Delete(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingResourceConfig(testCloudID, testGroupID, "cloud", "readonly"),
@@ -321,7 +321,7 @@ func testAccCheckPolicyBindingExistsInAPI(resourceName string) resource.TestChec
 		}
 
 		// Get the test client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("Failed to get test client: %w", err)
 		}
@@ -347,7 +347,7 @@ func testAccCheckPolicyBindingExistsInAPI(resourceName string) resource.TestChec
 func testAccCheckPolicyBindingIsEmpty(resourceID, resourceType string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		// Get the test client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("Failed to get test client: %w", err)
 		}

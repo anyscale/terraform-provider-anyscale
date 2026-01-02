@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/brent/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -20,8 +21,8 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 	testEmail := fmt.Sprintf("tfacc-invite-basic-%d@example.com", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -59,8 +60,8 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 	testEmail2 := fmt.Sprintf("tfacc-invite-replace2-%d@example.com", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccOrganizationInvitationResourceConfig(testEmail1),
@@ -90,8 +91,8 @@ func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 	testEmail := fmt.Sprintf("tfacc-invite-delete-%d@example.com", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccOrganizationInvitationResourceConfig(testEmail),
@@ -133,7 +134,7 @@ func testAccCheckInvitationExistsInAPI(resourceName string) resource.TestCheckFu
 		}
 
 		// Get the test client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("Failed to get test client: %w", err)
 		}
@@ -157,7 +158,7 @@ func testAccCheckInvitationExistsInAPI(resourceName string) resource.TestCheckFu
 func testAccCheckInvitationDoesNotExist(email string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		// Get the test client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("Failed to get test client: %w", err)
 		}
@@ -181,13 +182,13 @@ func testAccCheckInvitationDoesNotExist(email string) resource.TestCheckFunc {
 	}
 }
 
-// testAccPreCheckAuth checks for authentication without requiring cloud ID
-func testAccPreCheckAuth(t *testing.T) {
+// PreCheckAuth checks for authentication without requiring cloud ID
+func PreCheckAuth(t *testing.T) {
 	// Check for authentication
 	token := os.Getenv("ANYSCALE_CLI_TOKEN")
 	if token == "" {
 		// Try credentials file
-		if _, err := GetAuthToken(); err != nil {
+		if _, err := provider.GetAuthToken(); err != nil {
 			t.Fatalf("ANYSCALE_CLI_TOKEN must be set or ~/.anyscale/credentials.json must exist for acceptance tests")
 		}
 	}

@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"context"
@@ -9,19 +9,20 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/brent/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // TestAccCloudResourceResource_AWS_VM tests AWS VM cloud resource creation
 func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-cloud-res-aws"
 	resourceName := "default"
 
 	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -59,13 +60,13 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 
 // TestAccCloudResourceResource_GCP_VM tests GCP VM cloud resource creation
 func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-cloud-res-gcp"
 	resourceName := "default"
 
 	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceResourceGCPConfig(cloudName, resourceName),
@@ -95,13 +96,13 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 
 // TestAccCloudResourceResource_AWS_K8S tests AWS K8S cloud resource creation
 func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-cloud-res-k8s"
 	resourceName := "default"
 
 	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceResourceK8SConfig(cloudName, resourceName),
@@ -120,13 +121,13 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 
 // TestAccCloudResourceResource_WithFileStorage tests cloud resource with file storage
 func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	cloudName := "tfacc-test-cloud-res-fs"
 	resourceName := "with-file-storage"
 
 	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName),
@@ -176,7 +177,7 @@ func testAccCheckCloudResourceExistsInAPI(resourceName, expectedResourceName str
 		}
 
 		// Get the API client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("failed to get test client: %w", err)
 		}
@@ -205,7 +206,7 @@ func testAccCheckCloudResourceExistsInAPI(resourceName, expectedResourceName str
 			return fmt.Errorf("API returned error status %d: %s", resp.StatusCode, string(body))
 		}
 
-		var deploymentsResp CloudDeploymentsResponse
+		var deploymentsResp provider.CloudDeploymentsResponse
 		if err := json.Unmarshal(body, &deploymentsResp); err != nil {
 			return fmt.Errorf("failed to parse API response: %w", err)
 		}
@@ -241,7 +242,7 @@ func testAccCheckCloudResourceAttributes(resourceName, expectedName, expectedCom
 		}
 
 		// Get the API client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("failed to get test client: %w", err)
 		}
@@ -266,13 +267,13 @@ func testAccCheckCloudResourceAttributes(resourceName, expectedName, expectedCom
 			return fmt.Errorf("API returned error status %d: %s", resp.StatusCode, string(body))
 		}
 
-		var deploymentsResp CloudDeploymentsResponse
+		var deploymentsResp provider.CloudDeploymentsResponse
 		if err := json.Unmarshal(body, &deploymentsResp); err != nil {
 			return fmt.Errorf("failed to parse API response: %w", err)
 		}
 
 		// Find the specific resource
-		var foundDeployment *CloudDeploymentResult
+		var foundDeployment *provider.CloudDeploymentResult
 		for _, deployment := range deploymentsResp.Results {
 			if deployment.Name == expectedName {
 				foundDeployment = &deployment

@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"context"
@@ -13,13 +13,13 @@ import (
 
 func TestAccComputeConfigResource_Basic(t *testing.T) {
 	// Skip if acceptance tests are not enabled
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -57,13 +57,13 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_withWorkers(cloudID),
@@ -81,13 +81,13 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_Anonymous(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_minimal(cloudID),
@@ -102,7 +102,7 @@ func TestAccComputeConfigResource_Anonymous(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -110,8 +110,8 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_withCloudName(cloudName),
@@ -146,7 +146,7 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 		}
 
 		// Get the API client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("failed to get test client: %w", err)
 		}
@@ -245,16 +245,16 @@ resource "anyscale_compute_config" "test" {
 // TestAccComputeConfigResource_Update tests that updating a compute config
 // creates a new version with the updated configuration.
 func TestAccComputeConfigResource_Update(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 	configName := fmt.Sprintf("tf-test-compute-config-update-%d", os.Getpid())
 
 	var initialConfigID string
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create initial compute config with m5.large
 			{
