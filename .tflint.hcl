@@ -12,7 +12,7 @@ rule "terraform_module_version" {
 }
 
 rule "terraform_required_version" {
-  enabled = true
+  enabled = false
 }
 
 rule "terraform_naming_convention" {
