@@ -27,6 +27,10 @@ var (
 	// Cache for test cloud ID to avoid repeated API calls
 	cachedTestCloudID     string
 	cachedTestCloudIDOnce sync.Once
+
+	// Cache for any cloud ID (fallback for data source tests)
+	cachedAnyCloudID     string
+	cachedAnyCloudIDOnce sync.Once
 )
 
 // GetTestCloudID returns a test cloud ID with the following priority:
@@ -178,6 +182,7 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 	}
 
 	// Look for clouds with test-related names (prefer "tfprovider" prefix)
+	// Fall back to any cloud if no test-specific clouds are found
 	var testClouds []struct {
 		ID        string
 		Name      string
@@ -187,7 +192,7 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 
 	for _, cloud := range cloudsResp.Results {
 		nameLower := strings.ToLower(cloud.Name)
-		priority := 0
+		priority := 1 // Default priority for any cloud
 
 		if strings.Contains(nameLower, "tfprovider") {
 			priority = 10 // Highest priority
@@ -197,23 +202,21 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 			priority = 5
 		}
 
-		if priority > 0 {
-			testClouds = append(testClouds, struct {
-				ID        string
-				Name      string
-				CreatedAt string
-				Priority  int
-			}{
-				ID:        cloud.ID,
-				Name:      cloud.Name,
-				CreatedAt: cloud.CreatedAt,
-				Priority:  priority,
-			})
-		}
+		testClouds = append(testClouds, struct {
+			ID        string
+			Name      string
+			CreatedAt string
+			Priority  int
+		}{
+			ID:        cloud.ID,
+			Name:      cloud.Name,
+			CreatedAt: cloud.CreatedAt,
+			Priority:  priority,
+		})
 	}
 
 	if len(testClouds) == 0 {
-		return "", fmt.Errorf("no test clouds found (looking for names containing 'tfprovider', 'tf-acc-', or 'test')")
+		return "", fmt.Errorf("no clouds found in the account")
 	}
 
 	// Sort by priority (highest first), then by created_at (most recent first)
@@ -225,12 +228,75 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 		}
 	}
 
-	t.Logf("Auto-discovered test cloud: %s (ID: %s)", bestCloud.Name, bestCloud.ID)
+	if bestCloud.Priority == 1 {
+		t.Logf("Auto-discovered cloud (no test-specific cloud found): %s (ID: %s)", bestCloud.Name, bestCloud.ID)
+	} else {
+		t.Logf("Auto-discovered test cloud: %s (ID: %s)", bestCloud.Name, bestCloud.ID)
+	}
 	if len(testClouds) > 1 {
-		t.Logf("Note: Found %d potential test clouds, selected '%s' based on priority and recency", len(testClouds), bestCloud.Name)
+		t.Logf("Note: Found %d clouds, selected '%s' based on priority and recency", len(testClouds), bestCloud.Name)
 	}
 
 	return bestCloud.ID, nil
+}
+
+// GetAnyCloudID returns any available cloud ID from the account.
+// This is useful for data source tests that just need a valid cloud to query.
+// The result is cached after the first successful call.
+func GetAnyCloudID(t *testing.T) string {
+	cachedAnyCloudIDOnce.Do(func() {
+		client, err := GetTestClient()
+		if err != nil {
+			t.Logf("Warning: Failed to get test client: %v", err)
+			return
+		}
+
+		resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
+		if err != nil {
+			t.Logf("Warning: Failed to list clouds: %v", err)
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			t.Logf("Warning: API returned status %d: %s", resp.StatusCode, string(body))
+			return
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Logf("Warning: Failed to read response: %v", err)
+			return
+		}
+
+		var cloudsResp struct {
+			Results []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"results"`
+		}
+
+		if err := json.Unmarshal(body, &cloudsResp); err != nil {
+			t.Logf("Warning: Failed to parse clouds response: %v", err)
+			return
+		}
+
+		if len(cloudsResp.Results) == 0 {
+			t.Logf("Warning: No clouds found in the account")
+			return
+		}
+
+		// Return the first available cloud
+		cachedAnyCloudID = cloudsResp.Results[0].ID
+		t.Logf("Using cloud for data source test: %s (ID: %s)", cloudsResp.Results[0].Name, cachedAnyCloudID)
+	})
+
+	if cachedAnyCloudID == "" {
+		t.Skip("No cloud available. Ensure at least one cloud exists in the account.")
+	}
+
+	return cachedAnyCloudID
 }
 
 // GetTestClient returns an authenticated client for testing
