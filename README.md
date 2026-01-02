@@ -137,6 +137,7 @@ make test-aws-vm-basic
 3. Add acceptance tests for resources
 4. Update documentation
 5. Run `make lint` and `make test` before submitting
+6. Install precommit: `pre-commit install`
 
 ## License
 

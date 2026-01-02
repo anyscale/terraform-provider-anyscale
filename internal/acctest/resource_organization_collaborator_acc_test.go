@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"context"
@@ -18,8 +18,8 @@ func TestAccOrganizationCollaboratorResource_CreateFails(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccOrganizationCollaboratorResourceConfig("collaborator"),
@@ -42,8 +42,8 @@ func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Import existing collaborator
 			{
@@ -70,8 +70,8 @@ func TestAccOrganizationCollaboratorResource_UpdatePermission(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Import as collaborator
 			{
@@ -123,8 +123,8 @@ func TestAccOrganizationCollaboratorResource_Delete(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckAuth(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheckAuth(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Import collaborator
 			{
@@ -174,7 +174,7 @@ func testAccCheckCollaboratorExistsInAPI(resourceName string) resource.TestCheck
 		}
 
 		// Get the test client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("Failed to get test client: %w", err)
 		}
@@ -219,7 +219,7 @@ func testAccCheckCollaboratorPermissionInAPI(resourceName string, expectedPermis
 func testAccCheckCollaboratorDoesNotExist(identityID string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		// Get the test client
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("Failed to get test client: %w", err)
 		}

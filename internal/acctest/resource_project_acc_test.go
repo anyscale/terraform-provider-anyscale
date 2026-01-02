@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"context"
@@ -11,15 +11,15 @@ import (
 )
 
 func TestAccProjectResource_Basic(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-project-basic-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -48,16 +48,16 @@ func TestAccProjectResource_Basic(t *testing.T) {
 }
 
 func TestAccProjectResource_WithDescription(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	projectName := fmt.Sprintf("tfacc-test-project-desc-%d", os.Getpid())
 	description := "Test project with description"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectResourceWithDescriptionConfig(cloudID, projectName, description),
@@ -72,7 +72,7 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 }
 
 func TestAccProjectResource_WithCloudName(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -82,8 +82,8 @@ func TestAccProjectResource_WithCloudName(t *testing.T) {
 	projectName := fmt.Sprintf("tfacc-test-project-cloudname-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectResourceWithCloudNameConfig(cloudName, projectName),
@@ -98,9 +98,9 @@ func TestAccProjectResource_WithCloudName(t *testing.T) {
 }
 
 func TestAccProjectResource_WithCollaborators(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	// Note: This test requires valid test user emails
 	// Skip if not provided
@@ -113,8 +113,8 @@ func TestAccProjectResource_WithCollaborators(t *testing.T) {
 	projectName := fmt.Sprintf("tfacc-test-project-collab-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create with collaborators
 			{
@@ -150,7 +150,7 @@ func testAccCheckProjectExistsInAPI(resourceName string) resource.TestCheckFunc 
 			return fmt.Errorf("project ID not set")
 		}
 
-		client, err := getTestClient()
+		client, err := GetTestClient()
 		if err != nil {
 			return fmt.Errorf("failed to get test client: %w", err)
 		}
@@ -237,14 +237,14 @@ resource "anyscale_project" "test" {
 }
 
 func TestAccProjectResource_WithUserDataSource(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 	projectName := fmt.Sprintf("tfacc-test-project-datasource-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create project with current user as collaborator using data source
 			{

@@ -72,7 +72,7 @@ test: ## Run unit tests
 .PHONY: testacc
 testacc: ## Run acceptance tests (requires TF_ACC=1)
 	@echo "==> Running acceptance tests..."
-	TF_ACC=1 $(GO) test ./... -v -timeout 120m
+	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 120m
 
 .PHONY: testacc-cover
 testacc-cover: ## Run acceptance tests with coverage

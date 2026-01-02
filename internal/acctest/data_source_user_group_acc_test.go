@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"fmt"
@@ -20,8 +20,8 @@ func TestAccUserGroupDataSource_ByID(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupDataSourceByIDConfig(groupID),
@@ -49,8 +49,8 @@ func TestAccUserGroupDataSource_ByName(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupDataSourceByNameConfig(groupName),
@@ -74,11 +74,11 @@ func TestAccUserGroupDataSource_FromListToSingle(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
-			testAccPreCheck(t)
+			PreCheck(t)
 			// This test requires at least one user group to exist
 			t.Skip("Skipping test - requires user groups to be configured")
 		},
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupDataSourceFromListToSingleConfig(),

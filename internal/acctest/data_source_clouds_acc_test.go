@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"fmt"
@@ -9,11 +9,11 @@ import (
 )
 
 func TestAccCloudsDataSource_NoFilters(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudsDataSourceNoFiltersConfig(),
@@ -27,11 +27,11 @@ func TestAccCloudsDataSource_NoFilters(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByProvider(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				// Filter by AWS provider
@@ -54,13 +54,13 @@ func TestAccCloudsDataSource_FilterByProvider(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				// First get the test cloud to know its region
@@ -74,7 +74,7 @@ func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
@@ -89,8 +89,8 @@ func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudsDataSourceFilterByNameContainsConfig(nameContains),
@@ -104,11 +104,11 @@ func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudsDataSourceNoFiltersConfig(),
@@ -138,17 +138,17 @@ func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
 	if cloudName == "" {
 		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudsDataSourceFindSpecificCloudConfig(cloudName),
@@ -165,13 +165,13 @@ func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_MultipleFilters(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
-	cloudID := getTestCloudID(t)
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				// Get the test cloud details first
@@ -186,11 +186,11 @@ func TestAccCloudsDataSource_MultipleFilters(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByProviderAndRegion(t *testing.T) {
-	skipIfNotAcceptanceTest(t)
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				// Use hardcoded common values to test multiple filters

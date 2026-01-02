@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"os"
@@ -14,8 +14,8 @@ func TestAccUserGroupsDataSource_Basic(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupsDataSourceBasicConfig(),
@@ -36,11 +36,11 @@ func TestAccUserGroupsDataSource_GroupFieldsPopulated(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
-			testAccPreCheck(t)
+			PreCheck(t)
 			// This test requires at least one user group to exist
 			// Skip if no groups are configured
 		},
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupsDataSourceBasicConfig(),
@@ -61,8 +61,8 @@ func TestAccUserGroupsDataSource_NoDeletedGroups(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserGroupsDataSourceBasicConfig(),

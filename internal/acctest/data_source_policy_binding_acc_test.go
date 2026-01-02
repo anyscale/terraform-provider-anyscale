@@ -1,4 +1,4 @@
-package provider
+package acctest
 
 import (
 	"fmt"
@@ -20,8 +20,8 @@ func TestAccPolicyBindingDataSource_Cloud(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingDataSourceCloudConfig(cloudID),
@@ -48,8 +48,8 @@ func TestAccPolicyBindingDataSource_Project(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingDataSourceProjectConfig(projectID),
@@ -70,8 +70,8 @@ func TestAccPolicyBindingDataSource_Organization(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingDataSourceOrganizationConfig(),
@@ -95,8 +95,8 @@ func TestAccPolicyBindingDataSource_NotFound(t *testing.T) {
 	fakeCloudID := "cld_nonexistent123456789"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingDataSourceCloudConfig(fakeCloudID),
@@ -124,10 +124,10 @@ func TestAccPolicyBindingDataSource_BindingsPopulated(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
-			testAccPreCheck(t)
+			PreCheck(t)
 			// This test assumes the cloud has at least one policy binding configured
 		},
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingDataSourceCloudConfig(cloudID),
@@ -148,8 +148,8 @@ func TestAccPolicyBindingDataSource_FromListToSingle(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingDataSourceFromListToSingleConfig(),
