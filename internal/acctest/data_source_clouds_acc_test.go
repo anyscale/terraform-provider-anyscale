@@ -106,6 +106,10 @@ func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
 func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
+	// This test requires at least one cloud to exist in the account
+	// Skip if no clouds are available
+	_ = GetAnyCloudID(t) // Will skip the test if no clouds exist
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
