@@ -45,7 +45,8 @@ func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// This test uses AWS-specific instance types (m5.2xlarge)
+	cloudID := GetAWSCloudID(t)
 	schedulerName := fmt.Sprintf("tfacc-test-pool-spec-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
@@ -135,7 +136,8 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// This test uses AWS-specific instance types and zones (m5.2xlarge, us-west-2a)
+	cloudID := GetAWSCloudID(t)
 	schedulerName := fmt.Sprintf("tfacc-test-pool-full-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{

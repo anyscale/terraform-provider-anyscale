@@ -308,6 +308,58 @@ func GetAnyCloudID(t *testing.T) string {
 	return cachedAnyCloudID
 }
 
+// GetAWSCloudID returns an AWS cloud ID for tests that require AWS-specific features.
+// This searches for clouds with provider type AWS.
+func GetAWSCloudID(t *testing.T) string {
+	client, err := GetTestClient()
+	if err != nil {
+		t.Skip("No AWS cloud available - failed to get test client.")
+		return ""
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		t.Skip("No AWS cloud available - failed to list clouds.")
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Skip("No AWS cloud available - API error.")
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Skip("No AWS cloud available - failed to read response.")
+		return ""
+	}
+
+	var cloudsResp struct {
+		Results []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Provider string `json:"provider"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		t.Skip("No AWS cloud available - failed to parse response.")
+		return ""
+	}
+
+	// Look for AWS clouds
+	for _, cloud := range cloudsResp.Results {
+		if cloud.Provider == "AWS" {
+			t.Logf("Found AWS cloud: %s (ID: %s)", cloud.Name, cloud.ID)
+			return cloud.ID
+		}
+	}
+
+	t.Skip("No AWS cloud available - no AWS clouds found in the account.")
+	return ""
+}
+
 // GetTestClient returns an authenticated client for testing
 func GetTestClient() (*provider.Client, error) {
 	// Get API URL from environment or use default

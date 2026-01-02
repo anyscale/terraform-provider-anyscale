@@ -35,7 +35,8 @@ func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
 func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// This test uses AWS-specific instance types (m5.2xlarge)
+	cloudID := GetAWSCloudID(t)
 	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-spec-%d", os.Getpid())
 
 	resource.Test(t, resource.TestCase{
