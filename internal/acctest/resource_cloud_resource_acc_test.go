@@ -26,6 +26,7 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -72,6 +73,7 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceResourceGCPConfig(cloudName, resourceName, randSuffix),
@@ -110,6 +112,7 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix),
@@ -137,6 +140,7 @@ func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix),
@@ -333,6 +337,85 @@ func testAccCloudResourceImportStateIdFunc(resourceName string) resource.ImportS
 
 		return fmt.Sprintf("%s:%s", cloudID, resName), nil
 	}
+}
+
+// testAccCheckCloudResourceDestroy verifies that clouds and cloud resources created by tests
+// are properly destroyed. This checks both anyscale_cloud and anyscale_cloud_resource.
+func testAccCheckCloudResourceDestroy(s *terraform.State) error {
+	client, err := GetTestClient()
+	if err != nil {
+		return fmt.Errorf("failed to get test client: %w", err)
+	}
+
+	// Check cloud resources
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "anyscale_cloud_resource" && rs.Type != "anyscale_cloud" {
+			continue
+		}
+
+		if rs.Type == "anyscale_cloud" {
+			cloudID := rs.Primary.ID
+			if cloudID == "" {
+				continue
+			}
+
+			// Check if the cloud still exists
+			resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+			if err != nil {
+				log.Printf("[WARN] Failed to check cloud %s during destroy verification: %v", cloudID, err)
+				continue
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode == http.StatusOK {
+				return fmt.Errorf("cloud %s still exists after destroy", cloudID)
+			}
+		}
+
+		if rs.Type == "anyscale_cloud_resource" {
+			cloudID := rs.Primary.Attributes["cloud_id"]
+			resourceName := rs.Primary.Attributes["name"]
+			if cloudID == "" || resourceName == "" {
+				continue
+			}
+
+			// Check if the cloud resource still exists by fetching cloud deployments
+			resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/deployments", cloudID), nil)
+			if err != nil {
+				// Cloud might already be deleted, which is fine
+				log.Printf("[DEBUG] Cloud %s may already be deleted: %v", cloudID, err)
+				continue
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			// If cloud is gone (404), the resource is definitely destroyed
+			if resp.StatusCode == http.StatusNotFound {
+				continue
+			}
+
+			// If we can still fetch deployments, check if our resource is in the list
+			if resp.StatusCode == http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				// If the resource name appears in the response, it wasn't destroyed
+				if len(body) > 0 {
+					var deploymentsResp struct {
+						Results []struct {
+							Name string `json:"name"`
+						} `json:"results"`
+					}
+					if err := json.Unmarshal(body, &deploymentsResp); err == nil {
+						for _, d := range deploymentsResp.Results {
+							if d.Name == resourceName {
+								return fmt.Errorf("cloud resource %s:%s still exists after destroy", cloudID, resourceName)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // Configuration templates

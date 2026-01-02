@@ -2,7 +2,6 @@ package acctest
 
 import (
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -76,10 +75,7 @@ func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
 func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
-	}
+	cloudName := GetTestCloudName(t)
 
 	// Use part of the cloud name to test partial matching
 	// Take the first few characters as the search term
@@ -145,10 +141,7 @@ func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
-	}
+	cloudName := GetTestCloudName(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

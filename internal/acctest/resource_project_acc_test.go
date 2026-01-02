@@ -74,10 +74,7 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 func TestAccProjectResource_WithCloudName(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
-	}
+	cloudName := GetTestCloudName(t)
 
 	projectName := fmt.Sprintf("tfacc-test-project-cloudname-%d", os.Getpid())
 

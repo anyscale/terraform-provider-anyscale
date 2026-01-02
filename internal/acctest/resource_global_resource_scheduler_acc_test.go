@@ -109,10 +109,7 @@ func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
-	}
+	cloudName := GetTestCloudName(t)
 
 	schedulerName := fmt.Sprintf("tfacc-test-pool-cloudname-%d", os.Getpid())
 

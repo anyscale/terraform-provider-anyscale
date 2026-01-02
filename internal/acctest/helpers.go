@@ -25,8 +25,9 @@ var ProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, erro
 
 var (
 	// Cache for test cloud ID to avoid repeated API calls
-	cachedTestCloudID string
-	cloudIDMutex      sync.Mutex
+	cachedTestCloudID   string
+	cachedTestCloudName string
+	cloudIDMutex        sync.Mutex
 
 	// Cache for any cloud ID (fallback for data source tests)
 	cachedAnyCloudID string
@@ -67,20 +68,57 @@ func GetTestCloudID(t *testing.T) string {
 			t.Logf("Warning: Failed to resolve cloud name '%s': %v", envCloudName, err)
 		} else {
 			cachedTestCloudID = cloudID
+			cachedTestCloudName = envCloudName
 			return cachedTestCloudID
 		}
 	}
 
 	// Priority 3: Auto-discover
 	t.Logf("Auto-discovering test cloud...")
-	cloudID, err = autoDiscoverTestCloud(t)
+	var cloudName string
+	cloudID, cloudName, err = autoDiscoverTestCloud(t)
 	if err != nil {
 		t.Logf("Warning: Failed to auto-discover test cloud: %v", err)
 		t.Skip("No test cloud ID available. Set ANYSCALE_TEST_CLOUD_ID or ANYSCALE_TEST_CLOUD_NAME, or ensure at least one cloud exists in the account.")
 	}
 
 	cachedTestCloudID = cloudID
+	cachedTestCloudName = cloudName
 	return cachedTestCloudID
+}
+
+// GetTestCloudName returns a test cloud name with the following priority:
+// 1. ANYSCALE_TEST_CLOUD_NAME environment variable (explicit override)
+// 2. Auto-discover any available cloud and return its name
+//
+// This function ensures GetTestCloudID has been called first to populate the cache.
+func GetTestCloudName(t *testing.T) string {
+	cloudIDMutex.Lock()
+	defer cloudIDMutex.Unlock()
+
+	// If we have a cached name, return it
+	if cachedTestCloudName != "" {
+		return cachedTestCloudName
+	}
+
+	// Priority 1: Explicit cloud name from environment
+	if envCloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); envCloudName != "" {
+		t.Logf("Using test cloud name from ANYSCALE_TEST_CLOUD_NAME: %s", envCloudName)
+		cachedTestCloudName = envCloudName
+		return cachedTestCloudName
+	}
+
+	// Priority 2: Auto-discover (this will populate both ID and Name caches)
+	t.Logf("Auto-discovering test cloud for name...")
+	cloudID, cloudName, err := autoDiscoverTestCloud(t)
+	if err != nil {
+		t.Logf("Warning: Failed to auto-discover test cloud: %v", err)
+		t.Skip("No test cloud name available. Set ANYSCALE_TEST_CLOUD_NAME or ensure at least one cloud exists in the account.")
+	}
+
+	cachedTestCloudID = cloudID
+	cachedTestCloudName = cloudName
+	return cachedTestCloudName
 }
 
 // resolveCloudNameToID resolves a cloud name to its ID by querying the API
@@ -149,27 +187,28 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 	return matchedCloudID, nil
 }
 
-// autoDiscoverTestCloud attempts to find a suitable test cloud automatically
-func autoDiscoverTestCloud(t *testing.T) (string, error) {
+// autoDiscoverTestCloud attempts to find a suitable test cloud automatically.
+// Returns both the cloud ID and name.
+func autoDiscoverTestCloud(t *testing.T) (cloudID string, cloudName string, err error) {
 	client, err := GetTestClient()
 	if err != nil {
-		return "", fmt.Errorf("failed to get test client: %w", err)
+		return "", "", fmt.Errorf("failed to get test client: %w", err)
 	}
 
 	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
+		return "", "", fmt.Errorf("failed to list clouds: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return "", "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		return "", "", fmt.Errorf("failed to read response: %w", err)
 	}
 
 	var cloudsResp struct {
@@ -181,7 +220,7 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 	}
 
 	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse clouds response: %w", err)
+		return "", "", fmt.Errorf("failed to parse clouds response: %w", err)
 	}
 
 	// Look for clouds with test-related names (prefer "tfprovider" prefix)
@@ -219,7 +258,7 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 	}
 
 	if len(testClouds) == 0 {
-		return "", fmt.Errorf("no clouds found in the account")
+		return "", "", fmt.Errorf("no clouds found in the account")
 	}
 
 	// Sort by priority (highest first), then by created_at (most recent first)
@@ -240,7 +279,7 @@ func autoDiscoverTestCloud(t *testing.T) (string, error) {
 		t.Logf("Note: Found %d clouds, selected '%s' based on priority and recency", len(testClouds), bestCloud.Name)
 	}
 
-	return bestCloud.ID, nil
+	return bestCloud.ID, bestCloud.Name, nil
 }
 
 // GetAnyCloudID returns any available cloud ID from the account.
@@ -308,107 +347,108 @@ func GetAnyCloudID(t *testing.T) string {
 	return cachedAnyCloudID
 }
 
-// GetAWSCloudID returns an AWS cloud ID for tests that require AWS-specific features.
-// This searches for clouds with provider type AWS that have cloud resources configured.
-func GetAWSCloudID(t *testing.T) string {
-	client, err := GetTestClient()
-	if err != nil {
-		t.Skip("No AWS cloud available - failed to get test client.")
-		return ""
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		t.Skip("No AWS cloud available - failed to list clouds.")
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		t.Skip("No AWS cloud available - API error.")
-		return ""
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Skip("No AWS cloud available - failed to read response.")
-		return ""
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID             string `json:"id"`
-			Name           string `json:"name"`
-			Provider       string `json:"provider"`
-			CloudResources []struct {
-				ID string `json:"id"`
-			} `json:"cloud_resources"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		t.Skip("No AWS cloud available - failed to parse response.")
-		return ""
-	}
-
-	// Look for AWS clouds with cloud resources configured
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Provider == "AWS" && len(cloud.CloudResources) > 0 {
-			t.Logf("Found AWS cloud with resources: %s (ID: %s)", cloud.Name, cloud.ID)
-			return cloud.ID
-		}
-	}
-
-	// Fallback: AWS cloud without resources (may not work for all tests)
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Provider == "AWS" {
-			t.Logf("Found AWS cloud (no resources): %s (ID: %s)", cloud.Name, cloud.ID)
-			return cloud.ID
-		}
-	}
-
-	t.Skip("No AWS cloud available - no AWS clouds found in the account.")
-	return ""
-}
-
 // CloudInfo contains information about a discovered cloud
 type CloudInfo struct {
-	ID       string
-	Name     string
-	Provider string // "AWS" or "GCP"
+	ID           string
+	Name         string
+	Provider     string // "AWS" or "GCP"
+	ComputeStack string // "VM" or "K8S"
 }
 
-// InstanceTypes returns appropriate instance types for the cloud provider
+// IsK8s returns true if this cloud uses Kubernetes compute stack
+func (c CloudInfo) IsK8s() bool {
+	return c.ComputeStack == "K8S"
+}
+
+// IsVM returns true if this cloud uses VM compute stack
+func (c CloudInfo) IsVM() bool {
+	return c.ComputeStack == "VM" || c.ComputeStack == ""
+}
+
+// InstanceTypes returns appropriate instance types for the cloud provider.
+// For K8S clouds, returns empty values - K8S instance types are defined by the
+// operator pod shapes, not by the cloud provider's VM instance types.
+// TODO: Add K8S pod shape support when operator-defined shapes are available via API.
 func (c CloudInfo) InstanceTypes() InstanceTypeSet {
+	// K8S clouds use operator-defined pod shapes, not cloud provider instance types
+	if c.IsK8s() {
+		return InstanceTypeSet{
+			// K8S instance types are defined by the operator, not the cloud provider.
+			// These are placeholders - tests requiring instance types should skip K8S clouds.
+			Small:        "",
+			Medium:       "",
+			Large:        "",
+			XLarge:       "",
+			Zones:        nil,
+			Provider:     c.Provider,
+			ComputeStack: "K8S",
+		}
+	}
+
 	if c.Provider == "GCP" {
 		return InstanceTypeSet{
-			Small:    "n2-standard-2",
-			Medium:   "n2-standard-4",
-			Large:    "n2-standard-8",
-			XLarge:   "n2-standard-16",
-			Zones:    []string{"us-central1-a", "us-central1-b"},
-			Provider: "GCP",
+			Small:        "n2-standard-2",
+			Medium:       "n2-standard-4",
+			Large:        "n2-standard-8",
+			XLarge:       "n2-standard-16",
+			Zones:        []string{"us-central1-a", "us-central1-b"},
+			Provider:     "GCP",
+			ComputeStack: "VM",
 		}
 	}
 	// Default to AWS
 	return InstanceTypeSet{
-		Small:    "m5.large",
-		Medium:   "m5.xlarge",
-		Large:    "m5.2xlarge",
-		XLarge:   "m5.4xlarge",
-		Zones:    []string{"us-west-2a", "us-west-2b"},
-		Provider: "AWS",
+		Small:        "m5.large",
+		Medium:       "m5.xlarge",
+		Large:        "m5.2xlarge",
+		XLarge:       "m5.4xlarge",
+		Zones:        []string{"us-west-2a", "us-west-2b"},
+		Provider:     "AWS",
+		ComputeStack: "VM",
 	}
 }
 
 // InstanceTypeSet contains instance types for a specific cloud provider
 type InstanceTypeSet struct {
-	Small    string   // 2 vCPU equivalent
-	Medium   string   // 4 vCPU equivalent
-	Large    string   // 8 vCPU equivalent
-	XLarge   string   // 16 vCPU equivalent
-	Zones    []string // Example availability zones
-	Provider string
+	Small        string   // 2 vCPU equivalent
+	Medium       string   // 4 vCPU equivalent
+	Large        string   // 8 vCPU equivalent
+	XLarge       string   // 16 vCPU equivalent
+	Zones        []string // Example availability zones
+	Provider     string
+	ComputeStack string // "VM" or "K8S"
+}
+
+// IsValid returns true if this instance type set has valid instance types.
+// K8S clouds return empty instance types since they use operator-defined pod shapes.
+func (i InstanceTypeSet) IsValid() bool {
+	return i.Small != "" && i.Medium != ""
+}
+
+// IsK8s returns true if this instance type set is for a K8S cloud
+func (i InstanceTypeSet) IsK8s() bool {
+	return i.ComputeStack == "K8S"
+}
+
+// normalizeComputeStack returns a normalized compute stack value.
+// Empty string defaults to "VM" for backwards compatibility.
+func normalizeComputeStack(computeStack string) string {
+	if computeStack == "" {
+		return "VM"
+	}
+	return computeStack
+}
+
+// isKnownProvider returns true if the provider is a known cloud provider (AWS, GCP, or Generic for K8S).
+func isKnownProvider(provider, computeStack string) bool {
+	if provider == "AWS" || provider == "GCP" {
+		return true
+	}
+	// Generic provider is only valid for K8S compute stack
+	if provider == "Generic" && computeStack == "K8S" {
+		return true
+	}
+	return false
 }
 
 // GetConfiguredCloud returns a cloud that has cloud resources configured.
@@ -445,6 +485,7 @@ func GetConfiguredCloud(t *testing.T) CloudInfo {
 			ID             string `json:"id"`
 			Name           string `json:"name"`
 			Provider       string `json:"provider"`
+			ComputeStack   string `json:"compute_stack"`
 			CloudResources []struct {
 				ID string `json:"id"`
 			} `json:"cloud_resources"`
@@ -456,42 +497,73 @@ func GetConfiguredCloud(t *testing.T) CloudInfo {
 		return CloudInfo{}
 	}
 
-	// Priority 1: Look for clouds with cloud resources configured
+	// Priority 1: Look for VM clouds with cloud resources configured (best for compute config tests)
+	for _, cloud := range cloudsResp.Results {
+		if len(cloud.CloudResources) > 0 && (cloud.ComputeStack == "VM" || cloud.ComputeStack == "") {
+			t.Logf("Found configured VM cloud: %s (ID: %s, provider: %s, compute_stack: %s)", cloud.Name, cloud.ID, cloud.Provider, cloud.ComputeStack)
+			return CloudInfo{
+				ID:           cloud.ID,
+				Name:         cloud.Name,
+				Provider:     cloud.Provider,
+				ComputeStack: normalizeComputeStack(cloud.ComputeStack),
+			}
+		}
+	}
+
+	// Priority 2: Look for any cloud with cloud resources configured (including K8S)
 	for _, cloud := range cloudsResp.Results {
 		if len(cloud.CloudResources) > 0 {
-			t.Logf("Found configured cloud: %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
+			t.Logf("Found configured cloud: %s (ID: %s, provider: %s, compute_stack: %s)", cloud.Name, cloud.ID, cloud.Provider, cloud.ComputeStack)
 			return CloudInfo{
-				ID:       cloud.ID,
-				Name:     cloud.Name,
-				Provider: cloud.Provider,
+				ID:           cloud.ID,
+				Name:         cloud.Name,
+				Provider:     cloud.Provider,
+				ComputeStack: normalizeComputeStack(cloud.ComputeStack),
 			}
 		}
 	}
 
-	// Priority 2: Fall back to any cloud with a known provider (AWS or GCP)
+	// Priority 3: Fall back to any VM cloud with a known provider (AWS, GCP)
 	for _, cloud := range cloudsResp.Results {
-		if cloud.Provider == "AWS" || cloud.Provider == "GCP" {
-			t.Logf("Found cloud without cloud_resources (may not work for all tests): %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
+		computeStack := normalizeComputeStack(cloud.ComputeStack)
+		if isKnownProvider(cloud.Provider, computeStack) && computeStack == "VM" {
+			t.Logf("Found VM cloud without cloud_resources (may not work for all tests): %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
 			return CloudInfo{
-				ID:       cloud.ID,
-				Name:     cloud.Name,
-				Provider: cloud.Provider,
+				ID:           cloud.ID,
+				Name:         cloud.Name,
+				Provider:     cloud.Provider,
+				ComputeStack: computeStack,
 			}
 		}
 	}
 
-	// Priority 3: Fall back to any cloud, defaulting to AWS instance types
+	// Priority 4: Fall back to any cloud with a known provider (including K8S and Generic)
+	for _, cloud := range cloudsResp.Results {
+		computeStack := normalizeComputeStack(cloud.ComputeStack)
+		if isKnownProvider(cloud.Provider, computeStack) {
+			t.Logf("Found cloud without cloud_resources (may not work for all tests): %s (ID: %s, provider: %s, compute_stack: %s)", cloud.Name, cloud.ID, cloud.Provider, computeStack)
+			return CloudInfo{
+				ID:           cloud.ID,
+				Name:         cloud.Name,
+				Provider:     cloud.Provider,
+				ComputeStack: computeStack,
+			}
+		}
+	}
+
+	// Priority 5: Fall back to any cloud, defaulting to AWS instance types
 	if len(cloudsResp.Results) > 0 {
 		cloud := cloudsResp.Results[0]
 		provider := cloud.Provider
 		if provider == "" {
 			provider = "AWS" // Default to AWS instance types
 		}
-		t.Logf("Found cloud without known provider (using %s defaults): %s (ID: %s)", provider, cloud.Name, cloud.ID)
+		t.Logf("Found cloud without known provider (using %s defaults): %s (ID: %s, compute_stack: %s)", provider, cloud.Name, cloud.ID, cloud.ComputeStack)
 		return CloudInfo{
-			ID:       cloud.ID,
-			Name:     cloud.Name,
-			Provider: provider,
+			ID:           cloud.ID,
+			Name:         cloud.Name,
+			Provider:     provider,
+			ComputeStack: normalizeComputeStack(cloud.ComputeStack),
 		}
 	}
 
@@ -505,6 +577,119 @@ func GetConfiguredCloud(t *testing.T) CloudInfo {
 func GetConfiguredCloudID(t *testing.T) string {
 	cloud := GetConfiguredCloud(t)
 	return cloud.ID
+}
+
+// GetAllConfiguredClouds returns all clouds that have cloud resources configured.
+// This is useful for running tests across multiple cloud types (AWS VM, GCP VM, AWS K8S, etc.).
+// Returns an empty slice if no clouds are available.
+func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
+	client, err := GetTestClient()
+	if err != nil {
+		t.Logf("Failed to get test client: %v", err)
+		return nil
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		t.Logf("Failed to list clouds: %v", err)
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Logf("API returned status %d", resp.StatusCode)
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Logf("Failed to read response: %v", err)
+		return nil
+	}
+
+	var cloudsResp struct {
+		Results []struct {
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			Provider       string `json:"provider"`
+			ComputeStack   string `json:"compute_stack"`
+			CloudResources []struct {
+				ID string `json:"id"`
+			} `json:"cloud_resources"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(body, &cloudsResp); err != nil {
+		t.Logf("Failed to parse response: %v", err)
+		return nil
+	}
+
+	var clouds []CloudInfo
+
+	// Collect all clouds with cloud resources configured
+	for _, cloud := range cloudsResp.Results {
+		computeStack := normalizeComputeStack(cloud.ComputeStack)
+		if len(cloud.CloudResources) > 0 && isKnownProvider(cloud.Provider, computeStack) {
+			clouds = append(clouds, CloudInfo{
+				ID:           cloud.ID,
+				Name:         cloud.Name,
+				Provider:     cloud.Provider,
+				ComputeStack: computeStack,
+			})
+		}
+	}
+
+	// If no configured clouds found, try clouds without cloud_resources
+	if len(clouds) == 0 {
+		for _, cloud := range cloudsResp.Results {
+			computeStack := normalizeComputeStack(cloud.ComputeStack)
+			if isKnownProvider(cloud.Provider, computeStack) {
+				clouds = append(clouds, CloudInfo{
+					ID:           cloud.ID,
+					Name:         cloud.Name,
+					Provider:     cloud.Provider,
+					ComputeStack: computeStack,
+				})
+			}
+		}
+	}
+
+	t.Logf("Found %d configured clouds for testing", len(clouds))
+	for _, c := range clouds {
+		t.Logf("  - %s (ID: %s, provider: %s, compute_stack: %s)", c.Name, c.ID, c.Provider, c.ComputeStack)
+	}
+
+	return clouds
+}
+
+// GetAllVMClouds returns one VM cloud per provider (AWS, GCP).
+// This deduplicates clouds so tests run once per provider type, not once per cloud.
+// This is useful for tests that require VM-specific instance types.
+func GetAllVMClouds(t *testing.T) []CloudInfo {
+	allClouds := GetAllConfiguredClouds(t)
+
+	// Deduplicate by provider - we only need one cloud per provider type
+	// since instance types are the same for all clouds of the same provider
+	seen := make(map[string]bool)
+	var vmClouds []CloudInfo
+
+	for _, cloud := range allClouds {
+		if cloud.IsVM() {
+			key := cloud.Provider // e.g., "AWS", "GCP"
+			if !seen[key] {
+				seen[key] = true
+				vmClouds = append(vmClouds, cloud)
+				t.Logf("Selected %s VM cloud for testing: %s (ID: %s)", cloud.Provider, cloud.Name, cloud.ID)
+			}
+		}
+	}
+
+	if len(vmClouds) == 0 {
+		t.Logf("No VM clouds available for testing")
+	} else {
+		t.Logf("Found %d unique VM cloud providers for testing", len(vmClouds))
+	}
+	return vmClouds
 }
 
 // GetTestClient returns an authenticated client for testing

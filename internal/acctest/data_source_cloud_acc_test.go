@@ -35,10 +35,7 @@ func TestAccCloudDataSource_ByID(t *testing.T) {
 func TestAccCloudDataSource_ByName(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME")
-	if cloudName == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_NAME not set, skipping test")
-	}
+	cloudName := GetTestCloudName(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

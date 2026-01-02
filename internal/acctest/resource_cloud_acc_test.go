@@ -25,6 +25,7 @@ func TestAccCloudResource_AWS_Basic(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -75,6 +76,7 @@ func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceAWSEmptyConfig(cloudName),
@@ -102,6 +104,7 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceGCPBasicConfig(cloudName, randSuffix),
@@ -146,6 +149,7 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix),
@@ -275,6 +279,50 @@ func testAccCheckCloudAttributes(resourceName, expectedName, expectedProvider, e
 
 		return nil
 	}
+}
+
+// testAccCheckCloudDestroy verifies that clouds created by tests are properly destroyed.
+// This function is called automatically by the test framework after all test steps complete.
+func testAccCheckCloudDestroy(s *terraform.State) error {
+	client, err := GetTestClient()
+	if err != nil {
+		return fmt.Errorf("failed to get test client: %w", err)
+	}
+
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "anyscale_cloud" {
+			continue
+		}
+
+		cloudID := rs.Primary.ID
+		if cloudID == "" {
+			continue
+		}
+
+		// Check if the cloud still exists
+		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+		if err != nil {
+			// Network error - can't determine state, but likely destroyed
+			log.Printf("[WARN] Failed to check cloud %s during destroy verification: %v", cloudID, err)
+			continue
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		// 404 means successfully destroyed
+		if resp.StatusCode == http.StatusNotFound {
+			continue
+		}
+
+		// If we get a 200, the cloud still exists - that's an error
+		if resp.StatusCode == http.StatusOK {
+			return fmt.Errorf("cloud %s still exists after destroy", cloudID)
+		}
+
+		// Other status codes - log but don't fail
+		log.Printf("[WARN] Unexpected status %d when checking cloud %s destruction", resp.StatusCode, cloudID)
+	}
+
+	return nil
 }
 
 // Configuration templates
