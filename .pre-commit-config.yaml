@@ -28,6 +28,18 @@ repos:
         language: system
         pass_filenames: false
         files: "^(.*).go$"
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: go mod tidy
+        language: system
+        pass_filenames: false
+        files: "^(.*).go$"
+      - id: provider-docs
+        name: provider-doc
+        entry: make docs
+        language: system
+        pass_filenames: false
+        files: "^(.*).go$"
 
   - repo: https://github.com/golangci/golangci-lint
     rev: v2.7.2  # or whatever version you're using

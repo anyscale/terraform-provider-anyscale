@@ -460,3 +460,118 @@ type DetachMachinePoolFromCloudRequest struct {
 type DetachMachinePoolFromCloudResponse struct {
 	Result struct{} `json:"result"`
 }
+
+// Container Image / Cluster Environment API Models
+
+// CreateClusterEnvironmentRequest is the request body for creating a cluster environment
+type CreateClusterEnvironmentRequest struct {
+	Name          string  `json:"name"`
+	Containerfile string  `json:"containerfile,omitempty"`
+	ProjectID     *string `json:"project_id,omitempty"`
+}
+
+// CreateBuildRequest is the request body for creating a new build for an existing cluster environment
+type CreateBuildRequest struct {
+	ApplicationTemplateID string `json:"application_template_id"`
+	Containerfile         string `json:"containerfile"`
+}
+
+// ClusterEnvironmentResponse represents a single cluster environment from the API
+type ClusterEnvironmentResponse struct {
+	Result ClusterEnvironmentResult `json:"result"`
+}
+
+// ClusterEnvironmentsListResponse represents the response from listing cluster environments
+type ClusterEnvironmentsListResponse struct {
+	Results  []ClusterEnvironmentResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// ClusterEnvironmentResult represents a cluster environment (App Config) from the API
+type ClusterEnvironmentResult struct {
+	ID             string           `json:"id"`
+	Name           string           `json:"name"`
+	ProjectID      *string          `json:"project_id,omitempty"`
+	CreatorID      string           `json:"creator_id"`
+	CreatedAt      string           `json:"created_at"`
+	LastModifiedAt string           `json:"last_modified_at,omitempty"`
+	IsArchived     bool             `json:"is_archived"`
+	IsAnonymous    bool             `json:"is_anonymous"`
+	LatestBuild    *LatestBuildInfo `json:"latest_build,omitempty"`
+	// Legacy fields for compatibility with list endpoint
+	LatestBuildID     *string `json:"latest_build_id,omitempty"`
+	LatestBuildStatus *string `json:"latest_build_status,omitempty"`
+}
+
+// LatestBuildInfo represents the nested latest_build object in the cluster environment response
+type LatestBuildInfo struct {
+	ID       string `json:"id"`
+	Revision int    `json:"revision"`
+	Status   string `json:"status"`
+}
+
+// GetOrCreateBuildFromImageURIRequest is the request body for registering an external Docker image
+type GetOrCreateBuildFromImageURIRequest struct {
+	ImageURI            string  `json:"image_uri"`
+	ClusterEnvName      *string `json:"cluster_env_name,omitempty"`
+	RayVersion          *string `json:"ray_version,omitempty"`
+	RegistryLoginSecret *string `json:"registry_login_secret,omitempty"`
+}
+
+// BuildResponse represents a single build from the API
+type BuildResponse struct {
+	Result BuildResult `json:"result"`
+}
+
+// BuildsListResponse represents the response from listing builds
+type BuildsListResponse struct {
+	Results  []BuildResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// BuildResult represents a build from the API
+type BuildResult struct {
+	ID                    string  `json:"id"`
+	ApplicationTemplateID string  `json:"application_template_id"`
+	Containerfile         *string `json:"containerfile,omitempty"`
+	DockerImageName       *string `json:"docker_image_name,omitempty"`
+	RegistryLoginSecret   *string `json:"registry_login_secret,omitempty"`
+	RayVersion            *string `json:"ray_version,omitempty"`
+	Revision              int     `json:"revision"`
+	CreatorID             string  `json:"creator_id"`
+	ErrorMessage          *string `json:"error_message,omitempty"`
+	Status                string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, cancelled
+	CreatedAt             string  `json:"created_at"`
+	LastModifiedAt        string  `json:"last_modified_at"`
+	IsBYOD                bool    `json:"is_byod"`
+	CloudID               *string `json:"cloud_id,omitempty"`
+	Digest                *string `json:"digest,omitempty"`
+}
+
+// ClusterEnvironmentsSearchQuery is the request body for POST /api/v2/application_templates/search
+type ClusterEnvironmentsSearchQuery struct {
+	ProjectID        *string    `json:"project_id,omitempty"`
+	CreatorID        *string    `json:"creator_id,omitempty"`
+	Name             *TextQuery `json:"name,omitempty"`
+	ImageName        *TextQuery `json:"image_name,omitempty"`
+	Paging           PageQuery  `json:"paging"`
+	IncludeArchived  bool       `json:"include_archived"`
+	IncludeAnonymous bool       `json:"include_anonymous"`
+}
+
+// TextQuery represents a text search filter
+type TextQuery struct {
+	Contains string `json:"contains"`
+}
+
+// PageQuery represents pagination parameters
+type PageQuery struct {
+	Count       int     `json:"count,omitempty"`
+	PagingToken *string `json:"paging_token,omitempty"`
+}
