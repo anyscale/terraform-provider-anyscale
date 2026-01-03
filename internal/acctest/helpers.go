@@ -13,6 +13,8 @@ import (
 	"github.com/brent/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // ProtoV6ProviderFactories are used to instantiate a provider during
@@ -738,5 +740,51 @@ func PreCheck(t *testing.T) {
 func SkipIfNotAcceptanceTest(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
+	}
+}
+
+// CaptureResourceAttr captures a resource attribute value for later comparison.
+// Useful for verifying that updates happen in-place (ID doesn't change) vs replacement.
+// Example usage:
+//
+//	var originalID string
+//	resource.TestStep{
+//	    Config: config,
+//	    Check: CaptureResourceAttr("my_resource.test", "id", &originalID),
+//	}
+func CaptureResourceAttr(resourceName, attrName string, value *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found: %s", resourceName)
+		}
+		*value = rs.Primary.Attributes[attrName]
+		return nil
+	}
+}
+
+// VerifyResourceAttrUnchanged verifies that a resource attribute hasn't changed from a captured value.
+// Useful for verifying that updates happen in-place (ID doesn't change) vs replacement.
+// Example usage:
+//
+//	var originalID string
+//	// Step 1: capture ID
+//	// Step 2: update config and verify ID unchanged
+//	resource.TestStep{
+//	    Config: updatedConfig,
+//	    Check: VerifyResourceAttrUnchanged("my_resource.test", "id", &originalID),
+//	}
+func VerifyResourceAttrUnchanged(resourceName, attrName string, originalValue *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found: %s", resourceName)
+		}
+		currentValue := rs.Primary.Attributes[attrName]
+		if currentValue != *originalValue {
+			return fmt.Errorf("%s.%s changed from %q to %q (expected update-in-place, not replacement)",
+				resourceName, attrName, *originalValue, currentValue)
+		}
+		return nil
 	}
 }
