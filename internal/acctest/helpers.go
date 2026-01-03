@@ -34,6 +34,10 @@ var (
 	// Cache for any cloud ID (fallback for data source tests)
 	cachedAnyCloudID string
 	anyCloudIDMutex  sync.Mutex
+
+	// Track ephemeral cloud created by tests for cleanup
+	ephemeralCloudID   string
+	ephemeralCloudName string
 )
 
 // GetTestCloudID returns a test cloud ID with the following priority:
@@ -90,7 +94,7 @@ func GetTestCloudID(t *testing.T) string {
 }
 
 // GetTestCloudName returns a test cloud name with the following priority:
-// 1. ANYSCALE_TEST_CLOUD_NAME environment variable (explicit override)
+// 1. ANYSCALE_TEST_CLOUD_NAME environment variable (explicit override, validated to exist)
 // 2. Auto-discover any available cloud and return its name
 //
 // This function ensures GetTestCloudID has been called first to populate the cache.
@@ -103,11 +107,18 @@ func GetTestCloudName(t *testing.T) string {
 		return cachedTestCloudName
 	}
 
-	// Priority 1: Explicit cloud name from environment
+	// Priority 1: Explicit cloud name from environment (validate it exists)
 	if envCloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); envCloudName != "" {
-		t.Logf("Using test cloud name from ANYSCALE_TEST_CLOUD_NAME: %s", envCloudName)
-		cachedTestCloudName = envCloudName
-		return cachedTestCloudName
+		t.Logf("Validating test cloud name from ANYSCALE_TEST_CLOUD_NAME: %s", envCloudName)
+		cloudID, err := resolveCloudNameToID(t, envCloudName)
+		if err != nil {
+			t.Logf("Warning: Failed to resolve cloud name '%s': %v", envCloudName, err)
+			// Fall through to auto-discovery
+		} else {
+			cachedTestCloudID = cloudID
+			cachedTestCloudName = envCloudName
+			return cachedTestCloudName
+		}
 	}
 
 	// Priority 2: Auto-discover (this will populate both ID and Name caches)
@@ -189,7 +200,113 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 	return matchedCloudID, nil
 }
 
+// createEphemeralTestCloud creates a minimal empty cloud for testing.
+// The cloud will be cleaned up after tests unless ANYSCALE_TEST_KEEP=1 is set.
+// Returns the cloud ID and name.
+func createEphemeralTestCloud(t *testing.T) (cloudID string, cloudName string, err error) {
+	client, err := GetTestClient()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get test client: %w", err)
+	}
+
+	// Generate a unique cloud name
+	cloudName = fmt.Sprintf("tfacc-ephemeral-%d", os.Getpid())
+
+	t.Logf("Creating ephemeral test cloud: %s", cloudName)
+
+	// Create minimal empty cloud request
+	createReq := struct {
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+		Region   string `json:"region"`
+	}{
+		Name:     cloudName,
+		Provider: "AWS",
+		Region:   "us-east-2",
+	}
+
+	reqBody, err := json.Marshal(createReq)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal create request: %w", err)
+	}
+
+	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/clouds", strings.NewReader(string(reqBody)))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create cloud: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return "", "", fmt.Errorf("failed to create cloud (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var cloudResp struct {
+		Result struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &cloudResp); err != nil {
+		return "", "", fmt.Errorf("failed to parse cloud response: %w", err)
+	}
+
+	// Track the ephemeral cloud for cleanup
+	ephemeralCloudID = cloudResp.Result.ID
+	ephemeralCloudName = cloudResp.Result.Name
+
+	t.Logf("Created ephemeral test cloud: %s (ID: %s)", ephemeralCloudName, ephemeralCloudID)
+
+	if os.Getenv("ANYSCALE_TEST_KEEP") == "1" {
+		t.Logf("ANYSCALE_TEST_KEEP=1: Cloud will be preserved after tests")
+	} else {
+		// Register cleanup
+		t.Cleanup(func() {
+			cleanupEphemeralCloud(t)
+		})
+	}
+
+	return ephemeralCloudID, ephemeralCloudName, nil
+}
+
+// cleanupEphemeralCloud deletes the ephemeral cloud created for testing
+func cleanupEphemeralCloud(t *testing.T) {
+	if ephemeralCloudID == "" {
+		return
+	}
+
+	t.Logf("Cleaning up ephemeral test cloud: %s (ID: %s)", ephemeralCloudName, ephemeralCloudID)
+
+	client, err := GetTestClient()
+	if err != nil {
+		t.Logf("Warning: Failed to get client for cleanup: %v", err)
+		return
+	}
+
+	resp, err := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/clouds/%s", ephemeralCloudID), nil)
+	if err != nil {
+		t.Logf("Warning: Failed to delete ephemeral cloud: %v", err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == 200 || resp.StatusCode == 204 || resp.StatusCode == 404 {
+		t.Logf("Successfully cleaned up ephemeral cloud: %s", ephemeralCloudName)
+		ephemeralCloudID = ""
+		ephemeralCloudName = ""
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		t.Logf("Warning: Failed to delete ephemeral cloud (status %d): %s", resp.StatusCode, string(body))
+	}
+}
+
 // autoDiscoverTestCloud attempts to find a suitable test cloud automatically.
+// If no clouds exist and ANYSCALE_TEST_CREATE_CLOUD=1 is set, creates an ephemeral cloud.
 // Returns both the cloud ID and name.
 func autoDiscoverTestCloud(t *testing.T) (cloudID string, cloudName string, err error) {
 	client, err := GetTestClient()
@@ -260,7 +377,12 @@ func autoDiscoverTestCloud(t *testing.T) (cloudID string, cloudName string, err 
 	}
 
 	if len(testClouds) == 0 {
-		return "", "", fmt.Errorf("no clouds found in the account")
+		// No clouds exist - try to create an ephemeral one if enabled
+		if os.Getenv("ANYSCALE_TEST_CREATE_CLOUD") == "1" {
+			t.Logf("No clouds found, ANYSCALE_TEST_CREATE_CLOUD=1: Creating ephemeral test cloud...")
+			return createEphemeralTestCloud(t)
+		}
+		return "", "", fmt.Errorf("no clouds found in the account (set ANYSCALE_TEST_CREATE_CLOUD=1 to auto-create)")
 	}
 
 	// Sort by priority (highest first), then by created_at (most recent first)
