@@ -25,17 +25,17 @@ Builds a container image from a Containerfile (Dockerfile). Use this resource to
 ### Optional
 
 - `build_timeout` (String) Maximum time to wait for the build to complete (e.g., `30m`, `1h`). Defaults to `30m`.
-- `containerfile` (String) The content of the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile_path`.
-- `containerfile_path` (String) Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`.
+- `containerfile` (String) The content of the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile_path`. Updating this value triggers a new build revision.
+- `containerfile_path` (String) Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`. Updating this value triggers a new build revision.
 - `project_id` (String) The ID of the project to associate this container image with.
 
 ### Read-Only
 
-- `build_id` (String) The unique identifier of the build.
+- `build_id` (String) The unique identifier of the build. Changes when a new build is created.
 - `build_status` (String) The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).
-- `created_at` (String) Timestamp when the build was created.
+- `created_at` (String) Timestamp when the build was created. Changes when a new build is created.
 - `id` (String) The unique identifier of the cluster environment.
 - `image_uri` (String) The URI of the built container image.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
 - `ray_version` (String) The Ray version used in the build.
-- `revision` (Number) The revision number of the container image build.
+- `revision` (Number) The revision number of the container image build. Increments with each new build.
