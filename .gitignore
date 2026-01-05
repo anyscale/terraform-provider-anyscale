@@ -2,6 +2,9 @@
 terraform-provider-anyscale
 build/
 
+# GoReleaser artifacts
+dist/
+
 # Go build artifacts
 *.exe
 *.exe~

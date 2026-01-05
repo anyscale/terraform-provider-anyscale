@@ -381,15 +381,86 @@ version-check: ## Check if version is set correctly (useful for CI)
 	@echo "Version check passed: $(VERSION)"
 
 # ============================================================================
-# RELEASE (placeholder for future CI/CD)
+# RELEASE
 # ============================================================================
 
-.PHONY: release-snapshot
-release-snapshot: ## Create a snapshot release (requires goreleaser)
-	@echo "==> Creating snapshot release..."
-	@if command -v goreleaser >/dev/null 2>&1; then \
-		goreleaser release --snapshot --clean; \
+GORELEASER := goreleaser
+
+.PHONY: release-check
+release-check: ## Validate goreleaser configuration
+	@echo "==> Validating goreleaser configuration..."
+	@if command -v $(GORELEASER) >/dev/null 2>&1; then \
+		$(GORELEASER) check; \
 	else \
 		echo "goreleaser not installed. Install with: brew install goreleaser"; \
 		exit 1; \
 	fi
+
+.PHONY: release-snapshot
+release-snapshot: ## Create a snapshot release (no publish, no tag required)
+	@echo "==> Creating snapshot release..."
+	@if command -v $(GORELEASER) >/dev/null 2>&1; then \
+		$(GORELEASER) release --snapshot --clean; \
+	else \
+		echo "goreleaser not installed. Install with: brew install goreleaser"; \
+		exit 1; \
+	fi
+
+.PHONY: release-dry-run
+release-dry-run: ## Dry run release (validate everything without publishing)
+	@echo "==> Running release dry-run..."
+	@if command -v $(GORELEASER) >/dev/null 2>&1; then \
+		$(GORELEASER) release --skip=publish --clean; \
+	else \
+		echo "goreleaser not installed. Install with: brew install goreleaser"; \
+		exit 1; \
+	fi
+
+.PHONY: release
+release: ## Create and publish a release (requires GPG_FINGERPRINT env var)
+	@echo "==> Creating release..."
+	@if [ -z "$(GPG_FINGERPRINT)" ]; then \
+		echo "ERROR: GPG_FINGERPRINT environment variable is required"; \
+		echo "Set it with: export GPG_FINGERPRINT=<your-gpg-key-fingerprint>"; \
+		echo "Find your fingerprint with: gpg --list-secret-keys --keyid-format=long"; \
+		exit 1; \
+	fi
+	@if command -v $(GORELEASER) >/dev/null 2>&1; then \
+		$(GORELEASER) release --clean; \
+	else \
+		echo "goreleaser not installed. Install with: brew install goreleaser"; \
+		exit 1; \
+	fi
+
+# ============================================================================
+# TAGGING HELPERS
+# ============================================================================
+
+.PHONY: tag
+tag: ## Create and push a release tag (usage: make tag VERSION=0.1.0)
+	@if [ -z "$(VERSION)" ] || [ "$(VERSION)" = "0.0.1" ]; then \
+		echo "ERROR: VERSION is required. Usage: make tag VERSION=0.1.0"; \
+		exit 1; \
+	fi
+	@echo "==> Creating tag v$(VERSION)..."
+	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
+	@echo "==> Pushing tag v$(VERSION)..."
+	git push origin "v$(VERSION)"
+	@echo "==> Tag v$(VERSION) created and pushed"
+
+.PHONY: tag-delete
+tag-delete: ## Delete a release tag locally and remotely (usage: make tag-delete VERSION=0.1.0)
+	@if [ -z "$(VERSION)" ] || [ "$(VERSION)" = "0.0.1" ]; then \
+		echo "ERROR: VERSION is required. Usage: make tag-delete VERSION=0.1.0"; \
+		exit 1; \
+	fi
+	@echo "==> Deleting tag v$(VERSION) locally..."
+	-git tag -d "v$(VERSION)"
+	@echo "==> Deleting tag v$(VERSION) remotely..."
+	-git push origin --delete "v$(VERSION)"
+	@echo "==> Tag v$(VERSION) deleted"
+
+.PHONY: tag-list
+tag-list: ## List all version tags
+	@echo "==> Version tags:"
+	@git tag -l "v*" --sort=-version:refname
