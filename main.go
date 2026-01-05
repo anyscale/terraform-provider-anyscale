@@ -5,13 +5,8 @@ import (
 	"flag"
 	"log"
 
-	"github.com/brent/terraform-provider-anyscale/internal/provider"
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
-)
-
-// Version information (set via ldflags)
-var (
-	version = "dev"
 )
 
 func main() {
@@ -28,7 +23,7 @@ func main() {
 		Debug:   debug,
 	}
 
-	err := providerserver.Serve(context.Background(), provider.NewFramework(version), opts)
+	err := providerserver.Serve(context.Background(), provider.NewFramework(provider.GetVersion()), opts)
 
 	if err != nil {
 		log.Fatal(err.Error())
