@@ -1,4 +1,4 @@
-module github.com/brent/terraform-provider-anyscale
+module github.com/anyscale/terraform-provider-anyscale
 
 go 1.24.0
 

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/brent/terraform-provider-anyscale/internal/provider"
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/brent/terraform-provider-anyscale/internal/provider"
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"

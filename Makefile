@@ -18,7 +18,7 @@ VERSION ?= $(if $(GIT_TAG),$(GIT_TAG),0.0.1)
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 # Set version in both main.version and provider.Version for compatibility
-LDFLAGS := -ldflags "-X main.version=$(VERSION) -X github.com/brent/terraform-provider-anyscale/internal/provider.Version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)"
+LDFLAGS := -ldflags "-X github.com/anyscale/terraform-provider-anyscale/internal/provider.Version=$(VERSION)"
 
 # Default target
 .DEFAULT_GOAL := help
