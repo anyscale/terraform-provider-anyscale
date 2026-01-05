@@ -16,7 +16,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version: "1.25"
 
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -45,4 +45,5 @@ jobs:
       - name: Test Acceptance
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+          ANYSCALE_TEST_CREATE_CLOUD: 1
         run: make testacc
