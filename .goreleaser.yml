@@ -1,0 +1,96 @@
+# GoReleaser configuration for terraform-provider-anyscale
+# This configuration is designed to publish to the Terraform Registry
+# See: https://goreleaser.com/customization/
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: terraform-provider-anyscale
+    env:
+      - CGO_ENABLED=0
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - "-s -w -X github.com/anyscale/terraform-provider-anyscale/internal/provider.Version={{ .Version }}"
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    goarm:
+      - "6"
+    ignore:
+      - goos: windows
+        goarch: arm
+      - goos: windows
+        goarch: arm64
+    binary: "{{ .ProjectName }}_v{{ .Version }}"
+
+archives:
+  - id: terraform-provider-anyscale
+    formats:
+      - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+
+signs:
+  - artifacts: checksum
+    args:
+      # If you are using this in a GitHub action, you need to configure GPG
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+release:
+  # GitHub release settings
+  github:
+    owner: anyscale
+    name: terraform-provider-anyscale
+  
+  # Draft releases allow you to review before publishing
+  draft: false
+  
+  # Mark as prerelease if the tag contains -rc, -beta, -alpha
+  prerelease: auto
+  
+  # Release name template
+  name_template: "{{ .ProjectName }} v{{ .Version }}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: "Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: "Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "Breaking Changes"
+      regexp: '^.*?!:.+$'
+      order: 2
+    - title: "Other Changes"
+      order: 999

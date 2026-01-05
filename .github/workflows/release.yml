@@ -1,0 +1,62 @@
+# Terraform Provider release workflow
+# This workflow creates releases for the Terraform Registry when a new tag is pushed.
+#
+# Prerequisites:
+# 1. Create a GPG key pair for signing releases
+# 2. Add the following secrets to your GitHub repository:
+#    - GPG_PRIVATE_KEY: The GPG private key (armor exported)
+#    - GPG_PASSPHRASE: The passphrase for the GPG key (if any)
+#    - GITHUB_TOKEN: Automatically provided by GitHub Actions
+#
+# To create a release:
+#   git tag -a v0.1.0 -m "Release v0.1.0"
+#   git push origin v0.1.0
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Restrict permissions for security
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Fetch full history for changelog generation
+          fetch-depth: 0
+
+      - name: Fetch all tags
+        run: git fetch --force --tags
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Import GPG key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          # GitHub token for creating releases
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GPG fingerprint for signing checksums
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
