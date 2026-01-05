@@ -47,13 +47,20 @@ var (
 //
 // The result is cached after the first successful resolution.
 // Unlike sync.Once, this will retry on failure.
+// Cached values are validated to ensure the cloud still exists.
 func GetTestCloudID(t *testing.T) string {
 	cloudIDMutex.Lock()
 	defer cloudIDMutex.Unlock()
 
-	// Return cached value if available
+	// Return cached value if available and still valid
 	if cachedTestCloudID != "" {
-		return cachedTestCloudID
+		if validateCloudExists(cachedTestCloudID) {
+			return cachedTestCloudID
+		}
+		// Cached cloud no longer exists, clear cache and re-discover
+		t.Logf("Cached cloud ID %s no longer exists, clearing cache and re-discovering", cachedTestCloudID)
+		cachedTestCloudID = ""
+		cachedTestCloudName = ""
 	}
 
 	var cloudID string
@@ -98,13 +105,20 @@ func GetTestCloudID(t *testing.T) string {
 // 2. Auto-discover any available cloud and return its name
 //
 // This function ensures GetTestCloudID has been called first to populate the cache.
+// Cached values are validated to ensure the cloud still exists.
 func GetTestCloudName(t *testing.T) string {
 	cloudIDMutex.Lock()
 	defer cloudIDMutex.Unlock()
 
-	// If we have a cached name, return it
-	if cachedTestCloudName != "" {
-		return cachedTestCloudName
+	// If we have a cached name and ID, validate the cloud still exists
+	if cachedTestCloudName != "" && cachedTestCloudID != "" {
+		if validateCloudExists(cachedTestCloudID) {
+			return cachedTestCloudName
+		}
+		// Cached cloud no longer exists, clear cache and re-discover
+		t.Logf("Cached cloud %s (ID: %s) no longer exists, clearing cache and re-discovering", cachedTestCloudName, cachedTestCloudID)
+		cachedTestCloudID = ""
+		cachedTestCloudName = ""
 	}
 
 	// Priority 1: Explicit cloud name from environment (validate it exists)
@@ -132,6 +146,22 @@ func GetTestCloudName(t *testing.T) string {
 	cachedTestCloudID = cloudID
 	cachedTestCloudName = cloudName
 	return cachedTestCloudName
+}
+
+// validateCloudExists checks if a cloud with the given ID exists in the API
+func validateCloudExists(cloudID string) bool {
+	client, err := GetTestClient()
+	if err != nil {
+		return false
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	return resp.StatusCode == 200
 }
 
 // resolveCloudNameToID resolves a cloud name to its ID by querying the API
@@ -279,6 +309,21 @@ func cleanupEphemeralCloud(t *testing.T) {
 	if ephemeralCloudID == "" {
 		return
 	}
+
+	// Clear cached values if they reference this ephemeral cloud
+	// This prevents subsequent tests from using stale cache values
+	cloudIDMutex.Lock()
+	if cachedTestCloudID == ephemeralCloudID {
+		cachedTestCloudID = ""
+		cachedTestCloudName = ""
+	}
+	cloudIDMutex.Unlock()
+
+	anyCloudIDMutex.Lock()
+	if cachedAnyCloudID == ephemeralCloudID {
+		cachedAnyCloudID = ""
+	}
+	anyCloudIDMutex.Unlock()
 
 	t.Logf("Cleaning up ephemeral test cloud: %s (ID: %s)", ephemeralCloudName, ephemeralCloudID)
 
