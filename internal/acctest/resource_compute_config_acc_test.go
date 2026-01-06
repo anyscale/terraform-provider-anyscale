@@ -215,7 +215,7 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 		}
 
 		// Make API call to verify compute config exists
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/compute_templates/%s", configID), nil)
+		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/ext/v0/cluster_computes/%s", configID), nil)
 		if err != nil {
 			return fmt.Errorf("API request failed: %w", err)
 		}
