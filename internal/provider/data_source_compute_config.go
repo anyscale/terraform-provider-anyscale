@@ -229,7 +229,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/api/v2/compute_templates/%s", configID),
+		fmt.Sprintf("/ext/v0/cluster_computes/%s", configID),
 		nil,
 		http.StatusOK,
 	)
@@ -392,7 +392,7 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 		ctx,
 		d.client,
 		"POST",
-		"/api/v2/compute_templates/search",
+		"/ext/v0/cluster_computes/search",
 		searchBody,
 		http.StatusOK,
 	)
@@ -453,7 +453,7 @@ func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context
 		ctx,
 		d.client,
 		"POST",
-		"/api/v2/compute_templates/search",
+		"/ext/v0/cluster_computes/search",
 		searchBody,
 		http.StatusOK,
 	)

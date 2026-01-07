@@ -596,10 +596,10 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Creating compute config")
+	log.Printf("[DEBUG] POST /ext/v0/cluster_computes/ - Creating compute config")
 
 	apiResult, err := DoRequestAndParse[map[string]interface{}](
-		ctx, r.client, "POST", "/api/v2/compute_templates/", reqBody,
+		ctx, r.client, "POST", "/ext/v0/cluster_computes/", reqBody,
 		http.StatusOK, http.StatusCreated,
 	)
 	if err != nil {
@@ -660,7 +660,7 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 
 	// Make API call to get compute config
 	apiResult, err := DoRequestAndParse[map[string]interface{}](
-		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", lookupID), nil,
+		ctx, r.client, "GET", fmt.Sprintf("/ext/v0/cluster_computes/%s", lookupID), nil,
 		http.StatusOK, http.StatusNotFound,
 	)
 	if err != nil {
@@ -806,10 +806,10 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Creating new version of compute config")
+	log.Printf("[DEBUG] POST /ext/v0/cluster_computes/ - Creating new version of compute config")
 
 	apiResult, err := DoRequestAndParse[map[string]interface{}](
-		ctx, r.client, "POST", "/api/v2/compute_templates/", reqBody,
+		ctx, r.client, "POST", "/ext/v0/cluster_computes/", reqBody,
 		http.StatusOK, http.StatusCreated,
 	)
 	if err != nil {
@@ -871,19 +871,19 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 		configID = state.ID.ValueString()
 	}
 
-	log.Printf("[INFO] Archiving compute config: name=%s, config_id=%s", state.Name.ValueString(), configID)
+	log.Printf("[INFO] Deleting compute config: name=%s, config_id=%s", state.Name.ValueString(), configID)
 
-	// Make API call to archive compute config (compute templates are archived, not deleted)
+	// Make API call to delete compute config
 	_, err := DoRequestRaw(
-		ctx, r.client, "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", configID), nil,
+		ctx, r.client, "DELETE", fmt.Sprintf("/ext/v0/cluster_computes/%s", configID), nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 	)
 	if err != nil {
-		AddAPIError(&resp.Diagnostics, "archive compute config", err)
+		AddAPIError(&resp.Diagnostics, "delete compute config", err)
 		return
 	}
 
-	log.Printf("[INFO] Archived compute config successfully")
+	log.Printf("[INFO] Deleted compute config successfully")
 }
 
 func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
