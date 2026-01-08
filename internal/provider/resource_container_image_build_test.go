@@ -259,14 +259,14 @@ func TestContainerImageBuildModelMapping(t *testing.T) {
 		LatestBuildStatus: strPtr("succeeded"),
 	}
 
-	buildResult := BuildResult{
-		ID:                    "bld_789",
-		ApplicationTemplateID: "apptemp_123",
-		Status:                "succeeded",
-		RayVersion:            strPtr("2.9.0"),
-		DockerImageName:       strPtr("anyscale/my-custom-image:v1"),
-		CreatedAt:             "2024-01-01T00:00:00Z",
-		Revision:              3,
+	buildResult := ClusterEnvironmentBuildResult{
+		ID:                   "bld_789",
+		ClusterEnvironmentID: "apptemp_123",
+		Status:               "succeeded",
+		RayVersion:           strPtr("2.9.0"),
+		DockerImageName:      strPtr("anyscale/my-custom-image:v1"),
+		CreatedAt:            "2024-01-01T00:00:00Z",
+		Revision:             3,
 	}
 
 	// Map to model
@@ -380,11 +380,11 @@ func TestBuildErrorMessageHandling(t *testing.T) {
 // TestNullableFieldHandling tests handling of nullable fields in build response
 func TestNullableFieldHandling(t *testing.T) {
 	// Build without optional fields
-	build := BuildResult{
-		ID:                    "bld_123",
-		ApplicationTemplateID: "apptemp_456",
-		Status:                "succeeded",
-		CreatedAt:             "2024-01-01T00:00:00Z",
+	build := ClusterEnvironmentBuildResult{
+		ID:                   "bld_123",
+		ClusterEnvironmentID: "apptemp_456",
+		Status:               "succeeded",
+		CreatedAt:            "2024-01-01T00:00:00Z",
 		// Optional fields are nil
 		RayVersion:      nil,
 		DockerImageName: nil,
@@ -393,7 +393,7 @@ func TestNullableFieldHandling(t *testing.T) {
 
 	// Map to model - should handle nil values
 	model := ContainerImageBuildResourceModel{
-		ID:          types.StringValue(build.ApplicationTemplateID),
+		ID:          types.StringValue(build.ClusterEnvironmentID),
 		BuildID:     types.StringValue(build.ID),
 		BuildStatus: types.StringValue(build.Status),
 		CreatedAt:   types.StringValue(build.CreatedAt),

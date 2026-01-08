@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -207,46 +205,23 @@ func (d *ContainerImagesDataSource) Read(ctx context.Context, req datasource.Rea
 
 // Helper functions
 
-// fetchContainerImages fetches container images using GET /api/v2/application_templates/, handling pagination automatically.
-// Note: We use GET instead of POST /search because GET returns DecoratedApplicationTemplate with latest_build info.
+// fetchContainerImages fetches container images using POST /ext/v0/cluster_environments/search, handling pagination automatically.
 func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, query ClusterEnvironmentsSearchQuery) ([]ContainerImageSummaryModel, error) {
 	var allResults []ClusterEnvironmentResult
 
-	// Build query string for GET endpoint
-	baseURL := "/api/v2/application_templates/"
-	params := make([]string, 0)
-	params = append(params, fmt.Sprintf("count=%d", query.Paging.Count))
-
-	if query.Name != nil && query.Name.Contains != "" {
-		params = append(params, fmt.Sprintf("name_contains=%s", url.QueryEscape(query.Name.Contains)))
-	}
-	if query.CreatorID != nil && *query.CreatorID != "" {
-		params = append(params, fmt.Sprintf("creator_id=%s", url.QueryEscape(*query.CreatorID)))
-	}
-	if query.ProjectID != nil && *query.ProjectID != "" {
-		params = append(params, fmt.Sprintf("project_id=%s", url.QueryEscape(*query.ProjectID)))
-	}
-	if query.IncludeArchived {
-		params = append(params, "include_archived=true")
-	}
-
 	// Handle pagination
 	for {
-		queryString := baseURL
-		currentParams := params
-		if query.Paging.PagingToken != nil && *query.Paging.PagingToken != "" {
-			currentParams = append(currentParams, fmt.Sprintf("paging_token=%s", url.QueryEscape(*query.Paging.PagingToken)))
-		}
-		if len(currentParams) > 0 {
-			queryString = fmt.Sprintf("%s?%s", baseURL, strings.Join(currentParams, "&"))
+		reqBody, err := MarshalRequestBody(query)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal search query: %w", err)
 		}
 
 		listResp, err := DoRequestAndParse[ClusterEnvironmentsListResponse](
 			ctx,
 			d.client,
-			"GET",
-			queryString,
-			nil,
+			"POST",
+			"/ext/v0/cluster_environments/search",
+			reqBody,
 			http.StatusOK,
 		)
 		if err != nil {
@@ -332,13 +307,13 @@ func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, qu
 }
 
 // getBuild fetches build details by ID.
-func (d *ContainerImagesDataSource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
+func (d *ContainerImagesDataSource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[BuildResponse](
+	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/api/v2/builds/%s", buildID),
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,

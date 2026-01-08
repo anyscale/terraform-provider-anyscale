@@ -461,19 +461,55 @@ type DetachMachinePoolFromCloudResponse struct {
 	Result struct{} `json:"result"`
 }
 
-// Container Image / Cluster Environment API Models
+// Container Image / Cluster Environment API Models (/ext/v0)
 
 // CreateClusterEnvironmentRequest is the request body for creating a cluster environment
+// POST /ext/v0/cluster_environments/
 type CreateClusterEnvironmentRequest struct {
 	Name          string  `json:"name"`
 	Containerfile string  `json:"containerfile,omitempty"`
 	ProjectID     *string `json:"project_id,omitempty"`
 }
 
-// CreateBuildRequest is the request body for creating a new build for an existing cluster environment
-type CreateBuildRequest struct {
-	ApplicationTemplateID string `json:"application_template_id"`
-	Containerfile         string `json:"containerfile"`
+// CreateClusterEnvironmentBuildRequest is the request body for creating a new build for an existing cluster environment
+// POST /ext/v0/cluster_environment_builds/
+type CreateClusterEnvironmentBuildRequest struct {
+	ClusterEnvironmentID string  `json:"cluster_environment_id"`
+	Containerfile        string  `json:"containerfile,omitempty"`
+	DockerImageName      *string `json:"docker_image_name,omitempty"`
+	RegistryLoginSecret  *string `json:"registry_login_secret,omitempty"`
+	RayVersion           *string `json:"ray_version,omitempty"`
+}
+
+// CreateBYODClusterEnvironmentRequest is the request body for creating a BYOD cluster environment
+// POST /ext/v0/cluster_environments/byod
+type CreateBYODClusterEnvironmentRequest struct {
+	Name       string                                 `json:"name"`
+	ConfigJSON CreateBYODClusterEnvironmentConfigJSON `json:"config_json"`
+	Anonymous  bool                                   `json:"anonymous,omitempty"`
+}
+
+// CreateBYODClusterEnvironmentConfigJSON is the config_json for BYOD cluster environment creation
+type CreateBYODClusterEnvironmentConfigJSON struct {
+	DockerImage         string            `json:"docker_image"`
+	RayVersion          string            `json:"ray_version"`
+	EnvVars             map[string]string `json:"env_vars,omitempty"`
+	RegistryLoginSecret *string           `json:"registry_login_secret,omitempty"`
+}
+
+// CreateBYODClusterEnvironmentBuildRequest is the request body for creating a BYOD build
+// POST /ext/v0/cluster_environment_builds/byod
+type CreateBYODClusterEnvironmentBuildRequest struct {
+	ClusterEnvironmentID string                        `json:"cluster_environment_id"`
+	ConfigJSON           CreateBYODAppConfigConfigJSON `json:"config_json"`
+}
+
+// CreateBYODAppConfigConfigJSON is the config_json for BYOD build creation
+type CreateBYODAppConfigConfigJSON struct {
+	DockerImage         string            `json:"docker_image"`
+	RayVersion          string            `json:"ray_version"`
+	EnvVars             map[string]string `json:"env_vars,omitempty"`
+	RegistryLoginSecret *string           `json:"registry_login_secret,omitempty"`
 }
 
 // ClusterEnvironmentResponse represents a single cluster environment from the API
@@ -490,7 +526,7 @@ type ClusterEnvironmentsListResponse struct {
 	} `json:"metadata"`
 }
 
-// ClusterEnvironmentResult represents a cluster environment (App Config) from the API
+// ClusterEnvironmentResult represents a cluster environment from the API
 type ClusterEnvironmentResult struct {
 	ID             string           `json:"id"`
 	Name           string           `json:"name"`
@@ -513,48 +549,48 @@ type LatestBuildInfo struct {
 	Status   string `json:"status"`
 }
 
-// GetOrCreateBuildFromImageURIRequest is the request body for registering an external Docker image
-type GetOrCreateBuildFromImageURIRequest struct {
-	ImageURI            string  `json:"image_uri"`
-	ClusterEnvName      *string `json:"cluster_env_name,omitempty"`
-	RayVersion          *string `json:"ray_version,omitempty"`
-	RegistryLoginSecret *string `json:"registry_login_secret,omitempty"`
+// ClusterEnvironmentBuildResponse represents a single cluster environment build from the API
+// GET /ext/v0/cluster_environment_builds/{id}
+type ClusterEnvironmentBuildResponse struct {
+	Result ClusterEnvironmentBuildResult `json:"result"`
 }
 
-// BuildResponse represents a single build from the API
-type BuildResponse struct {
-	Result BuildResult `json:"result"`
+// ClusterEnvironmentBuildOperationResponse represents the response from creating a build (async operation)
+// POST /ext/v0/cluster_environment_builds/
+type ClusterEnvironmentBuildOperationResponse struct {
+	Result ClusterEnvironmentBuildResult `json:"result"`
 }
 
-// BuildsListResponse represents the response from listing builds
-type BuildsListResponse struct {
-	Results  []BuildResult `json:"results"`
+// ClusterEnvironmentBuildsListResponse represents the response from listing builds
+// GET /ext/v0/cluster_environment_builds/?cluster_environment_id=...
+type ClusterEnvironmentBuildsListResponse struct {
+	Results  []ClusterEnvironmentBuildResult `json:"results"`
 	Metadata struct {
 		Total           int     `json:"total"`
 		NextPagingToken *string `json:"next_paging_token"`
 	} `json:"metadata"`
 }
 
-// BuildResult represents a build from the API
-type BuildResult struct {
-	ID                    string  `json:"id"`
-	ApplicationTemplateID string  `json:"application_template_id"`
-	Containerfile         *string `json:"containerfile,omitempty"`
-	DockerImageName       *string `json:"docker_image_name,omitempty"`
-	RegistryLoginSecret   *string `json:"registry_login_secret,omitempty"`
-	RayVersion            *string `json:"ray_version,omitempty"`
-	Revision              int     `json:"revision"`
-	CreatorID             string  `json:"creator_id"`
-	ErrorMessage          *string `json:"error_message,omitempty"`
-	Status                string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, cancelled
-	CreatedAt             string  `json:"created_at"`
-	LastModifiedAt        string  `json:"last_modified_at"`
-	IsBYOD                bool    `json:"is_byod"`
-	CloudID               *string `json:"cloud_id,omitempty"`
-	Digest                *string `json:"digest,omitempty"`
+// ClusterEnvironmentBuildResult represents a cluster environment build from the API
+type ClusterEnvironmentBuildResult struct {
+	ID                   string  `json:"id"`
+	ClusterEnvironmentID string  `json:"cluster_environment_id"`
+	Containerfile        *string `json:"containerfile,omitempty"`
+	DockerImageName      *string `json:"docker_image_name,omitempty"`
+	RegistryLoginSecret  *string `json:"registry_login_secret,omitempty"`
+	RayVersion           *string `json:"ray_version,omitempty"`
+	Revision             int     `json:"revision"`
+	CreatorID            string  `json:"creator_id"`
+	ErrorMessage         *string `json:"error_message,omitempty"`
+	Status               string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, cancelled
+	CreatedAt            string  `json:"created_at"`
+	LastModifiedAt       string  `json:"last_modified_at"`
+	IsBYOD               bool    `json:"is_byod"`
+	CloudID              *string `json:"cloud_id,omitempty"`
+	Digest               *string `json:"digest,omitempty"`
 }
 
-// ClusterEnvironmentsSearchQuery is the request body for POST /api/v2/application_templates/search
+// ClusterEnvironmentsSearchQuery is the request body for POST /ext/v0/cluster_environments/search
 type ClusterEnvironmentsSearchQuery struct {
 	ProjectID        *string    `json:"project_id,omitempty"`
 	CreatorID        *string    `json:"creator_id,omitempty"`

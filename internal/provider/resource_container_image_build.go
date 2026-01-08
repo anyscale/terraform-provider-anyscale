@@ -223,7 +223,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		ctx,
 		r.client,
 		"POST",
-		"/api/v2/application_templates/",
+		"/ext/v0/cluster_environments/",
 		reqBody,
 		http.StatusOK,
 		http.StatusCreated,
@@ -319,7 +319,7 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/api/v2/application_templates/%s", clusterEnvID),
+		fmt.Sprintf("/ext/v0/cluster_environments/%s", clusterEnvID),
 		nil,
 		http.StatusOK,
 	)
@@ -360,11 +360,11 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 	// If we have a build ID, get build details
 	if buildID != "" {
 		// Note: The Anyscale API returns 201 for GET build endpoints
-		buildResp, err := DoRequestAndParse[BuildResponse](
+		buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
 			ctx,
 			r.client,
 			"GET",
-			fmt.Sprintf("/api/v2/builds/%s", buildID),
+			fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
 			nil,
 			http.StatusOK,
 			http.StatusCreated,
@@ -440,9 +440,9 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	clusterEnvID := state.ID.ValueString()
 
 	// Create a new build for the existing cluster environment
-	createBuildReq := CreateBuildRequest{
-		ApplicationTemplateID: clusterEnvID,
-		Containerfile:         containerfileContent,
+	createBuildReq := CreateClusterEnvironmentBuildRequest{
+		ClusterEnvironmentID: clusterEnvID,
+		Containerfile:        containerfileContent,
 	}
 
 	reqBody, err := MarshalRequestBody(createBuildReq)
@@ -452,11 +452,11 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	}
 
 	// POST to create new build
-	buildResp, err := DoRequestAndParse[BuildResponse](
+	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildOperationResponse](
 		ctx,
 		r.client,
 		"POST",
-		"/api/v2/builds/",
+		"/ext/v0/cluster_environment_builds/",
 		reqBody,
 		http.StatusOK,
 		http.StatusCreated,
@@ -532,11 +532,12 @@ func (r *ContainerImageBuildResource) Delete(ctx context.Context, req resource.D
 	})
 
 	// Archive the cluster environment
+	// Note: The /ext/v0 API doesn't have an archive endpoint, so we use DELETE
 	_, err := DoRequestRaw(
 		ctx,
 		r.client,
-		"POST",
-		fmt.Sprintf("/api/v2/application_templates/%s/archive", clusterEnvID),
+		"DELETE",
+		fmt.Sprintf("/ext/v0/cluster_environments/%s", clusterEnvID),
 		nil,
 		http.StatusOK,
 		http.StatusNoContent,
@@ -614,11 +615,11 @@ func (r *ContainerImageBuildResource) parseTimeout(timeoutStr string) (time.Dura
 // getLatestBuildID fetches the latest build ID for a cluster environment.
 func (r *ContainerImageBuildResource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
 	// List builds for this cluster environment
-	buildsResp, err := DoRequestAndParse[BuildsListResponse](
+	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/api/v2/builds?application_template_id=%s&count=1", clusterEnvID),
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,
@@ -635,7 +636,7 @@ func (r *ContainerImageBuildResource) getLatestBuildID(ctx context.Context, clus
 }
 
 // waitForBuild polls the build status until it reaches a terminal state.
-func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID string, timeout time.Duration) (*BuildResult, error) {
+func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID string, timeout time.Duration) (*ClusterEnvironmentBuildResult, error) {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
@@ -678,13 +679,13 @@ func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID 
 }
 
 // getBuild fetches the current build details.
-func (r *ContainerImageBuildResource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
+func (r *ContainerImageBuildResource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[BuildResponse](
+	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/api/v2/builds/%s", buildID),
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,

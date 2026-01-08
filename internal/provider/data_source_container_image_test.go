@@ -130,7 +130,7 @@ func TestContainerImageDataSourceModelMapping(t *testing.T) {
 		LatestBuildStatus: strPtr("succeeded"),
 	}
 
-	build := BuildResult{
+	build := ClusterEnvironmentBuildResult{
 		ID:              "bld_789",
 		Status:          "succeeded",
 		RayVersion:      strPtr("2.9.0"),
@@ -297,7 +297,7 @@ func TestContainerImageDataSourceBYODvsBuilt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			build := BuildResult{
+			build := ClusterEnvironmentBuildResult{
 				ID:     "bld_123",
 				IsBYOD: tt.isBYOD,
 			}

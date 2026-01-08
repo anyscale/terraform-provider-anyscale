@@ -125,7 +125,7 @@ func TestContainerImageSummaryModelMapping(t *testing.T) {
 		LatestBuildStatus: strPtr("succeeded"),
 	}
 
-	build := BuildResult{
+	build := ClusterEnvironmentBuildResult{
 		ID:       "bld_789",
 		Revision: 5,
 	}
