@@ -316,6 +316,7 @@ func (d *ContainerImagesDataSource) getBuild(ctx context.Context, buildID string
 
 // getLatestBuildID fetches the latest build ID for a cluster environment.
 func (d *ContainerImagesDataSource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
+	// Note: The Anyscale API may return 201 for GET build endpoints
 	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
 		ctx,
 		d.client,
@@ -323,6 +324,7 @@ func (d *ContainerImagesDataSource) getLatestBuildID(ctx context.Context, cluste
 		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
 		nil,
 		http.StatusOK,
+		http.StatusCreated,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to list builds for cluster environment %s: %w", clusterEnvID, err)
