@@ -244,17 +244,11 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 	// Set the cluster environment ID immediately
 	plan.ID = types.StringValue(clusterEnvID)
 
-	// Get the build ID - it may be in latest_build_id or we need to list builds
-	var buildID string
-	if result.LatestBuildID != nil && *result.LatestBuildID != "" {
-		buildID = *result.LatestBuildID
-	} else {
-		// If not in response, list builds for this cluster environment
-		buildID, err = r.getLatestBuildID(ctx, clusterEnvID)
-		if err != nil {
-			AddAPIError(&resp.Diagnostics, "get build ID", err)
-			return
-		}
+	// Get the build ID by listing builds for this cluster environment
+	buildID, err := r.getLatestBuildID(ctx, clusterEnvID)
+	if err != nil {
+		AddAPIError(&resp.Diagnostics, "get build ID", err)
+		return
 	}
 
 	tflog.Debug(ctx, "Found build ID", map[string]any{
@@ -337,7 +331,7 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 	result := clusterEnvResp.Result
 
 	// Check if archived
-	if result.IsArchived {
+	if result.IsArchived() {
 		tflog.Warn(ctx, "Cluster environment is archived, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
 		resp.State.RemoveResource(ctx)
 		return
@@ -346,15 +340,19 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 	// Update name from cluster environment (important for import)
 	state.Name = types.StringValue(result.Name)
 
-	// Get the build ID from nested latest_build object or state
+	// Get the build ID from state or by listing builds
 	var buildID string
-	if result.LatestBuild != nil && result.LatestBuild.ID != "" {
-		buildID = result.LatestBuild.ID
-	} else if result.LatestBuildID != nil && *result.LatestBuildID != "" {
-		// Legacy fallback for list endpoint
-		buildID = *result.LatestBuildID
-	} else if !state.BuildID.IsNull() {
+	if !state.BuildID.IsNull() {
 		buildID = state.BuildID.ValueString()
+	} else {
+		// List builds to get the latest
+		buildID, err = r.getLatestBuildID(ctx, clusterEnvID)
+		if err != nil {
+			tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
+				"cluster_environment_id": clusterEnvID,
+				"error":                  err.Error(),
+			})
+		}
 	}
 
 	// If we have a build ID, get build details

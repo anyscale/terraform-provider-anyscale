@@ -70,30 +70,32 @@ func TestContainerImageDataSourceLookupValidation(t *testing.T) {
 // TestContainerImageDataSourceNameResolutionLogic tests name resolution with multiple matching images
 func TestContainerImageDataSourceNameResolutionLogic(t *testing.T) {
 	// Simulate API response with multiple cluster environments having the same name
+	// Using DeletedAt to control IsArchived() behavior
+	deletedAt := "2024-01-03T00:00:00Z"
 	clusterEnvs := []ClusterEnvironmentResult{
 		{
-			ID:         "apptemp_123",
-			Name:       "test-image",
-			CreatedAt:  "2024-01-01T00:00:00Z",
-			IsArchived: false,
+			ID:        "apptemp_123",
+			Name:      "test-image",
+			CreatedAt: "2024-01-01T00:00:00Z",
+			DeletedAt: nil, // Not archived
 		},
 		{
-			ID:         "apptemp_456",
-			Name:       "test-image",
-			CreatedAt:  "2024-01-02T00:00:00Z", // More recent
-			IsArchived: false,
+			ID:        "apptemp_456",
+			Name:      "test-image",
+			CreatedAt: "2024-01-02T00:00:00Z", // More recent
+			DeletedAt: nil,                    // Not archived
 		},
 		{
-			ID:         "apptemp_789",
-			Name:       "test-image",
-			CreatedAt:  "2024-01-03T00:00:00Z",
-			IsArchived: true, // Archived - should be filtered out
+			ID:        "apptemp_789",
+			Name:      "test-image",
+			CreatedAt: "2024-01-03T00:00:00Z",
+			DeletedAt: &deletedAt, // Archived - should be filtered out
 		},
 		{
-			ID:         "apptemp_abc",
-			Name:       "other-image",
-			CreatedAt:  "2024-01-04T00:00:00Z",
-			IsArchived: false,
+			ID:        "apptemp_abc",
+			Name:      "other-image",
+			CreatedAt: "2024-01-04T00:00:00Z",
+			DeletedAt: nil, // Not archived
 		},
 	}
 
@@ -102,7 +104,7 @@ func TestContainerImageDataSourceNameResolutionLogic(t *testing.T) {
 	// Simulate resolution logic - find exact matches that are not archived
 	var matches []ClusterEnvironmentResult
 	for _, env := range clusterEnvs {
-		if env.Name == targetName && !env.IsArchived {
+		if env.Name == targetName && !env.IsArchived() {
 			matches = append(matches, env)
 		}
 	}
@@ -120,14 +122,13 @@ func TestContainerImageDataSourceNameResolutionLogic(t *testing.T) {
 
 // TestContainerImageDataSourceModelMapping tests mapping of API response to model
 func TestContainerImageDataSourceModelMapping(t *testing.T) {
-	// Simulate API response
+	// Simulate API response - note: LatestBuildID/LatestBuildStatus are no longer in the model
+	// Build info is fetched separately via listing builds
 	clusterEnv := ClusterEnvironmentResult{
-		ID:                "apptemp_123",
-		Name:              "my-custom-image",
-		CreatorID:         "user_456",
-		CreatedAt:         "2024-01-01T00:00:00Z",
-		LatestBuildID:     strPtr("bld_789"),
-		LatestBuildStatus: strPtr("succeeded"),
+		ID:        "apptemp_123",
+		Name:      "my-custom-image",
+		CreatorID: "user_456",
+		CreatedAt: "2024-01-01T00:00:00Z",
 	}
 
 	build := ClusterEnvironmentBuildResult{
@@ -191,23 +192,24 @@ func TestContainerImageDataSourceModelMapping(t *testing.T) {
 
 // TestContainerImageDataSourceArchivedFiltering tests that archived images are filtered out
 func TestContainerImageDataSourceArchivedFiltering(t *testing.T) {
+	deletedAt := "2024-01-01T00:00:00Z"
 	clusterEnvs := []ClusterEnvironmentResult{
 		{
-			ID:         "apptemp_123",
-			Name:       "my-image",
-			IsArchived: true, // Should be filtered out
+			ID:        "apptemp_123",
+			Name:      "my-image",
+			DeletedAt: &deletedAt, // Archived - should be filtered out
 		},
 		{
-			ID:         "apptemp_456",
-			Name:       "my-image",
-			IsArchived: false, // Should be included
+			ID:        "apptemp_456",
+			Name:      "my-image",
+			DeletedAt: nil, // Not archived - should be included
 		},
 	}
 
-	// Filter out archived
+	// Filter out archived using IsArchived() method
 	var active []ClusterEnvironmentResult
 	for _, env := range clusterEnvs {
-		if !env.IsArchived {
+		if !env.IsArchived() {
 			active = append(active, env)
 		}
 	}
@@ -223,15 +225,16 @@ func TestContainerImageDataSourceArchivedFiltering(t *testing.T) {
 
 // TestContainerImageDataSourceNullBuildHandling tests handling when no build exists
 func TestContainerImageDataSourceNullBuildHandling(t *testing.T) {
-	// Cluster environment without a build
+	// Cluster environment without a build (no builds returned from listing)
 	clusterEnv := ClusterEnvironmentResult{
-		ID:                "apptemp_123",
-		Name:              "empty-image",
-		CreatorID:         "user_456",
-		CreatedAt:         "2024-01-01T00:00:00Z",
-		LatestBuildID:     nil,
-		LatestBuildStatus: nil,
+		ID:        "apptemp_123",
+		Name:      "empty-image",
+		CreatorID: "user_456",
+		CreatedAt: "2024-01-01T00:00:00Z",
 	}
+
+	// Simulate: no builds found when listing builds
+	var buildID string // empty string means no builds found
 
 	// Map to model - should handle nil build
 	model := ContainerImageDataSourceModel{
@@ -242,7 +245,7 @@ func TestContainerImageDataSourceNullBuildHandling(t *testing.T) {
 	}
 
 	// Set build-related fields to null when no build exists
-	if clusterEnv.LatestBuildID == nil {
+	if buildID == "" {
 		model.BuildID = types.StringNull()
 		model.BuildStatus = types.StringNull()
 		model.ImageURI = types.StringNull()
@@ -254,10 +257,10 @@ func TestContainerImageDataSourceNullBuildHandling(t *testing.T) {
 
 	// Verify null handling
 	if !model.BuildID.IsNull() {
-		t.Error("BuildID should be null when LatestBuildID is nil")
+		t.Error("BuildID should be null when no builds found")
 	}
 	if !model.BuildStatus.IsNull() {
-		t.Error("BuildStatus should be null when LatestBuildID is nil")
+		t.Error("BuildStatus should be null when no builds found")
 	}
 	if !model.ImageURI.IsNull() {
 		t.Error("ImageURI should be null when no build exists")
@@ -333,48 +336,49 @@ func TestContainerImageDataSourceIDLookupPriority(t *testing.T) {
 	if lookupMethod != "by_id" {
 		t.Errorf("lookupMethod = %v, want 'by_id'", lookupMethod)
 	}
+
+	// Ensure hasName is used to avoid compiler warning
+	if !hasName {
+		t.Log("Name not provided, but that's fine for this test")
+	}
 }
 
-// TestClusterEnvironmentResultLatestBuild tests extraction of latest build info
-func TestClusterEnvironmentResultLatestBuild(t *testing.T) {
+// TestClusterEnvironmentResultIsArchived tests the IsArchived() method
+func TestClusterEnvironmentResultIsArchived(t *testing.T) {
+	deletedAt := "2024-01-01T00:00:00Z"
+	emptyDeletedAt := ""
+
 	tests := []struct {
-		name          string
-		latestBuildID *string
-		latestStatus  *string
-		hasBuild      bool
+		name       string
+		deletedAt  *string
+		isArchived bool
 	}{
 		{
-			name:          "with latest build",
-			latestBuildID: strPtr("bld_123"),
-			latestStatus:  strPtr("succeeded"),
-			hasBuild:      true,
+			name:       "nil DeletedAt - not archived",
+			deletedAt:  nil,
+			isArchived: false,
 		},
 		{
-			name:          "without latest build",
-			latestBuildID: nil,
-			latestStatus:  nil,
-			hasBuild:      false,
+			name:       "empty DeletedAt - not archived",
+			deletedAt:  &emptyDeletedAt,
+			isArchived: false,
 		},
 		{
-			name:          "with empty build ID",
-			latestBuildID: strPtr(""),
-			latestStatus:  strPtr(""),
-			hasBuild:      false,
+			name:       "non-empty DeletedAt - archived",
+			deletedAt:  &deletedAt,
+			isArchived: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ClusterEnvironmentResult{
-				ID:                "apptemp_123",
-				LatestBuildID:     tt.latestBuildID,
-				LatestBuildStatus: tt.latestStatus,
+				ID:        "apptemp_123",
+				DeletedAt: tt.deletedAt,
 			}
 
-			hasBuild := result.LatestBuildID != nil && *result.LatestBuildID != ""
-
-			if hasBuild != tt.hasBuild {
-				t.Errorf("hasBuild = %v, want %v", hasBuild, tt.hasBuild)
+			if result.IsArchived() != tt.isArchived {
+				t.Errorf("IsArchived() = %v, want %v", result.IsArchived(), tt.isArchived)
 			}
 		})
 	}

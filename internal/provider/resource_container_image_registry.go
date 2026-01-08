@@ -250,33 +250,25 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		"name":                   clusterEnvName,
 	})
 
-	// Get the build ID from the cluster environment
-	var buildID string
-	if clusterEnvResp.Result.LatestBuild != nil && clusterEnvResp.Result.LatestBuild.ID != "" {
-		buildID = clusterEnvResp.Result.LatestBuild.ID
-	} else if clusterEnvResp.Result.LatestBuildID != nil && *clusterEnvResp.Result.LatestBuildID != "" {
-		buildID = *clusterEnvResp.Result.LatestBuildID
-	} else {
-		// List builds for this cluster environment to get the latest
-		buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
-			ctx,
-			r.client,
-			"GET",
-			fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
-			nil,
-			http.StatusOK,
-			http.StatusCreated,
-		)
-		if err != nil {
-			AddAPIError(&resp.Diagnostics, "get build ID", err)
-			return
-		}
-		if len(buildsResp.Results) == 0 {
-			AddAPIError(&resp.Diagnostics, "get build ID", fmt.Errorf("no builds found for cluster environment"))
-			return
-		}
-		buildID = buildsResp.Results[0].ID
+	// Get the build ID by listing builds for this cluster environment
+	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
+		nil,
+		http.StatusOK,
+		http.StatusCreated,
+	)
+	if err != nil {
+		AddAPIError(&resp.Diagnostics, "get build ID", err)
+		return
 	}
+	if len(buildsResp.Results) == 0 {
+		AddAPIError(&resp.Diagnostics, "get build ID", fmt.Errorf("no builds found for cluster environment"))
+		return
+	}
+	buildID := buildsResp.Results[0].ID
 
 	// Get build details
 	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](

@@ -250,13 +250,13 @@ func TestBuildStatusTerminalCheck(t *testing.T) {
 // TestContainerImageBuildModelMapping tests mapping of API response to model
 func TestContainerImageBuildModelMapping(t *testing.T) {
 	// Simulate API responses
+	// Note: LatestBuildID/LatestBuildStatus are no longer in ClusterEnvironmentResult
+	// Build info is fetched separately via listing builds
 	clusterEnvResult := ClusterEnvironmentResult{
-		ID:                "apptemp_123",
-		Name:              "my-custom-image",
-		CreatorID:         "user_456",
-		CreatedAt:         "2024-01-01T00:00:00Z",
-		LatestBuildID:     strPtr("bld_789"),
-		LatestBuildStatus: strPtr("succeeded"),
+		ID:        "apptemp_123",
+		Name:      "my-custom-image",
+		CreatorID: "user_456",
+		CreatedAt: "2024-01-01T00:00:00Z",
 	}
 
 	buildResult := ClusterEnvironmentBuildResult{

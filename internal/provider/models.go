@@ -527,26 +527,23 @@ type ClusterEnvironmentsListResponse struct {
 }
 
 // ClusterEnvironmentResult represents a cluster environment from the API
+// Matches the /ext/v0/cluster_environments/ endpoint response
 type ClusterEnvironmentResult struct {
-	ID             string           `json:"id"`
-	Name           string           `json:"name"`
-	ProjectID      *string          `json:"project_id,omitempty"`
-	CreatorID      string           `json:"creator_id"`
-	CreatedAt      string           `json:"created_at"`
-	LastModifiedAt string           `json:"last_modified_at,omitempty"`
-	IsArchived     bool             `json:"is_archived"`
-	IsAnonymous    bool             `json:"is_anonymous"`
-	LatestBuild    *LatestBuildInfo `json:"latest_build,omitempty"`
-	// Legacy fields for compatibility with list endpoint
-	LatestBuildID     *string `json:"latest_build_id,omitempty"`
-	LatestBuildStatus *string `json:"latest_build_status,omitempty"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	ProjectID      *string `json:"project_id,omitempty"`
+	OrganizationID string  `json:"organization_id,omitempty"`
+	CreatorID      string  `json:"creator_id"`
+	CreatedAt      string  `json:"created_at"`
+	LastModifiedAt string  `json:"last_modified_at,omitempty"`
+	DeletedAt      *string `json:"deleted_at,omitempty"`
+	Anonymous      bool    `json:"anonymous"`
+	IsDefault      bool    `json:"is_default"`
 }
 
-// LatestBuildInfo represents the nested latest_build object in the cluster environment response
-type LatestBuildInfo struct {
-	ID       string `json:"id"`
-	Revision int    `json:"revision"`
-	Status   string `json:"status"`
+// IsArchived returns true if the cluster environment has been deleted/archived
+func (c *ClusterEnvironmentResult) IsArchived() bool {
+	return c.DeletedAt != nil && *c.DeletedAt != ""
 }
 
 // ClusterEnvironmentBuildResponse represents a single cluster environment build from the API

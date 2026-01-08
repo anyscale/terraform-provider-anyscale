@@ -168,24 +168,18 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 	config.CreatedAt = types.StringValue(clusterEnv.CreatedAt)
 	config.CreatorID = types.StringValue(clusterEnv.CreatorID)
 
-	// Get build ID from nested latest_build object or legacy field
-	var buildID string
-	if clusterEnv.LatestBuild != nil && clusterEnv.LatestBuild.ID != "" {
-		buildID = clusterEnv.LatestBuild.ID
-	} else if clusterEnv.LatestBuildID != nil && *clusterEnv.LatestBuildID != "" {
-		buildID = *clusterEnv.LatestBuildID
+	// Fetch the latest build for this cluster environment
+	buildID, err := d.getLatestBuildID(ctx, clusterEnv.ID)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
+			"cluster_environment_id": clusterEnv.ID,
+			"error":                  err.Error(),
+		})
 	}
 
 	// Get build details if available
 	if buildID != "" {
 		config.BuildID = types.StringValue(buildID)
-
-		// Set status from nested object if available
-		if clusterEnv.LatestBuild != nil {
-			config.BuildStatus = types.StringValue(clusterEnv.LatestBuild.Status)
-		} else if clusterEnv.LatestBuildStatus != nil {
-			config.BuildStatus = types.StringValue(*clusterEnv.LatestBuildStatus)
-		}
 
 		// Get full build details
 		build, err := d.getBuild(ctx, buildID)
@@ -285,7 +279,7 @@ func (d *ContainerImageDataSource) getClusterEnvironmentByName(ctx context.Conte
 	// Find exact match
 	var matches []ClusterEnvironmentResult
 	for _, env := range clusterEnvsResp.Results {
-		if env.Name == name && !env.IsArchived {
+		if env.Name == name && !env.IsArchived() {
 			matches = append(matches, env)
 		}
 	}
@@ -319,4 +313,27 @@ func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string)
 	}
 
 	return &buildResp.Result, nil
+}
+
+// getLatestBuildID fetches the latest build ID for a cluster environment.
+func (d *ContainerImageDataSource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
+	tflog.Debug(ctx, "Fetching latest build for cluster environment", map[string]any{"cluster_environment_id": clusterEnvID})
+
+	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
+		ctx,
+		d.client,
+		"GET",
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
+		nil,
+		http.StatusOK,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to list builds for cluster environment %s: %w", clusterEnvID, err)
+	}
+
+	if len(buildsResp.Results) == 0 {
+		return "", nil // No builds yet - not an error
+	}
+
+	return buildsResp.Results[0].ID, nil
 }
