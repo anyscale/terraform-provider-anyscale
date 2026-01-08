@@ -115,18 +115,19 @@ func TestContainerImagesDataSourceFilterConstruction(t *testing.T) {
 // TestContainerImageSummaryModelMapping tests mapping of API response to model
 func TestContainerImageSummaryModelMapping(t *testing.T) {
 	// Simulate API response
+	// Note: LatestBuildID/LatestBuildStatus are no longer in ClusterEnvironmentResult
+	// Build info is fetched separately via listing builds
 	clusterEnv := ClusterEnvironmentResult{
-		ID:                "apptemp_123",
-		Name:              "my-custom-image",
-		CreatorID:         "user_456",
-		CreatedAt:         "2024-01-01T00:00:00Z",
-		IsArchived:        false,
-		LatestBuildID:     strPtr("bld_789"),
-		LatestBuildStatus: strPtr("succeeded"),
+		ID:        "apptemp_123",
+		Name:      "my-custom-image",
+		CreatorID: "user_456",
+		CreatedAt: "2024-01-01T00:00:00Z",
+		DeletedAt: nil, // Not archived
 	}
 
-	build := BuildResult{
+	build := ClusterEnvironmentBuildResult{
 		ID:       "bld_789",
+		Status:   "succeeded",
 		Revision: 5,
 	}
 
@@ -136,9 +137,9 @@ func TestContainerImageSummaryModelMapping(t *testing.T) {
 		Name:              types.StringValue(clusterEnv.Name),
 		CreatorID:         types.StringValue(clusterEnv.CreatorID),
 		CreatedAt:         types.StringValue(clusterEnv.CreatedAt),
-		IsArchived:        types.BoolValue(clusterEnv.IsArchived),
-		LatestBuildID:     types.StringValue(*clusterEnv.LatestBuildID),
-		LatestBuildStatus: types.StringValue(*clusterEnv.LatestBuildStatus),
+		IsArchived:        types.BoolValue(clusterEnv.IsArchived()),
+		LatestBuildID:     types.StringValue(build.ID),
+		LatestBuildStatus: types.StringValue(build.Status),
 		Revision:          types.Int64Value(int64(build.Revision)),
 		NameVersion:       types.StringValue(fmt.Sprintf("%s:%d", clusterEnv.Name, build.Revision)),
 	}
@@ -172,16 +173,17 @@ func TestContainerImageSummaryModelMapping(t *testing.T) {
 
 // TestContainerImageSummaryNoBuild tests handling of images without builds
 func TestContainerImageSummaryNoBuild(t *testing.T) {
-	// Simulate cluster environment without a build
+	// Simulate cluster environment without a build (no builds returned from listing)
 	clusterEnv := ClusterEnvironmentResult{
-		ID:                "apptemp_123",
-		Name:              "empty-image",
-		CreatorID:         "user_456",
-		CreatedAt:         "2024-01-01T00:00:00Z",
-		IsArchived:        false,
-		LatestBuildID:     nil,
-		LatestBuildStatus: nil,
+		ID:        "apptemp_123",
+		Name:      "empty-image",
+		CreatorID: "user_456",
+		CreatedAt: "2024-01-01T00:00:00Z",
+		DeletedAt: nil, // Not archived
 	}
+
+	// Simulate: no builds found when listing builds
+	var buildID string // empty string means no builds found
 
 	// Map to summary model - should handle nil build
 	model := ContainerImageSummaryModel{
@@ -189,11 +191,11 @@ func TestContainerImageSummaryNoBuild(t *testing.T) {
 		Name:       types.StringValue(clusterEnv.Name),
 		CreatorID:  types.StringValue(clusterEnv.CreatorID),
 		CreatedAt:  types.StringValue(clusterEnv.CreatedAt),
-		IsArchived: types.BoolValue(clusterEnv.IsArchived),
+		IsArchived: types.BoolValue(clusterEnv.IsArchived()),
 	}
 
 	// Set build-related fields to null when no build exists
-	if clusterEnv.LatestBuildID == nil {
+	if buildID == "" {
 		model.LatestBuildID = types.StringNull()
 		model.LatestBuildStatus = types.StringNull()
 		model.Revision = types.Int64Null()
@@ -217,21 +219,22 @@ func TestContainerImageSummaryNoBuild(t *testing.T) {
 
 // TestContainerImagesArchivedFilter tests the archived filtering logic
 func TestContainerImagesArchivedFilter(t *testing.T) {
+	deletedAt := "2024-01-01T00:00:00Z"
 	clusterEnvs := []ClusterEnvironmentResult{
 		{
-			ID:         "apptemp_123",
-			Name:       "active-image",
-			IsArchived: false,
+			ID:        "apptemp_123",
+			Name:      "active-image",
+			DeletedAt: nil, // Not archived
 		},
 		{
-			ID:         "apptemp_456",
-			Name:       "archived-image",
-			IsArchived: true,
+			ID:        "apptemp_456",
+			Name:      "archived-image",
+			DeletedAt: &deletedAt, // Archived
 		},
 		{
-			ID:         "apptemp_789",
-			Name:       "another-active",
-			IsArchived: false,
+			ID:        "apptemp_789",
+			Name:      "another-active",
+			DeletedAt: nil, // Not archived
 		},
 	}
 
@@ -239,7 +242,7 @@ func TestContainerImagesArchivedFilter(t *testing.T) {
 	// when include_archived=false
 	var activeOnly []ClusterEnvironmentResult
 	for _, env := range clusterEnvs {
-		if !env.IsArchived {
+		if !env.IsArchived() {
 			activeOnly = append(activeOnly, env)
 		}
 	}

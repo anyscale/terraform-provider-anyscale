@@ -62,79 +62,61 @@ func TestImageURIValidation(t *testing.T) {
 	}
 }
 
-// TestGetOrCreateBuildFromImageURIRequestStructure tests the structure of the request
-func TestGetOrCreateBuildFromImageURIRequestStructure(t *testing.T) {
+// TestCreateBYODClusterEnvironmentRequestStructure tests the structure of the BYOD request
+func TestCreateBYODClusterEnvironmentRequestStructure(t *testing.T) {
 	tests := []struct {
 		name                string
-		imageURI            string
-		clusterEnvName      *string
-		rayVersion          *string
+		dockerImage         string
+		rayVersion          string
 		registryLoginSecret *string
 	}{
 		{
 			name:                "basic request",
-			imageURI:            "anyscale/ray:2.9.0-py310",
-			clusterEnvName:      nil,
-			rayVersion:          nil,
-			registryLoginSecret: nil,
-		},
-		{
-			name:                "with cluster env name",
-			imageURI:            "anyscale/ray:2.9.0-py310",
-			clusterEnvName:      strPtr("my-custom-image"),
-			rayVersion:          nil,
+			dockerImage:         "anyscale/ray:2.9.0-py310",
+			rayVersion:          "2.44.0",
 			registryLoginSecret: nil,
 		},
 		{
 			name:                "with ray version",
-			imageURI:            "myrepo/custom:latest",
-			clusterEnvName:      strPtr("my-image"),
-			rayVersion:          strPtr("2.9.0"),
+			dockerImage:         "myrepo/custom:latest",
+			rayVersion:          "2.9.0",
 			registryLoginSecret: nil,
 		},
 		{
 			name:                "with private registry",
-			imageURI:            "123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest",
-			clusterEnvName:      strPtr("ecr-image"),
-			rayVersion:          strPtr("2.9.0"),
+			dockerImage:         "123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest",
+			rayVersion:          "2.9.0",
 			registryLoginSecret: strPtr("my-ecr-secret"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := GetOrCreateBuildFromImageURIRequest{
-				ImageURI:            tt.imageURI,
-				ClusterEnvName:      tt.clusterEnvName,
+			configJSON := CreateBYODClusterEnvironmentConfigJSON{
+				DockerImage:         tt.dockerImage,
 				RayVersion:          tt.rayVersion,
 				RegistryLoginSecret: tt.registryLoginSecret,
 			}
 
-			if req.ImageURI != tt.imageURI {
-				t.Errorf("ImageURI = %v, want %v", req.ImageURI, tt.imageURI)
+			req := CreateBYODClusterEnvironmentRequest{
+				Name:       "test-image",
+				ConfigJSON: configJSON,
+				Anonymous:  false,
 			}
 
-			if tt.clusterEnvName != nil {
-				if req.ClusterEnvName == nil || *req.ClusterEnvName != *tt.clusterEnvName {
-					t.Errorf("ClusterEnvName = %v, want %v", req.ClusterEnvName, tt.clusterEnvName)
-				}
-			} else if req.ClusterEnvName != nil {
-				t.Error("ClusterEnvName should be nil")
+			if req.ConfigJSON.DockerImage != tt.dockerImage {
+				t.Errorf("DockerImage = %v, want %v", req.ConfigJSON.DockerImage, tt.dockerImage)
 			}
 
-			if tt.rayVersion != nil {
-				if req.RayVersion == nil || *req.RayVersion != *tt.rayVersion {
-					t.Errorf("RayVersion = %v, want %v", req.RayVersion, tt.rayVersion)
-				}
-			} else if req.RayVersion != nil {
-				t.Error("RayVersion should be nil")
+			if req.ConfigJSON.RayVersion != tt.rayVersion {
+				t.Errorf("RayVersion = %v, want %v", req.ConfigJSON.RayVersion, tt.rayVersion)
 			}
 
 			if tt.registryLoginSecret != nil {
-				if req.RegistryLoginSecret == nil || *req.RegistryLoginSecret != *tt.registryLoginSecret {
-					t.Errorf("RegistryLoginSecret = %v, want %v", req.RegistryLoginSecret, tt.registryLoginSecret)
+				if req.ConfigJSON.RegistryLoginSecret == nil || *req.ConfigJSON.RegistryLoginSecret != *tt.registryLoginSecret {
+					t.Errorf("RegistryLoginSecret = %v, want %v", req.ConfigJSON.RegistryLoginSecret, tt.registryLoginSecret)
 				}
-			} else if req.RegistryLoginSecret != nil {
+			} else if req.ConfigJSON.RegistryLoginSecret != nil {
 				t.Error("RegistryLoginSecret should be nil")
 			}
 		})
@@ -144,15 +126,15 @@ func TestGetOrCreateBuildFromImageURIRequestStructure(t *testing.T) {
 // TestContainerImageRegistryModelMapping tests mapping of API response to model
 func TestContainerImageRegistryModelMapping(t *testing.T) {
 	// Simulate API response for a registered BYOD image
-	buildResult := BuildResult{
-		ID:                    "bld_123",
-		ApplicationTemplateID: "apptemp_456",
-		Status:                "succeeded",
-		RayVersion:            strPtr("2.9.0"),
-		DockerImageName:       strPtr("anyscale/ray:2.9.0-py310"),
-		IsBYOD:                true,
-		CreatedAt:             "2024-01-01T00:00:00Z",
-		Revision:              1,
+	buildResult := ClusterEnvironmentBuildResult{
+		ID:                   "bld_123",
+		ClusterEnvironmentID: "apptemp_456",
+		Status:               "succeeded",
+		RayVersion:           strPtr("2.9.0"),
+		DockerImageName:      strPtr("anyscale/ray:2.9.0-py310"),
+		IsBYOD:               true,
+		CreatedAt:            "2024-01-01T00:00:00Z",
+		Revision:             1,
 	}
 
 	// Map to model
@@ -160,7 +142,7 @@ func TestContainerImageRegistryModelMapping(t *testing.T) {
 	model := ContainerImageRegistryResourceModel{
 		ID:                   types.StringValue(buildResult.ID),
 		BuildID:              types.StringValue(buildResult.ID),
-		ClusterEnvironmentID: types.StringValue(buildResult.ApplicationTemplateID),
+		ClusterEnvironmentID: types.StringValue(buildResult.ClusterEnvironmentID),
 		BuildStatus:          types.StringValue(buildResult.Status),
 		CreatedAt:            types.StringValue(buildResult.CreatedAt),
 		IsBYOD:               types.BoolValue(buildResult.IsBYOD),
@@ -274,7 +256,7 @@ func TestBuildResultToBuildIDMapping(t *testing.T) {
 	tests := []struct {
 		name             string
 		buildID          string
-		appTemplateID    string
+		clusterEnvID     string
 		wantResourceID   string
 		wantBuildID      string
 		wantClusterEnvID string
@@ -282,7 +264,7 @@ func TestBuildResultToBuildIDMapping(t *testing.T) {
 		{
 			name:             "standard IDs",
 			buildID:          "bld_abc123",
-			appTemplateID:    "apptemp_xyz789",
+			clusterEnvID:     "apptemp_xyz789",
 			wantResourceID:   "bld_abc123",
 			wantBuildID:      "bld_abc123",
 			wantClusterEnvID: "apptemp_xyz789",
@@ -291,15 +273,15 @@ func TestBuildResultToBuildIDMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := BuildResult{
-				ID:                    tt.buildID,
-				ApplicationTemplateID: tt.appTemplateID,
+			result := ClusterEnvironmentBuildResult{
+				ID:                   tt.buildID,
+				ClusterEnvironmentID: tt.clusterEnvID,
 			}
 
 			// Resource ID should be build ID for registry resources
 			resourceID := result.ID
 			buildID := result.ID
-			clusterEnvID := result.ApplicationTemplateID
+			clusterEnvID := result.ClusterEnvironmentID
 
 			if resourceID != tt.wantResourceID {
 				t.Errorf("resourceID = %v, want %v", resourceID, tt.wantResourceID)
@@ -318,7 +300,7 @@ func TestBuildResultToBuildIDMapping(t *testing.T) {
 func TestRegisteredImageBuildStatus(t *testing.T) {
 	// For registered images, the build status should typically be "succeeded"
 	// since there's no actual build process
-	result := BuildResult{
+	result := ClusterEnvironmentBuildResult{
 		ID:     "bld_123",
 		Status: "succeeded",
 		IsBYOD: true,

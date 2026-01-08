@@ -165,7 +165,7 @@ func testAccCheckContainerImageBuildExistsInAPI(resourceName string) resource.Te
 			return fmt.Errorf("failed to get test client: %w", err)
 		}
 
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/application_templates/%s", clusterEnvID), nil)
+		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/ext/v0/cluster_environments/%s", clusterEnvID), nil)
 		if err != nil {
 			return fmt.Errorf("failed to get cluster environment: %w", err)
 		}

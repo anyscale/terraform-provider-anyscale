@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -181,24 +182,41 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	// Build create request
-	createReq := GetOrCreateBuildFromImageURIRequest{
-		ImageURI: plan.ImageURI.ValueString(),
-	}
-
-	if !plan.Name.IsNull() {
-		name := plan.Name.ValueString()
-		createReq.ClusterEnvName = &name
-	}
-
+	// Determine the ray version - use provided value or default to "2.44.0"
+	rayVersion := "2.44.0"
 	if !plan.RayVersion.IsNull() {
-		rayVersion := plan.RayVersion.ValueString()
-		createReq.RayVersion = &rayVersion
+		rayVersion = plan.RayVersion.ValueString()
+	}
+
+	// Build BYOD cluster environment create request
+	configJSON := CreateBYODClusterEnvironmentConfigJSON{
+		DockerImage: plan.ImageURI.ValueString(),
+		RayVersion:  rayVersion,
 	}
 
 	if !plan.RegistryLoginSecret.IsNull() {
 		secret := plan.RegistryLoginSecret.ValueString()
-		createReq.RegistryLoginSecret = &secret
+		configJSON.RegistryLoginSecret = &secret
+	}
+
+	// Determine name - use provided value or generate a valid one from image URI
+	// Name must match pattern: ^[A-Za-z0-9._-]+$
+	var name string
+	if !plan.Name.IsNull() && plan.Name.ValueString() != "" {
+		name = plan.Name.ValueString()
+	} else {
+		// Sanitize image URI to create a valid name
+		// Replace invalid characters (/, :, @) with hyphens
+		// Add timestamp suffix to ensure uniqueness
+		baseName := sanitizeImageURIForName(plan.ImageURI.ValueString())
+		timestamp := time.Now().UnixNano()
+		name = fmt.Sprintf("%s-%d", baseName, timestamp)
+	}
+
+	createReq := CreateBYODClusterEnvironmentRequest{
+		Name:       name,
+		ConfigJSON: configJSON,
+		Anonymous:  false,
 	}
 
 	// Marshal request to JSON
@@ -208,17 +226,17 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	tflog.Debug(ctx, "Registering container image", map[string]any{
-		"image_uri": createReq.ImageURI,
-		"name":      createReq.ClusterEnvName,
+	tflog.Debug(ctx, "Registering container image via BYOD", map[string]any{
+		"image_uri": plan.ImageURI.ValueString(),
+		"name":      name,
 	})
 
-	// Register the image
-	buildResp, err := DoRequestAndParse[BuildResponse](
+	// Create BYOD cluster environment
+	clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
 		ctx,
 		r.client,
 		"POST",
-		"/api/v2/builds/get_or_create_build_from_image_uri",
+		"/ext/v0/cluster_environments/byod",
 		reqBody,
 		http.StatusOK,
 		http.StatusCreated,
@@ -228,39 +246,65 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		return
 	}
 
+	clusterEnvID := clusterEnvResp.Result.ID
+	clusterEnvName := clusterEnvResp.Result.Name
+
+	tflog.Info(ctx, "BYOD cluster environment created", map[string]any{
+		"cluster_environment_id": clusterEnvID,
+		"name":                   clusterEnvName,
+	})
+
+	// Get the build ID by listing builds for this cluster environment
+	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
+		nil,
+		http.StatusOK,
+		http.StatusCreated,
+	)
+	if err != nil {
+		AddAPIError(&resp.Diagnostics, "get build ID", err)
+		return
+	}
+	if len(buildsResp.Results) == 0 {
+		AddAPIError(&resp.Diagnostics, "get build ID", fmt.Errorf("no builds found for cluster environment"))
+		return
+	}
+	buildID := buildsResp.Results[0].ID
+
+	// Get build details
+	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
+		nil,
+		http.StatusOK,
+		http.StatusCreated,
+	)
+	if err != nil {
+		AddAPIError(&resp.Diagnostics, "get build details", err)
+		return
+	}
+
 	result := buildResp.Result
 	tflog.Info(ctx, "Container image registered successfully", map[string]any{
 		"build_id":               result.ID,
-		"cluster_environment_id": result.ApplicationTemplateID,
+		"cluster_environment_id": result.ClusterEnvironmentID,
 	})
 
 	// Map response to model
 	plan.ID = types.StringValue(result.ID)
 	plan.BuildID = types.StringValue(result.ID)
-	plan.ClusterEnvironmentID = types.StringValue(result.ApplicationTemplateID)
+	plan.ClusterEnvironmentID = types.StringValue(result.ClusterEnvironmentID)
 	plan.BuildStatus = types.StringValue(result.Status)
 	plan.CreatedAt = types.StringValue(result.CreatedAt)
 	plan.IsBYOD = types.BoolValue(result.IsBYOD)
 	plan.Revision = types.Int64Value(int64(result.Revision))
 
-	// Get cluster environment name for name_version
-	clusterEnvName := ""
-	if !plan.Name.IsNull() {
-		clusterEnvName = plan.Name.ValueString()
-	} else {
-		// Fetch the cluster environment to get its name
-		clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
-			ctx,
-			r.client,
-			"GET",
-			fmt.Sprintf("/api/v2/application_templates/%s", result.ApplicationTemplateID),
-			nil,
-			http.StatusOK,
-		)
-		if err == nil {
-			clusterEnvName = clusterEnvResp.Result.Name
-		}
-	}
+	// Set name_version
 	if clusterEnvName != "" {
 		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", clusterEnvName, result.Revision))
 	} else {
@@ -287,11 +331,11 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 
 	// Get build details
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[BuildResponse](
+	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/api/v2/builds/%s", buildID),
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,
@@ -311,7 +355,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 
 	// Update state
 	state.BuildID = types.StringValue(result.ID)
-	state.ClusterEnvironmentID = types.StringValue(result.ApplicationTemplateID)
+	state.ClusterEnvironmentID = types.StringValue(result.ClusterEnvironmentID)
 	state.BuildStatus = types.StringValue(result.Status)
 	state.CreatedAt = types.StringValue(result.CreatedAt)
 	state.IsBYOD = types.BoolValue(result.IsBYOD)
@@ -327,7 +371,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 			ctx,
 			r.client,
 			"GET",
-			fmt.Sprintf("/api/v2/application_templates/%s", result.ApplicationTemplateID),
+			fmt.Sprintf("/ext/v0/cluster_environments/%s", result.ClusterEnvironmentID),
 			nil,
 			http.StatusOK,
 		)
@@ -369,6 +413,7 @@ func (r *ContainerImageRegistryResource) Delete(ctx context.Context, req resourc
 	})
 
 	// Archive the cluster environment
+	// Note: The /ext/v0/cluster_environments/ endpoint do not have DELETE, so we use POST /api/v2/application_templates/{id}/archive
 	_, err := DoRequestRaw(
 		ctx,
 		r.client,
@@ -411,4 +456,23 @@ func (r *ContainerImageRegistryResource) Delete(ctx context.Context, req resourc
 func (r *ContainerImageRegistryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Import by build ID
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// sanitizeImageURIForName converts an image URI to a valid cluster environment name.
+// Names must match pattern: ^[A-Za-z0-9._-]+$
+func sanitizeImageURIForName(imageURI string) string {
+	// Replace common invalid characters with hyphens
+	result := strings.ReplaceAll(imageURI, "/", "-")
+	result = strings.ReplaceAll(result, ":", "-")
+	result = strings.ReplaceAll(result, "@", "-")
+
+	// Remove any remaining invalid characters
+	var sanitized strings.Builder
+	for _, r := range result {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			sanitized.WriteRune(r)
+		}
+	}
+
+	return sanitized.String()
 }

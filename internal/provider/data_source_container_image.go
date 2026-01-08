@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -169,24 +168,18 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 	config.CreatedAt = types.StringValue(clusterEnv.CreatedAt)
 	config.CreatorID = types.StringValue(clusterEnv.CreatorID)
 
-	// Get build ID from nested latest_build object or legacy field
-	var buildID string
-	if clusterEnv.LatestBuild != nil && clusterEnv.LatestBuild.ID != "" {
-		buildID = clusterEnv.LatestBuild.ID
-	} else if clusterEnv.LatestBuildID != nil && *clusterEnv.LatestBuildID != "" {
-		buildID = *clusterEnv.LatestBuildID
+	// Fetch the latest build for this cluster environment
+	buildID, err := d.getLatestBuildID(ctx, clusterEnv.ID)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
+			"cluster_environment_id": clusterEnv.ID,
+			"error":                  err.Error(),
+		})
 	}
 
 	// Get build details if available
 	if buildID != "" {
 		config.BuildID = types.StringValue(buildID)
-
-		// Set status from nested object if available
-		if clusterEnv.LatestBuild != nil {
-			config.BuildStatus = types.StringValue(clusterEnv.LatestBuild.Status)
-		} else if clusterEnv.LatestBuildStatus != nil {
-			config.BuildStatus = types.StringValue(*clusterEnv.LatestBuildStatus)
-		}
 
 		// Get full build details
 		build, err := d.getBuild(ctx, buildID)
@@ -239,7 +232,7 @@ func (d *ContainerImageDataSource) getClusterEnvironmentByID(ctx context.Context
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/api/v2/application_templates/%s", id),
+		fmt.Sprintf("/ext/v0/cluster_environments/%s", id),
 		nil,
 		http.StatusOK,
 	)
@@ -254,14 +247,29 @@ func (d *ContainerImageDataSource) getClusterEnvironmentByID(ctx context.Context
 func (d *ContainerImageDataSource) getClusterEnvironmentByName(ctx context.Context, name string) (*ClusterEnvironmentResult, error) {
 	tflog.Debug(ctx, "Fetching cluster environment by name", map[string]any{"name": name})
 
-	// Search for cluster environment by name
-	encodedName := url.QueryEscape(name)
+	// Search for cluster environment by name using POST /ext/v0/cluster_environments/search
+	searchQuery := ClusterEnvironmentsSearchQuery{
+		Name: &TextQuery{
+			Contains: name,
+		},
+		Paging: PageQuery{
+			Count: 100,
+		},
+		IncludeArchived:  false,
+		IncludeAnonymous: false,
+	}
+
+	reqBody, err := MarshalRequestBody(searchQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal search query: %w", err)
+	}
+
 	clusterEnvsResp, err := DoRequestAndParse[ClusterEnvironmentsListResponse](
 		ctx,
 		d.client,
-		"GET",
-		fmt.Sprintf("/api/v2/application_templates?name_contains=%s&count=100", encodedName),
-		nil,
+		"POST",
+		"/ext/v0/cluster_environments/search",
+		reqBody,
 		http.StatusOK,
 	)
 	if err != nil {
@@ -271,7 +279,7 @@ func (d *ContainerImageDataSource) getClusterEnvironmentByName(ctx context.Conte
 	// Find exact match
 	var matches []ClusterEnvironmentResult
 	for _, env := range clusterEnvsResp.Results {
-		if env.Name == name && !env.IsArchived {
+		if env.Name == name && !env.IsArchived() {
 			matches = append(matches, env)
 		}
 	}
@@ -289,13 +297,13 @@ func (d *ContainerImageDataSource) getClusterEnvironmentByName(ctx context.Conte
 }
 
 // getBuild fetches build details by ID.
-func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
+func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[BuildResponse](
+	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/api/v2/builds/%s", buildID),
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,
@@ -305,4 +313,29 @@ func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string)
 	}
 
 	return &buildResp.Result, nil
+}
+
+// getLatestBuildID fetches the latest build ID for a cluster environment.
+func (d *ContainerImageDataSource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
+	tflog.Debug(ctx, "Fetching latest build for cluster environment", map[string]any{"cluster_environment_id": clusterEnvID})
+
+	// Note: The Anyscale API may return 201 for GET build endpoints
+	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
+		ctx,
+		d.client,
+		"GET",
+		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
+		nil,
+		http.StatusOK,
+		http.StatusCreated,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to list builds for cluster environment %s: %w", clusterEnvID, err)
+	}
+
+	if len(buildsResp.Results) == 0 {
+		return "", nil // No builds yet - not an error
+	}
+
+	return buildsResp.Results[0].ID, nil
 }
