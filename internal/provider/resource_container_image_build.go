@@ -532,12 +532,12 @@ func (r *ContainerImageBuildResource) Delete(ctx context.Context, req resource.D
 	})
 
 	// Archive the cluster environment
-	// Note: The /ext/v0 API doesn't have an archive endpoint, so we use DELETE
+	// Note: The /ext/v0/cluster_environments/ endpoint do not have DELETE, so we use POST /api/v2/application_templates/{id}/archive
 	_, err := DoRequestRaw(
 		ctx,
 		r.client,
-		"DELETE",
-		fmt.Sprintf("/ext/v0/cluster_environments/%s", clusterEnvID),
+		"POST",
+		fmt.Sprintf("/api/v2/application_templates/%s/archive", clusterEnvID),
 		nil,
 		http.StatusOK,
 		http.StatusNoContent,
