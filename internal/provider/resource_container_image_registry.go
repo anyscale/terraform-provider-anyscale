@@ -198,10 +198,15 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		configJSON.RegistryLoginSecret = &secret
 	}
 
-	// Determine name - use provided value or generate one
-	name := plan.ImageURI.ValueString()
-	if !plan.Name.IsNull() {
+	// Determine name - use provided value or generate a valid one from image URI
+	// Name must match pattern: ^[A-Za-z0-9._-]+$
+	var name string
+	if !plan.Name.IsNull() && plan.Name.ValueString() != "" {
 		name = plan.Name.ValueString()
+	} else {
+		// Sanitize image URI to create a valid name
+		// Replace invalid characters (/, :, @) with hyphens
+		name = sanitizeImageURIForName(plan.ImageURI.ValueString())
 	}
 
 	createReq := CreateBYODClusterEnvironmentRequest{
@@ -455,4 +460,23 @@ func (r *ContainerImageRegistryResource) Delete(ctx context.Context, req resourc
 func (r *ContainerImageRegistryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Import by build ID
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// sanitizeImageURIForName converts an image URI to a valid cluster environment name.
+// Names must match pattern: ^[A-Za-z0-9._-]+$
+func sanitizeImageURIForName(imageURI string) string {
+	// Replace common invalid characters with hyphens
+	result := strings.ReplaceAll(imageURI, "/", "-")
+	result = strings.ReplaceAll(result, ":", "-")
+	result = strings.ReplaceAll(result, "@", "-")
+
+	// Remove any remaining invalid characters
+	var sanitized strings.Builder
+	for _, r := range result {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			sanitized.WriteRune(r)
+		}
+	}
+
+	return sanitized.String()
 }
