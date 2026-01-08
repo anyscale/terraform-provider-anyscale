@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -206,7 +207,10 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	} else {
 		// Sanitize image URI to create a valid name
 		// Replace invalid characters (/, :, @) with hyphens
-		name = sanitizeImageURIForName(plan.ImageURI.ValueString())
+		// Add timestamp suffix to ensure uniqueness
+		baseName := sanitizeImageURIForName(plan.ImageURI.ValueString())
+		timestamp := time.Now().UnixNano()
+		name = fmt.Sprintf("%s-%d", baseName, timestamp)
 	}
 
 	createReq := CreateBYODClusterEnvironmentRequest{
