@@ -2,8 +2,8 @@ package acctest
 
 import (
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -33,8 +33,8 @@ func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
 
 	cloudID := GetTestCloudID(t)
 
-	projectName1 := fmt.Sprintf("tfacc-test-ds-projects-1-%d", os.Getpid())
-	projectName2 := fmt.Sprintf("tfacc-test-ds-projects-2-%d", os.Getpid())
+	projectName1 := fmt.Sprintf("tfacc-test-ds-projects-1-%d", time.Now().UnixNano())
+	projectName2 := fmt.Sprintf("tfacc-test-ds-projects-2-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -57,7 +57,7 @@ func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
 	cloudID := GetTestCloudID(t)
 	cloudName := GetTestCloudName(t)
 
-	projectName := fmt.Sprintf("tfacc-test-ds-projects-cloudname-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-ds-projects-cloudname-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -78,7 +78,7 @@ func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
 
 	cloudID := GetTestCloudID(t)
 
-	uniquePrefix := fmt.Sprintf("tfacc-unique-prefix-%d", os.Getpid())
+	uniquePrefix := fmt.Sprintf("tfacc-unique-prefix-%d", time.Now().UnixNano())
 	projectName1 := fmt.Sprintf("%s-project-1", uniquePrefix)
 	projectName2 := fmt.Sprintf("%s-project-2", uniquePrefix)
 
@@ -102,7 +102,7 @@ func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
 
 	cloudID := GetTestCloudID(t)
 
-	projectName := fmt.Sprintf("tfacc-test-ds-projects-nodefault-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-ds-projects-nodefault-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -126,7 +126,7 @@ func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
 
 	cloudID := GetTestCloudID(t)
 
-	projectName := fmt.Sprintf("tfacc-test-ds-projects-fields-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-ds-projects-fields-%d", time.Now().UnixNano())
 	description := "Test project for data source fields"
 
 	resource.Test(t, resource.TestCase{

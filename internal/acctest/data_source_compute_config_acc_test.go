@@ -2,8 +2,8 @@ package acctest
 
 import (
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -13,7 +13,7 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	configName := fmt.Sprintf("tf-test-ds-compute-config-%d", os.Getpid())
+	configName := fmt.Sprintf("tf-test-ds-compute-config-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -50,7 +50,7 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	configName := fmt.Sprintf("tf-test-ds-versions-%d", os.Getpid())
+	configName := fmt.Sprintf("tf-test-ds-versions-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

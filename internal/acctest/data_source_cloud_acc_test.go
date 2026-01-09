@@ -2,8 +2,8 @@ package acctest
 
 import (
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -97,7 +97,7 @@ data "anyscale_cloud" "test" {
 }
 
 func testAccCloudDataSourceConfig_withComputeConfig(cloudID string) string {
-	configName := fmt.Sprintf("tf-test-datasource-compute-%d", os.Getpid())
+	configName := fmt.Sprintf("tf-test-datasource-compute-%d", time.Now().UnixNano())
 	return fmt.Sprintf(`
 data "anyscale_cloud" "test" {
   id = "%s"

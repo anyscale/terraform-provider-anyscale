@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -25,7 +26,7 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 	}
 
 	// Use a unique email for testing
-	testEmail := fmt.Sprintf("tfacc-invite-basic-%d@example.com", os.Getpid())
+	testEmail := fmt.Sprintf("tfacc-invite-basic-%d@example.com", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -69,8 +70,8 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 		return
 	}
 
-	testEmail1 := fmt.Sprintf("tfacc-invite-replace1-%d@example.com", os.Getpid())
-	testEmail2 := fmt.Sprintf("tfacc-invite-replace2-%d@example.com", os.Getpid())
+	testEmail1 := fmt.Sprintf("tfacc-invite-replace1-%d@example.com", time.Now().UnixNano())
+	testEmail2 := fmt.Sprintf("tfacc-invite-replace2-%d@example.com", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -107,7 +108,7 @@ func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 		return
 	}
 
-	testEmail := fmt.Sprintf("tfacc-invite-delete-%d@example.com", os.Getpid())
+	testEmail := fmt.Sprintf("tfacc-invite-delete-%d@example.com", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },

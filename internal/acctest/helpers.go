@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -240,7 +241,7 @@ func createEphemeralTestCloud(t *testing.T) (cloudID string, cloudName string, e
 	}
 
 	// Generate a unique cloud name
-	cloudName = fmt.Sprintf("tfacc-ephemeral-%d", os.Getpid())
+	cloudName = fmt.Sprintf("tfacc-ephemeral-%d", time.Now().UnixNano())
 
 	t.Logf("Creating ephemeral test cloud: %s", cloudName)
 

@@ -14,8 +14,8 @@ package acctest
 
 import (
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -56,7 +56,7 @@ data "anyscale_container_images" "include_archived" {
 func TestAccContainerImagesDataSource_WithBuild(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-imgs-%d", os.Getpid())
+	imageName := fmt.Sprintf("tfacc-imgs-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

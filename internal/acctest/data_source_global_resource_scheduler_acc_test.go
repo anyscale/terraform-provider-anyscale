@@ -2,8 +2,8 @@ package acctest
 
 import (
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -11,7 +11,7 @@ import (
 func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -38,7 +38,7 @@ func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 	// Get a configured cloud and use appropriate instance types
 	cloud := GetConfiguredCloud(t)
 	instanceTypes := cloud.InstanceTypes()
-	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-spec-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-spec-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -61,7 +61,7 @@ func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pools-ds-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pools-ds-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -83,7 +83,7 @@ func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
 func TestAccGlobalResourceSchedulersDataSource_WithFilter(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pools-filter-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pools-filter-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

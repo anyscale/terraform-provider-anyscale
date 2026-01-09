@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -13,7 +14,7 @@ func TestAccProjectDataSource_ByID(t *testing.T) {
 
 	cloudID := GetTestCloudID(t)
 
-	projectName := fmt.Sprintf("tfacc-test-ds-project-id-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-ds-project-id-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
