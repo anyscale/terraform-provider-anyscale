@@ -14,8 +14,8 @@ package acctest
 
 import (
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -25,7 +25,7 @@ import (
 func TestAccContainerImageDataSource(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-test-ds-%d", os.Getpid())
+	imageName := fmt.Sprintf("tfacc-test-ds-%d", time.Now().UnixNano())
 	containerfile := `FROM anyscale/ray:2.53.0-slim-py312
 RUN pip install emoji==2.15.0`
 

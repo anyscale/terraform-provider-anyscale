@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -250,7 +250,7 @@ resource "anyscale_compute_config" "test" {
     instance_type = "%s"
   }
 }
-`, os.Getpid(), cloudID, instanceType)
+`, time.Now().UnixNano(), cloudID, instanceType)
 }
 
 func testAccComputeConfigResourceConfig_withWorkers(cloudID, headInstanceType, workerInstanceType string) string {
@@ -275,7 +275,7 @@ resource "anyscale_compute_config" "test" {
     }
   ]
 }
-`, os.Getpid(), cloudID, headInstanceType, workerInstanceType)
+`, time.Now().UnixNano(), cloudID, headInstanceType, workerInstanceType)
 }
 
 func testAccComputeConfigResourceConfig_minimal(cloudID, instanceType string) string {
@@ -288,11 +288,11 @@ resource "anyscale_compute_config" "test" {
     instance_type = "%s"
   }
 }
-`, os.Getpid(), cloudID, instanceType)
+`, time.Now().UnixNano(), cloudID, instanceType)
 }
 
 func testAccComputeConfigResourceConfig_withCloudName(cloudName string) string {
-	configName := fmt.Sprintf("tf-test-cloudname-%d", os.Getpid())
+	configName := fmt.Sprintf("tf-test-cloudname-%d", time.Now().UnixNano())
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name       = "%s"
@@ -325,7 +325,7 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 				t.Skipf("Skipping %s - no valid instance types", testName)
 			}
 
-			configName := fmt.Sprintf("tf-test-compute-update-%s-%d", cloud.Provider, os.Getpid())
+			configName := fmt.Sprintf("tf-test-compute-update-%s-%d", cloud.Provider, time.Now().UnixNano())
 			var initialConfigID string
 
 			resource.Test(t, resource.TestCase{

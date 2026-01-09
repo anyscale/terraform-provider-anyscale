@@ -3,8 +3,8 @@ package acctest
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -13,7 +13,7 @@ import (
 func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pool-basic-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pool-basic-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -48,7 +48,7 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 	// Get a configured cloud and use appropriate instance types
 	cloud := GetConfiguredCloud(t)
 	instanceTypes := cloud.InstanceTypes()
-	schedulerName := fmt.Sprintf("tfacc-test-pool-spec-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pool-spec-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -84,7 +84,7 @@ func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 
 	// This test requires a cloud with cloud resources configured
 	cloud := GetConfiguredCloud(t)
-	schedulerName := fmt.Sprintf("tfacc-test-pool-cloud-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pool-cloud-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -111,7 +111,7 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 
 	cloudName := GetTestCloudName(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pool-cloudname-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pool-cloudname-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -138,7 +138,7 @@ func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
 	// Get a configured cloud and use appropriate instance types
 	cloud := GetConfiguredCloud(t)
 	instanceTypes := cloud.InstanceTypes()
-	schedulerName := fmt.Sprintf("tfacc-test-pool-full-%d", os.Getpid())
+	schedulerName := fmt.Sprintf("tfacc-test-pool-full-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

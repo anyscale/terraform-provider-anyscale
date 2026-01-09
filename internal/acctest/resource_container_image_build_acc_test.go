@@ -15,8 +15,8 @@ package acctest
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -27,7 +27,7 @@ import (
 func TestAccContainerImageBuildResource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-test-build-basic-%d", os.Getpid())
+	imageName := fmt.Sprintf("tfacc-test-build-basic-%d", time.Now().UnixNano())
 
 	// Simple containerfile that just adds a pip package to the base Ray image
 	containerfile := `FROM anyscale/ray:2.53.0-slim-py312
@@ -68,7 +68,7 @@ RUN pip install emoji==2.15.0`
 func TestAccContainerImageBuildResource_Update(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-test-build-update-%d", os.Getpid())
+	imageName := fmt.Sprintf("tfacc-test-build-update-%d", time.Now().UnixNano())
 
 	// Initial containerfile
 	containerfileV1 := `FROM anyscale/ray:2.53.0-slim-py312
@@ -122,8 +122,8 @@ func TestAccContainerImageBuildResource_WithProjectID(t *testing.T) {
 
 	cloudID := GetTestCloudID(t)
 
-	imageName := fmt.Sprintf("tfacc-test-build-project-%d", os.Getpid())
-	projectName := fmt.Sprintf("tfacc-test-project-build-%d", os.Getpid())
+	imageName := fmt.Sprintf("tfacc-test-build-project-%d", time.Now().UnixNano())
+	projectName := fmt.Sprintf("tfacc-test-project-build-%d", time.Now().UnixNano())
 
 	containerfile := `FROM anyscale/ray:2.53.0-slim-py312
 RUN pip install emoji==2.15.0`

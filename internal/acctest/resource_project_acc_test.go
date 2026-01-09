@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -15,7 +16,7 @@ func TestAccProjectResource_Basic(t *testing.T) {
 
 	cloudID := GetTestCloudID(t)
 
-	projectName := fmt.Sprintf("tfacc-test-project-basic-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-project-basic-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -52,7 +53,7 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 
 	cloudID := GetTestCloudID(t)
 
-	projectName := fmt.Sprintf("tfacc-test-project-desc-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-project-desc-%d", time.Now().UnixNano())
 	description := "Test project with description"
 
 	resource.Test(t, resource.TestCase{
@@ -76,7 +77,7 @@ func TestAccProjectResource_WithCloudName(t *testing.T) {
 
 	cloudName := GetTestCloudName(t)
 
-	projectName := fmt.Sprintf("tfacc-test-project-cloudname-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-project-cloudname-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -107,7 +108,7 @@ func TestAccProjectResource_WithCollaborators(t *testing.T) {
 		t.Skip("ANYSCALE_TEST_USER_EMAIL_1 and ANYSCALE_TEST_USER_EMAIL_2 not set, skipping collaborator test")
 	}
 
-	projectName := fmt.Sprintf("tfacc-test-project-collab-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-project-collab-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -237,7 +238,7 @@ func TestAccProjectResource_WithUserDataSource(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	projectName := fmt.Sprintf("tfacc-test-project-datasource-%d", os.Getpid())
+	projectName := fmt.Sprintf("tfacc-test-project-datasource-%d", time.Now().UnixNano())
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
