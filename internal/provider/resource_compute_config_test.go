@@ -562,29 +562,29 @@ func TestRequiredResourcesConversion(t *testing.T) {
 		t.Fatalf("nodeConfigToAPI() error = %v", err)
 	}
 
-	// Verify required_resources was converted
-	reqRes, ok := got["required_resources"]
+	// Verify physical_resources was converted (API field name for required_resources)
+	physRes, ok := got["physical_resources"]
 	if !ok {
-		t.Fatal("nodeConfigToAPI() missing required_resources")
+		t.Fatal("nodeConfigToAPI() missing physical_resources")
 	}
 
-	reqResMap, ok := reqRes.(map[string]interface{})
+	physResMap, ok := physRes.(map[string]interface{})
 	if !ok {
-		t.Fatalf("required_resources is not a map, got %T", reqRes)
+		t.Fatalf("physical_resources is not a map, got %T", physRes)
 	}
 
 	// Verify fields
-	if reqResMap["cpu"] != int64(16) {
-		t.Errorf("required_resources.cpu = %v, want 16", reqResMap["cpu"])
+	if physResMap["cpu"] != int64(16) {
+		t.Errorf("physical_resources.cpu = %v, want 16", physResMap["cpu"])
 	}
-	if reqResMap["memory"] != "64Gi" {
-		t.Errorf("required_resources.memory = %v, want '64Gi'", reqResMap["memory"])
+	if physResMap["memory"] != "64Gi" {
+		t.Errorf("physical_resources.memory = %v, want '64Gi'", physResMap["memory"])
 	}
-	if reqResMap["gpu"] != int64(4) {
-		t.Errorf("required_resources.gpu = %v, want 4", reqResMap["gpu"])
+	if physResMap["gpu"] != int64(4) {
+		t.Errorf("physical_resources.gpu = %v, want 4", physResMap["gpu"])
 	}
-	if reqResMap["accelerator"] != "A100" {
-		t.Errorf("required_resources.accelerator = %v, want 'A100'", reqResMap["accelerator"])
+	if physResMap["accelerator"] != "A100" {
+		t.Errorf("physical_resources.accelerator = %v, want 'A100'", physResMap["accelerator"])
 	}
 }
 
