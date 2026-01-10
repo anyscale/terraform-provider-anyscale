@@ -11,7 +11,7 @@ resource "anyscale_compute_config" "example" {
   }
 
   # Native HCL for advanced configurations
-  advanced_configurations_json = {
+  advanced_instance_config = {
     ray_head_node = {
       instance_type = "m5.large"
       min_instances = 1
@@ -46,7 +46,7 @@ resource "anyscale_compute_config" "gpu" {
     "ray-cluster-ray-version" = "2.9.0"
   }
 
-  advanced_configurations_json = {
+  advanced_instance_config = {
     ray_head_node = {
       instance_type = "m5.large"
       min_instances = 1

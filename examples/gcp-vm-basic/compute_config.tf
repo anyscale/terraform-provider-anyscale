@@ -62,7 +62,7 @@ resource "anyscale_compute_config" "advanced" {
   }
 
   # Advanced configurations for GCP
-  advanced_configurations_json = {
+  advanced_instance_config = {
     instance_properties = {
       disks = [
         {

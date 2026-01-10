@@ -37,28 +37,28 @@ type ComputeConfigResource struct {
 
 // ComputeConfigResourceModel describes the resource data model.
 type ComputeConfigResourceModel struct {
-	ID                         types.String  `tfsdk:"id"`           // Terraform resource ID (same as name for stability across versions)
-	ConfigID                   types.String  `tfsdk:"config_id"`    // Version-specific API ID (changes with each version)
-	NameVersion                types.String  `tfsdk:"name_version"` // Formatted as "name:version" for use with Anyscale APIs
-	Name                       types.String  `tfsdk:"name"`
-	ProjectID                  types.String  `tfsdk:"project_id"`
-	CloudID                    types.String  `tfsdk:"cloud_id"`
-	CloudName                  types.String  `tfsdk:"cloud_name"`
-	Region                     types.String  `tfsdk:"region"`
-	IdleTerminationMinutes     types.Int64   `tfsdk:"idle_termination_minutes"`
-	MaximumUptimeMinutes       types.Int64   `tfsdk:"maximum_uptime_minutes"`
-	AllowedAZs                 types.List    `tfsdk:"allowed_azs"`   // List of String
-	MinResources               types.Map     `tfsdk:"min_resources"` // Map of Float64
-	MaxResources               types.Map     `tfsdk:"max_resources"` // Map of Float64
-	EnableCrossZoneScaling     types.Bool    `tfsdk:"enable_cross_zone_scaling"`
-	AdvancedConfigurationsJSON types.Dynamic `tfsdk:"advanced_configurations_json"` // Dynamic (supports nested objects with mixed types)
-	AutoSelectWorkerConfig     types.Bool    `tfsdk:"auto_select_worker_config"`
-	Flags                      types.Dynamic `tfsdk:"flags"` // Dynamic (supports mixed value types) - KEY FEATURE!
-	Version                    types.Int64   `tfsdk:"version"`
-	CreatedAt                  types.String  `tfsdk:"created_at"`
-	LastModifiedAt             types.String  `tfsdk:"last_modified_at"`
-	HeadNode                   types.Object  `tfsdk:"head_node"`    // Single NodeConfigModel
-	WorkerNodes                types.List    `tfsdk:"worker_nodes"` // List of WorkerNodeConfigModel
+	ID                     types.String  `tfsdk:"id"`           // Terraform resource ID (same as name for stability across versions)
+	ConfigID               types.String  `tfsdk:"config_id"`    // Version-specific API ID (changes with each version)
+	NameVersion            types.String  `tfsdk:"name_version"` // Formatted as "name:version" for use with Anyscale APIs
+	Name                   types.String  `tfsdk:"name"`
+	ProjectID              types.String  `tfsdk:"project_id"`
+	CloudID                types.String  `tfsdk:"cloud_id"`
+	CloudName              types.String  `tfsdk:"cloud_name"`
+	Region                 types.String  `tfsdk:"region"`
+	IdleTerminationMinutes types.Int64   `tfsdk:"idle_termination_minutes"`
+	MaximumUptimeMinutes   types.Int64   `tfsdk:"maximum_uptime_minutes"`
+	AllowedAZs             types.List    `tfsdk:"allowed_azs"`   // List of String
+	MinResources           types.Map     `tfsdk:"min_resources"` // Map of Float64
+	MaxResources           types.Map     `tfsdk:"max_resources"` // Map of Float64
+	EnableCrossZoneScaling types.Bool    `tfsdk:"enable_cross_zone_scaling"`
+	AdvancedInstanceConfig types.Dynamic `tfsdk:"advanced_instance_config"` // Dynamic (supports nested objects with mixed types)
+	AutoSelectWorkerConfig types.Bool    `tfsdk:"auto_select_worker_config"`
+	Flags                  types.Dynamic `tfsdk:"flags"` // Dynamic (supports mixed value types) - KEY FEATURE!
+	Version                types.Int64   `tfsdk:"version"`
+	CreatedAt              types.String  `tfsdk:"created_at"`
+	LastModifiedAt         types.String  `tfsdk:"last_modified_at"`
+	HeadNode               types.Object  `tfsdk:"head_node"`    // Single NodeConfigModel
+	WorkerNodes            types.List    `tfsdk:"worker_nodes"` // List of WorkerNodeConfigModel
 }
 
 // NodeConfigModel describes a node configuration.
@@ -198,10 +198,10 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				Description:         "Allow instances in the cluster to be run across multiple zones. Recommended for production services.",
 				MarkdownDescription: "Allow instances in the cluster to be run across multiple zones. Recommended for production services.",
 			},
-			"advanced_configurations_json": schema.DynamicAttribute{
+			"advanced_instance_config": schema.DynamicAttribute{
 				Optional:            true,
-				Description:         "Advanced configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.",
-				MarkdownDescription: "Advanced configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.",
+				Description:         "Advanced instance configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.",
+				MarkdownDescription: "Advanced instance configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.",
 			},
 			"auto_select_worker_config": schema.BoolAttribute{
 				Optional:            true,
@@ -493,11 +493,11 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		config["auto_select_worker_config"] = plan.AutoSelectWorkerConfig.ValueBool()
 	}
 
-	// Add advanced_configurations_json (now a Dynamic value!)
-	if !plan.AdvancedConfigurationsJSON.IsNull() {
-		advancedConfig, err := DynamicToInterface(ctx, plan.AdvancedConfigurationsJSON)
+	// Add advanced_instance_config (now a Dynamic value!)
+	if !plan.AdvancedInstanceConfig.IsNull() {
+		advancedConfig, err := DynamicToInterface(ctx, plan.AdvancedInstanceConfig)
 		if err != nil {
-			AddConfigError(diags, "Failed to Convert Advanced Configurations", err.Error())
+			AddConfigError(diags, "Failed to Convert Advanced Instance Config", err.Error())
 			return nil, ""
 		}
 		config["advanced_configurations_json"] = advancedConfig
@@ -783,7 +783,7 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 			}
 		}
 
-		// NOTE: We intentionally do NOT read advanced_configurations_json from the API response
+		// NOTE: We intentionally do NOT read advanced_instance_config from the API response
 		// The API's representation may differ from our config's representation (e.g., null vs empty arrays)
 		// This would cause perpetual drift. We preserve what the user configured.
 

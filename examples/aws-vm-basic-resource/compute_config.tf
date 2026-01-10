@@ -63,7 +63,7 @@ resource "anyscale_compute_config" "advanced" {
 
 
   # Advanced configurations for AWS
-  advanced_configurations_json = {
+  advanced_instance_config = {
     BlockDeviceMappings = [
       {
         DeviceName = "/dev/sda1"

@@ -26,7 +26,7 @@ resource "anyscale_compute_config" "example" {
   }
 
   # Native HCL for advanced configurations
-  advanced_configurations_json = {
+  advanced_instance_config = {
     ray_head_node = {
       instance_type = "m5.large"
       min_instances = 1
@@ -61,7 +61,7 @@ resource "anyscale_compute_config" "gpu" {
     "ray-cluster-ray-version" = "2.9.0"
   }
 
-  advanced_configurations_json = {
+  advanced_instance_config = {
     ray_head_node = {
       instance_type = "m5.large"
       min_instances = 1
@@ -99,7 +99,7 @@ output "compute_config_id" {
 
 ### Optional
 
-- `advanced_configurations_json` (Dynamic) Advanced configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.
+- `advanced_instance_config` (Dynamic) Advanced instance configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.
 - `allowed_azs` (List of String) The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.
 - `auto_select_worker_config` (Boolean) If set to true, worker node groups will automatically be selected based on workload.
 - `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified.

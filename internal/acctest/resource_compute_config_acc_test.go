@@ -63,7 +63,7 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 							"enable_cross_zone_scaling",
 							"min_resources",
 							"max_resources",
-							"advanced_configurations_json",
+							"advanced_instance_config",
 							"flags",
 							"allowed_azs",
 						},
