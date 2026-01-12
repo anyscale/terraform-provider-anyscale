@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -100,6 +101,53 @@ type WorkerNodeConfigModel struct {
 	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string
 	Flags                  types.String `tfsdk:"flags"`                    // JSON string
 	CloudDeployment        types.Object `tfsdk:"cloud_deployment"`
+}
+
+type computeTemplateRequest struct {
+	Name       string                `json:"name"`
+	ProjectID  string                `json:"project_id,omitempty"`
+	Config     computeTemplateConfig `json:"config"`
+	Anonymous  bool                  `json:"anonymous"`
+	NewVersion bool                  `json:"new_version"`
+}
+
+type computeTemplateConfig struct {
+	CloudID                    string                         `json:"cloud_id"`
+	DeploymentConfigs          []cloudDeploymentComputeConfig `json:"deployment_configs,omitempty"`
+	AllowedAZs                 []string                       `json:"allowed_azs,omitempty"`
+	HeadNodeType               map[string]interface{}         `json:"head_node_type,omitempty"`
+	WorkerNodeTypes            []map[string]interface{}       `json:"worker_node_types,omitempty"`
+	AutoSelectWorkerConfig     bool                           `json:"auto_select_worker_config,omitempty"`
+	Flags                      map[string]interface{}         `json:"flags,omitempty"`
+	AdvancedConfigurationsJSON map[string]interface{}         `json:"advanced_configurations_json,omitempty"`
+	AWSAdvancedConfigurations  map[string]interface{}         `json:"aws_advanced_configurations_json,omitempty"`
+	GCPAdvancedConfigurations  map[string]interface{}         `json:"gcp_advanced_configurations_json,omitempty"`
+	IdleTerminationMinutes     *int64                         `json:"idle_termination_minutes,omitempty"`
+	MaximumUptimeMinutes       *int64                         `json:"maximum_uptime_minutes,omitempty"`
+}
+
+type cloudDeploymentComputeConfig struct {
+	CloudDeployment            string                   `json:"cloud_deployment,omitempty"`
+	CloudResourceID            string                   `json:"cloud_resource_id,omitempty"`
+	AllowedAZs                 []string                 `json:"allowed_azs,omitempty"`
+	HeadNodeType               map[string]interface{}   `json:"head_node_type,omitempty"`
+	WorkerNodeTypes            []map[string]interface{} `json:"worker_node_types,omitempty"`
+	AdvancedConfigurationsJSON map[string]interface{}   `json:"advanced_configurations_json,omitempty"`
+	AutoSelectWorkerConfig     bool                     `json:"auto_select_worker_config,omitempty"`
+	Flags                      map[string]interface{}   `json:"flags,omitempty"`
+}
+
+type computeTemplateResponse struct {
+	Result computeTemplate `json:"result"`
+}
+
+type computeTemplate struct {
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	Version        int64                 `json:"version"`
+	CreatedAt      string                `json:"created_at"`
+	LastModifiedAt string                `json:"last_modified_at"`
+	Config         computeTemplateConfig `json:"config"`
 }
 
 func (r *ComputeConfigResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -382,7 +430,7 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 	ctx context.Context,
 	plan *ComputeConfigResourceModel,
 	diags *diag.Diagnostics,
-) (map[string]interface{}, string) {
+) (*computeTemplateRequest, string) {
 	// Validate that either cloud_id or cloud_name is provided
 	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
 		AddConfigError(
@@ -418,51 +466,41 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		"name":     plan.Name.ValueString(),
 	})
 
-	createRequest := map[string]interface{}{
-		"name":        plan.Name.ValueString(),
-		"anonymous":   false, // Always false since name is required for Terraform-managed resources
-		"new_version": true,  // Always create a new version (required for updates to work)
-		"config": map[string]interface{}{
-			"cloud_id": cloudID,
-		},
+	createConfig := computeTemplateConfig{
+		CloudID: cloudID,
 	}
 
-	// Add optional project_id
-	config := createRequest["config"].(map[string]interface{})
-
-	// Add cloud_resource
-	if !plan.CloudResource.IsNull() {
-		config["cloud_resource"] = plan.CloudResource.ValueString()
-	}
-
-	// Add zones (maps to allowed_azs in API)
+	var zones []string
 	if !plan.Zones.IsNull() {
-		zones, zonesDiags := StringListToInterface(ctx, plan.Zones)
+		zonesResult, zonesDiags := StringListToInterface(ctx, plan.Zones)
 		diags.Append(zonesDiags...)
 		if diags.HasError() {
 			return nil, ""
 		}
-		config["allowed_azs"] = zones
+		if len(zonesResult) > 0 {
+			zones = zonesResult
+			createConfig.AllowedAZs = zonesResult
+		}
 	}
 
-	// Add auto_select_worker_config
+	autoSelectWorkerConfig := false
 	if !plan.AutoSelectWorkerConfig.IsNull() {
-		config["auto_select_worker_config"] = plan.AutoSelectWorkerConfig.ValueBool()
+		autoSelectWorkerConfig = plan.AutoSelectWorkerConfig.ValueBool()
+		createConfig.AutoSelectWorkerConfig = autoSelectWorkerConfig
 	}
 
-	// Add advanced_instance_config (now a Dynamic value!)
 	if !plan.AdvancedInstanceConfig.IsNull() {
 		advancedConfig, err := DynamicToInterface(ctx, plan.AdvancedInstanceConfig)
 		if err != nil {
 			AddConfigError(diags, "Failed to Convert Advanced Instance Config", err.Error())
 			return nil, ""
 		}
-		config["advanced_configurations_json"] = advancedConfig
+		if advancedConfig != nil {
+			createConfig.AdvancedConfigurationsJSON = advancedConfig
+		}
 	}
 
-	// Add flags (Dynamic value - THE KEY FEATURE!)
-	// Also translate enable_cross_zone_scaling to flags
-	var flags map[string]interface{}
+	flags := make(map[string]interface{})
 	if !plan.Flags.IsNull() {
 		var err error
 		flags, err = DynamicToInterface(ctx, plan.Flags)
@@ -473,16 +511,12 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		if flags == nil {
 			flags = make(map[string]interface{})
 		}
-	} else {
-		flags = make(map[string]interface{})
 	}
 
-	// Translate enable_cross_zone_scaling to flag (per CLI behavior)
 	if !plan.EnableCrossZoneScaling.IsNull() {
 		flags["allow-cross-zone-autoscaling"] = plan.EnableCrossZoneScaling.ValueBool()
 	}
 
-	// Add min_resources to flags (per CLI behavior)
 	if !plan.MinResources.IsNull() {
 		minResourcesMap := make(map[string]interface{})
 		for key, value := range plan.MinResources.Elements() {
@@ -495,7 +529,6 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		}
 	}
 
-	// Add max_resources to flags (per CLI behavior)
 	if !plan.MaxResources.IsNull() {
 		maxResourcesMap := make(map[string]interface{})
 		for key, value := range plan.MaxResources.Elements() {
@@ -509,10 +542,9 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 	}
 
 	if len(flags) > 0 {
-		config["flags"] = flags
+		createConfig.Flags = flags
 	}
 
-	// Add head_node
 	if !plan.HeadNode.IsNull() {
 		headNodeConfig, err := nodeConfigToAPI(ctx, plan.HeadNode)
 		if err != nil {
@@ -520,11 +552,10 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 			return nil, ""
 		}
 		if headNodeConfig != nil {
-			config["head_node_type"] = headNodeConfig
+			createConfig.HeadNodeType = headNodeConfig
 		}
 	}
 
-	// Add worker_nodes
 	if !plan.WorkerNodes.IsNull() {
 		workerNodeElements := plan.WorkerNodes.Elements()
 		workerConfigs := make([]map[string]interface{}, 0, len(workerNodeElements))
@@ -547,8 +578,30 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		}
 
 		if len(workerConfigs) > 0 {
-			config["worker_node_types"] = workerConfigs
+			createConfig.WorkerNodeTypes = workerConfigs
 		}
+	}
+
+	deploymentConfig := cloudDeploymentComputeConfig{
+		AllowedAZs:                 zones,
+		HeadNodeType:               createConfig.HeadNodeType,
+		WorkerNodeTypes:            createConfig.WorkerNodeTypes,
+		AutoSelectWorkerConfig:     autoSelectWorkerConfig,
+		Flags:                      createConfig.Flags,
+		AdvancedConfigurationsJSON: createConfig.AdvancedConfigurationsJSON,
+	}
+
+	if !plan.CloudResource.IsNull() {
+		deploymentConfig.CloudDeployment = plan.CloudResource.ValueString()
+	}
+
+	createConfig.DeploymentConfigs = []cloudDeploymentComputeConfig{deploymentConfig}
+
+	createRequest := &computeTemplateRequest{
+		Name:       plan.Name.ValueString(),
+		Config:     createConfig,
+		Anonymous:  false,
+		NewVersion: true,
 	}
 
 	return createRequest, cloudID
@@ -575,10 +628,10 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	log.Printf("[DEBUG] POST /ext/v0/cluster_computes/ - Creating compute config")
+	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Creating compute config")
 
-	apiResult, err := DoRequestAndParse[map[string]interface{}](
-		ctx, r.client, "POST", "/ext/v0/cluster_computes/", reqBody,
+	apiResult, err := DoRequestAndParse[computeTemplateResponse](
+		ctx, r.client, "POST", "/api/v2/compute_templates/", reqBody,
 		http.StatusOK, http.StatusCreated,
 	)
 	if err != nil {
@@ -586,36 +639,26 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	// Extract result from response
-	resultData, ok := (*apiResult)["result"].(map[string]interface{})
-	if !ok {
-		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return expected result structure")
-		return
-	}
+	resultData := apiResult.Result
 
-	// Set the IDs:
-	// - ID = name (stable across versions, used as Terraform resource identifier)
-	// - ConfigID = API ID (version-specific, changes with each update)
-	configID, ok := resultData["id"].(string)
-	if !ok || configID == "" {
+	if resultData.ID == "" {
 		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return an ID")
 		return
 	}
-	plan.ID = types.StringValue(plan.Name.ValueString()) // Use name as stable Terraform ID
-	plan.ConfigID = types.StringValue(configID)          // Store version-specific ID
-	log.Printf("[INFO] Created compute config: name=%s, config_id=%s", plan.Name.ValueString(), configID)
 
-	// Extract computed fields from create response
-	if version, ok := resultData["version"].(float64); ok {
-		plan.Version = types.Int64Value(int64(version))
-		// Set name_version formatted as "name:version" for use with Anyscale APIs
-		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), int64(version)))
+	plan.ID = types.StringValue(resultData.Name)
+	plan.ConfigID = types.StringValue(resultData.ID)
+	log.Printf("[INFO] Created compute config: name=%s, config_id=%s", resultData.Name, resultData.ID)
+
+	if resultData.Version > 0 {
+		plan.Version = types.Int64Value(resultData.Version)
+		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", resultData.Name, resultData.Version))
 	}
-	if createdAt, ok := resultData["created_at"].(string); ok {
-		plan.CreatedAt = types.StringValue(createdAt)
+	if resultData.CreatedAt != "" {
+		plan.CreatedAt = types.StringValue(resultData.CreatedAt)
 	}
-	if lastModifiedAt, ok := resultData["last_modified_at"].(string); ok {
-		plan.LastModifiedAt = types.StringValue(lastModifiedAt)
+	if resultData.LastModifiedAt != "" {
+		plan.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
 	}
 
 	// Set state with all fields populated
@@ -638,12 +681,11 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Make API call to get compute config
-	apiResult, err := DoRequestAndParse[map[string]interface{}](
-		ctx, r.client, "GET", fmt.Sprintf("/ext/v0/cluster_computes/%s", lookupID), nil,
+	apiResult, err := DoRequestAndParse[computeTemplateResponse](
+		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", lookupID), nil,
 		http.StatusOK, http.StatusNotFound,
 	)
 	if err != nil {
-		// Check if it's a 404 - resource was deleted
 		if apiResult == nil {
 			log.Printf("[WARN] Compute config not found, removing from state: config_id=%s", lookupID)
 			resp.State.RemoveResource(ctx)
@@ -653,104 +695,121 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	// Extract result from response
-	resultData, ok := (*apiResult)["result"].(map[string]interface{})
-	if !ok {
-		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return expected result structure")
-		return
+	resultData := apiResult.Result
+
+	if resultData.ID != "" {
+		state.ConfigID = types.StringValue(resultData.ID)
 	}
 
-	// Update ConfigID from API response (in case it changed)
-	if apiID, ok := resultData["id"].(string); ok {
-		state.ConfigID = types.StringValue(apiID)
+	if resultData.Name != "" {
+		state.Name = types.StringValue(resultData.Name)
+		state.ID = types.StringValue(resultData.Name)
 	}
 
-	// Update state with response
-	if name, ok := resultData["name"].(string); ok {
-		state.Name = types.StringValue(name)
-		// ID should match name (stable identifier)
-		state.ID = types.StringValue(name)
+	if resultData.Version > 0 {
+		state.Version = types.Int64Value(resultData.Version)
+		state.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", resultData.Name, resultData.Version))
 	}
 
-	if version, ok := resultData["version"].(float64); ok {
-		state.Version = types.Int64Value(int64(version))
-		// Set name_version formatted as "name:version" for use with Anyscale APIs
-		state.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", state.Name.ValueString(), int64(version)))
+	if resultData.CreatedAt != "" {
+		state.CreatedAt = types.StringValue(resultData.CreatedAt)
 	}
 
-	if createdAt, ok := resultData["created_at"].(string); ok {
-		state.CreatedAt = types.StringValue(createdAt)
+	if resultData.LastModifiedAt != "" {
+		state.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
 	}
 
-	if lastModifiedAt, ok := resultData["last_modified_at"].(string); ok {
-		state.LastModifiedAt = types.StringValue(lastModifiedAt)
+	configData := resultData.Config
+	if configData.CloudID != "" {
+		state.CloudID = types.StringValue(configData.CloudID)
 	}
 
-	// Extract config object
-	if configData, ok := resultData["config"].(map[string]interface{}); ok {
-		if cloudID, ok := configData["cloud_id"].(string); ok {
-			state.CloudID = types.StringValue(cloudID)
+	allowedAZs := configData.AllowedAZs
+	flags := configData.Flags
+	autoSelect := configData.AutoSelectWorkerConfig
+	headNodeType := configData.HeadNodeType
+	workerNodeTypes := configData.WorkerNodeTypes
+
+	if len(configData.DeploymentConfigs) > 0 {
+		deploymentConfig := configData.DeploymentConfigs[0]
+		if len(deploymentConfig.AllowedAZs) > 0 {
+			allowedAZs = deploymentConfig.AllowedAZs
 		}
-
-		if cloudResource, ok := configData["cloud_resource"].(string); ok {
-			state.CloudResource = types.StringValue(cloudResource)
+		if deploymentConfig.Flags != nil {
+			flags = deploymentConfig.Flags
 		}
+		autoSelect = deploymentConfig.AutoSelectWorkerConfig
+		if deploymentConfig.HeadNodeType != nil {
+			headNodeType = deploymentConfig.HeadNodeType
+		}
+		if len(deploymentConfig.WorkerNodeTypes) > 0 {
+			workerNodeTypes = deploymentConfig.WorkerNodeTypes
+		}
+		if deploymentConfig.CloudDeployment != "" {
+			state.CloudResource = types.StringValue(deploymentConfig.CloudDeployment)
+		}
+	}
 
-		if allowedAzs, ok := configData["allowed_azs"].([]interface{}); ok {
-			zonesList, diags := InterfaceListToString(ctx, allowedAzs)
+	if len(allowedAZs) > 0 {
+		if len(allowedAZs) == 1 && strings.EqualFold(allowedAZs[0], "any") {
+			state.Zones = types.ListNull(types.StringType)
+		} else {
+			allowedAZInterfaces := make([]interface{}, 0, len(allowedAZs))
+			for _, az := range allowedAZs {
+				allowedAZInterfaces = append(allowedAZInterfaces, az)
+			}
+			zonesList, diags := InterfaceListToString(ctx, allowedAZInterfaces)
 			resp.Diagnostics.Append(diags...)
 			state.Zones = zonesList
 		}
+	}
 
-		if autoSelect, ok := configData["auto_select_worker_config"].(bool); ok {
-			state.AutoSelectWorkerConfig = types.BoolValue(autoSelect)
+	state.AutoSelectWorkerConfig = types.BoolValue(autoSelect)
+
+	if flags != nil {
+		if minResources, ok := flags["min_resources"].(map[string]interface{}); ok {
+			minResourcesMap, diags := InterfaceMapToFloat64(ctx, minResources)
+			resp.Diagnostics.Append(diags...)
+			state.MinResources = minResourcesMap
 		}
 
-		// Parse min_resources, max_resources, and enable_cross_zone_scaling from flags
-		// (per CLI behavior, these are stored in flags when sent to the API)
-		if flags, ok := configData["flags"].(map[string]interface{}); ok {
-			if minResources, ok := flags["min_resources"].(map[string]interface{}); ok {
-				minResourcesMap, diags := InterfaceMapToFloat64(ctx, minResources)
-				resp.Diagnostics.Append(diags...)
-				state.MinResources = minResourcesMap
-			}
-
-			if maxResources, ok := flags["max_resources"].(map[string]interface{}); ok {
-				maxResourcesMap, diags := InterfaceMapToFloat64(ctx, maxResources)
-				resp.Diagnostics.Append(diags...)
-				state.MaxResources = maxResourcesMap
-			}
-
-			if enableCrossZone, ok := flags["allow-cross-zone-autoscaling"].(bool); ok {
-				state.EnableCrossZoneScaling = types.BoolValue(enableCrossZone)
-			}
+		if maxResources, ok := flags["max_resources"].(map[string]interface{}); ok {
+			maxResourcesMap, diags := InterfaceMapToFloat64(ctx, maxResources)
+			resp.Diagnostics.Append(diags...)
+			state.MaxResources = maxResourcesMap
 		}
 
-		// NOTE: We intentionally do NOT read user-defined flags from the API response
-		// The flags field should only reflect what's in the user's configuration
-		// We extract special flags (min_resources, max_resources, allow-cross-zone-autoscaling) above,
-		// but user's custom flags are preserved as-is from their configuration.
-
-		// NOTE: We intentionally do NOT read advanced_instance_config from the API response
-		// The API's representation may differ from our config's representation (e.g., null vs empty arrays)
-		// This would cause perpetual drift. We preserve what the user configured.
-
-		// Parse head_node from API response
-		if headNodeType, ok := configData["head_node_type"].(map[string]interface{}); ok {
-			headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, headNodeType)
-			resp.Diagnostics.Append(headNodeDiags...)
-			if !resp.Diagnostics.HasError() {
-				state.HeadNode = headNodeObj
-			}
+		if enableCrossZone, ok := flags["allow-cross-zone-autoscaling"].(bool); ok {
+			state.EnableCrossZoneScaling = types.BoolValue(enableCrossZone)
 		}
+	}
 
-		// Parse worker_nodes from API response
-		if workerNodeTypes, ok := configData["worker_node_types"].([]interface{}); ok {
-			workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerNodeTypes)
-			resp.Diagnostics.Append(workerNodesDiags...)
-			if !resp.Diagnostics.HasError() {
-				state.WorkerNodes = workerNodesList
-			}
+	// NOTE: We intentionally do NOT read user-defined flags from the API response
+	// The flags field should only reflect what's in the user's configuration
+	// We extract special flags (min_resources, max_resources, allow-cross-zone-autoscaling) above,
+	// but user's custom flags are preserved as-is from their configuration.
+
+	// NOTE: We intentionally do NOT read advanced_instance_config from the API response
+	// The API's representation may differ from our config's representation (e.g., null vs empty arrays)
+	// This would cause perpetual drift. We preserve what the user configured.
+
+	if headNodeType != nil {
+		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, headNodeType)
+		resp.Diagnostics.Append(headNodeDiags...)
+		if !resp.Diagnostics.HasError() {
+			state.HeadNode = headNodeObj
+		}
+	}
+
+	if len(workerNodeTypes) > 0 {
+		workerInterfaces := make([]interface{}, 0, len(workerNodeTypes))
+		for _, worker := range workerNodeTypes {
+			workerInterfaces = append(workerInterfaces, worker)
+		}
+		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		resp.Diagnostics.Append(workerNodesDiags...)
+		if !resp.Diagnostics.HasError() {
+			state.WorkerNodes = workerNodesList
 		}
 	}
 
@@ -790,10 +849,10 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	log.Printf("[DEBUG] POST /ext/v0/cluster_computes/ - Creating new version of compute config")
+	log.Printf("[DEBUG] POST /api/v2/compute_templates/ - Creating new version of compute config")
 
-	apiResult, err := DoRequestAndParse[map[string]interface{}](
-		ctx, r.client, "POST", "/ext/v0/cluster_computes/", reqBody,
+	apiResult, err := DoRequestAndParse[computeTemplateResponse](
+		ctx, r.client, "POST", "/api/v2/compute_templates/", reqBody,
 		http.StatusOK, http.StatusCreated,
 	)
 	if err != nil {
@@ -801,39 +860,30 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	resultData, ok := (*apiResult)["result"].(map[string]interface{})
-	if !ok {
-		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return expected result structure")
-		return
-	}
+	resultData := apiResult.Result
 
-	// Extract the new config ID - this changes with each version
-	newConfigID, ok := resultData["id"].(string)
-	if !ok || newConfigID == "" {
+	if resultData.ID == "" {
 		AddConfigError(&resp.Diagnostics, "Invalid Response", "API did not return an ID for the new version")
 		return
 	}
 
 	tflog.Info(ctx, "Created new compute config version", map[string]any{
-		"name":          plan.Name.ValueString(),
-		"new_config_id": newConfigID,
-		"new_version":   resultData["version"],
+		"name":          resultData.Name,
+		"new_config_id": resultData.ID,
+		"new_version":   resultData.Version,
 	})
 
-	// Update state with new computed values
-	// ID stays the same (name), ConfigID changes to new version-specific ID
-	plan.ID = types.StringValue(plan.Name.ValueString()) // Keep ID = name (stable)
-	plan.ConfigID = types.StringValue(newConfigID)       // Update version-specific ID
-	if version, ok := resultData["version"].(float64); ok {
-		plan.Version = types.Int64Value(int64(version))
-		// Set name_version formatted as "name:version" for use with Anyscale APIs
-		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), int64(version)))
+	plan.ID = types.StringValue(resultData.Name)
+	plan.ConfigID = types.StringValue(resultData.ID)
+	if resultData.Version > 0 {
+		plan.Version = types.Int64Value(resultData.Version)
+		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", resultData.Name, resultData.Version))
 	}
-	if createdAt, ok := resultData["created_at"].(string); ok {
-		plan.CreatedAt = types.StringValue(createdAt)
+	if resultData.CreatedAt != "" {
+		plan.CreatedAt = types.StringValue(resultData.CreatedAt)
 	}
-	if lastModifiedAt, ok := resultData["last_modified_at"].(string); ok {
-		plan.LastModifiedAt = types.StringValue(lastModifiedAt)
+	if resultData.LastModifiedAt != "" {
+		plan.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
 	}
 
 	// Set updated state
@@ -855,11 +905,10 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 		configID = state.ID.ValueString()
 	}
 
-	log.Printf("[INFO] Deleting compute config: name=%s, config_id=%s", state.Name.ValueString(), configID)
+	log.Printf("[INFO] Archiving compute config: name=%s, config_id=%s", state.Name.ValueString(), configID)
 
-	// Make API call to delete compute config
 	_, err := DoRequestRaw(
-		ctx, r.client, "DELETE", fmt.Sprintf("/ext/v0/cluster_computes/%s", configID), nil,
+		ctx, r.client, "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", configID), nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 	)
 	if err != nil {
@@ -867,7 +916,7 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 
-	log.Printf("[INFO] Deleted compute config successfully")
+	log.Printf("[INFO] Archived compute config successfully")
 }
 
 func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -877,6 +926,50 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 }
 
 // Helper functions for converting nested objects
+
+func resourceMapToAPI(resources types.Map) map[string]interface{} {
+	if resources.IsNull() || resources.IsUnknown() {
+		return nil
+	}
+
+	elements := resources.Elements()
+	if len(elements) == 0 {
+		return nil
+	}
+
+	apiResources := make(map[string]interface{})
+	customResources := make(map[string]interface{})
+
+	for key, value := range elements {
+		floatValue, ok := value.(types.Float64)
+		if !ok || floatValue.IsNull() {
+			continue
+		}
+
+		switch strings.ToLower(key) {
+		case "cpu":
+			apiResources["cpu"] = floatValue.ValueFloat64()
+		case "gpu":
+			apiResources["gpu"] = floatValue.ValueFloat64()
+		case "memory":
+			apiResources["memory"] = floatValue.ValueFloat64()
+		case "object_store_memory":
+			apiResources["object_store_memory"] = floatValue.ValueFloat64()
+		default:
+			customResources[key] = floatValue.ValueFloat64()
+		}
+	}
+
+	if len(customResources) > 0 {
+		apiResources["custom_resources"] = customResources
+	}
+
+	if len(apiResources) == 0 {
+		return nil
+	}
+
+	return apiResources
+}
 
 // nodeConfigToAPI converts a head_node or worker_node object to API format
 func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]interface{}, error) {
@@ -891,22 +984,12 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 	}
 
 	config := map[string]interface{}{
-		"name":          "head", // API requires name field
+		"name":          "head",
 		"instance_type": node.InstanceType.ValueString(),
 	}
 
-	// Add resources
-	if !node.Resources.IsNull() {
-		resourcesMap := make(map[string]interface{})
-		elements := node.Resources.Elements()
-		for key, value := range elements {
-			if float64Val, ok := value.(types.Float64); ok && !float64Val.IsNull() {
-				resourcesMap[key] = float64Val.ValueFloat64()
-			}
-		}
-		if len(resourcesMap) > 0 {
-			config["resources"] = resourcesMap
-		}
+	if resourcesMap := resourceMapToAPI(node.Resources); len(resourcesMap) > 0 {
+		config["resources"] = resourcesMap
 	}
 
 	// Add physical_resources
@@ -963,15 +1046,6 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 		}
 	}
 
-	// Add flags (JSON string)
-	if !node.Flags.IsNull() && node.Flags.ValueString() != "" {
-		var flags map[string]interface{}
-		if err := json.Unmarshal([]byte(node.Flags.ValueString()), &flags); err == nil {
-			config["flags"] = flags
-		}
-	}
-
-	// Add cloud_deployment
 	if !node.CloudDeployment.IsNull() {
 		var cloudDep CloudDeploymentModel
 		diags := node.CloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
@@ -995,6 +1069,17 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 				config["cloud_deployment"] = cloudDepMap
 			}
 		}
+	}
+
+	flags := map[string]interface{}{}
+	if !node.Flags.IsNull() && node.Flags.ValueString() != "" {
+		if err := json.Unmarshal([]byte(node.Flags.ValueString()), &flags); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(flags) > 0 {
+		config["flags"] = flags
 	}
 
 	return config, nil
@@ -1056,18 +1141,8 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 		config["fallback_to_ondemand"] = false
 	}
 
-	// Add resources
-	if !worker.Resources.IsNull() {
-		resourcesMap := make(map[string]interface{})
-		elements := worker.Resources.Elements()
-		for key, value := range elements {
-			if float64Val, ok := value.(types.Float64); ok && !float64Val.IsNull() {
-				resourcesMap[key] = float64Val.ValueFloat64()
-			}
-		}
-		if len(resourcesMap) > 0 {
-			config["resources"] = resourcesMap
-		}
+	if resourcesMap := resourceMapToAPI(worker.Resources); len(resourcesMap) > 0 {
+		config["resources"] = resourcesMap
 	}
 
 	// Add physical_resources
@@ -1124,15 +1199,6 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 		}
 	}
 
-	// Add flags (JSON string)
-	if !worker.Flags.IsNull() && worker.Flags.ValueString() != "" {
-		var flags map[string]interface{}
-		if err := json.Unmarshal([]byte(worker.Flags.ValueString()), &flags); err == nil {
-			config["flags"] = flags
-		}
-	}
-
-	// Add cloud_deployment
 	if !worker.CloudDeployment.IsNull() {
 		var cloudDep CloudDeploymentModel
 		diags := worker.CloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
@@ -1156,6 +1222,17 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 				config["cloud_deployment"] = cloudDepMap
 			}
 		}
+	}
+
+	flags := map[string]interface{}{}
+	if !worker.Flags.IsNull() && worker.Flags.ValueString() != "" {
+		if err := json.Unmarshal([]byte(worker.Flags.ValueString()), &flags); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(flags) > 0 {
+		config["flags"] = flags
 	}
 
 	return config, nil
