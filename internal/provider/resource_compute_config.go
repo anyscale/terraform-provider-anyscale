@@ -783,14 +783,14 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 			}
 		}
 
-		// NOTE: We intentionally do NOT read advanced_instance_config from the API response
-		// The API's representation may differ from our config's representation (e.g., null vs empty arrays)
-		// This would cause perpetual drift. We preserve what the user configured.
-
 		// NOTE: We intentionally do NOT read user-defined flags from the API response
 		// The flags field should only reflect what's in the user's configuration
 		// We extract special flags (min_resources, max_resources, allow-cross-zone-autoscaling) above,
 		// but user's custom flags are preserved as-is from their configuration.
+
+		// NOTE: We intentionally do NOT read advanced_instance_config from the API response
+		// The API's representation may differ from our config's representation (e.g., null vs empty arrays)
+		// This would cause perpetual drift. We preserve what the user configured.
 
 		// Parse head_node from API response
 		if headNodeType, ok := configData["head_node_type"].(map[string]interface{}); ok {
