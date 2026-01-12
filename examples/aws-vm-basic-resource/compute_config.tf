@@ -6,7 +6,6 @@ resource "anyscale_compute_config" "basic" {
   cloud_id = anyscale_cloud.primary.id
   # project_id is optional - omit to use organization default
 
-  idle_termination_minutes  = 30
   enable_cross_zone_scaling = false
 
   head_node = {
@@ -37,8 +36,6 @@ resource "anyscale_compute_config" "advanced" {
   cloud_id = anyscale_cloud.primary.id
   # project_id is optional - omit to use organization default
 
-  idle_termination_minutes  = 60
-  maximum_uptime_minutes    = 480
   enable_cross_zone_scaling = true
 
   # Resource constraints
@@ -55,7 +52,6 @@ resource "anyscale_compute_config" "advanced" {
 
   # Cluster-level flags
   flags = {
-    idle_termination_seconds    = 300
     workload_starting_timeout   = "30m"
     workload_recovering_timeout = "20m"
     instance_selection_strategy = "relaxed"
@@ -63,7 +59,7 @@ resource "anyscale_compute_config" "advanced" {
 
 
   # Advanced configurations for AWS
-  advanced_configurations_json = {
+  advanced_instance_config = {
     BlockDeviceMappings = [
       {
         DeviceName = "/dev/sda1"
@@ -138,10 +134,6 @@ resource "anyscale_compute_config" "advanced" {
         "node_type"   = "worker"
         "accelerator" = "nvidia-a10g"
         "workload"    = "ml-training"
-      }
-
-      required_labels = {
-        "ray.io/node-type" = "worker"
       }
     },
     {

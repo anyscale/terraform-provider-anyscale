@@ -63,9 +63,9 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 							"enable_cross_zone_scaling",
 							"min_resources",
 							"max_resources",
-							"advanced_configurations_json",
+							"advanced_instance_config",
 							"flags",
-							"allowed_azs",
+							"zones",
 						},
 					},
 				},
@@ -258,8 +258,6 @@ func testAccComputeConfigResourceConfig_withWorkers(cloudID, headInstanceType, w
 resource "anyscale_compute_config" "test" {
   name     = "tf-test-compute-config-workers-%d"
   cloud_id = "%s"
-
-  idle_termination_minutes = 60
 
   head_node = {
     instance_type = "%s"
