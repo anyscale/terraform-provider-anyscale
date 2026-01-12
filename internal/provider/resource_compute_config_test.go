@@ -25,9 +25,8 @@ func TestNodeConfigToAPI(t *testing.T) {
 				map[string]attr.Type{
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
-					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -41,9 +40,8 @@ func TestNodeConfigToAPI(t *testing.T) {
 							"RAM": types.Float64Value(32),
 						},
 					),
-					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
-					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -65,9 +63,8 @@ func TestNodeConfigToAPI(t *testing.T) {
 				map[string]attr.Type{
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
-					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -75,9 +72,8 @@ func TestNodeConfigToAPI(t *testing.T) {
 				map[string]attr.Value{
 					"instance_type":            types.StringValue("m5.xlarge"),
 					"resources":                types.MapNull(types.Float64Type),
-					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
-					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringValue(`{"disk_size": 100, "enable_monitoring": true}`),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -178,9 +174,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringType,
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
-					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -192,9 +187,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringValue("ON_DEMAND"),
 					"instance_type":            types.StringValue("m5.large"),
 					"resources":                types.MapNull(types.Float64Type),
-					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
-					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -220,9 +214,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringType,
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
-					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -234,9 +227,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringValue("SPOT"),
 					"instance_type":            types.StringValue("m5.xlarge"),
 					"resources":                types.MapNull(types.Float64Type),
-					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
-					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -262,9 +254,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringType,
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
-					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -276,9 +267,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringValue("PREFER_SPOT"),
 					"instance_type":            types.StringValue("m5.2xlarge"),
 					"resources":                types.MapNull(types.Float64Type),
-					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
-					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -476,9 +466,8 @@ func TestWorkerNameDefaulting(t *testing.T) {
 			"market_type":              types.StringType,
 			"instance_type":            types.StringType,
 			"resources":                types.MapType{ElemType: types.Float64Type},
-			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+			"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
-			"required_labels":          types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -490,9 +479,8 @@ func TestWorkerNameDefaulting(t *testing.T) {
 			"market_type":              types.StringValue("ON_DEMAND"),
 			"instance_type":            types.StringValue("n2-standard-4"),
 			"resources":                types.MapNull(types.Float64Type),
-			"required_resources":       types.ObjectNull(map[string]attr.Type{}),
+			"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
 			"labels":                   types.MapNull(types.StringType),
-			"required_labels":          types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
 			"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -510,12 +498,12 @@ func TestWorkerNameDefaulting(t *testing.T) {
 	}
 }
 
-// TestRequiredResourcesConversion tests conversion of required_resources for custom instance types
-func TestRequiredResourcesConversion(t *testing.T) {
+// TestPhysicalResourcesConversion tests conversion of physical_resources for custom instance types
+func TestPhysicalResourcesConversion(t *testing.T) {
 	ctx := context.Background()
 
-	// Build required_resources object
-	reqResourcesObj := types.ObjectValueMust(
+	// Build physical_resources object
+	physResourcesObj := types.ObjectValueMust(
 		map[string]attr.Type{
 			"cpu":         types.Int64Type,
 			"memory":      types.StringType,
@@ -538,9 +526,8 @@ func TestRequiredResourcesConversion(t *testing.T) {
 		map[string]attr.Type{
 			"instance_type":            types.StringType,
 			"resources":                types.MapType{ElemType: types.Float64Type},
-			"required_resources":       reqResourcesObj.Type(ctx),
+			"physical_resources":       physResourcesObj.Type(ctx),
 			"labels":                   types.MapType{ElemType: types.StringType},
-			"required_labels":          types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -548,9 +535,8 @@ func TestRequiredResourcesConversion(t *testing.T) {
 		map[string]attr.Value{
 			"instance_type":            types.StringValue("custom"),
 			"resources":                types.MapNull(types.Float64Type),
-			"required_resources":       reqResourcesObj,
+			"physical_resources":       physResourcesObj,
 			"labels":                   types.MapNull(types.StringType),
-			"required_labels":          types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
 			"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -562,7 +548,7 @@ func TestRequiredResourcesConversion(t *testing.T) {
 		t.Fatalf("nodeConfigToAPI() error = %v", err)
 	}
 
-	// Verify physical_resources was converted (API field name for required_resources)
+	// Verify physical_resources was converted (API field name for physical_resources)
 	physRes, ok := got["physical_resources"]
 	if !ok {
 		t.Fatal("nodeConfigToAPI() missing physical_resources")
@@ -611,9 +597,8 @@ func TestCloudDeploymentConversion(t *testing.T) {
 		map[string]attr.Type{
 			"instance_type":            types.StringType,
 			"resources":                types.MapType{ElemType: types.Float64Type},
-			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+			"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
-			"required_labels":          types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
 			"cloud_deployment":         cloudDepObj.Type(ctx),
@@ -621,9 +606,8 @@ func TestCloudDeploymentConversion(t *testing.T) {
 		map[string]attr.Value{
 			"instance_type":            types.StringValue("m5.large"),
 			"resources":                types.MapNull(types.Float64Type),
-			"required_resources":       types.ObjectNull(map[string]attr.Type{}),
+			"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
 			"labels":                   types.MapNull(types.StringType),
-			"required_labels":          types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
 			"cloud_deployment":         cloudDepObj,
@@ -658,7 +642,7 @@ func TestCloudDeploymentConversion(t *testing.T) {
 	}
 }
 
-// TestNodeLabelsConversion tests conversion of labels and required_labels
+// TestNodeLabelsConversion tests conversion of labels
 func TestNodeLabelsConversion(t *testing.T) {
 	ctx := context.Background()
 
@@ -666,9 +650,8 @@ func TestNodeLabelsConversion(t *testing.T) {
 		map[string]attr.Type{
 			"instance_type":            types.StringType,
 			"resources":                types.MapType{ElemType: types.Float64Type},
-			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+			"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
-			"required_labels":          types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -676,18 +659,12 @@ func TestNodeLabelsConversion(t *testing.T) {
 		map[string]attr.Value{
 			"instance_type":      types.StringValue("m5.xlarge"),
 			"resources":          types.MapNull(types.Float64Type),
-			"required_resources": types.ObjectNull(map[string]attr.Type{}),
+			"physical_resources": types.ObjectNull(map[string]attr.Type{}),
 			"labels": types.MapValueMust(
 				types.StringType,
 				map[string]attr.Value{
 					"environment": types.StringValue("production"),
 					"team":        types.StringValue("ml-platform"),
-				},
-			),
-			"required_labels": types.MapValueMust(
-				types.StringType,
-				map[string]attr.Value{
-					"gpu": types.StringValue("true"),
 				},
 			),
 			"advanced_instance_config": types.StringNull(),
@@ -712,15 +689,5 @@ func TestNodeLabelsConversion(t *testing.T) {
 	}
 	if labelsMap["team"] != "ml-platform" {
 		t.Errorf("labels.team = %v, want 'ml-platform'", labelsMap["team"])
-	}
-
-	// Verify required_labels
-	reqLabels, ok := got["required_labels"]
-	if !ok {
-		t.Fatal("nodeConfigToAPI() missing required_labels")
-	}
-	reqLabelsMap := reqLabels.(map[string]interface{})
-	if reqLabelsMap["gpu"] != "true" {
-		t.Errorf("required_labels.gpu = %v, want 'true'", reqLabelsMap["gpu"])
 	}
 }
