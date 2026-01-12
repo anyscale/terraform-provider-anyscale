@@ -44,6 +44,7 @@ type ComputeConfigResourceModel struct {
 	ProjectID              types.String  `tfsdk:"project_id"`
 	CloudID                types.String  `tfsdk:"cloud_id"`
 	CloudName              types.String  `tfsdk:"cloud_name"`
+	CloudResource          types.String  `tfsdk:"cloud_resource"` // Target specific cloud resource within a cloud
 	Region                 types.String  `tfsdk:"region"`
 	IdleTerminationMinutes types.Int64   `tfsdk:"idle_termination_minutes"`
 	MaximumUptimeMinutes   types.Int64   `tfsdk:"maximum_uptime_minutes"`
@@ -153,6 +154,11 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				Optional:            true,
 				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id.",
 				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id.",
+			},
+			"cloud_resource": schema.StringAttribute{
+				Optional:            true,
+				Description:         "The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.",
+				MarkdownDescription: "The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.",
 			},
 			"region": schema.StringAttribute{
 				Optional:            true,
@@ -463,6 +469,11 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 
 	config := createRequest["config"].(map[string]interface{})
 
+	// Add cloud_resource
+	if !plan.CloudResource.IsNull() {
+		config["cloud_resource"] = plan.CloudResource.ValueString()
+	}
+
 	// Add region
 	if !plan.Region.IsNull() {
 		config["region"] = plan.Region.ValueString()
@@ -739,6 +750,10 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	if configData, ok := resultData["config"].(map[string]interface{}); ok {
 		if cloudID, ok := configData["cloud_id"].(string); ok {
 			state.CloudID = types.StringValue(cloudID)
+		}
+
+		if cloudResource, ok := configData["cloud_resource"].(string); ok {
+			state.CloudResource = types.StringValue(cloudResource)
 		}
 
 		if region, ok := configData["region"].(string); ok {

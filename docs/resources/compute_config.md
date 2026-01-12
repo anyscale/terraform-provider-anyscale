@@ -104,6 +104,7 @@ output "compute_config_id" {
 - `auto_select_worker_config` (Boolean) If set to true, worker node groups will automatically be selected based on workload.
 - `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified.
 - `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id.
+- `cloud_resource` (String) The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.
 - `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Recommended for production services.
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
 - `idle_termination_minutes` (Number) If set to a positive number, Anyscale will terminate the cluster this many minutes after the cluster is idle. Set to 0 to disable. Defaults to 120 minutes.
