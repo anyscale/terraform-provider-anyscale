@@ -41,8 +41,6 @@ resource "anyscale_compute_config" "example" {
   name     = "example-compute-config"
   cloud_id = data.anyscale_cloud.production.id
 
-  idle_termination_minutes = 60
-
   head_node = {
     instance_type = "m5.large"
   }
@@ -80,10 +78,6 @@ data "anyscale_compute_config" "template" {
 resource "anyscale_compute_config" "customized" {
   name     = "customized-config"
   cloud_id = data.anyscale_compute_config.template.cloud_id
-  region   = data.anyscale_compute_config.template.region
-
-  # Customize the idle timeout
-  idle_termination_minutes = 30
 
   head_node = {
     instance_type = "m5.2xlarge"

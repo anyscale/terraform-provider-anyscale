@@ -100,20 +100,17 @@ output "compute_config_id" {
 ### Optional
 
 - `advanced_instance_config` (Dynamic) Advanced instance configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.
-- `allowed_azs` (List of String) The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.
 - `auto_select_worker_config` (Boolean) If set to true, worker node groups will automatically be selected based on workload.
 - `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified.
 - `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id.
 - `cloud_resource` (String) The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.
 - `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Recommended for production services.
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
-- `idle_termination_minutes` (Number) If set to a positive number, Anyscale will terminate the cluster this many minutes after the cluster is idle. Set to 0 to disable. Defaults to 120 minutes.
 - `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`)
-- `maximum_uptime_minutes` (Number) If set to a positive number, Anyscale will terminate the cluster this many minutes after cluster start.
 - `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`)
 - `project_id` (String) The project ID to associate the compute config with.
-- `region` (String) The region to launch clusters in. Defaults to `USE_CLOUD` which uses the cloud's default region.
 - `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests. (see [below for nested schema](#nestedatt--worker_nodes))
+- `zones` (List of String) Availability zones to consider for this cluster. Defaults to all zones in the cloud's region.
 
 ### Read-Only
 
@@ -137,8 +134,7 @@ Optional:
 - `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--head_node--cloud_deployment))
 - `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.
 - `labels` (Map of String) Labels to associate the node with for scheduling purposes.
-- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes.
-- `required_resources` (Attributes) Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--head_node--required_resources))
+- `physical_resources` (Attributes) Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--head_node--physical_resources))
 - `resources` (Map of Number) Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.
 
 <a id="nestedatt--head_node--cloud_deployment"></a>
@@ -152,8 +148,8 @@ Optional:
 - `region` (String) Cloud provider region, e.g., `us-west-2`.
 
 
-<a id="nestedatt--head_node--required_resources"></a>
-### Nested Schema for `head_node.required_resources`
+<a id="nestedatt--head_node--physical_resources"></a>
+### Nested Schema for `head_node.physical_resources`
 
 Optional:
 
@@ -183,8 +179,7 @@ Optional:
 - `max_nodes` (Number) Maximum number of nodes of this type that can be running in the cluster.
 - `min_nodes` (Number) Minimum number of nodes of this type that will be kept running in the cluster.
 - `name` (String) Unique name of this worker group. Defaults to a human-friendly representation of the instance type.
-- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes.
-- `required_resources` (Attributes) Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
+- `physical_resources` (Attributes) Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--worker_nodes--physical_resources))
 - `resources` (Map of Number) Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.
 
 <a id="nestedatt--worker_nodes--cloud_deployment"></a>
@@ -198,8 +193,8 @@ Optional:
 - `region` (String) Cloud provider region, e.g., `us-west-2`.
 
 
-<a id="nestedatt--worker_nodes--required_resources"></a>
-### Nested Schema for `worker_nodes.required_resources`
+<a id="nestedatt--worker_nodes--physical_resources"></a>
+### Nested Schema for `worker_nodes.physical_resources`
 
 Optional:
 

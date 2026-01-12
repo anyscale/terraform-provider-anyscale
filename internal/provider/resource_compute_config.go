@@ -45,12 +45,9 @@ type ComputeConfigResourceModel struct {
 	CloudID                types.String  `tfsdk:"cloud_id"`
 	CloudName              types.String  `tfsdk:"cloud_name"`
 	CloudResource          types.String  `tfsdk:"cloud_resource"` // Target specific cloud resource within a cloud
-	Region                 types.String  `tfsdk:"region"`
-	IdleTerminationMinutes types.Int64   `tfsdk:"idle_termination_minutes"`
-	MaximumUptimeMinutes   types.Int64   `tfsdk:"maximum_uptime_minutes"`
-	AllowedAZs             types.List    `tfsdk:"allowed_azs"`   // List of String
-	MinResources           types.Map     `tfsdk:"min_resources"` // Map of Float64
-	MaxResources           types.Map     `tfsdk:"max_resources"` // Map of Float64
+	Zones                  types.List    `tfsdk:"zones"`          // List of String
+	MinResources           types.Map     `tfsdk:"min_resources"`  // Map of Float64
+	MaxResources           types.Map     `tfsdk:"max_resources"`  // Map of Float64
 	EnableCrossZoneScaling types.Bool    `tfsdk:"enable_cross_zone_scaling"`
 	AdvancedInstanceConfig types.Dynamic `tfsdk:"advanced_instance_config"` // Dynamic (supports nested objects with mixed types)
 	AutoSelectWorkerConfig types.Bool    `tfsdk:"auto_select_worker_config"`
@@ -66,16 +63,15 @@ type ComputeConfigResourceModel struct {
 type NodeConfigModel struct {
 	InstanceType           types.String `tfsdk:"instance_type"`
 	Resources              types.Map    `tfsdk:"resources"`                // Map of Float64
-	RequiredResources      types.Object `tfsdk:"required_resources"`       // RequiredResourcesModel
+	PhysicalResources      types.Object `tfsdk:"physical_resources"`       // PhysicalResourcesModel
 	Labels                 types.Map    `tfsdk:"labels"`                   // Map of String
-	RequiredLabels         types.Map    `tfsdk:"required_labels"`          // Map of String
 	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string
 	Flags                  types.String `tfsdk:"flags"`                    // JSON string
 	CloudDeployment        types.Object `tfsdk:"cloud_deployment"`         // CloudDeploymentModel
 }
 
-// RequiredResourcesModel describes required resources for custom instances.
-type RequiredResourcesModel struct {
+// PhysicalResourcesModel describes physical resources for custom instances.
+type PhysicalResourcesModel struct {
 	CPU         types.Int64  `tfsdk:"cpu"`
 	Memory      types.String `tfsdk:"memory"`
 	GPU         types.Int64  `tfsdk:"gpu"`
@@ -100,9 +96,8 @@ type WorkerNodeConfigModel struct {
 	MarketType             types.String `tfsdk:"market_type"`
 	InstanceType           types.String `tfsdk:"instance_type"`
 	Resources              types.Map    `tfsdk:"resources"`
-	RequiredResources      types.Object `tfsdk:"required_resources"`
+	PhysicalResources      types.Object `tfsdk:"physical_resources"`
 	Labels                 types.Map    `tfsdk:"labels"`
-	RequiredLabels         types.Map    `tfsdk:"required_labels"`
 	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string
 	Flags                  types.String `tfsdk:"flags"`                    // JSON string
 	CloudDeployment        types.Object `tfsdk:"cloud_deployment"`
@@ -160,30 +155,12 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				Description:         "The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.",
 				MarkdownDescription: "The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.",
 			},
-			"region": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString("USE_CLOUD"),
-				Description:         "The region to launch clusters in. Defaults to USE_CLOUD which uses the cloud's default region.",
-				MarkdownDescription: "The region to launch clusters in. Defaults to `USE_CLOUD` which uses the cloud's default region.",
-			},
-			"idle_termination_minutes": schema.Int64Attribute{
-				Optional:            true,
-				Computed:            true,
-				Default:             int64default.StaticInt64(120),
-				Description:         "If set to a positive number, Anyscale will terminate the cluster this many minutes after the cluster is idle. Set to 0 to disable. Defaults to 120 minutes.",
-				MarkdownDescription: "If set to a positive number, Anyscale will terminate the cluster this many minutes after the cluster is idle. Set to 0 to disable. Defaults to 120 minutes.",
-			},
-			"maximum_uptime_minutes": schema.Int64Attribute{
-				Optional:            true,
-				Description:         "If set to a positive number, Anyscale will terminate the cluster this many minutes after cluster start.",
-				MarkdownDescription: "If set to a positive number, Anyscale will terminate the cluster this many minutes after cluster start.",
-			},
-			"allowed_azs": schema.ListAttribute{
+
+			"zones": schema.ListAttribute{
 				ElementType:         types.StringType,
 				Optional:            true,
-				Description:         "The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.",
-				MarkdownDescription: "The availability zones that sessions are allowed to be launched in. If not specified, any AZ may be used.",
+				Description:         "Availability zones to consider for this cluster. Defaults to all zones in the cloud's region.",
+				MarkdownDescription: "Availability zones to consider for this cluster. Defaults to all zones in the cloud's region.",
 			},
 			"min_resources": schema.MapAttribute{
 				ElementType:         types.Float64Type,
@@ -268,7 +245,7 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 			Description:         "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
 			MarkdownDescription: "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
 		},
-		"required_resources": schema.SingleNestedAttribute{
+		"physical_resources": schema.SingleNestedAttribute{
 			Optional:            true,
 			Description:         "Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources.",
 			MarkdownDescription: "Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources.",
@@ -310,12 +287,6 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 			Optional:            true,
 			Description:         "Labels to associate the node with for scheduling purposes.",
 			MarkdownDescription: "Labels to associate the node with for scheduling purposes.",
-		},
-		"required_labels": schema.MapAttribute{
-			ElementType:         types.StringType,
-			Optional:            true,
-			Description:         "Required labels that must be present on the node for scheduling purposes.",
-			MarkdownDescription: "Required labels that must be present on the node for scheduling purposes.",
 		},
 		"advanced_instance_config": schema.StringAttribute{
 			Optional:            true,
@@ -474,29 +445,14 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		config["cloud_resource"] = plan.CloudResource.ValueString()
 	}
 
-	// Add region
-	if !plan.Region.IsNull() {
-		config["region"] = plan.Region.ValueString()
-	}
-
-	// Add idle_termination_minutes
-	if !plan.IdleTerminationMinutes.IsNull() {
-		config["idle_termination_minutes"] = plan.IdleTerminationMinutes.ValueInt64()
-	}
-
-	// Add maximum_uptime_minutes
-	if !plan.MaximumUptimeMinutes.IsNull() {
-		config["maximum_uptime_minutes"] = plan.MaximumUptimeMinutes.ValueInt64()
-	}
-
-	// Add allowed_azs
-	if !plan.AllowedAZs.IsNull() {
-		allowedAzs, azDiags := StringListToInterface(ctx, plan.AllowedAZs)
-		diags.Append(azDiags...)
+	// Add zones (maps to allowed_azs in API)
+	if !plan.Zones.IsNull() {
+		zones, zonesDiags := StringListToInterface(ctx, plan.Zones)
+		diags.Append(zonesDiags...)
 		if diags.HasError() {
 			return nil, ""
 		}
-		config["allowed_azs"] = allowedAzs
+		config["allowed_azs"] = zones
 	}
 
 	// Add auto_select_worker_config
@@ -756,22 +712,10 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 			state.CloudResource = types.StringValue(cloudResource)
 		}
 
-		if region, ok := configData["region"].(string); ok {
-			state.Region = types.StringValue(region)
-		}
-
-		if idleTermination, ok := configData["idle_termination_minutes"].(float64); ok {
-			state.IdleTerminationMinutes = types.Int64Value(int64(idleTermination))
-		}
-
-		if maximumUptime, ok := configData["maximum_uptime_minutes"].(float64); ok {
-			state.MaximumUptimeMinutes = types.Int64Value(int64(maximumUptime))
-		}
-
 		if allowedAzs, ok := configData["allowed_azs"].([]interface{}); ok {
-			allowedAzsList, diags := InterfaceListToString(ctx, allowedAzs)
+			zonesList, diags := InterfaceListToString(ctx, allowedAzs)
 			resp.Diagnostics.Append(diags...)
-			state.AllowedAZs = allowedAzsList
+			state.Zones = zonesList
 		}
 
 		if autoSelect, ok := configData["auto_select_worker_config"].(bool); ok {
@@ -981,34 +925,34 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 		}
 	}
 
-	// Add required_resources
-	if !node.RequiredResources.IsNull() {
-		var reqRes RequiredResourcesModel
-		diags := node.RequiredResources.As(ctx, &reqRes, basetypes.ObjectAsOptions{})
+	// Add physical_resources
+	if !node.PhysicalResources.IsNull() {
+		var physRes PhysicalResourcesModel
+		diags := node.PhysicalResources.As(ctx, &physRes, basetypes.ObjectAsOptions{})
 		if !diags.HasError() {
-			reqResourcesMap := make(map[string]interface{})
+			physResourcesMap := make(map[string]interface{})
 
-			if !reqRes.CPU.IsNull() {
-				reqResourcesMap["cpu"] = reqRes.CPU.ValueInt64()
+			if !physRes.CPU.IsNull() {
+				physResourcesMap["cpu"] = physRes.CPU.ValueInt64()
 			}
-			if !reqRes.Memory.IsNull() {
-				reqResourcesMap["memory"] = reqRes.Memory.ValueString()
+			if !physRes.Memory.IsNull() {
+				physResourcesMap["memory"] = physRes.Memory.ValueString()
 			}
-			if !reqRes.GPU.IsNull() {
-				reqResourcesMap["gpu"] = reqRes.GPU.ValueInt64()
+			if !physRes.GPU.IsNull() {
+				physResourcesMap["gpu"] = physRes.GPU.ValueInt64()
 			}
-			if !reqRes.Accelerator.IsNull() {
-				reqResourcesMap["accelerator"] = reqRes.Accelerator.ValueString()
+			if !physRes.Accelerator.IsNull() {
+				physResourcesMap["accelerator"] = physRes.Accelerator.ValueString()
 			}
-			if !reqRes.TPU.IsNull() {
-				reqResourcesMap["tpu"] = reqRes.TPU.ValueInt64()
+			if !physRes.TPU.IsNull() {
+				physResourcesMap["tpu"] = physRes.TPU.ValueInt64()
 			}
-			if !reqRes.TPUHosts.IsNull() {
-				reqResourcesMap["anyscale/tpu_hosts"] = reqRes.TPUHosts.ValueInt64()
+			if !physRes.TPUHosts.IsNull() {
+				physResourcesMap["anyscale/tpu_hosts"] = physRes.TPUHosts.ValueInt64()
 			}
 
-			if len(reqResourcesMap) > 0 {
-				config["physical_resources"] = reqResourcesMap
+			if len(physResourcesMap) > 0 {
+				config["physical_resources"] = physResourcesMap
 			}
 		}
 	}
@@ -1024,20 +968,6 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 		}
 		if len(labelsMap) > 0 {
 			config["labels"] = labelsMap
-		}
-	}
-
-	// Add required_labels
-	if !node.RequiredLabels.IsNull() {
-		reqLabelsMap := make(map[string]interface{})
-		elements := node.RequiredLabels.Elements()
-		for key, value := range elements {
-			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
-				reqLabelsMap[key] = strVal.ValueString()
-			}
-		}
-		if len(reqLabelsMap) > 0 {
-			config["required_labels"] = reqLabelsMap
 		}
 	}
 
@@ -1156,34 +1086,34 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 		}
 	}
 
-	// Add required_resources
-	if !worker.RequiredResources.IsNull() {
-		var reqRes RequiredResourcesModel
-		diags := worker.RequiredResources.As(ctx, &reqRes, basetypes.ObjectAsOptions{})
+	// Add physical_resources
+	if !worker.PhysicalResources.IsNull() {
+		var physRes PhysicalResourcesModel
+		diags := worker.PhysicalResources.As(ctx, &physRes, basetypes.ObjectAsOptions{})
 		if !diags.HasError() {
-			reqResourcesMap := make(map[string]interface{})
+			physResourcesMap := make(map[string]interface{})
 
-			if !reqRes.CPU.IsNull() {
-				reqResourcesMap["cpu"] = reqRes.CPU.ValueInt64()
+			if !physRes.CPU.IsNull() {
+				physResourcesMap["cpu"] = physRes.CPU.ValueInt64()
 			}
-			if !reqRes.Memory.IsNull() {
-				reqResourcesMap["memory"] = reqRes.Memory.ValueString()
+			if !physRes.Memory.IsNull() {
+				physResourcesMap["memory"] = physRes.Memory.ValueString()
 			}
-			if !reqRes.GPU.IsNull() {
-				reqResourcesMap["gpu"] = reqRes.GPU.ValueInt64()
+			if !physRes.GPU.IsNull() {
+				physResourcesMap["gpu"] = physRes.GPU.ValueInt64()
 			}
-			if !reqRes.Accelerator.IsNull() {
-				reqResourcesMap["accelerator"] = reqRes.Accelerator.ValueString()
+			if !physRes.Accelerator.IsNull() {
+				physResourcesMap["accelerator"] = physRes.Accelerator.ValueString()
 			}
-			if !reqRes.TPU.IsNull() {
-				reqResourcesMap["tpu"] = reqRes.TPU.ValueInt64()
+			if !physRes.TPU.IsNull() {
+				physResourcesMap["tpu"] = physRes.TPU.ValueInt64()
 			}
-			if !reqRes.TPUHosts.IsNull() {
-				reqResourcesMap["anyscale/tpu_hosts"] = reqRes.TPUHosts.ValueInt64()
+			if !physRes.TPUHosts.IsNull() {
+				physResourcesMap["anyscale/tpu_hosts"] = physRes.TPUHosts.ValueInt64()
 			}
 
-			if len(reqResourcesMap) > 0 {
-				config["physical_resources"] = reqResourcesMap
+			if len(physResourcesMap) > 0 {
+				config["physical_resources"] = physResourcesMap
 			}
 		}
 	}
@@ -1199,20 +1129,6 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 		}
 		if len(labelsMap) > 0 {
 			config["labels"] = labelsMap
-		}
-	}
-
-	// Add required_labels
-	if !worker.RequiredLabels.IsNull() {
-		reqLabelsMap := make(map[string]interface{})
-		elements := worker.RequiredLabels.Elements()
-		for key, value := range elements {
-			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
-				reqLabelsMap[key] = strVal.ValueString()
-			}
-		}
-		if len(reqLabelsMap) > 0 {
-			config["required_labels"] = reqLabelsMap
 		}
 	}
 
@@ -1265,13 +1181,11 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{}) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
-	// Define the attribute types for NodeConfigModel
 	nodeAttrTypes := map[string]attr.Type{
 		"instance_type":            types.StringType,
 		"resources":                types.MapType{ElemType: types.Float64Type},
-		"required_resources":       requiredResourcesObjectType(),
+		"physical_resources":       physicalResourcesObjectType(),
 		"labels":                   types.MapType{ElemType: types.StringType},
-		"required_labels":          types.MapType{ElemType: types.StringType},
 		"advanced_instance_config": types.StringType,
 		"flags":                    types.StringType,
 		"cloud_deployment":         cloudDeploymentObjectType(),
@@ -1291,28 +1205,18 @@ func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{})
 		resources = resourcesMap
 	}
 
-	// Extract physical_resources (required_resources in Terraform)
-	requiredResources := types.ObjectNull(requiredResourcesAttrTypes())
+	physicalResources := types.ObjectNull(physicalResourcesAttrTypes())
 	if pr, ok := apiNode["physical_resources"].(map[string]interface{}); ok {
-		reqResObj, reqResDiags := apiPhysicalResourcesToTerraform(ctx, pr)
-		diags.Append(reqResDiags...)
-		requiredResources = reqResObj
+		physResObj, physResDiags := apiPhysicalResourcesToTerraform(ctx, pr)
+		diags.Append(physResDiags...)
+		physicalResources = physResObj
 	}
 
-	// Extract labels
 	labels := types.MapNull(types.StringType)
 	if lbl, ok := apiNode["labels"].(map[string]interface{}); ok {
 		labelsMap, labelsDiags := InterfaceMapToString(ctx, lbl)
 		diags.Append(labelsDiags...)
 		labels = labelsMap
-	}
-
-	// Extract required_labels (if present in API response)
-	requiredLabels := types.MapNull(types.StringType)
-	if reqLbl, ok := apiNode["required_labels"].(map[string]interface{}); ok {
-		reqLabelsMap, reqLabelsDiags := InterfaceMapToString(ctx, reqLbl)
-		diags.Append(reqLabelsDiags...)
-		requiredLabels = reqLabelsMap
 	}
 
 	// Extract advanced_instance_config from advanced_configurations_json
@@ -1350,13 +1254,11 @@ func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{})
 		}
 	}
 
-	// Build the object
 	nodeAttrs := map[string]attr.Value{
 		"instance_type":            instanceType,
 		"resources":                resources,
-		"required_resources":       requiredResources,
+		"physical_resources":       physicalResources,
 		"labels":                   labels,
-		"required_labels":          requiredLabels,
 		"advanced_instance_config": advancedInstanceConfig,
 		"flags":                    flagsStr,
 		"cloud_deployment":         cloudDeployment,
@@ -1448,11 +1350,11 @@ func apiWorkerNodeTypeToTerraform(ctx context.Context, apiWorker map[string]inte
 		resources = resourcesMap
 	}
 
-	requiredResources := types.ObjectNull(requiredResourcesAttrTypes())
+	physicalResources := types.ObjectNull(physicalResourcesAttrTypes())
 	if pr, ok := apiWorker["physical_resources"].(map[string]interface{}); ok {
-		reqResObj, reqResDiags := apiPhysicalResourcesToTerraform(ctx, pr)
-		diags.Append(reqResDiags...)
-		requiredResources = reqResObj
+		physResObj, physResDiags := apiPhysicalResourcesToTerraform(ctx, pr)
+		diags.Append(physResDiags...)
+		physicalResources = physResObj
 	}
 
 	labels := types.MapNull(types.StringType)
@@ -1460,13 +1362,6 @@ func apiWorkerNodeTypeToTerraform(ctx context.Context, apiWorker map[string]inte
 		labelsMap, labelsDiags := InterfaceMapToString(ctx, lbl)
 		diags.Append(labelsDiags...)
 		labels = labelsMap
-	}
-
-	requiredLabels := types.MapNull(types.StringType)
-	if reqLbl, ok := apiWorker["required_labels"].(map[string]interface{}); ok {
-		reqLabelsMap, reqLabelsDiags := InterfaceMapToString(ctx, reqLbl)
-		diags.Append(reqLabelsDiags...)
-		requiredLabels = reqLabelsMap
 	}
 
 	advancedInstanceConfig := types.StringNull()
@@ -1500,7 +1395,6 @@ func apiWorkerNodeTypeToTerraform(ctx context.Context, apiWorker map[string]inte
 		}
 	}
 
-	// Build the worker object with all fields
 	workerAttrs := map[string]attr.Value{
 		"name":                     name,
 		"min_nodes":                minNodes,
@@ -1508,9 +1402,8 @@ func apiWorkerNodeTypeToTerraform(ctx context.Context, apiWorker map[string]inte
 		"market_type":              marketType,
 		"instance_type":            instanceType,
 		"resources":                resources,
-		"required_resources":       requiredResources,
+		"physical_resources":       physicalResources,
 		"labels":                   labels,
-		"required_labels":          requiredLabels,
 		"advanced_instance_config": advancedInstanceConfig,
 		"flags":                    flagsStr,
 		"cloud_deployment":         cloudDeployment,
@@ -1524,11 +1417,11 @@ func apiWorkerNodeTypeToTerraform(ctx context.Context, apiWorker map[string]inte
 
 // Helper functions for type definitions
 
-func requiredResourcesObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: requiredResourcesAttrTypes()}
+func physicalResourcesObjectType() types.ObjectType {
+	return types.ObjectType{AttrTypes: physicalResourcesAttrTypes()}
 }
 
-func requiredResourcesAttrTypes() map[string]attr.Type {
+func physicalResourcesAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"cpu":         types.Int64Type,
 		"memory":      types.StringType,
@@ -1560,9 +1453,8 @@ func workerNodeConfigAttrTypes() map[string]attr.Type {
 		"market_type":              types.StringType,
 		"instance_type":            types.StringType,
 		"resources":                types.MapType{ElemType: types.Float64Type},
-		"required_resources":       requiredResourcesObjectType(),
+		"physical_resources":       physicalResourcesObjectType(),
 		"labels":                   types.MapType{ElemType: types.StringType},
-		"required_labels":          types.MapType{ElemType: types.StringType},
 		"advanced_instance_config": types.StringType,
 		"flags":                    types.StringType,
 		"cloud_deployment":         cloudDeploymentObjectType(),
@@ -1579,14 +1471,14 @@ func apiResourcesToTerraformMap(ctx context.Context, apiRes map[string]interface
 
 	// Convert API resources format to flat map
 	// API format: {cpu: X, gpu: Y, memory: Z, object_store_memory: W, custom_resources: {...}}
-	// Terraform format: {"CPU": X, "GPU": Y, "memory": Z, "object_store_memory": W, ...custom}
+	// Terraform format: {cpu: X, gpu: Y, memory: Z, object_store_memory: W, ...custom}
 	flatMap := make(map[string]interface{})
 
 	if cpu, ok := apiRes["cpu"].(float64); ok {
-		flatMap["CPU"] = cpu
+		flatMap["cpu"] = cpu
 	}
 	if gpu, ok := apiRes["gpu"].(float64); ok {
-		flatMap["GPU"] = gpu
+		flatMap["gpu"] = gpu
 	}
 	if memory, ok := apiRes["memory"].(float64); ok {
 		flatMap["memory"] = memory
@@ -1605,7 +1497,6 @@ func apiResourcesToTerraformMap(ctx context.Context, apiRes map[string]interface
 	return InterfaceMapToFloat64(ctx, flatMap)
 }
 
-// apiPhysicalResourcesToTerraform converts API physical_resources to Terraform RequiredResources object
 func apiPhysicalResourcesToTerraform(ctx context.Context, apiPR map[string]interface{}) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
@@ -1616,7 +1507,6 @@ func apiPhysicalResourcesToTerraform(ctx context.Context, apiPR map[string]inter
 
 	memory := types.StringNull()
 	if m, ok := apiPR["memory"].(float64); ok {
-		// Convert bytes to string representation
 		memory = types.StringValue(fmt.Sprintf("%d", int64(m)))
 	} else if m, ok := apiPR["memory"].(string); ok {
 		memory = types.StringValue(m)
@@ -1638,7 +1528,6 @@ func apiPhysicalResourcesToTerraform(ctx context.Context, apiPR map[string]inter
 	}
 
 	tpuHosts := types.Int64Null()
-	// Check both API field names
 	if th, ok := apiPR["anyscale/tpu_hosts"].(float64); ok {
 		tpuHosts = types.Int64Value(int64(th))
 	} else if th, ok := apiPR["anyscale_tpu_hosts"].(float64); ok {
@@ -1654,7 +1543,7 @@ func apiPhysicalResourcesToTerraform(ctx context.Context, apiPR map[string]inter
 		"tpu_hosts":   tpuHosts,
 	}
 
-	obj, objDiags := types.ObjectValue(requiredResourcesAttrTypes(), attrs)
+	obj, objDiags := types.ObjectValue(physicalResourcesAttrTypes(), attrs)
 	diags.Append(objDiags...)
 
 	return obj, diags

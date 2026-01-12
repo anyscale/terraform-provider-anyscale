@@ -78,9 +78,9 @@ output "managed_user_permission" {
 # Example: Manage multiple users at different permission levels
 resource "anyscale_organization_invitation" "team_members" {
   for_each = {
-    "dev1@company.com"  = "collaborator"
-    "dev2@company.com"  = "collaborator"
-    "lead@company.com"  = "owner"
+    "dev1@company.com" = "collaborator"
+    "dev2@company.com" = "collaborator"
+    "lead@company.com" = "owner"
   }
 
   email            = each.key
