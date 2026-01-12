@@ -41,7 +41,6 @@ type ComputeConfigResourceModel struct {
 	ConfigID               types.String  `tfsdk:"config_id"`    // Version-specific API ID (changes with each version)
 	NameVersion            types.String  `tfsdk:"name_version"` // Formatted as "name:version" for use with Anyscale APIs
 	Name                   types.String  `tfsdk:"name"`
-	ProjectID              types.String  `tfsdk:"project_id"`
 	CloudID                types.String  `tfsdk:"cloud_id"`
 	CloudName              types.String  `tfsdk:"cloud_name"`
 	CloudResource          types.String  `tfsdk:"cloud_resource"` // Target specific cloud resource within a cloud
@@ -133,11 +132,6 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				Required:            true,
 				Description:         "The name of the compute config.",
 				MarkdownDescription: "The name of the compute config.",
-			},
-			"project_id": schema.StringAttribute{
-				Optional:            true,
-				Description:         "The project ID to associate the compute config with.",
-				MarkdownDescription: "The project ID to associate the compute config with.",
 			},
 			"cloud_id": schema.StringAttribute{
 				Optional:            true,
@@ -434,10 +428,6 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 	}
 
 	// Add optional project_id
-	if !plan.ProjectID.IsNull() {
-		createRequest["project_id"] = plan.ProjectID.ValueString()
-	}
-
 	config := createRequest["config"].(map[string]interface{})
 
 	// Add cloud_resource
@@ -694,12 +684,6 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 
 	if lastModifiedAt, ok := resultData["last_modified_at"].(string); ok {
 		state.LastModifiedAt = types.StringValue(lastModifiedAt)
-	}
-
-	if projectID, ok := resultData["project_id"].(string); ok {
-		state.ProjectID = types.StringValue(projectID)
-	} else {
-		state.ProjectID = types.StringNull()
 	}
 
 	// Extract config object

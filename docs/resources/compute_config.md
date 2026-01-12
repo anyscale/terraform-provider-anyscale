@@ -108,7 +108,6 @@ output "compute_config_id" {
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
 - `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`)
 - `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`)
-- `project_id` (String) The project ID to associate the compute config with.
 - `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests. (see [below for nested schema](#nestedatt--worker_nodes))
 - `zones` (List of String) Availability zones to consider for this cluster. Defaults to all zones in the cloud's region.
 
