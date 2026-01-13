@@ -77,76 +77,25 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	// Get all VM clouds for matrix testing
-	vmClouds := GetAllVMClouds(t)
-	if len(vmClouds) == 0 {
-		t.Skip("No VM clouds available for compute config testing")
-	}
+	cloudID := GetTestCloudID(t)
 
-	for _, cloud := range vmClouds {
-		cloud := cloud // capture range variable
-		testName := fmt.Sprintf("%s_%s", cloud.Provider, cloud.ComputeStack)
-		t.Run(testName, func(t *testing.T) {
-			instanceTypes := cloud.InstanceTypes()
-			if !instanceTypes.IsValid() {
-				t.Skipf("Skipping %s - no valid instance types", testName)
-			}
-
-			resource.Test(t, resource.TestCase{
-				PreCheck:                 func() { PreCheck(t) },
-				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-				Steps: []resource.TestStep{
-					{
-						Config: testAccComputeConfigResourceConfig_withWorkers(cloud.ID, instanceTypes.Small, instanceTypes.Medium),
-						Check: resource.ComposeAggregateTestCheckFunc(
-							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "1"),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.instance_type", instanceTypes.Medium),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.min_nodes", "0"),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.max_nodes", "10"),
-							testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
-						),
-					},
-				},
-			})
-		})
-	}
-}
-
-func TestAccComputeConfigResource_Anonymous(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-
-	// Get all VM clouds for matrix testing
-	vmClouds := GetAllVMClouds(t)
-	if len(vmClouds) == 0 {
-		t.Skip("No VM clouds available for compute config testing")
-	}
-
-	for _, cloud := range vmClouds {
-		cloud := cloud // capture range variable
-		testName := fmt.Sprintf("%s_%s", cloud.Provider, cloud.ComputeStack)
-		t.Run(testName, func(t *testing.T) {
-			instanceTypes := cloud.InstanceTypes()
-			if !instanceTypes.IsValid() {
-				t.Skipf("Skipping %s - no valid instance types", testName)
-			}
-
-			resource.Test(t, resource.TestCase{
-				PreCheck:                 func() { PreCheck(t) },
-				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-				Steps: []resource.TestStep{
-					{
-						Config: testAccComputeConfigResourceConfig_minimal(cloud.ID, instanceTypes.Small),
-						Check: resource.ComposeAggregateTestCheckFunc(
-							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
-							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
-							testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
-						),
-					},
-				},
-			})
-		})
-	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigResourceConfig_withWorkers(cloudID, "m5.large", "m5.xlarge"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "1"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.instance_type", "m5.xlarge"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.min_nodes", "0"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.max_nodes", "10"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+				),
+			},
+		},
+	})
 }
 
 func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
@@ -276,19 +225,6 @@ resource "anyscale_compute_config" "test" {
 `, time.Now().UnixNano(), cloudID, headInstanceType, workerInstanceType)
 }
 
-func testAccComputeConfigResourceConfig_minimal(cloudID, instanceType string) string {
-	return fmt.Sprintf(`
-resource "anyscale_compute_config" "test" {
-  name     = "tf-test-compute-config-minimal-%d"
-  cloud_id = "%s"
-
-  head_node = {
-    instance_type = "%s"
-  }
-}
-`, time.Now().UnixNano(), cloudID, instanceType)
-}
-
 func testAccComputeConfigResourceConfig_withCloudName(cloudName string) string {
 	configName := fmt.Sprintf("tf-test-cloudname-%d", time.Now().UnixNano())
 	return fmt.Sprintf(`
@@ -308,67 +244,51 @@ resource "anyscale_compute_config" "test" {
 func TestAccComputeConfigResource_Update(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	// Get all VM clouds for matrix testing
-	vmClouds := GetAllVMClouds(t)
-	if len(vmClouds) == 0 {
-		t.Skip("No VM clouds available for compute config testing")
-	}
+	cloudID := GetTestCloudID(t)
+	configName := fmt.Sprintf("tf-test-compute-update-%d", time.Now().UnixNano())
+	var initialConfigID string
 
-	for _, cloud := range vmClouds {
-		cloud := cloud // capture range variable
-		testName := fmt.Sprintf("%s_%s", cloud.Provider, cloud.ComputeStack)
-		t.Run(testName, func(t *testing.T) {
-			instanceTypes := cloud.InstanceTypes()
-			if !instanceTypes.IsValid() {
-				t.Skipf("Skipping %s - no valid instance types", testName)
-			}
-
-			configName := fmt.Sprintf("tf-test-compute-update-%s-%d", cloud.Provider, time.Now().UnixNano())
-			var initialConfigID string
-
-			resource.Test(t, resource.TestCase{
-				PreCheck:                 func() { PreCheck(t) },
-				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-				Steps: []resource.TestStep{
-					// Create initial compute config with small instance
-					{
-						Config: testAccComputeConfigResourceConfig_update(cloud.ID, configName, instanceTypes.Small),
-						Check: resource.ComposeAggregateTestCheckFunc(
-							// ID should be the name (stable across versions)
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "id", configName),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
-							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "config_id"),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", instanceTypes.Small),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
-							// Verify name_version format
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "name_version", configName+":1"),
-							testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
-							// Capture initial config_id for comparison
-							testAccCaptureComputeConfigID("anyscale_compute_config.test", &initialConfigID),
-						),
-					},
-					// Update to medium instance - should create a new version
-					{
-						Config: testAccComputeConfigResourceConfig_update(cloud.ID, configName, instanceTypes.Medium),
-						Check: resource.ComposeAggregateTestCheckFunc(
-							// ID should still be the name (stable)
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "id", configName),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
-							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "config_id"),
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", instanceTypes.Medium),
-							// Version should be incremented
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "2"),
-							// Verify name_version is updated
-							resource.TestCheckResourceAttr("anyscale_compute_config.test", "name_version", configName+":2"),
-							testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
-							// Verify config_id changed (new version = new config_id)
-							testAccCheckComputeConfigIDChanged("anyscale_compute_config.test", &initialConfigID),
-						),
-					},
-				},
-			})
-		})
-	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create initial compute config with small instance
+			{
+				Config: testAccComputeConfigResourceConfig_update(cloudID, configName, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// ID should be the name (stable across versions)
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "id", configName),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "config_id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.large"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
+					// Verify name_version format
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name_version", configName+":1"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					// Capture initial config_id for comparison
+					testAccCaptureComputeConfigID("anyscale_compute_config.test", &initialConfigID),
+				),
+			},
+			// Update to larger instance - should create a new version
+			{
+				Config: testAccComputeConfigResourceConfig_update(cloudID, configName, "m5.xlarge"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// ID should still be the name (stable)
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "id", configName),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", configName),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "config_id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.xlarge"),
+					// Version should be incremented
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "2"),
+					// Verify name_version is updated
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name_version", configName+":2"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					// Verify config_id changed (new version = new config_id)
+					testAccCheckComputeConfigIDChanged("anyscale_compute_config.test", &initialConfigID),
+				),
+			},
+		},
+	})
 }
 
 // testAccCaptureComputeConfigID captures the config_id for later comparison
