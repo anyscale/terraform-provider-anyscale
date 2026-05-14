@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -284,6 +285,7 @@ func TestKubernetesConfigJSON(t *testing.T) {
 	config := KubernetesConfig{
 		AnyscaleOperatorIAMIdentity: "arn:aws:iam::123456789012:role/anyscale-operator",
 		Zones:                       []string{"us-east-1a", "us-east-1b"},
+		RedisEndpoint:               "redis.ray-system.svc.cluster.local:6379",
 	}
 
 	data, err := json.Marshal(config)
@@ -301,6 +303,18 @@ func TestKubernetesConfigJSON(t *testing.T) {
 	}
 	if len(decoded.Zones) != len(config.Zones) {
 		t.Errorf("Zones length = %d, want %d", len(decoded.Zones), len(config.Zones))
+	}
+	if decoded.RedisEndpoint != config.RedisEndpoint {
+		t.Errorf("RedisEndpoint = %q, want %q", decoded.RedisEndpoint, config.RedisEndpoint)
+	}
+
+	// Verify omitempty when RedisEndpoint is empty
+	emptyData, err := json.Marshal(KubernetesConfig{AnyscaleOperatorIAMIdentity: "x"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(emptyData), "redis_endpoint") {
+		t.Errorf("empty RedisEndpoint should be omitted; got %s", emptyData)
 	}
 }
 

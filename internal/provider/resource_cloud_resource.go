@@ -108,6 +108,7 @@ type GCPConfigModel struct {
 type KubernetesConfigModel struct {
 	AnyscaleOperatorIAMIdentity types.String `tfsdk:"anyscale_operator_iam_identity"`
 	Zones                       types.List   `tfsdk:"zones"`
+	RedisEndpoint               types.String `tfsdk:"redis_endpoint"`
 	Namespace                   types.String `tfsdk:"namespace"`
 	IngressHost                 types.String `tfsdk:"ingress_host"`
 	ClusterName                 types.String `tfsdk:"cluster_name"`
@@ -424,6 +425,13 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						MarkdownDescription: "List of availability zones for the Kubernetes cluster.",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.RequiresReplace(),
+						},
+					},
+					"redis_endpoint": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
 						},
 					},
 					"namespace": schema.StringAttribute{
@@ -1233,6 +1241,7 @@ func expandKubernetesConfig(ctx context.Context, obj types.Object) (*KubernetesC
 
 	k8sConfig := &KubernetesConfig{
 		AnyscaleOperatorIAMIdentity: k8sModel.AnyscaleOperatorIAMIdentity.ValueString(),
+		RedisEndpoint:               k8sModel.RedisEndpoint.ValueString(),
 	}
 
 	// Zones

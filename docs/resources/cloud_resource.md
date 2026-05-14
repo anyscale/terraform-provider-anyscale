@@ -178,6 +178,7 @@ Optional:
 - `ingress_host` (String) The ingress host for the Anyscale operator (e.g., anyscale.example.com).
 - `kubeconfig_path` (String) Path to kubeconfig file (for Generic K8S deployments).
 - `namespace` (String) The Kubernetes namespace for Anyscale workloads.
+- `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.
 - `zones` (List of String) List of availability zones for the Kubernetes cluster.
 
 
