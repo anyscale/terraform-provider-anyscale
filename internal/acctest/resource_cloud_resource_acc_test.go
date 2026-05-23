@@ -25,6 +25,7 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
@@ -72,6 +73,7 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
@@ -111,6 +113,7 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
@@ -139,6 +142,7 @@ func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 	resourceName := fmt.Sprintf("with-file-storage-%s", randSuffix)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{

@@ -899,8 +899,31 @@ func PreCheck(t *testing.T) {
 		}
 	}
 
+	// Verify the token actually works against the API. If it's expired/invalid,
+	// skip rather than fail so CI doesn't go red on a stale secret.
+	ValidateAuthOrSkip(t)
+
 	// Note: We don't require ANYSCALE_TEST_CLOUD_ID here anymore
 	// Tests should use GetTestCloudID() which handles auto-discovery
+}
+
+// ValidateAuthOrSkip probes the Anyscale API with the configured token and
+// SKIPS the test if the API returns 401. Other errors (network, etc.) are
+// logged and ignored — they will surface naturally if they affect the test.
+func ValidateAuthOrSkip(t *testing.T) {
+	client, err := GetTestClient()
+	if err != nil {
+		t.Skipf("No usable Anyscale credentials: %v", err)
+	}
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
+	if err != nil {
+		t.Logf("Auth probe request error (continuing): %v", err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == 401 {
+		t.Skip("ANYSCALE_CLI_TOKEN is invalid or expired (401 from /api/v2/clouds); skipping acceptance test")
+	}
 }
 
 // SkipIfNotAcceptanceTest skips the test if TF_ACC is not set

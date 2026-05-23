@@ -24,6 +24,7 @@ func TestAccCloudResource_AWS_Basic(t *testing.T) {
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
@@ -75,6 +76,7 @@ func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 	cloudName := "tfacc-test-aws-empty"
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
@@ -103,6 +105,7 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
@@ -148,6 +151,7 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
