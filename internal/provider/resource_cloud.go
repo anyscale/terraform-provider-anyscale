@@ -406,6 +406,13 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 							listplanmodifier.RequiresReplace(),
 						},
 					},
+					"redis_endpoint": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
 					"namespace": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,

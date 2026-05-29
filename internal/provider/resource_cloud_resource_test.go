@@ -385,6 +385,7 @@ func TestExpandKubernetesConfig(t *testing.T) {
 				map[string]attr.Type{
 					"anyscale_operator_iam_identity": types.StringType,
 					"zones":                          types.ListType{ElemType: types.StringType},
+					"redis_endpoint":                 types.StringType,
 					"namespace":                      types.StringType,
 					"ingress_host":                   types.StringType,
 					"cluster_name":                   types.StringType,
@@ -400,6 +401,7 @@ func TestExpandKubernetesConfig(t *testing.T) {
 							types.StringValue("us-east-2b"),
 						},
 					),
+					"redis_endpoint":  types.StringValue("redis.ray-system.svc.cluster.local:6379"),
 					"namespace":       types.StringValue("anyscale-prod"),
 					"ingress_host":    types.StringValue("anyscale.example.com"),
 					"cluster_name":    types.StringValue("my-eks-cluster"),
@@ -410,6 +412,7 @@ func TestExpandKubernetesConfig(t *testing.T) {
 			want: &KubernetesConfig{
 				AnyscaleOperatorIAMIdentity: "arn:aws:iam::123456789012:role/anyscale-operator",
 				Zones:                       []string{"us-east-2a", "us-east-2b"},
+				RedisEndpoint:               "redis.ray-system.svc.cluster.local:6379",
 			},
 			wantErr: false,
 		},
@@ -419,6 +422,7 @@ func TestExpandKubernetesConfig(t *testing.T) {
 				map[string]attr.Type{
 					"anyscale_operator_iam_identity": types.StringType,
 					"zones":                          types.ListType{ElemType: types.StringType},
+					"redis_endpoint":                 types.StringType,
 					"namespace":                      types.StringType,
 					"ingress_host":                   types.StringType,
 					"cluster_name":                   types.StringType,
@@ -428,6 +432,7 @@ func TestExpandKubernetesConfig(t *testing.T) {
 				map[string]attr.Value{
 					"anyscale_operator_iam_identity": types.StringValue("operator@project.iam.gserviceaccount.com"),
 					"zones":                          types.ListNull(types.StringType),
+					"redis_endpoint":                 types.StringNull(),
 					"namespace":                      types.StringValue("anyscale"),
 					"ingress_host":                   types.StringNull(),
 					"cluster_name":                   types.StringNull(),
@@ -469,6 +474,9 @@ func TestExpandKubernetesConfig(t *testing.T) {
 				}
 				if len(got.Zones) != len(tt.want.Zones) {
 					t.Errorf("expandKubernetesConfig() Zones length = %v, want %v", len(got.Zones), len(tt.want.Zones))
+				}
+				if got.RedisEndpoint != tt.want.RedisEndpoint {
+					t.Errorf("expandKubernetesConfig() RedisEndpoint = %v, want %v", got.RedisEndpoint, tt.want.RedisEndpoint)
 				}
 			}
 		})

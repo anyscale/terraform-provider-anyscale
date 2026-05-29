@@ -141,7 +141,7 @@ type AzureConfig struct {
 }
 
 // KubernetesConfig represents Kubernetes-specific cloud configuration for API requests.
-// Note: Only anyscale_operator_iam_identity and zones are accepted by the add_resource API.
+// Note: Only anyscale_operator_iam_identity, zones, and redis_endpoint are accepted by the add_resource API.
 // Other fields (namespace, ingress_host, etc.) are stored in Terraform state for reference
 // but are not sent to the API.
 type KubernetesConfig struct {
@@ -150,6 +150,10 @@ type KubernetesConfig struct {
 
 	// Optional - availability zones for the K8s cluster
 	Zones []string `json:"zones,omitempty"`
+
+	// Optional - Redis endpoint reachable from the data plane (e.g. "redis.ray-system.svc.cluster.local:6379").
+	// Used for Ray GCS fault tolerance.
+	RedisEndpoint string `json:"redis_endpoint,omitempty"`
 }
 
 // KubernetesConfigFull represents the full Kubernetes configuration including

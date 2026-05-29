@@ -212,4 +212,7 @@ func PreCheckAuth(t *testing.T) {
 			t.Fatalf("ANYSCALE_CLI_TOKEN must be set or ~/.anyscale/credentials.json must exist for acceptance tests")
 		}
 	}
+
+	// Verify the token actually works; skip cleanly on expired/invalid secret.
+	ValidateAuthOrSkip(t)
 }
