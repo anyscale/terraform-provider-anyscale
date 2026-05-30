@@ -1,24 +1,13 @@
 ---
 name: terraform-provider-design
-description: Comprehensive guide for designing and implementing Terraform providers using Test-Driven Development (TDD). Use when creating new Terraform providers, adding resources/data sources to existing providers, implementing TDD workflows (RED-GREEN-REFACTOR), designing provider architecture, or working in terraform-provider-* directories. Covers HashiCorp best practices, Plugin Framework patterns, acceptance testing, CRUD implementations, and parallel development workflows.
+description: Advanced Terraform provider development patterns the official HashiCorp skills do not cover. Use when implementing Test-Driven Development (TDD) workflows (RED-GREEN-REFACTOR with parallel execution), writing drift detection tests with external API modification, using advanced state checks (statecheck.ExpectKnownValue, CompareValue, tfjsonpath, knownvalue, ExpectSensitiveValue), using plan checks (plancheck.ExpectEmptyPlan/ExpectNonEmptyPlan) for idempotency, designing API client architecture (auth, retry, cookie jars), or applying HashiCorp's five core design principles (single API, single object, schema alignment, import, version continuity). For scaffolding a new provider or basic CRUD/schema patterns, use new-terraform-provider and provider-resources instead.
 ---
 
-# Terraform Provider Design
+# Terraform Provider Design — Advanced Patterns
 
 ## Overview
 
-This skill guides Terraform provider development using Test-Driven Development (TDD) following HashiCorp's official best practices. It supports the complete RED-GREEN-REFACTOR cycle with parallel execution patterns for efficient provider development.
-
-## When to Use This Skill
-
-Use this skill when:
-
-- Creating a new Terraform provider from scratch
-- Adding resources or data sources to an existing provider
-- Implementing TDD workflows for provider development
-- Designing provider architecture and schemas
-- Writing acceptance tests for provider resources
-- Reviewing provider code for HashiCorp compliance
+This skill covers advanced Terraform provider patterns that complement the official HashiCorp skills. For scaffolding a new provider, see `new-terraform-provider`. For basic resource/data source CRUD and schema, see `provider-resources`. For Plugin Framework Actions, see `provider-actions`. This skill focuses on TDD workflows, drift detection, advanced state/plan checks, API client architecture, and design principles — gaps the official skills do not cover.
 
 ## Core TDD Workflow
 
@@ -69,56 +58,6 @@ Edit("internal/provider/user_data_source.go")
 Bash("TF_ACC=1 go test -v -timeout 120m ./internal/provider/")
 ```
 
-## Getting Started
-
-### Project Initialization
-
-Create a new provider project:
-
-```bash
-# Initialize Go module
-go mod init github.com/yourusername/terraform-provider-{name}
-
-# Add required dependencies
-go get github.com/hashicorp/terraform-plugin-framework
-go get github.com/hashicorp/terraform-plugin-go
-go get github.com/hashicorp/terraform-plugin-log
-go get github.com/hashicorp/terraform-plugin-testing
-
-# Create directory structure
-mkdir -p internal/provider examples/{provider,resources,data-sources} docs
-```
-
-### Provider Bootstrap Template
-
-See `assets/provider_template.go` for a complete provider initialization example.
-
-## Provider Structure
-
-### Standard Directory Layout
-
-```
-terraform-provider-{name}/
-├── internal/
-│   └── provider/
-│       ├── provider.go              # Provider definition
-│       ├── provider_test.go         # Provider tests
-│       ├── resource_*.go            # Resource implementations
-│       ├── resource_*_test.go       # Resource acceptance tests
-│       ├── data_source_*.go         # Data source implementations
-│       └── data_source_*_test.go    # Data source acceptance tests
-├── examples/
-│   ├── provider/                    # Provider configuration examples
-│   ├── resources/                   # Resource examples
-│   └── data-sources/                # Data source examples
-├── docs/                            # Generated documentation
-├── main.go                          # Provider binary entry point
-├── go.mod                           # Go module dependencies
-├── CHANGELOG.md                     # Version history
-├── .goreleaser.yml                  # Release automation
-└── GNUmakefile                      # Build and test commands
-```
-
 ## Design Principles
 
 Follow HashiCorp's core design principles (see `references/hashicorp_best_practices.md` for details):
@@ -128,142 +67,6 @@ Follow HashiCorp's core design principles (see `references/hashicorp_best_practi
 3. **Schema Alignment**: Match underlying API unless it degrades UX
 4. **Import Support**: All resources must support `terraform import`
 5. **Version Continuity**: Maintain backward compatibility
-
-## Resource Design Workflow
-
-### Step 1: Define Resource Schema
-
-Start with the schema that matches the underlying API:
-
-```go
-func (r *InstanceResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
-    resp.Schema = schema.Schema{
-        MarkdownDescription: "Instance resource",
-        Attributes: map[string]schema.Attribute{
-            "id": schema.StringAttribute{
-                Computed:            true,
-                MarkdownDescription: "Instance identifier",
-            },
-            "name": schema.StringAttribute{
-                Required:            true,
-                MarkdownDescription: "Instance name",
-            },
-            "tags": schema.MapAttribute{
-                Optional:            true,
-                ElementType:         types.StringType,
-                MarkdownDescription: "Resource tags",
-            },
-        },
-    }
-}
-```
-
-### Step 2: Write Acceptance Test (RED)
-
-Create failing test before implementation:
-
-```go
-func TestAccInstanceResource(t *testing.T) {
-    resource.Test(t, resource.TestCase{
-        PreCheck:                 func() { testAccPreCheck(t) },
-        ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-        Steps: []resource.TestStep{
-            // Create and Read
-            {
-                Config: testAccInstanceResourceConfig("test"),
-                Check: resource.ComposeAggregateTestCheckFunc(
-                    resource.TestCheckResourceAttr("example_instance.test", "name", "test"),
-                    resource.TestCheckResourceAttrSet("example_instance.test", "id"),
-                ),
-            },
-            // ImportState
-            {
-                ResourceName:      "example_instance.test",
-                ImportState:       true,
-                ImportStateVerify: true,
-            },
-            // Update and Read
-            {
-                Config: testAccInstanceResourceConfig("test-updated"),
-                Check: resource.ComposeAggregateTestCheckFunc(
-                    resource.TestCheckResourceAttr("example_instance.test", "name", "test-updated"),
-                ),
-            },
-        },
-    })
-}
-```
-
-### Step 3: Minimal Implementation (GREEN)
-
-Implement simplest CRUD to pass tests:
-
-```go
-func (r *InstanceResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-    var data InstanceResourceModel
-    resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-    if resp.Diagnostics.HasError() {
-        return
-    }
-
-    // Minimal - hardcoded for now
-    data.ID = types.StringValue("instance-123")
-
-    resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-}
-```
-
-### Step 4: Full Implementation (REFACTOR)
-
-Add real API integration:
-
-```go
-func (r *InstanceResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-    var data InstanceResourceModel
-    resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-    if resp.Diagnostics.HasError() {
-        return
-    }
-
-    // Real API call
-    instance, err := r.client.CreateInstance(ctx, data.Name.ValueString())
-    if err != nil {
-        resp.Diagnostics.AddError(
-            "Error Creating Instance",
-            "Could not create instance: "+err.Error(),
-        )
-        return
-    }
-
-    data.ID = types.StringValue(instance.ID)
-    resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-}
-```
-
-## Naming Conventions
-
-Follow HashiCorp naming standards:
-
-**Resources**: Singular nouns with provider prefix
-
-- Format: `{provider}_{resource_name}`
-- Example: `aws_instance`, `postgresql_database`
-
-**Data Sources**: Nouns (plural for collections)
-
-- Format: `{provider}_{data_source_name}`
-- Example: `aws_availability_zones`, `azurerm_subnet`
-
-**Attributes**: Lowercase with underscores
-
-- Single values: Singular nouns (`instance_type`)
-- Collections: Plural nouns (`security_group_ids`)
-- Booleans: Nouns describing what's enabled (`auto_scaling_enabled`)
-
-**Functions**: Verbs without provider prefix
-
-- Format: `{verb}_{object}`
-- Example: `parse_rfc3339`, `encode_base64`
 
 ## Testing Requirements
 
@@ -957,9 +760,9 @@ TF_ACC=1 go test -v -run TestAccExampleResource ./internal/provider/
 
 ### Templates (`assets/`)
 
-- `provider_template.go` - Provider initialization and configuration template
-- `main_template.go` - Provider binary entry point template
-- `resource_template.go` - Complete resource implementation template
+For provider scaffolding (main.go, provider.go), use the official `new-terraform-provider` skill.
+
+- `resource_template.go` - Resource implementation template with full CRUD
 - `data_source_template.go` - Data source implementation template
 - `acceptance_test_template.go` - Acceptance test template with all required steps
 
