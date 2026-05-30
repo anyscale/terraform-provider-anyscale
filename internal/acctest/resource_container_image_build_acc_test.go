@@ -36,6 +36,8 @@ RUN pip install emoji==2.15.0`
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		// API can only archive container images, not delete. Verify deleted_at is set.
+		CheckDestroy: NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/ext/v0/cluster_environments/%s", "result.deleted_at"),
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -85,6 +87,7 @@ RUN sudo mkdir -p /anyscale/init`
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/ext/v0/cluster_environments/%s", "result.deleted_at"),
 		Steps: []resource.TestStep{
 			// Step 1: Create initial image
 			{

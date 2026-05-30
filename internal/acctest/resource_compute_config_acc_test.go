@@ -34,6 +34,9 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 			resource.Test(t, resource.TestCase{
 				PreCheck:                 func() { PreCheck(t) },
 				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+				// Use config_id (version-specific) since Primary.ID is the name and the
+				// /ext/v0/cluster_computes/ endpoint requires the versioned ID.
+				CheckDestroy: NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 				Steps: []resource.TestStep{
 					// Create and Read testing
 					{
@@ -82,6 +85,7 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_withWorkers(cloudID, "m5.large", "m5.xlarge"),
@@ -106,6 +110,7 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_withCloudName(cloudName),
@@ -251,6 +256,7 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 		Steps: []resource.TestStep{
 			// Create initial compute config with small instance
 			{

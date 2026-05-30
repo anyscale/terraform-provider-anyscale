@@ -21,6 +21,7 @@ func TestAccProjectResource_Basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -59,6 +60,7 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectResourceWithDescriptionConfig(cloudID, projectName, description),
@@ -82,6 +84,7 @@ func TestAccProjectResource_WithCloudName(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectResourceWithCloudNameConfig(cloudName, projectName),
@@ -113,6 +116,7 @@ func TestAccProjectResource_WithCollaborators(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
 		Steps: []resource.TestStep{
 			// Create with collaborators
 			{
@@ -243,6 +247,7 @@ func TestAccProjectResource_WithUserDataSource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
 		Steps: []resource.TestStep{
 			// Create project with current user as collaborator using data source
 			{

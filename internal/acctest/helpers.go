@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -977,5 +978,151 @@ func VerifyResourceAttrUnchanged(resourceName, attrName string, originalValue *s
 				resourceName, attrName, *originalValue, currentValue)
 		}
 		return nil
+	}
+}
+
+// NewAPIDestroyCheck returns a CheckDestroy function that verifies every
+// resource of resourceType in the Terraform state is gone from the Anyscale
+// API. getPathFmt is a printf format string with one %s for the resource ID
+// (e.g. "/api/v2/projects/%s"). 404 = success. 200 = leak (returns error).
+// Transient errors (network, 5xx) log a warning and continue so a flaky API
+// doesn't mask a real leak from the rest of the state.
+func NewAPIDestroyCheck(resourceType, getPathFmt string) resource.TestCheckFunc {
+	return newAPIDestroyCheckImpl(resourceType, "", getPathFmt, "")
+}
+
+// NewAPIDestroyCheckByAttr is like NewAPIDestroyCheck but pulls the resource
+// ID from rs.Primary.Attributes[attrName] instead of rs.Primary.ID. Used when
+// the API-side identifier is exposed as a non-ID attribute (e.g. compute
+// config's version-specific config_id).
+func NewAPIDestroyCheckByAttr(resourceType, attrName, getPathFmt string) resource.TestCheckFunc {
+	return newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, "")
+}
+
+// NewAPIArchivedDestroyCheck is the variant for resources that the API cannot
+// permanently delete — container images, cluster environments. It verifies
+// that the resource still exists but its archived field is truthy.
+// archivedJSONPath is the dotted JSON path to read from the GET response
+// (e.g. "result.deleted_at" or "is_archived"). A value of true (bool) or a
+// non-empty/non-null string at that path counts as archived.
+func NewAPIArchivedDestroyCheck(resourceType, getPathFmt, archivedJSONPath string) resource.TestCheckFunc {
+	return newAPIDestroyCheckImpl(resourceType, "", getPathFmt, archivedJSONPath)
+}
+
+// NewAPIArchivedDestroyCheckByAttr is the attribute-keyed variant of
+// NewAPIArchivedDestroyCheck.
+func NewAPIArchivedDestroyCheckByAttr(resourceType, attrName, getPathFmt, archivedJSONPath string) resource.TestCheckFunc {
+	return newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath)
+}
+
+// newAPIDestroyCheckImpl is the shared implementation behind the public
+// CheckDestroy helpers. When archivedJSONPath is empty, a 200 response is
+// treated as a leak. Otherwise, the value at archivedJSONPath must be truthy
+// (bool true or non-empty/non-null string) or the resource is a leak.
+func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		if len(s.RootModule().Resources) == 0 {
+			return nil
+		}
+
+		client, err := GetTestClient()
+		if err != nil {
+			// No client = can't verify; surface clearly rather than silently passing.
+			return fmt.Errorf("CheckDestroy(%s): failed to get test client: %w", resourceType, err)
+		}
+
+		var leaks []string
+
+		for name, rs := range s.RootModule().Resources {
+			if rs.Type != resourceType {
+				continue
+			}
+
+			id := rs.Primary.ID
+			if attrName != "" {
+				id = rs.Primary.Attributes[attrName]
+			}
+			if id == "" {
+				continue
+			}
+
+			path := fmt.Sprintf(getPathFmt, id)
+			resp, err := client.DoRequest(context.Background(), "GET", path, nil)
+			if err != nil {
+				log.Printf("[WARN] CheckDestroy(%s) network error for %s (id=%s): %v", resourceType, name, id, err)
+				continue
+			}
+
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+
+			switch {
+			case resp.StatusCode == 404:
+				// gone — success
+				continue
+			case resp.StatusCode >= 500:
+				log.Printf("[WARN] CheckDestroy(%s) transient %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+				continue
+			case resp.StatusCode == 200 || resp.StatusCode == 201:
+				if archivedJSONPath == "" {
+					leaks = append(leaks, fmt.Sprintf("%s (id=%s) still returns 200 from %s", name, id, path))
+					continue
+				}
+				if readErr != nil {
+					log.Printf("[WARN] CheckDestroy(%s) failed to read body for %s (id=%s): %v", resourceType, name, id, readErr)
+					continue
+				}
+				archived, perr := extractArchivedValue(body, archivedJSONPath)
+				if perr != nil {
+					log.Printf("[WARN] CheckDestroy(%s) failed to parse %s for %s (id=%s): %v", resourceType, archivedJSONPath, name, id, perr)
+					continue
+				}
+				if !archived {
+					leaks = append(leaks, fmt.Sprintf("%s (id=%s) exists at %s and %s is not truthy", name, id, path, archivedJSONPath))
+				}
+			default:
+				log.Printf("[WARN] CheckDestroy(%s) unexpected status %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+			}
+		}
+
+		if len(leaks) > 0 {
+			return fmt.Errorf("CheckDestroy(%s) found leaked resources:\n  %s", resourceType, strings.Join(leaks, "\n  "))
+		}
+		return nil
+	}
+}
+
+// extractArchivedValue walks a dotted JSON path and returns whether the value
+// at the leaf is truthy. true (bool) or a non-empty/non-null string are
+// truthy; all other values (false, null, missing key, numbers, arrays) are
+// not. Designed for tolerant detection of "this resource has been archived
+// rather than deleted" markers (is_archived bool, deleted_at string, etc.).
+func extractArchivedValue(body []byte, jsonPath string) (bool, error) {
+	var root any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return false, err
+	}
+
+	cur := root
+	for _, segment := range strings.Split(jsonPath, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return false, nil
+		}
+		cur, ok = m[segment]
+		if !ok {
+			return false, nil
+		}
+	}
+
+	switch v := cur.(type) {
+	case bool:
+		return v, nil
+	case string:
+		return v != "", nil
+	case nil:
+		return false, nil
+	default:
+		return false, nil
 	}
 }

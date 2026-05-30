@@ -35,6 +35,9 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		// No CheckDestroy: Anyscale-provided (is_default) cluster environments
+		// cannot be archived or deleted by the API, so destroy is a no-op and
+		// the underlying object intentionally persists.
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -76,6 +79,8 @@ func TestAccContainerImageRegistryResource_BYOD(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		// API archives (not deletes) the cluster environment on destroy — verify deleted_at is set.
+		CheckDestroy: NewAPIArchivedDestroyCheckByAttr("anyscale_container_image_registry", "cluster_environment_id", "/ext/v0/cluster_environments/%s", "result.deleted_at"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccContainerImageRegistryResourceBYODConfig(imageName, fakeECRImageURI),
