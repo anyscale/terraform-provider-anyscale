@@ -9,6 +9,11 @@ GOFLAGS := -v
 GOLANGCI_LINT := golangci-lint
 TFPLUGINDOCS := tfplugindocs
 
+# Per-run suffix used by example apply/destroy targets to isolate state and
+# cloud names across parallel runs. Defaults to a timestamp.
+# Override with: make apply-aws-vm-basic SUFFIX=mytest
+SUFFIX ?= $(shell date +%s)
+
 # Get version info
 # Auto-detect version from git tags (e.g., v0.1.0 -> 0.1.0)
 # Falls back to VERSION env var, then to 0.0.1
@@ -80,6 +85,16 @@ testacc-cover: ## Run acceptance tests with coverage
 	TF_ACC=1 $(GO) test ./... -v -timeout 120m -coverprofile=coverage.out -covermode=atomic
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "==> Coverage report: coverage.html"
+
+.PHONY: sweep
+sweep: ## Run sweepers to clean up leaked test resources
+	@echo "==> Running sweepers..."
+	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 60m -sweep=anyscale -sweep-run=
+
+.PHONY: sweep-dry-run
+sweep-dry-run: ## List what sweepers would delete without actually deleting
+	@echo "==> Running sweepers in dry-run mode..."
+	TF_ACC=1 ANYSCALE_SWEEP_DRY_RUN=1 $(GO) test ./internal/acctest/ -v -timeout 60m -sweep=anyscale -sweep-run=
 
 .PHONY: test-compile
 test-compile: ## Verify tests compile without running
@@ -265,30 +280,62 @@ test-primary-gcp: build ## Run primary GCP tests only (3 tests)
 .PHONY: test-aws-vm-basic
 test-aws-vm-basic: build ## Test AWS VM basic (all-in-one pattern)
 	@echo "==> Testing AWS VM basic scenario..."
-	cd examples/aws-vm-basic && terraform apply -auto-approve
-	cd examples/aws-vm-basic && terraform destroy -auto-approve
+	@mkdir -p $(BUILD_DIR)
+	@bash -c 'set -u; \
+	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  STATE=$(CURDIR)/$(BUILD_DIR)/aws-vm-basic-$$SUFFIX.tfstate; \
+	  CLOUD=tfacc-aws-vm-basic-$$SUFFIX; \
+	  cd examples/aws-vm-basic; \
+	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
 
 .PHONY: test-aws-vm-full
 test-aws-vm-full: build ## Test AWS VM full (split pattern + EFS + MemoryDB)
 	@echo "==> Testing AWS VM full scenario..."
-	cd examples/aws-vm && terraform apply -auto-approve -var="enable_efs=true" -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-full" -var="common_prefix=aws-vm-full-" -var="vpc_cidr_block=172.27.0.0/16" -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
-	cd examples/aws-vm && terraform destroy -auto-approve -var="enable_efs=true" -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-full" -var="common_prefix=aws-vm-full-" -var="vpc_cidr_block=172.27.0.0/16" -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
+	@mkdir -p $(BUILD_DIR)
+	@bash -c 'set -u; \
+	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  STATE=$(CURDIR)/$(BUILD_DIR)/aws-vm-full-$$SUFFIX.tfstate; \
+	  CLOUD=tfacc-aws-vm-full-$$SUFFIX; \
+	  PREFIX=aws-vm-full-$$SUFFIX-; \
+	  VARS="-var=cloud_name=$$CLOUD -var=common_prefix=$$PREFIX -var=enable_efs=true -var=enable_memorydb=true -var=vpc_cidr_block=172.27.0.0/16 -var=vpc_public_subnets=[\"172.27.21.0/24\",\"172.27.22.0/24\",\"172.27.23.0/24\"]"; \
+	  cd examples/aws-vm; \
+	  trap "terraform destroy -auto-approve -state=$$STATE $$VARS || true" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE $$VARS'
 
 .PHONY: apply-aws-vm-basic
-apply-aws-vm-basic: build ## Apply AWS VM basic only
-	cd examples/aws-vm-basic && terraform apply -auto-approve
+apply-aws-vm-basic: build ## Apply AWS VM basic only (override SUFFIX=<id> to pair with destroy)
+	@mkdir -p $(BUILD_DIR)
+	cd examples/aws-vm-basic && terraform apply -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/aws-vm-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-aws-vm-basic-$(SUFFIX)
 
 .PHONY: apply-aws-vm-full
-apply-aws-vm-full: build ## Apply AWS VM full only
-	cd examples/aws-vm && terraform apply -auto-approve -var="enable_efs=true" -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-full" -var="common_prefix=aws-vm-full-" -var="vpc_cidr_block=172.27.0.0/16" -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
+apply-aws-vm-full: build ## Apply AWS VM full only (override SUFFIX=<id> to pair with destroy)
+	@mkdir -p $(BUILD_DIR)
+	cd examples/aws-vm && terraform apply -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/aws-vm-full-$(SUFFIX).tfstate \
+	  -var="cloud_name=tfacc-aws-vm-full-$(SUFFIX)" \
+	  -var="common_prefix=aws-vm-full-$(SUFFIX)-" \
+	  -var="enable_efs=true" -var="enable_memorydb=true" \
+	  -var="vpc_cidr_block=172.27.0.0/16" \
+	  -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
 
 .PHONY: destroy-aws-vm-basic
-destroy-aws-vm-basic: ## Destroy AWS VM basic
-	cd examples/aws-vm-basic && terraform destroy -auto-approve
+destroy-aws-vm-basic: ## Destroy AWS VM basic (must match SUFFIX used by apply)
+	cd examples/aws-vm-basic && terraform destroy -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/aws-vm-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-aws-vm-basic-$(SUFFIX)
 
 .PHONY: destroy-aws-vm-full
-destroy-aws-vm-full: ## Destroy AWS VM full
-	cd examples/aws-vm && terraform destroy -auto-approve -var="enable_efs=true" -var="enable_memorydb=true" -var="cloud_name=tfprovider-aws-vm-full" -var="common_prefix=aws-vm-full-" -var="vpc_cidr_block=172.27.0.0/16" -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
+destroy-aws-vm-full: ## Destroy AWS VM full (must match SUFFIX used by apply)
+	cd examples/aws-vm && terraform destroy -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/aws-vm-full-$(SUFFIX).tfstate \
+	  -var="cloud_name=tfacc-aws-vm-full-$(SUFFIX)" \
+	  -var="common_prefix=aws-vm-full-$(SUFFIX)-" \
+	  -var="enable_efs=true" -var="enable_memorydb=true" \
+	  -var="vpc_cidr_block=172.27.0.0/16" \
+	  -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
 
 # ============================================================================
 # TERRAFORM TESTING - AWS EKS
@@ -297,16 +344,27 @@ destroy-aws-vm-full: ## Destroy AWS VM full
 .PHONY: test-aws-eks-basic
 test-aws-eks-basic: build ## Test AWS EKS basic (K8S)
 	@echo "==> Testing AWS EKS basic scenario..."
-	cd examples/aws-eks-basic && terraform apply -auto-approve
-	cd examples/aws-eks-basic && terraform destroy -auto-approve
+	@mkdir -p $(BUILD_DIR)
+	@bash -c 'set -u; \
+	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  STATE=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfstate; \
+	  CLOUD=tfacc-aws-eks-basic-$$SUFFIX; \
+	  cd examples/aws-eks-basic; \
+	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
 
 .PHONY: apply-aws-eks-basic
-apply-aws-eks-basic: build ## Apply AWS EKS basic only
-	cd examples/aws-eks-basic && terraform apply -auto-approve
+apply-aws-eks-basic: build ## Apply AWS EKS basic only (override SUFFIX=<id> to pair with destroy)
+	@mkdir -p $(BUILD_DIR)
+	cd examples/aws-eks-basic && terraform apply -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-aws-eks-basic-$(SUFFIX)
 
 .PHONY: destroy-aws-eks-basic
-destroy-aws-eks-basic: ## Destroy AWS EKS basic
-	cd examples/aws-eks-basic && terraform destroy -auto-approve
+destroy-aws-eks-basic: ## Destroy AWS EKS basic (must match SUFFIX used by apply)
+	cd examples/aws-eks-basic && terraform destroy -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-aws-eks-basic-$(SUFFIX)
 
 # ============================================================================
 # TERRAFORM TESTING - GCP VM
@@ -315,30 +373,60 @@ destroy-aws-eks-basic: ## Destroy AWS EKS basic
 .PHONY: test-gcp-vm-basic
 test-gcp-vm-basic: build ## Test GCP VM basic (all-in-one pattern)
 	@echo "==> Testing GCP VM basic scenario..."
-	cd examples/gcp-vm-basic && terraform apply -auto-approve
-	cd examples/gcp-vm-basic && terraform destroy -auto-approve
+	@mkdir -p $(BUILD_DIR)
+	@bash -c 'set -u; \
+	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  STATE=$(CURDIR)/$(BUILD_DIR)/gcp-vm-basic-$$SUFFIX.tfstate; \
+	  CLOUD=tfacc-gcp-vm-basic-$$SUFFIX; \
+	  cd examples/gcp-vm-basic; \
+	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
 
 .PHONY: test-gcp-vm-full
 test-gcp-vm-full: build ## Test GCP VM full (split pattern + Filestore + Memorystore)
 	@echo "==> Testing GCP VM full scenario..."
-	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
+	@mkdir -p $(BUILD_DIR)
+	@bash -c 'set -u; \
+	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  STATE=$(CURDIR)/$(BUILD_DIR)/gcp-vm-full-$$SUFFIX.tfstate; \
+	  CLOUD=tfacc-gcp-vm-full-$$SUFFIX; \
+	  PREFIX=gcp-vm-full-$$SUFFIX-; \
+	  VARS="-var=cloud_name=$$CLOUD -var=common_prefix=$$PREFIX -var=enable_filestore=true -var=enable_memorystore=true -var=vpc_public_subnet_cidr=10.103.0.0/16"; \
+	  cd examples/gcp-vm; \
+	  trap "terraform destroy -auto-approve -state=$$STATE $$VARS || true" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE $$VARS'
 
 .PHONY: apply-gcp-vm-basic
-apply-gcp-vm-basic: build ## Apply GCP VM basic only
-	cd examples/gcp-vm-basic && terraform apply -auto-approve
+apply-gcp-vm-basic: build ## Apply GCP VM basic only (override SUFFIX=<id> to pair with destroy)
+	@mkdir -p $(BUILD_DIR)
+	cd examples/gcp-vm-basic && terraform apply -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/gcp-vm-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-gcp-vm-basic-$(SUFFIX)
 
 .PHONY: apply-gcp-vm-full
-apply-gcp-vm-full: build ## Apply GCP VM full only
-	cd examples/gcp-vm && terraform apply -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
+apply-gcp-vm-full: build ## Apply GCP VM full only (override SUFFIX=<id> to pair with destroy)
+	@mkdir -p $(BUILD_DIR)
+	cd examples/gcp-vm && terraform apply -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/gcp-vm-full-$(SUFFIX).tfstate \
+	  -var="cloud_name=tfacc-gcp-vm-full-$(SUFFIX)" \
+	  -var="common_prefix=gcp-vm-full-$(SUFFIX)-" \
+	  -var="enable_filestore=true" -var="enable_memorystore=true" \
+	  -var="vpc_public_subnet_cidr=10.103.0.0/16"
 
 .PHONY: destroy-gcp-vm-basic
-destroy-gcp-vm-basic: ## Destroy GCP VM basic
-	cd examples/gcp-vm-basic && terraform destroy -auto-approve
+destroy-gcp-vm-basic: ## Destroy GCP VM basic (must match SUFFIX used by apply)
+	cd examples/gcp-vm-basic && terraform destroy -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/gcp-vm-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-gcp-vm-basic-$(SUFFIX)
 
 .PHONY: destroy-gcp-vm-full
-destroy-gcp-vm-full: ## Destroy GCP VM full
-	cd examples/gcp-vm && terraform destroy -auto-approve -var="enable_filestore=true" -var="enable_memorystore=true" -var="cloud_name=tfprovider-gcp-vm-full" -var="common_prefix=gcp-vm-full-" -var="vpc_public_subnet_cidr=10.103.0.0/16"
+destroy-gcp-vm-full: ## Destroy GCP VM full (must match SUFFIX used by apply)
+	cd examples/gcp-vm && terraform destroy -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/gcp-vm-full-$(SUFFIX).tfstate \
+	  -var="cloud_name=tfacc-gcp-vm-full-$(SUFFIX)" \
+	  -var="common_prefix=gcp-vm-full-$(SUFFIX)-" \
+	  -var="enable_filestore=true" -var="enable_memorystore=true" \
+	  -var="vpc_public_subnet_cidr=10.103.0.0/16"
 
 # ============================================================================
 # TERRAFORM TESTING - GCP GKE
@@ -347,16 +435,27 @@ destroy-gcp-vm-full: ## Destroy GCP VM full
 .PHONY: test-gcp-gke-basic
 test-gcp-gke-basic: build ## Test GCP GKE basic (K8S)
 	@echo "==> Testing GCP GKE basic scenario..."
-	cd examples/gcp-gke-basic && terraform apply -auto-approve
-	cd examples/gcp-gke-basic && terraform destroy -auto-approve
+	@mkdir -p $(BUILD_DIR)
+	@bash -c 'set -u; \
+	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  STATE=$(CURDIR)/$(BUILD_DIR)/gcp-gke-basic-$$SUFFIX.tfstate; \
+	  CLOUD=tfacc-gcp-gke-basic-$$SUFFIX; \
+	  cd examples/gcp-gke-basic; \
+	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
 
 .PHONY: apply-gcp-gke-basic
-apply-gcp-gke-basic: build ## Apply GCP GKE basic only
-	cd examples/gcp-gke-basic && terraform apply -auto-approve
+apply-gcp-gke-basic: build ## Apply GCP GKE basic only (override SUFFIX=<id> to pair with destroy)
+	@mkdir -p $(BUILD_DIR)
+	cd examples/gcp-gke-basic && terraform apply -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/gcp-gke-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-gcp-gke-basic-$(SUFFIX)
 
 .PHONY: destroy-gcp-gke-basic
-destroy-gcp-gke-basic: ## Destroy GCP GKE basic
-	cd examples/gcp-gke-basic && terraform destroy -auto-approve
+destroy-gcp-gke-basic: ## Destroy GCP GKE basic (must match SUFFIX used by apply)
+	cd examples/gcp-gke-basic && terraform destroy -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/gcp-gke-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-gcp-gke-basic-$(SUFFIX)
 
 # ============================================================================
 # VERSION HELPERS
