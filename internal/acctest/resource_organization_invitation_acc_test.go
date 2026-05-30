@@ -2,7 +2,12 @@ package acctest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -31,6 +36,7 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckInvitationDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -76,6 +82,7 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckInvitationDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccOrganizationInvitationResourceConfig(testEmail1),
@@ -113,6 +120,7 @@ func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckInvitationDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccOrganizationInvitationResourceConfig(testEmail),
@@ -177,29 +185,129 @@ func testAccCheckInvitationExistsInAPI(resourceName string) resource.TestCheckFu
 
 func testAccCheckInvitationDoesNotExist(email string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		// Get the test client
 		client, err := GetTestClient()
 		if err != nil {
-			return fmt.Errorf("Failed to get test client: %w", err)
+			return fmt.Errorf("failed to get test client: %w", err)
 		}
 
-		// List invitations and check if this email exists
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/organization_invitations?email=%s", email), nil)
+		path := fmt.Sprintf("/api/v2/organization_invitations?email=%s", url.QueryEscape(email))
+		resp, err := client.DoRequest(context.Background(), "GET", path, nil)
 		if err != nil {
-			return fmt.Errorf("Error checking invitations: %s", err)
+			return fmt.Errorf("verify invitation for %s does not exist: %w", email, err)
 		}
-		defer func() { _ = resp.Body.Close() }()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
 
-		// If we get 404 or empty list, the invitation doesn't exist (good)
-		// If we get results, the invitation still exists (bad)
-		if resp.StatusCode == 200 {
-			// Could parse response to check if list is empty, but for now assume 200 means it exists
-			// This is a simplified check - in reality we'd want to parse the response
+		if resp.StatusCode == http.StatusNotFound {
 			return nil
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("verify invitation for %s does not exist: read body: %w", email, readErr)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("cannot verify invitation for %s: API returned status %d: %s", email, resp.StatusCode, truncateBody(string(body), 256))
+		}
+
+		var listResp struct {
+			Results []struct {
+				ID    string `json:"id"`
+				Email string `json:"email"`
+			} `json:"results"`
+		}
+		if err := json.Unmarshal(body, &listResp); err != nil {
+			return fmt.Errorf("verify invitation for %s does not exist: parse response: %w", email, err)
+		}
+
+		// The list endpoint may not filter server-side; match client-side to be safe.
+		for _, inv := range listResp.Results {
+			if inv.Email == email {
+				return fmt.Errorf("invitation for %s still exists (id %s) after destroy", email, inv.ID)
+			}
 		}
 
 		return nil
 	}
+}
+
+// testAccCheckInvitationDestroy verifies that any anyscale_organization_invitation in
+// state was invalidated. Delete on this resource POSTs to /invalidate, which the
+// provider's Read treats as a soft-delete: an invalidated invitation either 404s on
+// GET or returns with an expires_at in the past (status "expired"). Treat both as
+// destroyed; treat "pending" or "accepted" as a leak.
+func testAccCheckInvitationDestroy(s *terraform.State) error {
+	client, err := GetTestClient()
+	if err != nil {
+		return fmt.Errorf("failed to get test client: %w", err)
+	}
+
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "anyscale_organization_invitation" {
+			continue
+		}
+
+		invitationID := rs.Primary.ID
+		if invitationID == "" {
+			continue
+		}
+
+		if err := verifyInvitationDestroyed(client, invitationID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func verifyInvitationDestroyed(client *provider.Client, invitationID string) error {
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/organization_invitations/%s", invitationID), nil)
+	if err != nil {
+		return fmt.Errorf("verify destroy of invitation %s: %w", invitationID, err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("[WARN] Failed to close response body: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("verify destroy of invitation %s: read body: %w", invitationID, readErr)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("cannot verify destroy of invitation %s: API returned status %d: %s", invitationID, resp.StatusCode, truncateBody(string(body), 256))
+	}
+
+	var invResp provider.OrganizationInvitationResponse
+	if err := json.Unmarshal(body, &invResp); err != nil {
+		return fmt.Errorf("verify destroy of invitation %s: parse response: %w", invitationID, err)
+	}
+
+	// The provider computes status client-side from accepted_at + expires_at.
+	// Invalidate sets expires_at to the past, so a destroyed invitation reads as "expired".
+	if invResp.Result.AcceptedAt != nil && *invResp.Result.AcceptedAt != "" {
+		return fmt.Errorf("invitation %s was accepted before destroy could invalidate it", invitationID)
+	}
+
+	expires, err := time.Parse(time.RFC3339, invResp.Result.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("invitation %s still exists with unparseable expires_at %q", invitationID, invResp.Result.ExpiresAt)
+	}
+	if time.Now().Before(expires) {
+		return fmt.Errorf("invitation %s still exists and is not expired (expires_at=%s) after destroy", invitationID, invResp.Result.ExpiresAt)
+	}
+
+	return nil
 }
 
 // PreCheckAuth checks for authentication without requiring cloud ID

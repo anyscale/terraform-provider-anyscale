@@ -303,30 +303,36 @@ func testAccCheckCloudDestroy(s *terraform.State) error {
 			continue
 		}
 
-		// Check if the cloud still exists
-		resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
-		if err != nil {
-			// Network error - can't determine state, but likely destroyed
-			log.Printf("[WARN] Failed to check cloud %s during destroy verification: %v", cloudID, err)
-			continue
+		if err := verifyCloudDestroyed(client, cloudID); err != nil {
+			return err
 		}
-		defer func() { _ = resp.Body.Close() }()
-
-		// 404 means successfully destroyed
-		if resp.StatusCode == http.StatusNotFound {
-			continue
-		}
-
-		// If we get a 200, the cloud still exists - that's an error
-		if resp.StatusCode == http.StatusOK {
-			return fmt.Errorf("cloud %s still exists after destroy", cloudID)
-		}
-
-		// Other status codes - log but don't fail
-		log.Printf("[WARN] Unexpected status %d when checking cloud %s destruction", resp.StatusCode, cloudID)
 	}
 
 	return nil
+}
+
+// verifyCloudDestroyed returns nil if the cloud is gone (404) and an error
+// for any state that prevents proving destruction (200, 5xx, transport error, etc.).
+func verifyCloudDestroyed(client *provider.Client, cloudID string) error {
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	if err != nil {
+		return fmt.Errorf("verify destroy of cloud %s: %w", cloudID, err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("[WARN] Failed to close response body: %v", closeErr)
+		}
+	}()
+
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return nil
+	case http.StatusOK:
+		return fmt.Errorf("cloud %s still exists after destroy", cloudID)
+	default:
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("cannot verify destroy of cloud %s: API returned status %d: %s", cloudID, resp.StatusCode, truncateBody(string(body), 256))
+	}
 }
 
 // Configuration templates

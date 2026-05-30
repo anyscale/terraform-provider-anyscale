@@ -351,71 +351,71 @@ func testAccCheckCloudResourceDestroy(s *terraform.State) error {
 		return fmt.Errorf("failed to get test client: %w", err)
 	}
 
-	// Check cloud resources
 	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "anyscale_cloud_resource" && rs.Type != "anyscale_cloud" {
-			continue
-		}
-
-		if rs.Type == "anyscale_cloud" {
+		switch rs.Type {
+		case "anyscale_cloud":
 			cloudID := rs.Primary.ID
 			if cloudID == "" {
 				continue
 			}
-
-			// Check if the cloud still exists
-			resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
-			if err != nil {
-				log.Printf("[WARN] Failed to check cloud %s during destroy verification: %v", cloudID, err)
-				continue
+			if err := verifyCloudDestroyed(client, cloudID); err != nil {
+				return err
 			}
-			defer func() { _ = resp.Body.Close() }()
 
-			if resp.StatusCode == http.StatusOK {
-				return fmt.Errorf("cloud %s still exists after destroy", cloudID)
-			}
-		}
-
-		if rs.Type == "anyscale_cloud_resource" {
+		case "anyscale_cloud_resource":
 			cloudID := rs.Primary.Attributes["cloud_id"]
 			resourceName := rs.Primary.Attributes["name"]
 			if cloudID == "" || resourceName == "" {
 				continue
 			}
-
-			// Check if the cloud resource still exists by fetching cloud deployments
-			resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/deployments", cloudID), nil)
-			if err != nil {
-				// Cloud might already be deleted, which is fine
-				log.Printf("[DEBUG] Cloud %s may already be deleted: %v", cloudID, err)
-				continue
+			if err := verifyCloudResourceDestroyed(client, cloudID, resourceName); err != nil {
+				return err
 			}
-			defer func() { _ = resp.Body.Close() }()
+		}
+	}
 
-			// If cloud is gone (404), the resource is definitely destroyed
-			if resp.StatusCode == http.StatusNotFound {
-				continue
-			}
+	return nil
+}
 
-			// If we can still fetch deployments, check if our resource is in the list
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(resp.Body)
-				// If the resource name appears in the response, it wasn't destroyed
-				if len(body) > 0 {
-					var deploymentsResp struct {
-						Results []struct {
-							Name string `json:"name"`
-						} `json:"results"`
-					}
-					if err := json.Unmarshal(body, &deploymentsResp); err == nil {
-						for _, d := range deploymentsResp.Results {
-							if d.Name == resourceName {
-								return fmt.Errorf("cloud resource %s:%s still exists after destroy", cloudID, resourceName)
-							}
-						}
-					}
-				}
-			}
+// verifyCloudResourceDestroyed checks that a cloud_resource (deployment) is gone.
+// The cloud being 404 implies the deployment is gone with it; otherwise the
+// deployments list must not contain the resource name.
+func verifyCloudResourceDestroyed(client *provider.Client, cloudID, resourceName string) error {
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/deployments", cloudID), nil)
+	if err != nil {
+		return fmt.Errorf("verify destroy of cloud resource %s:%s: %w", cloudID, resourceName, err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("[WARN] Failed to close response body: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("verify destroy of cloud resource %s:%s: read body: %w", cloudID, resourceName, readErr)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("cannot verify destroy of cloud resource %s:%s: API returned status %d: %s", cloudID, resourceName, resp.StatusCode, truncateBody(string(body), 256))
+	}
+
+	var deploymentsResp struct {
+		Results []struct {
+			Name string `json:"name"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &deploymentsResp); err != nil {
+		return fmt.Errorf("verify destroy of cloud resource %s:%s: parse response: %w", cloudID, resourceName, err)
+	}
+
+	for _, d := range deploymentsResp.Results {
+		if d.Name == resourceName {
+			return fmt.Errorf("cloud resource %s:%s still exists after destroy", cloudID, resourceName)
 		}
 	}
 
