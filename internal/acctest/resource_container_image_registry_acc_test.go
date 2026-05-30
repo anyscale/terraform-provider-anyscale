@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -52,6 +53,11 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "created_at"),
 					testAccCheckContainerImageRegistryExistsInAPI("anyscale_container_image_registry.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing
 			{
@@ -91,6 +97,11 @@ func TestAccContainerImageRegistryResource_BYOD(t *testing.T) {
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "cluster_environment_id"),
 					testAccCheckContainerImageRegistryExistsInAPI("anyscale_container_image_registry.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})

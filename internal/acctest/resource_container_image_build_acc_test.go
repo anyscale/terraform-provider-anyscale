@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -52,6 +53,11 @@ RUN pip install emoji==2.15.0`
 					resource.TestCheckResourceAttrSet("anyscale_container_image_build.test", "name_version"),
 					testAccCheckContainerImageBuildExistsInAPI("anyscale_container_image_build.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing
 			{
@@ -99,6 +105,11 @@ RUN sudo mkdir -p /anyscale/init`
 					// Capture the cluster environment ID to verify it doesn't change
 					CaptureResourceAttr("anyscale_container_image_build.test", "id", &clusterEnvID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Step 2: Update containerfile - should create a new build (revision 2)
 			{
@@ -111,6 +122,11 @@ RUN sudo mkdir -p /anyscale/init`
 					// Verify the cluster environment ID is the same (not a replacement)
 					VerifyResourceAttrUnchanged("anyscale_container_image_build.test", "id", &clusterEnvID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})

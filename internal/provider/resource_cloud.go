@@ -177,11 +177,17 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"is_empty_cloud": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether this cloud was created without embedded resource configuration. Use anyscale_cloud_resource to attach resources separately.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 
 			"cloud_deployment_id": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 

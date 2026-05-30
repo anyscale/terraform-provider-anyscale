@@ -12,6 +12,7 @@ import (
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -42,6 +43,11 @@ func TestAccCloudResource_AWS_Basic(t *testing.T) {
 					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
 					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "AWS", "us-east-2"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing
 			{
@@ -91,6 +97,11 @@ func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
 					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "AWS", "us-east-2"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -121,6 +132,11 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
 					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "GCP", "us-central1"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			{
 				ResourceName:      "anyscale_cloud.test",
@@ -166,6 +182,11 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
 					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "AWS", "us-east-2"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})

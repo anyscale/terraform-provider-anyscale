@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -29,6 +30,11 @@ func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttrSet("anyscale_global_resource_scheduler.test", "organization_id"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing
 			{
@@ -65,6 +71,15 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "spec.0.machine_type.0.name", "RES-8CPU-32GB"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				// FIXME(4.1): Read drops cloud_attachment blocks — readMachinePool returns
+				// cloud_ids but never rebuilds the cloud_attachment block list from API.
+				// ExpectEmptyPlan should still pass since the block stays in state, but if
+				// the API normalizes cloud_resource_id this will flag drift.
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Update spec
 			{
@@ -73,6 +88,11 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "spec.0.machine_type.#", "2"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -100,6 +120,11 @@ func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "cloud_attachment.0.cloud_id", cloud.ID),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -126,6 +151,11 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "cloud_attachment.0.cloud_name", cloudName),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -157,6 +187,11 @@ func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "spec.0.machine_type.0.partition.#", "1"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})

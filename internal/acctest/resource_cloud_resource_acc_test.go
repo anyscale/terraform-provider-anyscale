@@ -12,6 +12,7 @@ import (
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -41,6 +42,11 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "VM"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing with composite ID (cloud_id:resource_name)
 			{
@@ -87,6 +93,11 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "VM"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			{
 				ResourceName:      "anyscale_cloud_resource.test",
@@ -127,6 +138,11 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "K8S"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -155,6 +171,11 @@ func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 					// API validation
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})

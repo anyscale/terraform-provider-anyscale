@@ -126,6 +126,9 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 			"build_status": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The status of the build (typically `succeeded` for registered images).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"created_at": schema.StringAttribute{
 				Computed:            true,
@@ -151,6 +154,9 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 			"name_version": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}

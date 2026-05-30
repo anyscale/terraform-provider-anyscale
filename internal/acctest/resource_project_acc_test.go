@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -35,6 +36,11 @@ func TestAccProjectResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_project.test", "is_default", "false"),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing
 			{
@@ -68,6 +74,11 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_project.test", "description", description),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -92,6 +103,11 @@ func TestAccProjectResource_WithCloudName(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_project.test", "cloud_name", cloudName),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -125,6 +141,11 @@ func TestAccProjectResource_WithCollaborators(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "2"),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Update collaborators (remove one, add different permission)
 			{
@@ -132,6 +153,11 @@ func TestAccProjectResource_WithCollaborators(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "1"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -261,6 +287,11 @@ func TestAccProjectResource_WithUserDataSource(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.0.permission_level", "owner"),
 					testAccCheckProjectExistsInAPI("anyscale_project.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})

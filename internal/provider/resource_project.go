@@ -146,6 +146,9 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"last_used_cloud_id": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The ID of the cloud last used by this project.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"is_default": schema.BoolAttribute{
 				Computed:            true,

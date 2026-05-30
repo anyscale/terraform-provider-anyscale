@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -50,6 +51,11 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "created_at"),
 							testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 						),
+						ConfigPlanChecks: resource.ConfigPlanChecks{
+							PostApplyPostRefresh: []plancheck.PlanCheck{
+								plancheck.ExpectEmptyPlan(),
+							},
+						},
 					},
 					// ImportState testing
 					{
@@ -98,6 +104,14 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.max_nodes", "10"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 				),
+				// FIXME(4.1): Read drops worker_nodes — apiWorkerNodeTypesToTerraform pulls
+				// from API which doesn't echo back min_nodes/max_nodes/market_type defaults.
+				// ExpectEmptyPlan may fail until Read round-trips worker config faithfully.
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -122,6 +136,11 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.large"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -274,6 +293,11 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 					// Capture initial config_id for comparison
 					testAccCaptureComputeConfigID("anyscale_compute_config.test", &initialConfigID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Update to larger instance - should create a new version
 			{
@@ -292,6 +316,11 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 					// Verify config_id changed (new version = new config_id)
 					testAccCheckComputeConfigIDChanged("anyscale_compute_config.test", &initialConfigID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})

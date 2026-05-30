@@ -240,11 +240,17 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			"status": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The current status of the cloud resource.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 
 			"is_default": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether this is the default resource for the cloud.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 

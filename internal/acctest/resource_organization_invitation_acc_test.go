@@ -14,6 +14,7 @@ import (
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -49,6 +50,11 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_organization_invitation.test", "status", "pending"),
 					testAccCheckInvitationExistsInAPI("anyscale_organization_invitation.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing
 			{
@@ -88,6 +94,11 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_organization_invitation.test", "email", testEmail1),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Changing email should force replacement
 			{
@@ -97,6 +108,11 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 					// Verify it's a new invitation (different ID)
 					testAccCheckInvitationExistsInAPI("anyscale_organization_invitation.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -126,6 +142,11 @@ func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckInvitationExistsInAPI("anyscale_organization_invitation.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Test deletion by removing the config
 			{
