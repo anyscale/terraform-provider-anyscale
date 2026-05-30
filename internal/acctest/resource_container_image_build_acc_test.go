@@ -16,7 +16,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -27,7 +26,7 @@ import (
 func TestAccContainerImageBuildResource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-test-build-basic-%d", time.Now().UnixNano())
+	imageName := UniqueName(t, "img-build-basic")
 
 	// Simple containerfile that just adds a pip package to the base Ray image
 	containerfile := `FROM anyscale/ray:2.53.0-slim-py312
@@ -70,7 +69,7 @@ RUN pip install emoji==2.15.0`
 func TestAccContainerImageBuildResource_Update(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-test-build-update-%d", time.Now().UnixNano())
+	imageName := UniqueName(t, "img-build-update")
 
 	// Initial containerfile
 	containerfileV1 := `FROM anyscale/ray:2.53.0-slim-py312

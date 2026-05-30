@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -31,6 +30,7 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				t.Skipf("Skipping %s - no valid instance types (K8S clouds use operator-defined pod shapes)", testName)
 			}
 
+			configName := UniqueName(t, "compute-config-basic")
 			resource.Test(t, resource.TestCase{
 				PreCheck:                 func() { PreCheck(t) },
 				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -40,7 +40,7 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				Steps: []resource.TestStep{
 					// Create and Read testing
 					{
-						Config: testAccComputeConfigResourceConfig_basic(cloud.ID, instanceTypes.Small),
+						Config: testAccComputeConfigResourceConfig_basic(configName, cloud.ID, instanceTypes.Small),
 						Check: resource.ComposeAggregateTestCheckFunc(
 							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
@@ -81,6 +81,7 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
+	configName := UniqueName(t, "compute-config-workers")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -88,7 +89,7 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_withWorkers(cloudID, "m5.large", "m5.xlarge"),
+				Config: testAccComputeConfigResourceConfig_withWorkers(configName, cloudID, "m5.large", "m5.xlarge"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "1"),
@@ -106,6 +107,7 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := GetTestCloudName(t)
+	configName := UniqueName(t, "compute-config-cloudname")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -113,7 +115,7 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_withCloudName(cloudName),
+				Config: testAccComputeConfigResourceConfig_withCloudName(configName, cloudName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "cloud_id"),
@@ -193,24 +195,23 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 
 // Configuration templates for tests
 
-func testAccComputeConfigResourceConfig_basic(cloudID, instanceType string) string {
+func testAccComputeConfigResourceConfig_basic(name, cloudID, instanceType string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  # Use unique name to avoid conflicts
-  name     = "tf-test-compute-config-basic-%d"
+  name     = "%s"
   cloud_id = "%s"
 
   head_node = {
     instance_type = "%s"
   }
 }
-`, time.Now().UnixNano(), cloudID, instanceType)
+`, name, cloudID, instanceType)
 }
 
-func testAccComputeConfigResourceConfig_withWorkers(cloudID, headInstanceType, workerInstanceType string) string {
+func testAccComputeConfigResourceConfig_withWorkers(name, cloudID, headInstanceType, workerInstanceType string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  name     = "tf-test-compute-config-workers-%d"
+  name     = "%s"
   cloud_id = "%s"
 
   head_node = {
@@ -227,11 +228,10 @@ resource "anyscale_compute_config" "test" {
     }
   ]
 }
-`, time.Now().UnixNano(), cloudID, headInstanceType, workerInstanceType)
+`, name, cloudID, headInstanceType, workerInstanceType)
 }
 
-func testAccComputeConfigResourceConfig_withCloudName(cloudName string) string {
-	configName := fmt.Sprintf("tf-test-cloudname-%d", time.Now().UnixNano())
+func testAccComputeConfigResourceConfig_withCloudName(name, cloudName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name       = "%s"
@@ -241,7 +241,7 @@ resource "anyscale_compute_config" "test" {
     instance_type = "m5.large"
   }
 }
-`, configName, cloudName)
+`, name, cloudName)
 }
 
 // TestAccComputeConfigResource_Update tests that updating a compute config
@@ -250,7 +250,7 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	configName := fmt.Sprintf("tf-test-compute-update-%d", time.Now().UnixNano())
+	configName := UniqueName(t, "compute-config-update")
 	var initialConfigID string
 
 	resource.Test(t, resource.TestCase{

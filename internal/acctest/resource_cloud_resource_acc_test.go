@@ -19,7 +19,7 @@ import (
 func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-cloud-res-aws"
+	cloudName := UniqueName(t, "cloud-res-aws")
 	resourceName := "default"
 	// Generate random suffix for IAM roles to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
@@ -67,7 +67,7 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-cloud-res-gcp"
+	cloudName := UniqueName(t, "cloud-res-gcp")
 	resourceName := "default"
 	// Generate random suffix for service accounts to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
@@ -107,7 +107,7 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-cloud-res-k8s"
+	cloudName := UniqueName(t, "cloud-res-k8s")
 	resourceName := "default"
 	// Generate random suffix for IAM roles to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
@@ -136,9 +136,9 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	// Generate random suffix for cloud resources to allow parallel test runs and avoid conflicts
+	cloudName := UniqueName(t, "cloud-res-fs")
+	// Random suffix for embedded IAM ARNs / bucket names in the config template.
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
-	cloudName := fmt.Sprintf("tfacc-test-cloud-res-fs-%s", randSuffix)
 	resourceName := fmt.Sprintf("with-file-storage-%s", randSuffix)
 
 	resource.Test(t, resource.TestCase{

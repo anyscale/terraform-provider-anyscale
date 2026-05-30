@@ -3,7 +3,6 @@ package acctest
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -11,7 +10,7 @@ import (
 func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "ds-scheduler")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -38,7 +37,7 @@ func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 	// Get a configured cloud and use appropriate instance types
 	cloud := GetConfiguredCloud(t)
 	instanceTypes := cloud.InstanceTypes()
-	schedulerName := fmt.Sprintf("tfacc-test-pool-ds-spec-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "ds-scheduler-spec")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -61,7 +60,7 @@ func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pools-ds-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "ds-schedulers")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -83,7 +82,7 @@ func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
 func TestAccGlobalResourceSchedulersDataSource_WithFilter(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pools-filter-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "ds-schedulers-filter")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -91,7 +90,7 @@ func TestAccGlobalResourceSchedulersDataSource_WithFilter(t *testing.T) {
 		CheckDestroy:             testAccCheckGlobalResourceSchedulerDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccGlobalResourceSchedulersDataSourceWithFilterConfig(schedulerName),
+				Config: testAccGlobalResourceSchedulersDataSourceWithFilterConfig(schedulerName, schedulerName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Should find at least the pool we created
 					resource.TestCheckResourceAttrSet("data.anyscale_global_resource_schedulers.filtered", "machine_pools.#"),
@@ -164,15 +163,15 @@ data "anyscale_global_resource_schedulers" "all" {
 `, schedulerName)
 }
 
-func testAccGlobalResourceSchedulersDataSourceWithFilterConfig(schedulerName string) string {
+func testAccGlobalResourceSchedulersDataSourceWithFilterConfig(schedulerName, nameContains string) string {
 	return fmt.Sprintf(`
 resource "anyscale_global_resource_scheduler" "test" {
   name = "%s"
 }
 
 data "anyscale_global_resource_schedulers" "filtered" {
-  name_contains = "tfacc-test-pools-filter"
+  name_contains = "%s"
   depends_on    = [anyscale_global_resource_scheduler.test]
 }
-`, schedulerName)
+`, schedulerName, nameContains)
 }

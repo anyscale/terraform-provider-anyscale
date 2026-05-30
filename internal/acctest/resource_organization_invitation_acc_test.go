@@ -30,8 +30,7 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 		return
 	}
 
-	// Use a unique email for testing
-	testEmail := fmt.Sprintf("tfacc-invite-basic-%d@example.com", time.Now().UnixNano())
+	testEmail := UniqueName(t, "invite-basic") + "@example.com"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -76,8 +75,8 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 		return
 	}
 
-	testEmail1 := fmt.Sprintf("tfacc-invite-replace1-%d@example.com", time.Now().UnixNano())
-	testEmail2 := fmt.Sprintf("tfacc-invite-replace2-%d@example.com", time.Now().UnixNano())
+	testEmail1 := UniqueName(t, "invite-replace1") + "@example.com"
+	testEmail2 := UniqueName(t, "invite-replace2") + "@example.com"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -115,7 +114,7 @@ func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 		return
 	}
 
-	testEmail := fmt.Sprintf("tfacc-invite-delete-%d@example.com", time.Now().UnixNano())
+	testEmail := UniqueName(t, "invite-delete") + "@example.com"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },

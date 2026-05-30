@@ -19,7 +19,7 @@ import (
 func TestAccCloudResource_AWS_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-aws-basic"
+	cloudName := UniqueName(t, "cloud-aws-basic")
 	// Generate random suffix for IAM roles to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
@@ -73,7 +73,7 @@ func TestAccCloudResource_AWS_Basic(t *testing.T) {
 func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-aws-empty"
+	cloudName := UniqueName(t, "cloud-aws-empty")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -100,7 +100,7 @@ func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 func TestAccCloudResource_GCP_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-gcp-basic"
+	cloudName := UniqueName(t, "cloud-gcp-basic")
 	// Generate random suffix for service accounts to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
@@ -146,7 +146,7 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 func TestAccCloudResource_AWS_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-aws-k8s"
+	cloudName := UniqueName(t, "cloud-aws-k8s")
 	// Generate random suffix for IAM roles to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 

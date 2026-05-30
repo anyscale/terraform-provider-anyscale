@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -13,7 +12,7 @@ import (
 func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pool-basic-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-basic")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -48,7 +47,7 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 	// Get a configured cloud and use appropriate instance types
 	cloud := GetConfiguredCloud(t)
 	instanceTypes := cloud.InstanceTypes()
-	schedulerName := fmt.Sprintf("tfacc-test-pool-spec-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-spec")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -84,7 +83,7 @@ func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 
 	// This test requires a cloud with cloud resources configured
 	cloud := GetConfiguredCloud(t)
-	schedulerName := fmt.Sprintf("tfacc-test-pool-cloud-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-cloud")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -111,7 +110,7 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 
 	cloudName := GetTestCloudName(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pool-cloudname-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-cloudname")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -138,7 +137,7 @@ func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
 	// Get a configured cloud and use appropriate instance types
 	cloud := GetConfiguredCloud(t)
 	instanceTypes := cloud.InstanceTypes()
-	schedulerName := fmt.Sprintf("tfacc-test-pool-full-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-full")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

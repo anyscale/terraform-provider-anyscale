@@ -3,7 +3,6 @@ package acctest
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -58,13 +57,14 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
+	configName := UniqueName(t, "ds-cloud-compute")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudDataSourceConfig_withComputeConfig(cloudID),
+				Config: testAccCloudDataSourceConfig_withComputeConfig(cloudID, configName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Check data source
 					resource.TestCheckResourceAttr("data.anyscale_cloud.test", "id", cloudID),
@@ -96,8 +96,7 @@ data "anyscale_cloud" "test" {
 `, cloudName)
 }
 
-func testAccCloudDataSourceConfig_withComputeConfig(cloudID string) string {
-	configName := fmt.Sprintf("tf-test-datasource-compute-%d", time.Now().UnixNano())
+func testAccCloudDataSourceConfig_withComputeConfig(cloudID, configName string) string {
 	return fmt.Sprintf(`
 data "anyscale_cloud" "test" {
   id = "%s"

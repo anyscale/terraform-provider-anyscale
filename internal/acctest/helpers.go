@@ -15,6 +15,7 @@ import (
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	tfacctest "github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -37,10 +38,16 @@ var (
 	cachedAnyCloudID string
 	anyCloudIDMutex  sync.Mutex
 
-	// Track ephemeral cloud created by tests for cleanup
-	ephemeralCloudID   string
-	ephemeralCloudName string
+	// Track ephemeral clouds created by tests for cleanup. Keyed by cloud ID
+	// so concurrent createEphemeralTestCloud calls do not clobber each other.
+	ephemeralClouds      = map[string]ephemeralCloud{}
+	ephemeralCloudsMutex sync.Mutex
 )
+
+type ephemeralCloud struct {
+	ID   string
+	Name string
+}
 
 // GetTestCloudID returns a test cloud ID with the following priority:
 // 1. ANYSCALE_TEST_CLOUD_ID environment variable (explicit override)
@@ -288,46 +295,54 @@ func createEphemeralTestCloud(t *testing.T) (cloudID string, cloudName string, e
 		return "", "", fmt.Errorf("failed to parse cloud response: %w", err)
 	}
 
-	// Track the ephemeral cloud for cleanup
-	ephemeralCloudID = cloudResp.Result.ID
-	ephemeralCloudName = cloudResp.Result.Name
+	createdID := cloudResp.Result.ID
+	createdName := cloudResp.Result.Name
 
-	t.Logf("Created ephemeral test cloud: %s (ID: %s)", ephemeralCloudName, ephemeralCloudID)
+	ephemeralCloudsMutex.Lock()
+	ephemeralClouds[createdID] = ephemeralCloud{ID: createdID, Name: createdName}
+	ephemeralCloudsMutex.Unlock()
+
+	t.Logf("Created ephemeral test cloud: %s (ID: %s)", createdName, createdID)
 
 	if os.Getenv("ANYSCALE_TEST_KEEP") == "1" {
 		t.Logf("ANYSCALE_TEST_KEEP=1: Cloud will be preserved after tests")
 	} else {
-		// Register cleanup
 		t.Cleanup(func() {
-			cleanupEphemeralCloud(t)
+			cleanupEphemeralCloud(t, createdID)
 		})
 	}
 
-	return ephemeralCloudID, ephemeralCloudName, nil
+	return createdID, createdName, nil
 }
 
-// cleanupEphemeralCloud deletes the ephemeral cloud created for testing
-func cleanupEphemeralCloud(t *testing.T) {
-	if ephemeralCloudID == "" {
+// cleanupEphemeralCloud deletes a specific ephemeral cloud created for testing.
+func cleanupEphemeralCloud(t *testing.T, cloudID string) {
+	if cloudID == "" {
 		return
 	}
 
-	// Clear cached values if they reference this ephemeral cloud
-	// This prevents subsequent tests from using stale cache values
+	ephemeralCloudsMutex.Lock()
+	ec, tracked := ephemeralClouds[cloudID]
+	ephemeralCloudsMutex.Unlock()
+	if !tracked {
+		return
+	}
+
+	// Invalidate caches that reference this cloud so subsequent tests don't reuse a deleted ID.
 	cloudIDMutex.Lock()
-	if cachedTestCloudID == ephemeralCloudID {
+	if cachedTestCloudID == cloudID {
 		cachedTestCloudID = ""
 		cachedTestCloudName = ""
 	}
 	cloudIDMutex.Unlock()
 
 	anyCloudIDMutex.Lock()
-	if cachedAnyCloudID == ephemeralCloudID {
+	if cachedAnyCloudID == cloudID {
 		cachedAnyCloudID = ""
 	}
 	anyCloudIDMutex.Unlock()
 
-	t.Logf("Cleaning up ephemeral test cloud: %s (ID: %s)", ephemeralCloudName, ephemeralCloudID)
+	t.Logf("Cleaning up ephemeral test cloud: %s (ID: %s)", ec.Name, ec.ID)
 
 	client, err := GetTestClient()
 	if err != nil {
@@ -335,7 +350,7 @@ func cleanupEphemeralCloud(t *testing.T) {
 		return
 	}
 
-	resp, err := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/clouds/%s", ephemeralCloudID), nil)
+	resp, err := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/clouds/%s", ec.ID), nil)
 	if err != nil {
 		t.Logf("Warning: Failed to delete ephemeral cloud: %v", err)
 		return
@@ -343,9 +358,10 @@ func cleanupEphemeralCloud(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 200 || resp.StatusCode == 204 || resp.StatusCode == 404 {
-		t.Logf("Successfully cleaned up ephemeral cloud: %s", ephemeralCloudName)
-		ephemeralCloudID = ""
-		ephemeralCloudName = ""
+		t.Logf("Successfully cleaned up ephemeral cloud: %s", ec.Name)
+		ephemeralCloudsMutex.Lock()
+		delete(ephemeralClouds, cloudID)
+		ephemeralCloudsMutex.Unlock()
 	} else {
 		body, _ := io.ReadAll(resp.Body)
 		t.Logf("Warning: Failed to delete ephemeral cloud (status %d): %s", resp.StatusCode, string(body))
@@ -1125,4 +1141,17 @@ func extractArchivedValue(body []byte, jsonPath string) (bool, error) {
 	default:
 		return false, nil
 	}
+}
+
+// UniqueName returns a deterministic-prefixed but per-invocation-unique
+// test resource name in the form "tfacc-<slug>-<8charrand>". Use this in
+// every new acceptance test rather than literal names; literal names
+// collide between concurrent CI runs and require manual cleanup.
+//
+// slug should be a short, lowercase-with-dashes identifier of the test
+// purpose, e.g. "cloud-aws-basic" or "project-collab".
+func UniqueName(t *testing.T, slug string) string {
+	t.Helper()
+	suffix := tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
+	return fmt.Sprintf("tfacc-%s-%s", slug, strings.ToLower(suffix))
 }

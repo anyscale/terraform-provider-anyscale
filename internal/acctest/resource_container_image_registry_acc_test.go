@@ -16,7 +16,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -71,7 +70,7 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 func TestAccContainerImageRegistryResource_BYOD(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-test-registry-byod-%d", time.Now().UnixNano())
+	imageName := UniqueName(t, "img-registry-byod")
 	// Use a fake ECR-style URI - the API accepts the format even if the image doesn't exist
 	// Format: <account_id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
 	fakeECRImageURI := "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ray-image:latest"
