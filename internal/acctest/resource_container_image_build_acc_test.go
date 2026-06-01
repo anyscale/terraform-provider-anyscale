@@ -64,8 +64,11 @@ RUN pip install emoji==2.15.0`
 				ResourceName:      "anyscale_container_image_build.test",
 				ImportState:       true,
 				ImportStateVerify: true,
-				// User-provided values not stored in state after import
-				ImportStateVerifyIgnore: []string{"containerfile", "containerfile_path", "build_timeout"},
+				ImportStateVerifyIgnore: []string{
+					"containerfile",      // client-only: Dockerfile body is sent to the build API and not echoed back
+					"containerfile_path", // client-only: local filesystem path, never sent to the API
+					"build_timeout",      // client-side wait knob; not stored server-side
+				},
 			},
 		},
 	})

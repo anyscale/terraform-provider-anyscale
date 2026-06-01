@@ -54,21 +54,15 @@ func TestAccCloudResource_AWS_Basic(t *testing.T) {
 				ResourceName:      "anyscale_cloud.test",
 				ImportState:       true,
 				ImportStateVerify: true,
-				// API doesn't return full config details, so ignore these fields
 				ImportStateVerifyIgnore: []string{
-					"credentials",
-					"aws_config",
-					"gcp_config",
-					"azure_config",
-					"kubernetes_config",
-					"object_storage",
-					"file_storage",
-					"compute_stack",
-					"is_empty_cloud",
-					"auto_add_user",
-					"enable_lineage_tracking",
-					"enable_log_ingestion",
-					"is_private_cloud",
+					"credentials",       // sensitive: API never returns auth tokens after create
+					"aws_config",        // write-only block: API does not echo back provider-specific config on cloud GET
+					"gcp_config",        // write-only block: API does not echo back provider-specific config on cloud GET
+					"azure_config",      // write-only block: API does not echo back provider-specific config on cloud GET
+					"kubernetes_config", // write-only block: API does not echo back provider-specific config on cloud GET
+					"object_storage",    // write-only block: storage lives on the cloud deployment, not on the cloud GET
+					"file_storage",      // write-only block: storage lives on the cloud deployment, not on the cloud GET
+					"is_empty_cloud",    // create-time-only flag derived from plan; not surfaced by the API
 				},
 			},
 		},
@@ -143,15 +137,10 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"credentials",
-					"gcp_config",
-					"object_storage",
-					"compute_stack",
-					"is_empty_cloud",
-					"auto_add_user",
-					"enable_lineage_tracking",
-					"enable_log_ingestion",
-					"is_private_cloud",
+					"credentials",    // sensitive: API never returns auth tokens after create
+					"gcp_config",     // write-only block: API does not echo back provider-specific config on cloud GET
+					"object_storage", // write-only block: storage lives on the cloud deployment, not on the cloud GET
+					"is_empty_cloud", // create-time-only flag derived from plan; not surfaced by the API
 				},
 			},
 		},
@@ -434,4 +423,67 @@ resource "anyscale_cloud" "test" {
   }
 }
 `, name, randSuffix, randSuffix)
+}
+
+// TestAccCloudResource_Disappears verifies that an out-of-band cloud deletion
+// is detected by the next plan as drift rather than silently succeeding.
+func TestAccCloudResource_Disappears(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-disappears")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccCloudResourceAWSEmptyConfig(cloudName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
+					testAccDeleteCloudViaAPI("anyscale_cloud.test"),
+				),
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// testAccDeleteCloudViaAPI deletes the cloud directly via the Anyscale API so
+// the next plan must observe drift. 200/202/204/404 all count as success.
+func testAccDeleteCloudViaAPI(resourceName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("not found: %s", resourceName)
+		}
+
+		cloudID := rs.Primary.ID
+		if cloudID == "" {
+			return fmt.Errorf("no Cloud ID is set for %s", resourceName)
+		}
+
+		client, err := GetTestClient()
+		if err != nil {
+			return fmt.Errorf("failed to get test client: %w", err)
+		}
+
+		resp, err := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+		if err != nil {
+			return fmt.Errorf("failed to delete cloud %s via API: %w", cloudID, err)
+		}
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
+
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusAccepted, http.StatusNoContent, http.StatusNotFound:
+			return nil
+		default:
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status %d deleting cloud %s: %s", resp.StatusCode, cloudID, truncateBody(string(body), 256))
+		}
+	}
 }

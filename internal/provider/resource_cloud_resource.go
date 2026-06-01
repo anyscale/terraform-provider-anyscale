@@ -895,6 +895,9 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 	state.ComputeStack = types.StringValue(foundResource.ComputeStack)
 	state.Region = types.StringValue(foundResource.Region)
 	state.IsDefault = types.BoolValue(foundResource.IsDefault)
+	if foundResource.Provider != "" {
+		state.CloudProvider = types.StringValue(foundResource.Provider)
+	}
 
 	if foundResource.OperatorStatus != nil {
 		state.Status = types.StringValue(*foundResource.OperatorStatus)

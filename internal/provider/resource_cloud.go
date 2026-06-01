@@ -1382,10 +1382,18 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	state.CloudProvider = types.StringValue(cloudResp.Result.Provider)
 	state.Region = types.StringValue(cloudResp.Result.Region)
 
-	// These fields might not be in the response, so keep existing values if response doesn't have them:
-	// - IsEmptyCloud should already be set during create
-	// - CloudDeploymentID should already be set during addCloudResource
-	// We don't overwrite them here since the API doesn't return them directly
+	// Refresh cloud-level boolean settings from the API. These are Optional+Computed
+	// with a Default of false; rehydrating them keeps import round-tripping lossless.
+	state.IsPrivateCloud = types.BoolValue(cloudResp.Result.IsPrivateCloud)
+	state.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
+	state.EnableLineageTracking = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
+	state.EnableLogIngestion = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
+
+	// compute_stack on the cloud reflects how the cloud was created (VM vs K8S).
+	// The API may return an empty string for clouds that pre-date the field.
+	if cloudResp.Result.ComputeStack != "" {
+		state.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
+	}
 
 	// If CloudDeploymentID is still unknown/null, set it to null explicitly
 	if state.CloudDeploymentID.IsUnknown() {

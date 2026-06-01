@@ -3,6 +3,7 @@ package acctest
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"testing"
 
@@ -64,17 +65,15 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 						ImportStateVerify: true,
 						// Import using config_id (version-specific API ID), not name
 						ImportStateIdFunc: testAccComputeConfigImportStateIdFunc("anyscale_compute_config.test"),
-						// These fields are not returned by the API read operation
-						// TODO: Implement full state reconstruction from API response
 						ImportStateVerifyIgnore: []string{
-							"head_node",
-							"worker_nodes",
-							"enable_cross_zone_scaling",
-							"min_resources",
-							"max_resources",
-							"advanced_instance_config",
-							"flags",
-							"zones",
+							"head_node",                 // nested attrs auto-filled from instance_type by API; mask-vs-prior logic in Read cannot recover original null markers on import
+							"worker_nodes",              // same as head_node: API normalizes resources/physical_resources and import has no prior state to mask against
+							"enable_cross_zone_scaling", // serialized into flags["allow-cross-zone-autoscaling"]; default false matches null on configs that omit it
+							"min_resources",             // serialized into flags["min_resources"]; null on Basic test config but API returns whatever it normalized
+							"max_resources",             // serialized into flags["max_resources"]; null on Basic test config but API returns whatever it normalized
+							"advanced_instance_config",  // Dynamic type: API may return null vs empty maps differently; preserved-as-configured by Read
+							"flags",                     // Dynamic type at top level: user flags preserved-as-configured to avoid representation drift
+							"zones",                     // API replaces empty with ["any"]; preserved-as-configured by Read
 						},
 					},
 				},
@@ -104,9 +103,6 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.max_nodes", "10"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 				),
-				// FIXME(4.1): Read drops worker_nodes — apiWorkerNodeTypesToTerraform pulls
-				// from API which doesn't echo back min_nodes/max_nodes/market_type defaults.
-				// ExpectEmptyPlan may fail until Read round-trips worker config faithfully.
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -367,4 +363,81 @@ resource "anyscale_compute_config" "test" {
   }
 }
 `, configName, cloudID, instanceType)
+}
+
+// TestAccComputeConfigResource_Disappears verifies that an out-of-band archive
+// of the compute config is detected by the next plan as drift.
+func TestAccComputeConfigResource_Disappears(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	// K8S clouds use operator-defined pod shapes, not the basic instance_type
+	// shape used here. Pick the first VM cloud, mirroring TestAccComputeConfigResource_Basic.
+	vmClouds := GetAllVMClouds(t)
+	if len(vmClouds) == 0 {
+		t.Skip("No VM clouds available for compute config testing")
+	}
+	cloud := vmClouds[0]
+	instanceTypes := cloud.InstanceTypes()
+	if !instanceTypes.IsValid() {
+		t.Skipf("Skipping %s - no valid instance types (K8S clouds use operator-defined pod shapes)", cloud.Provider)
+	}
+
+	configName := UniqueName(t, "compute-config-disappears")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigResourceConfig_basic(configName, cloud.ID, instanceTypes.Small),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					testAccDeleteComputeConfigViaAPI("anyscale_compute_config.test"),
+				),
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// testAccDeleteComputeConfigViaAPI archives the compute config directly via the
+// Anyscale API so the next plan must observe drift. Uses the same archive
+// endpoint as Delete and the sweeper. 200/202/204/404 all count as success.
+func testAccDeleteComputeConfigViaAPI(resourceName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("not found: %s", resourceName)
+		}
+
+		// config_id is the version-specific ID expected by the archive endpoint.
+		configID := rs.Primary.Attributes["config_id"]
+		if configID == "" {
+			return fmt.Errorf("no config_id attribute set for %s", resourceName)
+		}
+
+		client, err := GetTestClient()
+		if err != nil {
+			return fmt.Errorf("failed to get test client: %w", err)
+		}
+
+		resp, err := client.DoRequest(context.Background(), "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", configID), nil)
+		if err != nil {
+			return fmt.Errorf("failed to archive compute config %s via API: %w", configID, err)
+		}
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
+
+		switch resp.StatusCode {
+		case 200, 202, 204, 404:
+			return nil
+		default:
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status %d archiving compute config %s: %s", resp.StatusCode, configID, truncateBody(string(body), 256))
+		}
+	}
 }

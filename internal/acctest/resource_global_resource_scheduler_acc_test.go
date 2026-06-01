@@ -71,10 +71,9 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "spec.0.machine_type.0.name", "RES-8CPU-32GB"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
-				// FIXME(4.1): Read drops cloud_attachment blocks — readMachinePool returns
-				// cloud_ids but never rebuilds the cloud_attachment block list from API.
-				// ExpectEmptyPlan should still pass since the block stays in state, but if
-				// the API normalizes cloud_resource_id this will flag drift.
+				// cloud_attachment is a block stored as a slice on the model; Read does
+				// not overwrite it, so the user-supplied values round-trip via prior state.
+				// CloudIDs (computed) is refreshed separately from the API response.
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),

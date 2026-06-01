@@ -3,6 +3,7 @@ package acctest
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"testing"
 
@@ -47,8 +48,9 @@ func TestAccProjectResource_Basic(t *testing.T) {
 				ResourceName:      "anyscale_project.test",
 				ImportState:       true,
 				ImportStateVerify: true,
-				// cloud_name not returned by API, so ignore in import verification
-				ImportStateVerifyIgnore: []string{"cloud_name"},
+				ImportStateVerifyIgnore: []string{
+					"cloud_name", // input-only alias for cloud_id; project API stores only parent_cloud_id
+				},
 			},
 		},
 	})
@@ -312,4 +314,64 @@ resource "anyscale_project" "test" {
   }
 }
 `, projectName, cloudID)
+}
+
+// TestAccProjectResource_Disappears verifies that an out-of-band project
+// deletion is detected by the next plan as drift.
+func TestAccProjectResource_Disappears(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetTestCloudID(t)
+	projectName := UniqueName(t, "project-disappears")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProjectResourceBasicConfig(cloudID, projectName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckProjectExistsInAPI("anyscale_project.test"),
+					testAccDeleteProjectViaAPI("anyscale_project.test"),
+				),
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// testAccDeleteProjectViaAPI deletes the project directly via the Anyscale API
+// so the next plan must observe drift. 200/202/204/404 all count as success.
+func testAccDeleteProjectViaAPI(resourceName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("not found: %s", resourceName)
+		}
+
+		projectID := rs.Primary.ID
+		if projectID == "" {
+			return fmt.Errorf("no Project ID is set for %s", resourceName)
+		}
+
+		client, err := GetTestClient()
+		if err != nil {
+			return fmt.Errorf("failed to get test client: %w", err)
+		}
+
+		resp, err := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/projects/%s", projectID), nil)
+		if err != nil {
+			return fmt.Errorf("failed to delete project %s via API: %w", projectID, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		switch resp.StatusCode {
+		case 200, 202, 204, 404:
+			return nil
+		default:
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status %d deleting project %s: %s", resp.StatusCode, projectID, truncateBody(string(body), 256))
+		}
+	}
 }

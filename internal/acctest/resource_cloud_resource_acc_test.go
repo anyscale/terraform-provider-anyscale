@@ -54,15 +54,13 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateIdFunc: testAccCloudResourceImportStateIdFunc("anyscale_cloud_resource.test"),
-				// API doesn't return full config details, so ignore these fields
 				ImportStateVerifyIgnore: []string{
-					"aws_config",
-					"gcp_config",
-					"azure_config",
-					"kubernetes_config",
-					"object_storage",
-					"file_storage",
-					"cloud_provider",
+					"aws_config",        // write-only block: nested attrs (subnet_ids, IAM ARNs) are not echoed back by /clouds/{id}/resources
+					"gcp_config",        // write-only block: nested attrs are not echoed back by /clouds/{id}/resources
+					"azure_config",      // write-only block: nested attrs are not echoed back by /clouds/{id}/resources
+					"kubernetes_config", // write-only block: nested attrs are not echoed back by /clouds/{id}/resources
+					"object_storage",    // write-only block: bucket name is normalized server-side and not echoed back
+					"file_storage",      // write-only block: mount target details are not echoed back by /clouds/{id}/resources
 				},
 			},
 		},
@@ -105,9 +103,8 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 				ImportStateVerify: true,
 				ImportStateIdFunc: testAccCloudResourceImportStateIdFunc("anyscale_cloud_resource.test"),
 				ImportStateVerifyIgnore: []string{
-					"gcp_config",
-					"object_storage",
-					"cloud_provider",
+					"gcp_config",     // write-only block: nested attrs (project_id, subnet_names) are not echoed back by /clouds/{id}/resources
+					"object_storage", // write-only block: bucket name is normalized server-side and not echoed back
 				},
 			},
 		},
