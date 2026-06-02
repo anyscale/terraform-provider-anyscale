@@ -3,17 +3,17 @@ package acctest
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 // TestAccComputeConfigDataSource_Basic tests looking up a compute config by name
 func TestAccComputeConfigDataSource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	configName := fmt.Sprintf("tf-test-ds-compute-config-%d", time.Now().UnixNano())
+	configName := UniqueName(t, "ds-compute-config")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -47,10 +47,11 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 // Note: The Anyscale API search may not return all historical versions, so we verify
 // that the current version is correctly reflected in both version and name_version.
 func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	configName := fmt.Sprintf("tf-test-ds-versions-%d", time.Now().UnixNano())
+	configName := UniqueName(t, "ds-compute-versions")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

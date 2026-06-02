@@ -3,15 +3,17 @@ package acctest
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccComputeConfigResource_Basic(t *testing.T) {
+	t.Parallel()
 	// Skip if acceptance tests are not enabled
 	SkipIfNotAcceptanceTest(t)
 
@@ -31,13 +33,17 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				t.Skipf("Skipping %s - no valid instance types (K8S clouds use operator-defined pod shapes)", testName)
 			}
 
+			configName := UniqueName(t, "compute-config-basic")
 			resource.Test(t, resource.TestCase{
 				PreCheck:                 func() { PreCheck(t) },
 				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+				// Use config_id (version-specific) since Primary.ID is the name and the
+				// /ext/v0/cluster_computes/ endpoint requires the versioned ID.
+				CheckDestroy: NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 				Steps: []resource.TestStep{
 					// Create and Read testing
 					{
-						Config: testAccComputeConfigResourceConfig_basic(cloud.ID, instanceTypes.Small),
+						Config: testAccComputeConfigResourceConfig_basic(configName, cloud.ID, instanceTypes.Small),
 						Check: resource.ComposeAggregateTestCheckFunc(
 							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "name"),
@@ -47,6 +53,11 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 							resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "created_at"),
 							testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 						),
+						ConfigPlanChecks: resource.ConfigPlanChecks{
+							PostApplyPostRefresh: []plancheck.PlanCheck{
+								plancheck.ExpectEmptyPlan(),
+							},
+						},
 					},
 					// ImportState testing
 					{
@@ -55,17 +66,15 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 						ImportStateVerify: true,
 						// Import using config_id (version-specific API ID), not name
 						ImportStateIdFunc: testAccComputeConfigImportStateIdFunc("anyscale_compute_config.test"),
-						// These fields are not returned by the API read operation
-						// TODO: Implement full state reconstruction from API response
 						ImportStateVerifyIgnore: []string{
-							"head_node",
-							"worker_nodes",
-							"enable_cross_zone_scaling",
-							"min_resources",
-							"max_resources",
-							"advanced_instance_config",
-							"flags",
-							"zones",
+							"head_node",                 // nested attrs auto-filled from instance_type by API; mask-vs-prior logic in Read cannot recover original null markers on import
+							"worker_nodes",              // same as head_node: API normalizes resources/physical_resources and import has no prior state to mask against
+							"enable_cross_zone_scaling", // serialized into flags["allow-cross-zone-autoscaling"]; default false matches null on configs that omit it
+							"min_resources",             // serialized into flags["min_resources"]; null on Basic test config but API returns whatever it normalized
+							"max_resources",             // serialized into flags["max_resources"]; null on Basic test config but API returns whatever it normalized
+							"advanced_instance_config",  // Dynamic type: API may return null vs empty maps differently; preserved-as-configured by Read
+							"flags",                     // Dynamic type at top level: user flags preserved-as-configured to avoid representation drift
+							"zones",                     // API replaces empty with ["any"]; preserved-as-configured by Read
 						},
 					},
 				},
@@ -75,16 +84,19 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
+	configName := UniqueName(t, "compute-config-workers")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_withWorkers(cloudID, "m5.large", "m5.xlarge"),
+				Config: testAccComputeConfigResourceConfig_withWorkers(configName, cloudID, "m5.large", "m5.xlarge"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "1"),
@@ -93,28 +105,41 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.max_nodes", "10"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
 }
 
 func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := GetTestCloudName(t)
+	configName := UniqueName(t, "compute-config-cloudname")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeConfigResourceConfig_withCloudName(cloudName),
+				Config: testAccComputeConfigResourceConfig_withCloudName(configName, cloudName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
 					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "cloud_id"),
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.large"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -188,24 +213,23 @@ func testAccCheckComputeConfigExistsInAPI(resourceName string) resource.TestChec
 
 // Configuration templates for tests
 
-func testAccComputeConfigResourceConfig_basic(cloudID, instanceType string) string {
+func testAccComputeConfigResourceConfig_basic(name, cloudID, instanceType string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  # Use unique name to avoid conflicts
-  name     = "tf-test-compute-config-basic-%d"
+  name     = "%s"
   cloud_id = "%s"
 
   head_node = {
     instance_type = "%s"
   }
 }
-`, time.Now().UnixNano(), cloudID, instanceType)
+`, name, cloudID, instanceType)
 }
 
-func testAccComputeConfigResourceConfig_withWorkers(cloudID, headInstanceType, workerInstanceType string) string {
+func testAccComputeConfigResourceConfig_withWorkers(name, cloudID, headInstanceType, workerInstanceType string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
-  name     = "tf-test-compute-config-workers-%d"
+  name     = "%s"
   cloud_id = "%s"
 
   head_node = {
@@ -222,11 +246,10 @@ resource "anyscale_compute_config" "test" {
     }
   ]
 }
-`, time.Now().UnixNano(), cloudID, headInstanceType, workerInstanceType)
+`, name, cloudID, headInstanceType, workerInstanceType)
 }
 
-func testAccComputeConfigResourceConfig_withCloudName(cloudName string) string {
-	configName := fmt.Sprintf("tf-test-cloudname-%d", time.Now().UnixNano())
+func testAccComputeConfigResourceConfig_withCloudName(name, cloudName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name       = "%s"
@@ -236,21 +259,23 @@ resource "anyscale_compute_config" "test" {
     instance_type = "m5.large"
   }
 }
-`, configName, cloudName)
+`, name, cloudName)
 }
 
 // TestAccComputeConfigResource_Update tests that updating a compute config
 // creates a new version with the updated configuration.
 func TestAccComputeConfigResource_Update(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
-	configName := fmt.Sprintf("tf-test-compute-update-%d", time.Now().UnixNano())
+	configName := UniqueName(t, "compute-config-update")
 	var initialConfigID string
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
 		Steps: []resource.TestStep{
 			// Create initial compute config with small instance
 			{
@@ -268,6 +293,11 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 					// Capture initial config_id for comparison
 					testAccCaptureComputeConfigID("anyscale_compute_config.test", &initialConfigID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Update to larger instance - should create a new version
 			{
@@ -286,6 +316,11 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 					// Verify config_id changed (new version = new config_id)
 					testAccCheckComputeConfigIDChanged("anyscale_compute_config.test", &initialConfigID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -332,4 +367,82 @@ resource "anyscale_compute_config" "test" {
   }
 }
 `, configName, cloudID, instanceType)
+}
+
+// TestAccComputeConfigResource_Disappears verifies that an out-of-band archive
+// of the compute config is detected by the next plan as drift.
+func TestAccComputeConfigResource_Disappears(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	// K8S clouds use operator-defined pod shapes, not the basic instance_type
+	// shape used here. Pick the first VM cloud, mirroring TestAccComputeConfigResource_Basic.
+	vmClouds := GetAllVMClouds(t)
+	if len(vmClouds) == 0 {
+		t.Skip("No VM clouds available for compute config testing")
+	}
+	cloud := vmClouds[0]
+	instanceTypes := cloud.InstanceTypes()
+	if !instanceTypes.IsValid() {
+		t.Skipf("Skipping %s - no valid instance types (K8S clouds use operator-defined pod shapes)", cloud.Provider)
+	}
+
+	configName := UniqueName(t, "compute-config-disappears")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigResourceConfig_basic(configName, cloud.ID, instanceTypes.Small),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					testAccDeleteComputeConfigViaAPI("anyscale_compute_config.test"),
+				),
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// testAccDeleteComputeConfigViaAPI archives the compute config directly via the
+// Anyscale API so the next plan must observe drift. Uses the same archive
+// endpoint as Delete and the sweeper. 200/202/204/404 all count as success.
+func testAccDeleteComputeConfigViaAPI(resourceName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("not found: %s", resourceName)
+		}
+
+		// config_id is the version-specific ID expected by the archive endpoint.
+		configID := rs.Primary.Attributes["config_id"]
+		if configID == "" {
+			return fmt.Errorf("no config_id attribute set for %s", resourceName)
+		}
+
+		client, err := GetTestClient()
+		if err != nil {
+			return fmt.Errorf("failed to get test client: %w", err)
+		}
+
+		resp, err := client.DoRequest(context.Background(), "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", configID), nil)
+		if err != nil {
+			return fmt.Errorf("failed to archive compute config %s via API: %w", configID, err)
+		}
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close response body: %v", closeErr)
+			}
+		}()
+
+		switch resp.StatusCode {
+		case 200, 202, 204, 404:
+			return nil
+		default:
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status %d archiving compute config %s: %s", resp.StatusCode, configID, truncateBody(string(body), 256))
+		}
+	}
 }

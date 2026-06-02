@@ -4,16 +4,17 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pool-basic-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-basic")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -30,6 +31,11 @@ func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttrSet("anyscale_global_resource_scheduler.test", "organization_id"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing
 			{
@@ -43,12 +49,13 @@ func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// Get a configured cloud and use appropriate instance types
 	cloud := GetConfiguredCloud(t)
 	instanceTypes := cloud.InstanceTypes()
-	schedulerName := fmt.Sprintf("tfacc-test-pool-spec-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-spec")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -66,6 +73,14 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "spec.0.machine_type.0.name", "RES-8CPU-32GB"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				// cloud_attachment is a block stored as a slice on the model; Read does
+				// not overwrite it, so the user-supplied values round-trip via prior state.
+				// CloudIDs (computed) is refreshed separately from the API response.
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Update spec
 			{
@@ -74,17 +89,23 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "spec.0.machine_type.#", "2"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
 }
 
 func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// This test requires a cloud with cloud resources configured
 	cloud := GetConfiguredCloud(t)
-	schedulerName := fmt.Sprintf("tfacc-test-pool-cloud-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-cloud")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -101,17 +122,23 @@ func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "cloud_attachment.0.cloud_id", cloud.ID),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
 }
 
 func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := GetTestCloudName(t)
 
-	schedulerName := fmt.Sprintf("tfacc-test-pool-cloudname-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-cloudname")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -127,18 +154,24 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "cloud_attachment.0.cloud_name", cloudName),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
 }
 
 func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// Get a configured cloud and use appropriate instance types
 	cloud := GetConfiguredCloud(t)
 	instanceTypes := cloud.InstanceTypes()
-	schedulerName := fmt.Sprintf("tfacc-test-pool-full-%d", time.Now().UnixNano())
+	schedulerName := UniqueName(t, "scheduler-full")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -158,6 +191,11 @@ func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_global_resource_scheduler.test", "spec.0.machine_type.0.partition.#", "1"),
 					testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})

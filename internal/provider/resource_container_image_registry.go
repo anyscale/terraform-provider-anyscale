@@ -126,6 +126,9 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 			"build_status": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The status of the build (typically `succeeded` for registered images).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"created_at": schema.StringAttribute{
 				Computed:            true,
@@ -151,6 +154,9 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 			"name_version": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -361,12 +367,26 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	state.IsBYOD = types.BoolValue(result.IsBYOD)
 	state.Revision = types.Int64Value(int64(result.Revision))
 
-	// Get cluster environment name for name_version
+	// image_uri is Required in the schema, so the user always supplied a value
+	// that the API now echoes back as docker_image_name. Refresh from the API
+	// to keep state in sync if the canonical URI differs from the user's input.
+	if result.DockerImageName != nil {
+		state.ImageURI = types.StringValue(*result.DockerImageName)
+	}
+	// ray_version is Optional-only; only overwrite when the user actually set it
+	// in their config so we don't introduce drift on plans that omit the field.
+	if result.RayVersion != nil && !state.RayVersion.IsNull() {
+		state.RayVersion = types.StringValue(*result.RayVersion)
+	}
+
+	// Get cluster environment name for name_version. We deliberately do NOT
+	// overwrite state.Name from the API: name is Optional-only in the schema,
+	// so populating it from the API when the user left it unset would cause
+	// drift on a subsequent plan.
 	clusterEnvName := ""
 	if !state.Name.IsNull() {
 		clusterEnvName = state.Name.ValueString()
 	} else {
-		// Fetch the cluster environment to get its name
 		clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
 			ctx,
 			r.client,

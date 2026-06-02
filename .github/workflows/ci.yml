@@ -9,6 +9,10 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [lint-and-unit, acctest-data, acctest-resource]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -25,31 +29,45 @@ jobs:
           terraform_wrapper: false
 
       - name: Install golangci-lint
+        if: matrix.shard == 'lint-and-unit'
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.7
 
       - name: Install tfplugindocs
+        if: matrix.shard == 'lint-and-unit'
         run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest
 
       - name: Format
+        if: matrix.shard == 'lint-and-unit'
         run: |
           make fmt
           git diff --exit-code || (echo "Code is not formatted. Run 'make fmt' locally." && exit 1)
 
       - name: Vet
+        if: matrix.shard == 'lint-and-unit'
         run: make vet
 
       - name: Generate Docs
+        if: matrix.shard == 'lint-and-unit'
         run: |
           make docs
           git diff --exit-code || (echo "Docs are out of date. Run 'make docs' locally." && exit 1)
 
       - name: Test
+        if: matrix.shard == 'lint-and-unit'
         run: make test
 
-      - name: Test Acceptance
+      - name: Acceptance Tests - Data Sources
+        if: matrix.shard == 'acctest-data'
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
-        run: make testacc
+        run: TF_ACC=1 go test ./internal/acctest/ -v -timeout 60m -parallel 4 -run '^TestAcc[A-Za-z]+DataSource'
+
+      - name: Acceptance Tests - Resources
+        if: matrix.shard == 'acctest-resource'
+        env:
+          ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+          ANYSCALE_TEST_CREATE_CLOUD: 1
+        run: TF_ACC=1 go test ./internal/acctest/ -v -timeout 90m -parallel 4 -run '^TestAcc[A-Za-z]+Resource'

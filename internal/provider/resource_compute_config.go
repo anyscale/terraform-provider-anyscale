@@ -673,6 +673,12 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
+	// Capture the prior nested objects so we can mask API-normalized defaults
+	// (e.g. resources/physical_resources auto-filled from instance_type) back to
+	// null when the user did not explicitly set them.
+	priorHeadNode := state.HeadNode
+	priorWorkerNodes := state.WorkerNodes
+
 	// Use ConfigID for API lookup (version-specific ID)
 	// Fall back to ID if ConfigID is not set (for backwards compatibility or import)
 	lookupID := state.ConfigID.ValueString()
@@ -797,7 +803,7 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, headNodeType)
 		resp.Diagnostics.Append(headNodeDiags...)
 		if !resp.Diagnostics.HasError() {
-			state.HeadNode = headNodeObj
+			state.HeadNode = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, &resp.Diagnostics)
 		}
 	}
 
@@ -809,11 +815,96 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
 		resp.Diagnostics.Append(workerNodesDiags...)
 		if !resp.Diagnostics.HasError() {
-			state.WorkerNodes = workerNodesList
+			state.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, &resp.Diagnostics)
 		}
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// maskNodeFromPrior preserves null on nested node attributes (resources,
+// physical_resources, labels, advanced_instance_config, flags, cloud_deployment)
+// that were null in the prior state. The Anyscale API auto-fills these from the
+// instance_type which would otherwise cause drift when the user did not set them.
+func maskNodeFromPrior(ctx context.Context, apiNode types.Object, priorNode types.Object, diags *diag.Diagnostics) types.Object {
+	if priorNode.IsNull() || priorNode.IsUnknown() || apiNode.IsNull() {
+		return apiNode
+	}
+
+	priorAttrs := priorNode.Attributes()
+	apiAttrs := apiNode.Attributes()
+	masked := make(map[string]attr.Value, len(apiAttrs))
+	for k, v := range apiAttrs {
+		masked[k] = v
+	}
+
+	for _, name := range []string{"resources", "physical_resources", "labels", "advanced_instance_config", "flags", "cloud_deployment"} {
+		if prior, ok := priorAttrs[name]; ok && prior != nil && prior.IsNull() {
+			if apiVal, ok := masked[name]; ok {
+				masked[name] = nullValueOf(apiVal)
+			}
+		}
+	}
+
+	obj, objDiags := types.ObjectValue(apiNode.AttributeTypes(ctx), masked)
+	diags.Append(objDiags...)
+	return obj
+}
+
+// maskWorkerNodesFromPrior applies maskNodeFromPrior elementwise on the
+// worker_nodes list, matching prior elements by index.
+func maskWorkerNodesFromPrior(ctx context.Context, apiWorkers types.List, priorWorkers types.List, diags *diag.Diagnostics) types.List {
+	if priorWorkers.IsNull() || priorWorkers.IsUnknown() || apiWorkers.IsNull() {
+		return apiWorkers
+	}
+
+	apiElems := apiWorkers.Elements()
+	priorElems := priorWorkers.Elements()
+	if len(apiElems) == 0 {
+		return apiWorkers
+	}
+
+	masked := make([]attr.Value, 0, len(apiElems))
+	for i, apiVal := range apiElems {
+		apiObj, ok := apiVal.(types.Object)
+		if !ok {
+			masked = append(masked, apiVal)
+			continue
+		}
+		var priorObj types.Object
+		if i < len(priorElems) {
+			if obj, ok := priorElems[i].(types.Object); ok {
+				priorObj = obj
+			}
+		}
+		masked = append(masked, maskNodeFromPrior(ctx, apiObj, priorObj, diags))
+	}
+
+	listVal, listDiags := types.ListValue(apiWorkers.ElementType(ctx), masked)
+	diags.Append(listDiags...)
+	return listVal
+}
+
+// nullValueOf returns a typed null value matching the type of v.
+func nullValueOf(v attr.Value) attr.Value {
+	switch t := v.(type) {
+	case types.Map:
+		return types.MapNull(t.ElementType(context.Background()))
+	case types.List:
+		return types.ListNull(t.ElementType(context.Background()))
+	case types.Object:
+		return types.ObjectNull(t.AttributeTypes(context.Background()))
+	case types.String:
+		return types.StringNull()
+	case types.Bool:
+		return types.BoolNull()
+	case types.Int64:
+		return types.Int64Null()
+	case types.Float64:
+		return types.Float64Null()
+	default:
+		return v
+	}
 }
 
 func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {

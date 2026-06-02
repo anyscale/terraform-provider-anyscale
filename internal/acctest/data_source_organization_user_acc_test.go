@@ -8,6 +8,7 @@ import (
 )
 
 func TestAccOrganizationUserDataSource_ByEmail(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -38,6 +39,7 @@ func TestAccOrganizationUserDataSource_ByEmail(t *testing.T) {
 }
 
 func TestAccOrganizationUserDataSource_ByID(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -68,6 +70,7 @@ func TestAccOrganizationUserDataSource_ByID(t *testing.T) {
 }
 
 func TestAccOrganizationUserDataSource_ByUserID(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -97,6 +100,7 @@ func TestAccOrganizationUserDataSource_ByUserID(t *testing.T) {
 }
 
 func TestAccOrganizationUserDataSource_AllFieldsPopulated(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -122,6 +126,7 @@ func TestAccOrganizationUserDataSource_AllFieldsPopulated(t *testing.T) {
 }
 
 func TestAccOrganizationUserDataSource_FromListToSingle(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return

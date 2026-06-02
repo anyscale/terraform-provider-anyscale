@@ -7,6 +7,7 @@ import (
 )
 
 func TestAccUserDataSource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -29,6 +30,7 @@ func TestAccUserDataSource_Basic(t *testing.T) {
 }
 
 func TestAccUserDataSource_OrganizationData(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -54,6 +56,7 @@ func TestAccUserDataSource_OrganizationData(t *testing.T) {
 }
 
 func TestAccUserDataSource_CloudAccess(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -72,6 +75,7 @@ func TestAccUserDataSource_CloudAccess(t *testing.T) {
 }
 
 func TestAccUserDataSource_UserGroups(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -90,6 +94,7 @@ func TestAccUserDataSource_UserGroups(t *testing.T) {
 }
 
 func TestAccUserDataSource_WithCloudReference(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -114,6 +119,7 @@ func TestAccUserDataSource_WithCloudReference(t *testing.T) {
 }
 
 func TestAccUserDataSource_MultipleFields(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -140,6 +146,7 @@ func TestAccUserDataSource_MultipleFields(t *testing.T) {
 }
 
 func TestAccUserDataSource_OutputsWork(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{

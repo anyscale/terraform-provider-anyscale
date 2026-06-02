@@ -20,6 +20,8 @@ func TestAccOrganizationCollaboratorResource_CreateFails(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		// No CheckDestroy: direct create is rejected, so nothing is ever created
+		// to verify the destroy of.
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccOrganizationCollaboratorResourceConfig("collaborator"),
@@ -44,6 +46,10 @@ func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		// No CheckDestroy: the API has no GET-by-ID endpoint for collaborators
+		// (only list-and-filter). And in this import-only test the collaborator
+		// pre-exists outside of Terraform, so destroying state should not remove
+		// the underlying user from the org.
 		Steps: []resource.TestStep{
 			// Import existing collaborator
 			{
@@ -72,6 +78,8 @@ func TestAccOrganizationCollaboratorResource_UpdatePermission(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		// No CheckDestroy: imports an existing user; destroying state must not
+		// remove the user. API also has no GET-by-ID for collaborators.
 		Steps: []resource.TestStep{
 			// Import as collaborator
 			{
@@ -125,6 +133,8 @@ func TestAccOrganizationCollaboratorResource_Delete(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		// No CheckDestroy: API has no GET-by-ID for collaborators; the inline
+		// testAccCheckCollaboratorDoesNotExist below covers post-destroy state.
 		Steps: []resource.TestStep{
 			// Import collaborator
 			{

@@ -2,7 +2,10 @@ package acctest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"regexp"
 	"testing"
@@ -10,6 +13,85 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
+
+// testAccCheckPolicyBindingDestroyed is a custom CheckDestroy. The policy
+// endpoint never 404s after delete — it just returns 200 with an empty
+// bindings list — so the generic NewAPIDestroyCheck helper doesn't fit.
+func testAccCheckPolicyBindingDestroyed(s *terraform.State) error {
+	client, err := GetTestClient()
+	if err != nil {
+		return fmt.Errorf("CheckDestroy(anyscale_policy_binding): failed to get test client: %w", err)
+	}
+
+	var leaks []string
+	for name, rs := range s.RootModule().Resources {
+		if rs.Type != "anyscale_policy_binding" {
+			continue
+		}
+
+		resourceType := rs.Primary.Attributes["resource_type"]
+		resourceID := rs.Primary.Attributes["resource_id"]
+		if resourceType == "" || resourceID == "" {
+			continue
+		}
+
+		path := fmt.Sprintf("/api/v2/policy/%s/%s", resourceType, resourceID)
+		resp, err := client.DoRequest(context.Background(), "GET", path, nil)
+		if err != nil {
+			log.Printf("[WARN] CheckDestroy(anyscale_policy_binding) network error for %s (%s/%s): %v", name, resourceType, resourceID, err)
+			continue
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+
+		switch {
+		case resp.StatusCode == 404:
+			continue
+		case resp.StatusCode >= 500:
+			log.Printf("[WARN] CheckDestroy(anyscale_policy_binding) transient %d for %s (%s/%s)", resp.StatusCode, name, resourceType, resourceID)
+			continue
+		case resp.StatusCode != 200:
+			log.Printf("[WARN] CheckDestroy(anyscale_policy_binding) unexpected status %d for %s (%s/%s)", resp.StatusCode, name, resourceType, resourceID)
+			continue
+		}
+
+		if readErr != nil {
+			log.Printf("[WARN] CheckDestroy(anyscale_policy_binding) failed to read body for %s (%s/%s): %v", name, resourceType, resourceID, readErr)
+			continue
+		}
+
+		var parsed struct {
+			Result struct {
+				Bindings []json.RawMessage `json:"bindings"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			log.Printf("[WARN] CheckDestroy(anyscale_policy_binding) failed to parse body for %s (%s/%s): %v", name, resourceType, resourceID, err)
+			continue
+		}
+
+		if len(parsed.Result.Bindings) > 0 {
+			leaks = append(leaks, fmt.Sprintf("%s (%s/%s) still has %d bindings after destroy", name, resourceType, resourceID, len(parsed.Result.Bindings)))
+		}
+	}
+
+	if len(leaks) > 0 {
+		return fmt.Errorf("CheckDestroy(anyscale_policy_binding) found leaked bindings:\n  %s", joinLeaks(leaks))
+	}
+	return nil
+}
+
+func joinLeaks(leaks []string) string {
+	out := ""
+	for i, l := range leaks {
+		if i > 0 {
+			out += "\n  "
+		}
+		out += l
+	}
+	return out
+}
 
 func TestAccPolicyBindingResource_CloudBasic(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
@@ -30,6 +112,7 @@ func TestAccPolicyBindingResource_CloudBasic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
 			// Create with readonly role
 			{
@@ -80,6 +163,7 @@ func TestAccPolicyBindingResource_ProjectBasic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
 			// Create with readonly role
 			{
@@ -123,6 +207,7 @@ func TestAccPolicyBindingResource_InvalidRoleForCloud(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccPolicyBindingResourceConfig(testCloudID, testGroupID, "cloud", "owner"),
@@ -148,6 +233,7 @@ func TestAccPolicyBindingResource_InvalidRoleForProject(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccPolicyBindingResourceConfig(testProjectID, testGroupID, "project", "collaborator"),
@@ -179,6 +265,7 @@ func TestAccPolicyBindingResource_MultipleBindings(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingResourceConfigMultiple(testCloudID, testGroupID1, testGroupID2),
@@ -207,6 +294,7 @@ func TestAccPolicyBindingResource_EmptyBindings(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
 			// Create with bindings
 			{
@@ -242,6 +330,7 @@ func TestAccPolicyBindingResource_Delete(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccPolicyBindingResourceConfig(testCloudID, testGroupID, "cloud", "readonly"),

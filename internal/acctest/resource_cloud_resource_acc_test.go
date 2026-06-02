@@ -12,6 +12,7 @@ import (
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -19,7 +20,7 @@ import (
 func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-cloud-res-aws"
+	cloudName := UniqueName(t, "cloud-res-aws")
 	resourceName := "default"
 	// Generate random suffix for IAM roles to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
@@ -41,6 +42,11 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "VM"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing with composite ID (cloud_id:resource_name)
 			{
@@ -48,15 +54,13 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateIdFunc: testAccCloudResourceImportStateIdFunc("anyscale_cloud_resource.test"),
-				// API doesn't return full config details, so ignore these fields
 				ImportStateVerifyIgnore: []string{
-					"aws_config",
-					"gcp_config",
-					"azure_config",
-					"kubernetes_config",
-					"object_storage",
-					"file_storage",
-					"cloud_provider",
+					"aws_config",        // write-only block: nested attrs (subnet_ids, IAM ARNs) are not echoed back by /clouds/{id}/resources
+					"gcp_config",        // write-only block: nested attrs are not echoed back by /clouds/{id}/resources
+					"azure_config",      // write-only block: nested attrs are not echoed back by /clouds/{id}/resources
+					"kubernetes_config", // write-only block: nested attrs are not echoed back by /clouds/{id}/resources
+					"object_storage",    // write-only block: bucket name is normalized server-side and not echoed back
+					"file_storage",      // write-only block: mount target details are not echoed back by /clouds/{id}/resources
 				},
 			},
 		},
@@ -67,7 +71,7 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-cloud-res-gcp"
+	cloudName := UniqueName(t, "cloud-res-gcp")
 	resourceName := "default"
 	// Generate random suffix for service accounts to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
@@ -87,6 +91,11 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "VM"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			{
 				ResourceName:      "anyscale_cloud_resource.test",
@@ -94,9 +103,8 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 				ImportStateVerify: true,
 				ImportStateIdFunc: testAccCloudResourceImportStateIdFunc("anyscale_cloud_resource.test"),
 				ImportStateVerifyIgnore: []string{
-					"gcp_config",
-					"object_storage",
-					"cloud_provider",
+					"gcp_config",     // write-only block: nested attrs (project_id, subnet_names) are not echoed back by /clouds/{id}/resources
+					"object_storage", // write-only block: bucket name is normalized server-side and not echoed back
 				},
 			},
 		},
@@ -107,7 +115,7 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := "tfacc-test-cloud-res-k8s"
+	cloudName := UniqueName(t, "cloud-res-k8s")
 	resourceName := "default"
 	// Generate random suffix for IAM roles to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
@@ -127,6 +135,11 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "K8S"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -136,9 +149,9 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	// Generate random suffix for cloud resources to allow parallel test runs and avoid conflicts
+	cloudName := UniqueName(t, "cloud-res-fs")
+	// Random suffix for embedded IAM ARNs / bucket names in the config template.
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
-	cloudName := fmt.Sprintf("tfacc-test-cloud-res-fs-%s", randSuffix)
 	resourceName := fmt.Sprintf("with-file-storage-%s", randSuffix)
 
 	resource.Test(t, resource.TestCase{
@@ -155,6 +168,11 @@ func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 					// API validation
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -351,71 +369,71 @@ func testAccCheckCloudResourceDestroy(s *terraform.State) error {
 		return fmt.Errorf("failed to get test client: %w", err)
 	}
 
-	// Check cloud resources
 	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "anyscale_cloud_resource" && rs.Type != "anyscale_cloud" {
-			continue
-		}
-
-		if rs.Type == "anyscale_cloud" {
+		switch rs.Type {
+		case "anyscale_cloud":
 			cloudID := rs.Primary.ID
 			if cloudID == "" {
 				continue
 			}
-
-			// Check if the cloud still exists
-			resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
-			if err != nil {
-				log.Printf("[WARN] Failed to check cloud %s during destroy verification: %v", cloudID, err)
-				continue
+			if err := verifyCloudDestroyed(client, cloudID); err != nil {
+				return err
 			}
-			defer func() { _ = resp.Body.Close() }()
 
-			if resp.StatusCode == http.StatusOK {
-				return fmt.Errorf("cloud %s still exists after destroy", cloudID)
-			}
-		}
-
-		if rs.Type == "anyscale_cloud_resource" {
+		case "anyscale_cloud_resource":
 			cloudID := rs.Primary.Attributes["cloud_id"]
 			resourceName := rs.Primary.Attributes["name"]
 			if cloudID == "" || resourceName == "" {
 				continue
 			}
-
-			// Check if the cloud resource still exists by fetching cloud deployments
-			resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/deployments", cloudID), nil)
-			if err != nil {
-				// Cloud might already be deleted, which is fine
-				log.Printf("[DEBUG] Cloud %s may already be deleted: %v", cloudID, err)
-				continue
+			if err := verifyCloudResourceDestroyed(client, cloudID, resourceName); err != nil {
+				return err
 			}
-			defer func() { _ = resp.Body.Close() }()
+		}
+	}
 
-			// If cloud is gone (404), the resource is definitely destroyed
-			if resp.StatusCode == http.StatusNotFound {
-				continue
-			}
+	return nil
+}
 
-			// If we can still fetch deployments, check if our resource is in the list
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(resp.Body)
-				// If the resource name appears in the response, it wasn't destroyed
-				if len(body) > 0 {
-					var deploymentsResp struct {
-						Results []struct {
-							Name string `json:"name"`
-						} `json:"results"`
-					}
-					if err := json.Unmarshal(body, &deploymentsResp); err == nil {
-						for _, d := range deploymentsResp.Results {
-							if d.Name == resourceName {
-								return fmt.Errorf("cloud resource %s:%s still exists after destroy", cloudID, resourceName)
-							}
-						}
-					}
-				}
-			}
+// verifyCloudResourceDestroyed checks that a cloud_resource (deployment) is gone.
+// The cloud being 404 implies the deployment is gone with it; otherwise the
+// deployments list must not contain the resource name.
+func verifyCloudResourceDestroyed(client *provider.Client, cloudID, resourceName string) error {
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/deployments", cloudID), nil)
+	if err != nil {
+		return fmt.Errorf("verify destroy of cloud resource %s:%s: %w", cloudID, resourceName, err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("[WARN] Failed to close response body: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("verify destroy of cloud resource %s:%s: read body: %w", cloudID, resourceName, readErr)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("cannot verify destroy of cloud resource %s:%s: API returned status %d: %s", cloudID, resourceName, resp.StatusCode, truncateBody(string(body), 256))
+	}
+
+	var deploymentsResp struct {
+		Results []struct {
+			Name string `json:"name"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &deploymentsResp); err != nil {
+		return fmt.Errorf("verify destroy of cloud resource %s:%s: parse response: %w", cloudID, resourceName, err)
+	}
+
+	for _, d := range deploymentsResp.Results {
+		if d.Name == resourceName {
+			return fmt.Errorf("cloud resource %s:%s still exists after destroy", cloudID, resourceName)
 		}
 	}
 

@@ -15,7 +15,6 @@ package acctest
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -23,6 +22,7 @@ import (
 // TestAccContainerImagesDataSource_Basic tests basic listing functionality without building images.
 // Tests NoFilters and IncludeArchived which don't require building new images.
 func TestAccContainerImagesDataSource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -54,9 +54,10 @@ data "anyscale_container_images" "include_archived" {
 // This consolidates FilterByNameContains, ExcludeArchived, and FieldsPopulated tests
 // to reduce build time by reusing a single built image.
 func TestAccContainerImagesDataSource_WithBuild(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-imgs-%d", time.Now().UnixNano())
+	imageName := UniqueName(t, "ds-imgs")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

@@ -16,18 +16,19 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // TestAccContainerImageBuildResource_Basic tests building from an inline containerfile.
 // This consolidates basic creation, timeout configuration, and import testing.
 func TestAccContainerImageBuildResource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-test-build-basic-%d", time.Now().UnixNano())
+	imageName := UniqueName(t, "img-build-basic")
 
 	// Simple containerfile that just adds a pip package to the base Ray image
 	containerfile := `FROM anyscale/ray:2.53.0-slim-py312
@@ -36,6 +37,8 @@ RUN pip install emoji==2.15.0`
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		// API can only archive container images, not delete. Verify deleted_at is set.
+		CheckDestroy: NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/ext/v0/cluster_environments/%s", "result.deleted_at"),
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -51,14 +54,22 @@ RUN pip install emoji==2.15.0`
 					resource.TestCheckResourceAttrSet("anyscale_container_image_build.test", "name_version"),
 					testAccCheckContainerImageBuildExistsInAPI("anyscale_container_image_build.test"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// ImportState testing
 			{
 				ResourceName:      "anyscale_container_image_build.test",
 				ImportState:       true,
 				ImportStateVerify: true,
-				// User-provided values not stored in state after import
-				ImportStateVerifyIgnore: []string{"containerfile", "containerfile_path", "build_timeout"},
+				ImportStateVerifyIgnore: []string{
+					"containerfile",      // client-only: Dockerfile body is sent to the build API and not echoed back
+					"containerfile_path", // client-only: local filesystem path, never sent to the API
+					"build_timeout",      // client-side wait knob; not stored server-side
+				},
 			},
 		},
 	})
@@ -66,9 +77,10 @@ RUN pip install emoji==2.15.0`
 
 // TestAccContainerImageBuildResource_Update tests that updating the containerfile creates a new build revision.
 func TestAccContainerImageBuildResource_Update(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	imageName := fmt.Sprintf("tfacc-test-build-update-%d", time.Now().UnixNano())
+	imageName := UniqueName(t, "img-build-update")
 
 	// Initial containerfile
 	containerfileV1 := `FROM anyscale/ray:2.53.0-slim-py312
@@ -85,6 +97,7 @@ RUN sudo mkdir -p /anyscale/init`
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/ext/v0/cluster_environments/%s", "result.deleted_at"),
 		Steps: []resource.TestStep{
 			// Step 1: Create initial image
 			{
@@ -97,6 +110,11 @@ RUN sudo mkdir -p /anyscale/init`
 					// Capture the cluster environment ID to verify it doesn't change
 					CaptureResourceAttr("anyscale_container_image_build.test", "id", &clusterEnvID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Step 2: Update containerfile - should create a new build (revision 2)
 			{
@@ -109,6 +127,11 @@ RUN sudo mkdir -p /anyscale/init`
 					// Verify the cluster environment ID is the same (not a replacement)
 					VerifyResourceAttrUnchanged("anyscale_container_image_build.test", "id", &clusterEnvID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 		},
 	})
@@ -118,6 +141,7 @@ RUN sudo mkdir -p /anyscale/init`
 // Commented out to reduce test runtime - can be enabled when testing project_id functionality.
 /*
 func TestAccContainerImageBuildResource_WithProjectID(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)

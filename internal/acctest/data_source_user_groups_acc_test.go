@@ -8,6 +8,7 @@ import (
 )
 
 func TestAccUserGroupsDataSource_Basic(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -29,6 +30,7 @@ func TestAccUserGroupsDataSource_Basic(t *testing.T) {
 }
 
 func TestAccUserGroupsDataSource_GroupFieldsPopulated(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -55,6 +57,7 @@ func TestAccUserGroupsDataSource_GroupFieldsPopulated(t *testing.T) {
 }
 
 func TestAccUserGroupsDataSource_NoDeletedGroups(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return

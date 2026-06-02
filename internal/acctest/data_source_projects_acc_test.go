@@ -3,12 +3,12 @@ package acctest
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccProjectsDataSource_NoFilters(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -29,12 +29,13 @@ func TestAccProjectsDataSource_NoFilters(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
 
-	projectName1 := fmt.Sprintf("tfacc-test-ds-projects-1-%d", time.Now().UnixNano())
-	projectName2 := fmt.Sprintf("tfacc-test-ds-projects-2-%d", time.Now().UnixNano())
+	projectName1 := UniqueName(t, "ds-projects-1")
+	projectName2 := UniqueName(t, "ds-projects-2")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -52,12 +53,13 @@ func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
 	cloudName := GetTestCloudName(t)
 
-	projectName := fmt.Sprintf("tfacc-test-ds-projects-cloudname-%d", time.Now().UnixNano())
+	projectName := UniqueName(t, "ds-projects-cloudname")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -74,11 +76,12 @@ func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
 
-	uniquePrefix := fmt.Sprintf("tfacc-unique-prefix-%d", time.Now().UnixNano())
+	uniquePrefix := UniqueName(t, "ds-projects-prefix")
 	projectName1 := fmt.Sprintf("%s-project-1", uniquePrefix)
 	projectName2 := fmt.Sprintf("%s-project-2", uniquePrefix)
 
@@ -98,11 +101,12 @@ func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
 
-	projectName := fmt.Sprintf("tfacc-test-ds-projects-nodefault-%d", time.Now().UnixNano())
+	projectName := UniqueName(t, "ds-projects-nodefault")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -122,11 +126,12 @@ func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
 
-	projectName := fmt.Sprintf("tfacc-test-ds-projects-fields-%d", time.Now().UnixNano())
+	projectName := UniqueName(t, "ds-projects-fields")
 	description := "Test project for data source fields"
 
 	resource.Test(t, resource.TestCase{

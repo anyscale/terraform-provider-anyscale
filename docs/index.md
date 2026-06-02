@@ -37,5 +37,5 @@ provider "anyscale" {
 
 ### Optional
 
-- `api_url` (String) The Anyscale API URL. Can also be set via ANYSCALE_API_URL environment variable. Defaults to https://console.anyscale.com
+- `api_url` (String) The Anyscale API URL. Can also be set via ANYSCALE_API_URL, ANYSCALE_API_HOST, or ANYSCALE_HOST environment variables (checked in that order). Defaults to https://console.anyscale.com
 - `token` (String, Sensitive) The Anyscale API token. Can also be set via ANYSCALE_CLI_TOKEN environment variable or read from ~/.anyscale/credentials.json.
