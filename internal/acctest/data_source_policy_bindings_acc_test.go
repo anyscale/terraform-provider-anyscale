@@ -8,6 +8,7 @@ import (
 )
 
 func TestAccPolicyBindingsDataSource_Clouds(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -30,6 +31,7 @@ func TestAccPolicyBindingsDataSource_Clouds(t *testing.T) {
 }
 
 func TestAccPolicyBindingsDataSource_Projects(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -52,6 +54,7 @@ func TestAccPolicyBindingsDataSource_Projects(t *testing.T) {
 }
 
 func TestAccPolicyBindingsDataSource_PolicyFieldsPopulated(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -76,6 +79,7 @@ func TestAccPolicyBindingsDataSource_PolicyFieldsPopulated(t *testing.T) {
 }
 
 func TestAccPolicyBindingsDataSource_FindSpecificCloud(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -102,6 +106,7 @@ func TestAccPolicyBindingsDataSource_FindSpecificCloud(t *testing.T) {
 }
 
 func TestAccPolicyBindingsDataSource_EmptyBindings(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return

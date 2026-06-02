@@ -8,6 +8,7 @@ import (
 )
 
 func TestAccProjectsDataSource_NoFilters(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -28,6 +29,7 @@ func TestAccProjectsDataSource_NoFilters(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -51,6 +53,7 @@ func TestAccProjectsDataSource_FilterByCloudID(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -73,6 +76,7 @@ func TestAccProjectsDataSource_FilterByCloudName(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -97,6 +101,7 @@ func TestAccProjectsDataSource_FilterByNameContains(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -121,6 +126,7 @@ func TestAccProjectsDataSource_ExcludeDefaults(t *testing.T) {
 }
 
 func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)

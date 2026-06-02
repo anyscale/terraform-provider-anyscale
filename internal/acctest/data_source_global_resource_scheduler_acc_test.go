@@ -8,6 +8,7 @@ import (
 )
 
 func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := UniqueName(t, "ds-scheduler")
@@ -32,6 +33,7 @@ func TestAccGlobalResourceSchedulerDataSource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// Get a configured cloud and use appropriate instance types
@@ -58,6 +60,7 @@ func TestAccGlobalResourceSchedulerDataSource_WithSpec(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := UniqueName(t, "ds-schedulers")
@@ -80,6 +83,7 @@ func TestAccGlobalResourceSchedulersDataSource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulersDataSource_WithFilter(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := UniqueName(t, "ds-schedulers-filter")

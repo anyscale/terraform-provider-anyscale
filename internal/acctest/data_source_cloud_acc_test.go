@@ -8,6 +8,7 @@ import (
 )
 
 func TestAccCloudDataSource_ByID(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -32,6 +33,7 @@ func TestAccCloudDataSource_ByID(t *testing.T) {
 }
 
 func TestAccCloudDataSource_ByName(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := GetTestCloudName(t)
@@ -54,6 +56,7 @@ func TestAccCloudDataSource_ByName(t *testing.T) {
 }
 
 func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)

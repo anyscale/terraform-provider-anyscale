@@ -9,6 +9,7 @@ import (
 
 // TestAccComputeConfigDataSource_Basic tests looking up a compute config by name
 func TestAccComputeConfigDataSource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -46,6 +47,7 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 // Note: The Anyscale API search may not return all historical versions, so we verify
 // that the current version is correctly reflected in both version and name_version.
 func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)

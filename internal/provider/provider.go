@@ -52,7 +52,7 @@ func (p *AnyscaleProvider) Schema(ctx context.Context, req provider.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"api_url": schema.StringAttribute{
 				Optional:    true,
-				Description: "The Anyscale API URL. Can also be set via ANYSCALE_API_URL environment variable. Defaults to https://console.anyscale.com",
+				Description: "The Anyscale API URL. Can also be set via ANYSCALE_API_URL, ANYSCALE_API_HOST, or ANYSCALE_HOST environment variables (checked in that order). Defaults to https://console.anyscale.com",
 			},
 			"token": schema.StringAttribute{
 				Optional:    true,
@@ -73,12 +73,19 @@ func (p *AnyscaleProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	// Get API URL from config or environment
+	// Get API URL from config or environment.
+	// Env var fallbacks are checked in priority order; the first non-empty wins.
+	// ANYSCALE_API_HOST and ANYSCALE_HOST are recognized to match the Anyscale CLI/SDK conventions.
 	apiURL := "https://console.anyscale.com"
-	if !config.ApiUrl.IsNull() {
+	if !config.ApiUrl.IsNull() && config.ApiUrl.ValueString() != "" {
 		apiURL = config.ApiUrl.ValueString()
-	} else if envURL := os.Getenv("ANYSCALE_API_URL"); envURL != "" {
-		apiURL = envURL
+	} else {
+		for _, envVar := range []string{"ANYSCALE_API_URL", "ANYSCALE_API_HOST", "ANYSCALE_HOST"} {
+			if envURL := os.Getenv(envVar); envURL != "" {
+				apiURL = envURL
+				break
+			}
+		}
 	}
 
 	// Get token from config, environment, or credentials file

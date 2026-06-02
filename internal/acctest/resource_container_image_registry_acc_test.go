@@ -23,6 +23,7 @@ import (
 )
 
 func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// Use a public Anyscale Ray image that's guaranteed to exist
@@ -77,6 +78,7 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 // TestAccContainerImageRegistryResource_BYOD tests registering a BYOD (Bring Your Own Docker) image.
 // Uses a fake ECR-style URI to test the BYOD registration flow.
 func TestAccContainerImageRegistryResource_BYOD(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	imageName := UniqueName(t, "img-registry-byod")

@@ -242,3 +242,39 @@ These targets run terraform apply and terraform destroy. Ensure your credentials
   - Use Authorization: Bearer $ANYSCALE_CLI_TOKEN
   - Do not print real tokens
   - The $ANYSCALE_CLI_TOKEN may be read from an environment variable, or read from ~/.anyscale/credentials.json
+
+## Test Resource Naming and Sweeping
+
+All test-created resources MUST use the `acctest.UniqueName(t, slug)` helper
+which produces names of the form `tfacc-<slug>-<rand>`. Do not hardcode
+literal names — concurrent CI runs will collide. Do not use legacy prefixes
+`tf-test-` or `tfprovider-` for new tests; sweepers still match those for
+backward compatibility but new code should standardize on `tfacc-`.
+
+### Sweepers
+
+Sweepers in `internal/acctest/sweeper_*.go` automatically clean leaked test
+resources whose names match a sweepable prefix AND that are older than
+`ANYSCALE_SWEEP_MIN_AGE` (default 2h). The age guard prevents racing live
+tests. Run manually:
+
+    make sweep            # actually deletes
+    make sweep-dry-run    # logs what would be deleted
+
+A daily GitHub Actions job at `.github/workflows/sweep.yml` runs `make sweep`
+at 03:00 UTC against the test org.
+
+### When a test crashes or is interrupted
+
+The example-based test targets (`make test-aws-vm-basic`, etc.) wrap apply
+and destroy in a bash EXIT trap so destroy fires even on apply failure or
+ctrl-C. If you still suspect a leak, run `make sweep-dry-run` to inspect or
+`make sweep` to clean.
+
+### Adding a new resource type
+
+If you add a new resource type to the provider that creates real backend
+state, add a sweeper file `internal/acctest/sweeper_<type>_test.go` following
+the pattern in `sweeper_project_test.go`. The cloud sweeper's `Dependencies`
+list determines order — if your new resource lives under a cloud, add it to
+the cloud sweeper's `Dependencies` so it sweeps first.

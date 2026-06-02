@@ -22,6 +22,7 @@ import (
 // TestAccContainerImageDataSource tests all data source functionality with a single built image.
 // This consolidates ByID, ByName, and WithBuildResource tests to reduce build time.
 func TestAccContainerImageDataSource(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	imageName := UniqueName(t, "ds-img")

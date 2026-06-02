@@ -13,6 +13,7 @@ import (
 )
 
 func TestAccComputeConfigResource_Basic(t *testing.T) {
+	t.Parallel()
 	// Skip if acceptance tests are not enabled
 	SkipIfNotAcceptanceTest(t)
 
@@ -83,6 +84,7 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -114,6 +116,7 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 }
 
 func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := GetTestCloudName(t)
@@ -262,6 +265,7 @@ resource "anyscale_compute_config" "test" {
 // TestAccComputeConfigResource_Update tests that updating a compute config
 // creates a new version with the updated configuration.
 func TestAccComputeConfigResource_Update(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -368,6 +372,7 @@ resource "anyscale_compute_config" "test" {
 // TestAccComputeConfigResource_Disappears verifies that an out-of-band archive
 // of the compute config is detected by the next plan as drift.
 func TestAccComputeConfigResource_Disappears(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// K8S clouds use operator-defined pod shapes, not the basic instance_type

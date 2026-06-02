@@ -19,6 +19,7 @@ import (
 )
 
 func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -70,6 +71,7 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 // because invitation API doesn't support setting permission level during creation
 
 func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return
@@ -119,6 +121,7 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 }
 
 func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
 		return

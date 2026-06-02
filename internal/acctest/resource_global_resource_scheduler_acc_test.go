@@ -11,6 +11,7 @@ import (
 )
 
 func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	schedulerName := UniqueName(t, "scheduler-basic")
@@ -48,6 +49,7 @@ func TestAccGlobalResourceSchedulerResource_Basic(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// Get a configured cloud and use appropriate instance types
@@ -98,6 +100,7 @@ func TestAccGlobalResourceSchedulerResource_WithSpec(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// This test requires a cloud with cloud resources configured
@@ -130,6 +133,7 @@ func TestAccGlobalResourceSchedulerResource_WithCloudAttachment(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := GetTestCloudName(t)
@@ -161,6 +165,7 @@ func TestAccGlobalResourceSchedulerResource_WithCloudName(t *testing.T) {
 }
 
 func TestAccGlobalResourceSchedulerResource_Full(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// Get a configured cloud and use appropriate instance types

@@ -25,6 +25,7 @@ import (
 // TestAccContainerImageBuildResource_Basic tests building from an inline containerfile.
 // This consolidates basic creation, timeout configuration, and import testing.
 func TestAccContainerImageBuildResource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	imageName := UniqueName(t, "img-build-basic")
@@ -76,6 +77,7 @@ RUN pip install emoji==2.15.0`
 
 // TestAccContainerImageBuildResource_Update tests that updating the containerfile creates a new build revision.
 func TestAccContainerImageBuildResource_Update(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	imageName := UniqueName(t, "img-build-update")
@@ -139,6 +141,7 @@ RUN sudo mkdir -p /anyscale/init`
 // Commented out to reduce test runtime - can be enabled when testing project_id functionality.
 /*
 func TestAccContainerImageBuildResource_WithProjectID(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)

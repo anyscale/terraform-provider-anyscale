@@ -8,6 +8,7 @@ import (
 )
 
 func TestAccCloudsDataSource_NoFilters(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -26,6 +27,7 @@ func TestAccCloudsDataSource_NoFilters(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByProvider(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -53,6 +55,7 @@ func TestAccCloudsDataSource_FilterByProvider(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -73,6 +76,7 @@ func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := GetTestCloudName(t)
@@ -100,6 +104,7 @@ func TestAccCloudsDataSource_FilterByNameContains(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	// This test requires at least one cloud to exist in the account
@@ -138,6 +143,7 @@ func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -162,6 +168,7 @@ func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_MultipleFilters(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -183,6 +190,7 @@ func TestAccCloudsDataSource_MultipleFilters(t *testing.T) {
 }
 
 func TestAccCloudsDataSource_FilterByProviderAndRegion(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{

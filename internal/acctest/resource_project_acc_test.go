@@ -13,6 +13,7 @@ import (
 )
 
 func TestAccProjectResource_Basic(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -57,6 +58,7 @@ func TestAccProjectResource_Basic(t *testing.T) {
 }
 
 func TestAccProjectResource_WithDescription(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -87,6 +89,7 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 }
 
 func TestAccProjectResource_WithCloudName(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudName := GetTestCloudName(t)
@@ -116,6 +119,7 @@ func TestAccProjectResource_WithCloudName(t *testing.T) {
 }
 
 func TestAccProjectResource_WithCollaborators(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -266,6 +270,7 @@ resource "anyscale_project" "test" {
 }
 
 func TestAccProjectResource_WithUserDataSource(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
@@ -319,6 +324,7 @@ resource "anyscale_project" "test" {
 // TestAccProjectResource_Disappears verifies that an out-of-band project
 // deletion is detected by the next plan as drift.
 func TestAccProjectResource_Disappears(t *testing.T) {
+	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)

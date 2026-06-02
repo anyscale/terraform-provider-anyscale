@@ -14,6 +14,9 @@ TFPLUGINDOCS := tfplugindocs
 # Override with: make apply-aws-vm-basic SUFFIX=mytest
 SUFFIX ?= $(shell date +%s)
 
+# Acceptance-test parallelism. Conservative default; override with PARALLEL=8.
+PARALLEL ?= 4
+
 # Get version info
 # Auto-detect version from git tags (e.g., v0.1.0 -> 0.1.0)
 # Falls back to VERSION env var, then to 0.0.1
@@ -77,12 +80,12 @@ test: ## Run unit tests
 .PHONY: testacc
 testacc: ## Run acceptance tests (requires TF_ACC=1)
 	@echo "==> Running acceptance tests..."
-	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 120m
+	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 120m -parallel $(PARALLEL)
 
 .PHONY: testacc-cover
 testacc-cover: ## Run acceptance tests with coverage
 	@echo "==> Running acceptance tests with coverage..."
-	TF_ACC=1 $(GO) test ./... -v -timeout 120m -coverprofile=coverage.out -covermode=atomic
+	TF_ACC=1 $(GO) test ./... -v -timeout 120m -parallel $(PARALLEL) -coverprofile=coverage.out -covermode=atomic
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "==> Coverage report: coverage.html"
 
@@ -193,6 +196,15 @@ clean: ## Clean build artifacts
 	rm -f $(BINARY_NAME)
 	rm -rf $(BUILD_DIR)
 	rm -f coverage.out coverage.html
+	@echo "==> Clean complete"
+
+.PHONY: clean-tests
+clean-tests: ## Remove stale local test artifacts (binaries, example tfstate)
+	@echo "==> Cleaning local test artifacts..."
+	rm -f acctest.test provider.test
+	find examples -maxdepth 2 -name 'terraform.tfstate*' -delete
+	find examples -maxdepth 2 -name '.terraform.lock.hcl' -delete
+	find examples -maxdepth 2 -type d -name '.terraform' -exec rm -rf {} +
 	@echo "==> Clean complete"
 
 # ============================================================================
