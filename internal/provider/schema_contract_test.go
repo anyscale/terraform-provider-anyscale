@@ -40,6 +40,15 @@ func hasPlanModifierDescription(mods []planmodifier.String, want string) bool {
 	return false
 }
 
+func hasMapPlanModifierDescription(mods []planmodifier.Map, want string) bool {
+	for _, m := range mods {
+		if m.Description(context.Background()) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // TestServerInferredStringAttributesAreComputedWithUseStateForUnknown pins
 // the schema contract for "server-inferred creation-time" string attributes:
 // ones the user may omit (the server derives/defaults a value, e.g.
@@ -101,4 +110,71 @@ func TestServerInferredStringAttributesAreComputedWithUseStateForUnknown(t *test
 			}
 		})
 	}
+}
+
+// TestComputeConfigResourceContract pins the schema contract settled by F11
+// (the compute-config "Provider returned invalid result object after apply"
+// bug, surfaced once the pinned static cloud let the compute-config tests run):
+//
+//   - cloud_resource must be Optional and NOT Computed. The API does not echo
+//     this field back, so marking it Computed makes it unsatisfiable — Create
+//     cannot resolve it and the framework rejects the apply with an unknown
+//     value. Re-adding Computed here is exactly the regression this pins. This
+//     is the genuinely load-bearing assertion (it holds independent of F11's
+//     runtime fix).
+//   - head_node.resources and worker_nodes[].resources must be
+//     Optional+Computed+UseStateForUnknown. The API DOES echo these (auto-filled
+//     from instance_type), so Computed is correct; this documents that intent
+//     and keeps the framework's known-after-apply enforcement live.
+//
+// NOTE: this is a SCHEMA-contract guard — it does NOT catch F11's RUNTIME bug
+// (Create leaving the Computed resources maps unknown). That is covered by the
+// compute-config acceptance tests running against the pinned static cloud. The
+// value here is preventing a regression of the schema DIRECTION.
+func TestComputeConfigResourceContract(t *testing.T) {
+	s := schemaOf(t, &ComputeConfigResource{})
+
+	// cloud_resource: Optional and NOT Computed (the API does not echo it).
+	cr, ok := s.Attributes["cloud_resource"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("cloud_resource is not a schema.StringAttribute (got %T)", s.Attributes["cloud_resource"])
+	}
+	if !cr.Optional {
+		t.Errorf("cloud_resource must be Optional: true")
+	}
+	if cr.Computed {
+		t.Errorf("cloud_resource must NOT be Computed — the API does not echo it back, so Computed is unsatisfiable: " +
+			"Create leaves it unknown and the framework rejects the apply ('Provider returned invalid result object after apply'). " +
+			"This is F11's regression guard.")
+	}
+
+	// head_node.resources and worker_nodes[].resources: Optional+Computed+USFU.
+	assertResourcesMap := func(t *testing.T, label string, attrs map[string]schema.Attribute) {
+		t.Helper()
+		ra, ok := attrs["resources"].(schema.MapAttribute)
+		if !ok {
+			t.Fatalf("%s.resources is not a schema.MapAttribute (got %T)", label, attrs["resources"])
+		}
+		if !ra.Optional {
+			t.Errorf("%s.resources must be Optional: true", label)
+		}
+		if !ra.Computed {
+			t.Errorf("%s.resources must be Computed: true (the API auto-fills it from instance_type)", label)
+		}
+		if !hasMapPlanModifierDescription(ra.PlanModifiers, descUseStateForUnknown) {
+			t.Errorf("%s.resources must include mapplanmodifier.UseStateForUnknown()", label)
+		}
+	}
+
+	headNode, ok := s.Attributes["head_node"].(schema.SingleNestedAttribute)
+	if !ok {
+		t.Fatalf("head_node is not a schema.SingleNestedAttribute (got %T)", s.Attributes["head_node"])
+	}
+	assertResourcesMap(t, "head_node", headNode.Attributes)
+
+	workerNodes, ok := s.Attributes["worker_nodes"].(schema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("worker_nodes is not a schema.ListNestedAttribute (got %T)", s.Attributes["worker_nodes"])
+	}
+	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes)
 }

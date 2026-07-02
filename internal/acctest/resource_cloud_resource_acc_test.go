@@ -19,6 +19,7 @@ import (
 // TestAccCloudResourceResource_AWS_VM tests AWS VM cloud resource creation
 func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-res-aws")
 	resourceName := "default"
@@ -70,6 +71,7 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 // TestAccCloudResourceResource_GCP_VM tests GCP VM cloud resource creation
 func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-res-gcp")
 	resourceName := "default"
@@ -114,6 +116,7 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 // TestAccCloudResourceResource_AWS_K8S tests AWS K8S cloud resource creation
 func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-res-k8s")
 	resourceName := "default"
@@ -148,6 +151,7 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 // TestAccCloudResourceResource_WithFileStorage tests cloud resource with file storage
 func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-res-fs")
 	// Random suffix for embedded IAM ARNs / bucket names in the config template.
