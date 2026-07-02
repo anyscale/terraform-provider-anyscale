@@ -100,6 +100,11 @@ func sweepClouds(region string) error {
 			continue
 		}
 
+		if isSweepDryRun() {
+			log.Printf("[sweepClouds] DRY-RUN would DELETE %s (%s), age %s", cloud.Name, cloud.ID, age.Round(time.Second))
+			continue
+		}
+
 		delResp, err := client.DoRequest(ctx, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloud.ID), nil)
 		if err != nil {
 			log.Printf("[sweepClouds] DELETE FAILED %s (%s): request error: %v", cloud.Name, cloud.ID, err)

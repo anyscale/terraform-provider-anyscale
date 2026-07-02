@@ -89,8 +89,13 @@ func TestAccContainerImageRegistryResource_BYOD(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		// API archives (not deletes) the cluster environment on destroy — verify deleted_at is set.
-		CheckDestroy: NewAPIArchivedDestroyCheckByAttr("anyscale_container_image_registry", "cluster_environment_id", "/ext/v0/cluster_environments/%s", "result.deleted_at"),
+		// API archives (not deletes) the cluster environment on destroy — verify
+		// archived_at is set via /api/v2/application_templates, not deleted_at
+		// via /ext/v0/cluster_environments (see the longer note in
+		// resource_container_image_build_acc_test.go — the /ext/v0 read model
+		// never serializes archived_at, so its deleted_at can never reflect an
+		// archive regardless of how long you poll).
+		CheckDestroy: NewAPIArchivedDestroyCheckByAttr("anyscale_container_image_registry", "cluster_environment_id", "/api/v2/application_templates/%s", "result.archived_at"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccContainerImageRegistryResourceBYODConfig(imageName, fakeECRImageURI),

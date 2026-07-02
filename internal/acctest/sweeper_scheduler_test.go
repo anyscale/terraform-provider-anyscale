@@ -127,6 +127,11 @@ func listAllSchedulersForSweep(ctx context.Context, client *provider.Client) ([]
 }
 
 func sweepDeleteScheduler(ctx context.Context, client *provider.Client, s sweepSchedulerResult) error {
+	if isSweepDryRun() {
+		log.Printf("[sweep:anyscale_global_resource_scheduler] DRY-RUN would DELETE %s (%s)", s.MachinePoolID, s.MachinePoolName)
+		return nil
+	}
+
 	// Delete via POST with a body, matching the resource implementation.
 	payload := map[string]string{"machine_pool_name": s.MachinePoolName}
 	body, err := json.Marshal(payload)

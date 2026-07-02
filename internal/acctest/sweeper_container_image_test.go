@@ -181,6 +181,11 @@ func searchContainerImagesByContains(ctx context.Context, client *provider.Clien
 }
 
 func sweepArchiveContainerImage(ctx context.Context, client *provider.Client, c sweepContainerImageResult) error {
+	if isSweepDryRun() {
+		log.Printf("[sweep:anyscale_container_image] DRY-RUN would ARCHIVE %s (%s)", c.ID, c.Name)
+		return nil
+	}
+
 	// The cluster_environments endpoint has no DELETE verb; archive via
 	// application_templates instead. The API may respond 200 with the env in
 	// an archived state, 4xx for default envs, or 404 if it raced — all OK.
