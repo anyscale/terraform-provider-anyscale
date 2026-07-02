@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -194,8 +195,12 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 			},
 			"cloud_resource": schema.StringAttribute{
 				Optional:            true,
+				Computed:            true,
 				Description:         "The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.",
 				MarkdownDescription: "The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 
 			"zones": schema.ListAttribute{
@@ -284,8 +289,12 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 		"resources": schema.MapAttribute{
 			ElementType:         types.Float64Type,
 			Optional:            true,
+			Computed:            true,
 			Description:         "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
 			MarkdownDescription: "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
+			PlanModifiers: []planmodifier.Map{
+				mapplanmodifier.UseStateForUnknown(),
+			},
 		},
 		"physical_resources": schema.SingleNestedAttribute{
 			Optional:            true,

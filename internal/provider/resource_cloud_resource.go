@@ -197,7 +197,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			"compute_stack": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Compute stack type: VM or K8S. Inferred from the cloud/provider configuration when not specified.",
+				MarkdownDescription: "Compute stack type: VM or K8S. When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -206,9 +206,11 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			"region": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The region for this cloud resource.",
+				Computed:            true,
+				MarkdownDescription: "The region for this cloud resource. Inferred from the cloud/provider configuration when not specified.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 

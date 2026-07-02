@@ -121,7 +121,7 @@ output "is_empty_cloud" {
 - `aws_config` (Block, Optional) AWS-specific configuration. Required when cloud_provider is AWS and using all-in-one pattern. (see [below for nested schema](#nestedblock--aws_config))
 - `azure_config` (Block, Optional) Azure-specific configuration. Required when cloud_provider is Azure. (see [below for nested schema](#nestedblock--azure_config))
 - `cloud_provider` (String) Cloud provider: AWS, GCP, Azure, or Generic. Auto-detected from aws_config/gcp_config, or defaults to AWS for empty clouds.
-- `compute_stack` (String) Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config).
+- `compute_stack` (String) Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).
 - `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using split pattern (empty cloud + cloud_resource).
 - `enable_lineage_tracking` (Boolean) Whether to enable lineage tracking for this cloud.
 - `enable_log_ingestion` (Boolean) Whether to enable aggregated log ingestion for this cloud.

@@ -366,7 +366,6 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 			"equals": name,
 		},
 		"include_anonymous": false,
-		"archive_status":    "NOT_ARCHIVED",
 	}
 
 	// Add cloud_id filter if provided
@@ -433,7 +432,6 @@ func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context
 			"equals": name,
 		},
 		"include_anonymous": false,
-		"archive_status":    "NOT_ARCHIVED",
 	}
 
 	searchBody, err := MarshalRequestBody(searchPayload)

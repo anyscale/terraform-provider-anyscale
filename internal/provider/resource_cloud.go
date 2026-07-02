@@ -117,9 +117,11 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			"compute_stack": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config).",
+				Computed:            true,
+				MarkdownDescription: "Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 
