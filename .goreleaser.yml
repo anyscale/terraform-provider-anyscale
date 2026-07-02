@@ -61,6 +61,15 @@ release:
   github:
     owner: anyscale
     name: terraform-provider-anyscale
+
+  # The Terraform Registry reads the provider's supported protocol versions from
+  # a manifest asset named terraform-provider-anyscale_<version>_manifest.json.
+  # Without it the Registry defaults to protocol 5.0, which is wrong for a
+  # Plugin Framework provider (6.0). This publishes terraform-registry-manifest.json
+  # under that required asset name.
+  extra_files:
+    - glob: "terraform-registry-manifest.json"
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
   
   # Draft releases allow you to review before publishing
   draft: false
