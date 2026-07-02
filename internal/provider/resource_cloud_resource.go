@@ -691,6 +691,24 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		plan.Status = types.StringNull()
 	}
 
+	// compute_stack/region may still be unknown here (e.g. omitted in config);
+	// the create response already reports the backend's resolved values.
+	if plan.ComputeStack.IsUnknown() {
+		plan.ComputeStack = types.StringValue(deployResp.Result.ComputeStack)
+	}
+	if plan.Region.IsUnknown() {
+		plan.Region = types.StringValue(deployResp.Result.Region)
+	}
+
+	// Persist state now that the cloud resource exists remotely, before any
+	// subsequent step (wait, read-back) that can fail. Without this, a
+	// mid-create failure below would leave the resource orphaned in the
+	// backend with no Terraform record to destroy it.
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	tflog.Info(ctx, "Cloud resource created successfully", map[string]any{"id": plan.ID.ValueString()})
 
 	// Wait for the parent cloud to become ready

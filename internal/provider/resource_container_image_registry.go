@@ -260,6 +260,24 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		"name":                   clusterEnvName,
 	})
 
+	// Persist state now that the cluster environment exists remotely, before
+	// the subsequent build lookup calls that can fail. Delete() acts on
+	// ClusterEnvironmentID, so that (not just ID) must be recorded here.
+	// Without this, a failure below would leave the cluster environment
+	// orphaned in the backend with no Terraform record to destroy it.
+	plan.ID = types.StringValue(clusterEnvID)
+	plan.ClusterEnvironmentID = types.StringValue(clusterEnvID)
+	plan.BuildID = types.StringNull()
+	plan.BuildStatus = types.StringNull()
+	plan.CreatedAt = types.StringNull()
+	plan.IsBYOD = types.BoolValue(true)
+	plan.Revision = types.Int64Value(0)
+	plan.NameVersion = types.StringNull()
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Get the build ID by listing builds for this cluster environment
 	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
 		ctx,
