@@ -84,6 +84,14 @@ func sweepClouds(region string) error {
 	var failures []string
 
 	for _, cloud := range listResp.Results {
+		// Never sweep the designated static fixture cloud (single source of
+		// truth: defaultKnownGoodCloudName). Its current name is outside the
+		// sweepable prefixes, but this explicit guard protects it even if it is
+		// ever renamed under one, so CI never deletes its own known-good cloud.
+		if cloud.Name == defaultKnownGoodCloudName {
+			log.Printf("[sweepClouds] KEEP %s (%s): protected static test fixture", cloud.Name, cloud.ID)
+			continue
+		}
 		if !hasSweepablePrefix(cloud.Name) {
 			continue
 		}

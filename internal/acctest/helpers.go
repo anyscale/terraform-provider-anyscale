@@ -49,10 +49,33 @@ type ephemeralCloud struct {
 	Name string
 }
 
+// defaultKnownGoodCloudName identifies a real, healthy, static fixture cloud in
+// the Anyscale test org. It is the resolution fallback (after env overrides,
+// before auto-discovery) so cloud-dependent acceptance tests get a healthy
+// cloud with zero setup, locally and in CI. Only the NAME is stored — the repo
+// is public, so the cloud ID is resolved from the name at runtime, never
+// hardcoded. Resolution falls through to auto-discovery if the name does not
+// resolve in the current org. Override per-run with ANYSCALE_TEST_CLOUD_ID or
+// ANYSCALE_TEST_CLOUD_NAME.
+const defaultKnownGoodCloudName = "tfp-test-aws-useast1-STATIC"
+
+// resolveDefaultKnownGoodCloudID resolves defaultKnownGoodCloudName to a cloud
+// ID via the API. Returns "" (caller falls through to auto-discovery) when the
+// name cannot be resolved in the current org. The ID is deliberately not
+// hardcoded in the repo.
+func resolveDefaultKnownGoodCloudID(t *testing.T) string {
+	id, err := resolveCloudNameToID(t, defaultKnownGoodCloudName)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
 // GetTestCloudID returns a test cloud ID with the following priority:
 // 1. ANYSCALE_TEST_CLOUD_ID environment variable (explicit override)
 // 2. ANYSCALE_TEST_CLOUD_NAME environment variable (resolve name to ID)
-// 3. Auto-discover any available cloud (prefers test-named clouds)
+// 3. Known-good static fixture cloud (validated; falls through if absent)
+// 4. Auto-discover any available cloud (prefers test-named clouds)
 //
 // The result is cached after the first successful resolution.
 // Unlike sync.Once, this will retry on failure.
@@ -95,7 +118,18 @@ func GetTestCloudID(t *testing.T) string {
 		}
 	}
 
-	// Priority 3: Auto-discover
+	// Priority 3: Known-good static fixture cloud, resolved by NAME at runtime
+	// (ID not hardcoded). Gives every run a healthy cloud with zero setup;
+	// falls through if the name does not resolve in the current org.
+	if id := resolveDefaultKnownGoodCloudID(t); id != "" {
+		t.Logf("Using default known-good test cloud: %s (%s)", defaultKnownGoodCloudName, id)
+		cachedTestCloudID = id
+		cachedTestCloudName = defaultKnownGoodCloudName
+		return cachedTestCloudID
+	}
+	t.Logf("Default known-good cloud %q did not resolve in this org; falling through to auto-discovery", defaultKnownGoodCloudName)
+
+	// Priority 4: Auto-discover
 	t.Logf("Auto-discovering test cloud...")
 	var cloudName string
 	cloudID, cloudName, err = autoDiscoverTestCloud(t)
@@ -144,7 +178,15 @@ func GetTestCloudName(t *testing.T) string {
 		}
 	}
 
-	// Priority 2: Auto-discover (this will populate both ID and Name caches)
+	// Priority 2: Known-good static fixture cloud, resolved by NAME at runtime.
+	if id := resolveDefaultKnownGoodCloudID(t); id != "" {
+		t.Logf("Using default known-good test cloud for name: %s", defaultKnownGoodCloudName)
+		cachedTestCloudID = id
+		cachedTestCloudName = defaultKnownGoodCloudName
+		return cachedTestCloudName
+	}
+
+	// Priority 3: Auto-discover (this will populate both ID and Name caches)
 	t.Logf("Auto-discovering test cloud for name...")
 	cloudID, cloudName, err := autoDiscoverTestCloud(t)
 	if err != nil {
@@ -849,6 +891,11 @@ func GetComputeConfigCloudID(t *testing.T) string {
 	if id := os.Getenv("ANYSCALE_TEST_CLOUD_ID"); id != "" {
 		return id
 	}
+	// Known-good static fixture (resolved by name) before auto-discovery.
+	if id := resolveDefaultKnownGoodCloudID(t); id != "" {
+		t.Logf("Using default known-good cloud for compute config: %s (%s)", defaultKnownGoodCloudName, id)
+		return id
+	}
 	for _, c := range GetAllConfiguredClouds(t) {
 		if c.IsVM() {
 			return c.ID
@@ -866,6 +913,10 @@ func GetComputeConfigCloudID(t *testing.T) string {
 func GetComputeConfigCloudName(t *testing.T) string {
 	if name := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); name != "" {
 		return name
+	}
+	// Known-good static fixture (resolved by name) before auto-discovery.
+	if resolveDefaultKnownGoodCloudID(t) != "" {
+		return defaultKnownGoodCloudName
 	}
 	for _, c := range GetAllConfiguredClouds(t) {
 		if c.IsVM() {
