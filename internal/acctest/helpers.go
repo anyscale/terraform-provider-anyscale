@@ -1031,10 +1031,21 @@ func NewAPIArchivedDestroyCheckByAttr(resourceType, attrName, getPathFmt, archiv
 	return newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath)
 }
 
+// Anyscale archives/deletes are asynchronous: the API accepts the request but
+// the archive marker (e.g. result.deleted_at) can take a few seconds to
+// persist. CheckDestroy polls for the archived variant up to this bound so it
+// does not race the backend and report a false leak.
+const (
+	destroyCheckPollTimeout  = 30 * time.Second
+	destroyCheckPollInterval = 2 * time.Second
+)
+
 // newAPIDestroyCheckImpl is the shared implementation behind the public
 // CheckDestroy helpers. When archivedJSONPath is empty, a 200 response is
 // treated as a leak. Otherwise, the value at archivedJSONPath must be truthy
-// (bool true or non-empty/non-null string) or the resource is a leak.
+// (bool true or non-empty/non-null string) or the resource is a leak. For the
+// archived variant the check polls up to destroyCheckPollTimeout because the
+// backend sets the archive marker asynchronously.
 func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		if len(s.RootModule().Resources) == 0 {
@@ -1063,41 +1074,59 @@ func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath
 			}
 
 			path := fmt.Sprintf(getPathFmt, id)
-			resp, err := client.DoRequest(context.Background(), "GET", path, nil)
-			if err != nil {
-				log.Printf("[WARN] CheckDestroy(%s) network error for %s (id=%s): %v", resourceType, name, id, err)
-				continue
-			}
 
-			body, readErr := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
+			// Poll so we don't race the backend's asynchronous archive/delete.
+			// Definitive outcomes (404 gone, or a truthy archive marker) exit
+			// immediately; only a still-present, not-yet-archived resource is
+			// retried until destroyCheckPollTimeout elapses.
+			deadline := time.Now().Add(destroyCheckPollTimeout)
+			for {
+				resp, err := client.DoRequest(context.Background(), "GET", path, nil)
+				if err != nil {
+					log.Printf("[WARN] CheckDestroy(%s) network error for %s (id=%s): %v", resourceType, name, id, err)
+					break
+				}
 
-			switch {
-			case resp.StatusCode == 404:
-				// gone — success
-				continue
-			case resp.StatusCode >= 500:
-				log.Printf("[WARN] CheckDestroy(%s) transient %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
-				continue
-			case resp.StatusCode == 200 || resp.StatusCode == 201:
+				body, readErr := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+
+				if resp.StatusCode == 404 {
+					break // gone — success
+				}
+				if resp.StatusCode >= 500 {
+					log.Printf("[WARN] CheckDestroy(%s) transient %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+					break
+				}
+				if resp.StatusCode != 200 && resp.StatusCode != 201 {
+					log.Printf("[WARN] CheckDestroy(%s) unexpected status %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+					break
+				}
+
+				// 200/201: the resource still exists.
 				if archivedJSONPath == "" {
 					leaks = append(leaks, fmt.Sprintf("%s (id=%s) still returns 200 from %s", name, id, path))
-					continue
+					break
 				}
 				if readErr != nil {
 					log.Printf("[WARN] CheckDestroy(%s) failed to read body for %s (id=%s): %v", resourceType, name, id, readErr)
-					continue
+					break
 				}
 				archived, perr := extractArchivedValue(body, archivedJSONPath)
 				if perr != nil {
 					log.Printf("[WARN] CheckDestroy(%s) failed to parse %s for %s (id=%s): %v", resourceType, archivedJSONPath, name, id, perr)
-					continue
+					break
 				}
-				if !archived {
+				if archived {
+					break // archived — success
+				}
+
+				// Still present and not yet archived: the async delete may still
+				// be in flight. Retry until the deadline, then record a leak.
+				if time.Now().After(deadline) {
 					leaks = append(leaks, fmt.Sprintf("%s (id=%s) exists at %s and %s is not truthy", name, id, path, archivedJSONPath))
+					break
 				}
-			default:
-				log.Printf("[WARN] CheckDestroy(%s) unexpected status %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+				time.Sleep(destroyCheckPollInterval)
 			}
 		}
 
