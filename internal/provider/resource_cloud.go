@@ -117,9 +117,11 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			"compute_stack": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config).",
+				Computed:            true,
+				MarkdownDescription: "Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 
@@ -744,6 +746,27 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// Initialize CloudDeploymentID to known null - will be updated by addCloudResource if deployment succeeds
 	if plan.CloudDeploymentID.IsUnknown() {
 		plan.CloudDeploymentID = types.StringNull()
+	}
+
+	// compute_stack may still be unknown here (e.g. omitted on an empty cloud).
+	// The create response already reports the backend's resolved value, so use
+	// it directly instead of guessing - the partial state saved below then
+	// matches what readCloudState would report anyway.
+	if plan.ComputeStack.IsUnknown() {
+		if cloudResp.Result.ComputeStack != "" {
+			plan.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
+		} else {
+			plan.ComputeStack = types.StringValue("VM")
+		}
+	}
+
+	// Persist state now that the cloud exists remotely, before any subsequent
+	// step (add_resource, wait, read-back) that can fail. Without this, a
+	// mid-create failure below would leave the cloud orphaned in the backend
+	// with no Terraform record to destroy it.
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	tflog.Info(ctx, "Cloud created successfully", map[string]any{"id": cloudID, "name": name})

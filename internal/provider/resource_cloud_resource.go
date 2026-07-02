@@ -197,7 +197,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			"compute_stack": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Compute stack type: VM or K8S. Inferred from the cloud/provider configuration when not specified.",
+				MarkdownDescription: "Compute stack type: VM or K8S. When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -206,9 +206,11 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			"region": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The region for this cloud resource.",
+				Computed:            true,
+				MarkdownDescription: "The region for this cloud resource. Inferred from the cloud/provider configuration when not specified.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 
@@ -687,6 +689,24 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	// Initialize Status to known null - will be updated by readCloudResource if available
 	if plan.Status.IsUnknown() {
 		plan.Status = types.StringNull()
+	}
+
+	// compute_stack/region may still be unknown here (e.g. omitted in config);
+	// the create response already reports the backend's resolved values.
+	if plan.ComputeStack.IsUnknown() {
+		plan.ComputeStack = types.StringValue(deployResp.Result.ComputeStack)
+	}
+	if plan.Region.IsUnknown() {
+		plan.Region = types.StringValue(deployResp.Result.Region)
+	}
+
+	// Persist state now that the cloud resource exists remotely, before any
+	// subsequent step (wait, read-back) that can fail. Without this, a
+	// mid-create failure below would leave the resource orphaned in the
+	// backend with no Terraform record to destroy it.
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	tflog.Info(ctx, "Cloud resource created successfully", map[string]any{"id": plan.ID.ValueString()})

@@ -120,10 +120,17 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 	for {
 		// The search endpoint returns every version of a compute config as a
 		// distinct row, so we must paginate even within a single prefix query.
+		// archive_status is not a field the backend accepts (confirmed against
+		// product's ClusterComputesQuery model: the field was removed, not
+		// renamed; base/routers/cluster_computes_router.py's /search endpoint
+		// has no archived-filter arg at all yet). Sending it 422s the whole
+		// request. Sweep candidates are filtered by name prefix + age instead,
+		// so losing server-side archive filtering just means a few more
+		// already-archived rows pass through sweepArchiveComputeConfig, which
+		// already treats re-archiving as a success (200/202/204/404).
 		payload := map[string]interface{}{
 			"name":              map[string]string{"contains": contains},
 			"include_anonymous": false,
-			"archive_status":    "NOT_ARCHIVED",
 			"paging":            map[string]interface{}{"count": 100},
 		}
 		if pagingToken != nil && *pagingToken != "" {
@@ -167,6 +174,11 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 }
 
 func sweepArchiveComputeConfig(ctx context.Context, client *provider.Client, c sweepComputeConfigResult) error {
+	if isSweepDryRun() {
+		log.Printf("[sweep:anyscale_compute_config] DRY-RUN would ARCHIVE %s (%s)", c.ID, c.Name)
+		return nil
+	}
+
 	// Delete maps to the resource's archive op so each version-specific ID
 	// must be archived; the sweep search returns one row per version.
 	resp, err := client.DoRequest(ctx, "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", c.ID), nil)

@@ -39,7 +39,13 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 				// Use config_id (version-specific) since Primary.ID is the name and the
 				// /ext/v0/cluster_computes/ endpoint requires the versioned ID.
-				CheckDestroy: NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+				// Compute configs ARCHIVE (not delete) on destroy: the resource's Delete
+				// calls /api/v2/compute_templates/{id}/archive, which sets archived_at
+				// but leaves the row 200-fetchable. So verify the archived marker, not a
+				// 404 — else CheckDestroy false-positives ("still returns 200"). Same
+				// wrong-check-type class as the F4 container-image fix; confirmed live:
+				// an archived config returns archived_at set + deleted_at null here.
+				CheckDestroy: NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"),
 				Steps: []resource.TestStep{
 					// Create and Read testing
 					{
@@ -93,7 +99,7 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_withWorkers(configName, cloudID, "m5.large", "m5.xlarge"),
@@ -125,7 +131,7 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_withCloudName(configName, cloudName),
@@ -275,7 +281,7 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
 		Steps: []resource.TestStep{
 			// Create initial compute config with small instance
 			{
@@ -392,7 +398,7 @@ func TestAccComputeConfigResource_Disappears(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_basic(configName, cloud.ID, instanceTypes.Small),

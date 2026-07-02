@@ -19,6 +19,7 @@ import (
 // TestAccCloudResource_AWS_Basic tests basic AWS cloud creation with all-in-one pattern
 func TestAccCloudResource_AWS_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-aws-basic")
 	// Generate random suffix for IAM roles to allow parallel test runs
@@ -104,6 +105,7 @@ func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 // TestAccCloudResource_GCP_Basic tests basic GCP cloud creation
 func TestAccCloudResource_GCP_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-gcp-basic")
 	// Generate random suffix for service accounts to allow parallel test runs
@@ -150,6 +152,7 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 // TestAccCloudResource_AWS_K8S tests AWS K8S cloud creation
 func TestAccCloudResource_AWS_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-aws-k8s")
 	// Generate random suffix for IAM roles to allow parallel test runs

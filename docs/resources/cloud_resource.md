@@ -97,14 +97,14 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
 - `cloud_id` (String) The cloud ID to attach this resource to. Either `cloud_id` or `cloud_name` can be specified.
 - `cloud_name` (String) The cloud name to attach this resource to. Either `cloud_id` or `cloud_name` can be specified. If provided, will be resolved to cloud_id.
 - `cloud_provider` (String) Cloud provider: AWS or GCP. Required for K8S compute_stack when aws_config/gcp_config is not provided. Inferred from aws_config/gcp_config if not specified.
-- `compute_stack` (String) Compute stack type: VM or K8S. Inferred from the cloud/provider configuration when not specified.
+- `compute_stack` (String) Compute stack type: VM or K8S. When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).
 - `file_storage` (Block, Optional) File storage configuration (EFS, Filestore, etc.). (see [below for nested schema](#nestedblock--file_storage))
 - `gcp_config` (Block, Optional) GCP-specific configuration. (see [below for nested schema](#nestedblock--gcp_config))
 - `is_private` (Boolean) Whether this is a private resource (private networking).
 - `kubernetes_config` (Block, Optional) Kubernetes-specific configuration. Required when compute_stack is K8S. (see [below for nested schema](#nestedblock--kubernetes_config))
 - `name` (String) The name of the cloud resource. Auto-generated if not provided.
 - `object_storage` (Block, Optional) Object storage configuration (S3, GCS). (see [below for nested schema](#nestedblock--object_storage))
-- `region` (String) The region for this cloud resource.
+- `region` (String) The region for this cloud resource. Inferred from the cloud/provider configuration when not specified.
 
 ### Read-Only
 

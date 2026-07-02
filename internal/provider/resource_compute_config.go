@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -284,8 +285,12 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 		"resources": schema.MapAttribute{
 			ElementType:         types.Float64Type,
 			Optional:            true,
+			Computed:            true,
 			Description:         "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
 			MarkdownDescription: "Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.",
+			PlanModifiers: []planmodifier.Map{
+				mapplanmodifier.UseStateForUnknown(),
+			},
 		},
 		"physical_resources": schema.SingleNestedAttribute{
 			Optional:            true,
@@ -615,6 +620,14 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
+	// Capture what the user actually configured before it's overwritten below,
+	// so head_node/worker_nodes' Computed sub-attributes (e.g. resources, which
+	// the API auto-fills from instance_type) can be masked back to null when
+	// the user did not set them - mirroring Read's prior-state masking, using
+	// the plan itself as "prior" since this is the resource's first apply.
+	priorHeadNode := plan.HeadNode
+	priorWorkerNodes := plan.WorkerNodes
+
 	// Build the request
 	createRequest, _ := r.buildComputeConfigRequest(ctx, &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
@@ -659,6 +672,44 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	}
 	if resultData.LastModifiedAt != "" {
 		plan.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
+	}
+
+	// head_node/worker_nodes are Required/Optional blocks, but sub-attributes
+	// like resources are Optional+Computed (the API fills them in from
+	// instance_type). Populate them from the create response the same way
+	// Read does, or they are left Unknown and Terraform rejects the apply
+	// with "Provider returned invalid result object".
+	configData := resultData.Config
+	headNodeType := configData.HeadNodeType
+	workerNodeTypes := configData.WorkerNodeTypes
+	if len(configData.DeploymentConfigs) > 0 {
+		deploymentConfig := configData.DeploymentConfigs[0]
+		if deploymentConfig.HeadNodeType != nil {
+			headNodeType = deploymentConfig.HeadNodeType
+		}
+		if len(deploymentConfig.WorkerNodeTypes) > 0 {
+			workerNodeTypes = deploymentConfig.WorkerNodeTypes
+		}
+	}
+
+	if headNodeType != nil {
+		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, headNodeType)
+		resp.Diagnostics.Append(headNodeDiags...)
+		if !resp.Diagnostics.HasError() {
+			plan.HeadNode = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, &resp.Diagnostics)
+		}
+	}
+
+	if len(workerNodeTypes) > 0 {
+		workerInterfaces := make([]interface{}, 0, len(workerNodeTypes))
+		for _, worker := range workerNodeTypes {
+			workerInterfaces = append(workerInterfaces, worker)
+		}
+		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		resp.Diagnostics.Append(workerNodesDiags...)
+		if !resp.Diagnostics.HasError() {
+			plan.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, &resp.Diagnostics)
+		}
 	}
 
 	// Set state with all fields populated
