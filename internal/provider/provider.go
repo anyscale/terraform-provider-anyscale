@@ -143,7 +143,8 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewOrganizationInvitationResource,
 		NewOrganizationCollaboratorResource,
 		NewPolicyBindingResource,
-		NewGlobalResourceSchedulerResource,
+		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
+		// NewGlobalResourceSchedulerResource,
 		NewContainerImageBuildResource,
 		NewContainerImageRegistryResource,
 	}
@@ -166,7 +167,8 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewUserDataSource,
 		NewUserGroupDataSource,
 		NewUserGroupsDataSource,
-		NewGlobalResourceSchedulerDataSource,
-		NewGlobalResourceSchedulersDataSource,
+		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
+		// NewGlobalResourceSchedulerDataSource,
+		// NewGlobalResourceSchedulersDataSource,
 	}
 }

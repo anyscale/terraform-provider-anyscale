@@ -196,9 +196,11 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			"compute_stack": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Compute stack type: VM or K8S.",
+				Computed:            true,
+				MarkdownDescription: "Compute stack type: VM or K8S. Inferred from the cloud/provider configuration when not specified.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 

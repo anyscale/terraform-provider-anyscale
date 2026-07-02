@@ -826,20 +826,10 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 		}
 	}
 
-	// If no configured clouds found, try clouds without cloud_resources
-	if len(clouds) == 0 {
-		for _, cloud := range cloudsResp.Results {
-			computeStack := normalizeComputeStack(cloud.ComputeStack)
-			if isKnownProvider(cloud.Provider, computeStack) {
-				clouds = append(clouds, CloudInfo{
-					ID:           cloud.ID,
-					Name:         cloud.Name,
-					Provider:     cloud.Provider,
-					ComputeStack: computeStack,
-				})
-			}
-		}
-	}
+	// Intentionally no fallback to clouds without cloud_resources: creating a
+	// compute config against a cloud that lacks a healthy primary cloud resource
+	// returns a backend 500. Returning an empty slice lets callers skip cleanly
+	// rather than hard-fail on a degraded cloud.
 
 	t.Logf("Found %d configured clouds for testing", len(clouds))
 	for _, c := range clouds {
@@ -847,6 +837,45 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	}
 
 	return clouds
+}
+
+// GetComputeConfigCloudID returns the ID of a cloud suitable for creating
+// compute configs: one with at least one cloud resource (a proxy for a healthy
+// primary cloud resource). POST /api/v2/compute_templates/ returns a backend
+// 500 for clouds lacking a healthy primary resource, so when none are available
+// the test is skipped rather than hard-failing. An explicit ANYSCALE_TEST_CLOUD_ID
+// override is honored first (the operator is asserting that cloud is healthy).
+func GetComputeConfigCloudID(t *testing.T) string {
+	if id := os.Getenv("ANYSCALE_TEST_CLOUD_ID"); id != "" {
+		return id
+	}
+	for _, c := range GetAllConfiguredClouds(t) {
+		if c.IsVM() {
+			return c.ID
+		}
+	}
+	t.Skip("No VM cloud with a healthy primary cloud resource available; " +
+		"compute config creation returns a backend 500 on degraded clouds. " +
+		"Set ANYSCALE_TEST_CLOUD_ID to a healthy cloud to run this test.")
+	return ""
+}
+
+// GetComputeConfigCloudName is like GetComputeConfigCloudID but returns the
+// cloud name, for tests that reference a cloud by name. Honors
+// ANYSCALE_TEST_CLOUD_NAME first.
+func GetComputeConfigCloudName(t *testing.T) string {
+	if name := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); name != "" {
+		return name
+	}
+	for _, c := range GetAllConfiguredClouds(t) {
+		if c.IsVM() {
+			return c.Name
+		}
+	}
+	t.Skip("No VM cloud with a healthy primary cloud resource available; " +
+		"compute config creation returns a backend 500 on degraded clouds. " +
+		"Set ANYSCALE_TEST_CLOUD_NAME to a healthy cloud to run this test.")
+	return ""
 }
 
 // GetAllVMClouds returns one VM cloud per provider (AWS, GCP).
@@ -1031,10 +1060,21 @@ func NewAPIArchivedDestroyCheckByAttr(resourceType, attrName, getPathFmt, archiv
 	return newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath)
 }
 
+// Anyscale archives/deletes are asynchronous: the API accepts the request but
+// the archive marker (e.g. result.deleted_at) can take a few seconds to
+// persist. CheckDestroy polls for the archived variant up to this bound so it
+// does not race the backend and report a false leak.
+const (
+	destroyCheckPollTimeout  = 30 * time.Second
+	destroyCheckPollInterval = 2 * time.Second
+)
+
 // newAPIDestroyCheckImpl is the shared implementation behind the public
 // CheckDestroy helpers. When archivedJSONPath is empty, a 200 response is
 // treated as a leak. Otherwise, the value at archivedJSONPath must be truthy
-// (bool true or non-empty/non-null string) or the resource is a leak.
+// (bool true or non-empty/non-null string) or the resource is a leak. For the
+// archived variant the check polls up to destroyCheckPollTimeout because the
+// backend sets the archive marker asynchronously.
 func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		if len(s.RootModule().Resources) == 0 {
@@ -1063,41 +1103,59 @@ func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath
 			}
 
 			path := fmt.Sprintf(getPathFmt, id)
-			resp, err := client.DoRequest(context.Background(), "GET", path, nil)
-			if err != nil {
-				log.Printf("[WARN] CheckDestroy(%s) network error for %s (id=%s): %v", resourceType, name, id, err)
-				continue
-			}
 
-			body, readErr := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
+			// Poll so we don't race the backend's asynchronous archive/delete.
+			// Definitive outcomes (404 gone, or a truthy archive marker) exit
+			// immediately; only a still-present, not-yet-archived resource is
+			// retried until destroyCheckPollTimeout elapses.
+			deadline := time.Now().Add(destroyCheckPollTimeout)
+			for {
+				resp, err := client.DoRequest(context.Background(), "GET", path, nil)
+				if err != nil {
+					log.Printf("[WARN] CheckDestroy(%s) network error for %s (id=%s): %v", resourceType, name, id, err)
+					break
+				}
 
-			switch {
-			case resp.StatusCode == 404:
-				// gone — success
-				continue
-			case resp.StatusCode >= 500:
-				log.Printf("[WARN] CheckDestroy(%s) transient %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
-				continue
-			case resp.StatusCode == 200 || resp.StatusCode == 201:
+				body, readErr := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+
+				if resp.StatusCode == 404 {
+					break // gone — success
+				}
+				if resp.StatusCode >= 500 {
+					log.Printf("[WARN] CheckDestroy(%s) transient %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+					break
+				}
+				if resp.StatusCode != 200 && resp.StatusCode != 201 {
+					log.Printf("[WARN] CheckDestroy(%s) unexpected status %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+					break
+				}
+
+				// 200/201: the resource still exists.
 				if archivedJSONPath == "" {
 					leaks = append(leaks, fmt.Sprintf("%s (id=%s) still returns 200 from %s", name, id, path))
-					continue
+					break
 				}
 				if readErr != nil {
 					log.Printf("[WARN] CheckDestroy(%s) failed to read body for %s (id=%s): %v", resourceType, name, id, readErr)
-					continue
+					break
 				}
 				archived, perr := extractArchivedValue(body, archivedJSONPath)
 				if perr != nil {
 					log.Printf("[WARN] CheckDestroy(%s) failed to parse %s for %s (id=%s): %v", resourceType, archivedJSONPath, name, id, perr)
-					continue
+					break
 				}
-				if !archived {
+				if archived {
+					break // archived — success
+				}
+
+				// Still present and not yet archived: the async delete may still
+				// be in flight. Retry until the deadline, then record a leak.
+				if time.Now().After(deadline) {
 					leaks = append(leaks, fmt.Sprintf("%s (id=%s) exists at %s and %s is not truthy", name, id, path, archivedJSONPath))
+					break
 				}
-			default:
-				log.Printf("[WARN] CheckDestroy(%s) unexpected status %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+				time.Sleep(destroyCheckPollInterval)
 			}
 		}
 
