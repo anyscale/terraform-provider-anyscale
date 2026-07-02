@@ -59,7 +59,7 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	cloudID := GetComputeConfigCloudID(t)
 	configName := UniqueName(t, "ds-cloud-compute")
 
 	resource.Test(t, resource.TestCase{

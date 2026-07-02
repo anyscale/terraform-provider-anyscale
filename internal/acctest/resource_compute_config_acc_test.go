@@ -87,7 +87,7 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	cloudID := GetComputeConfigCloudID(t)
 	configName := UniqueName(t, "compute-config-workers")
 
 	resource.Test(t, resource.TestCase{
@@ -119,7 +119,7 @@ func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := GetTestCloudName(t)
+	cloudName := GetComputeConfigCloudName(t)
 	configName := UniqueName(t, "compute-config-cloudname")
 
 	resource.Test(t, resource.TestCase{
@@ -268,7 +268,7 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	cloudID := GetComputeConfigCloudID(t)
 	configName := UniqueName(t, "compute-config-update")
 	var initialConfigID string
 

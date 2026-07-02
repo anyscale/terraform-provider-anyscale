@@ -154,7 +154,7 @@ func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudsDataSourceFindSpecificCloudConfig(cloudName),
+				Config: testAccCloudsDataSourceFindSpecificCloudConfig(cloudName, cloudID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Should find exactly the test cloud
 					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.#"),
@@ -256,19 +256,21 @@ data "anyscale_clouds" "test" {
 `, cloudID)
 }
 
-func testAccCloudsDataSourceFindSpecificCloudConfig(cloudName string) string {
+func testAccCloudsDataSourceFindSpecificCloudConfig(cloudName, cloudID string) string {
 	return fmt.Sprintf(`
 data "anyscale_clouds" "test" {
-  name_contains   = "%s"
-  cloud_provider  = "GCP"
+  name_contains  = "%s"
+  cloud_provider = "GCP"
 }
 
-# Verify we can use the clouds data source to get cloud ID
-# and look it up with the singular data source
+# Look the cloud up by its unique ID rather than clouds[0]. The anyscale_clouds
+# name_contains/cloud_provider filters are not applied server-side, so the list
+# is unordered and clouds[0] is not guaranteed to be the test cloud when other
+# tfacc-cloud-gcp-basic-* clouds exist concurrently.
 data "anyscale_cloud" "verify" {
-  id = data.anyscale_clouds.test.clouds[0].id
+  id = "%s"
 }
-`, cloudName)
+`, cloudName, cloudID)
 }
 
 func testAccCloudsDataSourceFilterByProviderAndRegionConfig(provider, region string) string {

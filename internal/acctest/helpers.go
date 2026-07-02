@@ -826,20 +826,10 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 		}
 	}
 
-	// If no configured clouds found, try clouds without cloud_resources
-	if len(clouds) == 0 {
-		for _, cloud := range cloudsResp.Results {
-			computeStack := normalizeComputeStack(cloud.ComputeStack)
-			if isKnownProvider(cloud.Provider, computeStack) {
-				clouds = append(clouds, CloudInfo{
-					ID:           cloud.ID,
-					Name:         cloud.Name,
-					Provider:     cloud.Provider,
-					ComputeStack: computeStack,
-				})
-			}
-		}
-	}
+	// Intentionally no fallback to clouds without cloud_resources: creating a
+	// compute config against a cloud that lacks a healthy primary cloud resource
+	// returns a backend 500. Returning an empty slice lets callers skip cleanly
+	// rather than hard-fail on a degraded cloud.
 
 	t.Logf("Found %d configured clouds for testing", len(clouds))
 	for _, c := range clouds {
@@ -847,6 +837,45 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	}
 
 	return clouds
+}
+
+// GetComputeConfigCloudID returns the ID of a cloud suitable for creating
+// compute configs: one with at least one cloud resource (a proxy for a healthy
+// primary cloud resource). POST /api/v2/compute_templates/ returns a backend
+// 500 for clouds lacking a healthy primary resource, so when none are available
+// the test is skipped rather than hard-failing. An explicit ANYSCALE_TEST_CLOUD_ID
+// override is honored first (the operator is asserting that cloud is healthy).
+func GetComputeConfigCloudID(t *testing.T) string {
+	if id := os.Getenv("ANYSCALE_TEST_CLOUD_ID"); id != "" {
+		return id
+	}
+	for _, c := range GetAllConfiguredClouds(t) {
+		if c.IsVM() {
+			return c.ID
+		}
+	}
+	t.Skip("No VM cloud with a healthy primary cloud resource available; " +
+		"compute config creation returns a backend 500 on degraded clouds. " +
+		"Set ANYSCALE_TEST_CLOUD_ID to a healthy cloud to run this test.")
+	return ""
+}
+
+// GetComputeConfigCloudName is like GetComputeConfigCloudID but returns the
+// cloud name, for tests that reference a cloud by name. Honors
+// ANYSCALE_TEST_CLOUD_NAME first.
+func GetComputeConfigCloudName(t *testing.T) string {
+	if name := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); name != "" {
+		return name
+	}
+	for _, c := range GetAllConfiguredClouds(t) {
+		if c.IsVM() {
+			return c.Name
+		}
+	}
+	t.Skip("No VM cloud with a healthy primary cloud resource available; " +
+		"compute config creation returns a backend 500 on degraded clouds. " +
+		"Set ANYSCALE_TEST_CLOUD_NAME to a healthy cloud to run this test.")
+	return ""
 }
 
 // GetAllVMClouds returns one VM cloud per provider (AWS, GCP).
