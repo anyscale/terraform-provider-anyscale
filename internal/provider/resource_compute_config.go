@@ -195,12 +195,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 			},
 			"cloud_resource": schema.StringAttribute{
 				Optional:            true,
-				Computed:            true,
 				Description:         "The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.",
 				MarkdownDescription: "The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 
 			"zones": schema.ListAttribute{
@@ -624,6 +620,14 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
+	// Capture what the user actually configured before it's overwritten below,
+	// so head_node/worker_nodes' Computed sub-attributes (e.g. resources, which
+	// the API auto-fills from instance_type) can be masked back to null when
+	// the user did not set them - mirroring Read's prior-state masking, using
+	// the plan itself as "prior" since this is the resource's first apply.
+	priorHeadNode := plan.HeadNode
+	priorWorkerNodes := plan.WorkerNodes
+
 	// Build the request
 	createRequest, _ := r.buildComputeConfigRequest(ctx, &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
@@ -668,6 +672,44 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	}
 	if resultData.LastModifiedAt != "" {
 		plan.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
+	}
+
+	// head_node/worker_nodes are Required/Optional blocks, but sub-attributes
+	// like resources are Optional+Computed (the API fills them in from
+	// instance_type). Populate them from the create response the same way
+	// Read does, or they are left Unknown and Terraform rejects the apply
+	// with "Provider returned invalid result object".
+	configData := resultData.Config
+	headNodeType := configData.HeadNodeType
+	workerNodeTypes := configData.WorkerNodeTypes
+	if len(configData.DeploymentConfigs) > 0 {
+		deploymentConfig := configData.DeploymentConfigs[0]
+		if deploymentConfig.HeadNodeType != nil {
+			headNodeType = deploymentConfig.HeadNodeType
+		}
+		if len(deploymentConfig.WorkerNodeTypes) > 0 {
+			workerNodeTypes = deploymentConfig.WorkerNodeTypes
+		}
+	}
+
+	if headNodeType != nil {
+		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, headNodeType)
+		resp.Diagnostics.Append(headNodeDiags...)
+		if !resp.Diagnostics.HasError() {
+			plan.HeadNode = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, &resp.Diagnostics)
+		}
+	}
+
+	if len(workerNodeTypes) > 0 {
+		workerInterfaces := make([]interface{}, 0, len(workerNodeTypes))
+		for _, worker := range workerNodeTypes {
+			workerInterfaces = append(workerInterfaces, worker)
+		}
+		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		resp.Diagnostics.Append(workerNodesDiags...)
+		if !resp.Diagnostics.HasError() {
+			plan.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, &resp.Diagnostics)
+		}
 	}
 
 	// Set state with all fields populated
