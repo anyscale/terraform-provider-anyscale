@@ -448,23 +448,38 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						Computed:            true,
 						Default:             stringdefault.StaticString("anyscale"),
-						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads.",
+						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"ingress_host": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com).",
+						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"cluster_name": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name).",
+						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"context": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments).",
+						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"kubeconfig_path": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments).",
+						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 				},
 			},
@@ -512,12 +527,18 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						Computed:            true,
 						Default:             stringdefault.StaticString("/mnt/shared"),
-						MarkdownDescription: "The mount path for the file storage.",
+						MarkdownDescription: "The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 				},
 				Blocks: map[string]schema.Block{
 					"mount_targets": schema.ListNestedBlock{
-						MarkdownDescription: "List of mount targets with address and optional zone.",
+						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
+						},
 						NestedObject: schema.NestedBlockObject{
 							Attributes: map[string]schema.Attribute{
 								"address": schema.StringAttribute{
@@ -665,8 +686,13 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	jsonData, _ := json.Marshal(deployReq)
 	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": SanitizeJSONForLog(string(jsonData))})
 
+	// add_resource registers real cloud infrastructure server-side and can
+	// legitimately run well past DoRequest's default deadline.
+	addResourceCtx, cancel := context.WithTimeout(ctx, addResourceRequestTimeout)
+	defer cancel()
+
 	deployResp, err := DoRequestAndParse[CloudDeploymentResponse](
-		ctx,
+		addResourceCtx,
 		r.client,
 		"PUT",
 		fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID),
@@ -858,36 +884,46 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 
 // findDefaultCloudResource checks if the cloud has a single default resource
 func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cloudID string) (*CloudDeploymentResult, error) {
-	deploymentsResp, err := DoRequestAndParse[CloudDeploymentsResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID),
-		nil,
+	// Pages through every page rather than just the first - a cloud with many
+	// resources attached would otherwise risk missing the default one.
+	results, err := PaginatedRequest(
+		ctx, r.client, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil,
+		func(body []byte) ([]CloudDeploymentResult, *string, error) {
+			var deploymentsResp CloudDeploymentsResponse
+			if err := json.Unmarshal(body, &deploymentsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal cloud resources: %w", err)
+			}
+			return deploymentsResp.Results, deploymentsResp.Metadata.NextPagingToken, nil
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list cloud resources: %w", err)
 	}
 
-	if len(deploymentsResp.Results) == 1 && deploymentsResp.Results[0].IsDefault {
-		tflog.Debug(ctx, "Found single default resource", map[string]any{"name": deploymentsResp.Results[0].Name})
-		return &deploymentsResp.Results[0], nil
+	if len(results) == 1 && results[0].IsDefault {
+		tflog.Debug(ctx, "Found single default resource", map[string]any{"name": results[0].Name})
+		return &results[0], nil
 	}
 
-	tflog.Debug(ctx, "Cloud has multiple resources or no default", map[string]any{"count": len(deploymentsResp.Results)})
+	tflog.Debug(ctx, "Cloud has multiple resources or no default", map[string]any{"count": len(results)})
 	return nil, nil
 }
 
 // readCloudResource reads a cloud resource from the API and updates the state model
 func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel) error {
-	deploymentsResp, err := DoRequestAndParse[CloudDeploymentsResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID),
-		nil,
-		http.StatusOK,
-		http.StatusNotFound,
+	// Pages through every page rather than just the first: Read calls this and
+	// removes the resource from state on a "not found", so a resource whose
+	// name only appears past page 1 would otherwise be phantom-deleted from
+	// state - the same bug class task d35713ef fixed for organization_collaborator.
+	results, err := PaginatedRequest(
+		ctx, r.client, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil,
+		func(body []byte) ([]CloudDeploymentResult, *string, error) {
+			var deploymentsResp CloudDeploymentsResponse
+			if err := json.Unmarshal(body, &deploymentsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal cloud resources: %w", err)
+			}
+			return deploymentsResp.Results, deploymentsResp.Metadata.NextPagingToken, nil
+		},
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
@@ -898,7 +934,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 
 	// Find the resource by name
 	var foundResource *CloudDeploymentResult
-	for _, r := range deploymentsResp.Results {
+	for _, r := range results {
 		if r.Name == resourceName {
 			foundResource = &r
 			break
@@ -1127,6 +1163,12 @@ func (r *CloudResourceResource) addProviderConfig(ctx context.Context, deployReq
 				deployReq.FileStorage = fileStorage
 			}
 		}
+
+	case "AZURE":
+		return fmt.Errorf("azure clouds are not yet supported by this provider")
+
+	case "GENERIC":
+		return fmt.Errorf("generic clouds are not yet supported by this provider")
 	}
 
 	return nil

@@ -18,6 +18,18 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+// defaultRequestTimeout bounds an API call when the caller's context carries
+// no deadline of its own. Long-running calls (e.g. add_resource, which
+// legitimately runs for minutes while real cloud infra is registered) set
+// their own longer deadline on ctx before calling DoRequest, which then
+// leaves it untouched instead of overriding it with this default.
+const defaultRequestTimeout = 60 * time.Second
+
+// addResourceRequestTimeout is the deadline for the add_resource call
+// (POST/PUT .../add_resource), which registers real cloud infrastructure
+// server-side and legitimately takes longer than defaultRequestTimeout.
+const addResourceRequestTimeout = 15 * time.Minute
+
 // Credentials represents the structure of ~/.anyscale/credentials.json
 type Credentials struct {
 	Token    string `json:"token"`
@@ -34,20 +46,20 @@ func NewClient(baseURL string) (*Client, error) {
 	return &Client{
 		BaseURL: baseURL,
 		Token:   token,
-		HTTPClient: &http.Client{
-			Timeout: time.Second * 30,
-		},
+		// No blanket Timeout here: it would cap every request (including
+		// long-running ones like add_resource) regardless of context, which
+		// is exactly the bug this shape previously had. DoRequest applies
+		// defaultRequestTimeout via context instead, which callers can override.
+		HTTPClient: &http.Client{},
 	}, nil
 }
 
 // NewClientWithToken creates a new Anyscale API client with explicit token
 func NewClientWithToken(baseURL, token string) *Client {
 	return &Client{
-		BaseURL: baseURL,
-		Token:   token,
-		HTTPClient: &http.Client{
-			Timeout: time.Second * 30,
-		},
+		BaseURL:    baseURL,
+		Token:      token,
+		HTTPClient: &http.Client{},
 	}
 }
 
@@ -102,13 +114,23 @@ func GetAuthToken() (string, error) {
 }
 
 // DoRequest performs an authenticated HTTP request to the Anyscale API.
-// The context is used for cancellation and timeouts.
+// The context is used for cancellation and timeouts: if ctx has no deadline
+// of its own, defaultRequestTimeout is applied; if it already has one (set by
+// a caller that knows a particular call runs long), that deadline is left as-is.
 func (c *Client) DoRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := c.BaseURL + path
+
+	var cancel context.CancelFunc
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		ctx, cancel = context.WithTimeout(ctx, defaultRequestTimeout)
+	}
 
 	// Use NewRequestWithContext to support context cancellation
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -118,8 +140,31 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body io.Rea
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
 
+	// Tie the timeout's cancel to the body close, not this function's return:
+	// callers read resp.Body after DoRequest returns, and canceling any
+	// earlier would abort that read.
+	if cancel != nil {
+		resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
+	}
+
 	return resp, nil
+}
+
+// cancelOnCloseBody releases a DoRequest-created context timeout when the
+// response body is closed, rather than when DoRequest itself returns.
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
 }
