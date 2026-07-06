@@ -289,3 +289,7 @@ state, add a sweeper file `internal/acctest/sweeper_<type>_test.go` following
 the pattern in `sweeper_project_test.go`. The cloud sweeper's `Dependencies`
 list determines order — if your new resource lives under a cloud, add it to
 the cloud sweeper's `Dependencies` so it sweeps first.
+
+<!-- crystl-cli:begin -->
+@AGENTS.md
+<!-- crystl-cli:end -->
