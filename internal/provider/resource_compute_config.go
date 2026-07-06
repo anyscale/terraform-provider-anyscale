@@ -382,8 +382,21 @@ func workerNodeConfigAttributes() map[string]schema.Attribute {
 	// Add worker-specific fields
 	attrs["name"] = schema.StringAttribute{
 		Optional:            true,
+		Computed:            true,
 		Description:         "Unique name of this worker group. Defaults to a human-friendly representation of the instance type.",
 		MarkdownDescription: "Unique name of this worker group. Defaults to a human-friendly representation of the instance type.",
+		PlanModifiers: []planmodifier.String{
+			// UseNonNullStateForUnknown, not UseStateForUnknown: name is an
+			// attribute nested inside a list element (worker_nodes), and a
+			// brand-new element added by this plan has no corresponding prior
+			// state at its index. Plain UseStateForUnknown copies that missing
+			// state's null straight into the plan, so a genuinely new worker
+			// group's name plans as null instead of unknown - the API then
+			// returns a real value and Terraform rejects the apply as
+			// inconsistent. UseNonNullStateForUnknown leaves it unknown
+			// instead when there is no non-null prior value to reuse.
+			stringplanmodifier.UseNonNullStateForUnknown(),
+		},
 	}
 	attrs["min_nodes"] = schema.Int64Attribute{
 		Optional:            true,
@@ -679,7 +692,26 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	// instance_type). Populate them from the create response the same way
 	// Read does, or they are left Unknown and Terraform rejects the apply
 	// with "Provider returned invalid result object".
-	configData := resultData.Config
+	populateNodesFromResponse(ctx, resultData.Config, priorHeadNode, priorWorkerNodes, &plan, &resp.Diagnostics)
+
+	// Set state with all fields populated
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+// populateNodesFromResponse resolves head_node/worker_nodes' Computed
+// sub-attributes (name, resources, ...) from a create/update API response,
+// masking each against its prior value the same way Read does. Both Create
+// and Update must call this: the API only returns final node data in this
+// response, and any Computed sub-attribute left unresolved causes Terraform
+// to reject the apply with "Provider produced inconsistent result after apply".
+func populateNodesFromResponse(
+	ctx context.Context,
+	configData computeTemplateConfig,
+	priorHeadNode types.Object,
+	priorWorkerNodes types.List,
+	plan *ComputeConfigResourceModel,
+	diags *diag.Diagnostics,
+) {
 	headNodeType := configData.HeadNodeType
 	workerNodeTypes := configData.WorkerNodeTypes
 	if len(configData.DeploymentConfigs) > 0 {
@@ -694,9 +726,9 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 
 	if headNodeType != nil {
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, headNodeType)
-		resp.Diagnostics.Append(headNodeDiags...)
-		if !resp.Diagnostics.HasError() {
-			plan.HeadNode = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, &resp.Diagnostics)
+		diags.Append(headNodeDiags...)
+		if !diags.HasError() {
+			plan.HeadNode = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, diags)
 		}
 	}
 
@@ -706,14 +738,11 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 			workerInterfaces = append(workerInterfaces, worker)
 		}
 		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
-		resp.Diagnostics.Append(workerNodesDiags...)
-		if !resp.Diagnostics.HasError() {
-			plan.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, &resp.Diagnostics)
+		diags.Append(workerNodesDiags...)
+		if !diags.HasError() {
+			plan.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, diags)
 		}
 	}
-
-	// Set state with all fields populated
-	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
 func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -729,6 +758,8 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	// null when the user did not explicitly set them.
 	priorHeadNode := state.HeadNode
 	priorWorkerNodes := state.WorkerNodes
+	priorMinResources := state.MinResources
+	priorMaxResources := state.MaxResources
 
 	// Use ConfigID for API lookup (version-specific ID)
 	// Fall back to ID if ConfigID is not set (for backwards compatibility or import)
@@ -827,13 +858,13 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		if minResources, ok := flags["min_resources"].(map[string]interface{}); ok {
 			minResourcesMap, diags := InterfaceMapToFloat64(ctx, minResources)
 			resp.Diagnostics.Append(diags...)
-			state.MinResources = minResourcesMap
+			state.MinResources = restoreMapKeyCasing(ctx, minResourcesMap, priorMinResources)
 		}
 
 		if maxResources, ok := flags["max_resources"].(map[string]interface{}); ok {
 			maxResourcesMap, diags := InterfaceMapToFloat64(ctx, maxResources)
 			resp.Diagnostics.Append(diags...)
-			state.MaxResources = maxResourcesMap
+			state.MaxResources = restoreMapKeyCasing(ctx, maxResourcesMap, priorMaxResources)
 		}
 
 		if enableCrossZone, ok := flags["allow-cross-zone-autoscaling"].(bool); ok {
@@ -897,9 +928,57 @@ func maskNodeFromPrior(ctx context.Context, apiNode types.Object, priorNode type
 		}
 	}
 
+	// resourceMapToAPI canonicalizes well-known resource keys to lowercase
+	// (cpu/gpu/memory/object_store_memory) before sending, so a configured
+	// "CPU" round-trips from the API as "cpu". Restore the user's casing here
+	// instead of at the request layer, so state matches plan.
+	if priorResources, ok := priorAttrs["resources"].(types.Map); ok {
+		if apiResources, ok := masked["resources"].(types.Map); ok {
+			masked["resources"] = restoreMapKeyCasing(ctx, apiResources, priorResources)
+		}
+	}
+
 	obj, objDiags := types.ObjectValue(apiNode.AttributeTypes(ctx), masked)
 	diags.Append(objDiags...)
 	return obj
+}
+
+// restoreMapKeyCasing returns apiMap with each key's casing replaced by the
+// case-insensitively matching key from priorMap, where one exists. Anyscale's
+// API normalizes some map keys (e.g. resource type names) regardless of how
+// they were configured; without this, state drifts from plan on every read.
+// Keys with no case-insensitive match in priorMap (new keys, or import with no
+// prior to match against) are left as the API returned them.
+func restoreMapKeyCasing(ctx context.Context, apiMap types.Map, priorMap types.Map) types.Map {
+	if apiMap.IsNull() || apiMap.IsUnknown() || priorMap.IsNull() || priorMap.IsUnknown() {
+		return apiMap
+	}
+
+	priorElems := priorMap.Elements()
+	if len(priorElems) == 0 {
+		return apiMap
+	}
+
+	priorCasing := make(map[string]string, len(priorElems))
+	for k := range priorElems {
+		priorCasing[strings.ToLower(k)] = k
+	}
+
+	apiElems := apiMap.Elements()
+	restored := make(map[string]attr.Value, len(apiElems))
+	for k, v := range apiElems {
+		if orig, ok := priorCasing[strings.ToLower(k)]; ok {
+			restored[orig] = v
+		} else {
+			restored[k] = v
+		}
+	}
+
+	mapVal, mapDiags := types.MapValue(apiMap.ElementType(ctx), restored)
+	if mapDiags.HasError() {
+		return apiMap
+	}
+	return mapVal
 }
 
 // maskWorkerNodesFromPrior applies maskNodeFromPrior elementwise on the
@@ -968,6 +1047,12 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
+	// Capture what the user configured before it's overwritten below, same
+	// reasoning as Create: this is what tells populateNodesFromResponse
+	// which Computed sub-attributes (resources, ...) the user left unset.
+	priorHeadNode := plan.HeadNode
+	priorWorkerNodes := plan.WorkerNodes
+
 	// Anyscale compute configs support versioning - updates create a new version with the same name.
 	// The API handles this via POST with new_version=true and the same name.
 	// This gives us a new ID and incremented version number.
@@ -1027,6 +1112,11 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 	if resultData.LastModifiedAt != "" {
 		plan.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
 	}
+
+	// Same as Create: resolve head_node/worker_nodes' Computed sub-attributes
+	// from the response, or a value left Unknown (e.g. a brand-new nameless
+	// worker group added in this update) makes Terraform reject the apply.
+	populateNodesFromResponse(ctx, resultData.Config, priorHeadNode, priorWorkerNodes, &plan, &resp.Diagnostics)
 
 	// Set updated state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)

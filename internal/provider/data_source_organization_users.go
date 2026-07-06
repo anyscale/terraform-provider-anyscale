@@ -2,10 +2,8 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -137,73 +135,43 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 		return
 	}
 
-	// Build query parameters
-	queryParams := "?count=50"
+	// Build extra query parameters (page size is added by listAllOrganizationCollaborators)
+	extraParams := url.Values{}
 	if !config.Email.IsNull() {
-		queryParams += fmt.Sprintf("&email=%s", config.Email.ValueString())
+		extraParams.Set("email", config.Email.ValueString())
 	}
 	if !config.Name.IsNull() {
-		queryParams += fmt.Sprintf("&name=%s", config.Name.ValueString())
+		extraParams.Set("name", config.Name.ValueString())
 	}
 	if !config.IsServiceAccount.IsNull() {
-		queryParams += fmt.Sprintf("&is_service_account=%t", config.IsServiceAccount.ValueBool())
+		extraParams.Set("is_service_account", fmt.Sprintf("%t", config.IsServiceAccount.ValueBool()))
 	}
 
-	// Fetch organization users from API
-	apiResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/organization_collaborators%s", queryParams), nil)
+	// Fetch organization users from API, across every page rather than just the first.
+	collaborators, err := listAllOrganizationCollaborators(ctx, d.client, extraParams)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch organization users", map[string]any{"error": err.Error()})
 		resp.Diagnostics.AddError("API Request Failed", fmt.Sprintf("Failed to fetch organization users: %s", err.Error()))
 		return
 	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", fmt.Sprintf("Failed to read response: %s", err.Error()))
-		return
-	}
-
-	if apiResp.StatusCode != http.StatusOK {
-		resp.Diagnostics.AddError(
-			"API Error",
-			fmt.Sprintf("Failed to list organization users: %s - %s", apiResp.Status, string(body)),
-		)
-		return
-	}
-
-	var usersResp struct {
-		Results []struct {
-			ID              string  `json:"id"`
-			UserID          *string `json:"user_id"`
-			Name            string  `json:"name"`
-			Email           string  `json:"email"`
-			PermissionLevel string  `json:"permission_level"`
-			CreatedAt       string  `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &usersResp); err != nil {
-		resp.Diagnostics.AddError("JSON Unmarshal Error", fmt.Sprintf("Failed to unmarshal response: %s", err.Error()))
-		return
-	}
 
 	// Convert to Terraform model
-	users := make([]OrganizationUserModel, len(usersResp.Results))
-	for i, user := range usersResp.Results {
+	users := make([]OrganizationUserModel, len(collaborators))
+	for i, user := range collaborators {
 		userID := types.StringNull()
 		if user.UserID != nil {
 			userID = types.StringValue(*user.UserID)
 		}
 
+		name := ""
+		if user.Name != nil {
+			name = *user.Name
+		}
+
 		users[i] = OrganizationUserModel{
 			ID:              types.StringValue(user.ID),
 			UserID:          userID,
-			Name:            types.StringValue(user.Name),
+			Name:            types.StringValue(name),
 			Email:           types.StringValue(user.Email),
 			PermissionLevel: types.StringValue(user.PermissionLevel),
 			CreatedAt:       types.StringValue(user.CreatedAt),
