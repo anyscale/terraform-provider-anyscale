@@ -140,7 +140,8 @@ func (d *PolicyBindingsDataSource) Read(ctx context.Context, req datasource.Read
 
 	resourceType := config.ResourceType.ValueString()
 
-	// Fetch policy bindings from API
+	// Fetch policy bindings from API. Confirmed non-paginated (BETA endpoint;
+	// PolicyBindingsListResponse has no next_paging_token) - not an a41c8e2d gap.
 	apiResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/policy/%s", resourceType), nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch policy bindings", map[string]any{"error": err.Error()})

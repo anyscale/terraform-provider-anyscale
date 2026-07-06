@@ -77,7 +77,7 @@ output "user_permission" {
 
 ### Read-Only
 
-- `created_at` (String) Timestamp when the collaborator was added to the organization.
+- `created_at` (String) Timestamp when the collaborator was added to the organization. Write-once: set on import and never re-read afterward, since the API has returned different values for it across reads for the same collaborator.
 - `email` (String) The email address of the collaborator.
 - `id` (String) The unique identity ID of the collaborator. Used for import.
 - `name` (String) The name of the collaborator.

@@ -304,15 +304,6 @@ type OrganizationInvitationResponse struct {
 	Result OrganizationInvitationResult `json:"result"`
 }
 
-// OrganizationInvitationsListResponse represents the response from listing invitations
-type OrganizationInvitationsListResponse struct {
-	Results  []OrganizationInvitationResult `json:"results"`
-	Metadata struct {
-		Total           int     `json:"total"`
-		NextPagingToken *string `json:"next_paging_token"`
-	} `json:"metadata"`
-}
-
 // OrganizationInvitationResult represents an invitation
 type OrganizationInvitationResult struct {
 	ID             string  `json:"id"` // invitation_id

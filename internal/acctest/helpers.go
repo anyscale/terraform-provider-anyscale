@@ -297,13 +297,15 @@ func createEphemeralTestCloud(t *testing.T) (cloudID string, cloudName string, e
 
 	// Create minimal empty cloud request
 	createReq := struct {
-		Name     string `json:"name"`
-		Provider string `json:"provider"`
-		Region   string `json:"region"`
+		Name        string `json:"name"`
+		Provider    string `json:"provider"`
+		Region      string `json:"region"`
+		Credentials string `json:"credentials"`
 	}{
-		Name:     cloudName,
-		Provider: "AWS",
-		Region:   "us-east-2",
+		Name:        cloudName,
+		Provider:    "AWS",
+		Region:      "us-east-2",
+		Credentials: fmt.Sprintf("arn:aws:iam::000000000000:role/%s", cloudName),
 	}
 
 	reqBody, err := json.Marshal(createReq)
