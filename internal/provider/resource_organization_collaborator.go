@@ -61,6 +61,7 @@ func (r *OrganizationCollaboratorResource) Metadata(ctx context.Context, req res
 func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages an existing Anyscale Organization Collaborator's permissions.\n\n" +
+			"~> **Warning:** Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate `DELETE` against the Anyscale API. There is no undo; the user would need to be re-invited and re-accept to regain access. This also happens on any `terraform destroy` that reaches this resource, including as part of tearing down a larger configuration. If you only want Terraform to stop managing a collaborator without removing their access, use `terraform state rm` instead of `terraform destroy`.\n\n" +
 			"**Important:** This resource cannot create new users. Users must first be added to the organization through:\n" +
 			"1. An accepted `anyscale_organization_invitation`, or\n" +
 			"2. SCIM provisioning\n\n" +

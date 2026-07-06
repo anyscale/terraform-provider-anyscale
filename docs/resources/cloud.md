@@ -226,3 +226,14 @@ Optional:
 - `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS).
 - `endpoint` (String) Custom S3-compatible endpoint (for MinIO, etc.).
 - `region` (String) The bucket region (if different from cloud region).
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import using the cloud ID
+terraform import anyscale_cloud.example cld_abc123
+```

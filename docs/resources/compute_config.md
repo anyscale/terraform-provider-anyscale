@@ -203,3 +203,16 @@ Optional:
 - `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
 - `tpu` (Number) Number of TPUs to allocate.
 - `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import using the version-specific config ID (not the name).
+# Find it via `anyscale compute-config get <name>` or the anyscale_compute_config
+# data source's `config_id` attribute.
+terraform import anyscale_compute_config.example cpt_abc123
+```
