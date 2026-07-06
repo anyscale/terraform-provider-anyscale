@@ -85,10 +85,7 @@ func TestAccPolicyBindingsDataSource_FindSpecificCloud(t *testing.T) {
 		return
 	}
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

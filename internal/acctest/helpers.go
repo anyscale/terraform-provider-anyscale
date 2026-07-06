@@ -295,7 +295,11 @@ func createEphemeralTestCloud(t *testing.T) (cloudID string, cloudName string, e
 
 	t.Logf("Creating ephemeral test cloud: %s", cloudName)
 
-	// Create minimal empty cloud request
+	// Create minimal empty cloud request. The API requires a credentials
+	// value even for an empty cloud with no resource attached; an obviously
+	// fake placeholder ARN is fine since nothing ever assumes this role. This
+	// mirrors the exact placeholder format resource_cloud.go's
+	// getOrGenerateCredentials generates for the same empty-cloud pattern.
 	createReq := struct {
 		Name        string `json:"name"`
 		Provider    string `json:"provider"`
@@ -971,6 +975,326 @@ func GetAllVMClouds(t *testing.T) []CloudInfo {
 		t.Logf("Found %d unique VM cloud providers for testing", len(vmClouds))
 	}
 	return vmClouds
+}
+
+var (
+	// Cache for a read-only test project ID. Only for tests that merely read
+	// a project (e.g. data source lookups) — never for tests that create,
+	// update, or replace project-scoped state, since this may resolve to a
+	// shared, real project. Those should call createEphemeralTestProject instead.
+	cachedTestProjectID string
+	testProjectIDMutex  sync.Mutex
+
+	// Cache for a test user group ID, used e.g. as a policy binding principal.
+	cachedTestUserGroupID string
+	testUserGroupIDMutex  sync.Mutex
+)
+
+// GetTestProjectID returns a project ID for READ-ONLY acceptance tests, with
+// priority:
+//  1. ANYSCALE_TEST_PROJECT_ID environment variable (explicit override)
+//  2. Auto-discover: list projects, prefer the org's default project (always
+//     present, stable across runs), else the first result.
+//
+// Do not use this for tests that mutate or replace state scoped to the
+// project itself (e.g. policy bindings, which replace all bindings on the
+// target resource) — call createEphemeralTestProject instead so the test
+// never touches a shared/real project.
+func GetTestProjectID(t *testing.T) string {
+	testProjectIDMutex.Lock()
+	defer testProjectIDMutex.Unlock()
+
+	if cachedTestProjectID != "" {
+		return cachedTestProjectID
+	}
+
+	if envProjectID := os.Getenv("ANYSCALE_TEST_PROJECT_ID"); envProjectID != "" {
+		t.Logf("Using test project ID from ANYSCALE_TEST_PROJECT_ID: %s", envProjectID)
+		cachedTestProjectID = envProjectID
+		return cachedTestProjectID
+	}
+
+	client, err := GetTestClient()
+	if err != nil {
+		t.Skip("No project available - failed to get test client.")
+		return ""
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/projects", nil)
+	if err != nil {
+		t.Skip("No project available - failed to list projects.")
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Skip("No project available - API error listing projects.")
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Skip("No project available - failed to read response.")
+		return ""
+	}
+
+	var projectsResp struct {
+		Results []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			IsDefault bool   `json:"is_default"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &projectsResp); err != nil {
+		t.Skip("No project available - failed to parse response.")
+		return ""
+	}
+
+	if len(projectsResp.Results) == 0 {
+		t.Skip("No project available - no projects found in the account.")
+		return ""
+	}
+
+	// Prefer the default project: always present, stable across runs, so
+	// repeated test invocations resolve to the same read target.
+	for _, p := range projectsResp.Results {
+		if p.IsDefault {
+			t.Logf("Using default project for test: %s (ID: %s)", p.Name, p.ID)
+			cachedTestProjectID = p.ID
+			return cachedTestProjectID
+		}
+	}
+
+	t.Logf("Using first available project for test: %s (ID: %s)", projectsResp.Results[0].Name, projectsResp.Results[0].ID)
+	cachedTestProjectID = projectsResp.Results[0].ID
+	return cachedTestProjectID
+}
+
+// GetTestUserGroupID returns a user group ID for acceptance tests that need
+// to reference an existing group (e.g. as a policy binding principal), with
+// priority:
+//  1. ANYSCALE_TEST_USER_GROUP_ID environment variable (explicit override)
+//  2. Auto-discover: list user groups, use the first non-deleted result.
+//
+// User groups are normally synced from an IdP via SCIM rather than created by
+// tests, so unlike clouds/projects there is no ephemeral-creation fallback:
+// if the org has no groups, the test skips.
+func GetTestUserGroupID(t *testing.T) string {
+	testUserGroupIDMutex.Lock()
+	defer testUserGroupIDMutex.Unlock()
+
+	if cachedTestUserGroupID != "" {
+		return cachedTestUserGroupID
+	}
+
+	if envGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID"); envGroupID != "" {
+		t.Logf("Using test user group ID from ANYSCALE_TEST_USER_GROUP_ID: %s", envGroupID)
+		cachedTestUserGroupID = envGroupID
+		return cachedTestUserGroupID
+	}
+
+	client, err := GetTestClient()
+	if err != nil {
+		t.Skip("No user group available - failed to get test client.")
+		return ""
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/user_groups", nil)
+	if err != nil {
+		t.Skip("No user group available - failed to list user groups.")
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Skip("No user group available - API error listing user groups.")
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Skip("No user group available - failed to read response.")
+		return ""
+	}
+
+	var groupsResp struct {
+		Results []struct {
+			ID        string  `json:"id"`
+			Name      string  `json:"name"`
+			DeletedAt *string `json:"deleted_at"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &groupsResp); err != nil {
+		t.Skip("No user group available - failed to parse response.")
+		return ""
+	}
+
+	for _, g := range groupsResp.Results {
+		if g.DeletedAt == nil {
+			t.Logf("Using user group for test: %s (ID: %s)", g.Name, g.ID)
+			cachedTestUserGroupID = g.ID
+			return cachedTestUserGroupID
+		}
+	}
+
+	t.Skip("No user group available - org has no active user groups. Set ANYSCALE_TEST_USER_GROUP_ID, or ensure SCIM group sync has run.")
+	return ""
+}
+
+// createEphemeralTestProject creates a minimal disposable project under a
+// resolved test cloud, named with the "tfacc-" prefix so the existing project
+// sweeper cleans it up if test cleanup is interrupted. Tests that mutate
+// project-scoped state (e.g. policy bindings, which replace all bindings on
+// the target resource) should use this instead of GetTestProjectID, so they
+// never touch a shared/real project.
+func createEphemeralTestProject(t *testing.T) (projectID string, projectName string, err error) {
+	client, err := GetTestClient()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get test client: %w", err)
+	}
+
+	parentCloudID := GetTestCloudID(t)
+
+	projectName = UniqueName(t, "policy-binding")
+	t.Logf("Creating ephemeral test project: %s (parent cloud: %s)", projectName, parentCloudID)
+
+	createReq := struct {
+		Name          string `json:"name"`
+		ParentCloudID string `json:"parent_cloud_id"`
+		Description   string `json:"description"`
+	}{
+		Name:          projectName,
+		ParentCloudID: parentCloudID,
+		Description:   "Ephemeral project created by terraform-provider-anyscale acceptance tests",
+	}
+
+	reqBody, err := json.Marshal(createReq)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal create request: %w", err)
+	}
+
+	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/projects", strings.NewReader(string(reqBody)))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create project: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return "", "", fmt.Errorf("failed to create project (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var projectResp struct {
+		Result struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &projectResp); err != nil {
+		return "", "", fmt.Errorf("failed to parse project response: %w", err)
+	}
+
+	createdID := projectResp.Result.ID
+	t.Logf("Created ephemeral test project: %s (ID: %s)", projectName, createdID)
+
+	if os.Getenv("ANYSCALE_TEST_KEEP") == "1" {
+		t.Logf("ANYSCALE_TEST_KEEP=1: Project will be preserved after tests")
+	} else {
+		t.Cleanup(func() {
+			delResp, delErr := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/projects/%s", createdID), nil)
+			if delErr != nil {
+				t.Logf("Warning: Failed to delete ephemeral project %s: %v", createdID, delErr)
+				return
+			}
+			defer func() { _ = delResp.Body.Close() }()
+			if delResp.StatusCode != 200 && delResp.StatusCode != 202 && delResp.StatusCode != 204 && delResp.StatusCode != 404 {
+				t.Logf("Warning: Failed to delete ephemeral project %s: status %d", createdID, delResp.StatusCode)
+			}
+		})
+	}
+
+	return createdID, projectName, nil
+}
+
+var (
+	// Cache for the caller's own org ID.
+	cachedTestOrgID string
+	testOrgIDMutex  sync.Mutex
+)
+
+// GetTestOrgID returns the org ID of the credential running the tests, with
+// priority:
+//  1. ANYSCALE_TEST_ORG_ID environment variable (explicit override)
+//  2. Resolve via GET /api/v2/userinfo, which returns the current user's own
+//     record including an organizations array — there is no dedicated
+//     list-organizations endpoint (confirmed 404 on guessed paths).
+//
+// Same shape already used in HCL via the anyscale_user data source with no
+// email filter (see testAccPolicyBindingDataSourceOrganizationConfig's
+// data.anyscale_user.current.organizations[0].id); this is that lookup one
+// layer lower, for tests that need the raw ID in Go rather than in config.
+func GetTestOrgID(t *testing.T) string {
+	testOrgIDMutex.Lock()
+	defer testOrgIDMutex.Unlock()
+
+	if cachedTestOrgID != "" {
+		return cachedTestOrgID
+	}
+
+	if envOrgID := os.Getenv("ANYSCALE_TEST_ORG_ID"); envOrgID != "" {
+		t.Logf("Using test org ID from ANYSCALE_TEST_ORG_ID: %s", envOrgID)
+		cachedTestOrgID = envOrgID
+		return cachedTestOrgID
+	}
+
+	client, err := GetTestClient()
+	if err != nil {
+		t.Skip("No org ID available - failed to get test client.")
+		return ""
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/userinfo", nil)
+	if err != nil {
+		t.Skip("No org ID available - failed to fetch userinfo.")
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Skip("No org ID available - API error fetching userinfo.")
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Skip("No org ID available - failed to read userinfo response.")
+		return ""
+	}
+
+	var userInfoResp struct {
+		Result struct {
+			Organizations []struct {
+				ID string `json:"id"`
+			} `json:"organizations"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &userInfoResp); err != nil {
+		t.Skip("No org ID available - failed to parse userinfo response.")
+		return ""
+	}
+
+	if len(userInfoResp.Result.Organizations) == 0 {
+		t.Skip("No org ID available - userinfo returned no organizations.")
+		return ""
+	}
+
+	t.Logf("Using org ID from userinfo: %s", userInfoResp.Result.Organizations[0].ID)
+	cachedTestOrgID = userInfoResp.Result.Organizations[0].ID
+	return cachedTestOrgID
 }
 
 // GetTestClient returns an authenticated client for testing
