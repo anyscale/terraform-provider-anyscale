@@ -2,6 +2,9 @@
 terraform-provider-anyscale
 build/
 
+.crystl/
+.crystl-agent-history/
+
 # GoReleaser artifacts
 dist/
 
