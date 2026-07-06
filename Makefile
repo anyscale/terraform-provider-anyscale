@@ -3,7 +3,7 @@
 
 BINARY_NAME := terraform-provider-anyscale
 BUILD_DIR := ./build
-INSTALL_DIR := $(HOME)/.terraform.d/plugins/registry.terraform.io/terraform-providers/anyscale/0.0.1/darwin_arm64
+INSTALL_DIR := $(HOME)/.terraform.d/plugins/registry.terraform.io/anyscale/anyscale/0.0.1/darwin_arm64
 GO := go
 GOFLAGS := -v
 GOLANGCI_LINT := golangci-lint
@@ -180,7 +180,7 @@ docs: ## Generate provider documentation
 docs-validate: ## Validate provider documentation
 	@echo "==> Validating documentation..."
 	@if command -v $(TFPLUGINDOCS) >/dev/null 2>&1; then \
-		$(TFPLUGINDOCS) validate; \
+		$(TFPLUGINDOCS) validate --provider-name $(BINARY_NAME); \
 	else \
 		echo "tfplugindocs not installed. Install with: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest"; \
 		exit 1; \

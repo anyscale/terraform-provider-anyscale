@@ -62,3 +62,14 @@ output "new_owner_accepted" {
 - `id` (String) The unique identifier of the invitation (invitation_id).
 - `organization_id` (String) The organization ID this invitation belongs to.
 - `status` (String) The current status of the invitation. Can be `pending`, `accepted`, or `expired`.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import using the invitation ID
+terraform import anyscale_organization_invitation.example inv_abc123
+```

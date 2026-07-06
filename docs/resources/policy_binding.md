@@ -176,3 +176,14 @@ Required:
   - **Organization**: `owner`, `collaborator`
   - **Cloud**: `collaborator`, `readonly`
   - **Project**: `owner`, `write`, `readonly`
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import using the composite ID "resource_type/resource_id"
+terraform import anyscale_policy_binding.example cloud/cld_abc123
+```
