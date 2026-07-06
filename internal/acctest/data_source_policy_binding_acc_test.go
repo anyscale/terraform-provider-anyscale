@@ -15,10 +15,7 @@ func TestAccPolicyBindingDataSource_Cloud(t *testing.T) {
 		return
 	}
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -44,10 +41,7 @@ func TestAccPolicyBindingDataSource_Project(t *testing.T) {
 		return
 	}
 
-	projectID := os.Getenv("ANYSCALE_TEST_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("ANYSCALE_TEST_PROJECT_ID not set, skipping test")
-	}
+	projectID := GetTestProjectID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -122,10 +116,7 @@ func TestAccPolicyBindingDataSource_BindingsPopulated(t *testing.T) {
 		return
 	}
 
-	cloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set, skipping test")
-	}
+	cloudID := GetTestCloudID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {

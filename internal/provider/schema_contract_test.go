@@ -17,6 +17,19 @@ import (
 const (
 	descRequiresReplace    = "If the value of this attribute changes, Terraform will destroy and recreate the resource."
 	descUseStateForUnknown = "Once set, the value of this attribute in state will not change."
+	// descRequiresReplaceIfConfigured is distinct from descRequiresReplace
+	// (note "is configured and") — that difference is exactly what lets a
+	// test tell the two modifiers apart, since neither exposes its
+	// underlying type publicly.
+	descRequiresReplaceIfConfigured = "If the value of this attribute is configured and changes, Terraform will destroy and recreate the resource."
+	// descUseNonNullStateForUnknown is distinct from descUseStateForUnknown
+	// (note "to a non-null value") — required instead of plain
+	// UseStateForUnknown for an attribute nested inside a list, because
+	// UseStateForUnknown copies a MISSING element's null state into the plan
+	// for an update that adds a brand-new list element, producing "Provider
+	// produced inconsistent result after apply" (task 1f2d592f, found via a
+	// live update-add-worker-group repro).
+	descUseNonNullStateForUnknown = "Once set to a non-null value, the value of this attribute in state will not change."
 )
 
 // schemaOf returns the resource.Schema for a resource.Resource implementation
@@ -41,6 +54,15 @@ func hasPlanModifierDescription(mods []planmodifier.String, want string) bool {
 }
 
 func hasMapPlanModifierDescription(mods []planmodifier.Map, want string) bool {
+	for _, m := range mods {
+		if m.Description(context.Background()) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasListPlanModifierDescription(mods []planmodifier.List, want string) bool {
 	for _, m := range mods {
 		if m.Description(context.Background()) == want {
 			return true
@@ -177,4 +199,164 @@ func TestComputeConfigResourceContract(t *testing.T) {
 		t.Fatalf("worker_nodes is not a schema.ListNestedAttribute (got %T)", s.Attributes["worker_nodes"])
 	}
 	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes)
+}
+
+// TestCloudResourceHardenedFieldsRequireReplace pins task 861aaf10's fix: on
+// anyscale_cloud_resource, Update() is a no-op (it re-reads state but never
+// calls the API), so any nested kubernetes_config / file_storage attribute
+// without RequiresReplace silently swallows an edit — the plan diff never
+// converges because nothing ever tells Terraform the change needs a replace.
+// This catches that regression class in milliseconds instead of needing the
+// real-AWS-infra acceptance tests (SkipIfNoRealInfra) to ever run.
+//
+// Deliberately NOT covered here yet: anyscale_cloud carries the identical
+// duplicated kubernetes_config/file_storage shape (tracked as task 02118d55,
+// the sibling mirror fix). Asserting it here before that fix lands would fail
+// for the right reason but at the wrong time — add that case once 02118d55
+// merges, not before.
+func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
+	s := schemaOf(t, &CloudResourceResource{})
+
+	k8sBlock, ok := s.Blocks["kubernetes_config"].(schema.SingleNestedBlock)
+	if !ok {
+		t.Fatalf("kubernetes_config is not a schema.SingleNestedBlock (got %T)", s.Blocks["kubernetes_config"])
+	}
+
+	k8sStringAttrs := []string{"namespace", "ingress_host", "cluster_name", "context", "kubeconfig_path"}
+	for _, name := range k8sStringAttrs {
+		name := name
+		t.Run("kubernetes_config."+name, func(t *testing.T) {
+			attr, ok := k8sBlock.Attributes[name].(schema.StringAttribute)
+			if !ok {
+				t.Fatalf("kubernetes_config.%s is not a schema.StringAttribute (got %T)", name, k8sBlock.Attributes[name])
+			}
+			if !hasPlanModifierDescription(attr.PlanModifiers, descRequiresReplace) {
+				t.Errorf("kubernetes_config.%s must include stringplanmodifier.RequiresReplace() — Update() is a "+
+					"no-op, so without this an edit is silently swallowed and the plan never converges (task 861aaf10)", name)
+			}
+		})
+	}
+
+	fileStorageBlock, ok := s.Blocks["file_storage"].(schema.SingleNestedBlock)
+	if !ok {
+		t.Fatalf("file_storage is not a schema.SingleNestedBlock (got %T)", s.Blocks["file_storage"])
+	}
+
+	t.Run("file_storage.mount_path", func(t *testing.T) {
+		mountPath, ok := fileStorageBlock.Attributes["mount_path"].(schema.StringAttribute)
+		if !ok {
+			t.Fatalf("file_storage.mount_path is not a schema.StringAttribute (got %T)", fileStorageBlock.Attributes["mount_path"])
+		}
+		if !hasPlanModifierDescription(mountPath.PlanModifiers, descRequiresReplace) {
+			t.Errorf("file_storage.mount_path must include stringplanmodifier.RequiresReplace() — same swallowed-edit " +
+				"bug as kubernetes_config (task 861aaf10)")
+		}
+	})
+
+	t.Run("file_storage.mount_targets", func(t *testing.T) {
+		mountTargets, ok := fileStorageBlock.Blocks["mount_targets"].(schema.ListNestedBlock)
+		if !ok {
+			t.Fatalf("file_storage.mount_targets is not a schema.ListNestedBlock (got %T)", fileStorageBlock.Blocks["mount_targets"])
+		}
+		if !hasListPlanModifierDescription(mountTargets.PlanModifiers, descRequiresReplace) {
+			t.Errorf("file_storage.mount_targets must include listplanmodifier.RequiresReplace() at the block level " +
+				"— editing an element's zone hits the same swallowed-edit bug via a different modifier type (task 861aaf10)")
+		}
+	})
+}
+
+// TestProjectDescriptionRequiresReplaceIfConfigured pins task 452e7154's fix.
+// anyscale_project.description is Optional+Computed (the API auto-generates
+// a description when omitted), so a plain RequiresReplace() fires on ANY
+// change to the value — including a server-generated description changing on
+// its own, or an unrelated update (e.g. a collaborator change) that happens
+// to trigger a fresh read — forcing a full project replace nobody asked for.
+// RequiresReplaceIfConfigured only fires when the user actually configured a
+// value, which is the correct trigger. UseStateForUnknown is required
+// alongside it so a server-assigned description stays stable across
+// subsequent plans instead of looking perpetually unknown.
+func TestProjectDescriptionRequiresReplaceIfConfigured(t *testing.T) {
+	s := schemaOf(t, &ProjectResource{})
+
+	desc, ok := s.Attributes["description"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("description is not a schema.StringAttribute (got %T)", s.Attributes["description"])
+	}
+
+	if hasPlanModifierDescription(desc.PlanModifiers, descRequiresReplace) {
+		t.Errorf("description must NOT use plain stringplanmodifier.RequiresReplace() — that forces a full " +
+			"project replace on ANY change, including a server-generated description or an unrelated update " +
+			"(task 452e7154's regression). Use RequiresReplaceIfConfigured instead.")
+	}
+	if !hasPlanModifierDescription(desc.PlanModifiers, descRequiresReplaceIfConfigured) {
+		t.Errorf("description must include stringplanmodifier.RequiresReplaceIfConfigured() so replacement only " +
+			"triggers on a user-configured change, not a server-side one (task 452e7154)")
+	}
+	if !hasPlanModifierDescription(desc.PlanModifiers, descUseStateForUnknown) {
+		t.Errorf("description must include stringplanmodifier.UseStateForUnknown() so a server-assigned value " +
+			"stays stable across subsequent plans instead of appearing perpetually unknown")
+	}
+}
+
+// TestComputeConfigWorkerNodeNameIsServerInferred pins task 451e2845's fix,
+// corrected per task 1f2d592f's live finding.
+// worker_nodes[].name ships Optional with no Computed and no plan modifier at
+// all, but its own description says it "[d]efaults to a human-friendly
+// representation of the instance type" when omitted — exactly the
+// omit-or-set-explicitly shape TestServerInferredStringAttributesAreComputedWithUseStateForUnknown
+// guards elsewhere (compute_stack, cloud_provider, region), just not yet
+// applied here. Without Computed, omitting name plans a hard null; the
+// server (or the provider's own instance-type-derived fallback) then returns
+// a non-null name, and the framework rejects the apply with "Provider
+// produced inconsistent result after apply". This is a table of one rather
+// than folded into that existing test because worker_nodes[].name is nested
+// inside a ListNestedAttribute, not a top-level schema attribute — a
+// different access path (worker_nodes[].NestedObject.Attributes) than that
+// test's flat s.Attributes[...] lookups.
+//
+// Requires UseNonNullStateForUnknown specifically, NOT plain
+// UseStateForUnknown. This was originally written mechanism-agnostic (before
+// either existed in the fix) accepting either UseStateForUnknown or a static
+// Default — forge's live update-add-worker-group repro (task 1f2d592f) found
+// that plain UseStateForUnknown actively regresses this exact scenario: for
+// an update that adds a brand-new list element, the resource has prior state
+// but not at that new index, so UseStateForUnknown copies the missing
+// element's null state into the plan instead of leaving it unknown, and the
+// apply fails the same "Provider produced inconsistent result" way the
+// original bug did. A static Default was never viable either, since the
+// default value is derived from the sibling instance_type field, not a fixed
+// constant. UseNonNullStateForUnknown is the one mechanism that's actually
+// correct here — its own doc string names this exact "child of a nested
+// attribute that can be null after the resource is created" shape.
+func TestComputeConfigWorkerNodeNameIsServerInferred(t *testing.T) {
+	s := schemaOf(t, &ComputeConfigResource{})
+
+	workerNodes, ok := s.Attributes["worker_nodes"].(schema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("worker_nodes is not a schema.ListNestedAttribute (got %T)", s.Attributes["worker_nodes"])
+	}
+
+	name, ok := workerNodes.NestedObject.Attributes["name"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("worker_nodes[].name is not a schema.StringAttribute (got %T)", workerNodes.NestedObject.Attributes["name"])
+	}
+
+	if !name.Optional {
+		t.Errorf("worker_nodes[].name must be Optional: true (users may omit it and get an instance-type-derived default)")
+	}
+	if !name.Computed {
+		t.Errorf("worker_nodes[].name must be Computed: true — without it, omitting the name plans a hard null " +
+			"that can never reconcile against the non-null name the server/provider assigns, producing " +
+			"'Provider produced inconsistent result after apply' (task 451e2845)")
+	}
+	if hasPlanModifierDescription(name.PlanModifiers, descUseStateForUnknown) {
+		t.Errorf("worker_nodes[].name must NOT use plain stringplanmodifier.UseStateForUnknown() — for an " +
+			"update that adds a brand-new worker group, that modifier copies the missing element's null prior " +
+			"state into the plan instead of leaving it unknown, producing 'Provider produced inconsistent " +
+			"result after apply' on the new element (task 1f2d592f's regression). Use UseNonNullStateForUnknown instead.")
+	}
+	if !hasPlanModifierDescription(name.PlanModifiers, descUseNonNullStateForUnknown) {
+		t.Errorf("worker_nodes[].name must include stringplanmodifier.UseNonNullStateForUnknown() — the variant " +
+			"safe for an attribute nested inside a list that can be null after creation (task 451e2845 + 1f2d592f)")
+	}
 }
