@@ -17,10 +17,53 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Changelog fragment presence check
+        if: matrix.shard == 'lint-and-unit' && github.event_name == 'pull_request'
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          FRAGMENT=".changelog/${PR_NUM}.txt"
+          HAS_SKIP_LABEL=$(jq -r '[.pull_request.labels[].name] | any(. == "skip-changelog")' "$GITHUB_EVENT_PATH")
+          if [ -s "$FRAGMENT" ]; then
+            echo "Found changelog fragment: $FRAGMENT"
+          elif [ "$HAS_SKIP_LABEL" = "true" ]; then
+            echo "No changelog fragment, but 'skip-changelog' label present -- OK."
+          else
+            echo "::error::Missing changelog fragment for this PR. Add $FRAGMENT containing one or more 'release-note:<type>' blocks (see CONTRIBUTING.md), or apply the 'skip-changelog' label if this PR has no user-facing effect."
+            exit 1
+          fi
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version: "1.25"
+
+      - name: Changelog fragment content check
+        if: matrix.shard == 'lint-and-unit' && github.event_name == 'pull_request'
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          FRAGMENT=".changelog/${PR_NUM}.txt"
+          if [ -s "$FRAGMENT" ]; then
+            CHECK_DIR=$(mktemp -d)
+            cp "$FRAGMENT" "$CHECK_DIR/"
+            go run ./tools/changelog-build -check -fragments "$CHECK_DIR"
+          else
+            echo "No fragment for this PR (presence check already passed via skip-changelog label) -- nothing to validate."
+          fi
+
+      - name: Changelog build idempotency check
+        if: matrix.shard == 'lint-and-unit'
+        run: |
+          SCRATCH_FRAGMENT=".changelog/ci-idempotency-smoke-test.txt"
+          printf 'release-note:added\nprovider: CI idempotency smoke-test fragment, not a real change.\n' > "$SCRATCH_FRAGMENT"
+          make changelog-build
+          cp CHANGELOG.md /tmp/changelog-first-fold.md
+          make changelog-build
+          if ! diff -u /tmp/changelog-first-fold.md CHANGELOG.md; then
+            echo "::error::make changelog-build is not idempotent -- running it twice produced different output"
+            exit 1
+          fi
+          git checkout -- CHANGELOG.md
+          rm -f "$SCRATCH_FRAGMENT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
