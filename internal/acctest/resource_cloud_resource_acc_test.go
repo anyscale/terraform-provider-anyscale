@@ -703,8 +703,11 @@ func testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix, 
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
   cloud_provider = "AWS"
-  compute_stack  = "K8S"
   region         = "us-east-2"
+  # compute_stack deliberately omitted (stays Computed): the parent starts
+  # empty and derives its compute_stack from the attached cloud_resource -
+  # setting K8S explicitly here can never be honored by the empty-cloud
+  # create path (C14, see quest chat).
 }
 
 resource "anyscale_cloud_resource" "test" {
@@ -732,8 +735,11 @@ func testAccCloudResourceResourceGCPK8SConfig(cloudName, resourceName, randSuffi
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
   cloud_provider = "GCP"
-  compute_stack  = "K8S"
   region         = "us-central1"
+  # compute_stack deliberately omitted (stays Computed): the parent starts
+  # empty and derives its compute_stack from the attached cloud_resource -
+  # setting K8S explicitly here can never be honored by the empty-cloud
+  # create path (C14, see quest chat).
 }
 
 resource "anyscale_cloud_resource" "test" {
