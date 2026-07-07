@@ -9,8 +9,13 @@
 #    - GITHUB_TOKEN: Automatically provided by GitHub Actions
 #
 # To create a release:
-#   git tag -a v0.1.0 -m "Release v0.1.0"
-#   git push origin v0.1.0
+#   make changelog-release VERSION=0.1.0   # finalizes CHANGELOG.md on a branch, opens a PR
+#   # ...get that PR reviewed and merged...
+#   make tag VERSION=0.1.0                 # verifies CHANGELOG.md is finalized on main, tags, pushes
+#
+# See the `changelog-release` and `tag` targets in the Makefile, and
+# .crystl/quest/changelog-release-contract.md for why the changelog step
+# goes through a PR instead of a direct push to main.
 
 name: Release
 
@@ -49,12 +54,24 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
+      # `make tag` already committed the finalized "## [x.y.z] - date" section
+      # to CHANGELOG.md before pushing this tag (see the `tag` Makefile
+      # target), so it's present on this checkout. Re-extract it rather than
+      # trusting a local dist/release-notes.md, which never gets committed
+      # (dist/ is gitignored) and so never survives to reach this runner.
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          go run ./tools/changelog-build -extract "$version" -notes-out dist/release-notes.md
+          echo "==> release notes for $version:"
+          cat dist/release-notes.md
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=dist/release-notes.md
         env:
           # GitHub token for creating releases
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

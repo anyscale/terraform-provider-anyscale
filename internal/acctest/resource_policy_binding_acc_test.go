@@ -99,15 +99,15 @@ func TestAccPolicyBindingResource_CloudBasic(t *testing.T) {
 		return
 	}
 
-	// These tests require:
-	// 1. A test cloud ID (ANYSCALE_TEST_CLOUD_ID)
-	// 2. A test user group ID (ANYSCALE_TEST_USER_GROUP_ID)
-	testCloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	testGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID")
-
-	if testCloudID == "" || testGroupID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_USER_GROUP_ID must be set")
+	// Policy bindings REPLACE all existing bindings on the target resource, so
+	// this runs against a freshly created, disposable cloud rather than a
+	// shared fixture — otherwise the test would wipe any real bindings on
+	// whatever cloud ANYSCALE_TEST_CLOUD_ID happened to resolve to.
+	testCloudID, _, err := createEphemeralTestCloud(t)
+	if err != nil {
+		t.Skipf("Could not create ephemeral test cloud: %v", err)
 	}
+	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -153,12 +153,15 @@ func TestAccPolicyBindingResource_ProjectBasic(t *testing.T) {
 		return
 	}
 
-	testProjectID := os.Getenv("ANYSCALE_TEST_PROJECT_ID")
-	testGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID")
-
-	if testProjectID == "" || testGroupID == "" {
-		t.Skip("ANYSCALE_TEST_PROJECT_ID and ANYSCALE_TEST_USER_GROUP_ID must be set")
+	// Policy bindings REPLACE all existing bindings on the target resource, so
+	// this runs against a freshly created, disposable project rather than a
+	// shared fixture — otherwise the test would wipe any real bindings on
+	// whatever project ANYSCALE_TEST_PROJECT_ID happened to resolve to.
+	testProjectID, _, err := createEphemeralTestProject(t)
+	if err != nil {
+		t.Skipf("Could not create ephemeral test project: %v", err)
 	}
+	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -197,12 +200,11 @@ func TestAccPolicyBindingResource_InvalidRoleForCloud(t *testing.T) {
 		return
 	}
 
-	testCloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	testGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID")
-
-	if testCloudID == "" || testGroupID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_USER_GROUP_ID must be set")
+	testCloudID, _, err := createEphemeralTestCloud(t)
+	if err != nil {
+		t.Skipf("Could not create ephemeral test cloud: %v", err)
 	}
+	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -223,12 +225,11 @@ func TestAccPolicyBindingResource_InvalidRoleForProject(t *testing.T) {
 		return
 	}
 
-	testProjectID := os.Getenv("ANYSCALE_TEST_PROJECT_ID")
-	testGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID")
-
-	if testProjectID == "" || testGroupID == "" {
-		t.Skip("ANYSCALE_TEST_PROJECT_ID and ANYSCALE_TEST_USER_GROUP_ID must be set")
+	testProjectID, _, err := createEphemeralTestProject(t)
+	if err != nil {
+		t.Skipf("Could not create ephemeral test project: %v", err)
 	}
+	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -249,15 +250,17 @@ func TestAccPolicyBindingResource_MultipleBindings(t *testing.T) {
 		return
 	}
 
-	testCloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	testGroupID1 := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID")
-	testGroupID2 := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID_2")
-
-	if testCloudID == "" || testGroupID1 == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_USER_GROUP_ID must be set")
+	testCloudID, _, err := createEphemeralTestCloud(t)
+	if err != nil {
+		t.Skipf("Could not create ephemeral test cloud: %v", err)
 	}
+	testGroupID1 := GetTestUserGroupID(t)
 
-	// If second group not set, use same group for both roles (for testing purposes)
+	// A second, distinct group isn't auto-discoverable safely (we'd have no
+	// way to tell two arbitrary groups apart), so this stays an optional
+	// explicit override. Falls back to the same group for both roles, which
+	// still exercises the multiple-bindings-in-one-call code path.
+	testGroupID2 := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID_2")
 	if testGroupID2 == "" {
 		testGroupID2 = testGroupID1
 	}
@@ -284,12 +287,11 @@ func TestAccPolicyBindingResource_EmptyBindings(t *testing.T) {
 		return
 	}
 
-	testCloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	testGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID")
-
-	if testCloudID == "" || testGroupID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_USER_GROUP_ID must be set")
+	testCloudID, _, err := createEphemeralTestCloud(t)
+	if err != nil {
+		t.Skipf("Could not create ephemeral test cloud: %v", err)
 	}
+	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -320,12 +322,11 @@ func TestAccPolicyBindingResource_Delete(t *testing.T) {
 		return
 	}
 
-	testCloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID")
-	testGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID")
-
-	if testCloudID == "" || testGroupID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID and ANYSCALE_TEST_USER_GROUP_ID must be set")
+	testCloudID, _, err := createEphemeralTestCloud(t)
+	if err != nil {
+		t.Skipf("Could not create ephemeral test cloud: %v", err)
 	}
+	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
@@ -457,8 +458,24 @@ func testAccCheckPolicyBindingIsEmpty(resourceID, resourceType string) resource.
 			return fmt.Errorf("Unexpected status code: %d", resp.StatusCode)
 		}
 
-		// For now, assume success if we can fetch it
-		// A full implementation would parse the response and check bindings.length == 0
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("Failed to read policy binding response: %w", err)
+		}
+
+		var parsed struct {
+			Result struct {
+				Bindings []json.RawMessage `json:"bindings"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return fmt.Errorf("Failed to parse policy binding response: %w", err)
+		}
+
+		if len(parsed.Result.Bindings) > 0 {
+			return fmt.Errorf("expected empty bindings for %s/%s after delete, found %d", resourceType, resourceID, len(parsed.Result.Bindings))
+		}
+
 		return nil
 	}
 }

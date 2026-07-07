@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
@@ -19,6 +20,7 @@ import (
 // TestAccCloudResource_AWS_Basic tests basic AWS cloud creation with all-in-one pattern
 func TestAccCloudResource_AWS_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-aws-basic")
 	// Generate random suffix for IAM roles to allow parallel test runs
@@ -101,9 +103,33 @@ func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 	})
 }
 
+// TestAccCloudResource_Azure_NotSupported is a regression test for task a7b8a48d:
+// setting azure_config used to silently no-op (tflog.Warn only), creating an
+// unconfigured cloud with no error. It must now fail clearly at apply instead.
+// The cloud shell from the POST that happens before add_resource is expected:
+// state is persisted before that call specifically so CheckDestroy can clean it up.
+func TestAccCloudResource_Azure_NotSupported(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-azure-notsup")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceAzureConfig(cloudName),
+				ExpectError: regexp.MustCompile("azure clouds are not yet supported"),
+			},
+		},
+	})
+}
+
 // TestAccCloudResource_GCP_Basic tests basic GCP cloud creation
 func TestAccCloudResource_GCP_Basic(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-gcp-basic")
 	// Generate random suffix for service accounts to allow parallel test runs
@@ -150,6 +176,7 @@ func TestAccCloudResource_GCP_Basic(t *testing.T) {
 // TestAccCloudResource_AWS_K8S tests AWS K8S cloud creation
 func TestAccCloudResource_AWS_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-aws-k8s")
 	// Generate random suffix for IAM roles to allow parallel test runs
@@ -161,7 +188,7 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix),
+				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix, "anyscale"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "AWS"),
@@ -172,6 +199,25 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "AWS", "us-east-2"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// regression test for task 02118d55: this kubernetes_config block is a
+			// duplicate of the one fixed under 861aaf10 on anyscale_cloud_resource and
+			// had the same missing RequiresReplace, so an edit here plans a clean
+			// replace now instead of a diff Update() (partial no-op) used to swallow.
+			{
+				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix, "custom-ns"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.namespace", "custom-ns"),
+					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionReplace),
+					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},
@@ -383,6 +429,21 @@ resource "anyscale_cloud" "test" {
 `, name)
 }
 
+func testAccCloudResourceAzureConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name          = "%s"
+  region        = "eastus"
+  compute_stack = "VM"
+
+  azure_config {
+    subscription_id     = "00000000-0000-0000-0000-000000000000"
+    resource_group_name = "tfacc-notsupported-rg"
+  }
+}
+`, name)
+}
+
 func testAccCloudResourceGCPBasicConfig(name, randSuffix string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
@@ -404,7 +465,7 @@ resource "anyscale_cloud" "test" {
 `, name, randSuffix, randSuffix, randSuffix, randSuffix)
 }
 
-func testAccCloudResourceAWSK8SConfig(name, randSuffix string) string {
+func testAccCloudResourceAWSK8SConfig(name, randSuffix, namespace string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
   name           = "%s"
@@ -413,7 +474,7 @@ resource "anyscale_cloud" "test" {
   region         = "us-east-2"
 
   kubernetes_config {
-    namespace                       = "anyscale"
+    namespace                       = "%s"
     anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/tfacc-aws-k8s-operator-%s"
     zones                           = ["us-east-2a", "us-east-2b"]
   }
@@ -422,7 +483,7 @@ resource "anyscale_cloud" "test" {
     bucket_name = "tfacc-aws-k8s-bucket-%s"
   }
 }
-`, name, randSuffix, randSuffix)
+`, name, namespace, randSuffix, randSuffix)
 }
 
 // TestAccCloudResource_Disappears verifies that an out-of-band cloud deletion

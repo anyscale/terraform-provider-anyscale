@@ -2,9 +2,7 @@ package provider
 
 import (
 	"context"
-	"net/http"
 	"os"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -119,14 +117,11 @@ func (p *AnyscaleProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	// Create the API client
-	client := &Client{
-		BaseURL: apiURL,
-		Token:   token,
-		HTTPClient: &http.Client{
-			Timeout: time.Second * 30,
-		},
-	}
+	// Delegate to NewClientWithToken rather than a third hand-rolled Client
+	// literal, so its HTTPClient construction (no blanket Timeout - DoRequest
+	// applies a default per-call deadline via context instead) has one
+	// definition, not three.
+	client := NewClientWithToken(apiURL, token)
 
 	// Make the client available to resources and data sources
 	resp.DataSourceData = client
@@ -143,7 +138,8 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewOrganizationInvitationResource,
 		NewOrganizationCollaboratorResource,
 		NewPolicyBindingResource,
-		NewGlobalResourceSchedulerResource,
+		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
+		// NewGlobalResourceSchedulerResource,
 		NewContainerImageBuildResource,
 		NewContainerImageRegistryResource,
 	}
@@ -166,7 +162,8 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewUserDataSource,
 		NewUserGroupDataSource,
 		NewUserGroupsDataSource,
-		NewGlobalResourceSchedulerDataSource,
-		NewGlobalResourceSchedulersDataSource,
+		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
+		// NewGlobalResourceSchedulerDataSource,
+		// NewGlobalResourceSchedulersDataSource,
 	}
 }

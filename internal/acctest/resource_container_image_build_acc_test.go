@@ -37,8 +37,19 @@ RUN pip install emoji==2.15.0`
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		// API can only archive container images, not delete. Verify deleted_at is set.
-		CheckDestroy: NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/ext/v0/cluster_environments/%s", "result.deleted_at"),
+		// API can only archive container images, not delete. Verify archived_at is set.
+		//
+		// This must poll /api/v2/application_templates/%s (result.archived_at),
+		// NOT /ext/v0/cluster_environments/%s (result.deleted_at): the archive
+		// endpoint (POST .../application_templates/{id}/archive) writes
+		// archived_at + archiver_id on the ClusterEnvironment row, and never
+		// touches deleted_at. The /ext/v0 read model doesn't even serialize
+		// archived_at, so its deleted_at is structurally always null — no
+		// amount of polling that field will ever observe an archive. Confirmed
+		// against the live API 2026-07-02: an image archived minutes earlier
+		// showed deleted_at=null on /ext/v0 and archived_at=<real timestamp>
+		// on /api/v2 for the same ID.
+		CheckDestroy: NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/api/v2/application_templates/%s", "result.archived_at"),
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -97,7 +108,7 @@ RUN sudo mkdir -p /anyscale/init`
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/ext/v0/cluster_environments/%s", "result.deleted_at"),
+		CheckDestroy:             NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/api/v2/application_templates/%s", "result.archived_at"),
 		Steps: []resource.TestStep{
 			// Step 1: Create initial image
 			{

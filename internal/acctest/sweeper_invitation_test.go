@@ -139,6 +139,11 @@ func listAllInvitationsForSweep(ctx context.Context, client *provider.Client) ([
 }
 
 func sweepInvalidateInvitation(ctx context.Context, client *provider.Client, inv sweepInvitationResult) error {
+	if isSweepDryRun() {
+		log.Printf("[sweep:anyscale_organization_invitation] DRY-RUN would INVALIDATE %s (%s)", inv.ID, sweepRedactEmail(inv.Email))
+		return nil
+	}
+
 	// Invitations are invalidated via POST, not DELETE; the resource Delete
 	// implementation calls the same endpoint.
 	resp, err := client.DoRequest(ctx, "POST", fmt.Sprintf("/api/v2/organization_invitations/%s/invalidate", inv.ID), nil)

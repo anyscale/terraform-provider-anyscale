@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2025-12-29 (Unreleased)
+## [Unreleased]
+
+## [0.1.1] - 2026-07-06
 
 ### 🎉 Major Framework Migration
 
@@ -133,6 +135,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🐛 Fixed
 
+- **Compute Stack Apply Drift**: Fixed "Provider produced inconsistent result after apply" on `anyscale_cloud`
+  - `compute_stack` is now `Optional` + `Computed` with `UseStateForUnknown`, matching the existing `cloud_provider`/`region` pattern
+  - Configs that omit `compute_stack` now apply cleanly instead of erroring; the server-derived value stays stable across subsequent plans
+
+- **Cloud Resource Region Apply Drift**: Fixed the same "inconsistent result after apply" pattern on `anyscale_cloud_resource`
+  - `region` is now `Optional` + `Computed` with `UseStateForUnknown`
+
+- **Compute Config Lookup by Name**: Fixed `anyscale_compute_config` data source lookups by name always failing with "unexpected status 422"
+  - Removed an `archive_status` field from the search request that the API has never accepted
+  - Affected any lookup by `name` (with or without `versions`); lookups by `id` were unaffected
+
+- **Compute Config Apply Drift**: Fixed "Provider returned invalid result object after apply" on `anyscale_compute_config`
+  - `head_node.resources` and `worker_nodes[].resources` were already correctly schema'd, but `Create` never populated them from the API response, leaving them unknown; `Create` now populates them like `Read` does
+  - `cloud_resource` was incorrectly `Optional` + `Computed`, but the API never echoes it back when omitted; changed to `Optional`-only so it no longer waits on a value that never arrives
+
 - **CloudDeploymentID State**: Fixed "unknown value after apply" error
   - CloudDeploymentID now properly initialized to known null value
   - Updated during add_resource if deployment succeeds
@@ -257,9 +274,23 @@ make test-aws-vm-basic
 
 **Native HCL is the star of this release!** No more `jsonencode()` for `flags` and `advanced_configurations_json`. This was the #1 requested feature and improves the developer experience significantly.
 
+### Since the framework migration
+
+- **Added**: `redis_endpoint` on `kubernetes_config` (`anyscale_cloud`, `anyscale_cloud_resource`) for Ray GCS fault tolerance on K8s clouds.
+- **Added**: Terraform Registry publishing pipeline (GoReleaser config + `terraform-registry-manifest.json`) so tagged releases can be published to the Registry.
+- **Removed**: `anyscale_global_resource_scheduler` resource and data sources are temporarily disabled (not registered with the provider) pending a backend API rework. Existing configurations referencing them will fail to plan until they're reinstated.
+- **Fixed**: apply-time drift on several server-inferred attributes; hardened `CheckDestroy`/sweeper handling for container image resources.
+- **Fixed**: a hardcoded 30-second HTTP client timeout caused `anyscale_cloud`'s `add_resource` call to fail on every real cloud creation (the exact path the quickstart examples exercise). The client no longer times out before the API responds.
+- **Fixed**: `kubernetes_config` and `file_storage` attributes on both `anyscale_cloud` and `anyscale_cloud_resource` caused a perpetual plan diff that never converged (`Update` never called the API for these, and the attributes weren't marked to require replacement).
+- **Fixed**: `anyscale_project.description` no longer forces the entire project to be destroyed and recreated when the server generates or changes it; it now updates in place.
+- **Fixed**: `anyscale_cloud` now returns a clear error for `azure_config` instead of silently creating an unconfigured cloud.
+- **Fixed**: "inconsistent result after apply" errors on `anyscale_compute_config` (worker group names, and CPU/GPU resource-key casing) and `anyscale_organization_collaborator` (`created_at` is now treated as write-once instead of being re-read on every apply).
+- **Fixed**: pagination across the provider only ever returned the first 50 items — affected organization users, organization collaborators, project collaborators, and cloud resources. All list/lookup paths now paginate fully.
+- **Changed**: `anyscale_organization_collaborator` now documents prominently that `terraform destroy` (including as part of tearing down a larger configuration) really does remove the user from the organization, not just from state — use `terraform state rm` if you only want Terraform to stop managing an existing collaborator.
+
 ---
 
-## [0.0.1] - 2024-XX-XX (SDK v2 Version)
+## [0.0.1-dev] - Draft, never published (SDK v2 baseline)
 
 ### Added
 
@@ -274,5 +305,6 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[0.1.0]: https://github.com/your-org/terraform-provider-anyscale/releases/tag/v0.1.0
-[0.0.1]: https://github.com/your-org/terraform-provider-anyscale/releases/tag/v0.0.1
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1
+[0.0.1-dev]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1-dev

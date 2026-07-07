@@ -15,7 +15,7 @@ The Anyscale provider is used to interact with Anyscale resources.
 terraform {
   required_providers {
     anyscale = {
-      source  = "github.com/anyscale/terraform-provider-anyscale"
+      source  = "anyscale/anyscale"
       version = "~> 0.1"
     }
   }

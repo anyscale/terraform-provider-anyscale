@@ -1,3 +1,10 @@
+//go:build grs_enabled
+
+// GRS (Global Resource Scheduler) support is temporarily disabled pending
+// backend API rework — these acceptance tests are excluded from the default
+// build. Re-enable by removing this build tag (and the registrations in
+// provider.go) once the APIs stabilize.
+
 package acctest
 
 import (

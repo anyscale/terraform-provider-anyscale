@@ -160,7 +160,18 @@ Optional overrides:
 - `ANYSCALE_TEST_CLOUD_ID` — pin tests to an existing cloud ID (validated to exist).
 - `ANYSCALE_TEST_CLOUD_NAME` — pin tests by cloud name (must resolve uniquely).
 
-If neither are set, tests should:
+If neither are set, tests fall back to a default pinned cloud NAME
+(`tfp-test-aws-useast1-STATIC`, a manually-created known-good fixture) resolved to
+an ID at runtime, before finally trying auto-discovery/ephemeral-creation. This
+default exists because the CI test org has no reliably-healthy cloud for
+auto-discovery to land on. It works the same way for a local run, an agent, and CI
+with zero setup, since it lives in the resolver itself rather than a wrapper script.
+
+Deliberately by NAME, not by ID: the cloud's ID is never committed anywhere in this
+repo (only its name, which is not sensitive). If you're tempted to "simplify" this by
+hardcoding the ID somewhere, don't — that was an explicit call, not an oversight.
+
+If none of the above resolve, tests should:
 1.	Discover an existing test cloud (e.g., by name prefix/tag such as tf-acc-*), or
 2.	Create an ephemeral test cloud, then reuse it during the test run.
 
@@ -278,3 +289,7 @@ state, add a sweeper file `internal/acctest/sweeper_<type>_test.go` following
 the pattern in `sweeper_project_test.go`. The cloud sweeper's `Dependencies`
 list determines order — if your new resource lives under a cloud, add it to
 the cloud sweeper's `Dependencies` so it sweeps first.
+
+<!-- crystl-cli:begin -->
+@AGENTS.md
+<!-- crystl-cli:end -->

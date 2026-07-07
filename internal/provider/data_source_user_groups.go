@@ -109,7 +109,8 @@ func (d *UserGroupsDataSource) Configure(ctx context.Context, req datasource.Con
 func (d *UserGroupsDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var state UserGroupsDataSourceModel
 
-	// Fetch user groups from API
+	// Fetch user groups from API. Confirmed non-paginated (no next_paging_token
+	// in the response) - not an a41c8e2d gap.
 	apiResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/user_groups", nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch user groups", map[string]any{"error": err.Error()})

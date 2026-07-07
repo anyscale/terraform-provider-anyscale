@@ -12,7 +12,11 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// Creating a compute config (not just reading one) needs a cloud with a
+	// healthy primary cloud resource, same as TestAccComputeConfigResource_*;
+	// GetTestCloudID doesn't filter for that and this test used to hard-fail
+	// with a backend 500 on a degraded cloud instead of skipping cleanly.
+	cloudID := GetComputeConfigCloudID(t)
 	configName := UniqueName(t, "ds-compute-config")
 
 	resource.Test(t, resource.TestCase{
@@ -50,7 +54,9 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	// See TestAccComputeConfigDataSource_Basic: needs a cloud with a healthy
+	// primary cloud resource to avoid a 500 on create.
+	cloudID := GetComputeConfigCloudID(t)
 	configName := UniqueName(t, "ds-compute-versions")
 
 	resource.Test(t, resource.TestCase{

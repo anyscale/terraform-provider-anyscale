@@ -39,7 +39,13 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 				// Use config_id (version-specific) since Primary.ID is the name and the
 				// /ext/v0/cluster_computes/ endpoint requires the versioned ID.
-				CheckDestroy: NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+				// Compute configs ARCHIVE (not delete) on destroy: the resource's Delete
+				// calls /api/v2/compute_templates/{id}/archive, which sets archived_at
+				// but leaves the row 200-fetchable. So verify the archived marker, not a
+				// 404 — else CheckDestroy false-positives ("still returns 200"). Same
+				// wrong-check-type class as the F4 container-image fix; confirmed live:
+				// an archived config returns archived_at set + deleted_at null here.
+				CheckDestroy: NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"),
 				Steps: []resource.TestStep{
 					// Create and Read testing
 					{
@@ -87,13 +93,13 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	cloudID := GetComputeConfigCloudID(t)
 	configName := UniqueName(t, "compute-config-workers")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_withWorkers(configName, cloudID, "m5.large", "m5.xlarge"),
@@ -115,17 +121,78 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	})
 }
 
+// TestAccComputeConfigResource_InconsistentResultRegressions is a regression
+// test for tasks 451e2845 and 1f2d592f: worker_nodes[].name and resource-map
+// keys (per-node resources, and top-level min_resources) used to trip
+// Terraform's "provider produced inconsistent result after apply" check -
+// resourceMapToAPI canonicalizes well-known resource keys to lowercase before
+// sending, so a configured "CPU" used to come back as "cpu", and a
+// server-assigned worker name used to come back non-null when the config left
+// it unset. Step 1 exercises both at Create time. Step 2 adds a second,
+// brand-new nameless worker group via Update - the case populateNodesFromResponse
+// exists for, since UseStateForUnknown has no prior list element to fall back
+// to for a worker group that didn't exist before this update.
+func TestAccComputeConfigResource_InconsistentResultRegressions(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetComputeConfigCloudID(t)
+	configName := UniqueName(t, "compute-config-inconsistent")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigResourceConfig_inconsistentResultRegressions(configName, cloudID, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "1"),
+					// Configured uppercase keys must round-trip with their original
+					// casing, not the API's lowercased canonical form.
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.resources.CPU", "2"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "min_resources.CPU", "1"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// regression test for task 1f2d592f: adding a second, brand-new
+			// nameless worker group via Update (not Create) must not trip the
+			// inconsistent-result check either - Update() now resolves Computed
+			// sub-attributes from the response the same way Create() does.
+			{
+				Config: testAccComputeConfigResourceConfig_inconsistentResultUpdateAddWorker(configName, cloudID, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "2"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.1.resources.GPU", "1"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+
 func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := GetTestCloudName(t)
+	cloudName := GetComputeConfigCloudName(t)
 	configName := UniqueName(t, "compute-config-cloudname")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_withCloudName(configName, cloudName),
@@ -226,6 +293,77 @@ resource "anyscale_compute_config" "test" {
 `, name, cloudID, instanceType)
 }
 
+func testAccComputeConfigResourceConfig_inconsistentResultRegressions(name, cloudID, workerInstanceType string) string {
+	return fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  head_node = {
+    instance_type = "%s"
+  }
+
+  worker_nodes = [
+    {
+      # name intentionally omitted: the API assigns one from the instance type.
+      instance_type = "%s"
+      min_nodes     = 0
+      max_nodes     = 1
+      market_type   = "ON_DEMAND"
+      resources = {
+        CPU = 2
+      }
+    }
+  ]
+
+  min_resources = {
+    CPU = 1
+  }
+}
+`, name, cloudID, workerInstanceType, workerInstanceType)
+}
+
+func testAccComputeConfigResourceConfig_inconsistentResultUpdateAddWorker(name, cloudID, workerInstanceType string) string {
+	return fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  head_node = {
+    instance_type = "%s"
+  }
+
+  worker_nodes = [
+    {
+      # name intentionally omitted: the API assigns one from the instance type.
+      instance_type = "%s"
+      min_nodes     = 0
+      max_nodes     = 1
+      market_type   = "ON_DEMAND"
+      resources = {
+        CPU = 2
+      }
+    },
+    {
+      # Second worker group, brand new in this update, also nameless -
+      # UseStateForUnknown has no prior list element to fall back to for it.
+      instance_type = "%s"
+      min_nodes     = 0
+      max_nodes     = 1
+      market_type   = "ON_DEMAND"
+      resources = {
+        GPU = 1
+      }
+    }
+  ]
+
+  min_resources = {
+    CPU = 1
+  }
+}
+`, name, cloudID, workerInstanceType, workerInstanceType, workerInstanceType)
+}
+
 func testAccComputeConfigResourceConfig_withWorkers(name, cloudID, headInstanceType, workerInstanceType string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
@@ -268,14 +406,14 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
-	cloudID := GetTestCloudID(t)
+	cloudID := GetComputeConfigCloudID(t)
 	configName := UniqueName(t, "compute-config-update")
 	var initialConfigID string
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
 		Steps: []resource.TestStep{
 			// Create initial compute config with small instance
 			{
@@ -392,7 +530,7 @@ func TestAccComputeConfigResource_Disappears(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s"),
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
 		Steps: []resource.TestStep{
 			{
 				Config: testAccComputeConfigResourceConfig_basic(configName, cloud.ID, instanceTypes.Small),

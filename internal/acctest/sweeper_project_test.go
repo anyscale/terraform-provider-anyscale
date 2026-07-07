@@ -144,6 +144,11 @@ func listAllProjectsForSweep(ctx context.Context, client *provider.Client) ([]sw
 }
 
 func sweepDeleteProject(ctx context.Context, client *provider.Client, p sweepProjectResult) error {
+	if isSweepDryRun() {
+		log.Printf("[sweep:anyscale_project] DRY-RUN would DELETE %s (%s)", p.ID, p.Name)
+		return nil
+	}
+
 	resp, err := client.DoRequest(ctx, "DELETE", fmt.Sprintf("/api/v2/projects/%s", p.ID), nil)
 	if err != nil {
 		log.Printf("[sweep:anyscale_project] DELETE FAILED %s (%s): %v", p.ID, p.Name, err)

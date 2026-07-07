@@ -84,6 +84,84 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 					},
 				},
 			},
+			// regression test for task 452e7154: the API has no endpoint to update a
+			// project's description in place, so an explicit, intentional description
+			// change plans a replace (not a perpetual diff, not a silent no-op).
+			{
+				Config: testAccProjectResourceWithDescriptionConfig(cloudID, projectName, description+" (changed)"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_project.test", "description", description+" (changed)"),
+					testAccCheckProjectExistsInAPI("anyscale_project.test"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_project.test", plancheck.ResourceActionReplace),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+
+// TestAccProjectResource_DescriptionOmittedSurvivesUpdate is a regression test for
+// task 452e7154: description is Optional+Computed and, when omitted from config,
+// the framework's default proposed value for it goes unknown on ANY update to the
+// resource (not just changes to description itself). A plain RequiresReplace can't
+// tell "still omitted" apart from "changed" in that situation, so it used to force a
+// full project replace on e.g. a collaborator-only edit even though description was
+// never touched. This asserts that case is now a plain in-place update.
+func TestAccProjectResource_DescriptionOmittedSurvivesUpdate(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetTestCloudID(t)
+
+	testEmail1 := os.Getenv("ANYSCALE_TEST_USER_EMAIL_1")
+	testEmail2 := os.Getenv("ANYSCALE_TEST_USER_EMAIL_2")
+	if testEmail1 == "" || testEmail2 == "" {
+		t.Skip("ANYSCALE_TEST_USER_EMAIL_1 and ANYSCALE_TEST_USER_EMAIL_2 not set, skipping collaborator test")
+	}
+
+	projectName := UniqueName(t, "project-desc-omit")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProjectResourceDescriptionOmittedConfig(cloudID, projectName, testEmail1, testEmail2),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "2"),
+					resource.TestCheckResourceAttrSet("anyscale_project.test", "description"),
+					testAccCheckProjectExistsInAPI("anyscale_project.test"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// Collaborator-only edit, description still omitted from config: must be
+			// a plain update, never a replace, and must not perpetually diff.
+			{
+				Config: testAccProjectResourceDescriptionOmittedUpdatedConfig(cloudID, projectName, testEmail1),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "1"),
+					resource.TestCheckResourceAttrSet("anyscale_project.test", "description"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_project.test", plancheck.ResourceActionUpdate),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
 		},
 	})
 }
@@ -260,6 +338,41 @@ resource "anyscale_project" "test" {
   name        = "%s"
   cloud_id    = "%s"
   description = "Test project with collaborators"
+
+  collaborator {
+    email            = "%s"
+    permission_level = "writer"
+  }
+}
+`, projectName, cloudID, email1)
+}
+
+// testAccProjectResourceDescriptionOmittedConfig deliberately has no `description`
+// argument at all: it must be left to the API-generated default, not just set to "".
+func testAccProjectResourceDescriptionOmittedConfig(cloudID, projectName, email1, email2 string) string {
+	return fmt.Sprintf(`
+resource "anyscale_project" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  collaborator {
+    email            = "%s"
+    permission_level = "owner"
+  }
+
+  collaborator {
+    email            = "%s"
+    permission_level = "writer"
+  }
+}
+`, projectName, cloudID, email1, email2)
+}
+
+func testAccProjectResourceDescriptionOmittedUpdatedConfig(cloudID, projectName, email1 string) string {
+	return fmt.Sprintf(`
+resource "anyscale_project" "test" {
+  name     = "%s"
+  cloud_id = "%s"
 
   collaborator {
     email            = "%s"

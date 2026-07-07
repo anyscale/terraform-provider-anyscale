@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
@@ -19,6 +20,7 @@ import (
 // TestAccCloudResourceResource_AWS_VM tests AWS VM cloud resource creation
 func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-res-aws")
 	resourceName := "default"
@@ -70,6 +72,7 @@ func TestAccCloudResourceResource_AWS_VM(t *testing.T) {
 // TestAccCloudResourceResource_GCP_VM tests GCP VM cloud resource creation
 func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-res-gcp")
 	resourceName := "default"
@@ -114,6 +117,7 @@ func TestAccCloudResourceResource_GCP_VM(t *testing.T) {
 // TestAccCloudResourceResource_AWS_K8S tests AWS K8S cloud resource creation
 func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-res-k8s")
 	resourceName := "default"
@@ -126,16 +130,36 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix),
+				Config: testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix, "anyscale"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_cloud_resource.test", "cloud_id"),
 					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "name", resourceName),
 					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "compute_stack", "K8S"),
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "kubernetes_config.namespace", "anyscale"),
 					// API validation
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "K8S"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// regression test for task 861aaf10: kubernetes_config.namespace had no
+			// RequiresReplace, so Update() (a no-op) silently swallowed this edit and
+			// every subsequent plan showed the same diff forever. Editing it must now
+			// plan a clean replace, and the plan after apply must be empty again.
+			{
+				Config: testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix, "custom-ns"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "kubernetes_config.namespace", "custom-ns"),
+					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud_resource.test", plancheck.ResourceActionReplace),
+					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},
@@ -148,6 +172,7 @@ func TestAccCloudResourceResource_AWS_K8S(t *testing.T) {
 // TestAccCloudResourceResource_WithFileStorage tests cloud resource with file storage
 func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
 
 	cloudName := UniqueName(t, "cloud-res-fs")
 	// Random suffix for embedded IAM ARNs / bucket names in the config template.
@@ -160,11 +185,13 @@ func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 		CheckDestroy:             testAccCheckCloudResourceDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix),
+				Config: testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix, "/mnt/shared", "us-east-2a"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_cloud_resource.test", "cloud_id"),
 					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "name", resourceName),
 					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "file_storage.file_storage_id", "fs-test123"),
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "file_storage.mount_path", "/mnt/shared"),
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "file_storage.mount_targets.0.zone", "us-east-2a"),
 					// API validation
 					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
 				),
@@ -173,6 +200,87 @@ func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 						plancheck.ExpectEmptyPlan(),
 					},
 				},
+			},
+			// regression test for task 861aaf10: file_storage.mount_path had no
+			// RequiresReplace, so Update() (a no-op) silently swallowed this edit.
+			// Editing it must now plan a clean replace.
+			{
+				Config: testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix, "/mnt/custom", "us-east-2a"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "file_storage.mount_path", "/mnt/custom"),
+					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud_resource.test", plancheck.ResourceActionReplace),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// regression test for task 861aaf10: mount_targets had no list-level
+			// RequiresReplace, so editing a target's zone hit the same swallowed-diff
+			// bug via a different modifier type (listplanmodifier, not stringplanmodifier).
+			{
+				Config: testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix, "/mnt/custom", "us-east-2b"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "file_storage.mount_targets.0.zone", "us-east-2b"),
+					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud_resource.test", plancheck.ResourceActionReplace),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+
+// TestAccCloudResourceResource_Azure_NotSupported is a regression test for task
+// 02118d55: the provider switch in addProviderConfig had no case at all for AZURE
+// (or GENERIC), so it silently fell through with none of the user's intent applied
+// and no error. It must now fail clearly, the same way anyscale_cloud's AZURE case
+// already does (task a7b8a48d). No real infra needed: this fails before the add_resource
+// API call is ever made.
+func TestAccCloudResourceResource_Azure_NotSupported(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-res-azure-notsup")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudResourceDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceResourceAzureConfig(cloudName),
+				ExpectError: regexp.MustCompile("azure clouds are not yet supported"),
+			},
+		},
+	})
+}
+
+// TestAccCloudResourceResource_Generic_NotSupported mirrors the Azure test above for
+// the GENERIC provider value: confirmed with product that provider-agnostic BYO-kubeconfig
+// K8s is not a v0.1.0 launch feature, so it must error clearly rather than silently no-op.
+func TestAccCloudResourceResource_Generic_NotSupported(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-res-generic-notsup")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudResourceDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceResourceGenericConfig(cloudName),
+				ExpectError: regexp.MustCompile("generic clouds are not yet supported"),
 			},
 		},
 	})
@@ -442,6 +550,48 @@ func verifyCloudResourceDestroyed(client *provider.Client, cloudID, resourceName
 
 // Configuration templates
 
+func testAccCloudResourceResourceAzureConfig(cloudName string) string {
+	return fmt.Sprintf(`
+# Parent cloud is a normal empty AWS cloud - the point of this test is that
+# adding an AZURE-provider resource to it errors, not that the parent is Azure.
+resource "anyscale_cloud" "test_cloud" {
+  name           = "%s"
+  cloud_provider = "AWS"
+  region         = "us-east-2"
+}
+
+resource "anyscale_cloud_resource" "test" {
+  cloud_id       = anyscale_cloud.test_cloud.id
+  name           = "azure-attempt"
+  cloud_provider = "AZURE"
+  region         = "eastus"
+  compute_stack  = "VM"
+}
+`, cloudName)
+}
+
+func testAccCloudResourceResourceGenericConfig(cloudName string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test_cloud" {
+  name           = "%s"
+  cloud_provider = "AWS"
+  region         = "us-east-2"
+}
+
+resource "anyscale_cloud_resource" "test" {
+  cloud_id       = anyscale_cloud.test_cloud.id
+  name           = "generic-attempt"
+  cloud_provider = "GENERIC"
+  compute_stack  = "K8S"
+
+  kubernetes_config {
+    context         = "my-context"
+    kubeconfig_path = "/tmp/kubeconfig"
+  }
+}
+`, cloudName)
+}
+
 func testAccCloudResourceResourceAWSConfig(cloudName, resourceName, randSuffix string) string {
 	return fmt.Sprintf(`
 # First create an empty cloud
@@ -513,7 +663,7 @@ resource "anyscale_cloud_resource" "test" {
 `, cloudName, resourceName, randSuffix, randSuffix, randSuffix, randSuffix, randSuffix)
 }
 
-func testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix string) string {
+func testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix, namespace string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
@@ -530,7 +680,7 @@ resource "anyscale_cloud_resource" "test" {
   compute_stack  = "K8S"
 
   kubernetes_config {
-    namespace                       = "anyscale"
+    namespace                       = "%s"
     anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/tfacc-cloudres-k8s-operator-%s"
     zones                           = ["us-east-2a", "us-east-2b"]
   }
@@ -539,10 +689,10 @@ resource "anyscale_cloud_resource" "test" {
     bucket_name = "tfacc-cres-k8s-bucket-%s"
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix)
+`, cloudName, resourceName, namespace, randSuffix, randSuffix)
 }
 
-func testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix string) string {
+func testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix, mountPath, mountTargetZone string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
@@ -578,11 +728,12 @@ resource "anyscale_cloud_resource" "test" {
 
   file_storage {
     file_storage_id = "fs-test123"
+    mount_path      = "%s"
     mount_targets {
       address = "fs-test123.efs.us-east-2.amazonaws.com"
-      zone    = "us-east-2a"
+      zone    = "%s"
     }
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix, randSuffix)
+`, cloudName, resourceName, randSuffix, randSuffix, randSuffix, mountPath, mountTargetZone)
 }

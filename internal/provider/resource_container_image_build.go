@@ -256,6 +256,25 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		"cluster_environment_id": clusterEnvID,
 	})
 
+	plan.BuildID = types.StringValue(buildID)
+
+	// Persist state now that the cluster environment exists remotely, before
+	// waiting on the (potentially long-running) build. Without this, a build
+	// timeout/failure below would leave the cluster environment orphaned in
+	// the backend with no Terraform record to destroy it.
+	for _, computed := range []*types.String{&plan.BuildStatus, &plan.ImageURI, &plan.RayVersion, &plan.NameVersion, &plan.CreatedAt} {
+		if computed.IsUnknown() {
+			*computed = types.StringNull()
+		}
+	}
+	if plan.Revision.IsUnknown() {
+		plan.Revision = types.Int64Value(0)
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Wait for build to complete
 	build, err := r.waitForBuild(ctx, buildID, timeout)
 	if err != nil {

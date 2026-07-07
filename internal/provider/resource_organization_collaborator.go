@@ -61,6 +61,7 @@ func (r *OrganizationCollaboratorResource) Metadata(ctx context.Context, req res
 func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages an existing Anyscale Organization Collaborator's permissions.\n\n" +
+			"~> **Warning:** Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate `DELETE` against the Anyscale API. There is no undo; the user would need to be re-invited and re-accept to regain access. This also happens on any `terraform destroy` that reaches this resource, including as part of tearing down a larger configuration. If you only want Terraform to stop managing a collaborator without removing their access, use `terraform state rm` instead of `terraform destroy`.\n\n" +
 			"**Important:** This resource cannot create new users. Users must first be added to the organization through:\n" +
 			"1. An accepted `anyscale_organization_invitation`, or\n" +
 			"2. SCIM provisioning\n\n" +
@@ -110,7 +111,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 
 			"created_at": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "Timestamp when the collaborator was added to the organization.",
+				MarkdownDescription: "Timestamp when the collaborator was added to the organization. Write-once: set on import and never re-read afterward, since the API has returned different values for it across reads for the same collaborator.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -194,25 +195,37 @@ func (r *OrganizationCollaboratorResource) Read(ctx context.Context, req resourc
 		return
 	}
 
-	// Update state with API data
-	state.Email = types.StringValue(collaborator.Email)
+	// Update state with API data. created_at is intentionally NOT refreshed
+	// here - see the schema doc string; the API has returned different values
+	// for it across reads, and it's treated as write-once (set on import only).
+	applyCollaboratorIdentityFields(&state, collaborator)
 	state.PermissionLevel = types.StringValue(collaborator.PermissionLevel)
-	state.CreatedAt = types.StringValue(collaborator.CreatedAt)
-
-	if collaborator.UserID != nil && *collaborator.UserID != "" {
-		state.UserID = types.StringValue(*collaborator.UserID)
-	} else {
-		state.UserID = types.StringNull()
-	}
-
-	if collaborator.Name != nil && *collaborator.Name != "" {
-		state.Name = types.StringValue(*collaborator.Name)
-	} else {
-		state.Name = types.StringNull()
-	}
 
 	// Save updated state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// applyCollaboratorIdentityFields copies the identity fields that are safe to
+// refresh from the API (email, user_id, name) into model. created_at is
+// deliberately excluded and must be set separately only where appropriate
+// (import) - see the schema doc string and task 4745d9fb: the API has
+// returned different created_at values across reads for the same
+// collaborator, so re-syncing it from Read/Update causes "Provider produced
+// inconsistent result after apply".
+func applyCollaboratorIdentityFields(model *OrganizationCollaboratorResourceModel, collaborator *OrganizationCollaboratorResult) {
+	model.Email = types.StringValue(collaborator.Email)
+
+	if collaborator.UserID != nil && *collaborator.UserID != "" {
+		model.UserID = types.StringValue(*collaborator.UserID)
+	} else {
+		model.UserID = types.StringNull()
+	}
+
+	if collaborator.Name != nil && *collaborator.Name != "" {
+		model.Name = types.StringValue(*collaborator.Name)
+	} else {
+		model.Name = types.StringNull()
+	}
 }
 
 // Update updates an organization collaborator's permission level.
@@ -291,21 +304,13 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 		return
 	}
 
-	// Update plan with latest data
-	plan.Email = types.StringValue(collaborator.Email)
-	plan.CreatedAt = types.StringValue(collaborator.CreatedAt)
-
-	if collaborator.UserID != nil && *collaborator.UserID != "" {
-		plan.UserID = types.StringValue(*collaborator.UserID)
-	} else {
-		plan.UserID = types.StringNull()
-	}
-
-	if collaborator.Name != nil && *collaborator.Name != "" {
-		plan.Name = types.StringValue(*collaborator.Name)
-	} else {
-		plan.Name = types.StringNull()
-	}
+	// Update plan with latest data. created_at is intentionally left as
+	// req.Plan.Get already resolved it (UseStateForUnknown -> the prior state
+	// value) rather than overwritten here - the API has returned different
+	// created_at values across reads for the same collaborator, and
+	// overwriting it caused "Provider produced inconsistent result after
+	// apply" on a bare permission_level change (task 4745d9fb).
+	applyCollaboratorIdentityFields(&plan, collaborator)
 
 	// Save updated state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -410,81 +415,43 @@ func (r *OrganizationCollaboratorResource) ImportState(ctx context.Context, req 
 
 // Helper functions
 
-// findCollaboratorByID fetches a collaborator by identity_id
+// listAllOrganizationCollaborators pages through the full /api/v2/organization_collaborators
+// list via PaginatedRequest, across every page rather than stopping at the
+// first, so a collaborator past page 1 is never mistaken for missing or
+// silently dropped from a list. extraParams, if non-nil, is merged in
+// alongside the page-size param (e.g. a server-side email or name filter);
+// pass nil for an unfiltered listing.
+func listAllOrganizationCollaborators(ctx context.Context, client *Client, extraParams url.Values) ([]OrganizationCollaboratorResult, error) {
+	params := url.Values{"count": []string{"50"}}
+	for k, v := range extraParams {
+		params[k] = v
+	}
+
+	return PaginatedRequest(
+		ctx, client, "/api/v2/organization_collaborators", params,
+		func(body []byte) ([]OrganizationCollaboratorResult, *string, error) {
+			var listResp OrganizationCollaboratorsListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, fmt.Errorf("error parsing response: %w", err)
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
+	)
+}
+
+// findCollaboratorByID fetches a collaborator by identity_id. The API has no
+// direct GET endpoint for a single collaborator, so this lists and filters.
 func (r *OrganizationCollaboratorResource) findCollaboratorByID(ctx context.Context, identityID string) (*OrganizationCollaboratorResult, error) {
-	// List all collaborators with pagination
-	// Note: The API doesn't have a direct GET endpoint for a single collaborator,
-	// so we need to list and filter
-	httpResp, err := r.client.DoRequest(ctx, "GET", "/api/v2/organization_collaborators?count=50", nil)
+	collaborators, err := listAllOrganizationCollaborators(ctx, r.client, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = httpResp.Body.Close() }()
 
-	body, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error reading response: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
-	}
-
-	var listResp OrganizationCollaboratorsListResponse
-	if err := json.Unmarshal(body, &listResp); err != nil {
-		return nil, fmt.Errorf("error parsing response: %w", err)
-	}
-
-	// Find the collaborator with matching identity_id
-	for _, collab := range listResp.Results {
+	for _, collab := range collaborators {
 		if collab.ID == identityID {
 			return &collab, nil
 		}
 	}
 
-	// If not found in first page, check if there are more pages
-	// For now, we'll assume 50 is enough for most cases
-	// TODO: Implement pagination if needed
-	if listResp.Metadata.NextPagingToken != nil {
-		tflog.Warn(ctx, "Collaborator list has more pages, pagination not fully implemented", map[string]interface{}{
-			"total": listResp.Metadata.Total,
-		})
-	}
-
 	return nil, fmt.Errorf("collaborator not found")
-}
-
-// findCollaboratorByEmail fetches a collaborator by email (convenience function)
-// nolint:unused
-func (r *OrganizationCollaboratorResource) findCollaboratorByEmail(ctx context.Context, email string) (*OrganizationCollaboratorResult, error) {
-	encodedEmail := url.QueryEscape(email)
-	httpResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/organization_collaborators?email=%s", encodedEmail), nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = httpResp.Body.Close() }()
-
-	body, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error reading response: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", httpResp.StatusCode, string(body))
-	}
-
-	var listResp OrganizationCollaboratorsListResponse
-	if err := json.Unmarshal(body, &listResp); err != nil {
-		return nil, fmt.Errorf("error parsing response: %w", err)
-	}
-
-	if len(listResp.Results) == 0 {
-		return nil, fmt.Errorf("collaborator not found")
-	}
-
-	if len(listResp.Results) > 1 {
-		return nil, fmt.Errorf("multiple collaborators found with email %s", email)
-	}
-
-	return &listResp.Results[0], nil
 }

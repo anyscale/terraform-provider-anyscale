@@ -1,10 +1,31 @@
-# Terraform provider for Anyscale
+# Terraform provider for Anyscale (Beta)
 
-A Terraform provider for managing Anyscale resources with Anyscale API v2, built with the [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework).
+> [!WARNING]
+> ## Beta / Use at Your Own Risk
+>
+> This Terraform provider is currently in **beta** and is intended for
+> **evaluation, experimentation, and early feedback**.
+>
+> **Do not rely on this provider for production infrastructure.**
+>
+> Expect:
+>
+> - Breaking changes between releases
+> - Incomplete API coverage
+> - Missing features and documentation
+> - Bugs that may result in failed or partial infrastructure changes
+> - State compatibility changes without notice
+>
+> Use this provider **at your own risk**.
 
-This is a work in progress.
+A Terraform provider for managing Anyscale resources using the Anyscale API v2.
 
-The Anyscale Terraform Provider works with Terraform v1.8+.
+This provider is currently in **beta**. APIs, resource schemas, behavior,
+and Terraform state compatibility may change before the first stable release.
+
+We welcome bug reports and feedback as the provider evolves toward a stable v1.0 release.
+
+This beta provider requires Terraform v1.8 or newer.
 
 ```hcl
 terraform {
@@ -25,15 +46,28 @@ provider "anyscale" {
 }
 ```
 
-## Features
+## Current Beta Capabilities
 
-- **WIP Anyscale Platform Support**:
+- Currently supported resources:
   - Anyscale Clouds with self contained deployment pattern
   - Cloud resource deployments with split deployment pattern
   - Compute configurations
   - Projects
 - **Automatic Detection**: Cloud provider and region auto-detected from configuration blocks
 - **Flexible Authentication**: Environment variable, credentials file, or provider configuration
+
+## Current Limitations
+
+This provider is under active development. Not all Anyscale APIs and
+resources are currently supported.
+
+Current limitations include:
+
+- Incomplete API coverage
+- Resource schemas may change
+- Import support may be incomplete
+- Documentation is still being expanded
+- Breaking changes may occur between releases
 
 ## Authentication
 
@@ -58,7 +92,7 @@ For local development, configure Terraform to use your local build with `~/.terr
 ```hcl
 provider_installation {
   dev_overrides {
-    "terraform-providers/anyscale" = "/path/to/terraform-provider-anyscale"
+    "anyscale/anyscale" = "/path/to/terraform-provider-anyscale"
   }
   direct {}
 }
@@ -74,7 +108,7 @@ provider_installation {
 terraform {
   required_providers {
     anyscale = {
-      source = "github.com/anyscale/terraform-provider-anyscale"
+      source  = "anyscale/anyscale"
       version = "~> 0.1"
     }
   }
@@ -92,6 +126,10 @@ provider "anyscale" {
 
 ## Examples
 
+> [!NOTE]
+> These examples demonstrate provider functionality during beta. They are
+> not production reference architectures.
+
 See the [`examples/`](examples/) directory for complete, working examples:
 
 - **AWS VM**: [`examples/aws-vm-basic/`](examples/aws-vm-basic/) - Basic AWS VM cloud with compute config examples
@@ -99,6 +137,26 @@ See the [`examples/`](examples/) directory for complete, working examples:
 - **AWS EKS**: [`examples/aws-eks-basic/`](examples/aws-eks-basic/) - AWS EKS Kubernetes cloud
 - **GCP GKE**: [`examples/gcp-gke-basic/`](examples/gcp-gke-basic/) - GCP GKE Kubernetes cloud
 - **Split Deployment**: [`examples/aws-vm-basic-resource/`](examples/aws-vm-basic-resource/) - Empty cloud with separate resource deployment
+
+## Versioning
+
+Until the provider reaches a 1.0 release:
+
+- Any release prior to v1.0 may include breaking changes without a major version bump.
+- Resource schemas may change.
+- Terraform state migrations may be required.
+
+## Feedback
+
+Bug reports, feature requests, and pull requests are welcome.
+
+Please include:
+
+- Terraform version
+- Provider version
+- Cloud provider
+- Example configuration
+- Relevant logs
 
 ## Development
 
@@ -132,13 +190,9 @@ make test-aws-vm-basic
 
 ## Contributing
 
-1. Follow [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework) best practices
-2. Add unit tests for helper functions
-3. Add acceptance tests for resources
-4. Update documentation
-5. Run `make lint` and `make test` before submitting
-6. Install precommit: `pre-commit install`
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the PR workflow, including the changelog fragment
+each PR needs.
 
 ## License
 
-[Your License Here]
+[Mozilla Public License 2.0](LICENSE)
