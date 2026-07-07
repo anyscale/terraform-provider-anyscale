@@ -2,9 +2,11 @@ package acctest
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccCloudDataSource_ByID(t *testing.T) {
@@ -156,6 +158,95 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 	})
 }
 
+// TestAccCloudDataSource_C2ParityMatchesPluralDataSource is an
+// acceptance-level proof for change C2's third acceptance criterion:
+// "values match the same cloud in the plural data source." Forge's mocked
+// unit test proves the singular data source's mapping is internally correct
+// in isolation; this proves the singular and plural data sources actually
+// converge on the same real cloud, which a mapping-only test can't show.
+//
+// Does NOT assume clouds.# == 1 or index into clouds.0: name_contains
+// filtering does not reliably exclude this org's pinned default/static
+// fixture cloud from plural results (confirmed live - it appears regardless
+// of filter value, even a garbage string matching nothing else), the same
+// reason TestAccCloudsDataSource_FindSpecificCloud avoids index-based
+// assertions. Finds this test's own cloud by ID within the returned list
+// instead, mirroring that existing pattern.
+func TestAccCloudDataSource_C2ParityMatchesPluralDataSource(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "ds-cloud-c2-parity")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccCloudDataSourceConfig_c2Parity(cloudName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.#"),
+					testAccCheckCloudC2ParityFieldsMatch("anyscale_cloud.test", "data.anyscale_cloud.test", "data.anyscale_clouds.test"),
+				),
+			},
+		},
+	})
+}
+
+// testAccCheckCloudC2ParityFieldsMatch finds the entry in the plural data
+// source's clouds list whose id matches resourceName's id (rather than
+// assuming a specific index - see the comment on the test above), then
+// asserts the 8 C2 parity fields agree with the singular data source's own
+// values for that same cloud.
+func testAccCheckCloudC2ParityFieldsMatch(resourceName, singularDS, pluralDS string) resource.TestCheckFunc {
+	fields := []string{
+		"compute_stack", "created_at", "creator_id", "is_default",
+		"is_aioa", "is_bring_your_own_resource", "is_private_cloud", "is_private_service_cloud",
+	}
+
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("not found: %s", resourceName)
+		}
+		cloudID := rs.Primary.ID
+
+		plural, ok := s.RootModule().Resources[pluralDS]
+		if !ok {
+			return fmt.Errorf("not found: %s", pluralDS)
+		}
+		singular, ok := s.RootModule().Resources[singularDS]
+		if !ok {
+			return fmt.Errorf("not found: %s", singularDS)
+		}
+
+		count, err := strconv.Atoi(plural.Primary.Attributes["clouds.#"])
+		if err != nil {
+			return fmt.Errorf("clouds.# is not a number: %v", err)
+		}
+
+		var foundIndex = -1
+		for i := 0; i < count; i++ {
+			if plural.Primary.Attributes[fmt.Sprintf("clouds.%d.id", i)] == cloudID {
+				foundIndex = i
+				break
+			}
+		}
+		if foundIndex == -1 {
+			return fmt.Errorf("cloud %s not found among %d entries in %s", cloudID, count, pluralDS)
+		}
+
+		for _, field := range fields {
+			pluralVal := plural.Primary.Attributes[fmt.Sprintf("clouds.%d.%s", foundIndex, field)]
+			singularVal := singular.Primary.Attributes[field]
+			if pluralVal != singularVal {
+				return fmt.Errorf("%s mismatch: singular=%q plural=%q", field, singularVal, pluralVal)
+			}
+		}
+		return nil
+	}
+}
+
 // Configuration templates
 
 func testAccCloudDataSourceConfig_byID(cloudID string) string {
@@ -193,6 +284,24 @@ data "anyscale_cloud" "by_name" {
   name = anyscale_cloud.test.name
 }
 `, cloudName, enabled, enabled)
+}
+
+func testAccCloudDataSourceConfig_c2Parity(cloudName string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name           = "%s"
+  cloud_provider = "AWS"
+  region         = "us-east-2"
+}
+
+data "anyscale_cloud" "test" {
+  id = anyscale_cloud.test.id
+}
+
+data "anyscale_clouds" "test" {
+  name_contains = anyscale_cloud.test.name
+}
+`, cloudName)
 }
 
 func testAccCloudDataSourceConfig_withComputeConfig(cloudID, configName string) string {
