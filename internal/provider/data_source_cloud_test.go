@@ -111,6 +111,60 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 	})
 }
 
+// TestReadCloudIntoModel_C2ParityFieldsMapFromResponse is a regression test
+// for change C2: the singular anyscale_cloud data source previously exposed
+// none of the 8 fields the plural anyscale_clouds data source already had
+// per-item (compute_stack, created_at, creator_id, is_default, is_aioa,
+// is_bring_your_own_resource, is_private_cloud, is_private_service_cloud).
+func TestReadCloudIntoModel_C2ParityFieldsMapFromResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/api/v2/clouds/cloud-parity":
+			_, _ = fmt.Fprint(w, `{
+				"result": {
+					"id": "cloud-parity", "name": "c", "provider": "AWS", "region": "us-east-1",
+					"compute_stack": "K8S", "created_at": "2026-01-01T00:00:00Z", "creator_id": "usr_123",
+					"is_default": true, "is_aioa": true, "is_bring_your_own_resource": true,
+					"is_private_cloud": true, "is_private_service_cloud": true
+				}
+			}`)
+		case "/api/v2/clouds/cloud-parity/resources":
+			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	var config CloudDataSourceModel
+	if err := d.readCloudIntoModel(context.Background(), "cloud-parity", &config); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if config.ComputeStack.ValueString() != "K8S" {
+		t.Errorf("ComputeStack = %v, want K8S", config.ComputeStack.ValueString())
+	}
+	if config.CreatedAt.ValueString() != "2026-01-01T00:00:00Z" {
+		t.Errorf("CreatedAt = %v, want 2026-01-01T00:00:00Z", config.CreatedAt.ValueString())
+	}
+	if config.CreatorID.ValueString() != "usr_123" {
+		t.Errorf("CreatorID = %v, want usr_123", config.CreatorID.ValueString())
+	}
+	for name, got := range map[string]types.Bool{
+		"IsDefault":              config.IsDefault,
+		"IsAIOA":                 config.IsAIOA,
+		"IsBringYourOwnResource": config.IsBringYourOwnResource,
+		"IsPrivateCloud":         config.IsPrivateCloud,
+		"IsPrivateServiceCloud":  config.IsPrivateServiceCloud,
+	} {
+		if !got.ValueBool() {
+			t.Errorf("%s = false, want true (from response)", name)
+		}
+	}
+}
+
 // TestCloudDataSource_LookupByIDAndByName_ReturnIdenticalValues proves that
 // the by-id and by-name lookup paths converge on readCloudIntoModel and so
 // return the same values for the same underlying cloud - both must reflect

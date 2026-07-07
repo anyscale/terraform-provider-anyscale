@@ -625,6 +625,17 @@ func (r *CloudResource) hasEmbeddedResourceConfig(plan *CloudResourceModel) bool
 	return !plan.AWSConfig.IsNull() || !plan.GCPConfig.IsNull() || !plan.AzureConfig.IsNull() || !plan.KubernetesConfig.IsNull()
 }
 
+// regionRequiredForCreateError returns a diagnostic-ready error for an
+// all-in-one create whose region could not be determined by the time
+// addCloudResource is about to be called - see C13. A non-empty region
+// produces no error.
+func regionRequiredForCreateError(region string) (summary, detail string, hasError bool) {
+	if region != "" {
+		return "", "", false
+	}
+	return "Region Could Not Be Determined", "region could not be determined; set region explicitly on the anyscale_cloud.", true
+}
+
 // findCloudByName looks for an existing cloud with the given name
 func (r *CloudResource) findCloudByName(ctx context.Context, name string) (string, error) {
 	resp, err := r.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
@@ -863,6 +874,22 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 			"Missing Required Field",
 			"compute_stack is required when using embedded config (aws_config/gcp_config)",
 		)
+		return
+	}
+
+	// C13: region auto-detection only has a source to infer from for AWS
+	// (subnet_ids_to_az) and only defaults a placeholder for the empty-cloud
+	// pattern - a K8S-only cloud (no aws_config/gcp_config) with no explicit
+	// region has neither, and plan.Region would otherwise still be an empty
+	// string here. Guard rather than send Region: "" to add_resource: a
+	// clear error here is far better than an opaque API failure.
+	// Deliberately NOT inferring from kubernetes_config.zones
+	// (region-from-zone parsing is provider-specific and error-prone - AWS
+	// "us-west-2a" vs GCP "us-central1-a") and NOT making region Required on
+	// the schema, which would break AWS users who rely on subnet inference
+	// and never hit this path at all.
+	if summary, detail, hasError := regionRequiredForCreateError(plan.Region.ValueString()); hasError {
+		resp.Diagnostics.AddError(summary, detail)
 		return
 	}
 

@@ -121,6 +121,20 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 	}
 }
 
+// TestRegionRequiredForCreateError is a regression test for C13: a K8S-only
+// all-in-one cloud (no aws_config, so no subnet-based inference, and no
+// longer treated as empty since C12) with no explicit region would otherwise
+// reach addCloudResource with region="" - a confusing API-level failure
+// instead of a clear provider-level one.
+func TestRegionRequiredForCreateError(t *testing.T) {
+	if summary, detail, hasError := regionRequiredForCreateError(""); !hasError || summary == "" || detail == "" {
+		t.Errorf("regionRequiredForCreateError(\"\") = (%q, %q, %v), want a non-empty error", summary, detail, hasError)
+	}
+	if summary, detail, hasError := regionRequiredForCreateError("us-east-1"); hasError || summary != "" || detail != "" {
+		t.Errorf("regionRequiredForCreateError(\"us-east-1\") = (%q, %q, %v), want no error", summary, detail, hasError)
+	}
+}
+
 // Test auto-detection of cloud_provider from config blocks
 func TestDetectCloudProvider(t *testing.T) {
 	tests := []struct {
