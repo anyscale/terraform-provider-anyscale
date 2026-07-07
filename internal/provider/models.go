@@ -185,26 +185,47 @@ type CloudDeploymentResponse struct {
 
 // CloudDeploymentResult is the actual deployment data
 type CloudDeploymentResult struct {
-	CloudResourceID         string            `json:"cloud_resource_id"`
-	CloudDeploymentID       string            `json:"cloud_deployment_id"`
-	Name                    string            `json:"name"`
-	Provider                string            `json:"provider"`
-	ComputeStack            string            `json:"compute_stack"`
-	Region                  string            `json:"region"`
-	NetworkingMode          string            `json:"networking_mode"`
-	ObjectStorage           *ObjectStorage    `json:"object_storage"`
-	FileStorage             *FileStorage      `json:"file_storage"`
-	AWSConfig               *AWSConfig        `json:"aws_config"`
-	GCPConfig               *GCPConfig        `json:"gcp_config"`
-	AzureConfig             *AzureConfig      `json:"azure_config"`
-	KubernetesConfig        *KubernetesConfig `json:"kubernetes_config"`
-	CreatedAt               string            `json:"created_at"`
-	IsDefault               bool              `json:"is_default"`
-	OperatorStatus          *string           `json:"operator_status"`
-	OperatorStatusDetails   *string           `json:"operator_status_details"`
-	AutoAddUser             *bool             `json:"auto_add_user,omitempty"`
-	LineageTrackingEnabled  *bool             `json:"lineage_tracking_enabled,omitempty"`
-	IsAggregatedLogsEnabled *bool             `json:"is_aggregated_logs_enabled,omitempty"`
+	CloudResourceID         string                 `json:"cloud_resource_id"`
+	CloudDeploymentID       string                 `json:"cloud_deployment_id"`
+	Name                    string                 `json:"name"`
+	Provider                string                 `json:"provider"`
+	ComputeStack            string                 `json:"compute_stack"`
+	Region                  string                 `json:"region"`
+	NetworkingMode          string                 `json:"networking_mode"`
+	ObjectStorage           *ObjectStorage         `json:"object_storage"`
+	FileStorage             *FileStorage           `json:"file_storage"`
+	AWSConfig               *AWSConfig             `json:"aws_config"`
+	GCPConfig               *GCPConfig             `json:"gcp_config"`
+	AzureConfig             *AzureConfig           `json:"azure_config"`
+	KubernetesConfig        *KubernetesConfig      `json:"kubernetes_config"`
+	CreatedAt               string                 `json:"created_at"`
+	IsDefault               bool                   `json:"is_default"`
+	OperatorStatus          *string                `json:"operator_status"`
+	OperatorStatusDetails   *OperatorStatusDetails `json:"operator_status_details"`
+	AutoAddUser             *bool                  `json:"auto_add_user,omitempty"`
+	LineageTrackingEnabled  *bool                  `json:"lineage_tracking_enabled,omitempty"`
+	IsAggregatedLogsEnabled *bool                  `json:"is_aggregated_logs_enabled,omitempty"`
+}
+
+// OperatorStatusDetails carries Kubernetes Anyscale Operator health details,
+// present once a K8s cloud_resource's operator has reported in. Previously
+// typed as *string on CloudDeploymentResult, which failed to decode as soon
+// as the API returned this object (C4/F2 investigation) - the API has always
+// returned an object here, never a string.
+type OperatorStatusDetails struct {
+	OperatorVersion *string               `json:"operator_version"`
+	CheckResults    []OperatorCheckResult `json:"check_results"`
+	ReportedAt      *string               `json:"reported_at"`
+}
+
+// OperatorCheckResult is a single named health check the operator reports,
+// e.g. connectivity or permissions checks. Not yet surfaced as its own
+// schema attribute (deferred per CLOUD-SYNC-DESIGN.md C4) - decoded here so
+// it doesn't need touching again when it is.
+type OperatorCheckResult struct {
+	Name    *string `json:"name"`
+	Status  *string `json:"status"`
+	Details *string `json:"details"`
 }
 
 // CloudDeploymentsResponse represents the response from listing cloud deployments

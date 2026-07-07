@@ -112,6 +112,9 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
 - `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale.
 - `id` (String) Composite identifier in format cloud_id:name
 - `is_default` (Boolean) Whether this is the default resource for the cloud.
+- `operator_status` (String) The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM). Same underlying value as `status`.
+- `operator_version` (String) The version of the Anyscale Operator that last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).
+- `reported_at` (String) Timestamp when the Anyscale Operator last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).
 - `status` (String) The current status of the cloud resource.
 
 <a id="nestedblock--aws_config"></a>
