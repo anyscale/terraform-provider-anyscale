@@ -1,0 +1,56 @@
+name: Changelog Gate
+
+# Dedicated PR gate for changelog fragments, split out of ci.yml so it can also
+# trigger on `labeled`/`unlabeled`. Applying (or removing) the `skip-changelog`
+# label then re-evaluates the gate immediately -- with no new push, and without
+# dragging ci.yml's expensive acctest matrix along for a label change.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+# A label toggle can supersede an in-flight run; keep only the latest per PR.
+concurrency:
+  group: changelog-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  changelog-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Changelog fragment presence check
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          FRAGMENT=".changelog/${PR_NUM}.txt"
+          HAS_SKIP_LABEL=$(jq -r '[.pull_request.labels[].name] | any(. == "skip-changelog")' "$GITHUB_EVENT_PATH")
+          if [ -s "$FRAGMENT" ]; then
+            echo "Found changelog fragment: $FRAGMENT"
+          elif [ "$HAS_SKIP_LABEL" = "true" ]; then
+            echo "No changelog fragment, but 'skip-changelog' label present -- OK."
+          else
+            echo "::error::Missing changelog fragment for this PR. Add $FRAGMENT containing one or more 'release-note:<type>' blocks (see CONTRIBUTING.md), or apply the 'skip-changelog' label if this PR has no user-facing effect."
+            exit 1
+          fi
+
+      - name: Changelog fragment content check
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          FRAGMENT=".changelog/${PR_NUM}.txt"
+          if [ -s "$FRAGMENT" ]; then
+            CHECK_DIR=$(mktemp -d)
+            cp "$FRAGMENT" "$CHECK_DIR/"
+            go run ./tools/changelog-build -check -fragments "$CHECK_DIR"
+          else
+            echo "No fragment for this PR (presence check already passed via skip-changelog label) -- nothing to validate."
+          fi
