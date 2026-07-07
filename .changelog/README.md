@@ -6,6 +6,13 @@ deletes them — so the changelog is always current without anyone having to han
 the fact. See the root [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the full contributor workflow;
 this file is the format reference.
 
+> [!IMPORTANT]
+> In every example below, the ` ``` ` lines are **literal characters your fragment file must
+> contain** — they aren't markdown decoration around the example, they're part of the syntax the
+> parser scans for. If you copy only the two lines *between* them, your fragment fails with
+> "no release-note fragments found" and CI will reject the PR. Copy the whole fenced block,
+> backticks included.
+
 If your PR has no user-facing effect (internal refactor, test fix, CI change), skip the fragment
 and apply the `skip-changelog` label instead. If you can't apply labels yourself (e.g. you're
 contributing from a fork), ask a maintainer to apply it during review.
@@ -21,25 +28,22 @@ filenames collision-proof (PR numbers are unique) and self-documenting (anyone r
 can trace it straight back to the PR that introduced it).
 
 Because you won't know your PR number until after you open the PR, add the fragment in a
-follow-up commit on the same branch once GitHub has assigned the number:
-
-```bash
-git commit -am "docs: add changelog fragment"   # after the PR exists, e.g. .changelog/142.txt
-git push
-```
+follow-up commit on the same branch once GitHub has assigned the number.
 
 ## Contents
 
-One or more fenced blocks, each shaped like this:
+One or more blocks, each shaped exactly like this — **including the backtick fence lines**:
 
+`````
 ```
 release-note:<type>
 <resource/NAME | data-source/NAME | provider>: <one sentence, present tense, user-facing>
 ```
+`````
 
 A single PR can carry multiple blocks in its one file if the change spans more than one type or
 component — for example, a PR that adds a resource and fixes an unrelated bug drops two blocks in
-the same `.changelog/<PR#>.txt`.
+the same `.changelog/<PR#>.txt`. Nothing else may appear in the file outside a fenced block.
 
 ## Types
 
@@ -73,59 +77,77 @@ A few boundaries that trip people up:
 `breaking-change` is the only mechanism for flagging a break — there's no separate label or side
 channel. The fragment body must state **both** what breaks and how to fix it, in one sentence:
 
+`````
 ```
 release-note:breaking-change
 resource/anyscale_cloud: `aws_config.anyscale_iam_role_id` is renamed to `controlplane_iam_role_arn`; to migrate, update the attribute name in your configuration and re-run `terraform plan`.
 ```
+`````
 
 Deprecations aren't breaking (nothing stops working yet), but call out what replaces the
 deprecated thing and, if known, when it goes away:
 
+`````
 ```
 release-note:deprecated
 resource/anyscale_cloud: `is_empty_cloud` is deprecated in favor of checking whether `cloud_deployment_id` is null; it will be removed in a future major version.
 ```
+`````
 
 ## Examples by type
 
 **New resource**
+`````
 ```
 release-note:new-resource
 resource/anyscale_service: Manage Anyscale Services.
 ```
+`````
 
 **New data source**
+`````
 ```
 release-note:new-data-source
 data-source/anyscale_project: Look up an existing Anyscale project by name or ID.
 ```
+`````
 
 **Added**
+`````
 ```
 release-note:added
 resource/anyscale_cloud: Add support for GCP Filestore in the `file_storage` block.
 ```
+`````
 
 **Changed**
+`````
 ```
 release-note:changed
 resource/anyscale_compute_config: `flags` and `advanced_configurations_json` now accept native HCL instead of requiring `jsonencode()`.
 ```
+`````
 
 **Removed** (non-breaking only — see above)
+`````
 ```
 release-note:removed
 provider: Remove an unused internal request field from compute-config lookups; no user-visible behavior changes.
 ```
+`````
 
 **Fixed**
+`````
 ```
 release-note:fixed
 resource/anyscale_compute_config: Fix data source lookups by `name` returning a 422 error.
 ```
+`````
 
 **Security**
+`````
 ```
 release-note:security
 provider: Mark credential and token fields as sensitive in state and plan output.
 ```
+`````

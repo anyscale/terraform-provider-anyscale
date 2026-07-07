@@ -24,18 +24,22 @@ existed). A release-time tool consolidates all pending fragments into `CHANGELOG
 them — so the changelog is always a byproduct of the PRs that already merged, not a separate task.
 
 **You won't know your PR number until the PR exists.** Open the PR first, then push a follow-up
-commit that adds `.changelog/<that number>.txt`:
+commit that adds `.changelog/<that number>.txt`. Note that the ` ``` ` lines below are literal
+required file content, not just this doc's formatting — the heredoc writes them into the file
+on purpose:
 
-```bash
+`````bash
 # after your PR is open and you know its number, e.g. 142:
 cat > .changelog/142.txt <<'EOF'
+```
 release-note:fixed
 resource/anyscale_cloud: Fix a plan diff on `region` when the field is left unset.
+```
 EOF
 git add .changelog/142.txt
 git commit -m "docs: add changelog fragment"
 git push
-```
+`````
 
 See [`.changelog/README.md`](.changelog/README.md) for the full block syntax, the complete list
 of valid types (`breaking-change`, `new-resource`, `new-data-source`, `added`, `changed`,
