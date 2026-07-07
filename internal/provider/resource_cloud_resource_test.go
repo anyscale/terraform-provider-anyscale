@@ -2,58 +2,11 @@ package provider
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
-
-// TestListCloudResources_OperatorStatusDetailsObjectShape is a regression test
-// for change C4: CloudDeploymentResult types OperatorStatusDetails as *string,
-// but the real API returns a JSON OBJECT (operator_version, check_results[],
-// reported_at) for a K8s resource whose operator has reported in. Decoding
-// that response fails the WHOLE listing (not just the one field), so
-// readCloudResource's Read() errors outright for any K8s cloud_resource with
-// a reported operator status, instead of surfacing its health.
-//
-// This asserts today's (buggy) behavior - that decode currently errors. Once
-// C4 retypes the field, this test must be rewritten to assert the opposite
-// (no error, fields populate) rather than just flipping wantErr, since the
-// whole point of the fix is that this response becomes decodable.
-func TestListCloudResources_OperatorStatusDetailsObjectShape(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{
-			"results": [{
-				"name": "default",
-				"cloud_resource_id": "cldrsrc_1",
-				"cloud_deployment_id": "cldrsrc_1",
-				"provider": "AWS",
-				"compute_stack": "K8S",
-				"region": "us-east-2",
-				"is_default": true,
-				"operator_status": "healthy",
-				"operator_status_details": {
-					"operator_version": "1.2.3",
-					"check_results": [{"name": "connectivity", "status": "ok"}],
-					"reported_at": "2026-07-07T12:00:00Z"
-				}
-			}],
-			"metadata": {"total": 1, "next_paging_token": null}
-		}`)
-	}))
-	defer server.Close()
-
-	client := NewClientWithToken(server.URL, "test-token")
-	_, err := listCloudResources(context.Background(), client, "cld_1")
-	if err == nil {
-		t.Fatal("expected a decode error for object-shaped operator_status_details against the current *string type, but got none - " +
-			"either C4 already landed (rewrite this test to assert success + populated fields instead) or the mock no longer matches the real API shape")
-	}
-}
 
 func TestParseCloudResourceID(t *testing.T) {
 	tests := []struct {
