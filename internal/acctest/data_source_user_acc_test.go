@@ -159,7 +159,14 @@ func TestAccUserDataSource_OutputsWork(t *testing.T) {
 					// Check user data is populated
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "email"),
-					// Outputs should be set (verified by Terraform planning successfully)
+					// organization_ids/cloud_ids are populated — checking the count
+					// attribute (matches the .# pattern used elsewhere in this file)
+					// rather than an exact length, since both lists are whole-account
+					// (every org/cloud the current credential can see) and can
+					// legitimately gain or lose entries between reads if anything
+					// else touches the same shared test org concurrently.
+					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organization_ids.#"),
+					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "cloud_ids.#"),
 				),
 			},
 		},
@@ -197,14 +204,6 @@ output "user_id" {
 
 output "user_email" {
   value = data.anyscale_user.test.email
-}
-
-output "user_org_count" {
-  value = length(data.anyscale_user.test.organization_ids)
-}
-
-output "user_cloud_count" {
-  value = length(data.anyscale_user.test.cloud_ids)
 }
 
 output "user_permission_level" {
