@@ -244,47 +244,28 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	}
 	state.Organizations = orgsList
 
-	// Fetch clouds the user has access to from /api/v2/clouds
-	cloudsResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
+	// Fetch clouds the user has access to from /api/v2/clouds, across every
+	// page rather than just the first (this endpoint paginates - see the
+	// dedicated anyscale_clouds data source, which already does the same).
+	clouds, err := PaginatedRequest(
+		ctx, d.client, "/api/v2/clouds", nil,
+		func(body []byte) ([]CloudResult, *string, error) {
+			var listResp CloudsListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal clouds: %w", err)
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
+	)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch clouds", map[string]any{"error": err.Error()})
 		resp.Diagnostics.AddError("API Request Failed", fmt.Sprintf("Failed to fetch clouds: %s", err.Error()))
 		return
 	}
-	defer func() {
-		if closeErr := cloudsResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	cloudsBody, err := io.ReadAll(cloudsResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", fmt.Sprintf("Failed to read clouds response: %s", err.Error()))
-		return
-	}
-
-	if cloudsResp.StatusCode != http.StatusOK {
-		resp.Diagnostics.AddError(
-			"API Error",
-			fmt.Sprintf("Failed to read clouds: %s - %s", cloudsResp.Status, string(cloudsBody)),
-		)
-		return
-	}
-
-	var cloudsAPIResp struct {
-		Results []struct {
-			ID string `json:"id"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(cloudsBody, &cloudsAPIResp); err != nil {
-		resp.Diagnostics.AddError("JSON Unmarshal Error", fmt.Sprintf("Failed to unmarshal clouds: %s", err.Error()))
-		return
-	}
 
 	// Convert cloud IDs to list
-	cloudIDs := make([]types.String, len(cloudsAPIResp.Results))
-	for i, cloud := range cloudsAPIResp.Results {
+	cloudIDs := make([]types.String, len(clouds))
+	for i, cloud := range clouds {
 		cloudIDs[i] = types.StringValue(cloud.ID)
 	}
 	cloudIDsList, diags := types.ListValueFrom(ctx, types.StringType, cloudIDs)
@@ -294,7 +275,9 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	}
 	state.CloudIDs = cloudIDsList
 
-	// Fetch user groups from /api/v2/user_groups (placeholder for future implementation)
+	// Fetch user groups from /api/v2/user_groups (placeholder for future implementation).
+	// Confirmed non-paginated (no next_paging_token in its response; the dedicated
+	// anyscale_user_groups data source hits the same endpoint the same way) - not an a41c8e2d gap.
 	userGroupsResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/user_groups", nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch user groups", map[string]any{"error": err.Error()})

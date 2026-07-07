@@ -4,6 +4,7 @@ page_title: "anyscale_organization_collaborator Resource - terraform-provider-an
 subcategory: ""
 description: |-
   Manages an existing Anyscale Organization Collaborator's permissions.
+  ~> Warning: Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate DELETE against the Anyscale API. There is no undo; the user would need to be re-invited and re-accept to regain access. This also happens on any terraform destroy that reaches this resource, including as part of tearing down a larger configuration. If you only want Terraform to stop managing a collaborator without removing their access, use terraform state rm instead of terraform destroy.
   Important: This resource cannot create new users. Users must first be added to the organization through:
   An accepted anyscale_organization_invitation, orSCIM provisioning
   Once a user exists in the organization, import them using terraform import to manage their permissions.
@@ -15,6 +16,8 @@ description: |-
 # anyscale_organization_collaborator (Resource)
 
 Manages an existing Anyscale Organization Collaborator's permissions.
+
+~> **Warning:** Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate `DELETE` against the Anyscale API. There is no undo; the user would need to be re-invited and re-accept to regain access. This also happens on any `terraform destroy` that reaches this resource, including as part of tearing down a larger configuration. If you only want Terraform to stop managing a collaborator without removing their access, use `terraform state rm` instead of `terraform destroy`.
 
 **Important:** This resource cannot create new users. Users must first be added to the organization through:
 1. An accepted `anyscale_organization_invitation`, or
@@ -77,8 +80,23 @@ output "user_permission" {
 
 ### Read-Only
 
-- `created_at` (String) Timestamp when the collaborator was added to the organization.
+- `created_at` (String) Timestamp when the collaborator was added to the organization. Write-once: set on import and never re-read afterward, since the API has returned different values for it across reads for the same collaborator.
 - `email` (String) The email address of the collaborator.
 - `id` (String) The unique identity ID of the collaborator. Used for import.
 - `name` (String) The name of the collaborator.
 - `user_id` (String) The user ID of the collaborator.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import using the collaborator's identity_id. If you don't know it, look it up
+# with the anyscale_organization_user data source first:
+#   data "anyscale_organization_user" "example" {
+#     email = "user@example.com"
+#   }
+terraform import anyscale_organization_collaborator.example idt_abc123
+```

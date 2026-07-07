@@ -425,23 +425,38 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Optional:            true,
 						Computed:            true,
 						Default:             stringdefault.StaticString("anyscale"),
-						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads.",
+						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"ingress_host": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com).",
+						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"cluster_name": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name).",
+						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"context": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments).",
+						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 					"kubeconfig_path": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments).",
+						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 				},
 			},
@@ -489,12 +504,18 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Optional:            true,
 						Computed:            true,
 						Default:             stringdefault.StaticString("/mnt/shared"),
-						MarkdownDescription: "The mount path for the file storage.",
+						MarkdownDescription: "The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
 					},
 				},
 				Blocks: map[string]schema.Block{
 					"mount_targets": schema.ListNestedBlock{
-						MarkdownDescription: "List of mount targets with address and optional zone.",
+						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
+						},
 						NestedObject: schema.NestedBlockObject{
 							Attributes: map[string]schema.Attribute{
 								"address": schema.StringAttribute{
@@ -1316,10 +1337,10 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		}
 
 	case "AZURE":
-		tflog.Warn(ctx, "Azure configuration not fully implemented yet")
+		return fmt.Errorf("azure clouds are not yet supported by this provider; azure_config cannot be applied")
 
 	case "GENERIC":
-		tflog.Warn(ctx, "Generic configuration not fully implemented yet")
+		return fmt.Errorf("generic clouds are not yet supported by this provider")
 	}
 
 	// Note: Cloud-level settings (auto_add_user, enable_lineage_tracking, enable_log_ingestion)
@@ -1334,7 +1355,12 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 	// Log sanitized request (redact sensitive fields)
 	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource", map[string]any{"request": SanitizeJSONForLog(string(deployJSON))})
 
-	deployResp, err := r.client.DoRequest(ctx, "PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(deployJSON)))
+	// add_resource registers real cloud infrastructure server-side and can
+	// legitimately run well past DoRequest's default deadline.
+	addResourceCtx, cancel := context.WithTimeout(ctx, addResourceRequestTimeout)
+	defer cancel()
+
+	deployResp, err := r.client.DoRequest(addResourceCtx, "PUT", fmt.Sprintf("/api/v2/clouds/%s/add_resource", cloudID), strings.NewReader(string(deployJSON)))
 	if err != nil {
 		tflog.Error(ctx, "Failed to add cloud resource", map[string]any{"error": err.Error()})
 		return err

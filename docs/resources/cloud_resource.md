@@ -137,8 +137,8 @@ Optional:
 Optional:
 
 - `file_storage_id` (String) The file storage ID (EFS ID, Filestore name, etc.).
-- `mount_path` (String) The mount path for the file storage.
-- `mount_targets` (Block List) List of mount targets with address and optional zone. (see [below for nested schema](#nestedblock--file_storage--mount_targets))
+- `mount_path` (String) The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.
+- `mount_targets` (Block List) List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. (see [below for nested schema](#nestedblock--file_storage--mount_targets))
 
 <a id="nestedblock--file_storage--mount_targets"></a>
 ### Nested Schema for `file_storage.mount_targets`
@@ -173,11 +173,11 @@ Optional:
 Optional:
 
 - `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.
-- `cluster_name` (String) The Kubernetes cluster name (EKS, GKE, AKS cluster name).
-- `context` (String) Kubeconfig context to use (for Generic K8S deployments).
-- `ingress_host` (String) The ingress host for the Anyscale operator (e.g., anyscale.example.com).
-- `kubeconfig_path` (String) Path to kubeconfig file (for Generic K8S deployments).
-- `namespace` (String) The Kubernetes namespace for Anyscale workloads.
+- `cluster_name` (String) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
+- `context` (String) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
+- `ingress_host` (String) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.
+- `kubeconfig_path` (String) Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
+- `namespace` (String) The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.
 - `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.
 - `zones` (List of String) List of availability zones for the Kubernetes cluster.
 
@@ -190,3 +190,14 @@ Optional:
 - `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS).
 - `endpoint` (String) Custom S3-compatible endpoint (for MinIO, etc.).
 - `region` (String) The bucket region (if different from cloud region).
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# Import using the composite ID "cloud_id:resource_name"
+terraform import anyscale_cloud_resource.example cld_abc123:vm-aws-us-east-2
+```

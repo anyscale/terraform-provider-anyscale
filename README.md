@@ -92,7 +92,7 @@ For local development, configure Terraform to use your local build with `~/.terr
 ```hcl
 provider_installation {
   dev_overrides {
-    "terraform-providers/anyscale" = "/path/to/terraform-provider-anyscale"
+    "anyscale/anyscale" = "/path/to/terraform-provider-anyscale"
   }
   direct {}
 }
@@ -108,7 +108,7 @@ provider_installation {
 terraform {
   required_providers {
     anyscale = {
-      source = "github.com/anyscale/terraform-provider-anyscale"
+      source  = "anyscale/anyscale"
       version = "~> 0.1"
     }
   }
@@ -196,3 +196,7 @@ make test-aws-vm-basic
 4. Update documentation
 5. Run `make lint` and `make test` before submitting
 6. Install precommit: `pre-commit install`
+
+## License
+
+[Mozilla Public License 2.0](LICENSE)

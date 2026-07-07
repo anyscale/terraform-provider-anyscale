@@ -31,6 +31,32 @@ func TestAccOrganizationCollaboratorResource_CreateFails(t *testing.T) {
 	})
 }
 
+// warnDestructiveCollaboratorTest logs a loud, explicit warning before any
+// test that imports a real organization_collaborator via resource.Test.
+//
+// resource.Test ALWAYS calls the resource's real Delete() at teardown,
+// whether the test passes or fails — CheckDestroy only controls whether
+// there's a post-destroy verification, not whether destroy itself runs. For
+// this resource, Delete() calls DELETE /api/v2/organization_collaborators/{id},
+// which genuinely removes that identity from the organization. There is no
+// undo: restoring a removed collaborator requires re-inviting and
+// re-accepting from scratch.
+//
+// This test class is gated behind ANYSCALE_TEST_USER_IDENTITY_ID specifically
+// so it stays opt-in, but the destructive-teardown behavior itself is not
+// obvious from the env var name alone — a real, shared test-org identity
+// (brent+testtfprovider@anyscale.com) was deprovisioned this way during
+// development because that risk wasn't stated loudly enough. Point this env
+// var only at a genuinely disposable identity you can afford to lose; the
+// default, CI-safe coverage for this resource is the mocked httptest-based
+// unit tests, which consume nothing real.
+func warnDestructiveCollaboratorTest(t *testing.T, identityID string) {
+	t.Helper()
+	t.Logf("WARNING: this test imports identity %s and resource.Test WILL delete it from the "+
+		"organization at teardown, pass or fail — there is no undo. Only point "+
+		"ANYSCALE_TEST_USER_IDENTITY_ID at a disposable identity you can afford to lose.", identityID)
+}
+
 func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
@@ -42,22 +68,52 @@ func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
 	if testIdentityID == "" {
 		t.Skip("ANYSCALE_TEST_USER_IDENTITY_ID not set, skipping import test")
 	}
+	warnDestructiveCollaboratorTest(t, testIdentityID)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		// No CheckDestroy: the API has no GET-by-ID endpoint for collaborators
-		// (only list-and-filter). And in this import-only test the collaborator
-		// pre-exists outside of Terraform, so destroying state should not remove
-		// the underlying user from the org.
+		// (only list-and-filter). CheckDestroy would only verify what happens
+		// after destroy, not prevent it — see warnDestructiveCollaboratorTest:
+		// destroy WILL remove this identity from the org for real.
 		Steps: []resource.TestStep{
-			// Import existing collaborator
+			// Import existing collaborator. ImportStateVerify is NOT usable here:
+			// it verifies import against an *already-established* prior resource
+			// state from an earlier step (normally created via Create()), but
+			// Create() is intentionally blocked for this resource — there is no
+			// "old" state to compare against, so ImportStateVerify would always
+			// fail with "Failed state verification, resource with ID ... not
+			// found" regardless of whether import itself actually worked. This
+			// went uncaught for as long as it did purely because the test always
+			// skipped (no ANYSCALE_TEST_USER_IDENTITY_ID in CI) until a real
+			// identity was provided. ImportStateCheck verifies the imported
+			// values directly instead, which is the documented alternative for
+			// exactly this situation.
 			{
-				Config:            testAccOrganizationCollaboratorResourceConfig("collaborator"),
-				ResourceName:      "anyscale_organization_collaborator.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-				ImportStateId:     testIdentityID,
+				Config:        testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				ResourceName:  "anyscale_organization_collaborator.test",
+				ImportState:   true,
+				ImportStateId: testIdentityID,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported resource, got %d", len(states))
+					}
+					s := states[0]
+					if s.Attributes["id"] != testIdentityID {
+						return fmt.Errorf("imported id = %q, want %q", s.Attributes["id"], testIdentityID)
+					}
+					if s.Attributes["email"] == "" {
+						return fmt.Errorf("imported email is empty, want it populated from the API")
+					}
+					if s.Attributes["permission_level"] == "" {
+						return fmt.Errorf("imported permission_level is empty, want it populated from the API")
+					}
+					if s.Attributes["created_at"] == "" {
+						return fmt.Errorf("imported created_at is empty, want it populated from the API")
+					}
+					return nil
+				},
 			},
 		},
 	})
@@ -74,19 +130,31 @@ func TestAccOrganizationCollaboratorResource_UpdatePermission(t *testing.T) {
 	if testIdentityID == "" {
 		t.Skip("ANYSCALE_TEST_USER_IDENTITY_ID not set, skipping update test")
 	}
+	warnDestructiveCollaboratorTest(t, testIdentityID)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		// No CheckDestroy: imports an existing user; destroying state must not
-		// remove the user. API also has no GET-by-ID for collaborators.
+		// No CheckDestroy: API has no GET-by-ID for collaborators. See
+		// warnDestructiveCollaboratorTest above — destroy DOES remove this
+		// identity from the org for real; that is not something CheckDestroy
+		// could prevent even if it verified against it.
 		Steps: []resource.TestStep{
-			// Import as collaborator
+			// Import as collaborator. ImportStatePersist is required here: without
+			// it, an import step's result is only checked in isolation and does
+			// NOT become the "current" state subsequent steps build on — since
+			// Create() is intentionally blocked for this resource, the next step
+			// would otherwise see no existing resource and attempt to create one
+			// from Config, hitting "Direct Creation Not Supported". This went
+			// uncaught for as long as it did purely because the test always
+			// skipped (no ANYSCALE_TEST_USER_IDENTITY_ID in CI) until a real
+			// identity was provided.
 			{
-				Config:        testAccOrganizationCollaboratorResourceConfig("collaborator"),
-				ResourceName:  "anyscale_organization_collaborator.test",
-				ImportState:   true,
-				ImportStateId: testIdentityID,
+				Config:             testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				ResourceName:       "anyscale_organization_collaborator.test",
+				ImportState:        true,
+				ImportStateId:      testIdentityID,
+				ImportStatePersist: true,
 			},
 			// Verify initial state
 			{
@@ -129,6 +197,7 @@ func TestAccOrganizationCollaboratorResource_Delete(t *testing.T) {
 	if testIdentityID == "" {
 		t.Skip("ANYSCALE_TEST_USER_IDENTITY_ID_DELETABLE not set, skipping delete test")
 	}
+	warnDestructiveCollaboratorTest(t, testIdentityID)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheckAuth(t) },

@@ -121,6 +121,67 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	})
 }
 
+// TestAccComputeConfigResource_InconsistentResultRegressions is a regression
+// test for tasks 451e2845 and 1f2d592f: worker_nodes[].name and resource-map
+// keys (per-node resources, and top-level min_resources) used to trip
+// Terraform's "provider produced inconsistent result after apply" check -
+// resourceMapToAPI canonicalizes well-known resource keys to lowercase before
+// sending, so a configured "CPU" used to come back as "cpu", and a
+// server-assigned worker name used to come back non-null when the config left
+// it unset. Step 1 exercises both at Create time. Step 2 adds a second,
+// brand-new nameless worker group via Update - the case populateNodesFromResponse
+// exists for, since UseStateForUnknown has no prior list element to fall back
+// to for a worker group that didn't exist before this update.
+func TestAccComputeConfigResource_InconsistentResultRegressions(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetComputeConfigCloudID(t)
+	configName := UniqueName(t, "compute-config-inconsistent")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigResourceConfig_inconsistentResultRegressions(configName, cloudID, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "1"),
+					// Configured uppercase keys must round-trip with their original
+					// casing, not the API's lowercased canonical form.
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.resources.CPU", "2"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "min_resources.CPU", "1"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			// regression test for task 1f2d592f: adding a second, brand-new
+			// nameless worker group via Update (not Create) must not trip the
+			// inconsistent-result check either - Update() now resolves Computed
+			// sub-attributes from the response the same way Create() does.
+			{
+				Config: testAccComputeConfigResourceConfig_inconsistentResultUpdateAddWorker(configName, cloudID, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "2"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.1.resources.GPU", "1"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+
 func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -230,6 +291,77 @@ resource "anyscale_compute_config" "test" {
   }
 }
 `, name, cloudID, instanceType)
+}
+
+func testAccComputeConfigResourceConfig_inconsistentResultRegressions(name, cloudID, workerInstanceType string) string {
+	return fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  head_node = {
+    instance_type = "%s"
+  }
+
+  worker_nodes = [
+    {
+      # name intentionally omitted: the API assigns one from the instance type.
+      instance_type = "%s"
+      min_nodes     = 0
+      max_nodes     = 1
+      market_type   = "ON_DEMAND"
+      resources = {
+        CPU = 2
+      }
+    }
+  ]
+
+  min_resources = {
+    CPU = 1
+  }
+}
+`, name, cloudID, workerInstanceType, workerInstanceType)
+}
+
+func testAccComputeConfigResourceConfig_inconsistentResultUpdateAddWorker(name, cloudID, workerInstanceType string) string {
+	return fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = "%s"
+  cloud_id = "%s"
+
+  head_node = {
+    instance_type = "%s"
+  }
+
+  worker_nodes = [
+    {
+      # name intentionally omitted: the API assigns one from the instance type.
+      instance_type = "%s"
+      min_nodes     = 0
+      max_nodes     = 1
+      market_type   = "ON_DEMAND"
+      resources = {
+        CPU = 2
+      }
+    },
+    {
+      # Second worker group, brand new in this update, also nameless -
+      # UseStateForUnknown has no prior list element to fall back to for it.
+      instance_type = "%s"
+      min_nodes     = 0
+      max_nodes     = 1
+      market_type   = "ON_DEMAND"
+      resources = {
+        GPU = 1
+      }
+    }
+  ]
+
+  min_resources = {
+    CPU = 1
+  }
+}
+`, name, cloudID, workerInstanceType, workerInstanceType, workerInstanceType)
 }
 
 func testAccComputeConfigResourceConfig_withWorkers(name, cloudID, headInstanceType, workerInstanceType string) string {

@@ -2,10 +2,7 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
 
@@ -162,177 +159,79 @@ func (d *OrganizationUserDataSource) Read(ctx context.Context, req datasource.Re
 	resp.Diagnostics.Append(resp.State.Set(ctx, user)...)
 }
 
-// findUserByID looks up a user by their identity ID.
+// organizationCollaboratorToUserModel converts a shared API result into this
+// data source's model.
+func organizationCollaboratorToUserModel(u OrganizationCollaboratorResult) *OrganizationUserDataSourceModel {
+	userID := types.StringNull()
+	if u.UserID != nil {
+		userID = types.StringValue(*u.UserID)
+	}
+
+	name := ""
+	if u.Name != nil {
+		name = *u.Name
+	}
+
+	return &OrganizationUserDataSourceModel{
+		ID:              types.StringValue(u.ID),
+		UserID:          userID,
+		Name:            types.StringValue(name),
+		Email:           types.StringValue(u.Email),
+		PermissionLevel: types.StringValue(u.PermissionLevel),
+		CreatedAt:       types.StringValue(u.CreatedAt),
+	}
+}
+
+// findUserByID looks up a user by their identity ID, paging through the full
+// collaborator list rather than only the first page.
 func (d *OrganizationUserDataSource) findUserByID(ctx context.Context, id string) (*OrganizationUserDataSourceModel, error) {
-	// List all users and find the one with matching ID
-	apiResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/organization_collaborators?count=50", nil)
+	users, err := listAllOrganizationCollaborators(ctx, d.client, nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch organization users", map[string]any{"error": err.Error()})
-		return nil, fmt.Errorf("failed to fetch organization users: %s", err.Error())
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %s", err.Error())
+		return nil, fmt.Errorf("failed to fetch organization users: %w", err)
 	}
 
-	if apiResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list organization users: %s - %s", apiResp.Status, string(body))
-	}
-
-	var usersResp struct {
-		Results []struct {
-			ID              string  `json:"id"`
-			UserID          *string `json:"user_id"`
-			Name            string  `json:"name"`
-			Email           string  `json:"email"`
-			PermissionLevel string  `json:"permission_level"`
-			CreatedAt       string  `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &usersResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %s", err.Error())
-	}
-
-	// Find user with matching ID
-	for _, u := range usersResp.Results {
+	for _, u := range users {
 		if u.ID == id {
-			userID := types.StringNull()
-			if u.UserID != nil {
-				userID = types.StringValue(*u.UserID)
-			}
-
-			return &OrganizationUserDataSourceModel{
-				ID:              types.StringValue(u.ID),
-				UserID:          userID,
-				Name:            types.StringValue(u.Name),
-				Email:           types.StringValue(u.Email),
-				PermissionLevel: types.StringValue(u.PermissionLevel),
-				CreatedAt:       types.StringValue(u.CreatedAt),
-			}, nil
+			return organizationCollaboratorToUserModel(u), nil
 		}
 	}
 
 	return nil, nil
 }
 
-// findUserByUserID looks up a user by their user ID.
+// findUserByUserID looks up a user by their user ID, paging through the full
+// collaborator list rather than only the first page.
 func (d *OrganizationUserDataSource) findUserByUserID(ctx context.Context, userID string) (*OrganizationUserDataSourceModel, error) {
-	// List all users and find the one with matching user_id
-	apiResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/organization_collaborators?count=50", nil)
+	users, err := listAllOrganizationCollaborators(ctx, d.client, nil)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch organization users", map[string]any{"error": err.Error()})
-		return nil, fmt.Errorf("failed to fetch organization users: %s", err.Error())
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %s", err.Error())
+		return nil, fmt.Errorf("failed to fetch organization users: %w", err)
 	}
 
-	if apiResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list organization users: %s - %s", apiResp.Status, string(body))
-	}
-
-	var usersResp struct {
-		Results []struct {
-			ID              string  `json:"id"`
-			UserID          *string `json:"user_id"`
-			Name            string  `json:"name"`
-			Email           string  `json:"email"`
-			PermissionLevel string  `json:"permission_level"`
-			CreatedAt       string  `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &usersResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %s", err.Error())
-	}
-
-	// Find user with matching user_id
-	for _, u := range usersResp.Results {
+	for _, u := range users {
 		if u.UserID != nil && *u.UserID == userID {
-			return &OrganizationUserDataSourceModel{
-				ID:              types.StringValue(u.ID),
-				UserID:          types.StringValue(*u.UserID),
-				Name:            types.StringValue(u.Name),
-				Email:           types.StringValue(u.Email),
-				PermissionLevel: types.StringValue(u.PermissionLevel),
-				CreatedAt:       types.StringValue(u.CreatedAt),
-			}, nil
+			return organizationCollaboratorToUserModel(u), nil
 		}
 	}
 
 	return nil, nil
 }
 
-// findUserByEmail looks up a user by their email address.
+// findUserByEmail looks up a user by their email address. The email query
+// param narrows results server-side, but pagination is still applied in case
+// that filter is not a strict exact match, rather than only ever inspecting
+// its first page.
 func (d *OrganizationUserDataSource) findUserByEmail(ctx context.Context, email string) (*OrganizationUserDataSourceModel, error) {
-	// Use API filter for email (must URL encode the email parameter)
-	encodedEmail := url.QueryEscape(email)
-	queryParams := fmt.Sprintf("?count=50&email=%s", encodedEmail)
-	apiResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/organization_collaborators%s", queryParams), nil)
+	users, err := listAllOrganizationCollaborators(ctx, d.client, url.Values{"email": []string{email}})
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch organization users", map[string]any{"error": err.Error()})
-		return nil, fmt.Errorf("failed to fetch organization users: %s", err.Error())
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %s", err.Error())
+		return nil, fmt.Errorf("failed to fetch organization users: %w", err)
 	}
 
-	if apiResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list organization users: %s - %s", apiResp.Status, string(body))
-	}
-
-	var usersResp struct {
-		Results []struct {
-			ID              string  `json:"id"`
-			UserID          *string `json:"user_id"`
-			Name            string  `json:"name"`
-			Email           string  `json:"email"`
-			PermissionLevel string  `json:"permission_level"`
-			CreatedAt       string  `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &usersResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %s", err.Error())
-	}
-
-	// Find exact match (case-insensitive)
-	for _, u := range usersResp.Results {
+	for _, u := range users {
 		if strings.EqualFold(u.Email, email) {
-			userID := types.StringNull()
-			if u.UserID != nil {
-				userID = types.StringValue(*u.UserID)
-			}
-
-			return &OrganizationUserDataSourceModel{
-				ID:              types.StringValue(u.ID),
-				UserID:          userID,
-				Name:            types.StringValue(u.Name),
-				Email:           types.StringValue(u.Email),
-				PermissionLevel: types.StringValue(u.PermissionLevel),
-				CreatedAt:       types.StringValue(u.CreatedAt),
-			}, nil
+			return organizationCollaboratorToUserModel(u), nil
 		}
 	}
 
