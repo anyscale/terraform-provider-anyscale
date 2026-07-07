@@ -611,9 +611,18 @@ func generateRandomString(length int) string {
 	return string(b)
 }
 
-// hasEmbeddedResourceConfig checks if the cloud has embedded resource configuration (all-in-one pattern)
+// hasEmbeddedResourceConfig checks if the cloud has embedded resource
+// configuration (all-in-one pattern). kubernetes_config counts on its own,
+// separate from aws_config/gcp_config/azure_config: aws_config/gcp_config are
+// optional for K8S clouds (see addCloudResource), so a K8S cloud can be
+// defined by kubernetes_config alone. Omitting it here (as this function did
+// before - F2/C12) misclassified such a cloud as empty, so Create took the
+// empty-cloud branch and never called addCloudResource at all - no K8S
+// resource was ever created, and the cloud rolled up to VM on read
+// ("Provider produced inconsistent result after apply: .compute_stack: was
+// K8S, but now VM").
 func (r *CloudResource) hasEmbeddedResourceConfig(plan *CloudResourceModel) bool {
-	return !plan.AWSConfig.IsNull() || !plan.GCPConfig.IsNull() || !plan.AzureConfig.IsNull()
+	return !plan.AWSConfig.IsNull() || !plan.GCPConfig.IsNull() || !plan.AzureConfig.IsNull() || !plan.KubernetesConfig.IsNull()
 }
 
 // findCloudByName looks for an existing cloud with the given name
