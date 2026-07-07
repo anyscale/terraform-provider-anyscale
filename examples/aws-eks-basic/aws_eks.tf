@@ -28,22 +28,12 @@ locals {
 
   # Base configuration for GPU node groups
   gpu_node_group_base = {
-    ami_type     = "AL2023_x86_64_NVIDIA"
-    min_size     = 0
-    max_size     = 10
-    desired_size = 0
-
-    block_device_mappings = {
-      xvda = {
-        device_name = "/dev/xvda"
-        ebs = {
-          volume_size           = var.node_group_disk_size
-          volume_type           = "gp3"
-          delete_on_termination = true
-        }
-      }
-    }
-
+    ami_type                     = "AL2023_x86_64_NVIDIA"
+    min_size                     = 0
+    max_size                     = 10
+    desired_size                 = 0
+    disk_size                    = var.node_group_disk_size
+    use_custom_launch_template   = false
     iam_role_additional_policies = local.anyscale_iam
   }
 
@@ -121,9 +111,13 @@ module "eks" {
   kubernetes_version = var.eks_cluster_version
 
   addons = {
-    coredns                = {}
-    eks-pod-identity-agent = {}
-    kube-proxy             = {}
+    coredns    = {}
+    kube-proxy = {}
+    # before_compute: install ahead of node join. v21 hardcodes
+    # bootstrap_self_managed_addons=false, so without these the
+    # cluster gets no CNI and every node stays NotReady.
+    eks-pod-identity-agent = { before_compute = true }
+    vpc-cni                = { before_compute = true }
   }
 
   # API endpoint access configuration
@@ -166,6 +160,12 @@ module "eks" {
         max_size     = 10
         desired_size = 2
 
+        # NOTE: v21's node-group IMDS hop limit default is 1 (was 2 in v20),
+        # so pods can no longer reach these policies via IMDS node-role
+        # inheritance. If you deploy cluster-autoscaler or the AWS Load
+        # Balancer Controller on this node group, wire them up via EKS Pod
+        # Identity associations instead -- the Anyscale operator already
+        # uses the pod identity agent addon, so it is unaffected.
         iam_role_additional_policies = merge(local.anyscale_iam, {
           cluster_autoscaler_policy = aws_iam_policy.autoscaler_policy.arn
           elb_policy                = aws_iam_policy.elb_policy.arn
@@ -185,21 +185,12 @@ module "eks" {
           "m5.4xlarge",
         ]
 
-        capacity_type = "ON_DEMAND"
-        min_size      = 0
-        max_size      = 10
-        desired_size  = 0
-
-        block_device_mappings = {
-          xvda = {
-            device_name = "/dev/xvda"
-            ebs = {
-              volume_size           = var.node_group_disk_size
-              volume_type           = "gp3"
-              delete_on_termination = true
-            }
-          }
-        }
+        capacity_type              = "ON_DEMAND"
+        min_size                   = 0
+        max_size                   = 10
+        desired_size               = 0
+        disk_size                  = var.node_group_disk_size
+        use_custom_launch_template = false
 
         taints = {
           capacity_type = {
@@ -223,21 +214,12 @@ module "eks" {
           "m5.4xlarge",
         ]
 
-        capacity_type = "SPOT"
-        min_size      = 0
-        max_size      = 10
-        desired_size  = 0
-
-        block_device_mappings = {
-          xvda = {
-            device_name = "/dev/xvda"
-            ebs = {
-              volume_size           = var.node_group_disk_size
-              volume_type           = "gp3"
-              delete_on_termination = true
-            }
-          }
-        }
+        capacity_type              = "SPOT"
+        min_size                   = 0
+        max_size                   = 10
+        desired_size               = 0
+        disk_size                  = var.node_group_disk_size
+        use_custom_launch_template = false
 
         taints = {
           capacity_type = {
