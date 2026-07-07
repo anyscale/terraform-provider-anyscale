@@ -54,7 +54,7 @@ jobs:
         if: matrix.shard == 'lint-and-unit'
         run: |
           SCRATCH_FRAGMENT=".changelog/ci-idempotency-smoke-test.txt"
-          printf 'release-note:added\nprovider: CI idempotency smoke-test fragment, not a real change.\n' > "$SCRATCH_FRAGMENT"
+          printf '```\nrelease-note:added\nprovider: CI idempotency smoke-test fragment, not a real change.\n```\n' > "$SCRATCH_FRAGMENT"
           make changelog-build
           cp CHANGELOG.md /tmp/changelog-first-fold.md
           make changelog-build
