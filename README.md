@@ -190,12 +190,8 @@ make test-aws-vm-basic
 
 ## Contributing
 
-1. Follow [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework) best practices
-2. Add unit tests for helper functions
-3. Add acceptance tests for resources
-4. Update documentation
-5. Run `make lint` and `make test` before submitting
-6. Install precommit: `pre-commit install`
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the PR workflow, including the changelog fragment
+each PR needs.
 
 ## License
 
