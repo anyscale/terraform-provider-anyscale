@@ -244,6 +244,84 @@ func TestGenerateRandomStringUniqueness(t *testing.T) {
 	}
 }
 
+// TestGetOrGenerateCredentials_WasPlaceholderSignal is a regression test for
+// C9: getOrGenerateCredentials used to fabricate a placeholder credential
+// with no signal to the caller at all, so a broken all-in-one cloud (config
+// present, credential un-derivable) applied silently. wasPlaceholder must
+// distinguish "fabricated" from "real/derived" so the caller (Create) can
+// warn only for the suspicious case and stay silent for a genuinely empty
+// cloud.
+func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
+	ctx := context.Background()
+	r := &CloudResource{}
+
+	t.Run("explicit credentials: not a placeholder", func(t *testing.T) {
+		plan := &CloudResourceModel{Credentials: types.StringValue("arn:aws:iam::123:role/real")}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - explicit credentials were provided")
+		}
+		if creds != "arn:aws:iam::123:role/real" {
+			t.Errorf("creds = %v, want the explicit value", creds)
+		}
+	})
+
+	t.Run("derived from aws_config: not a placeholder", func(t *testing.T) {
+		awsObj, diags := flattenAWSConfig(ctx, &AWSConfig{AnyscaleIAMRoleID: "arn:aws:iam::123:role/derived"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test aws_config: %v", diags)
+		}
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: awsObj}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - a credential was derivable from aws_config")
+		}
+		if creds != "arn:aws:iam::123:role/derived" {
+			t.Errorf("creds = %v, want the derived value", creds)
+		}
+	})
+
+	t.Run("all-in-one with config present but no derivable role: placeholder AND suspicious", func(t *testing.T) {
+		// aws_config is present (all-in-one, not empty cloud) but its
+		// controlplane_iam_role_arn was left unset - exactly the
+		// forgot-the-role case C9 exists to catch.
+		awsObj, diags := flattenAWSConfig(ctx, &AWSConfig{VPCID: "vpc-123"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test aws_config: %v", diags)
+		}
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: awsObj}
+		_, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false /* isEmptyCloud */)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !wasPlaceholder {
+			t.Error("wasPlaceholder = false, want true - no role was derivable, a placeholder must have been generated")
+		}
+		// The caller decides whether to warn using wasPlaceholder && !isEmptyCloud;
+		// this case has isEmptyCloud=false, so the caller WOULD warn - verified
+		// separately, this test only pins the signal itself.
+	})
+
+	t.Run("pure empty cloud: placeholder but expected, not suspicious", func(t *testing.T) {
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: types.ObjectNull(awsConfigAttrTypes())}
+		_, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", true /* isEmptyCloud */)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !wasPlaceholder {
+			t.Error("wasPlaceholder = false, want true - no config and no explicit credentials means a placeholder is generated")
+		}
+		// Again: the caller's isEmptyCloud=true here means it stays silent
+		// despite wasPlaceholder=true - this is the BYOC/split-pattern case.
+	})
+}
+
 // Test AWS placeholder credential generation
 func TestGenerateAWSPlaceholder(t *testing.T) {
 	// This simulates the logic from getOrGenerateCredentials for AWS empty clouds

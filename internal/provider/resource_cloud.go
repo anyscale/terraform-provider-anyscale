@@ -790,10 +790,25 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	// Get or generate credentials
-	credentials, err := r.getOrGenerateCredentials(ctx, &plan, provider, isEmptyCloud)
+	credentials, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, &plan, provider, isEmptyCloud)
 	if err != nil {
 		resp.Diagnostics.AddError("Credentials Error", err.Error())
 		return
+	}
+	// C9: a placeholder is expected and silent for a pure empty cloud (BYOC -
+	// real credentials attach later via anyscale_cloud_resource). It's
+	// suspicious for an all-in-one cloud: the user supplied a config block
+	// but we still couldn't derive a credential from it, most likely a
+	// forgotten IAM role/service-account field - warn instead of silently
+	// submitting a cloud that can never actually provision anything.
+	if wasPlaceholder && !isEmptyCloud {
+		resp.Diagnostics.AddWarning(
+			"Placeholder Credentials Generated",
+			"No credentials were provided, and none could be derived from the aws_config/gcp_config/azure_config block; "+
+				"a placeholder credential was generated so the apply could proceed. This cloud will not have valid "+
+				"infrastructure access until you set the credentials attribute explicitly, or supply the field the "+
+				"provider derives it from (e.g. aws_config.controlplane_iam_role_arn, or the GCP/Azure equivalents).",
+		)
 	}
 
 	// Step 1: Create the cloud with minimal required fields
@@ -1214,10 +1229,21 @@ func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStat
 // ─── Helper Functions (continued) ─────────────────────────────────────────────
 
 // getOrGenerateCredentials extracts credentials from config or generates placeholder
-func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *CloudResourceModel, provider string, isEmptyCloud bool) (string, error) {
+// getOrGenerateCredentials resolves credentials in priority order: explicit
+// plan.Credentials, then derived from the provider's config block, then a
+// fabricated placeholder as a last resort (needed for the empty-cloud
+// pattern, where credentials are legitimately unknown until a
+// anyscale_cloud_resource is attached later).
+//
+// wasPlaceholder tells the caller whether the last resort fired, so it can
+// decide whether to warn (C9): a fabricated credential is expected and
+// silent for a pure empty cloud, but suspicious - almost certainly a
+// forgotten role/service-account field - when the user DID supply a config
+// block and we still couldn't derive anything from it.
+func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *CloudResourceModel, provider string, isEmptyCloud bool) (credentials string, wasPlaceholder bool, err error) {
 	// Check explicit credentials field first
 	if !plan.Credentials.IsNull() && plan.Credentials.ValueString() != "" {
-		return plan.Credentials.ValueString(), nil
+		return plan.Credentials.ValueString(), false, nil
 	}
 
 	// Try to extract from config blocks (all-in-one pattern)
@@ -1226,17 +1252,17 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 		if !plan.AWSConfig.IsNull() {
 			awsConfig, err := expandAWSConfig(ctx, plan.AWSConfig)
 			if err != nil {
-				return "", err
+				return "", false, err
 			}
 			if awsConfig != nil && awsConfig.AnyscaleIAMRoleID != "" {
-				return awsConfig.AnyscaleIAMRoleID, nil
+				return awsConfig.AnyscaleIAMRoleID, false, nil
 			}
 		}
 	case "GCP":
 		if !plan.GCPConfig.IsNull() {
 			gcpConfig, err := expandGCPConfig(ctx, plan.GCPConfig)
 			if err != nil {
-				return "", err
+				return "", false, err
 			}
 			if gcpConfig != nil {
 				// For GCP, credentials must be a JSON object
@@ -1250,9 +1276,9 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 				}
 				credsJSON, err := json.Marshal(gcpCreds)
 				if err != nil {
-					return "", fmt.Errorf("failed to marshal GCP credentials: %w", err)
+					return "", false, fmt.Errorf("failed to marshal GCP credentials: %w", err)
 				}
-				return string(credsJSON), nil
+				return string(credsJSON), false, nil
 			}
 		}
 	case "AZURE":
@@ -1260,7 +1286,7 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 			var azureModel AzureConfigModel
 			diags := plan.AzureConfig.As(ctx, &azureModel, basetypes.ObjectAsOptions{})
 			if !diags.HasError() && !azureModel.ManagedIdentityID.IsNull() {
-				return azureModel.ManagedIdentityID.ValueString(), nil
+				return azureModel.ManagedIdentityID.ValueString(), false, nil
 			}
 		}
 	}
@@ -1269,7 +1295,7 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 	uniqueSuffix := generateRandomString(12)
 	switch strings.ToUpper(provider) {
 	case "AWS":
-		return fmt.Sprintf("arn:aws:iam::000000000000:role/anyscale-placeholder-%s", uniqueSuffix), nil
+		return fmt.Sprintf("arn:aws:iam::000000000000:role/anyscale-placeholder-%s", uniqueSuffix), true, nil
 	case "GCP":
 		placeholderCreds := map[string]string{
 			"provider_id":           fmt.Sprintf("projects/000000000000/locations/global/workloadIdentityPools/placeholder-%s/providers/placeholder", uniqueSuffix),
@@ -1277,9 +1303,9 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 			"service_account_email": fmt.Sprintf("placeholder-%s@placeholder-project.iam.gserviceaccount.com", uniqueSuffix),
 		}
 		credsJSON, _ := json.Marshal(placeholderCreds)
-		return string(credsJSON), nil
+		return string(credsJSON), true, nil
 	default:
-		return fmt.Sprintf("placeholder-%s", uniqueSuffix), nil
+		return fmt.Sprintf("placeholder-%s", uniqueSuffix), true, nil
 	}
 }
 
