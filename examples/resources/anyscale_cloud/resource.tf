@@ -40,16 +40,18 @@ resource "anyscale_cloud" "gcp_example" {
   compute_stack  = "VM"
 
   gcp_config {
-    project_id                     = "my-project-123"
-    provider_name                  = "projects/123/locations/global/workloadIdentityPools/anyscale/providers/anyscale"
-    vpc_name                       = "anyscale-vpc"
-    subnet_names                   = ["anyscale-subnet-us-central1"]
-    anyscale_service_account_email = "anyscale@my-project.iam.gserviceaccount.com"
-    cluster_service_account_email  = "cluster@my-project.iam.gserviceaccount.com"
+    project_id                         = "my-project-123"
+    provider_name                      = "projects/123/locations/global/workloadIdentityPools/anyscale/providers/anyscale"
+    vpc_name                           = "anyscale-vpc"
+    subnet_names                       = ["anyscale-subnet-us-central1"]
+    controlplane_service_account_email = "anyscale@my-project.iam.gserviceaccount.com"
+    dataplane_service_account_email    = "cluster@my-project.iam.gserviceaccount.com"
   }
 
   object_storage {
-    bucket_name = "my-gcs-bucket" # gs:// prefix added automatically
+    # Include the gs:// prefix explicitly for GCP (unlike AWS, where a bare
+    # bucket name is fine either way) - see the "Cloud Resources" guide for why.
+    bucket_name = "gs://my-gcs-bucket"
   }
 }
 
