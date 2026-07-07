@@ -28,43 +28,53 @@ locals {
 
   # Base configuration for GPU node groups
   gpu_node_group_base = {
-    ami_type                     = "AL2023_x86_64_NVIDIA"
-    min_size                     = 0
-    max_size                     = 10
-    desired_size                 = 0
-    disk_size                    = var.node_group_disk_size
-    use_custom_launch_template   = false
+    ami_type     = "AL2023_x86_64_NVIDIA"
+    min_size     = 0
+    max_size     = 10
+    desired_size = 0
+
+    block_device_mappings = {
+      xvda = {
+        device_name = "/dev/xvda"
+        ebs = {
+          volume_size           = var.node_group_disk_size
+          volume_type           = "gp3"
+          delete_on_termination = true
+        }
+      }
+    }
+
     iam_role_additional_policies = local.anyscale_iam
   }
 
-  gpu_node_taints_base = [
-    {
-      key    = "nvidia.com/gpu",
-      value  = "present",
-      effect = "NO_SCHEDULE",
-    },
-    {
-      key    = "node.anyscale.com/accelerator-type",
-      value  = "GPU",
-      effect = "NO_SCHEDULE",
+  gpu_node_taints_base = {
+    gpu_present = {
+      key    = "nvidia.com/gpu"
+      value  = "present"
+      effect = "NO_SCHEDULE"
     }
-  ]
+    accelerator_type = {
+      key    = "node.anyscale.com/accelerator-type"
+      value  = "GPU"
+      effect = "NO_SCHEDULE"
+    }
+  }
 
-  gpu_node_taints_ondemand = concat(local.gpu_node_taints_base, [
-    {
-      key    = "node.anyscale.com/capacity-type",
-      value  = "ON_DEMAND",
-      effect = "NO_SCHEDULE",
+  gpu_node_taints_ondemand = merge(local.gpu_node_taints_base, {
+    capacity_type = {
+      key    = "node.anyscale.com/capacity-type"
+      value  = "ON_DEMAND"
+      effect = "NO_SCHEDULE"
     }
-  ])
+  })
 
-  gpu_node_taints_spot = concat(local.gpu_node_taints_base, [
-    {
-      key    = "node.anyscale.com/capacity-type",
-      value  = "SPOT",
-      effect = "NO_SCHEDULE",
+  gpu_node_taints_spot = merge(local.gpu_node_taints_base, {
+    capacity_type = {
+      key    = "node.anyscale.com/capacity-type"
+      value  = "SPOT"
+      effect = "NO_SCHEDULE"
     }
-  ])
+  })
 
   # Create a map of GPU node groups based on gpu_instance_types
   gpu_node_groups = {
@@ -104,20 +114,20 @@ locals {
 module "eks" {
   #checkov:skip=CKV_TF_1: Use the given version of the module
   source  = "terraform-aws-modules/eks/aws"
-  version = "20.33.1"
+  version = "21.24.0"
 
   # Cluster basic configuration
-  cluster_name    = var.eks_cluster_name
-  cluster_version = var.eks_cluster_version
+  name               = var.eks_cluster_name
+  kubernetes_version = var.eks_cluster_version
 
-  cluster_addons = {
+  addons = {
     coredns                = {}
     eks-pod-identity-agent = {}
     kube-proxy             = {}
   }
 
   # API endpoint access configuration
-  cluster_endpoint_public_access = true
+  endpoint_public_access = true
 
   # The authentication mode for the cluster. Valid values are `CONFIG_MAP`, `API` or `API_AND_CONFIG_MAP`
   authentication_mode = "API_AND_CONFIG_MAP"
@@ -175,20 +185,29 @@ module "eks" {
           "m5.4xlarge",
         ]
 
-        capacity_type              = "ON_DEMAND"
-        min_size                   = 0
-        max_size                   = 10
-        desired_size               = 0
-        disk_size                  = var.node_group_disk_size
-        use_custom_launch_template = false
+        capacity_type = "ON_DEMAND"
+        min_size      = 0
+        max_size      = 10
+        desired_size  = 0
 
-        taints = [
-          {
-            key    = "node.anyscale.com/capacity-type",
-            value  = "ON_DEMAND",
-            effect = "NO_SCHEDULE",
+        block_device_mappings = {
+          xvda = {
+            device_name = "/dev/xvda"
+            ebs = {
+              volume_size           = var.node_group_disk_size
+              volume_type           = "gp3"
+              delete_on_termination = true
+            }
           }
-        ]
+        }
+
+        taints = {
+          capacity_type = {
+            key    = "node.anyscale.com/capacity-type"
+            value  = "ON_DEMAND"
+            effect = "NO_SCHEDULE"
+          }
+        }
 
         iam_role_additional_policies = local.anyscale_iam
       }
@@ -204,20 +223,29 @@ module "eks" {
           "m5.4xlarge",
         ]
 
-        capacity_type              = "SPOT"
-        min_size                   = 0
-        max_size                   = 10
-        desired_size               = 0
-        disk_size                  = var.node_group_disk_size
-        use_custom_launch_template = false
+        capacity_type = "SPOT"
+        min_size      = 0
+        max_size      = 10
+        desired_size  = 0
 
-        taints = [
-          {
-            key    = "node.anyscale.com/capacity-type",
-            value  = "SPOT",
-            effect = "NO_SCHEDULE",
+        block_device_mappings = {
+          xvda = {
+            device_name = "/dev/xvda"
+            ebs = {
+              volume_size           = var.node_group_disk_size
+              volume_type           = "gp3"
+              delete_on_termination = true
+            }
           }
-        ]
+        }
+
+        taints = {
+          capacity_type = {
+            key    = "node.anyscale.com/capacity-type"
+            value  = "SPOT"
+            effect = "NO_SCHEDULE"
+          }
+        }
 
         iam_role_additional_policies = local.anyscale_iam
       }

@@ -75,7 +75,7 @@ variable "eks_cluster_version" {
     ```
   EOT
   type        = string
-  default     = "1.34"
+  default     = "1.36"
 }
 
 variable "gpu_instance_types" {
