@@ -884,20 +884,12 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 
 // findDefaultCloudResource checks if the cloud has a single default resource
 func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cloudID string) (*CloudDeploymentResult, error) {
-	// Pages through every page rather than just the first - a cloud with many
-	// resources attached would otherwise risk missing the default one.
-	results, err := PaginatedRequest(
-		ctx, r.client, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil,
-		func(body []byte) ([]CloudDeploymentResult, *string, error) {
-			var deploymentsResp CloudDeploymentsResponse
-			if err := json.Unmarshal(body, &deploymentsResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to unmarshal cloud resources: %w", err)
-			}
-			return deploymentsResp.Results, deploymentsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	// listCloudResources pages through every page rather than just the first -
+	// a cloud with many resources attached would otherwise risk missing the
+	// default one.
+	results, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list cloud resources: %w", err)
+		return nil, err
 	}
 
 	if len(results) == 1 && results[0].IsDefault {
@@ -911,20 +903,12 @@ func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cl
 
 // readCloudResource reads a cloud resource from the API and updates the state model
 func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel) error {
-	// Pages through every page rather than just the first: Read calls this and
-	// removes the resource from state on a "not found", so a resource whose
-	// name only appears past page 1 would otherwise be phantom-deleted from
-	// state - the same bug class task d35713ef fixed for organization_collaborator.
-	results, err := PaginatedRequest(
-		ctx, r.client, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil,
-		func(body []byte) ([]CloudDeploymentResult, *string, error) {
-			var deploymentsResp CloudDeploymentsResponse
-			if err := json.Unmarshal(body, &deploymentsResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to unmarshal cloud resources: %w", err)
-			}
-			return deploymentsResp.Results, deploymentsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	// listCloudResources pages through every page rather than just the first:
+	// Read calls this and removes the resource from state on a "not found", so
+	// a resource whose name only appears past page 1 would otherwise be
+	// phantom-deleted from state - the same bug class task d35713ef fixed for
+	// organization_collaborator.
+	results, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			return fmt.Errorf("cloud not found")

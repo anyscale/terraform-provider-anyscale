@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -67,4 +68,39 @@ func ResolveCloudNameToID(ctx context.Context, client *Client, cloudName string)
 	})
 
 	return matchedCloudID, nil
+}
+
+// listCloudResources pages through every cloud resource (deployment) attached
+// to a cloud. Both anyscale_cloud_resource and the anyscale_cloud data source
+// need this same listing - centralizing it means there's exactly one place
+// that paginates GET /clouds/{id}/resources instead of several copies that
+// could drift (e.g. one paginating, one only reading page 1).
+func listCloudResources(ctx context.Context, client *Client, cloudID string) ([]CloudDeploymentResult, error) {
+	results, err := PaginatedRequest(
+		ctx, client, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil,
+		func(body []byte) ([]CloudDeploymentResult, *string, error) {
+			var deploymentsResp CloudDeploymentsResponse
+			if err := json.Unmarshal(body, &deploymentsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal cloud resources: %w", err)
+			}
+			return deploymentsResp.Results, deploymentsResp.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list cloud resources: %w", err)
+	}
+	return results, nil
+}
+
+// findDefaultInCloudResources returns the resource flagged as the cloud's
+// primary/default deployment, or nil if none is (a brand-new empty cloud has
+// zero resources at all; a cloud with only non-default resources is possible
+// in principle, though not through this provider).
+func findDefaultInCloudResources(results []CloudDeploymentResult) *CloudDeploymentResult {
+	for i := range results {
+		if results[i].IsDefault {
+			return &results[i]
+		}
+	}
+	return nil
 }
