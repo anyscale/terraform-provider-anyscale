@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-06
+
 ### 🎉 Major Framework Migration
 
 **Migrated from Terraform Plugin SDK v2 to Terraform Plugin Framework** for improved developer experience and native HCL support.
@@ -303,5 +305,6 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.0.1-dev...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1
 [0.0.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1
