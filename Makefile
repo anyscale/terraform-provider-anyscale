@@ -583,11 +583,20 @@ endef
 # whoever happens to have an admin bypass.
 
 .PHONY: changelog-release
+# Target-specific variable, not a plain shell `branch=...` capture: each
+# recipe line below runs in its OWN subshell (Make's default, no .ONESHELL),
+# so a shell variable set on one line is gone by the next. $(START_BRANCH)
+# is evaluated once by Make itself and textually substituted into every
+# line that references it, surviving across all of them - confirmed live
+# during the v0.1.2 release, where the plain-shell-variable version failed
+# the final `git checkout "$$branch"` with an empty pathspec (cosmetic only:
+# it ran after the finalize/branch/push/PR steps, which had already
+# succeeded, so it never blocked an actual release).
+changelog-release: START_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 changelog-release: ## Open a PR that finalizes CHANGELOG.md for a release (usage: make changelog-release VERSION=0.1.0)
 	$(call require_semver_version,changelog-release)
-	@branch="$$(git rev-parse --abbrev-ref HEAD)"; \
-	if [ "$$branch" != "main" ]; then \
-		echo "ERROR: run 'make changelog-release' from main (currently on $$branch)"; \
+	@if [ "$(START_BRANCH)" != "main" ]; then \
+		echo "ERROR: run 'make changelog-release' from main (currently on $(START_BRANCH))"; \
 		exit 1; \
 	fi
 	@if ! git diff --quiet || ! git diff --quiet --cached; then \
@@ -603,7 +612,7 @@ changelog-release: ## Open a PR that finalizes CHANGELOG.md for a release (usage
 	gh pr create --title "chore: finalize CHANGELOG.md for v$(VERSION)" \
 		--body "Mechanical: renames Unreleased to v$(VERSION) and dates it. Every entry in it already went through review as its own .changelog/ fragment PR; this just reorganizes them. Merge before running 'make tag VERSION=$(VERSION)'." \
 		--base main
-	git checkout "$$branch"
+	git checkout "$(START_BRANCH)"
 	@echo "==> Get that PR reviewed and merged, THEN run: make tag VERSION=$(VERSION)"
 
 .PHONY: tag
