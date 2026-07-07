@@ -883,6 +883,14 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 // ImportState imports an existing resource into Terraform state.
+//
+// C3-v2: this is the ONLY place that recovers aws_config/gcp_config/
+// kubernetes_config/object_storage from the API - never Create or Read (see
+// readCloudResource). Only the compute-stack-REQUIRED block(s) are
+// recovered, for the same reason as anyscale_cloud's ImportState: a
+// cloud_resource is never "empty" the way a cloud can be, but the
+// Create-time plan-consistency hazard applies here identically, since these
+// blocks are not Computed either.
 func (r *CloudResourceResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// ID format: cloud_id:name
 	cloudID, resourceName, err := parseCloudResourceID(req.ID)
@@ -896,6 +904,32 @@ func (r *CloudResourceResource) ImportState(ctx context.Context, req resource.Im
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_id"), cloudID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), resourceName)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	results, err := listCloudResources(ctx, r.client, cloudID)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to list cloud resources during import; config blocks will not be recovered - the subsequent Read will surface any real error", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+		return
+	}
+
+	var found *CloudDeploymentResult
+	for i := range results {
+		if results[i].Name == resourceName {
+			found = &results[i]
+			break
+		}
+	}
+	if found == nil {
+		return // subsequent Read surfaces the not-found error
+	}
+
+	blocks, diags := requiredImportConfigBlocks(ctx, found.Provider, found)
+	resp.Diagnostics.Append(diags...)
+	for attrName, obj := range blocks {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(attrName), obj)...)
+	}
 }
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -993,56 +1027,8 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		state.IsPrivate = types.BoolValue(false)
 	}
 
-	// C3 Phase 1: backfill any still-null config block from this resource's
-	// own API data - same non-destructive-import fix as anyscale_cloud, but
-	// simpler here: unlike the cloud-level resource, a anyscale_cloud_resource
-	// always represents real, non-empty infrastructure, so there's no
-	// is_empty_cloud-style sticky gate needed - a null block here can only
-	// mean "not yet populated" (import), never "intentionally absent".
-	diags := populateCloudResourceConfigBlocks(ctx, state, foundResource)
-	for _, d := range diags.Errors() {
-		tflog.Warn(ctx, "Failed to populate a config block from the resource", map[string]any{"cloud_id": cloudID, "name": resourceName, "error": d.Summary() + ": " + d.Detail()})
-	}
-
 	tflog.Info(ctx, "Cloud resource read successfully", map[string]any{"cloud_id": cloudID, "name": resourceName})
 	return nil
-}
-
-// populateCloudResourceConfigBlocks implements C3 Phase 1 for
-// anyscale_cloud_resource: it backfills any still-null aws_config/gcp_config/
-// kubernetes_config/object_storage/file_storage block from the resource's own
-// API data. An already-populated block is left completely untouched -
-// field-level drift detection is Phase 2, deliberately deferred.
-func populateCloudResourceConfigBlocks(ctx context.Context, state *CloudResourceResourceModel, resource *CloudDeploymentResult) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	if state.AWSConfig.IsNull() && resource.AWSConfig != nil {
-		obj, d := flattenAWSConfig(ctx, resource.AWSConfig)
-		diags.Append(d...)
-		state.AWSConfig = obj
-	}
-	if state.GCPConfig.IsNull() && resource.GCPConfig != nil {
-		obj, d := flattenGCPConfig(ctx, resource.GCPConfig)
-		diags.Append(d...)
-		state.GCPConfig = obj
-	}
-	if state.KubernetesConfig.IsNull() && resource.KubernetesConfig != nil {
-		obj, d := flattenKubernetesConfig(ctx, resource.KubernetesConfig)
-		diags.Append(d...)
-		state.KubernetesConfig = obj
-	}
-	if state.ObjectStorage.IsNull() && resource.ObjectStorage != nil {
-		obj, d := flattenObjectStorage(resource.ObjectStorage, state.CloudProvider.ValueString())
-		diags.Append(d...)
-		state.ObjectStorage = obj
-	}
-	if state.FileStorage.IsNull() && resource.FileStorage != nil {
-		obj, d := flattenFileStorage(ctx, resource.FileStorage)
-		diags.Append(d...)
-		state.FileStorage = obj
-	}
-
-	return diags
 }
 
 // addProviderConfig adds provider-specific configuration to the deployment request

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -1139,13 +1138,51 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 }
 
 // ImportState imports an existing resource into Terraform state.
+//
+// C3-v2: this is the ONLY place that recovers aws_config/gcp_config/
+// kubernetes_config/object_storage from the API - never Create or Read (see
+// backfillComputedCloudFields). ImportState runs once, before Terraform's
+// plan-consistency machinery is in the loop, so setting a non-Computed
+// attribute here carries none of the "provider produced inconsistent result"
+// risk that populating it in Create/Read does.
+//
+// Only the compute-stack-REQUIRED block(s) are recovered - VM gets aws_config
+// or gcp_config (whichever the provider is), K8S gets kubernetes_config AND
+// object_storage (both required for K8S). Optional/auxiliary blocks
+// (file_storage anywhere; object_storage for VM; aws_config/gcp_config for
+// K8S) are deliberately left null: recovering an optional block the user
+// never had is exactly the ambiguity C3-v2 exists to avoid, since a later
+// Read can never safely distinguish "recovered at import" from "genuinely
+// absent" the way it could get away with for the always-required blocks.
+// Add optional blocks to your .tf after import and reconcile manually if
+// you used them (they're RequiresReplace).
 func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by cloud ID
 	cloudID := req.ID
-
 	tflog.Info(ctx, "Importing Anyscale Cloud", map[string]any{"id": cloudID})
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), cloudID)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cloudResp, err := DoRequestAndParse[CloudResponse](ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to read cloud during import; config blocks will not be recovered - the subsequent Read will surface any real error", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+		return
+	}
+
+	resources, err := listCloudResources(ctx, r.client, cloudID)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to list cloud resources during import; config blocks will not be recovered", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+		return
+	}
+
+	defaultResource := findDefaultInCloudResources(resources)
+	blocks, diags := requiredImportConfigBlocks(ctx, cloudResp.Result.Provider, defaultResource)
+	resp.Diagnostics.Append(diags...)
+	for attrName, obj := range blocks {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(attrName), obj)...)
+	}
 }
 
 // ─── Helper Functions (continued) ─────────────────────────────────────────────
@@ -1531,93 +1568,54 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 		state.CloudDeploymentID = types.StringNull()
 	}
 
-	// C3 Phase 1: backfill is_empty_cloud/cloud_deployment_id and any
-	// still-null config block from the cloud's default resource - this is
-	// what makes `terraform import` non-destructive instead of forcing a
-	// replace on the first plan. A resources-list failure here degrades to a
-	// warning rather than failing the whole read: this is a best-effort
-	// enhancement layered on top of the scalar refresh above, which worked
-	// fine before this feature existed and must keep working if this one
-	// supplementary call has a bad day.
+	// C3 v2: backfill ONLY the two Computed fields (is_empty_cloud,
+	// cloud_deployment_id) from the cloud's resources. Config blocks
+	// (aws_config/gcp_config/kubernetes_config/object_storage/file_storage)
+	// are NOT Computed, so they may only ever equal what Create/Update saw in
+	// the plan - populating them here, in the shared Create/Read path, is
+	// exactly what caused the C12-exposed regression: a K8S-only create
+	// (aws_config/gcp_config genuinely absent, optional for K8S) got
+	// aws_config injected on the very first post-create Read, and Terraform
+	// hard-errored with "inconsistent result after apply: .aws_config was
+	// absent, but now present" - a fresh create's first Read starts with
+	// null blocks exactly like a fresh import does, and this function had no
+	// way to tell the two apart. Config-block recovery now lives ONLY in
+	// ImportState (see there), which runs once, before Terraform's own
+	// plan-consistency machinery is in the loop at all.
 	resources, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
-		tflog.Warn(ctx, "Failed to list cloud resources; skipping config-block backfill this read", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+		tflog.Warn(ctx, "Failed to list cloud resources; skipping Computed-field backfill this read", map[string]any{"cloud_id": cloudID, "error": err.Error()})
 	} else {
-		diags := r.populateConfigFromDefaultResource(ctx, state, resources)
-		for _, d := range diags.Errors() {
-			tflog.Warn(ctx, "Failed to populate a config block from the default resource", map[string]any{"cloud_id": cloudID, "error": d.Summary() + ": " + d.Detail()})
-		}
+		r.backfillComputedCloudFields(state, resources)
 	}
 
 	tflog.Info(ctx, "Cloud state read successfully", map[string]any{"id": cloudID, "name": cloudResp.Result.Name})
 	return nil
 }
 
-// populateConfigFromDefaultResource implements C3 Phase 1 for anyscale_cloud:
-// it backfills is_empty_cloud, cloud_deployment_id, and any still-null
-// aws_config/gcp_config/kubernetes_config/object_storage/file_storage block
-// from the cloud's default resource. An already-populated block is left
-// completely untouched - field-level drift detection on populated blocks is
-// Phase 2, deliberately deferred (see CLOUD-SYNC-DESIGN.md).
+// backfillComputedCloudFields fills in is_empty_cloud and cloud_deployment_id
+// from the cloud's resources. Both are Computed, so the provider may set them
+// at any time without risking a plan-consistency error - unlike the
+// non-Computed config blocks (see C3-v2; this function deliberately does not
+// touch them).
 //
 // is_empty_cloud is sticky: it's derived from "zero resources attached" only
 // while still null/unknown (a fresh import never ran Create, so it starts
 // that way); once resolved - true OR false - it is never re-derived. Without
 // this, an intentionally-empty cloud that later gets a anyscale_cloud_resource
-// attached would flip empty->non-empty on its next refresh and this function
-// would inject that resource's config into the *cloud*'s own state, even
-// though the user's anyscale_cloud config block never had one - producing a
-// spurious plan to strip it, i.e. a forced replace of a live empty cloud.
-//
-// Known accepted edge case: a *fresh* import of a cloud that was originally
-// created empty but already has a resource attached is indistinguishable
-// from an all-in-one import (both start with is_empty_cloud null and a
-// default resource present) - it will import as if it were all-in-one. To
-// import a split deployment's resource-level config, import the
-// anyscale_cloud_resource itself; the bare anyscale_cloud import is only
-// asked to recover cloud-level state.
-func (r *CloudResource) populateConfigFromDefaultResource(ctx context.Context, state *CloudResourceModel, resources []CloudDeploymentResult) diag.Diagnostics {
-	var diags diag.Diagnostics
-
+// attached would flip empty->non-empty on its next refresh.
+func (r *CloudResource) backfillComputedCloudFields(state *CloudResourceModel, resources []CloudDeploymentResult) {
 	state.IsEmptyCloud = resolveIsEmptyCloud(state.IsEmptyCloud, len(resources))
 	if state.IsEmptyCloud.ValueBool() {
-		return diags
+		return
 	}
 
 	defaultResource := findDefaultInCloudResources(resources)
 	if defaultResource == nil {
-		return diags
+		return
 	}
 
 	if state.CloudDeploymentID.IsNull() && defaultResource.CloudDeploymentID != "" {
 		state.CloudDeploymentID = types.StringValue(defaultResource.CloudDeploymentID)
 	}
-
-	if state.AWSConfig.IsNull() && defaultResource.AWSConfig != nil {
-		obj, d := flattenAWSConfig(ctx, defaultResource.AWSConfig)
-		diags.Append(d...)
-		state.AWSConfig = obj
-	}
-	if state.GCPConfig.IsNull() && defaultResource.GCPConfig != nil {
-		obj, d := flattenGCPConfig(ctx, defaultResource.GCPConfig)
-		diags.Append(d...)
-		state.GCPConfig = obj
-	}
-	if state.KubernetesConfig.IsNull() && defaultResource.KubernetesConfig != nil {
-		obj, d := flattenKubernetesConfig(ctx, defaultResource.KubernetesConfig)
-		diags.Append(d...)
-		state.KubernetesConfig = obj
-	}
-	if state.ObjectStorage.IsNull() && defaultResource.ObjectStorage != nil {
-		obj, d := flattenObjectStorage(defaultResource.ObjectStorage, state.CloudProvider.ValueString())
-		diags.Append(d...)
-		state.ObjectStorage = obj
-	}
-	if state.FileStorage.IsNull() && defaultResource.FileStorage != nil {
-		obj, d := flattenFileStorage(ctx, defaultResource.FileStorage)
-		diags.Append(d...)
-		state.FileStorage = obj
-	}
-
-	return diags
 }
