@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a resource, data source, or capability for the Anyscale Terraform provider
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This provider is under active development and API coverage is incomplete —
+        if there's an Anyscale capability you'd like to manage with Terraform, let us know.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the workflow or infrastructure you're trying to manage.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What resource, data source, or attribute would solve this? A sketch of the HCL you'd want to write is welcome.
+      render: hcl
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you're using today (e.g. the Anyscale CLI, console, or API directly).
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and this is not a duplicate
+          required: true
