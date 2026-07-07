@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -1449,6 +1450,93 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 		state.CloudDeploymentID = types.StringNull()
 	}
 
+	// C3 Phase 1: backfill is_empty_cloud/cloud_deployment_id and any
+	// still-null config block from the cloud's default resource - this is
+	// what makes `terraform import` non-destructive instead of forcing a
+	// replace on the first plan. A resources-list failure here degrades to a
+	// warning rather than failing the whole read: this is a best-effort
+	// enhancement layered on top of the scalar refresh above, which worked
+	// fine before this feature existed and must keep working if this one
+	// supplementary call has a bad day.
+	resources, err := listCloudResources(ctx, r.client, cloudID)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to list cloud resources; skipping config-block backfill this read", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+	} else {
+		diags := r.populateConfigFromDefaultResource(ctx, state, resources)
+		for _, d := range diags.Errors() {
+			tflog.Warn(ctx, "Failed to populate a config block from the default resource", map[string]any{"cloud_id": cloudID, "error": d.Summary() + ": " + d.Detail()})
+		}
+	}
+
 	tflog.Info(ctx, "Cloud state read successfully", map[string]any{"id": cloudID, "name": cloudResp.Result.Name})
 	return nil
+}
+
+// populateConfigFromDefaultResource implements C3 Phase 1 for anyscale_cloud:
+// it backfills is_empty_cloud, cloud_deployment_id, and any still-null
+// aws_config/gcp_config/kubernetes_config/object_storage/file_storage block
+// from the cloud's default resource. An already-populated block is left
+// completely untouched - field-level drift detection on populated blocks is
+// Phase 2, deliberately deferred (see CLOUD-SYNC-DESIGN.md).
+//
+// is_empty_cloud is sticky: it's derived from "zero resources attached" only
+// while still null/unknown (a fresh import never ran Create, so it starts
+// that way); once resolved - true OR false - it is never re-derived. Without
+// this, an intentionally-empty cloud that later gets a anyscale_cloud_resource
+// attached would flip empty->non-empty on its next refresh and this function
+// would inject that resource's config into the *cloud*'s own state, even
+// though the user's anyscale_cloud config block never had one - producing a
+// spurious plan to strip it, i.e. a forced replace of a live empty cloud.
+//
+// Known accepted edge case: a *fresh* import of a cloud that was originally
+// created empty but already has a resource attached is indistinguishable
+// from an all-in-one import (both start with is_empty_cloud null and a
+// default resource present) - it will import as if it were all-in-one. To
+// import a split deployment's resource-level config, import the
+// anyscale_cloud_resource itself; the bare anyscale_cloud import is only
+// asked to recover cloud-level state.
+func (r *CloudResource) populateConfigFromDefaultResource(ctx context.Context, state *CloudResourceModel, resources []CloudDeploymentResult) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	state.IsEmptyCloud = resolveIsEmptyCloud(state.IsEmptyCloud, len(resources))
+	if state.IsEmptyCloud.ValueBool() {
+		return diags
+	}
+
+	defaultResource := findDefaultInCloudResources(resources)
+	if defaultResource == nil {
+		return diags
+	}
+
+	if state.CloudDeploymentID.IsNull() && defaultResource.CloudDeploymentID != "" {
+		state.CloudDeploymentID = types.StringValue(defaultResource.CloudDeploymentID)
+	}
+
+	if state.AWSConfig.IsNull() && defaultResource.AWSConfig != nil {
+		obj, d := flattenAWSConfig(ctx, defaultResource.AWSConfig)
+		diags.Append(d...)
+		state.AWSConfig = obj
+	}
+	if state.GCPConfig.IsNull() && defaultResource.GCPConfig != nil {
+		obj, d := flattenGCPConfig(ctx, defaultResource.GCPConfig)
+		diags.Append(d...)
+		state.GCPConfig = obj
+	}
+	if state.KubernetesConfig.IsNull() && defaultResource.KubernetesConfig != nil {
+		obj, d := flattenKubernetesConfig(ctx, defaultResource.KubernetesConfig)
+		diags.Append(d...)
+		state.KubernetesConfig = obj
+	}
+	if state.ObjectStorage.IsNull() && defaultResource.ObjectStorage != nil {
+		obj, d := flattenObjectStorage(defaultResource.ObjectStorage, state.CloudProvider.ValueString())
+		diags.Append(d...)
+		state.ObjectStorage = obj
+	}
+	if state.FileStorage.IsNull() && defaultResource.FileStorage != nil {
+		obj, d := flattenFileStorage(ctx, defaultResource.FileStorage)
+		diags.Append(d...)
+		state.FileStorage = obj
+	}
+
+	return diags
 }

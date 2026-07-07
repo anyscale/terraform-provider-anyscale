@@ -953,8 +953,56 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		state.IsPrivate = types.BoolValue(false)
 	}
 
+	// C3 Phase 1: backfill any still-null config block from this resource's
+	// own API data - same non-destructive-import fix as anyscale_cloud, but
+	// simpler here: unlike the cloud-level resource, a anyscale_cloud_resource
+	// always represents real, non-empty infrastructure, so there's no
+	// is_empty_cloud-style sticky gate needed - a null block here can only
+	// mean "not yet populated" (import), never "intentionally absent".
+	diags := populateCloudResourceConfigBlocks(ctx, state, foundResource)
+	for _, d := range diags.Errors() {
+		tflog.Warn(ctx, "Failed to populate a config block from the resource", map[string]any{"cloud_id": cloudID, "name": resourceName, "error": d.Summary() + ": " + d.Detail()})
+	}
+
 	tflog.Info(ctx, "Cloud resource read successfully", map[string]any{"cloud_id": cloudID, "name": resourceName})
 	return nil
+}
+
+// populateCloudResourceConfigBlocks implements C3 Phase 1 for
+// anyscale_cloud_resource: it backfills any still-null aws_config/gcp_config/
+// kubernetes_config/object_storage/file_storage block from the resource's own
+// API data. An already-populated block is left completely untouched -
+// field-level drift detection is Phase 2, deliberately deferred.
+func populateCloudResourceConfigBlocks(ctx context.Context, state *CloudResourceResourceModel, resource *CloudDeploymentResult) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if state.AWSConfig.IsNull() && resource.AWSConfig != nil {
+		obj, d := flattenAWSConfig(ctx, resource.AWSConfig)
+		diags.Append(d...)
+		state.AWSConfig = obj
+	}
+	if state.GCPConfig.IsNull() && resource.GCPConfig != nil {
+		obj, d := flattenGCPConfig(ctx, resource.GCPConfig)
+		diags.Append(d...)
+		state.GCPConfig = obj
+	}
+	if state.KubernetesConfig.IsNull() && resource.KubernetesConfig != nil {
+		obj, d := flattenKubernetesConfig(ctx, resource.KubernetesConfig)
+		diags.Append(d...)
+		state.KubernetesConfig = obj
+	}
+	if state.ObjectStorage.IsNull() && resource.ObjectStorage != nil {
+		obj, d := flattenObjectStorage(resource.ObjectStorage, state.CloudProvider.ValueString())
+		diags.Append(d...)
+		state.ObjectStorage = obj
+	}
+	if state.FileStorage.IsNull() && resource.FileStorage != nil {
+		obj, d := flattenFileStorage(ctx, resource.FileStorage)
+		diags.Append(d...)
+		state.FileStorage = obj
+	}
+
+	return diags
 }
 
 // addProviderConfig adds provider-specific configuration to the deployment request
