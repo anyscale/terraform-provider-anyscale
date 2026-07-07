@@ -1,0 +1,72 @@
+# Folds .changelog/<PR#>.txt release-note fragments into CHANGELOG.md's
+# "## [Unreleased]" section as soon as they land on main, so the changelog is
+# already current by the time a release is cut -- see
+# .crystl/quest/changelog-release-contract.md (sec6).
+#
+# This does NOT cut a release and does NOT delete fragments: fragments are
+# only consumed at release time (`make changelog-build VERSION=x.y.z`, see the
+# `tag` Makefile target). This workflow only keeps the in-repo Unreleased
+# preview current between releases.
+#
+# Loop guard: triggers only on pushes that touch .changelog/**. The commit
+# this workflow makes only touches CHANGELOG.md, so it can never match that
+# path filter and re-trigger itself. The commit is also tagged [skip ci] as a
+# second, independent guard.
+
+name: Changelog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".changelog/**"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: changelog-fold
+  cancel-in-progress: false
+
+jobs:
+  fold:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Fold fragments into Unreleased
+        run: go run ./tools/changelog-build
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore: fold changelog fragments into Unreleased [skip ci]"
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt), rebasing onto latest main..."
+            git pull --rebase origin main
+          done
+          echo "::error::failed to push the changelog fold commit after 3 attempts"
+          exit 1

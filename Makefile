@@ -544,15 +544,51 @@ release: ## Create and publish a release (requires GPG_FINGERPRINT env var)
 	fi
 
 # ============================================================================
+# CHANGELOG
+# ============================================================================
+# Fragment-based changelog automation. See .crystl/quest/changelog-release-contract.md
+# and tools/changelog-build/.
+
+.PHONY: changelog-build
+changelog-build: ## Fold .changelog/ fragments into Unreleased, or finalize a release with VERSION=x.y.z
+	@if [ -n "$(VERSION)" ] && [ "$(VERSION)" != "0.0.1" ]; then \
+		go run ./tools/changelog-build -finalize $(VERSION); \
+	else \
+		go run ./tools/changelog-build; \
+	fi
+
+.PHONY: changelog-check
+changelog-check: ## Validate .changelog/ fragments parse cleanly, without writing anything
+	@go run ./tools/changelog-build -check
+
+# ============================================================================
 # TAGGING HELPERS
 # ============================================================================
 
 .PHONY: tag
-tag: ## Create and push a release tag (usage: make tag VERSION=0.1.0)
+tag: ## Finalize CHANGELOG.md, then create and push a release tag (usage: make tag VERSION=0.1.0)
 	@if [ -z "$(VERSION)" ] || [ "$(VERSION)" = "0.0.1" ]; then \
 		echo "ERROR: VERSION is required. Usage: make tag VERSION=0.1.0"; \
 		exit 1; \
 	fi
+	@case "$(VERSION)" in \
+		[0-9]*.[0-9]*.[0-9]*) ;; \
+		*) echo "ERROR: VERSION must look like a semantic version, e.g. 0.2.0 (got: $(VERSION))"; exit 1 ;; \
+	esac
+	@branch="$$(git rev-parse --abbrev-ref HEAD)"; \
+	if [ "$$branch" != "main" ]; then \
+		echo "ERROR: run 'make tag' from main (currently on $$branch)"; \
+		exit 1; \
+	fi
+	@if ! git diff --quiet || ! git diff --quiet --cached; then \
+		echo "ERROR: working tree has uncommitted changes; commit or stash first"; \
+		exit 1; \
+	fi
+	@echo "==> Finalizing CHANGELOG.md for v$(VERSION)..."
+	go run ./tools/changelog-build -finalize $(VERSION)
+	git add CHANGELOG.md .changelog
+	git commit -m "chore: finalize CHANGELOG.md for v$(VERSION)"
+	git push origin main
 	@echo "==> Creating tag v$(VERSION)..."
 	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
 	@echo "==> Pushing tag v$(VERSION)..."
