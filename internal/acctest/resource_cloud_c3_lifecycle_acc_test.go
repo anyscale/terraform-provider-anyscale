@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -240,12 +241,58 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudLifecycle_K8S_MockServer is the K8S analogue, using the split
-// pattern (anyscale_cloud_resource) since that is the path F2 steers K8S
-// users toward. F2 (the real backend's compute_stack-derivation bug) cannot
-// contaminate this test: the mock always reports whatever compute_stack this
-// test tells it to, so this proves the PROVIDER's C3 handling for K8S is
-// correct independent of that unresolved backend issue.
+// TestAccCloudResource_K8S_NoRegion_ClearError is an acceptance-level proof
+// for C13: a K8S-only all-in-one cloud (no aws_config, so no subnet-based
+// region inference, and no longer treated as empty since C12) with no
+// explicit region must fail with a clear provider-level error instead of
+// silently sending region="" through to a real add_resource call. Runs
+// through the real Create() framework path (not just forge's direct-function
+// unit test on regionRequiredForCreateError) against a mock server, so it
+// also proves the error surfaces correctly as a plan/apply-time diagnostic.
+func TestAccCloudResource_K8S_NoRegion_ClearError(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const cloudID = "cld_c13_noregion_mock"
+	// region is intentionally absent/empty here - this is what a create
+	// request looks like right before the C13 guard would otherwise let
+	// region="" flow through to add_resource.
+	cloudJSON := fmt.Sprintf(`{
+		"id": %[1]q, "name": "c13-noregion-mock", "provider": "AWS", "region": "",
+		"status": "ready", "state": "ACTIVE", "compute_stack": "K8S"
+	}`, cloudID)
+	resourcesJSON := `[]`
+
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	config := testAccProviderBlock(server.URL) + `
+resource "anyscale_cloud" "test" {
+  name           = "c13-noregion-mock"
+  cloud_provider = "AWS"
+  compute_stack  = "K8S"
+  # region deliberately omitted
+
+  kubernetes_config {
+    anyscale_operator_iam_identity = "arn:aws:iam::123456789012:role/real-k8s-operator"
+  }
+
+  object_storage {
+    bucket_name = "real-k8s-bucket"
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile("region could not be determined"),
+			},
+		},
+	})
+}
+
+// TestAccCloudLifecycle_K8S_MockServer, using the all-in-one pattern (a
+// single anyscale_cloud resource with an embedded kubernetes_config block).
 func TestAccCloudLifecycle_K8S_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
