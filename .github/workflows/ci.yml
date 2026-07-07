@@ -17,7 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Changelog fragment check
+      - name: Changelog fragment presence check
         if: matrix.shard == 'lint-and-unit' && github.event_name == 'pull_request'
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
@@ -36,6 +36,19 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: "1.25"
+
+      - name: Changelog fragment content check
+        if: matrix.shard == 'lint-and-unit' && github.event_name == 'pull_request'
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          FRAGMENT=".changelog/${PR_NUM}.txt"
+          if [ -s "$FRAGMENT" ]; then
+            CHECK_DIR=$(mktemp -d)
+            cp "$FRAGMENT" "$CHECK_DIR/"
+            go run ./tools/changelog-build -check -fragments "$CHECK_DIR"
+          else
+            echo "No fragment for this PR (presence check already passed via skip-changelog label) -- nothing to validate."
+          fi
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
