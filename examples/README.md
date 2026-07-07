@@ -67,24 +67,26 @@ Full GCP VM example with GCP Cloud Foundation modules. Creates both GCP infrastr
 
 #### [aws-eks-basic](./aws-eks-basic/)
 
-AWS EKS (Kubernetes) cloud example. Creates an Anyscale Cloud with AWS EKS compute stack.
+AWS EKS (Kubernetes) cloud example, using the all-in-one deployment pattern. Creates an Anyscale Cloud
+with AWS EKS compute stack in a single `anyscale_cloud` resource.
 
-**Use this when**: You want to register an AWS EKS cluster with Anyscale.
+**Use this when**: You want to register an AWS EKS cluster with Anyscale in one resource.
 
 **What it demonstrates**:
-- Creating an `anyscale_cloud` resource with K8S compute stack
-- Kubernetes configuration for AWS EKS
+- Creating an `anyscale_cloud` resource with K8S compute stack and an embedded `kubernetes_config`
 - Object storage configuration
 
 #### [gcp-gke-basic](./gcp-gke-basic/)
 
-GCP GKE (Kubernetes) cloud example. Creates an Anyscale Cloud with GCP GKE compute stack.
+GCP GKE (Kubernetes) cloud example, using the split deployment pattern. Creates an empty Anyscale
+Cloud, then attaches a GCP GKE compute stack via a separate `anyscale_cloud_resource`.
 
-**Use this when**: You want to register a GCP GKE cluster with Anyscale.
+**Use this when**: You want to register a GCP GKE cluster with Anyscale, managing the cloud and its
+resource deployment separately.
 
 **What it demonstrates**:
-- Creating an `anyscale_cloud` resource with K8S compute stack
-- Kubernetes configuration for GCP GKE
+- Creating an empty `anyscale_cloud` resource
+- Attaching a K8S `anyscale_cloud_resource` with an embedded `kubernetes_config`
 - Object storage configuration
 
 ### Advanced Examples
@@ -204,7 +206,7 @@ All examples require:
 | `gcp-vm-basic` | GCP | VM | All-in-one | Uses existing |
 | `gcp-vm` | GCP | VM | All-in-one | Creates via modules |
 | `aws-eks-basic` | AWS | K8S | All-in-one | Uses existing EKS |
-| `gcp-gke-basic` | GCP | K8S | All-in-one | Uses existing GKE |
+| `gcp-gke-basic` | GCP | K8S | Split | Uses existing GKE |
 | `multi-resource-cloud-basic` | AWS | VM | Split | Uses existing |
 
 ## Common Variables
