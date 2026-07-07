@@ -51,7 +51,15 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "has kubernetes_config only (not embedded)",
+			// Regression test for F2/C12: aws_config/gcp_config are optional
+			// for K8S clouds (see addCloudResource), so kubernetes_config
+			// alone is a valid, complete all-in-one config - it must count as
+			// embedded. Before C12 this asserted false, which is the exact
+			// bug that misclassified K8S-only clouds as empty, skipped
+			// addCloudResource entirely, and surfaced as "Provider produced
+			// inconsistent result after apply: .compute_stack: was K8S, but
+			// now VM" (F2).
+			name: "has kubernetes_config only (embedded - K8S needs no aws/gcp_config)",
 			plan: CloudResourceModel{
 				KubernetesConfig: types.ObjectValueMust(
 					map[string]attr.Type{},
@@ -61,7 +69,7 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 				GCPConfig:   types.ObjectNull(map[string]attr.Type{}),
 				AzureConfig: types.ObjectNull(map[string]attr.Type{}),
 			},
-			expected: false,
+			expected: true,
 		},
 		{
 			name: "has object_storage only (not embedded)",
