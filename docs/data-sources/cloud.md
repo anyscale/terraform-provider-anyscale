@@ -52,9 +52,17 @@ output "cloud_provider_by_id" {
 - `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
 - `cloud_deployment_id` (String) The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
+- `compute_stack` (String) The compute stack (VM or K8S).
+- `created_at` (String) Timestamp when the cloud was created.
+- `creator_id` (String) The ID of the user who created the cloud.
 - `enable_lineage_tracking` (Boolean) Whether lineage tracking is enabled for this cloud.
 - `enable_log_ingestion` (Boolean) Whether aggregated log ingestion is enabled for this cloud.
+- `is_aioa` (Boolean) Whether this is an AIOA (Anyscale In Your Own Account) cloud.
+- `is_bring_your_own_resource` (Boolean) Whether this cloud allows bringing your own resources.
+- `is_default` (Boolean) Whether this is the default cloud for the organization.
 - `is_empty_cloud` (Boolean) Whether this is an empty cloud (created without embedded resource configuration).
+- `is_private_cloud` (Boolean) Whether this is a private cloud.
+- `is_private_service_cloud` (Boolean) Whether this is a private service cloud.
 - `region` (String) The region where the cloud is deployed.
 - `state` (String) The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).
 - `status` (String) The operational status of the cloud (e.g., ready, pending, failed).

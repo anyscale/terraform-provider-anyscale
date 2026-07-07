@@ -46,6 +46,19 @@ type CloudDataSourceModel struct {
 	AutoAddUser           types.Bool   `tfsdk:"auto_add_user"`
 	EnableLineageTracking types.Bool   `tfsdk:"enable_lineage_tracking"`
 	EnableLogIngestion    types.Bool   `tfsdk:"enable_log_ingestion"`
+
+	// C2: parity with the plural anyscale_clouds data source's per-item
+	// fields. Names deliberately kept as-is (not renamed to match the
+	// plural's lineage_tracking_enabled/is_aggregated_logs_enabled) - see
+	// CLOUD-SYNC-DESIGN.md C7, renaming an existing attribute is breaking.
+	ComputeStack           types.String `tfsdk:"compute_stack"`
+	CreatedAt              types.String `tfsdk:"created_at"`
+	CreatorID              types.String `tfsdk:"creator_id"`
+	IsDefault              types.Bool   `tfsdk:"is_default"`
+	IsAIOA                 types.Bool   `tfsdk:"is_aioa"`
+	IsBringYourOwnResource types.Bool   `tfsdk:"is_bring_your_own_resource"`
+	IsPrivateCloud         types.Bool   `tfsdk:"is_private_cloud"`
+	IsPrivateServiceCloud  types.Bool   `tfsdk:"is_private_service_cloud"`
 }
 
 // Metadata returns the data source type name.
@@ -106,6 +119,40 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 			"enable_log_ingestion": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
+			},
+
+			// C2: parity with the plural anyscale_clouds data source.
+			"compute_stack": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The compute stack (VM or K8S).",
+			},
+			"created_at": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "Timestamp when the cloud was created.",
+			},
+			"creator_id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The ID of the user who created the cloud.",
+			},
+			"is_default": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this is the default cloud for the organization.",
+			},
+			"is_aioa": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this is an AIOA (Anyscale In Your Own Account) cloud.",
+			},
+			"is_bring_your_own_resource": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this cloud allows bringing your own resources.",
+			},
+			"is_private_cloud": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this is a private cloud.",
+			},
+			"is_private_service_cloud": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this is a private service cloud.",
 			},
 		},
 	}
@@ -251,6 +298,19 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	config.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
 	config.EnableLineageTracking = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
 	config.EnableLogIngestion = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
+
+	// C2: parity fields with the plural anyscale_clouds data source - mapped
+	// the same unconditional way plural's fetchClouds does, so the two
+	// report identical values for the same cloud rather than diverging on
+	// edge cases like an empty compute_stack from a pre-field-existing cloud.
+	config.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
+	config.CreatedAt = types.StringValue(cloudResp.Result.CreatedAt)
+	config.CreatorID = types.StringValue(cloudResp.Result.CreatorID)
+	config.IsDefault = types.BoolValue(cloudResp.Result.IsDefault)
+	config.IsAIOA = types.BoolValue(cloudResp.Result.IsAIOA)
+	config.IsBringYourOwnResource = types.BoolValue(cloudResp.Result.IsBringYourOwnResource)
+	config.IsPrivateCloud = types.BoolValue(cloudResp.Result.IsPrivateCloud)
+	config.IsPrivateServiceCloud = types.BoolValue(cloudResp.Result.IsPrivateServiceCloud)
 
 	// is_empty_cloud and cloud_deployment_id aren't on the cloud payload itself -
 	// derive them from the cloud's resources the same way anyscale_cloud_resource
