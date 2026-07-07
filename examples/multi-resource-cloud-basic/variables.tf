@@ -79,8 +79,8 @@ variable "common_prefix_1" {
   type        = string
   default     = "as-aws-basic1-"
   validation {
-    condition     = var.common_prefix == null || try(length(var.common_prefix) <= 30, false)
-    error_message = "common_prefix must either be `null` or less than 30 characters."
+    condition     = var.common_prefix_1 == null || try(length(var.common_prefix_1) <= 30, false)
+    error_message = "common_prefix_1 must either be `null` or less than 30 characters."
   }
 }
 
@@ -89,8 +89,8 @@ variable "common_prefix_2" {
   type        = string
   default     = "as-aws-basic2-"
   validation {
-    condition     = var.common_prefix == null || try(length(var.common_prefix) <= 30, false)
-    error_message = "common_prefix must either be `null` or less than 30 characters."
+    condition     = var.common_prefix_2 == null || try(length(var.common_prefix_2) <= 30, false)
+    error_message = "common_prefix_2 must either be `null` or less than 30 characters."
   }
 }
 

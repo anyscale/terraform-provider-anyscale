@@ -15,19 +15,19 @@ resource "anyscale_cloud_resource" "primary" {
 
   # AWS Configuration
   aws_config {
-    vpc_id           = module.aws_anyscale_v2.anyscale_vpc_id
-    subnet_ids_to_az = module.aws_anyscale_v2.anyscale_vpc_public_subnet_ids_az_map
+    vpc_id           = module.aws_anyscale_1.anyscale_vpc_id
+    subnet_ids_to_az = module.aws_anyscale_1.anyscale_vpc_public_subnet_ids_az_map
 
-    security_group_ids = [module.aws_anyscale_v2.anyscale_security_group_id]
+    security_group_ids = [module.aws_anyscale_1.anyscale_security_group_id]
 
-    controlplane_iam_role_arn = module.aws_anyscale_v2.anyscale_iam_role_arn
-    dataplane_iam_role_arn    = module.aws_anyscale_v2.anyscale_iam_role_cluster_node_arn
-    external_id               = module.aws_anyscale_v2.anyscale_iam_role_external_id
+    controlplane_iam_role_arn = module.aws_anyscale_1.anyscale_iam_role_arn
+    dataplane_iam_role_arn    = module.aws_anyscale_1.anyscale_iam_role_cluster_node_arn
+    external_id               = module.aws_anyscale_1.anyscale_iam_role_external_id
   }
 
   # Object Storage (S3)
   object_storage {
-    bucket_name = module.aws_anyscale_v2.anyscale_s3_bucket_id
+    bucket_name = module.aws_anyscale_1.anyscale_s3_bucket_id
     region      = var.aws_region
   }
 
