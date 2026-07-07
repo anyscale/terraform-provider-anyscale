@@ -17,6 +17,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Changelog fragment check
+        if: matrix.shard == 'lint-and-unit' && github.event_name == 'pull_request'
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          FRAGMENT=".changelog/${PR_NUM}.txt"
+          HAS_SKIP_LABEL=$(jq -r '[.pull_request.labels[].name] | any(. == "skip-changelog")' "$GITHUB_EVENT_PATH")
+          if [ -s "$FRAGMENT" ]; then
+            echo "Found changelog fragment: $FRAGMENT"
+          elif [ "$HAS_SKIP_LABEL" = "true" ]; then
+            echo "No changelog fragment, but 'skip-changelog' label present -- OK."
+          else
+            echo "::error::Missing changelog fragment for this PR. Add $FRAGMENT containing one or more 'release-note:<type>' blocks (see CONTRIBUTING.md), or apply the 'skip-changelog' label if this PR has no user-facing effect."
+            exit 1
+          fi
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
