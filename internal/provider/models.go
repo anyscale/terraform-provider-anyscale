@@ -104,17 +104,18 @@ type MountTarget struct {
 
 // AWSConfig represents AWS-specific cloud configuration
 type AWSConfig struct {
-	VPCID                   string   `json:"vpc_id"`
-	SubnetIDs               []string `json:"subnet_ids"`
-	Zones                   []string `json:"zones,omitempty"`
-	SecurityGroupIDs        []string `json:"security_group_ids"`
-	AnyscaleIAMRoleID       string   `json:"anyscale_iam_role_id"`
-	ExternalID              string   `json:"external_id,omitempty"`
-	ClusterIAMRoleID        string   `json:"cluster_iam_role_id"`
-	MemoryDBClusterName     *string  `json:"memorydb_cluster_name,omitempty"`
-	MemoryDBClusterARN      *string  `json:"memorydb_cluster_arn,omitempty"`
-	MemoryDBClusterEndpoint *string  `json:"memorydb_cluster_endpoint,omitempty"`
-	CloudFormationID        *string  `json:"cloudformation_id,omitempty"`
+	VPCID                    string   `json:"vpc_id"`
+	SubnetIDs                []string `json:"subnet_ids"`
+	Zones                    []string `json:"zones,omitempty"`
+	SecurityGroupIDs         []string `json:"security_group_ids"`
+	AnyscaleIAMRoleID        string   `json:"anyscale_iam_role_id"`
+	ExternalID               string   `json:"external_id,omitempty"`
+	ClusterIAMRoleID         string   `json:"cluster_iam_role_id"`
+	ClusterInstanceProfileID *string  `json:"cluster_instance_profile_id,omitempty"`
+	MemoryDBClusterName      *string  `json:"memorydb_cluster_name,omitempty"`
+	MemoryDBClusterARN       *string  `json:"memorydb_cluster_arn,omitempty"`
+	MemoryDBClusterEndpoint  *string  `json:"memorydb_cluster_endpoint,omitempty"`
+	CloudFormationID         *string  `json:"cloudformation_id,omitempty"`
 }
 
 // GCPConfig represents GCP-specific cloud configuration

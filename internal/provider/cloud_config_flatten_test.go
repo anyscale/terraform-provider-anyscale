@@ -204,3 +204,58 @@ func TestFlattenFileStorage_MountPathFallsBackOnlyWhenAPIOmitsIt(t *testing.T) {
 		}
 	})
 }
+
+// TestFlattenAWSConfig_ClusterInstanceProfileID is a regression test for C6:
+// aws_config.cluster_instance_profile_id must round-trip through import like
+// every other optional AWSConfig field.
+func TestFlattenAWSConfig_ClusterInstanceProfileID(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("set value is preserved", func(t *testing.T) {
+		profileID := "arn:aws:iam::123:instance-profile/custom"
+		obj, diags := flattenAWSConfig(ctx, &AWSConfig{ClusterInstanceProfileID: &profileID})
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+		var model AWSConfigModel
+		obj.As(ctx, &model, basetypes.ObjectAsOptions{})
+		if model.ClusterInstanceProfileID.ValueString() != profileID {
+			t.Errorf("ClusterInstanceProfileID = %v, want %v", model.ClusterInstanceProfileID.ValueString(), profileID)
+		}
+	})
+
+	t.Run("unset (nil) API value flattens to null, not the API-side default", func(t *testing.T) {
+		obj, diags := flattenAWSConfig(ctx, &AWSConfig{})
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+		var model AWSConfigModel
+		obj.As(ctx, &model, basetypes.ObjectAsOptions{})
+		if !model.ClusterInstanceProfileID.IsNull() {
+			t.Errorf("ClusterInstanceProfileID = %v, want null", model.ClusterInstanceProfileID)
+		}
+	})
+}
+
+// TestFlattenFileStorage_PVCAndCSIDriver is a regression test for C6:
+// file_storage.persistent_volume_claim and .csi_ephemeral_volume_driver must
+// round-trip like every other optional FileStorage field.
+func TestFlattenFileStorage_PVCAndCSIDriver(t *testing.T) {
+	ctx := context.Background()
+	obj, diags := flattenFileStorage(ctx, &FileStorage{
+		FileStorageID:            "fs-1",
+		PersistentVolumeClaim:    "ray-shared-pvc",
+		CSIEphemeralVolumeDriver: "ephemeral.csi.example.com",
+	})
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	var model FileStorageModel
+	obj.As(ctx, &model, basetypes.ObjectAsOptions{})
+	if model.PersistentVolumeClaim.ValueString() != "ray-shared-pvc" {
+		t.Errorf("PersistentVolumeClaim = %v, want ray-shared-pvc", model.PersistentVolumeClaim.ValueString())
+	}
+	if model.CSIEphemeralVolumeDriver.ValueString() != "ephemeral.csi.example.com" {
+		t.Errorf("CSIEphemeralVolumeDriver = %v, want ephemeral.csi.example.com", model.CSIEphemeralVolumeDriver.ValueString())
+	}
+}
