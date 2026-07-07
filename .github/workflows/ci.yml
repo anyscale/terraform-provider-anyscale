@@ -78,11 +78,17 @@ jobs:
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
-        run: TF_ACC=1 go test ./internal/acctest/ -v -timeout 60m -parallel 4 -run '^TestAcc[A-Za-z]+DataSource'
+        run: |
+          set -o pipefail
+          TF_ACC=1 go test ./internal/acctest/ -v -timeout 60m -parallel 4 -run '^TestAcc[A-Za-z]+DataSource' 2>&1 | tee /tmp/acctest.log
+          .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Data Sources"
 
       - name: Acceptance Tests - Resources
         if: matrix.shard == 'acctest-resource'
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
-        run: TF_ACC=1 go test ./internal/acctest/ -v -timeout 90m -parallel 4 -run '^TestAcc[A-Za-z]+Resource'
+        run: |
+          set -o pipefail
+          TF_ACC=1 go test ./internal/acctest/ -v -timeout 90m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' 2>&1 | tee /tmp/acctest.log
+          .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Resources"

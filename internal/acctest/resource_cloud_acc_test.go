@@ -227,6 +227,41 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 	})
 }
 
+// TestAccCloudResource_GCP_K8S tests GCP K8S (GKE) cloud creation
+func TestAccCloudResource_GCP_K8S(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
+
+	cloudName := UniqueName(t, "cloud-gcp-k8s")
+	// Generate random suffix for service accounts to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccCloudResourceGCPK8SConfig(cloudName, randSuffix),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "GCP"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "compute_stack", "K8S"),
+					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "id"),
+					// API validation
+					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
+					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "GCP", "us-central1"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+
 // Helper function to check if cloud exists in API and fetch its details
 func testAccCheckCloudExistsInAPI(resourceName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -484,6 +519,27 @@ resource "anyscale_cloud" "test" {
   }
 }
 `, name, namespace, randSuffix, randSuffix)
+}
+
+func testAccCloudResourceGCPK8SConfig(name, randSuffix string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name           = "%s"
+  cloud_provider = "GCP"
+  compute_stack  = "K8S"
+  region         = "us-central1"
+
+  kubernetes_config {
+    namespace                       = "anyscale"
+    anyscale_operator_iam_identity  = "tfacc-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com"
+    zones                           = ["us-central1-a", "us-central1-b"]
+  }
+
+  object_storage {
+    bucket_name = "tfacc-gcp-k8s-bucket-%s"
+  }
+}
+`, name, randSuffix, randSuffix)
 }
 
 // TestAccCloudResource_Disappears verifies that an out-of-band cloud deletion

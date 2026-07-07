@@ -104,17 +104,18 @@ type MountTarget struct {
 
 // AWSConfig represents AWS-specific cloud configuration
 type AWSConfig struct {
-	VPCID                   string   `json:"vpc_id"`
-	SubnetIDs               []string `json:"subnet_ids"`
-	Zones                   []string `json:"zones,omitempty"`
-	SecurityGroupIDs        []string `json:"security_group_ids"`
-	AnyscaleIAMRoleID       string   `json:"anyscale_iam_role_id"`
-	ExternalID              string   `json:"external_id,omitempty"`
-	ClusterIAMRoleID        string   `json:"cluster_iam_role_id"`
-	MemoryDBClusterName     *string  `json:"memorydb_cluster_name,omitempty"`
-	MemoryDBClusterARN      *string  `json:"memorydb_cluster_arn,omitempty"`
-	MemoryDBClusterEndpoint *string  `json:"memorydb_cluster_endpoint,omitempty"`
-	CloudFormationID        *string  `json:"cloudformation_id,omitempty"`
+	VPCID                    string   `json:"vpc_id"`
+	SubnetIDs                []string `json:"subnet_ids"`
+	Zones                    []string `json:"zones,omitempty"`
+	SecurityGroupIDs         []string `json:"security_group_ids"`
+	AnyscaleIAMRoleID        string   `json:"anyscale_iam_role_id"`
+	ExternalID               string   `json:"external_id,omitempty"`
+	ClusterIAMRoleID         string   `json:"cluster_iam_role_id"`
+	ClusterInstanceProfileID *string  `json:"cluster_instance_profile_id,omitempty"`
+	MemoryDBClusterName      *string  `json:"memorydb_cluster_name,omitempty"`
+	MemoryDBClusterARN       *string  `json:"memorydb_cluster_arn,omitempty"`
+	MemoryDBClusterEndpoint  *string  `json:"memorydb_cluster_endpoint,omitempty"`
+	CloudFormationID         *string  `json:"cloudformation_id,omitempty"`
 }
 
 // GCPConfig represents GCP-specific cloud configuration
@@ -156,28 +157,6 @@ type KubernetesConfig struct {
 	RedisEndpoint string `json:"redis_endpoint,omitempty"`
 }
 
-// KubernetesConfigFull represents the full Kubernetes configuration including
-// fields stored in Terraform state but not sent to the API.
-type KubernetesConfigFull struct {
-	KubernetesConfig
-
-	// The following fields are stored in Terraform state for reference/outputs
-	// but are NOT sent to the Anyscale API
-
-	// Namespace for Anyscale operator (defaults to "anyscale")
-	Namespace string `json:"-"`
-
-	// Ingress settings
-	IngressHost string `json:"-"`
-
-	// Cloud-specific cluster identifiers
-	ClusterName string `json:"-"` // AWS EKS cluster name
-	Context     string `json:"-"` // K8s context name
-
-	// Legacy/generic fields
-	KubeconfigPath string `json:"-"`
-}
-
 // CloudDeploymentResponse represents the response from adding a cloud resource
 type CloudDeploymentResponse struct {
 	Result CloudDeploymentResult `json:"result"`
@@ -185,26 +164,47 @@ type CloudDeploymentResponse struct {
 
 // CloudDeploymentResult is the actual deployment data
 type CloudDeploymentResult struct {
-	CloudResourceID         string            `json:"cloud_resource_id"`
-	CloudDeploymentID       string            `json:"cloud_deployment_id"`
-	Name                    string            `json:"name"`
-	Provider                string            `json:"provider"`
-	ComputeStack            string            `json:"compute_stack"`
-	Region                  string            `json:"region"`
-	NetworkingMode          string            `json:"networking_mode"`
-	ObjectStorage           *ObjectStorage    `json:"object_storage"`
-	FileStorage             *FileStorage      `json:"file_storage"`
-	AWSConfig               *AWSConfig        `json:"aws_config"`
-	GCPConfig               *GCPConfig        `json:"gcp_config"`
-	AzureConfig             *AzureConfig      `json:"azure_config"`
-	KubernetesConfig        *KubernetesConfig `json:"kubernetes_config"`
-	CreatedAt               string            `json:"created_at"`
-	IsDefault               bool              `json:"is_default"`
-	OperatorStatus          *string           `json:"operator_status"`
-	OperatorStatusDetails   *string           `json:"operator_status_details"`
-	AutoAddUser             *bool             `json:"auto_add_user,omitempty"`
-	LineageTrackingEnabled  *bool             `json:"lineage_tracking_enabled,omitempty"`
-	IsAggregatedLogsEnabled *bool             `json:"is_aggregated_logs_enabled,omitempty"`
+	CloudResourceID         string                 `json:"cloud_resource_id"`
+	CloudDeploymentID       string                 `json:"cloud_deployment_id"`
+	Name                    string                 `json:"name"`
+	Provider                string                 `json:"provider"`
+	ComputeStack            string                 `json:"compute_stack"`
+	Region                  string                 `json:"region"`
+	NetworkingMode          string                 `json:"networking_mode"`
+	ObjectStorage           *ObjectStorage         `json:"object_storage"`
+	FileStorage             *FileStorage           `json:"file_storage"`
+	AWSConfig               *AWSConfig             `json:"aws_config"`
+	GCPConfig               *GCPConfig             `json:"gcp_config"`
+	AzureConfig             *AzureConfig           `json:"azure_config"`
+	KubernetesConfig        *KubernetesConfig      `json:"kubernetes_config"`
+	CreatedAt               string                 `json:"created_at"`
+	IsDefault               bool                   `json:"is_default"`
+	OperatorStatus          *string                `json:"operator_status"`
+	OperatorStatusDetails   *OperatorStatusDetails `json:"operator_status_details"`
+	AutoAddUser             *bool                  `json:"auto_add_user,omitempty"`
+	LineageTrackingEnabled  *bool                  `json:"lineage_tracking_enabled,omitempty"`
+	IsAggregatedLogsEnabled *bool                  `json:"is_aggregated_logs_enabled,omitempty"`
+}
+
+// OperatorStatusDetails carries Kubernetes Anyscale Operator health details,
+// present once a K8s cloud_resource's operator has reported in. Previously
+// typed as *string on CloudDeploymentResult, which failed to decode as soon
+// as the API returned this object (C4/F2 investigation) - the API has always
+// returned an object here, never a string.
+type OperatorStatusDetails struct {
+	OperatorVersion *string               `json:"operator_version"`
+	CheckResults    []OperatorCheckResult `json:"check_results"`
+	ReportedAt      *string               `json:"reported_at"`
+}
+
+// OperatorCheckResult is a single named health check the operator reports,
+// e.g. connectivity or permissions checks. Not yet surfaced as its own
+// schema attribute (deferred per CLOUD-SYNC-DESIGN.md C4) - decoded here so
+// it doesn't need touching again when it is.
+type OperatorCheckResult struct {
+	Name    *string `json:"name"`
+	Status  *string `json:"status"`
+	Details *string `json:"details"`
 }
 
 // CloudDeploymentsResponse represents the response from listing cloud deployments

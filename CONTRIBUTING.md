@@ -8,6 +8,11 @@ workflow; for building, testing, and project layout see the [README](README.md#d
 
 1. Follow [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework) conventions.
 2. Add unit tests for new helper functions and acceptance tests for new/changed resources and data sources.
+   Note: acceptance tests that create a Cloud with embedded `aws_config`/`gcp_config`/`kubernetes_config`
+   are gated behind `ANYSCALE_TEST_REAL_INFRA=1` (see `internal/acctest/helpers.go`) and are **not**
+   run in CI — a green CI run doesn't exercise these paths. Verify them yourself locally with
+   `ANYSCALE_TEST_REAL_INFRA=1 make testacc` before relying on them as evidence, and prefer a mocked
+   unit test for anything you need CI to enforce on every PR.
 3. Run `make docs` if you changed a schema (description, attribute, resource/data source) — docs are generated, don't hand-edit files under `docs/`.
 4. Run `make fmt lint test` before pushing.
 5. Run `pre-commit install` once, so formatting hooks run automatically on commit.

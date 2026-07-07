@@ -241,6 +241,41 @@ func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 	})
 }
 
+// TestAccCloudResourceResource_GCP_K8S tests GCP K8S (GKE) cloud resource creation
+func TestAccCloudResourceResource_GCP_K8S(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
+
+	cloudName := UniqueName(t, "cloud-res-gcp-k8s")
+	resourceName := "default"
+	// Generate random suffix for service accounts to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudResourceDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccCloudResourceResourceGCPK8SConfig(cloudName, resourceName, randSuffix),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_cloud_resource.test", "cloud_id"),
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "name", resourceName),
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "compute_stack", "K8S"),
+					// API validation
+					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
+					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "K8S"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+
 // TestAccCloudResourceResource_Azure_NotSupported is a regression test for task
 // 02118d55: the provider switch in addProviderConfig had no case at all for AZURE
 // (or GENERIC), so it silently fell through with none of the user's intent applied
@@ -668,8 +703,11 @@ func testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix, 
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
   cloud_provider = "AWS"
-  compute_stack  = "K8S"
   region         = "us-east-2"
+  # compute_stack deliberately omitted (stays Computed): the parent starts
+  # empty and derives its compute_stack from the attached cloud_resource -
+  # setting K8S explicitly here can never be honored by the empty-cloud
+  # create path (C14, see quest chat).
 }
 
 resource "anyscale_cloud_resource" "test" {
@@ -690,6 +728,38 @@ resource "anyscale_cloud_resource" "test" {
   }
 }
 `, cloudName, resourceName, namespace, randSuffix, randSuffix)
+}
+
+func testAccCloudResourceResourceGCPK8SConfig(cloudName, resourceName, randSuffix string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test_cloud" {
+  name           = "%s"
+  cloud_provider = "GCP"
+  region         = "us-central1"
+  # compute_stack deliberately omitted (stays Computed): the parent starts
+  # empty and derives its compute_stack from the attached cloud_resource -
+  # setting K8S explicitly here can never be honored by the empty-cloud
+  # create path (C14, see quest chat).
+}
+
+resource "anyscale_cloud_resource" "test" {
+  cloud_id       = anyscale_cloud.test_cloud.id
+  name           = "%s"
+  cloud_provider = "GCP"
+  region         = "us-central1"
+  compute_stack  = "K8S"
+
+  kubernetes_config {
+    namespace                       = "anyscale"
+    anyscale_operator_iam_identity  = "tfacc-cloudres-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com"
+    zones                           = ["us-central1-a", "us-central1-b"]
+  }
+
+  object_storage {
+    bucket_name = "tfacc-cres-gcp-k8s-bucket-%s"
+  }
+}
+`, cloudName, resourceName, randSuffix, randSuffix)
 }
 
 func testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix, mountPath, mountTargetZone string) string {

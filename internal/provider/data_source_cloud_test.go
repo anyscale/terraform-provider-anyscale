@@ -1,10 +1,216 @@
 package provider
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// TestReadCloudIntoModel_MapsFromResponseNotConstant is a regression test for
+// change C1: data_source_cloud.go used to hardcode auto_add_user,
+// enable_lineage_tracking, enable_log_ingestion, is_empty_cloud to false and
+// cloud_deployment_id to null, regardless of what the API returned. Each case
+// below sets the mocked API to the OPPOSITE of the old hardcoded value, so
+// this test fails against the pre-fix implementation.
+func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
+	t.Run("cloud with resources: booleans true, deployment ID from default resource", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Path {
+			case "/api/v2/clouds/cloud-1":
+				_, _ = fmt.Fprint(w, `{
+					"result": {
+						"id": "cloud-1",
+						"name": "prod",
+						"provider": "AWS",
+						"region": "us-east-1",
+						"status": "ready",
+						"state": "ACTIVE",
+						"auto_add_user": true,
+						"lineage_tracking_enabled": true,
+						"is_aggregated_logs_enabled": true
+					}
+				}`)
+			case "/api/v2/clouds/cloud-1/resources":
+				_, _ = fmt.Fprint(w, `{
+					"results": [{"name": "default-resource", "cloud_deployment_id": "cd-42", "is_default": true}],
+					"metadata": {"total": 1, "next_paging_token": null}
+				}`)
+			default:
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
+		var config CloudDataSourceModel
+		if err := d.readCloudIntoModel(context.Background(), "cloud-1", &config); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !config.AutoAddUser.ValueBool() {
+			t.Error("AutoAddUser = false, want true (from response)")
+		}
+		if !config.EnableLineageTracking.ValueBool() {
+			t.Error("EnableLineageTracking = false, want true (from response)")
+		}
+		if !config.EnableLogIngestion.ValueBool() {
+			t.Error("EnableLogIngestion = false, want true (from response)")
+		}
+		if config.IsEmptyCloud.ValueBool() {
+			t.Error("IsEmptyCloud = true, want false (cloud has a resource)")
+		}
+		if config.CloudDeploymentID.IsNull() || config.CloudDeploymentID.ValueString() != "cd-42" {
+			t.Errorf("CloudDeploymentID = %v, want \"cd-42\"", config.CloudDeploymentID)
+		}
+	})
+
+	t.Run("cloud with no resources: booleans false, is_empty_cloud true, deployment ID null", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Path {
+			case "/api/v2/clouds/cloud-2":
+				_, _ = fmt.Fprint(w, `{
+					"result": {
+						"id": "cloud-2",
+						"name": "empty-cloud",
+						"provider": "AWS",
+						"region": "us-east-1",
+						"auto_add_user": false,
+						"lineage_tracking_enabled": false,
+						"is_aggregated_logs_enabled": false
+					}
+				}`)
+			case "/api/v2/clouds/cloud-2/resources":
+				_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+			default:
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
+		var config CloudDataSourceModel
+		if err := d.readCloudIntoModel(context.Background(), "cloud-2", &config); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if config.AutoAddUser.ValueBool() {
+			t.Error("AutoAddUser = true, want false (from response)")
+		}
+		if !config.IsEmptyCloud.ValueBool() {
+			t.Error("IsEmptyCloud = false, want true (cloud has zero resources)")
+		}
+		if !config.CloudDeploymentID.IsNull() {
+			t.Errorf("CloudDeploymentID = %v, want null (no default resource)", config.CloudDeploymentID)
+		}
+	})
+}
+
+// TestReadCloudIntoModel_C2ParityFieldsMapFromResponse is a regression test
+// for change C2: the singular anyscale_cloud data source previously exposed
+// none of the 8 fields the plural anyscale_clouds data source already had
+// per-item (compute_stack, created_at, creator_id, is_default, is_aioa,
+// is_bring_your_own_resource, is_private_cloud, is_private_service_cloud).
+func TestReadCloudIntoModel_C2ParityFieldsMapFromResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/api/v2/clouds/cloud-parity":
+			_, _ = fmt.Fprint(w, `{
+				"result": {
+					"id": "cloud-parity", "name": "c", "provider": "AWS", "region": "us-east-1",
+					"compute_stack": "K8S", "created_at": "2026-01-01T00:00:00Z", "creator_id": "usr_123",
+					"is_default": true, "is_aioa": true, "is_bring_your_own_resource": true,
+					"is_private_cloud": true, "is_private_service_cloud": true
+				}
+			}`)
+		case "/api/v2/clouds/cloud-parity/resources":
+			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	var config CloudDataSourceModel
+	if err := d.readCloudIntoModel(context.Background(), "cloud-parity", &config); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if config.ComputeStack.ValueString() != "K8S" {
+		t.Errorf("ComputeStack = %v, want K8S", config.ComputeStack.ValueString())
+	}
+	if config.CreatedAt.ValueString() != "2026-01-01T00:00:00Z" {
+		t.Errorf("CreatedAt = %v, want 2026-01-01T00:00:00Z", config.CreatedAt.ValueString())
+	}
+	if config.CreatorID.ValueString() != "usr_123" {
+		t.Errorf("CreatorID = %v, want usr_123", config.CreatorID.ValueString())
+	}
+	for name, got := range map[string]types.Bool{
+		"IsDefault":              config.IsDefault,
+		"IsAIOA":                 config.IsAIOA,
+		"IsBringYourOwnResource": config.IsBringYourOwnResource,
+		"IsPrivateCloud":         config.IsPrivateCloud,
+		"IsPrivateServiceCloud":  config.IsPrivateServiceCloud,
+	} {
+		if !got.ValueBool() {
+			t.Errorf("%s = false, want true (from response)", name)
+		}
+	}
+}
+
+// TestCloudDataSource_LookupByIDAndByName_ReturnIdenticalValues proves that
+// the by-id and by-name lookup paths converge on readCloudIntoModel and so
+// return the same values for the same underlying cloud - both must reflect
+// the real API response, not a lookup-path-specific default.
+func TestCloudDataSource_LookupByIDAndByName_ReturnIdenticalValues(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/api/v2/clouds":
+			_, _ = fmt.Fprint(w, `{"results": [{"id": "cloud-3", "name": "by-name-target", "created_at": "2024-01-01T00:00:00Z"}], "metadata": {"total": 1, "next_paging_token": null}}`)
+		case "/api/v2/clouds/cloud-3":
+			_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-3", "name": "by-name-target", "provider": "GCP", "region": "us-central1", "auto_add_user": true, "lineage_tracking_enabled": true, "is_aggregated_logs_enabled": true}}`)
+		case "/api/v2/clouds/cloud-3/resources":
+			_, _ = fmt.Fprint(w, `{"results": [{"name": "r", "cloud_deployment_id": "cd-99", "is_default": true}], "metadata": {"total": 1, "next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	var byID CloudDataSourceModel
+	if err := d.readCloudIntoModel(context.Background(), "cloud-3", &byID); err != nil {
+		t.Fatalf("by-id lookup: unexpected error: %v", err)
+	}
+
+	resolvedID, err := d.findCloudByName(context.Background(), "by-name-target")
+	if err != nil {
+		t.Fatalf("by-name lookup: unexpected error: %v", err)
+	}
+	var byName CloudDataSourceModel
+	if err := d.readCloudIntoModel(context.Background(), resolvedID, &byName); err != nil {
+		t.Fatalf("by-name lookup: unexpected error: %v", err)
+	}
+
+	if byID.AutoAddUser.ValueBool() != byName.AutoAddUser.ValueBool() {
+		t.Errorf("AutoAddUser mismatch: by-id=%v by-name=%v", byID.AutoAddUser.ValueBool(), byName.AutoAddUser.ValueBool())
+	}
+	if byID.CloudDeploymentID.ValueString() != byName.CloudDeploymentID.ValueString() {
+		t.Errorf("CloudDeploymentID mismatch: by-id=%v by-name=%v", byID.CloudDeploymentID, byName.CloudDeploymentID)
+	}
+	if byID.IsEmptyCloud.ValueBool() != byName.IsEmptyCloud.ValueBool() {
+		t.Errorf("IsEmptyCloud mismatch: by-id=%v by-name=%v", byID.IsEmptyCloud.ValueBool(), byName.IsEmptyCloud.ValueBool())
+	}
+}
 
 // TestCloudDataSourceLookupValidation tests validation of ID vs Name lookup
 func TestCloudDataSourceLookupValidation(t *testing.T) {
@@ -154,33 +360,6 @@ func TestCloudDataSourceModelMapping(t *testing.T) {
 	}
 	if model.State.ValueString() != "ACTIVE" {
 		t.Errorf("State = %v, want 'ACTIVE'", model.State.ValueString())
-	}
-}
-
-// TestCloudBooleanFieldDefaults tests default boolean field handling
-func TestCloudBooleanFieldDefaults(t *testing.T) {
-	// Simulate API response without boolean fields
-	model := CloudDataSourceModel{
-		ID:                    types.StringValue("cld_123"),
-		Name:                  types.StringValue("test-cloud"),
-		AutoAddUser:           types.BoolValue(false), // Should default to false
-		EnableLineageTracking: types.BoolValue(false),
-		EnableLogIngestion:    types.BoolValue(false),
-		IsEmptyCloud:          types.BoolValue(false),
-	}
-
-	// Verify defaults
-	if model.AutoAddUser.ValueBool() != false {
-		t.Errorf("AutoAddUser = %v, want false (default)", model.AutoAddUser.ValueBool())
-	}
-	if model.EnableLineageTracking.ValueBool() != false {
-		t.Errorf("EnableLineageTracking = %v, want false (default)", model.EnableLineageTracking.ValueBool())
-	}
-	if model.EnableLogIngestion.ValueBool() != false {
-		t.Errorf("EnableLogIngestion = %v, want false (default)", model.EnableLogIngestion.ValueBool())
-	}
-	if model.IsEmptyCloud.ValueBool() != false {
-		t.Errorf("IsEmptyCloud = %v, want false (default)", model.IsEmptyCloud.ValueBool())
 	}
 }
 

@@ -70,6 +70,9 @@ type CloudResourceResourceModel struct {
 	CloudResourceID   types.String `tfsdk:"cloud_resource_id"`
 	CloudDeploymentID types.String `tfsdk:"cloud_deployment_id"`
 	Status            types.String `tfsdk:"status"`
+	OperatorStatus    types.String `tfsdk:"operator_status"`
+	OperatorVersion   types.String `tfsdk:"operator_version"`
+	ReportedAt        types.String `tfsdk:"reported_at"`
 	IsDefault         types.Bool   `tfsdk:"is_default"`
 
 	// Internal
@@ -78,16 +81,17 @@ type CloudResourceResourceModel struct {
 
 // AWSConfigModel represents AWS-specific configuration.
 type AWSConfigModel struct {
-	VPCID                   types.String `tfsdk:"vpc_id"`
-	SubnetIDs               types.List   `tfsdk:"subnet_ids"`
-	SubnetIDsToAZ           types.Map    `tfsdk:"subnet_ids_to_az"`
-	SecurityGroupIDs        types.List   `tfsdk:"security_group_ids"`
-	ControlplaneIAMRoleARN  types.String `tfsdk:"controlplane_iam_role_arn"`
-	DataplaneIAMRoleARN     types.String `tfsdk:"dataplane_iam_role_arn"`
-	ExternalID              types.String `tfsdk:"external_id"`
-	MemoryDBClusterName     types.String `tfsdk:"memorydb_cluster_name"`
-	MemoryDBClusterARN      types.String `tfsdk:"memorydb_cluster_arn"`
-	MemoryDBClusterEndpoint types.String `tfsdk:"memorydb_cluster_endpoint"`
+	VPCID                    types.String `tfsdk:"vpc_id"`
+	SubnetIDs                types.List   `tfsdk:"subnet_ids"`
+	SubnetIDsToAZ            types.Map    `tfsdk:"subnet_ids_to_az"`
+	SecurityGroupIDs         types.List   `tfsdk:"security_group_ids"`
+	ControlplaneIAMRoleARN   types.String `tfsdk:"controlplane_iam_role_arn"`
+	DataplaneIAMRoleARN      types.String `tfsdk:"dataplane_iam_role_arn"`
+	ClusterInstanceProfileID types.String `tfsdk:"cluster_instance_profile_id"`
+	ExternalID               types.String `tfsdk:"external_id"`
+	MemoryDBClusterName      types.String `tfsdk:"memorydb_cluster_name"`
+	MemoryDBClusterARN       types.String `tfsdk:"memorydb_cluster_arn"`
+	MemoryDBClusterEndpoint  types.String `tfsdk:"memorydb_cluster_endpoint"`
 }
 
 // GCPConfigModel represents GCP-specific configuration.
@@ -125,9 +129,11 @@ type ObjectStorageModel struct {
 
 // FileStorageModel represents file storage configuration.
 type FileStorageModel struct {
-	FileStorageID types.String `tfsdk:"file_storage_id"`
-	MountPath     types.String `tfsdk:"mount_path"`
-	MountTargets  types.List   `tfsdk:"mount_targets"`
+	FileStorageID            types.String `tfsdk:"file_storage_id"`
+	MountPath                types.String `tfsdk:"mount_path"`
+	PersistentVolumeClaim    types.String `tfsdk:"persistent_volume_claim"`
+	CSIEphemeralVolumeDriver types.String `tfsdk:"csi_ephemeral_volume_driver"`
+	MountTargets             types.List   `tfsdk:"mount_targets"`
 }
 
 // MountTargetModel represents a mount target.
@@ -149,7 +155,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "Composite identifier in format cloud_id:resource_name",
+				MarkdownDescription: "Composite identifier in format cloud_id:name",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -249,6 +255,30 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				},
 			},
 
+			"operator_status": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM). Same underlying value as `status`.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"operator_version": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The version of the Anyscale Operator that last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"reported_at": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "Timestamp when the Anyscale Operator last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
 			"is_default": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether this is the default resource for the cloud.",
@@ -304,6 +334,13 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"dataplane_iam_role_arn": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "IAM role ARN for Anyscale data plane (cluster nodes).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"cluster_instance_profile_id": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "IAM instance profile ARN attached to Ray cluster nodes. Defaults to the instance profile with the same name as `dataplane_iam_role_arn` when unset - set this explicitly only if your IAM tooling generates a profile name that differs from the role name.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -448,6 +485,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						Computed:            true,
 						Default:             stringdefault.StaticString("anyscale"),
+						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
 						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
@@ -455,6 +493,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"ingress_host": schema.StringAttribute{
 						Optional:            true,
+						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
 						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
@@ -462,6 +501,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"cluster_name": schema.StringAttribute{
 						Optional:            true,
+						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
 						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
@@ -469,6 +509,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"context": schema.StringAttribute{
 						Optional:            true,
+						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
 						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
@@ -476,6 +517,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"kubeconfig_path": schema.StringAttribute{
 						Optional:            true,
+						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
 						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
@@ -528,6 +570,20 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Computed:            true,
 						Default:             stringdefault.StaticString("/mnt/shared"),
 						MarkdownDescription: "The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"persistent_volume_claim": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"csi_ephemeral_volume_driver": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only).",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -856,48 +912,74 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 // ImportState imports an existing resource into Terraform state.
+//
+// C3-v2: this is the ONLY place that recovers aws_config/gcp_config/
+// kubernetes_config/object_storage from the API - never Create or Read (see
+// readCloudResource). Only the compute-stack-REQUIRED block(s) are
+// recovered, for the same reason as anyscale_cloud's ImportState: a
+// cloud_resource is never "empty" the way a cloud can be, but the
+// Create-time plan-consistency hazard applies here identically, since these
+// blocks are not Computed either.
 func (r *CloudResourceResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// ID format: cloud_id:resource_name
+	// ID format: cloud_id:name
 	cloudID, resourceName, err := parseCloudResourceID(req.ID)
 	if err != nil {
 		AddConfigError(&resp.Diagnostics,
 			"Import Error",
-			fmt.Sprintf("Invalid import ID format. Expected 'cloud_id:resource_name', got '%s'", req.ID))
+			fmt.Sprintf("Invalid import ID format. Expected 'cloud_id:name', got '%s'", req.ID))
 		return
 	}
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_id"), cloudID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), resourceName)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	results, err := listCloudResources(ctx, r.client, cloudID)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to list cloud resources during import; config blocks will not be recovered - the subsequent Read will surface any real error", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+		return
+	}
+
+	var found *CloudDeploymentResult
+	for i := range results {
+		if results[i].Name == resourceName {
+			found = &results[i]
+			break
+		}
+	}
+	if found == nil {
+		return // subsequent Read surfaces the not-found error
+	}
+
+	blocks, diags := requiredImportConfigBlocks(ctx, found.Provider, found)
+	resp.Diagnostics.Append(diags...)
+	for attrName, obj := range blocks {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root(attrName), obj)...)
+	}
 }
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
-// parseCloudResourceID parses a composite ID in format "cloud_id:resource_name"
+// parseCloudResourceID parses a composite ID in format "cloud_id:name"
 func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 	parts := strings.SplitN(id, ":", 2)
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid cloud resource ID format: expected 'cloud_id:resource_name', got '%s'", id)
+		return "", "", fmt.Errorf("invalid cloud resource ID format: expected 'cloud_id:name', got '%s'", id)
 	}
 	return parts[0], parts[1], nil
 }
 
 // findDefaultCloudResource checks if the cloud has a single default resource
 func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cloudID string) (*CloudDeploymentResult, error) {
-	// Pages through every page rather than just the first - a cloud with many
-	// resources attached would otherwise risk missing the default one.
-	results, err := PaginatedRequest(
-		ctx, r.client, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil,
-		func(body []byte) ([]CloudDeploymentResult, *string, error) {
-			var deploymentsResp CloudDeploymentsResponse
-			if err := json.Unmarshal(body, &deploymentsResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to unmarshal cloud resources: %w", err)
-			}
-			return deploymentsResp.Results, deploymentsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	// listCloudResources pages through every page rather than just the first -
+	// a cloud with many resources attached would otherwise risk missing the
+	// default one.
+	results, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list cloud resources: %w", err)
+		return nil, err
 	}
 
 	if len(results) == 1 && results[0].IsDefault {
@@ -911,20 +993,12 @@ func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cl
 
 // readCloudResource reads a cloud resource from the API and updates the state model
 func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel) error {
-	// Pages through every page rather than just the first: Read calls this and
-	// removes the resource from state on a "not found", so a resource whose
-	// name only appears past page 1 would otherwise be phantom-deleted from
-	// state - the same bug class task d35713ef fixed for organization_collaborator.
-	results, err := PaginatedRequest(
-		ctx, r.client, fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil,
-		func(body []byte) ([]CloudDeploymentResult, *string, error) {
-			var deploymentsResp CloudDeploymentsResponse
-			if err := json.Unmarshal(body, &deploymentsResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to unmarshal cloud resources: %w", err)
-			}
-			return deploymentsResp.Results, deploymentsResp.Metadata.NextPagingToken, nil
-		},
-	)
+	// listCloudResources pages through every page rather than just the first:
+	// Read calls this and removes the resource from state on a "not found", so
+	// a resource whose name only appears past page 1 would otherwise be
+	// phantom-deleted from state - the same bug class task d35713ef fixed for
+	// organization_collaborator.
+	results, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			return fmt.Errorf("cloud not found")
@@ -959,8 +1033,21 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 
 	if foundResource.OperatorStatus != nil {
 		state.Status = types.StringValue(*foundResource.OperatorStatus)
+		state.OperatorStatus = types.StringValue(*foundResource.OperatorStatus)
 	} else {
 		state.Status = types.StringNull()
+		state.OperatorStatus = types.StringNull()
+	}
+
+	// C4: operator_version/reported_at are only present once a K8s
+	// resource's operator has reported in at least once - null for VM,
+	// and null for a K8s resource that hasn't reported yet.
+	if foundResource.OperatorStatusDetails != nil {
+		state.OperatorVersion = stringPtrOrNull(foundResource.OperatorStatusDetails.OperatorVersion)
+		state.ReportedAt = stringPtrOrNull(foundResource.OperatorStatusDetails.ReportedAt)
+	} else {
+		state.OperatorVersion = types.StringNull()
+		state.ReportedAt = types.StringNull()
 	}
 
 	if foundResource.NetworkingMode == "PRIVATE" {
@@ -1230,6 +1317,10 @@ func expandAWSConfig(ctx context.Context, obj types.Object) (*AWSConfig, error) 
 	if !awsModel.ExternalID.IsNull() {
 		awsConfig.ExternalID = awsModel.ExternalID.ValueString()
 	}
+	if !awsModel.ClusterInstanceProfileID.IsNull() {
+		profileID := awsModel.ClusterInstanceProfileID.ValueString()
+		awsConfig.ClusterInstanceProfileID = &profileID
+	}
 	if !awsModel.MemoryDBClusterName.IsNull() {
 		name := awsModel.MemoryDBClusterName.ValueString()
 		awsConfig.MemoryDBClusterName = &name
@@ -1376,6 +1467,13 @@ func expandFileStorage(ctx context.Context, obj types.Object) (*FileStorage, err
 
 	if !storageModel.MountPath.IsNull() {
 		storage.MountPath = storageModel.MountPath.ValueString()
+	}
+
+	if !storageModel.PersistentVolumeClaim.IsNull() {
+		storage.PersistentVolumeClaim = storageModel.PersistentVolumeClaim.ValueString()
+	}
+	if !storageModel.CSIEphemeralVolumeDriver.IsNull() {
+		storage.CSIEphemeralVolumeDriver = storageModel.CSIEphemeralVolumeDriver.ValueString()
 	}
 
 	if !storageModel.MountTargets.IsNull() {

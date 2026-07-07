@@ -55,16 +55,18 @@ resource "anyscale_cloud" "gcp_example" {
   compute_stack  = "VM"
 
   gcp_config {
-    project_id                     = "my-project-123"
-    provider_name                  = "projects/123/locations/global/workloadIdentityPools/anyscale/providers/anyscale"
-    vpc_name                       = "anyscale-vpc"
-    subnet_names                   = ["anyscale-subnet-us-central1"]
-    anyscale_service_account_email = "anyscale@my-project.iam.gserviceaccount.com"
-    cluster_service_account_email  = "cluster@my-project.iam.gserviceaccount.com"
+    project_id                         = "my-project-123"
+    provider_name                      = "projects/123/locations/global/workloadIdentityPools/anyscale/providers/anyscale"
+    vpc_name                           = "anyscale-vpc"
+    subnet_names                       = ["anyscale-subnet-us-central1"]
+    controlplane_service_account_email = "anyscale@my-project.iam.gserviceaccount.com"
+    dataplane_service_account_email    = "cluster@my-project.iam.gserviceaccount.com"
   }
 
   object_storage {
-    bucket_name = "my-gcs-bucket" # gs:// prefix added automatically
+    # Include the gs:// prefix explicitly for GCP (unlike AWS, where a bare
+    # bucket name is fine either way) - see the "Cloud Resources" guide for why.
+    bucket_name = "gs://my-gcs-bucket"
   }
 }
 
@@ -113,7 +115,7 @@ output "is_empty_cloud" {
 
 ### Required
 
-- `name` (String) The name of the cloud.
+- `name` (String) The name of the cloud. Immutable after creation: the API has no endpoint to rename a cloud, so changing this produces a plan-time error rather than an update or a replacement.
 
 ### Optional
 
@@ -143,6 +145,7 @@ output "is_empty_cloud" {
 
 Optional:
 
+- `cluster_instance_profile_id` (String) IAM instance profile ARN attached to Ray cluster nodes. Defaults to the instance profile with the same name as `dataplane_iam_role_arn` when unset - set this explicitly only if your IAM tooling generates a profile name that differs from the role name.
 - `controlplane_iam_role_arn` (String) IAM role ARN for Anyscale control plane (cross-account access).
 - `dataplane_iam_role_arn` (String) IAM role ARN for Anyscale data plane (cluster nodes).
 - `external_id` (String) External ID for IAM role assumption (recommended for security).
@@ -172,9 +175,11 @@ Optional:
 
 Optional:
 
+- `csi_ephemeral_volume_driver` (String) CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only).
 - `file_storage_id` (String) The file storage ID (EFS ID, Filestore name, etc.).
 - `mount_path` (String) The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.
 - `mount_targets` (Block List) List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. (see [below for nested schema](#nestedblock--file_storage--mount_targets))
+- `persistent_volume_claim` (String) Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only).
 
 <a id="nestedblock--file_storage--mount_targets"></a>
 ### Nested Schema for `file_storage.mount_targets`
@@ -209,11 +214,11 @@ Optional:
 Optional:
 
 - `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.
-- `cluster_name` (String) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
-- `context` (String) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
-- `ingress_host` (String) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.
-- `kubeconfig_path` (String) Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
-- `namespace` (String) The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.
+- `cluster_name` (String, Deprecated) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
+- `context` (String, Deprecated) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
+- `ingress_host` (String, Deprecated) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.
+- `kubeconfig_path` (String, Deprecated) Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
+- `namespace` (String, Deprecated) The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.
 - `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.
 - `zones` (List of String) List of availability zones for the Kubernetes cluster.
 

@@ -51,7 +51,15 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "has kubernetes_config only (not embedded)",
+			// Regression test for F2/C12: aws_config/gcp_config are optional
+			// for K8S clouds (see addCloudResource), so kubernetes_config
+			// alone is a valid, complete all-in-one config - it must count as
+			// embedded. Before C12 this asserted false, which is the exact
+			// bug that misclassified K8S-only clouds as empty, skipped
+			// addCloudResource entirely, and surfaced as "Provider produced
+			// inconsistent result after apply: .compute_stack: was K8S, but
+			// now VM" (F2).
+			name: "has kubernetes_config only (embedded - K8S needs no aws/gcp_config)",
 			plan: CloudResourceModel{
 				KubernetesConfig: types.ObjectValueMust(
 					map[string]attr.Type{},
@@ -61,7 +69,7 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 				GCPConfig:   types.ObjectNull(map[string]attr.Type{}),
 				AzureConfig: types.ObjectNull(map[string]attr.Type{}),
 			},
-			expected: false,
+			expected: true,
 		},
 		{
 			name: "has object_storage only (not embedded)",
@@ -110,6 +118,20 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 				t.Errorf("hasEmbeddedResourceConfig() = %v, expected %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+// TestRegionRequiredForCreateError is a regression test for C13: a K8S-only
+// all-in-one cloud (no aws_config, so no subnet-based inference, and no
+// longer treated as empty since C12) with no explicit region would otherwise
+// reach addCloudResource with region="" - a confusing API-level failure
+// instead of a clear provider-level one.
+func TestRegionRequiredForCreateError(t *testing.T) {
+	if summary, detail, hasError := regionRequiredForCreateError(""); !hasError || summary == "" || detail == "" {
+		t.Errorf("regionRequiredForCreateError(\"\") = (%q, %q, %v), want a non-empty error", summary, detail, hasError)
+	}
+	if summary, detail, hasError := regionRequiredForCreateError("us-east-1"); hasError || summary != "" || detail != "" {
+		t.Errorf("regionRequiredForCreateError(\"us-east-1\") = (%q, %q, %v), want no error", summary, detail, hasError)
 	}
 }
 
@@ -220,6 +242,84 @@ func TestGenerateRandomStringUniqueness(t *testing.T) {
 		}
 		seen[result] = true
 	}
+}
+
+// TestGetOrGenerateCredentials_WasPlaceholderSignal is a regression test for
+// C9: getOrGenerateCredentials used to fabricate a placeholder credential
+// with no signal to the caller at all, so a broken all-in-one cloud (config
+// present, credential un-derivable) applied silently. wasPlaceholder must
+// distinguish "fabricated" from "real/derived" so the caller (Create) can
+// warn only for the suspicious case and stay silent for a genuinely empty
+// cloud.
+func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
+	ctx := context.Background()
+	r := &CloudResource{}
+
+	t.Run("explicit credentials: not a placeholder", func(t *testing.T) {
+		plan := &CloudResourceModel{Credentials: types.StringValue("arn:aws:iam::123:role/real")}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - explicit credentials were provided")
+		}
+		if creds != "arn:aws:iam::123:role/real" {
+			t.Errorf("creds = %v, want the explicit value", creds)
+		}
+	})
+
+	t.Run("derived from aws_config: not a placeholder", func(t *testing.T) {
+		awsObj, diags := flattenAWSConfig(ctx, &AWSConfig{AnyscaleIAMRoleID: "arn:aws:iam::123:role/derived"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test aws_config: %v", diags)
+		}
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: awsObj}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - a credential was derivable from aws_config")
+		}
+		if creds != "arn:aws:iam::123:role/derived" {
+			t.Errorf("creds = %v, want the derived value", creds)
+		}
+	})
+
+	t.Run("all-in-one with config present but no derivable role: placeholder AND suspicious", func(t *testing.T) {
+		// aws_config is present (all-in-one, not empty cloud) but its
+		// controlplane_iam_role_arn was left unset - exactly the
+		// forgot-the-role case C9 exists to catch.
+		awsObj, diags := flattenAWSConfig(ctx, &AWSConfig{VPCID: "vpc-123"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test aws_config: %v", diags)
+		}
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: awsObj}
+		_, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false /* isEmptyCloud */)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !wasPlaceholder {
+			t.Error("wasPlaceholder = false, want true - no role was derivable, a placeholder must have been generated")
+		}
+		// The caller decides whether to warn using wasPlaceholder && !isEmptyCloud;
+		// this case has isEmptyCloud=false, so the caller WOULD warn - verified
+		// separately, this test only pins the signal itself.
+	})
+
+	t.Run("pure empty cloud: placeholder but expected, not suspicious", func(t *testing.T) {
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: types.ObjectNull(awsConfigAttrTypes())}
+		_, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", true /* isEmptyCloud */)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !wasPlaceholder {
+			t.Error("wasPlaceholder = false, want true - no config and no explicit credentials means a placeholder is generated")
+		}
+		// Again: the caller's isEmptyCloud=true here means it stays silent
+		// despite wasPlaceholder=true - this is the BYOC/split-pattern case.
+	})
 }
 
 // Test AWS placeholder credential generation
