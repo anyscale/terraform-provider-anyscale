@@ -618,7 +618,7 @@ tag: ## Create and push a release tag once CHANGELOG.md is finalized on main (us
 		echo "ERROR: working tree has uncommitted changes; commit or stash first"; \
 		exit 1; \
 	fi
-	@if ! grep -q "^## \[$(VERSION)\]" CHANGELOG.md; then \
+	@if ! grep "^## \[" CHANGELOG.md | grep -qF "[$(VERSION)]"; then \
 		echo "ERROR: CHANGELOG.md has no '## [$(VERSION)]' section on this branch."; \
 		echo "Run 'make changelog-release VERSION=$(VERSION)' and merge that PR first."; \
 		exit 1; \
