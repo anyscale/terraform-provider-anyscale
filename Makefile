@@ -486,7 +486,7 @@ version: ## Show current version information
 version-check: ## Check if version is set correctly (useful for CI)
 	@if [ "$(VERSION)" = "0.0.1" ] && [ -z "$(GIT_TAG)" ]; then \
 		echo "WARNING: No git tag found and VERSION is default (0.0.1)"; \
-		echo "Consider creating a git tag: git tag -a v0.1.0 -m 'Release 0.1.0'"; \
+		echo "Consider cutting a release: make changelog-release VERSION=0.1.0"; \
 		exit 1; \
 	fi
 	@echo "Version check passed: $(VERSION)"

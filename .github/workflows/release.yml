@@ -9,8 +9,13 @@
 #    - GITHUB_TOKEN: Automatically provided by GitHub Actions
 #
 # To create a release:
-#   git tag -a v0.1.0 -m "Release v0.1.0"
-#   git push origin v0.1.0
+#   make changelog-release VERSION=0.1.0   # finalizes CHANGELOG.md on a branch, opens a PR
+#   # ...get that PR reviewed and merged...
+#   make tag VERSION=0.1.0                 # verifies CHANGELOG.md is finalized on main, tags, pushes
+#
+# See the `changelog-release` and `tag` targets in the Makefile, and
+# .crystl/quest/changelog-release-contract.md for why the changelog step
+# goes through a PR instead of a direct push to main.
 
 name: Release
 
