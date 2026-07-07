@@ -113,7 +113,7 @@ output "is_empty_cloud" {
 
 ### Required
 
-- `name` (String) The name of the cloud.
+- `name` (String) The name of the cloud. Immutable after creation: the API has no endpoint to rename a cloud, so changing this produces a plan-time error rather than an update or a replacement.
 
 ### Optional
 

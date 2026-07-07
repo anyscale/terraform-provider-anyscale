@@ -81,6 +81,44 @@ type AzureConfigModel struct {
 	ManagedIdentityID types.String `tfsdk:"managed_identity_id"`
 }
 
+// cloudNameImmutablePlanModifier enforces that a cloud's name cannot change
+// after creation, as a clear plan-time error instead of either of the two
+// wrong outcomes: RequiresReplace would destroy a live cloud on a mere
+// upgrade for anyone whose .tf already has a stale/mismatched name (they are
+// currently protected by Update's apply-time 405, silently relying on it);
+// letting it through to Update would just 405 again with no useful message,
+// since the API has no endpoint that renames a cloud at all.
+type cloudNameImmutablePlanModifier struct{}
+
+func (m cloudNameImmutablePlanModifier) Description(ctx context.Context) string {
+	return "Cloud name is immutable after creation; changing it is a plan-time error, not an update or a replacement."
+}
+
+func (m cloudNameImmutablePlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m cloudNameImmutablePlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	// No established prior name to protect: a fresh create, or state not yet
+	// populated (e.g. immediately post-import before the first Read).
+	if req.StateValue.IsNull() || req.StateValue.IsUnknown() {
+		return
+	}
+	if req.PlanValue.IsUnknown() {
+		return
+	}
+	if req.PlanValue.ValueString() != req.StateValue.ValueString() {
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Cloud Name Is Immutable",
+			fmt.Sprintf(
+				"cloud name is immutable after creation; to rename, destroy and recreate deliberately. current name: %q, requested name: %q.",
+				req.StateValue.ValueString(), req.PlanValue.ValueString(),
+			),
+		)
+	}
+}
+
 // Metadata returns the resource type name.
 func (r *CloudResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_cloud"
@@ -103,7 +141,10 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			// ─── Common Fields ────────────────────────────────────
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name of the cloud.",
+				MarkdownDescription: "The name of the cloud. Immutable after creation: the API has no endpoint to rename a cloud, so changing this produces a plan-time error rather than an update or a replacement.",
+				PlanModifiers: []planmodifier.String{
+					cloudNameImmutablePlanModifier{},
+				},
 			},
 
 			"cloud_provider": schema.StringAttribute{
@@ -868,9 +909,10 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan CloudResourceModel
+	var plan, state CloudResourceModel
 
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -878,58 +920,8 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	cloudID := plan.ID.ValueString()
 	tflog.Info(ctx, "Updating Anyscale Cloud", map[string]any{"id": cloudID})
 
-	// Most fields are ForceNew, so we only handle updates to mutable fields
-	// Currently: auto_add_user, enable_lineage_tracking, enable_log_ingestion, name
-
-	// Build update request with only mutable fields
-	updateReq := make(map[string]interface{})
-
-	// Name can be updated
-	updateReq["name"] = plan.Name.ValueString()
-
-	// Boolean settings
-	if !plan.AutoAddUser.IsNull() {
-		updateReq["auto_add_user"] = plan.AutoAddUser.ValueBool()
-	}
-	if !plan.EnableLineageTracking.IsNull() {
-		updateReq["lineage_tracking_enabled"] = plan.EnableLineageTracking.ValueBool()
-	}
-	if !plan.EnableLogIngestion.IsNull() {
-		updateReq["is_aggregated_logs_enabled"] = plan.EnableLogIngestion.ValueBool()
-	}
-
-	jsonData, err := json.Marshal(updateReq)
-	if err != nil {
-		resp.Diagnostics.AddError("JSON Marshal Error", err.Error())
-		return
-	}
-
-	// Log sanitized request (redact sensitive fields)
-	tflog.Debug(ctx, "PATCH /api/v2/clouds/"+cloudID, map[string]any{"request": SanitizeJSONForLog(string(jsonData))})
-
-	httpResp, err := r.client.DoRequest(ctx, "PATCH", fmt.Sprintf("/api/v2/clouds/%s", cloudID), strings.NewReader(string(jsonData)))
-	if err != nil {
-		tflog.Error(ctx, "Failed to update cloud", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := httpResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", err.Error())
-		return
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		resp.Diagnostics.AddError(
-			"Update Failed",
-			fmt.Sprintf("Failed to update cloud: %s - %s", httpResp.Status, string(body)),
-		)
+	if err := r.updateMutableFields(ctx, cloudID, plan, state); err != nil {
+		AddAPIError(&resp.Diagnostics, "update cloud", err)
 		return
 	}
 
@@ -937,11 +929,64 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	// Read back updated state
 	if err := r.readCloudState(ctx, cloudID, &plan); err != nil {
-		resp.Diagnostics.AddError("Read Error", err.Error())
+		AddAPIError(&resp.Diagnostics, "read cloud after update", err)
 		return
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// updateMutableFields calls whichever of the cloud's three single-field PUT
+// routes correspond to an actually-changed value between plan and state.
+// There is no general PATCH on this resource (confirmed against the API
+// reference: /clouds/{id} only supports GET and DELETE) - each boolean lives
+// behind its own route, so each is only called when it changed, both to
+// avoid redundant API calls when nothing changed and because a user might
+// have permission for one of these routes but not another.
+//
+// name is deliberately absent here: it has no update endpoint at all, and
+// the cloudNameImmutablePlanModifier on its schema attribute raises a
+// plan-time error before Update is ever called with a changed name.
+func (r *CloudResource) updateMutableFields(ctx context.Context, cloudID string, plan, state CloudResourceModel) error {
+	if !plan.AutoAddUser.Equal(state.AutoAddUser) {
+		if err := r.updateCloudBoolField(ctx, cloudID, "auto_add_user", plan.AutoAddUser.ValueBool()); err != nil {
+			return fmt.Errorf("update auto_add_user: %w", err)
+		}
+	}
+	if !plan.EnableLineageTracking.Equal(state.EnableLineageTracking) {
+		if err := r.updateCloudBoolField(ctx, cloudID, "lineage_tracking_enabled", plan.EnableLineageTracking.ValueBool()); err != nil {
+			return fmt.Errorf("update lineage_tracking_enabled: %w", err)
+		}
+	}
+	if !plan.EnableLogIngestion.Equal(state.EnableLogIngestion) {
+		if err := r.updateCloudAggregatedLogsConfig(ctx, cloudID, plan.EnableLogIngestion.ValueBool()); err != nil {
+			return fmt.Errorf("update is_aggregated_logs_enabled: %w", err)
+		}
+	}
+	return nil
+}
+
+// updateCloudBoolField calls one of the cloud's single-boolean PUT routes
+// (auto_add_user or lineage_tracking_enabled). Both take the new value as a
+// query parameter with an empty body - confirmed against the generated
+// OpenAPI client (the ground truth for the wire format), since neither
+// route accepts a JSON request body.
+func (r *CloudResource) updateCloudBoolField(ctx context.Context, cloudID, fieldName string, value bool) error {
+	path := fmt.Sprintf("/api/v2/clouds/%s/%s?%s=%t", cloudID, fieldName, fieldName, value)
+	tflog.Debug(ctx, "PUT "+path)
+	_, err := DoRequestRaw(ctx, r.client, "PUT", path, nil, http.StatusOK, http.StatusNoContent)
+	return err
+}
+
+// updateCloudAggregatedLogsConfig calls the aggregated-logs PUT route. Its
+// query parameter is named is_enabled, not is_aggregated_logs_enabled - a
+// real naming mismatch confirmed against the backend router; using the
+// schema's own field name here would silently no-op against the real API.
+func (r *CloudResource) updateCloudAggregatedLogsConfig(ctx context.Context, cloudID string, enabled bool) error {
+	path := fmt.Sprintf("/api/v2/clouds/%s/update_customer_aggregated_logs_config?is_enabled=%t", cloudID, enabled)
+	tflog.Debug(ctx, "PUT "+path)
+	_, err := DoRequestRaw(ctx, r.client, "PUT", path, nil, http.StatusOK, http.StatusNoContent)
+	return err
 }
 
 // Delete deletes the resource and removes the Terraform state on success.
