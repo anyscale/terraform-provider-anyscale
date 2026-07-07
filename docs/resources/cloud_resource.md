@@ -110,7 +110,7 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
 
 - `cloud_deployment_id` (String) The cloud deployment ID assigned by Anyscale.
 - `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale.
-- `id` (String) Composite identifier in format cloud_id:resource_name
+- `id` (String) Composite identifier in format cloud_id:name
 - `is_default` (Boolean) Whether this is the default resource for the cloud.
 - `status` (String) The current status of the cloud resource.
 

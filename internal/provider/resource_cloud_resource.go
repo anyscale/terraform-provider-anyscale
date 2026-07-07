@@ -149,7 +149,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "Composite identifier in format cloud_id:resource_name",
+				MarkdownDescription: "Composite identifier in format cloud_id:name",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -857,12 +857,12 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 
 // ImportState imports an existing resource into Terraform state.
 func (r *CloudResourceResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// ID format: cloud_id:resource_name
+	// ID format: cloud_id:name
 	cloudID, resourceName, err := parseCloudResourceID(req.ID)
 	if err != nil {
 		AddConfigError(&resp.Diagnostics,
 			"Import Error",
-			fmt.Sprintf("Invalid import ID format. Expected 'cloud_id:resource_name', got '%s'", req.ID))
+			fmt.Sprintf("Invalid import ID format. Expected 'cloud_id:name', got '%s'", req.ID))
 		return
 	}
 
@@ -873,11 +873,11 @@ func (r *CloudResourceResource) ImportState(ctx context.Context, req resource.Im
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
-// parseCloudResourceID parses a composite ID in format "cloud_id:resource_name"
+// parseCloudResourceID parses a composite ID in format "cloud_id:name"
 func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 	parts := strings.SplitN(id, ":", 2)
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid cloud resource ID format: expected 'cloud_id:resource_name', got '%s'", id)
+		return "", "", fmt.Errorf("invalid cloud resource ID format: expected 'cloud_id:name', got '%s'", id)
 	}
 	return parts[0], parts[1], nil
 }
