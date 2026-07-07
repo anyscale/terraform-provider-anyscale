@@ -91,12 +91,22 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 // criterion ("data source == resource state, by id AND by name").
 //
 // Uses the empty-cloud pattern (no aws_config) so it creates a real cloud via
-// the API without requiring real AWS/GCP infra. The three booleans are set to
-// true via a separate Update step (step 2), not at Create (step 1): Create()'s
-// POST /clouds request does not send these fields at all today (a distinct,
-// separately-reported gap - see quest chat) - only Update() does. Routing
-// through Update keeps this test scoped to C1 (data-source read mapping)
-// instead of also depending on that unrelated create-time gap being fixed.
+// the API without requiring real AWS/GCP infra. auto_add_user and
+// enable_log_ingestion are set to true via a separate Update step (step 2),
+// not at Create (step 1): Create()'s POST /clouds request does not send these
+// fields at all today (a distinct, separately-reported gap - see quest chat)
+// - only Update() does. Routing through Update keeps this test scoped to C1
+// (data-source read mapping) instead of also depending on that unrelated
+// create-time gap being fixed.
+//
+// enable_lineage_tracking is deliberately left at its false default and
+// excluded from the true-value assertions: this test org's Anyscale
+// organization does not have lineage tracking enabled as a feature, so
+// PUT .../lineage_tracking_enabled legitimately 403s here regardless of
+// provider correctness (confirmed live: "Lineage tracking is not enabled for
+// your organization"). Its read-side mapping is still proven correct by
+// forge's mocked unit test (TestReadCloudIntoModel_MapsFromResponseNotConstant),
+// which isn't subject to this org's feature gating.
 func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -125,7 +135,7 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Resource itself has the non-default values we configured.
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "auto_add_user", "true"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "enable_lineage_tracking", "true"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "enable_lineage_tracking", "false"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "enable_log_ingestion", "true"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "is_empty_cloud", "true"),
 					// By-id data source converges with resource state for all 5 fields.
@@ -171,7 +181,7 @@ resource "anyscale_cloud" "test" {
   cloud_provider          = "AWS"
   region                  = "us-east-2"
   auto_add_user           = %t
-  enable_lineage_tracking = %t
+  enable_lineage_tracking = false
   enable_log_ingestion    = %t
 }
 
@@ -182,7 +192,7 @@ data "anyscale_cloud" "by_id" {
 data "anyscale_cloud" "by_name" {
   name = anyscale_cloud.test.name
 }
-`, cloudName, enabled, enabled, enabled)
+`, cloudName, enabled, enabled)
 }
 
 func testAccCloudDataSourceConfig_withComputeConfig(cloudID, configName string) string {
