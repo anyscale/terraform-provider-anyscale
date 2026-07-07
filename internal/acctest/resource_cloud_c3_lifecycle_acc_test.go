@@ -106,6 +106,8 @@ func TestAccCloudLifecycle_AWS_MockServer(t *testing.T) {
 	}`, cloudID)
 	// Realistic hazard shapes: parallel subnet_ids+zones (never subnet_ids_to_az),
 	// bucket_name WITH its s3:// prefix even though the schema stores it bare.
+	// cluster_instance_profile_id (C6) is included to prove it round-trips
+	// through the same import-only recovery path as the pre-existing fields.
 	resourcesJSON := `[{
 		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
 		"compute_stack": "VM", "region": "us-east-2",
@@ -116,6 +118,7 @@ func TestAccCloudLifecycle_AWS_MockServer(t *testing.T) {
 			"security_group_ids": ["sg-real1"],
 			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/real-crossaccount",
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/real-cluster-node",
+			"cluster_instance_profile_id": "arn:aws:iam::123456789012:instance-profile/real-cluster-node",
 			"external_id": "real-external-id"
 		},
 		"object_storage": {"bucket_name": "s3://real-bucket-name"}
@@ -135,9 +138,10 @@ resource "anyscale_cloud" "test" {
       "subnet-real1" = "us-east-2a"
       "subnet-real2" = "us-east-2b"
     }
-    security_group_ids        = ["sg-real1"]
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/real-crossaccount"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/real-cluster-node"
+    security_group_ids          = ["sg-real1"]
+    controlplane_iam_role_arn   = "arn:aws:iam::123456789012:role/real-crossaccount"
+    dataplane_iam_role_arn      = "arn:aws:iam::123456789012:role/real-cluster-node"
+    cluster_instance_profile_id = "arn:aws:iam::123456789012:instance-profile/real-cluster-node"
     external_id                = "real-external-id"
   }
 
@@ -154,6 +158,7 @@ resource "anyscale_cloud" "test" {
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "aws_config.vpc_id", "vpc-real123"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "aws_config.cluster_instance_profile_id", "arn:aws:iam::123456789012:instance-profile/real-cluster-node"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "object_storage.bucket_name", "real-bucket-name"),
 				),
 				// Headline C3 gate: a config populated at create against a
@@ -167,6 +172,7 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
+					"object_storage", // optional for VM (only aws_config/gcp_config is compute-stack-required); not recovered at import by design (C3-v2)
 				},
 			},
 		},
@@ -235,6 +241,7 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
+					"object_storage", // optional for VM (only aws_config/gcp_config is compute-stack-required); not recovered at import by design (C3-v2)
 				},
 			},
 		},
@@ -301,6 +308,12 @@ func TestAccCloudLifecycle_K8S_MockServer(t *testing.T) {
 		"id": %[1]q, "name": "c3-k8s-mock", "provider": "AWS", "region": "us-east-2",
 		"status": "ready", "state": "ACTIVE", "compute_stack": "K8S"
 	}`, cloudID)
+	// file_storage.persistent_volume_claim (C6) is set here to prove it
+	// applies cleanly on create, but is deliberately NOT asserted after
+	// import: file_storage is optional even for K8S (only kubernetes_config
+	// + object_storage are the compute-stack-required blocks C3-v2
+	// recovers), so it is never recovered at import by design - see
+	// ImportStateVerifyIgnore below.
 	resourcesJSON := `[{
 		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
 		"compute_stack": "K8S", "region": "us-east-2",
@@ -308,7 +321,8 @@ func TestAccCloudLifecycle_K8S_MockServer(t *testing.T) {
 			"anyscale_operator_iam_identity": "arn:aws:iam::123456789012:role/real-k8s-operator",
 			"zones": ["us-east-2a", "us-east-2b"]
 		},
-		"object_storage": {"bucket_name": "s3://real-k8s-bucket"}
+		"object_storage": {"bucket_name": "s3://real-k8s-bucket"},
+		"file_storage": {"persistent_volume_claim": "real-pvc-name"}
 	}]`
 
 	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
@@ -327,6 +341,10 @@ resource "anyscale_cloud" "test" {
   object_storage {
     bucket_name = "real-k8s-bucket"
   }
+
+  file_storage {
+    persistent_volume_claim = "real-pvc-name"
+  }
 }
 `
 
@@ -338,6 +356,7 @@ resource "anyscale_cloud" "test" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "compute_stack", "K8S"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "object_storage.bucket_name", "real-k8s-bucket"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.persistent_volume_claim", "real-pvc-name"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_deployment_id", "cldrsrc_mock_default"),
 				),
 				ExpectNonEmptyPlan: false,
@@ -348,6 +367,7 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
+					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
 				},
 			},
 		},
