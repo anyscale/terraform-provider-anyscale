@@ -551,7 +551,7 @@ release: ## Create and publish a release (requires GPG_FINGERPRINT env var)
 
 .PHONY: changelog-build
 changelog-build: ## Fold .changelog/ fragments into Unreleased, or finalize a release with VERSION=x.y.z
-	@if [ -n "$(VERSION)" ] && [ "$(VERSION)" != "0.0.1" ]; then \
+	@if [ "$(origin VERSION)" = "command line" ] && [ "$(VERSION)" != "0.0.1" ]; then \
 		go run ./tools/changelog-build -finalize $(VERSION); \
 	else \
 		go run ./tools/changelog-build; \
@@ -562,7 +562,7 @@ changelog-check: ## Validate .changelog/ fragments parse cleanly, without writin
 	@go run ./tools/changelog-build -check
 
 define require_semver_version
-	@if [ -z "$(VERSION)" ] || [ "$(VERSION)" = "0.0.1" ]; then \
+	@if [ "$(origin VERSION)" != "command line" ] || [ "$(VERSION)" = "0.0.1" ]; then \
 		echo "ERROR: VERSION is required. Usage: make $(1) VERSION=0.1.0"; \
 		exit 1; \
 	fi
