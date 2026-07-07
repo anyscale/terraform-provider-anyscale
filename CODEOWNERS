@@ -1,0 +1,11 @@
+# CODEOWNERS
+#
+# Every change to this repo requires review from the maintainer team below.
+# Pair this with "Require review from Code Owners" in main's branch protection
+# so merges are gated on a code-owner approval.
+#
+# Entries must be valid GitHub usernames or teams with write access, or GitHub
+# silently ignores them. Org teams need the @org/ prefix. Last matching pattern
+# wins, so keep broad rules first and more specific overrides below.
+
+*   @anyscale/public-terraform-owners

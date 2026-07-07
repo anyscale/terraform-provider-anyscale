@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a problem with the Anyscale Terraform provider
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. This provider is in **beta** —
+        please include as much detail as you can so we can reproduce it quickly.
+
+        **Never paste your Anyscale API token or other credentials into this issue.**
+        Redact them from config, logs, and error output before submitting.
+
+  - type: input
+    id: terraform-version
+    attributes:
+      label: Terraform version
+      description: Output of `terraform version`
+      placeholder: "Terraform v1.9.0"
+    validations:
+      required: true
+
+  - type: input
+    id: provider-version
+    attributes:
+      label: Provider version
+      description: The `anyscale/anyscale` version from your lock file or `required_providers` block
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cloud-provider
+    attributes:
+      label: Cloud provider
+      options:
+        - AWS
+        - GCP
+        - Azure
+        - Generic / Kubernetes
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Example configuration
+      description: A minimal Terraform configuration that reproduces the issue. Redact any real IDs, ARNs, or secrets.
+      render: hcl
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include the exact error message if there is one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Output from `terraform plan`/`apply`, or a debug trace (`TF_LOG=DEBUG terraform apply`).
+        Double-check there are no tokens or credentials in here before submitting.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I have redacted any tokens, credentials, or sensitive account IDs from this report
+          required: true
+        - label: I have searched existing issues and this is not a duplicate
+          required: true

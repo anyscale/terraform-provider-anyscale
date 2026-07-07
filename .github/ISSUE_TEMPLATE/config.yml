@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Anyscale documentation
+    url: https://docs.anyscale.com
+    about: General Anyscale platform questions not specific to this Terraform provider
+  - name: Provider documentation
+    url: https://registry.terraform.io/providers/anyscale/anyscale/latest/docs
+    about: Resource, data source, and provider configuration reference
