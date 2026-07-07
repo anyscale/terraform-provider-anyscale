@@ -156,28 +156,6 @@ type KubernetesConfig struct {
 	RedisEndpoint string `json:"redis_endpoint,omitempty"`
 }
 
-// KubernetesConfigFull represents the full Kubernetes configuration including
-// fields stored in Terraform state but not sent to the API.
-type KubernetesConfigFull struct {
-	KubernetesConfig
-
-	// The following fields are stored in Terraform state for reference/outputs
-	// but are NOT sent to the Anyscale API
-
-	// Namespace for Anyscale operator (defaults to "anyscale")
-	Namespace string `json:"-"`
-
-	// Ingress settings
-	IngressHost string `json:"-"`
-
-	// Cloud-specific cluster identifiers
-	ClusterName string `json:"-"` // AWS EKS cluster name
-	Context     string `json:"-"` // K8s context name
-
-	// Legacy/generic fields
-	KubeconfigPath string `json:"-"`
-}
-
 // CloudDeploymentResponse represents the response from adding a cloud resource
 type CloudDeploymentResponse struct {
 	Result CloudDeploymentResult `json:"result"`
