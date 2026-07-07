@@ -1,0 +1,31 @@
+# One-off diagnostic: prints ONLY the public half of the release-signing GPG
+# key (plus its fingerprint) so it can be registered on the Terraform Registry
+# publisher account. Never touches or prints the private key material itself.
+#
+# Run manually: gh workflow run print-gpg-public-key.yml
+name: Print GPG Public Key
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  print-public-key:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Import GPG key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Print public key and fingerprint
+        run: |
+          echo "=== Fingerprint ==="
+          gpg --fingerprint "${{ steps.import_gpg.outputs.fingerprint }}"
+          echo
+          echo "=== Armored public key (paste this into the Registry) ==="
+          gpg --armor --export "${{ steps.import_gpg.outputs.fingerprint }}"
