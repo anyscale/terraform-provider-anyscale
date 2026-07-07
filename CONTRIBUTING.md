@@ -1,0 +1,52 @@
+# Contributing
+
+Thanks for contributing to the Anyscale Terraform provider. This document covers the PR
+workflow; for building, testing, and project layout see the [README](README.md#development) and
+[CLAUDE.md](CLAUDE.md).
+
+## Before opening a PR
+
+1. Follow [Terraform Plugin Framework](https://developer.hashicorp.com/terraform/plugin/framework) conventions.
+2. Add unit tests for new helper functions and acceptance tests for new/changed resources and data sources.
+3. Run `make docs` if you changed a schema (description, attribute, resource/data source) — docs are generated, don't hand-edit files under `docs/`.
+4. Run `make fmt lint test` before pushing.
+5. Run `pre-commit install` once, so formatting hooks run automatically on commit.
+
+## Changelog fragments
+
+Every PR that changes user-facing behavior needs a changelog fragment: a small file at
+`.changelog/<PR_NUMBER>.txt` containing one plain-English, user-facing sentence describing the
+change. CI checks for this file and fails the PR if it's missing.
+
+This exists so `CHANGELOG.md` stays accurate automatically instead of depending on someone
+remembering to hand-edit it after merge (which is exactly how it drifted before this convention
+existed). A release-time tool consolidates all pending fragments into `CHANGELOG.md` and deletes
+them — so the changelog is always a byproduct of the PRs that already merged, not a separate task.
+
+**You won't know your PR number until the PR exists.** Open the PR first, then push a follow-up
+commit that adds `.changelog/<that number>.txt`:
+
+```bash
+# after your PR is open and you know its number, e.g. 142:
+cat > .changelog/142.txt <<'EOF'
+release-note:fixed
+resource/anyscale_cloud: Fix a plan diff on `region` when the field is left unset.
+EOF
+git add .changelog/142.txt
+git commit -m "docs: add changelog fragment"
+git push
+```
+
+See [`.changelog/README.md`](.changelog/README.md) for the full block syntax, the complete list
+of valid types (`breaking-change`, `new-resource`, `new-data-source`, `added`, `changed`,
+`deprecated`, `removed`, `fixed`, `security`), and one worked example per type.
+
+**Shipping a breaking change?** Its fragment must use `release-note:breaking-change` and state
+both what breaks and how to migrate, in one sentence — see the breaking-change section of
+`.changelog/README.md` for the exact shape. This is the only mechanism for flagging a break; there
+is no separate breaking-change label.
+
+**No user-facing effect?** Internal refactors, test-only fixes, and CI changes don't need a
+fragment — apply the `skip-changelog` label instead of adding a file. If you're contributing from
+a fork and can't apply labels yourself, say so in the PR description and a maintainer will apply
+it during review.
