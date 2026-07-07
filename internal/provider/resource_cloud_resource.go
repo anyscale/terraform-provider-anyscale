@@ -70,6 +70,9 @@ type CloudResourceResourceModel struct {
 	CloudResourceID   types.String `tfsdk:"cloud_resource_id"`
 	CloudDeploymentID types.String `tfsdk:"cloud_deployment_id"`
 	Status            types.String `tfsdk:"status"`
+	OperatorStatus    types.String `tfsdk:"operator_status"`
+	OperatorVersion   types.String `tfsdk:"operator_version"`
+	ReportedAt        types.String `tfsdk:"reported_at"`
 	IsDefault         types.Bool   `tfsdk:"is_default"`
 
 	// Internal
@@ -244,6 +247,30 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			"status": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The current status of the cloud resource.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"operator_status": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM). Same underlying value as `status`.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"operator_version": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The version of the Anyscale Operator that last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"reported_at": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "Timestamp when the Anyscale Operator last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -943,8 +970,21 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 
 	if foundResource.OperatorStatus != nil {
 		state.Status = types.StringValue(*foundResource.OperatorStatus)
+		state.OperatorStatus = types.StringValue(*foundResource.OperatorStatus)
 	} else {
 		state.Status = types.StringNull()
+		state.OperatorStatus = types.StringNull()
+	}
+
+	// C4: operator_version/reported_at are only present once a K8s
+	// resource's operator has reported in at least once - null for VM,
+	// and null for a K8s resource that hasn't reported yet.
+	if foundResource.OperatorStatusDetails != nil {
+		state.OperatorVersion = stringPtrOrNull(foundResource.OperatorStatusDetails.OperatorVersion)
+		state.ReportedAt = stringPtrOrNull(foundResource.OperatorStatusDetails.ReportedAt)
+	} else {
+		state.OperatorVersion = types.StringNull()
+		state.ReportedAt = types.StringNull()
 	}
 
 	if foundResource.NetworkingMode == "PRIVATE" {
