@@ -284,6 +284,13 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
+					"cluster_instance_profile_id": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "IAM instance profile ARN attached to Ray cluster nodes. Defaults to the instance profile with the same name as `dataplane_iam_role_arn` when unset - set this explicitly only if your IAM tooling generates a profile name that differs from the role name.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
 					"external_id": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "External ID for IAM role assumption (recommended for security).",
@@ -551,6 +558,20 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Computed:            true,
 						Default:             stringdefault.StaticString("/mnt/shared"),
 						MarkdownDescription: "The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"persistent_volume_claim": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only).",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"csi_ephemeral_volume_driver": schema.StringAttribute{
+						Optional:            true,
+						MarkdownDescription: "CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only).",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},

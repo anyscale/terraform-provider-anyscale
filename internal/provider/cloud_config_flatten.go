@@ -67,16 +67,17 @@ func stringListOrNull(ctx context.Context, items []string) (types.List, diag.Dia
 
 func awsConfigAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"vpc_id":                    types.StringType,
-		"subnet_ids":                types.ListType{ElemType: types.StringType},
-		"subnet_ids_to_az":          types.MapType{ElemType: types.StringType},
-		"security_group_ids":        types.ListType{ElemType: types.StringType},
-		"controlplane_iam_role_arn": types.StringType,
-		"dataplane_iam_role_arn":    types.StringType,
-		"external_id":               types.StringType,
-		"memorydb_cluster_name":     types.StringType,
-		"memorydb_cluster_arn":      types.StringType,
-		"memorydb_cluster_endpoint": types.StringType,
+		"vpc_id":                      types.StringType,
+		"subnet_ids":                  types.ListType{ElemType: types.StringType},
+		"subnet_ids_to_az":            types.MapType{ElemType: types.StringType},
+		"security_group_ids":          types.ListType{ElemType: types.StringType},
+		"controlplane_iam_role_arn":   types.StringType,
+		"dataplane_iam_role_arn":      types.StringType,
+		"cluster_instance_profile_id": types.StringType,
+		"external_id":                 types.StringType,
+		"memorydb_cluster_name":       types.StringType,
+		"memorydb_cluster_arn":        types.StringType,
+		"memorydb_cluster_endpoint":   types.StringType,
 	}
 }
 
@@ -125,9 +126,11 @@ func mountTargetAttrTypes() map[string]attr.Type {
 
 func fileStorageAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"file_storage_id": types.StringType,
-		"mount_path":      types.StringType,
-		"mount_targets":   types.ListType{ElemType: types.ObjectType{AttrTypes: mountTargetAttrTypes()}},
+		"file_storage_id":             types.StringType,
+		"mount_path":                  types.StringType,
+		"persistent_volume_claim":     types.StringType,
+		"csi_ephemeral_volume_driver": types.StringType,
+		"mount_targets":               types.ListType{ElemType: types.ObjectType{AttrTypes: mountTargetAttrTypes()}},
 	}
 }
 
@@ -159,16 +162,17 @@ func flattenAWSConfig(ctx context.Context, cfg *AWSConfig) (types.Object, diag.D
 	}
 
 	attrs := map[string]attr.Value{
-		"vpc_id":                    stringOrNull(cfg.VPCID),
-		"subnet_ids":                types.ListNull(types.StringType),
-		"subnet_ids_to_az":          subnetIDsToAZ,
-		"security_group_ids":        securityGroupIDs,
-		"controlplane_iam_role_arn": stringOrNull(cfg.AnyscaleIAMRoleID),
-		"dataplane_iam_role_arn":    stringOrNull(cfg.ClusterIAMRoleID),
-		"external_id":               stringOrNull(cfg.ExternalID),
-		"memorydb_cluster_name":     stringPtrOrNull(cfg.MemoryDBClusterName),
-		"memorydb_cluster_arn":      stringPtrOrNull(cfg.MemoryDBClusterARN),
-		"memorydb_cluster_endpoint": stringPtrOrNull(cfg.MemoryDBClusterEndpoint),
+		"vpc_id":                      stringOrNull(cfg.VPCID),
+		"subnet_ids":                  types.ListNull(types.StringType),
+		"subnet_ids_to_az":            subnetIDsToAZ,
+		"security_group_ids":          securityGroupIDs,
+		"controlplane_iam_role_arn":   stringOrNull(cfg.AnyscaleIAMRoleID),
+		"dataplane_iam_role_arn":      stringOrNull(cfg.ClusterIAMRoleID),
+		"cluster_instance_profile_id": stringPtrOrNull(cfg.ClusterInstanceProfileID),
+		"external_id":                 stringOrNull(cfg.ExternalID),
+		"memorydb_cluster_name":       stringPtrOrNull(cfg.MemoryDBClusterName),
+		"memorydb_cluster_arn":        stringPtrOrNull(cfg.MemoryDBClusterARN),
+		"memorydb_cluster_endpoint":   stringPtrOrNull(cfg.MemoryDBClusterEndpoint),
 	}
 
 	obj, d := types.ObjectValue(awsConfigAttrTypes(), attrs)
@@ -306,9 +310,11 @@ func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, di
 	}
 
 	attrs := map[string]attr.Value{
-		"file_storage_id": stringOrNull(cfg.FileStorageID),
-		"mount_path":      types.StringValue(mountPath),
-		"mount_targets":   mountTargets,
+		"file_storage_id":             stringOrNull(cfg.FileStorageID),
+		"mount_path":                  types.StringValue(mountPath),
+		"persistent_volume_claim":     stringOrNull(cfg.PersistentVolumeClaim),
+		"csi_ephemeral_volume_driver": stringOrNull(cfg.CSIEphemeralVolumeDriver),
+		"mount_targets":               mountTargets,
 	}
 
 	obj, d := types.ObjectValue(fileStorageAttrTypes(), attrs)

@@ -122,6 +122,7 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
 
 Optional:
 
+- `cluster_instance_profile_id` (String) IAM instance profile ARN attached to Ray cluster nodes. Defaults to the instance profile with the same name as `dataplane_iam_role_arn` when unset - set this explicitly only if your IAM tooling generates a profile name that differs from the role name.
 - `controlplane_iam_role_arn` (String) IAM role ARN for Anyscale control plane (cross-account access).
 - `dataplane_iam_role_arn` (String) IAM role ARN for Anyscale data plane (cluster nodes).
 - `external_id` (String) External ID for IAM role assumption (recommended for security).
@@ -139,9 +140,11 @@ Optional:
 
 Optional:
 
+- `csi_ephemeral_volume_driver` (String) CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only).
 - `file_storage_id` (String) The file storage ID (EFS ID, Filestore name, etc.).
 - `mount_path` (String) The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.
 - `mount_targets` (Block List) List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. (see [below for nested schema](#nestedblock--file_storage--mount_targets))
+- `persistent_volume_claim` (String) Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only).
 
 <a id="nestedblock--file_storage--mount_targets"></a>
 ### Nested Schema for `file_storage.mount_targets`
