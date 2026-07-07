@@ -290,7 +290,7 @@ make test-aws-vm-basic
 
 ---
 
-## [0.0.1] - 2024-XX-XX (SDK v2 Version)
+## [0.0.1-dev] - Draft, never published (SDK v2 baseline)
 
 ### Added
 
@@ -307,4 +307,4 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 [Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1
-[0.0.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1
+[0.0.1-dev]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1-dev

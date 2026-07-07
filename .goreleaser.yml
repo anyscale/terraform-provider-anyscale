@@ -87,26 +87,11 @@ release:
   # Release name template
   name_template: "{{ .ProjectName }} v{{ .Version }}"
 
+# CHANGELOG.md (via tools/changelog-build, see
+# .crystl/quest/changelog-release-contract.md) is the single source of truth
+# for release notes now. GoReleaser's own commit-scraped changelog is
+# disabled; release.yml extracts this version's CHANGELOG.md section and
+# passes it via `--release-notes`, so the GitHub Release body byte-matches
+# CHANGELOG.md instead of being a second, independently-generated story.
 changelog:
-  use: github
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
-      - "^chore:"
-      - Merge pull request
-      - Merge branch
-  groups:
-    - title: "Features"
-      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
-      order: 0
-    - title: "Bug Fixes"
-      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
-      order: 1
-    - title: "Breaking Changes"
-      regexp: '^.*?!:.+$'
-      order: 2
-    - title: "Other Changes"
-      order: 999
+  disable: true

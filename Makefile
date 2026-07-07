@@ -486,7 +486,7 @@ version: ## Show current version information
 version-check: ## Check if version is set correctly (useful for CI)
 	@if [ "$(VERSION)" = "0.0.1" ] && [ -z "$(GIT_TAG)" ]; then \
 		echo "WARNING: No git tag found and VERSION is default (0.0.1)"; \
-		echo "Consider creating a git tag: git tag -a v0.1.0 -m 'Release 0.1.0'"; \
+		echo "Consider cutting a release: make changelog-release VERSION=0.1.0"; \
 		exit 1; \
 	fi
 	@echo "Version check passed: $(VERSION)"
@@ -544,13 +544,83 @@ release: ## Create and publish a release (requires GPG_FINGERPRINT env var)
 	fi
 
 # ============================================================================
+# CHANGELOG
+# ============================================================================
+# Fragment-based changelog automation. See .crystl/quest/changelog-release-contract.md
+# and tools/changelog-build/.
+
+.PHONY: changelog-build
+changelog-build: ## Fold .changelog/ fragments into Unreleased, or finalize a release with VERSION=x.y.z
+	@if [ "$(origin VERSION)" = "command line" ] && [ "$(VERSION)" != "0.0.1" ]; then \
+		go run ./tools/changelog-build -finalize $(VERSION); \
+	else \
+		go run ./tools/changelog-build; \
+	fi
+
+.PHONY: changelog-check
+changelog-check: ## Validate .changelog/ fragments parse cleanly, without writing anything
+	@go run ./tools/changelog-build -check
+
+define require_semver_version
+	@if [ "$(origin VERSION)" != "command line" ] || [ "$(VERSION)" = "0.0.1" ]; then \
+		echo "ERROR: VERSION is required. Usage: make $(1) VERSION=0.1.0"; \
+		exit 1; \
+	fi
+	@case "$(VERSION)" in \
+		[0-9]*.[0-9]*.[0-9]*) ;; \
+		*) echo "ERROR: VERSION must look like a semantic version, e.g. 0.2.0 (got: $(VERSION))"; exit 1 ;; \
+	esac
+endef
+
+# ============================================================================
 # TAGGING HELPERS
 # ============================================================================
+# `main` requires 1 approval + code-owner review + passing checks (branch
+# protection; enforce_admins is off, so an admin token COULD push straight to
+# main, but this deliberately doesn't rely on that). So finalizing the
+# changelog and cutting the tag are two steps with a normal PR in between,
+# same as every other change to main -- not one command that only works for
+# whoever happens to have an admin bypass.
+
+.PHONY: changelog-release
+changelog-release: ## Open a PR that finalizes CHANGELOG.md for a release (usage: make changelog-release VERSION=0.1.0)
+	$(call require_semver_version,changelog-release)
+	@branch="$$(git rev-parse --abbrev-ref HEAD)"; \
+	if [ "$$branch" != "main" ]; then \
+		echo "ERROR: run 'make changelog-release' from main (currently on $$branch)"; \
+		exit 1; \
+	fi
+	@if ! git diff --quiet || ! git diff --quiet --cached; then \
+		echo "ERROR: working tree has uncommitted changes; commit or stash first"; \
+		exit 1; \
+	fi
+	@echo "==> Finalizing CHANGELOG.md for v$(VERSION)..."
+	go run ./tools/changelog-build -finalize $(VERSION)
+	git checkout -b "changelog/v$(VERSION)"
+	git add CHANGELOG.md .changelog
+	git commit -m "chore: finalize CHANGELOG.md for v$(VERSION)"
+	git push origin "changelog/v$(VERSION)"
+	gh pr create --title "chore: finalize CHANGELOG.md for v$(VERSION)" \
+		--body "Mechanical: renames Unreleased to v$(VERSION) and dates it. Every entry in it already went through review as its own .changelog/ fragment PR; this just reorganizes them. Merge before running 'make tag VERSION=$(VERSION)'." \
+		--base main
+	git checkout "$$branch"
+	@echo "==> Get that PR reviewed and merged, THEN run: make tag VERSION=$(VERSION)"
 
 .PHONY: tag
-tag: ## Create and push a release tag (usage: make tag VERSION=0.1.0)
-	@if [ -z "$(VERSION)" ] || [ "$(VERSION)" = "0.0.1" ]; then \
-		echo "ERROR: VERSION is required. Usage: make tag VERSION=0.1.0"; \
+tag: ## Create and push a release tag once CHANGELOG.md is finalized on main (usage: make tag VERSION=0.1.0)
+	$(call require_semver_version,tag)
+	@branch="$$(git rev-parse --abbrev-ref HEAD)"; \
+	if [ "$$branch" != "main" ]; then \
+		echo "ERROR: run 'make tag' from main (currently on $$branch)"; \
+		exit 1; \
+	fi
+	@if ! git diff --quiet || ! git diff --quiet --cached; then \
+		echo "ERROR: working tree has uncommitted changes; commit or stash first"; \
+		exit 1; \
+	fi
+	@if ! grep "^## \[" CHANGELOG.md | grep -qF "[$(VERSION)]"; then \
+		echo "ERROR: CHANGELOG.md has no '## [$(VERSION)]' section on this branch."; \
+		echo "Run 'make changelog-release VERSION=$(VERSION)' and merge that PR first."; \
 		exit 1; \
 	fi
 	@echo "==> Creating tag v$(VERSION)..."
