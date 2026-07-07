@@ -12,10 +12,15 @@ import (
 // This file converts API config structs (AWSConfig, GCPConfig, ...) into the
 // Terraform Object values used by anyscale_cloud/anyscale_cloud_resource's
 // aws_config/gcp_config/kubernetes_config/object_storage/file_storage blocks -
-// the reverse of expandAWSConfig etc. in resource_cloud_resource.go. It exists
-// to support C3 Phase 1: populating a still-null config block from the cloud's
-// default resource (the import/adoption case) without ever touching a block
-// that's already populated in state.
+// the reverse of expandAWSConfig etc. in resource_cloud_resource.go.
+//
+// C3-v2: config-block recovery from the API happens ONLY in ImportState (see
+// requiredImportConfigBlocks below), never in Create/Read. These blocks are
+// not Computed, so Terraform requires them to equal exactly what the plan
+// configured - populating one during Create/Read that the user's .tf never
+// set is a hard "provider produced inconsistent result" error, not a
+// harmless enhancement. ImportState runs once, before that consistency
+// machinery is in the loop, which is why it's the only safe place for this.
 
 // resolveIsEmptyCloud derives is_empty_cloud from "does this cloud have zero
 // resources attached right now", but ONLY while current is null/unknown (a
@@ -309,4 +314,63 @@ func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, di
 	obj, d := types.ObjectValue(fileStorageAttrTypes(), attrs)
 	diags.Append(d...)
 	return obj, diags
+}
+
+// requiredImportConfigBlocks decides which config block(s) a valid
+// anyscale_cloud or anyscale_cloud_resource config MUST have, based on
+// compute stack and provider, and flattens them from the given resource's
+// API data. Returns an empty map if there's nothing to recover (nil
+// resource, e.g. a genuinely empty cloud) - never an error on its own.
+//
+// Deliberately required-blocks-only (see C3-v2): VM gets aws_config OR
+// gcp_config (by provider); K8S gets kubernetes_config AND object_storage
+// (both required for K8S regardless of provider). Optional/auxiliary blocks
+// - file_storage anywhere, object_storage for VM, aws_config/gcp_config for
+// K8S - are never included here. Recovering one of those would reintroduce
+// the exact ambiguity this design avoids: a later Read has no way to tell
+// "recovered at import" apart from "genuinely absent", but for a
+// compute-stack-required block that distinction never arises, since a valid
+// config could never have left it unset in the first place.
+//
+// Shared by both resources' ImportState: the decision (which block, from
+// which struct field) is identical, only the surrounding API calls to reach
+// a *CloudDeploymentResult differ between a cloud's default resource and a
+// cloud_resource's own named lookup.
+func requiredImportConfigBlocks(ctx context.Context, provider string, defaultResource *CloudDeploymentResult) (map[string]types.Object, diag.Diagnostics) {
+	blocks := map[string]types.Object{}
+	var diags diag.Diagnostics
+
+	if defaultResource == nil {
+		return blocks, diags
+	}
+
+	if defaultResource.ComputeStack == "K8S" {
+		if defaultResource.KubernetesConfig != nil {
+			obj, d := flattenKubernetesConfig(ctx, defaultResource.KubernetesConfig)
+			diags.Append(d...)
+			blocks["kubernetes_config"] = obj
+		}
+		if defaultResource.ObjectStorage != nil {
+			obj, d := flattenObjectStorage(defaultResource.ObjectStorage, provider)
+			diags.Append(d...)
+			blocks["object_storage"] = obj
+		}
+		return blocks, diags
+	}
+
+	switch strings.ToUpper(provider) {
+	case "AWS":
+		if defaultResource.AWSConfig != nil {
+			obj, d := flattenAWSConfig(ctx, defaultResource.AWSConfig)
+			diags.Append(d...)
+			blocks["aws_config"] = obj
+		}
+	case "GCP":
+		if defaultResource.GCPConfig != nil {
+			obj, d := flattenGCPConfig(ctx, defaultResource.GCPConfig)
+			diags.Append(d...)
+			blocks["gcp_config"] = obj
+		}
+	}
+	return blocks, diags
 }
