@@ -209,11 +209,11 @@ Optional:
 Optional:
 
 - `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.
-- `cluster_name` (String) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
-- `context` (String) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
-- `ingress_host` (String) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.
-- `kubeconfig_path` (String) Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
-- `namespace` (String) The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.
+- `cluster_name` (String, Deprecated) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
+- `context` (String, Deprecated) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
+- `ingress_host` (String, Deprecated) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.
+- `kubeconfig_path` (String, Deprecated) Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
+- `namespace` (String, Deprecated) The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.
 - `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.
 - `zones` (List of String) List of availability zones for the Kubernetes cluster.
 

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -263,6 +264,49 @@ func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
 				"— editing an element's zone hits the same swallowed-edit bug via a different modifier type (task 861aaf10)")
 		}
 	})
+}
+
+// TestKubernetesConfigInertFieldsAreDeprecated pins C5: namespace/
+// ingress_host/cluster_name/context/kubeconfig_path are never sent to the
+// API (expandKubernetesConfig only forwards anyscale_operator_iam_identity/
+// zones/redis_endpoint), so setting any of them silently does nothing. Both
+// resources' kubernetes_config block must mark all five Deprecated with a
+// message that states a removal target, not just "deprecated" - a bare
+// "deprecated" tells a user something changed but not what to do about it.
+func TestKubernetesConfigInertFieldsAreDeprecated(t *testing.T) {
+	inertFields := []string{"namespace", "ingress_host", "cluster_name", "context", "kubeconfig_path"}
+
+	for _, tc := range []struct {
+		name string
+		res  resource.Resource
+	}{
+		{"anyscale_cloud", &CloudResource{}},
+		{"anyscale_cloud_resource", &CloudResourceResource{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := schemaOf(t, tc.res)
+			k8sBlock, ok := s.Blocks["kubernetes_config"].(schema.SingleNestedBlock)
+			if !ok {
+				t.Fatalf("kubernetes_config is not a schema.SingleNestedBlock (got %T)", s.Blocks["kubernetes_config"])
+			}
+
+			for _, name := range inertFields {
+				name := name
+				t.Run(name, func(t *testing.T) {
+					attr, ok := k8sBlock.Attributes[name].(schema.StringAttribute)
+					if !ok {
+						t.Fatalf("kubernetes_config.%s is not a schema.StringAttribute (got %T)", name, k8sBlock.Attributes[name])
+					}
+					if attr.DeprecationMessage == "" {
+						t.Errorf("kubernetes_config.%s has no DeprecationMessage - it's never sent to the API and has no effect (C5)", name)
+					}
+					if !strings.Contains(strings.ToLower(attr.DeprecationMessage), "removed in a future") {
+						t.Errorf("kubernetes_config.%s DeprecationMessage = %q, want it to state a removal target (shipwright's refinement) not just \"deprecated\"", name, attr.DeprecationMessage)
+					}
+				})
+			}
+		})
+	}
 }
 
 // TestProjectDescriptionRequiresReplaceIfConfigured pins task 452e7154's fix.
