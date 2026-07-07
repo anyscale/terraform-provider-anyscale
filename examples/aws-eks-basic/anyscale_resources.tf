@@ -7,6 +7,7 @@ locals {
 module "anyscale_vpc" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # tflint-ignore: terraform_module_pinned_source
   source = "github.com/anyscale/terraform-aws-anyscale-cloudfoundation-modules//modules/aws-anyscale-vpc"
 
   anyscale_vpc_name = "anyscale-${var.eks_cluster_name}"
@@ -27,6 +28,7 @@ module "anyscale_vpc" {
 module "anyscale_s3" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # tflint-ignore: terraform_module_pinned_source
   source = "github.com/anyscale/terraform-aws-anyscale-cloudfoundation-modules//modules/aws-anyscale-s3"
 
   module_enabled = true
@@ -67,6 +69,7 @@ resource "aws_security_group" "allow_all_vpc" {
 module "anyscale_efs" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # tflint-ignore: terraform_module_pinned_source
   source = "github.com/anyscale/terraform-aws-anyscale-cloudfoundation-modules//modules/aws-anyscale-efs"
 
   module_enabled = var.enable_efs
@@ -84,6 +87,7 @@ module "anyscale_efs" {
 module "anyscale_iam_roles" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # tflint-ignore: terraform_module_pinned_source
   source = "github.com/anyscale/terraform-aws-anyscale-cloudfoundation-modules//modules/aws-anyscale-iam"
 
   module_enabled = true
