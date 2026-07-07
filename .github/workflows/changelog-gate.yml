@@ -32,9 +32,13 @@ jobs:
       - name: Changelog fragment presence check
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
+          HEAD_REF="${{ github.event.pull_request.head.ref }}"
           FRAGMENT=".changelog/${PR_NUM}.txt"
           HAS_SKIP_LABEL=$(jq -r '[.pull_request.labels[].name] | any(. == "skip-changelog")' "$GITHUB_EVENT_PATH")
-          if [ -s "$FRAGMENT" ]; then
+          if [[ "$HEAD_REF" =~ ^changelog/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Branch $HEAD_REF is a 'make changelog-release' finalize PR -- it consumes fragments"
+            echo "rather than adding one, by design. Exempt from the fragment-presence check."
+          elif [ -s "$FRAGMENT" ]; then
             echo "Found changelog fragment: $FRAGMENT"
           elif [ "$HAS_SKIP_LABEL" = "true" ]; then
             echo "No changelog fragment, but 'skip-changelog' label present -- OK."

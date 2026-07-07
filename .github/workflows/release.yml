@@ -59,19 +59,25 @@ jobs:
       # target), so it's present on this checkout. Re-extract it rather than
       # trusting a local dist/release-notes.md, which never gets committed
       # (dist/ is gitignored) and so never survives to reach this runner.
+      #
+      # Written OUTSIDE dist/ deliberately: `goreleaser release --clean`
+      # removes its own dist/ output directory before building, which would
+      # delete a same-named file dropped there by this step moments earlier -
+      # confirmed live on v0.1.2, where it silently produced an empty GitHub
+      # Release body despite this step extracting the right content.
       - name: Extract release notes from CHANGELOG.md
         run: |
           version="${GITHUB_REF_NAME#v}"
-          go run ./tools/changelog-build -extract "$version" -notes-out dist/release-notes.md
+          go run ./tools/changelog-build -extract "$version" -notes-out release-notes.md
           echo "==> release notes for $version:"
-          cat dist/release-notes.md
+          cat release-notes.md
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --release-notes=dist/release-notes.md
+          args: release --clean --release-notes=release-notes.md
         env:
           # GitHub token for creating releases
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
