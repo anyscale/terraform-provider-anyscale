@@ -49,6 +49,13 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 					// exactly the CC5a claim this exercises, so instance_type is
 					// the meaningful, verified-true assertion here.
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "head_node.instance_type", "m5.large"),
+
+					// CC5a acceptance (architect): the by-id lookup path must
+					// stay green after switching Read to the shared typed
+					// structs, not just the by-name path exercised above.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "name", configName),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "version", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "head_node.instance_type", "m5.large"),
 				),
 			},
 		},
@@ -111,6 +118,15 @@ resource "anyscale_compute_config" "test" {
 
 data "anyscale_compute_config" "by_name" {
   name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+
+data "anyscale_compute_config" "by_id" {
+  # The data source's id input is the version-specific API id (what the
+  # resource calls config_id), not the resource's own id (which is the
+  # stable name) -- confusingly overlapping names for two different things.
+  id = anyscale_compute_config.test.config_id
 
   depends_on = [anyscale_compute_config.test]
 }
