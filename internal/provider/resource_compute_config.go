@@ -955,9 +955,24 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 			state.MaxResources = restoreMapKeyCasing(ctx, maxResourcesMap, priorMaxResources)
 		}
 
+		// CC14: resolve unconditionally, not just when the key is present.
+		// The backend omits this flag entirely once it is false (confirmed
+		// live: a freshly created config that never touched cross-zone
+		// scaling comes back with an empty flags object, no key at all), so
+		// "only assign when present" silently relied on prior state already
+		// being correct. That holds for ordinary Create/Read (Create always
+		// resolves the schema Default to a real false before Create even
+		// runs), but not for ImportState, which starts with nothing set --
+		// absent key there meant permanently null instead of settling on
+		// false, a phantom diff forever. False-if-absent is correct on every
+		// entry path, not just import.
 		if enableCrossZone, ok := eff.Flags["allow-cross-zone-autoscaling"].(bool); ok {
 			state.EnableCrossZoneScaling = types.BoolValue(enableCrossZone)
+		} else {
+			state.EnableCrossZoneScaling = types.BoolValue(false)
 		}
+	} else {
+		state.EnableCrossZoneScaling = types.BoolValue(false)
 	}
 
 	// NOTE: We intentionally do NOT read user-defined flags from the API response
