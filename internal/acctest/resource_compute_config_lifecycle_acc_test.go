@@ -320,11 +320,168 @@ resource "anyscale_compute_config" "test" {
 				ImportStateVerifyIgnore: []string{
 					// Import has no prior state to mask Computed sub-attributes
 					// against, same as the real-API equivalent in
-					// resource_compute_config_acc_test.go.
+					// resource_compute_config_acc_test.go. enable_cross_zone_scaling,
+					// advanced_instance_config, and flags used to be listed here too
+					// (pre-CC11/CC12/CC14); this config sets none of the three, so
+					// they now correctly resolve/stay at their pre-import values with
+					// nothing to ignore - see TestAccComputeConfigImportRecoversWriteOnlyFields
+					// for the actual CC12 recovery-with-real-values proof.
 					"head_node", "worker_nodes",
-					"enable_cross_zone_scaling", "min_resources", "max_resources",
-					"advanced_instance_config", "flags", "zones",
+					"min_resources", "max_resources", "zones",
 				},
+			},
+		},
+	})
+}
+
+// newCC12MockComputeConfigServer serves a single, fixed compute config that
+// already has real top-level flags and advanced_instance_config set - the
+// realistic "pre-existing config imported into a config that omits them"
+// scenario CC12 exists for. The mock never validates these values (unlike
+// the real Anyscale API, which rejects arbitrary flag keys and validates
+// advanced_instance_config against a provider-specific instance-launch
+// shape - see the design discussion), which is exactly why this has to be a
+// mock-server test rather than a real-API one: a synthetic marker payload
+// that proves the mechanism would 400 against the real backend.
+func newCC12MockComputeConfigServer(t *testing.T, configID, configName, cloudID string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	computeTemplateJSON := fmt.Sprintf(`{
+		"id": %[1]q, "name": %[2]q, "version": 1,
+		"created_at": "2026-01-01T00:00:00Z", "last_modified_at": "2026-01-01T00:00:00Z",
+		"archived_at": "",
+		"config": {
+			"cloud_id": %[3]q,
+			"head_node_type": {"name": "head", "instance_type": "m5.2xlarge"},
+			"flags": {"cc12-marker-flag": true, "cc12-marker-count": 3},
+			"advanced_configurations_json": {"disk_size": 100, "enable_monitoring": true}
+		}
+	}`, configID, configName, cloudID)
+
+	mux.HandleFunc("/api/v2/compute_templates/"+configID, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"result": `+computeTemplateJSON+`}`)
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestAccComputeConfigImportRecoversWriteOnlyFields is CC12's verify-gate,
+// assigned jointly to assayer and forge when CC12 was designed but not
+// actually written until caught reviewing the release PR text that claimed
+// it existed. Read intentionally never reads flags/advanced_instance_config
+// back from the API on ordinary refresh (to avoid perpetual drift against
+// what the user configured) - ImportState is the one place recovering them
+// is unambiguous, since there is no prior state yet to confuse "recovered at
+// import" with "genuinely never configured". Architect's three-point gate,
+// all exercised here:
+//  1. A config that already matches the recovered values reaches an empty
+//     plan (the recovered values are not phantom/unknown).
+//  2. A config that omits them shows a TRUTHFUL, non-empty diff - not a
+//     silent one - proving the recovered values are real tracked state, not
+//     re-masked back to invisible.
+//  3. The recovered values survive the immediate post-import refresh Read
+//     (Read must leave them alone, not wipe them back out).
+func TestAccComputeConfigImportRecoversWriteOnlyFields(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const configID = "cpt_cc12_mock"
+	const configName = "cc12-import-mock"
+	const cloudID = "cld_cc12_mock"
+
+	server := newCC12MockComputeConfigServer(t, configID, configName, cloudID)
+	providerBlock := testAccProviderBlock(server.URL)
+
+	// What a user would naturally write without knowing the backend already
+	// has flags/advanced_instance_config set - the realistic import case.
+	configOmittingWriteOnlyFields := providerBlock + fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = %[1]q
+  cloud_id = %[2]q
+
+  head_node = {
+    instance_type = "m5.2xlarge"
+  }
+}
+`, configName, cloudID)
+
+	// The same config, now stating the values ImportState should have
+	// recovered. jsonencode() sorts object keys alphabetically, the same way
+	// Go's json.Marshal does on the provider side (both apiNodeTypeToTerraform
+	// and the top-level recovery path re-marshal a decoded map), so a
+	// matching plan requires getting this byte-shape right, not just the
+	// logical content.
+	configMatchingRecoveredValues := providerBlock + fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = %[1]q
+  cloud_id = %[2]q
+
+  head_node = {
+    instance_type = "m5.2xlarge"
+  }
+
+  flags = {
+    cc12-marker-flag  = true
+    cc12-marker-count = 3
+  }
+
+  advanced_instance_config = {
+    disk_size         = 100
+    enable_monitoring = true
+  }
+}
+`, configName, cloudID)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Fresh import: Config omits flags/advanced_instance_config,
+				// matching what Read alone would have left in state (never
+				// populated). ImportStateVerify is deliberately NOT used here
+				// - it would fail on a config/state mismatch by design, since
+				// proving the mismatch IS gate 2 below. ImportStatePersist is
+				// required because this test has no prior apply step to
+				// establish state from (the whole point is exercising a
+				// fresh import as the very first action) - without it, the
+				// framework discards the imported state after this step's
+				// check and the next step would plan a fresh create instead
+				// of diffing against what was actually imported.
+				ResourceName:       "anyscale_compute_config.test",
+				ImportState:        true,
+				ImportStateId:      configID,
+				ImportStatePersist: true,
+				Config:             configOmittingWriteOnlyFields,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "config_id", configID),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "flags.cc12-marker-flag", "true"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "flags.cc12-marker-count", "3"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "advanced_instance_config.disk_size", "100"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "advanced_instance_config.enable_monitoring", "true"),
+				),
+			},
+			{
+				// Gate 1 + gate 3 together: a config that now states the
+				// recovered values reaches an empty plan - proving they are
+				// real, stable, known values (gate 1) that survived the
+				// post-import refresh Read untouched (gate 3), not
+				// re-masked or left Unknown.
+				Config:             configMatchingRecoveredValues,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+			{
+				// Gate 2: going back to the omitting config must show a
+				// truthful, non-empty removal diff - proving state actually
+				// tracks these as real values now, not a silent pass-through
+				// that would let an unrelated apply wipe them with no
+				// warning (the exact CC12 was designed to close).
+				Config:             configOmittingWriteOnlyFields,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
 			},
 		},
 	})
