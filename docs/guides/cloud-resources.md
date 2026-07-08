@@ -83,26 +83,27 @@ A few things aren't obvious from the resource's schema alone:
   end-to-end (never had your own infrastructure explicitly attached) rejects a second
   `anyscale_cloud_resource` at apply time with a `400`. To use more than one resource, the cloud needs
   to be the "bring your own cloud" kind from the start.
-- **`name` only has to be unique per cloud, not globally.** Give any resource beyond the first its own
-  explicit, distinct `name` — the clearest way to know which backend resource a given
-  `anyscale_cloud_resource` block manages. Leaving `name` unset works too: the backend generates one
-  (`{compute_stack}-{provider}-{region}`, lowercased, with a numeric suffix appended on collision — e.g.
-  `vm-aws-us-east-2`, then `vm-aws-us-east-2-1`) and reads it back into state. Explicit is just more
-  self-documenting in your configuration.
-- **A duplicate explicit `name` on the same cloud fails loud, never silent.** `apply` surfaces the
-  API's error (`409`, name already in use) rather than merging into or overwriting the existing
-  resource. There's no "adopt" behavior — every `anyscale_cloud_resource` you apply either creates a
-  new backend resource or fails outright, never silently attaches to one that's already there.
+- **`name` only has to be unique per cloud, not globally — but give every resource beyond the first
+  its own explicit, distinct `name`.** If you omit `name`, the provider computes one for you:
+  `{compute_stack}-{provider}-{region}`, lowercased (e.g. `vm-aws-us-east-2`). That computation is not
+  adjusted for collisions — a second resource that shares the same `compute_stack`, provider, and
+  `region` as an existing one on the same cloud computes to the exact same name and fails the same way
+  an explicit duplicate would (see below). Set `name` explicitly on any resource beyond the first, or
+  on any resource that would otherwise share its full compute_stack/provider/region combination with
+  one already on the cloud.
+- **A `name` collision on the same cloud fails loud, never silent.** Whether the colliding name came
+  from an explicit duplicate or two resources whose omitted-`name` computation landed on the same
+  string, `apply` surfaces the API's error (`409`, name already in use) rather than merging into or
+  overwriting the existing resource. There's no "adopt" behavior — every `anyscale_cloud_resource` you
+  apply either creates a new backend resource or fails outright, never silently attaches to one that's
+  already there.
 - **State loss recovers via `terraform import`, not a plain re-apply.** If a state entry for an
   `anyscale_cloud_resource` is lost while the backend resource itself is still alive, re-running
-  `apply` does not reconcile the two:
-  - An explicitly-named block gets a `409` (that name is already taken on the cloud).
-  - An unnamed block may succeed and create a brand new, separately-suffixed backend resource instead
-    of reattaching to the original one — ordinary Terraform behavior for anything whose identity is
-    assigned by the server, not specific to this resource.
-
-  Either way, `terraform import` is the fix — see [Import](../resources/cloud_resource.md#import) for
-  the `cloud_id:name` syntax.
+  `apply` computes the same name it originally would have — an explicit `name` is unchanged in your
+  configuration, and an omitted `name` recomputes deterministically from the same `compute_stack`,
+  provider, and `region` — so it hits the same `409` collision either way rather than reconciling the
+  two or creating a duplicate. `terraform import` is the fix — see
+  [Import](../resources/cloud_resource.md#import) for the `cloud_id:name` syntax.
 
 ## Naming differences between resources and data sources
 
