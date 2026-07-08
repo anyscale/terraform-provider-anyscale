@@ -248,7 +248,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			"cloud_deployment_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID assigned by Anyscale.",
+				MarkdownDescription: "The cloud deployment ID. The Anyscale API no longer populates this field; use `cloud_resource_id` instead.",
 				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -257,7 +257,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			"status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The current status of the cloud resource.",
+				MarkdownDescription: "The operator status of the cloud resource. Duplicates `operator_status` (identical value; null for VM); use `operator_status` instead.",
 				DeprecationMessage:  statusDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),

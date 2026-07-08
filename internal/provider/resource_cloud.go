@@ -227,7 +227,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			"cloud_deployment_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation.",
+				MarkdownDescription: "The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.",
 				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
