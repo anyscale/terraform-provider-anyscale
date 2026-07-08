@@ -338,8 +338,8 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 			ElementType:         types.Float64Type,
 			Optional:            true,
 			Computed:            true,
-			Description:         "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to let Ray auto-detect the instance's actual capacity at runtime; set it to override what Ray sees, independent of the instance's real capacity.",
-			MarkdownDescription: "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to let Ray auto-detect the instance's actual capacity at runtime; set it to override what Ray sees, independent of the instance's real capacity.",
+			Description:         "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.",
+			MarkdownDescription: "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.",
 			PlanModifiers: []planmodifier.Map{
 				mapplanmodifier.UseStateForUnknown(),
 			},
