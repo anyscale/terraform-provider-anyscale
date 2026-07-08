@@ -105,6 +105,56 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 	})
 }
 
+// TestAccComputeConfigDataSource_EnableCrossZoneScaling is the regression
+// test for a real, pre-existing bug shipwright found while reviewing CC5a's
+// diff: the data source used to look for a top-level enable_cross_zone_scaling
+// JSON key on the config that has never existed - the real value has only
+// ever lived inside flags["allow-cross-zone-autoscaling"], exactly where the
+// resource correctly reads it from. That miss always failed silently (the
+// map-index `ok` check was always false), so the data source's
+// enable_cross_zone_scaling output read as false for every user regardless
+// of what was actually configured, since before this quest started. CC5a's
+// switch to the shared typed parsing (resolveEffectiveComputeConfig, the
+// same helper Read uses) fixes this as a side effect. This proves it against
+// a real, explicitly-true-configured value, not just by re-reading the code.
+func TestAccComputeConfigDataSource_EnableCrossZoneScaling(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetComputeConfigCloudID(t)
+	configName := UniqueName(t, "ds-compute-xzone")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name                      = %[1]q
+  cloud_id                  = %[2]q
+  enable_cross_zone_scaling = true
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+}
+
+data "anyscale_compute_config" "by_name" {
+  name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+`, configName, cloudID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "enable_cross_zone_scaling", "true"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "enable_cross_zone_scaling", "true"),
+				),
+			},
+		},
+	})
+}
+
 func testAccComputeConfigDataSourceConfig_basic(cloudID, configName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
