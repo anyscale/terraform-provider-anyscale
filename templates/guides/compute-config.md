@@ -35,7 +35,7 @@ If a compute config is archived outside Terraform — through the Anyscale CLI o
 `plan` or `apply` detects this and removes it from state, the same as any other resource that
 disappears out from under Terraform; it then plans to create it fresh rather than erroring.
 
-## Renaming a compute config
+## Renaming a compute config, or changing its cloud
 
 `name` is part of the resource's identity: changing it replaces the resource (`RequiresReplace`)
 instead of updating it in place. Terraform's plan shows this as a destroy-then-create — the compute
@@ -44,6 +44,21 @@ config under the old name is archived, and a new one is created under the new na
 This is safe by construction: if the compute config you're renaming is currently backing a running
 cluster, the archive step fails with a clear error instead of proceeding, rather than silently tearing
 anything down. Simply retry once it's no longer in use.
+
+`cloud_id` and `cloud_name` are also part of the resource's identity, but behave differently on
+purpose. Changing which cloud a compute config actually points at is not `RequiresReplace`: instead,
+`apply` fails with an explicit error ("Compute Config Cloud Is Immutable") telling you to replace the
+resource deliberately — `terraform apply -replace` against this resource, or `terraform taint` it
+first — rather than proceeding automatically. Switching how you *express* the same cloud — for example,
+from `cloud_name` to the `cloud_id` it already resolves to — isn't a real change, and plans clean either
+way.
+
+This asymmetry is intentional, not an inconsistency: a `name` change is always detectable purely from
+your configuration and prior state, so Terraform can safely auto-replace. Whether a `cloud_id`/
+`cloud_name` change actually points at a different cloud can't always be determined without resolving
+`cloud_name` to an ID, which a plan-time check can't safely do — so this heavier, rarer operation gets a
+deliberate two-step instead of an automatic one. Both are equally safe against orphaning the old compute
+config; they just surface the choice to you at different points.
 
 ## `resources` versus `required_resources`
 
