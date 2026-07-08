@@ -55,7 +55,11 @@ both what breaks and how to migrate, in one sentence — see the breaking-change
 `.changelog/README.md` for the exact shape. This is the only mechanism for flagging a break; there
 is no separate breaking-change label.
 
-**No user-facing effect?** Internal refactors, test-only fixes, and CI changes don't need a
-fragment — apply the `skip-changelog` label instead of adding a file. If you're contributing from
-a fork and can't apply labels yourself, say so in the PR description and a maintainer will apply
-it during review.
+**No user-facing effect?** Internal refactors, test-only fixes, CI changes, and examples-only
+edits outside `examples/resources/`, `examples/data-sources/`, and `examples/provider/` don't need
+a fragment — apply the `skip-changelog` label instead of adding a file. Those three directories
+are the exception: they feed `tfplugindocs` and are pulled into registry-published doc pages (e.g.
+`examples/resources/anyscale_cloud/resource.tf` becomes the Example Usage block on
+`docs/resources/cloud.md`), so a change there is provider-facing even though it's "just an
+example." If you're contributing from a fork and can't apply labels yourself, say so in the PR
+description and a maintainer will apply it during review.

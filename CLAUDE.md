@@ -100,10 +100,10 @@ make docs
 
 ## Changelog Policy: When to Skip
 
-The `changelog-gate` CI check accepts EITHER a `.changelog/<PR#>.txt` fragment OR the `skip-changelog` label — one is required on every PR.
+The `changelog-gate` CI check accepts EITHER a `.changelog/<PR#>.txt` fragment OR the `skip-changelog` label — one is required on every PR. See [CONTRIBUTING.md](CONTRIBUTING.md#changelog-fragments) ("No user-facing effect?") for the full policy and the fragment format; this section is the short agent-facing version.
 
-- If a PR contains **no changes that require a new provider version** — e.g. examples-only edits, CI/tooling, tests, or internal docs with no user-facing provider behavior change — apply the **`skip-changelog`** label instead of adding a fragment.
-- Only changes to the provider itself (schemas, resources/data sources, observable provider behavior, user-facing bug fixes) require a `.changelog/<PR#>.txt` fragment and a version bump.
+- If a PR contains **no changes that require a new provider version** — e.g. CI/tooling, tests, internal docs, or examples-only edits **outside `examples/resources/`, `examples/data-sources/`, and `examples/provider/`** — apply the **`skip-changelog`** label instead of adding a fragment. Those three example directories feed `tfplugindocs` and land on registry-published doc pages, so changes there are provider-facing even though they are "just an example."
+- Only changes to the provider itself (schemas, resources/data sources, observable provider behavior, user-facing bug fixes) require a `.changelog/<PR#>.txt` fragment — folded into the next version bump at release time, not immediately.
 
 If you are unsure whether a change is user-facing, add a fragment — it is the safe default.
 
