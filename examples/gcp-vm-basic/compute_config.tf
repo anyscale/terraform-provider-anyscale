@@ -188,9 +188,10 @@ resource "anyscale_compute_config" "simple" {
 #   head_node = {
 #     instance_type = "custom"
 #
-#     physical_resources = {
-#       cpu    = 4
-#       memory = "16Gi"
+#     required_resources = {
+#       cpu              = 4
+#       memory           = "16Gi"
+#       cpu_architecture = "x86_64" # optional; also accepts "arm64"
 #     }
 #   }
 #
@@ -200,7 +201,7 @@ resource "anyscale_compute_config" "simple" {
 #       min_nodes     = 1
 #       max_nodes     = 10
 #
-#       physical_resources = {
+#       required_resources = {
 #         cpu         = 8
 #         memory      = "32Gi"
 #         gpu         = 1
@@ -233,7 +234,7 @@ resource "anyscale_compute_config" "simple" {
 #       min_nodes     = 0
 #       max_nodes     = 4
 #
-#       physical_resources = {
+#       required_resources = {
 #         cpu         = 7
 #         memory      = "12Gi"
 #         tpu         = 4
