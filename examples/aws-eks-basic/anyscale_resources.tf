@@ -33,6 +33,12 @@ module "anyscale_s3" {
 
   module_enabled = true
 
+  # global, not the module's own account-regional default: this example names
+  # the bucket explicitly (cluster name + region) rather than letting AWS
+  # generate an account-regional-namespaced name from a prefix, and the AWS
+  # provider rejects an explicit name that doesn't already carry the
+  # required -{account_id}-{region}-an suffix under account-regional.
+  bucket_namespace     = "global"
   anyscale_bucket_name = "${var.eks_cluster_name}-${var.aws_region}"
   force_destroy        = var.anyscale_s3_force_destroy
 
