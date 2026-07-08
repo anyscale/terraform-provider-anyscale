@@ -73,7 +73,7 @@ make sweep           # delete
 make docs
 ```
 
-Do **not** run `terraform init` inside an example directory if a provider binary isn't available at the path dev_overrides expects — it will error on the anyscale provider. Use an isolated scratch config (see `HANDOFF.md §Operational Notes`).
+`terraform init` is safe and necessary per example directory — it fetches third-party modules and the AWS provider. dev_overrides only skips the anyscale provider (prints a warning, nothing more). The hazard is running with the **shared `~/.terraformrc`**, which points at whatever binary sits at the main repo root and may be stale. For any apply or validate you intend to trust, use an isolated scratch CLI config pointing at a freshly-built binary. See `HANDOFF.md §Operational Notes`.
 
 ---
 
