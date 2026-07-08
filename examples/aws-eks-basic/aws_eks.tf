@@ -61,6 +61,11 @@ locals {
     iam_role_additional_policies = local.anyscale_iam
   }
 
+  # Taints are a safelist: only workloads whose compute config requests a GPU
+  # (and tolerates these keys) get scheduled onto GPU node groups, so CPU-only
+  # workloads never land on the more expensive GPU capacity by accident. The
+  # Anyscale operator sets the matching tolerations based on what a workload
+  # requests, so no manual toleration wiring is needed on the Anyscale side.
   gpu_node_taints_base = {
     gpu_present = {
       key    = "nvidia.com/gpu"
@@ -74,6 +79,9 @@ locals {
     }
   }
 
+  # Adds a capacity_type taint on top of the base GPU taints so on-demand and
+  # spot GPU nodes are also distinguished from each other. Consumed below by
+  # gpu_node_groups[*].ondemand/.spot (taints = local.gpu_node_taints_ondemand/_spot).
   gpu_node_taints_ondemand = merge(local.gpu_node_taints_base, {
     capacity_type = {
       key    = "node.anyscale.com/capacity-type"
@@ -215,6 +223,9 @@ module "eks" {
         desired_size          = 0
         block_device_mappings = local.bottlerocket_block_device_mappings
 
+        # Same capacity-type safelist pattern as the GPU node groups (see
+        # gpu_node_taints_base above): workloads must explicitly tolerate
+        # on-demand vs. spot rather than landing on whichever is available.
         taints = {
           capacity_type = {
             key    = "node.anyscale.com/capacity-type"
@@ -243,6 +254,9 @@ module "eks" {
         desired_size          = 0
         block_device_mappings = local.bottlerocket_block_device_mappings
 
+        # Same capacity-type safelist pattern as the GPU node groups (see
+        # gpu_node_taints_base above): workloads must explicitly tolerate
+        # on-demand vs. spot rather than landing on whichever is available.
         taints = {
           capacity_type = {
             key    = "node.anyscale.com/capacity-type"
