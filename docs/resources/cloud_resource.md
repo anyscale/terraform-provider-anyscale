@@ -119,7 +119,7 @@ output "eks_operator_reported_at" {
 
 ### Required
 
-- `name` (String) The name of the cloud resource. Must be distinct among resources on the same cloud that share the same compute stack, provider, and region. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with the same name fails with a duplicate-name error. Use `terraform import` to recover state instead.
+- `name` (String) The name of the cloud resource. Must be a non-empty string, distinct among resources on the same cloud that share the same compute stack, provider, and region. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with the same name fails with a duplicate-name error. Use `terraform import` to recover state instead.
 
 ### Optional
 
