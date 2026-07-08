@@ -2,7 +2,8 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
+	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -381,75 +382,109 @@ func TestMarketTypeTranslation(t *testing.T) {
 	}
 }
 
-// TestDynamicToInterfaceConversion tests conversion of Dynamic values
+// TestDynamicToInterfaceConversion tests the real DynamicToInterface function
+// (framework_helpers.go) against types.Dynamic shapes matching how Terraform
+// actually represents flags/advanced_instance_config HCL object literals -
+// the previous version of this test only re-parsed raw JSON and never called
+// DynamicToInterface at all, so it could not have caught a bug in it.
 func TestDynamicToInterfaceConversion(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name      string
-		input     string
-		wantMap   bool
-		wantValue interface{}
-		wantErr   bool
+		name    string
+		dynamic types.Dynamic
+		want    map[string]interface{}
 	}{
 		{
-			name:    "simple flag object",
-			input:   `{"enable_autoscaling": true, "max_scale": 10}`,
-			wantMap: true,
-			wantValue: map[string]interface{}{
+			name: "flat object with mixed types",
+			dynamic: types.DynamicValue(types.ObjectValueMust(
+				map[string]attr.Type{
+					"enable_autoscaling": types.BoolType,
+					"max_scale":          types.NumberType,
+					"pool_name":          types.StringType,
+				},
+				map[string]attr.Value{
+					"enable_autoscaling": types.BoolValue(true),
+					"max_scale":          types.NumberValue(big.NewFloat(10)),
+					"pool_name":          types.StringValue("default"),
+				},
+			)),
+			want: map[string]interface{}{
 				"enable_autoscaling": true,
-				"max_scale":          float64(10),
+				"max_scale":          int64(10),
+				"pool_name":          "default",
 			},
-			wantErr: false,
 		},
 		{
-			name:    "nested configuration",
-			input:   `{"disk": {"size": 100, "type": "ssd"}, "monitoring": {"enabled": true}}`,
-			wantMap: true,
-			wantValue: map[string]interface{}{
+			// The schema's MarkdownDescription for flags/advanced_instance_config
+			// specifically promises nested object support - this is the case the
+			// old test claimed to cover via "nested configuration" but did not.
+			name: "nested object with mixed types",
+			dynamic: types.DynamicValue(types.ObjectValueMust(
+				map[string]attr.Type{
+					"monitoring": types.ObjectType{AttrTypes: map[string]attr.Type{
+						"enabled": types.BoolType,
+					}},
+					"disk": types.ObjectType{AttrTypes: map[string]attr.Type{
+						"size": types.NumberType,
+						"type": types.StringType,
+					}},
+				},
+				map[string]attr.Value{
+					"monitoring": types.ObjectValueMust(
+						map[string]attr.Type{"enabled": types.BoolType},
+						map[string]attr.Value{"enabled": types.BoolValue(true)},
+					),
+					"disk": types.ObjectValueMust(
+						map[string]attr.Type{"size": types.NumberType, "type": types.StringType},
+						map[string]attr.Value{
+							"size": types.NumberValue(big.NewFloat(100)),
+							"type": types.StringValue("ssd"),
+						},
+					),
+				},
+			)),
+			want: map[string]interface{}{
+				"monitoring": map[string]interface{}{"enabled": true},
 				"disk": map[string]interface{}{
-					"size": float64(100),
+					"size": int64(100),
 					"type": "ssd",
 				},
-				"monitoring": map[string]interface{}{
-					"enabled": true,
-				},
 			},
-			wantErr: false,
+		},
+		{
+			name: "list-valued attribute inside a dynamic object",
+			dynamic: types.DynamicValue(types.ObjectValueMust(
+				map[string]attr.Type{
+					"allowed_zones": types.ListType{ElemType: types.StringType},
+				},
+				map[string]attr.Value{
+					"allowed_zones": types.ListValueMust(types.StringType, []attr.Value{
+						types.StringValue("us-west-2a"),
+						types.StringValue("us-west-2b"),
+					}),
+				},
+			)),
+			want: map[string]interface{}{
+				"allowed_zones": []interface{}{"us-west-2a", "us-west-2b"},
+			},
+		},
+		{
+			name:    "null dynamic returns nil map and no error",
+			dynamic: types.DynamicNull(),
+			want:    nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Parse JSON to test conversion
-			var intermediate interface{}
-			err := json.Unmarshal([]byte(tt.input), &intermediate)
+			got, err := DynamicToInterface(ctx, tt.dynamic)
 			if err != nil {
-				t.Fatalf("Failed to parse test input: %v", err)
+				t.Fatalf("DynamicToInterface() unexpected error = %v", err)
 			}
-
-			// Verify structure matches expected
-			if tt.wantMap {
-				gotMap, ok := intermediate.(map[string]interface{})
-				if !ok {
-					t.Errorf("Expected map[string]interface{}, got %T", intermediate)
-					return
-				}
-
-				expectedMap := tt.wantValue.(map[string]interface{})
-				if len(gotMap) != len(expectedMap) {
-					t.Errorf("Map length = %d, want %d", len(gotMap), len(expectedMap))
-				}
-
-				// Verify all keys exist
-				for key := range expectedMap {
-					if _, ok := gotMap[key]; !ok {
-						t.Errorf("Missing expected key: %s", key)
-					}
-				}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("DynamicToInterface() = %#v, want %#v", got, tt.want)
 			}
-
-			_ = ctx // Use ctx to avoid unused variable warning
 		})
 	}
 }
