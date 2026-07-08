@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -654,4 +655,123 @@ func TestAccComputeConfigResource_K8S(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestAccComputeConfigResource_RenameForcesReplace is the regression test for
+// CC3a. Before this fix, renaming a compute config sent the new name to the
+// same backend "create-or-new-version" endpoint used for Update, which
+// silently created a brand-new config under the new name and left the old
+// one live and un-archived - a real, live-verified orphan bug (see
+// tfp-assayer's rename-orphan probe in the design discussion), not
+// hypothetical. name now carries RequiresReplace, so Terraform's own
+// destroy-then-create replace cycle runs the resource's normal Delete/Create
+// path instead: the old config gets archived (proving Delete ran on it, not
+// silently abandoned) and a genuinely new config is provisioned under the new
+// name. This is the actual regression coverage - a plan-only check would only
+// prove the plan LOOKS right; the archived-check after a real apply proves
+// the orphan is actually closed end to end.
+func TestAccComputeConfigResource_RenameForcesReplace(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetComputeConfigCloudID(t)
+	originalName := UniqueName(t, "compute-config-rename-orig")
+	renamedName := UniqueName(t, "compute-config-rename-new")
+
+	var originalConfigID string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigResourceConfig_update(cloudID, originalName, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", originalName),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					testAccCaptureComputeConfigID("anyscale_compute_config.test", &originalConfigID),
+				),
+			},
+			{
+				Config: testAccComputeConfigResourceConfig_update(cloudID, renamedName, "m5.large"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_compute_config.test", plancheck.ResourceActionReplace),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", renamedName),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources["anyscale_compute_config.test"]
+						if !ok {
+							return fmt.Errorf("not found: anyscale_compute_config.test")
+						}
+						newConfigID := rs.Primary.Attributes["config_id"]
+						if newConfigID == "" {
+							return fmt.Errorf("new config_id is empty")
+						}
+						if newConfigID == originalConfigID {
+							return fmt.Errorf("config_id did not change after a rename that should force replace: still %s", newConfigID)
+						}
+						return nil
+					},
+					testAccCheckComputeConfigArchivedByID(&originalConfigID),
+				),
+			},
+		},
+	})
+}
+
+// testAccCheckComputeConfigArchivedByID polls the given (pre-replace) config
+// ID directly via the API - not via Terraform state, since a replaced
+// resource's old ID is no longer in state by the time this runs - and
+// verifies it was archived as part of the replace's destroy-then-create
+// cycle. This is the actual proof the rename-orphan bug is closed: a clean
+// plan alone only shows the NEW config looks right, not that the OLD one was
+// ever cleaned up.
+func testAccCheckComputeConfigArchivedByID(id *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		if id == nil || *id == "" {
+			return fmt.Errorf("no prior config_id captured to check")
+		}
+		client, err := GetTestClient()
+		if err != nil {
+			return fmt.Errorf("failed to get test client: %w", err)
+		}
+
+		deadline := time.Now().Add(destroyCheckPollTimeout)
+		for {
+			resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/ext/v0/cluster_computes/%s", *id), nil)
+			if err != nil {
+				return fmt.Errorf("failed to check archived status of %s: %w", *id, err)
+			}
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				return fmt.Errorf("failed to read response for %s: %w", *id, readErr)
+			}
+			if resp.StatusCode != 200 {
+				return fmt.Errorf("unexpected status %d checking archived status of %s: %s", resp.StatusCode, *id, truncateBody(string(body), 256))
+			}
+
+			archived, perr := extractArchivedValue(body, "result.archived_at")
+			if perr != nil {
+				return fmt.Errorf("failed to parse archived_at for %s: %w", *id, perr)
+			}
+			if archived {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("the pre-rename compute config %s was never archived after the replace - "+
+					"the rename-orphan bug is NOT closed: renaming left it live and unmanaged", *id)
+			}
+			time.Sleep(destroyCheckPollInterval)
+		}
+	}
 }

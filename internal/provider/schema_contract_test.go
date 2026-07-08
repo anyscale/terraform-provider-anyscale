@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
 // These descriptions are hardcoded, stable strings on the framework's own
@@ -66,6 +67,30 @@ func hasMapPlanModifierDescription(mods []planmodifier.Map, want string) bool {
 func hasListPlanModifierDescription(mods []planmodifier.List, want string) bool {
 	for _, m := range mods {
 		if m.Description(context.Background()) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasInt64PlanModifierDescription(mods []planmodifier.Int64, want string) bool {
+	for _, m := range mods {
+		if m.Description(context.Background()) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// hasInt64ValidatorContaining reports whether any validator's Description
+// contains want. Int64 validators do not expose their bound as a typed
+// field, only as a human-readable Description string (e.g.
+// int64validator.AtLeast(0).Description() = "value must be at least 0"), so
+// substring matching is the only externally-observable way to pin a specific
+// bound without depending on the validator's unexported concrete type.
+func hasInt64ValidatorContaining(vs []validator.Int64, want string) bool {
+	for _, v := range vs {
+		if strings.Contains(v.Description(context.Background()), want) {
 			return true
 		}
 	}
@@ -200,6 +225,158 @@ func TestComputeConfigResourceContract(t *testing.T) {
 		t.Fatalf("worker_nodes is not a schema.ListNestedAttribute (got %T)", s.Attributes["worker_nodes"])
 	}
 	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes)
+}
+
+// TestComputeConfigCC1RequiredResourcesRename pins CC1: physical_resources
+// was renamed to required_resources on both head_node and worker_nodes
+// because the Anyscale API rejects physical_resources outright on any
+// non-empty value (verified against the Platform backend - a non-empty
+// physical_resources dict raises a ValueError). The ABSENCE assertion is the
+// one that actually catches a regression: it is the only thing that would
+// fail if a future refactor accidentally reintroduced the old attribute name
+// (e.g. a bad merge, or copying a stale code snippet), which schema.Version
+// alone would not catch. cpu_architecture (CC4) ships as a plain string with
+// no enum validator - tightening it later would itself be a breaking change,
+// per the ratified contract, so its absence is pinned here too.
+func TestComputeConfigCC1RequiredResourcesRename(t *testing.T) {
+	s := schemaOf(t, &ComputeConfigResource{})
+
+	assertRequiredResources := func(t *testing.T, label string, attrs map[string]schema.Attribute) {
+		t.Helper()
+
+		if _, present := attrs["physical_resources"]; present {
+			t.Errorf("%s must NOT have a physical_resources attribute — the backend rejects it outright (CC1); "+
+				"this is the regression guard for an accidental revert of the rename", label)
+		}
+
+		rr, ok := attrs["required_resources"].(schema.SingleNestedAttribute)
+		if !ok {
+			t.Fatalf("%s.required_resources is not a schema.SingleNestedAttribute (got %T)", label, attrs["required_resources"])
+		}
+		if !rr.Optional {
+			t.Errorf("%s.required_resources must be Optional: true", label)
+		}
+
+		wantFields := []string{"cpu", "memory", "gpu", "accelerator", "tpu", "tpu_hosts", "cpu_architecture"}
+		for _, field := range wantFields {
+			if _, ok := rr.Attributes[field]; !ok {
+				t.Errorf("%s.required_resources is missing field %q", label, field)
+			}
+		}
+
+		cpuArch, ok := rr.Attributes["cpu_architecture"].(schema.StringAttribute)
+		if !ok {
+			t.Fatalf("%s.required_resources.cpu_architecture is not a schema.StringAttribute (got %T)", label, rr.Attributes["cpu_architecture"])
+		}
+		if !cpuArch.Optional {
+			t.Errorf("%s.required_resources.cpu_architecture must be Optional: true", label)
+		}
+		if len(cpuArch.Validators) > 0 {
+			t.Errorf("%s.required_resources.cpu_architecture must NOT have validators — it ships as a permissive "+
+				"plain string with no client-side enum by deliberate choice (CC4): the backend does not enforce one, "+
+				"and tightening a validator later, after users have set values, would itself be a breaking change", label)
+		}
+	}
+
+	headNode, ok := s.Attributes["head_node"].(schema.SingleNestedAttribute)
+	if !ok {
+		t.Fatalf("head_node is not a schema.SingleNestedAttribute (got %T)", s.Attributes["head_node"])
+	}
+	assertRequiredResources(t, "head_node", headNode.Attributes)
+
+	workerNodes, ok := s.Attributes["worker_nodes"].(schema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("worker_nodes is not a schema.ListNestedAttribute (got %T)", s.Attributes["worker_nodes"])
+	}
+	assertRequiredResources(t, "worker_nodes[]", workerNodes.NestedObject.Attributes)
+
+	// CC1's state upgrader depends on the schema version actually being
+	// bumped - UpgradeState is never invoked for a version-0-to-version-0
+	// no-op, so a prior state with the old physical_resources attribute
+	// would fail to decode against the new schema with no migration path.
+	if s.Version != 1 {
+		t.Errorf("schema Version = %d, want 1 (CC1's mandatory state upgrader depends on the version bump "+
+			"actually happening — UpgradeState never runs if the version does not change)", s.Version)
+	}
+}
+
+// TestComputeConfigCC2IdleAndMaxUptimeSettable pins CC2: idle_termination_minutes
+// and maximum_uptime_minutes become settable on the resource (previously wired
+// into the internal request/response struct but exposed nowhere on the
+// resource model - only the data source could read them, and only read-only).
+//
+// Neither attribute has a static Default, which is a deliberate reversal of
+// this contract's own first draft: idle_termination_minutes initially shipped
+// with Default(120) to mirror the backend's create default, but that would
+// silently force an EXISTING config's real value (e.g. imported, or set
+// before this attribute existed) back to 120 on the next apply whenever the
+// user's config omits it - the same silent-overwrite class CC12 fixes for
+// flags. Both fields instead use UseStateForUnknown plus populating from the
+// API response in Create/Update (mirroring Read), which reflects whatever
+// the backend actually set once and then holds steady - see
+// TestAccComputeConfigLifecycle_MockServer's empty-plan-after-refresh step
+// for the acceptance-level proof that this actually holds (a schema-only
+// check like this one cannot catch a RUNTIME failure to populate the value).
+func TestComputeConfigCC2IdleAndMaxUptimeSettable(t *testing.T) {
+	s := schemaOf(t, &ComputeConfigResource{})
+
+	assertServerDefaultedInt64 := func(t *testing.T, name string, attr schema.Int64Attribute, wantValidatorContains string) {
+		t.Helper()
+		if !attr.Optional {
+			t.Errorf("%s must be Optional: true", name)
+		}
+		if !attr.Computed {
+			t.Errorf("%s must be Computed: true", name)
+		}
+		if attr.Default != nil {
+			t.Errorf("%s must NOT have a static Default — the backend value can already differ from any "+
+				"hardcoded default (e.g. imported state, or a value set before this attribute existed), and a "+
+				"static Default would silently overwrite it the next time the user's config omits the attribute", name)
+		}
+		if !hasInt64PlanModifierDescription(attr.PlanModifiers, descUseStateForUnknown) {
+			t.Errorf("%s must include int64planmodifier.UseStateForUnknown() so a server-populated value "+
+				"stays stable across subsequent plans instead of re-planning Unknown on every apply "+
+				"(which would silently create a brand-new compute config VERSION each time, since Update "+
+				"always posts new_version:true - version inflation, not just a cosmetic diff)", name)
+		}
+		if !hasInt64ValidatorContaining(attr.Validators, wantValidatorContains) {
+			t.Errorf("%s must have a validator whose Description contains %q", name, wantValidatorContains)
+		}
+	}
+
+	idle, ok := s.Attributes["idle_termination_minutes"].(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("idle_termination_minutes is not a schema.Int64Attribute (got %T)", s.Attributes["idle_termination_minutes"])
+	}
+	assertServerDefaultedInt64(t, "idle_termination_minutes", idle, "at least 0")
+
+	maxUptime, ok := s.Attributes["maximum_uptime_minutes"].(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("maximum_uptime_minutes is not a schema.Int64Attribute (got %T)", s.Attributes["maximum_uptime_minutes"])
+	}
+	assertServerDefaultedInt64(t, "maximum_uptime_minutes", maxUptime, "at least 1")
+}
+
+// TestComputeConfigCC3aNameRequiresReplace pins CC3a: name gets RequiresReplace.
+// This is deliberately the OPPOSITE call from the Cloud effort's C11 (there
+// RequiresReplace was the trap, since it would destroy heavyweight real
+// infrastructure on a passive mismatch) - here the resource is a lightweight
+// versioned template, and a live-verified bug (renaming silently orphaned the
+// old config in the backend with no error, see the rename-orphan regression
+// acceptance test) makes replace the semantically correct answer to an
+// explicit rename instead.
+func TestComputeConfigCC3aNameRequiresReplace(t *testing.T) {
+	s := schemaOf(t, &ComputeConfigResource{})
+
+	name, ok := s.Attributes["name"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("name is not a schema.StringAttribute (got %T)", s.Attributes["name"])
+	}
+	if !hasPlanModifierDescription(name.PlanModifiers, descRequiresReplace) {
+		t.Errorf("name must include stringplanmodifier.RequiresReplace() (CC3a) — without it, renaming a compute " +
+			"config silently creates an orphaned, unmanaged duplicate in the backend instead of erroring or " +
+			"replacing (live-verified bug that motivated this fix)")
+	}
 }
 
 // TestCloudResourceHardenedFieldsRequireReplace pins task 861aaf10's fix: on
