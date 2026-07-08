@@ -486,3 +486,177 @@ resource "anyscale_compute_config" "test" {
 		},
 	})
 }
+
+// newCC12PerNodeMockComputeConfigServer serves a compute config with TWO
+// worker node groups, each carrying a real, realistic per-node
+// advanced_instance_config - an IAM instance profile assignment, the exact
+// shape already shipping in examples/aws-vm-basic/compute_config.tf
+// (worker_nodes[].advanced_instance_config = jsonencode({IamInstanceProfile
+// = {Arn = ...}})), per scribe's find and the user's explicit ask to cover
+// workers specifically with more than one entry.
+func newCC12PerNodeMockComputeConfigServer(t *testing.T, configID, configName, cloudID string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	computeTemplateJSON := fmt.Sprintf(`{
+		"id": %[1]q, "name": %[2]q, "version": 1,
+		"created_at": "2026-01-01T00:00:00Z", "last_modified_at": "2026-01-01T00:00:00Z",
+		"archived_at": "",
+		"config": {
+			"cloud_id": %[3]q,
+			"head_node_type": {"name": "head", "instance_type": "m5.2xlarge"},
+			"worker_node_types": [
+				{
+					"name": "general-compute", "instance_type": "m5.4xlarge",
+					"min_workers": 2, "max_workers": 10,
+					"use_spot": false, "fallback_to_ondemand": false,
+					"advanced_configurations_json": {"IamInstanceProfile": {"Arn": "arn:aws:iam::123456789012:instance-profile/general-compute-role"}}
+				},
+				{
+					"name": "gpu-workers", "instance_type": "g5.2xlarge",
+					"min_workers": 0, "max_workers": 5,
+					"use_spot": true, "fallback_to_ondemand": true,
+					"advanced_configurations_json": {"IamInstanceProfile": {"Arn": "arn:aws:iam::123456789012:instance-profile/gpu-workers-role"}}
+				}
+			]
+		}
+	}`, configID, configName, cloudID)
+
+	mux.HandleFunc("/api/v2/compute_templates/"+configID, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"result": `+computeTemplateJSON+`}`)
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestAccComputeConfigImportRecoversPerNodeAdvancedInstanceConfig is CC12's
+// per-node companion to TestAccComputeConfigImportRecoversWriteOnlyFields,
+// requested explicitly by the user after review caught that the top-level
+// test never actually exercised the nested case despite a comment implying
+// it did. Unlike the top-level Dynamic fields (CC15's structural List-vs-
+// Tuple concern), per-node advanced_instance_config/flags are plain JSON
+// STRINGS (schema.StringAttribute) - apiNodeTypeToTerraform/
+// apiWorkerNodeTypeToTerraform build them via a straight json.Marshal of the
+// decoded API response. The open question here is a byte-compare one: does
+// Go's compact, sorted-key json.Marshal output match what Terraform's own
+// jsonencode() produces for the same logical content. Architect's ruling: if
+// this does not reach an empty plan, that is a real per-node JSON
+// canonicalization fix for forge (in the same spirit as CC15), not a
+// shrug-and-document fallback - the user confirmed this is a common real
+// customer pattern, not an edge case.
+func TestAccComputeConfigImportRecoversPerNodeAdvancedInstanceConfig(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const configID = "cpt_cc12_pernode_mock"
+	const configName = "cc12-pernode-mock"
+	const cloudID = "cld_cc12_pernode_mock"
+
+	server := newCC12PerNodeMockComputeConfigServer(t, configID, configName, cloudID)
+	providerBlock := testAccProviderBlock(server.URL)
+
+	configOmittingPerNodeFields := providerBlock + fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = %[1]q
+  cloud_id = %[2]q
+
+  head_node = {
+    instance_type = "m5.2xlarge"
+  }
+
+  worker_nodes = [
+    {
+      name          = "general-compute"
+      instance_type = "m5.4xlarge"
+      min_nodes     = 2
+      max_nodes     = 10
+      market_type   = "ON_DEMAND"
+    },
+    {
+      name          = "gpu-workers"
+      instance_type = "g5.2xlarge"
+      min_nodes     = 0
+      max_nodes     = 5
+      market_type   = "PREFER_SPOT"
+    }
+  ]
+}
+`, configName, cloudID)
+
+	// jsonencode() sorts object keys alphabetically the same way Go's
+	// json.Marshal does on the provider side - the real question this test
+	// answers is whether the two independently-produced compact JSON strings
+	// are byte-identical, not just semantically equivalent.
+	configMatchingRecoveredValues := providerBlock + fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = %[1]q
+  cloud_id = %[2]q
+
+  head_node = {
+    instance_type = "m5.2xlarge"
+  }
+
+  worker_nodes = [
+    {
+      name          = "general-compute"
+      instance_type = "m5.4xlarge"
+      min_nodes     = 2
+      max_nodes     = 10
+      market_type   = "ON_DEMAND"
+      advanced_instance_config = jsonencode({
+        IamInstanceProfile = {
+          Arn = "arn:aws:iam::123456789012:instance-profile/general-compute-role"
+        }
+      })
+    },
+    {
+      name          = "gpu-workers"
+      instance_type = "g5.2xlarge"
+      min_nodes     = 0
+      max_nodes     = 5
+      market_type   = "PREFER_SPOT"
+      advanced_instance_config = jsonencode({
+        IamInstanceProfile = {
+          Arn = "arn:aws:iam::123456789012:instance-profile/gpu-workers-role"
+        }
+      })
+    }
+  ]
+}
+`, configName, cloudID)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				ResourceName:       "anyscale_compute_config.test",
+				ImportState:        true,
+				ImportStateId:      configID,
+				ImportStatePersist: true,
+				Config:             configOmittingPerNodeFields,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "config_id", configID),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "2"),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "worker_nodes.0.advanced_instance_config"),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "worker_nodes.1.advanced_instance_config"),
+				),
+			},
+			{
+				// The actual gate: does the recovered per-node JSON string
+				// byte-match what jsonencode() produces for the same content.
+				Config:             configMatchingRecoveredValues,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+			{
+				// Gate 2's per-node analogue: omitting must show a truthful
+				// diff, not a silent one.
+				Config:             configOmittingPerNodeFields,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
