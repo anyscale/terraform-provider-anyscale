@@ -40,6 +40,15 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 					// Verify versions list contains at least version 1
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.#", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.0", "1"),
+					// CC6: data source node topology parity with the resource.
+					// Confirmed live against the real API that "resources"
+					// itself comes back null from BOTH api/v2 and ext/v0 for an
+					// instance_type-only head node (no client-side auto-fill
+					// happens server-side despite the schema description's
+					// wording) -- identical between the two endpoints, which is
+					// exactly the CC5a claim this exercises, so instance_type is
+					// the meaningful, verified-true assertion here.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "head_node.instance_type", "m5.large"),
 				),
 			},
 		},

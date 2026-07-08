@@ -123,6 +123,7 @@ type computeTemplateRequest struct {
 
 type computeTemplateConfig struct {
 	CloudID                    string                         `json:"cloud_id"`
+	Region                     string                         `json:"region,omitempty"` // read-only today: CC5a data-source parity, not settable on the resource
 	DeploymentConfigs          []cloudDeploymentComputeConfig `json:"deployment_configs,omitempty"`
 	AllowedAZs                 []string                       `json:"allowed_azs,omitempty"`
 	HeadNodeType               map[string]interface{}         `json:"head_node_type,omitempty"`
@@ -154,6 +155,7 @@ type computeTemplateResponse struct {
 type computeTemplate struct {
 	ID             string                `json:"id"`
 	Name           string                `json:"name"`
+	ProjectID      string                `json:"project_id,omitempty"` // read-only today: CC5a data-source parity, not settable on the resource
 	Version        int64                 `json:"version"`
 	CreatedAt      string                `json:"created_at"`
 	LastModifiedAt string                `json:"last_modified_at"`

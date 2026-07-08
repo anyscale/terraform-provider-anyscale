@@ -50,6 +50,12 @@ type ComputeConfigDataSourceModel struct {
 	Version                types.Int64  `tfsdk:"version"`
 	CreatedAt              types.String `tfsdk:"created_at"`
 	LastModifiedAt         types.String `tfsdk:"last_modified_at"`
+
+	// CC6: node topology parity with the resource. Same underlying shape
+	// (NodeConfigModel / WorkerNodeConfigModel), all Computed-only here.
+	Zones       types.List   `tfsdk:"zones"`
+	HeadNode    types.Object `tfsdk:"head_node"`
+	WorkerNodes types.List   `tfsdk:"worker_nodes"`
 }
 
 // Metadata returns the data source type name.
@@ -134,8 +140,92 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 				Computed:            true,
 				MarkdownDescription: "The timestamp when the compute config was last modified.",
 			},
+			"zones": schema.ListAttribute{
+				ElementType:         types.StringType,
+				Computed:            true,
+				MarkdownDescription: "Availability zones considered for this cluster.",
+			},
+			"head_node": schema.SingleNestedAttribute{
+				Computed:            true,
+				MarkdownDescription: "Configuration for the head node of the cluster.",
+				Attributes:          dataSourceNodeAttributes(),
+			},
+			"worker_nodes": schema.ListNestedAttribute{
+				Computed:            true,
+				MarkdownDescription: "Configuration for the worker nodes of the cluster.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: dataSourceWorkerNodeAttributes(),
+				},
+			},
 		},
 	}
+}
+
+// dataSourceNodeAttributes mirrors the resource's nodeConfigAttributes shape
+// (internal/provider/resource_compute_config.go), Computed-only: a data
+// source has no Optional/Required distinction, and datasource/schema types
+// are a distinct Go type from resource/schema even where structurally
+// identical, so the two cannot share a single schema.Attribute map.
+func dataSourceNodeAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"instance_type": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP).",
+		},
+		"resources": schema.MapAttribute{
+			ElementType:         types.Float64Type,
+			Computed:            true,
+			MarkdownDescription: "Logical resources available on this node.",
+		},
+		"required_resources": schema.SingleNestedAttribute{
+			Computed:            true,
+			MarkdownDescription: "Explicit hardware requirements for custom instance types (free pod shapes).",
+			Attributes: map[string]schema.Attribute{
+				"cpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of CPUs allocated."},
+				"memory":           schema.StringAttribute{Computed: true, MarkdownDescription: "Amount of memory allocated."},
+				"gpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of GPUs allocated."},
+				"accelerator":      schema.StringAttribute{Computed: true, MarkdownDescription: "Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`)."},
+				"tpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of TPUs allocated."},
+				"tpu_hosts":        schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of TPU hosts."},
+				"cpu_architecture": schema.StringAttribute{Computed: true, MarkdownDescription: "CPU architecture, e.g. `x86_64` or `arm64`."},
+			},
+		},
+		"labels": schema.MapAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "Labels associated with the node for scheduling purposes.",
+		},
+		"advanced_instance_config": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Advanced instance configuration passed through to the cloud provider, as a JSON string.",
+		},
+		"flags": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Node-level flags, as a JSON string.",
+		},
+		"cloud_deployment": schema.SingleNestedAttribute{
+			Computed:            true,
+			MarkdownDescription: "Cloud deployment selectors for this node.",
+			Attributes: map[string]schema.Attribute{
+				"provider":     schema.StringAttribute{Computed: true, MarkdownDescription: "Cloud provider name, e.g., `aws` or `gcp`."},
+				"region":       schema.StringAttribute{Computed: true, MarkdownDescription: "Cloud provider region, e.g., `us-west-2`."},
+				"machine_pool": schema.StringAttribute{Computed: true, MarkdownDescription: "Machine pool name."},
+				"id":           schema.StringAttribute{Computed: true, MarkdownDescription: "Cloud deployment ID from cloud setup."},
+			},
+		},
+	}
+}
+
+// dataSourceWorkerNodeAttributes mirrors the resource's
+// workerNodeConfigAttributes: dataSourceNodeAttributes plus the
+// worker-specific fields.
+func dataSourceWorkerNodeAttributes() map[string]schema.Attribute {
+	attrs := dataSourceNodeAttributes()
+	attrs["name"] = schema.StringAttribute{Computed: true, MarkdownDescription: "Unique name of this worker group."}
+	attrs["min_nodes"] = schema.Int64Attribute{Computed: true, MarkdownDescription: "Minimum number of nodes of this type kept running."}
+	attrs["max_nodes"] = schema.Int64Attribute{Computed: true, MarkdownDescription: "Maximum number of nodes of this type."}
+	attrs["market_type"] = schema.StringAttribute{Computed: true, MarkdownDescription: "ON_DEMAND, SPOT, or PREFER_SPOT."}
+	return attrs
 }
 
 // Configure adds the provider configured client to the data source.
@@ -220,12 +310,14 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		}
 	}
 
-	// Fetch compute config details from API
-	type ComputeConfigResponse struct {
-		Result map[string]interface{} `json:"result"`
-	}
-
-	computeResp, err := DoRequestAndParse[ComputeConfigResponse](
+	// CC5a: fetch and parse using the same typed structs the resource uses
+	// (computeTemplateResponse/computeTemplate/computeTemplateConfig, see
+	// resource_compute_config.go) instead of hand-parsing a raw
+	// map[string]interface{}. Still calls /ext/v0/cluster_computes -- the
+	// endpoint migration to /api/v2/compute_templates itself is CC5b, gated
+	// and deferred separately; ext/v0 and api/v2 are reshapings of the same
+	// underlying record, so the same JSON field names decode correctly here.
+	computeResp, err := DoRequestAndParse[computeTemplateResponse](
 		ctx,
 		d.client,
 		"GET",
@@ -239,28 +331,19 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		return
 	}
 
-	// Extract result from response
 	resultData := computeResp.Result
 
-	// Populate the data source model
-	apiID := resultData["id"].(string)
-	config.ID = types.StringValue(apiID)
-	config.ConfigID = types.StringValue(apiID) // Also set config_id for consistency with resource
+	config.ID = types.StringValue(resultData.ID)
+	config.ConfigID = types.StringValue(resultData.ID) // Also set config_id for consistency with resource
 
-	// Set name from API response
-	var configName string
-	if name, ok := resultData["name"].(string); ok {
-		configName = name
-		config.Name = types.StringValue(name)
+	configName := resultData.Name
+	if configName != "" {
+		config.Name = types.StringValue(configName)
 	}
 
-	// Version
-	if version, ok := resultData["version"].(float64); ok {
-		config.Version = types.Int64Value(int64(version))
-		// Set name_version formatted as "name:version" for use with Anyscale APIs
-		if configName != "" {
-			config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", configName, int64(version)))
-		}
+	if resultData.Version > 0 {
+		config.Version = types.Int64Value(resultData.Version)
+		config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", configName, resultData.Version))
 	}
 
 	// Fetch all versions of this compute config by name
@@ -278,74 +361,104 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		config.Versions = types.ListNull(types.Int64Type)
 	}
 
-	// Timestamps
-	if createdAt, ok := resultData["created_at"].(string); ok {
-		config.CreatedAt = types.StringValue(createdAt)
+	if resultData.CreatedAt != "" {
+		config.CreatedAt = types.StringValue(resultData.CreatedAt)
 	}
-	if lastModifiedAt, ok := resultData["last_modified_at"].(string); ok {
-		config.LastModifiedAt = types.StringValue(lastModifiedAt)
+	if resultData.LastModifiedAt != "" {
+		config.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
 	}
 
-	// Project ID
-	if projectID, ok := resultData["project_id"].(string); ok {
-		config.ProjectID = types.StringValue(projectID)
+	if resultData.ProjectID != "" {
+		config.ProjectID = types.StringValue(resultData.ProjectID)
 	} else {
 		config.ProjectID = types.StringNull()
 	}
 
-	// Extract config object
-	if configData, ok := resultData["config"].(map[string]interface{}); ok {
-		if cloudID, ok := configData["cloud_id"].(string); ok {
-			config.CloudID = types.StringValue(cloudID)
+	configData := resultData.Config
+	if configData.CloudID != "" {
+		config.CloudID = types.StringValue(configData.CloudID)
 
-			// Fetch cloud name for the cloud_id
-			type CloudResponse struct {
-				Result map[string]interface{} `json:"result"`
-			}
-
-			cloudResp, err := DoRequestAndParse[CloudResponse](
-				ctx,
-				d.client,
-				"GET",
-				fmt.Sprintf("/api/v2/clouds/%s", cloudID),
-				nil,
-				http.StatusOK,
-			)
-			if err == nil {
-				if cloudName, ok := cloudResp.Result["name"].(string); ok {
-					config.CloudName = types.StringValue(cloudName)
-				}
-			}
+		cloudResp, err := DoRequestAndParse[CloudResponse](
+			ctx,
+			d.client,
+			"GET",
+			fmt.Sprintf("/api/v2/clouds/%s", configData.CloudID),
+			nil,
+			http.StatusOK,
+		)
+		if err == nil {
+			config.CloudName = types.StringValue(cloudResp.Result.Name)
+		} else {
 			// If we can't fetch cloud name, just leave it null - it's not critical
-			if config.CloudName.IsNull() {
-				tflog.Debug(ctx, "Could not fetch cloud name", map[string]any{"cloud_id": cloudID})
-			}
+			tflog.Debug(ctx, "Could not fetch cloud name", map[string]any{"cloud_id": configData.CloudID})
 		}
+	}
 
-		if region, ok := configData["region"].(string); ok {
-			config.Region = types.StringValue(region)
-		}
+	// idle_termination_minutes/maximum_uptime_minutes are top-level config
+	// fields only, same as the resource -- never per-deployment, so read
+	// straight off configData rather than through resolveEffectiveComputeConfig.
+	if configData.IdleTerminationMinutes != nil {
+		config.IdleTerminationMinutes = types.Int64Value(*configData.IdleTerminationMinutes)
+	} else {
+		config.IdleTerminationMinutes = types.Int64Null()
+	}
+	if configData.MaximumUptimeMinutes != nil {
+		config.MaximumUptimeMinutes = types.Int64Value(*configData.MaximumUptimeMinutes)
+	} else {
+		config.MaximumUptimeMinutes = types.Int64Null()
+	}
+	if configData.Region != "" {
+		config.Region = types.StringValue(configData.Region)
+	}
 
-		if idleTermination, ok := configData["idle_termination_minutes"].(float64); ok {
-			config.IdleTerminationMinutes = types.Int64Value(int64(idleTermination))
-		}
+	eff := resolveEffectiveComputeConfig(configData)
 
-		if maximumUptime, ok := configData["maximum_uptime_minutes"].(float64); ok {
-			config.MaximumUptimeMinutes = types.Int64Value(int64(maximumUptime))
-		} else {
-			config.MaximumUptimeMinutes = types.Int64Null()
-		}
-
-		if enableCrossZone, ok := configData["enable_cross_zone_scaling"].(bool); ok {
+	config.EnableCrossZoneScaling = types.BoolValue(false)
+	if eff.Flags != nil {
+		if enableCrossZone, ok := eff.Flags["allow-cross-zone-autoscaling"].(bool); ok {
 			config.EnableCrossZoneScaling = types.BoolValue(enableCrossZone)
-		} else {
-			config.EnableCrossZoneScaling = types.BoolValue(false)
 		}
+	}
+	config.AutoSelectWorkerConfig = types.BoolValue(eff.AutoSelect)
 
-		if autoSelect, ok := configData["auto_select_worker_config"].(bool); ok {
-			config.AutoSelectWorkerConfig = types.BoolValue(autoSelect)
-		} else {
-			config.AutoSelectWorkerConfig = types.BoolValue(false)
+	// CC6: node topology parity with the resource. A data source has no
+	// prior state to mask Computed sub-attributes against (there is nothing
+	// analogous to "the user left this null on purpose" for a read-only
+	// lookup), so these report exactly what the API returns, unmasked --
+	// unlike the resource, which nulls resources/required_resources/etc. that
+	// were never explicitly configured to avoid perpetual plan drift. A data
+	// source has no plan to drift.
+	if len(eff.AllowedAZs) > 0 {
+		allowedAZInterfaces := make([]interface{}, 0, len(eff.AllowedAZs))
+		for _, az := range eff.AllowedAZs {
+			allowedAZInterfaces = append(allowedAZInterfaces, az)
+		}
+		zonesList, diags := InterfaceListToString(ctx, allowedAZInterfaces)
+		resp.Diagnostics.Append(diags...)
+		config.Zones = zonesList
+	} else {
+		config.Zones = types.ListNull(types.StringType)
+	}
+
+	config.HeadNode = types.ObjectNull(nodeConfigAttrTypes())
+	if eff.HeadNodeType != nil {
+		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, eff.HeadNodeType)
+		resp.Diagnostics.Append(headNodeDiags...)
+		if !resp.Diagnostics.HasError() {
+			config.HeadNode = headNodeObj
+		}
+	}
+
+	config.WorkerNodes = types.ListNull(types.ObjectType{AttrTypes: workerNodeConfigAttrTypes()})
+	if len(eff.WorkerNodeTypes) > 0 {
+		workerInterfaces := make([]interface{}, 0, len(eff.WorkerNodeTypes))
+		for _, worker := range eff.WorkerNodeTypes {
+			workerInterfaces = append(workerInterfaces, worker)
+		}
+		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		resp.Diagnostics.Append(workerNodesDiags...)
+		if !resp.Diagnostics.HasError() {
+			config.WorkerNodes = workerNodesList
 		}
 	}
 
