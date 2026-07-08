@@ -844,13 +844,10 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 
 	var cloudsResp struct {
 		Results []struct {
-			ID             string `json:"id"`
-			Name           string `json:"name"`
-			Provider       string `json:"provider"`
-			ComputeStack   string `json:"compute_stack"`
-			CloudResources []struct {
-				ID string `json:"id"`
-			} `json:"cloud_resources"`
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			Provider     string `json:"provider"`
+			ComputeStack string `json:"compute_stack"`
 		} `json:"results"`
 	}
 
@@ -861,17 +858,30 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 
 	var clouds []CloudInfo
 
-	// Collect all clouds with cloud resources configured
+	// Collect all clouds with a healthy resource. GET /api/v2/clouds never
+	// embeds cloud_resources inline (confirmed against the real API: the key
+	// is simply absent from each result, not an empty array) - a prior
+	// version of this function checked that inline field directly, which
+	// meant the len(...) > 0 condition could never be true for ANY cloud in
+	// ANY org, so TestAccComputeConfigResource_Basic/_Disappears silently
+	// skipped everywhere, including CI, regardless of how many healthy
+	// clouds actually existed. Resource-health now comes from the real
+	// per-cloud endpoint instead.
 	for _, cloud := range cloudsResp.Results {
 		computeStack := normalizeComputeStack(cloud.ComputeStack)
-		if len(cloud.CloudResources) > 0 && isKnownProvider(cloud.Provider, computeStack) {
-			clouds = append(clouds, CloudInfo{
-				ID:           cloud.ID,
-				Name:         cloud.Name,
-				Provider:     cloud.Provider,
-				ComputeStack: computeStack,
-			})
+		if !isKnownProvider(cloud.Provider, computeStack) {
+			continue
 		}
+		if !cloudHasResources(client, cloud.ID) {
+			t.Logf("  skipping %s (ID: %s): no cloud resources configured", cloud.Name, cloud.ID)
+			continue
+		}
+		clouds = append(clouds, CloudInfo{
+			ID:           cloud.ID,
+			Name:         cloud.Name,
+			Provider:     cloud.Provider,
+			ComputeStack: computeStack,
+		})
 	}
 
 	// Intentionally no fallback to clouds without cloud_resources: creating a
@@ -881,15 +891,13 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	//
 	// We also intentionally do NOT substitute the static fixture here, so
 	// TestAccComputeConfigResource_Basic/_Disappears (which iterate
-	// GetAllVMClouds) skip rather than run. _Disappears exposes a separate
-	// unresolved issue: it archives the config out-of-band and expects a
-	// non-empty plan, but the compute-config Read returns an archived config as
-	// still-present, so the disappearance is not detected ("expected non-empty
-	// plan, got empty"). That needs the provider Read to treat archived_at as
-	// gone (tracked, forge lane). Compute-config RESOURCE creation is already
-	// covered by _WithCloudName/_Update/_WithWorkers via GetComputeConfigCloudID,
-	// so skipping these two loses no unique coverage; re-add a fixture fallback
-	// once the archived-Read issue is resolved.
+	// GetAllVMClouds) skip rather than run against a cloud with no healthy
+	// resource. _Disappears exposes a separate unresolved issue: it archives
+	// the config out-of-band and expects a non-empty plan, but the
+	// compute-config Read returns an archived config as still-present, so the
+	// disappearance is not detected ("expected non-empty plan, got empty").
+	// That needs the provider Read to treat archived_at as gone (tracked,
+	// forge lane).
 
 	t.Logf("Found %d configured clouds for testing", len(clouds))
 	for _, c := range clouds {
@@ -897,6 +905,36 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	}
 
 	return clouds
+}
+
+// cloudHasResources reports whether cloudID has at least one cloud resource
+// configured, via GET /api/v2/clouds/{id}/resources. The list-clouds endpoint
+// (GET /api/v2/clouds) never embeds cloud_resources inline, so this dedicated
+// per-cloud lookup is the only reliable way to detect a usable cloud; treat
+// any error as "no resources" so a transient failure just excludes that one
+// cloud rather than failing the whole discovery pass.
+func cloudHasResources(client *provider.Client, cloudID string) bool {
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		return false
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+	var resourcesResp struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &resourcesResp); err != nil {
+		return false
+	}
+	return len(resourcesResp.Results) > 0
 }
 
 // GetComputeConfigCloudID returns the ID of a cloud suitable for creating
@@ -975,6 +1013,96 @@ func GetAllVMClouds(t *testing.T) []CloudInfo {
 		t.Logf("Found %d unique VM cloud providers for testing", len(vmClouds))
 	}
 	return vmClouds
+}
+
+// GetAllK8sClouds returns every configured cloud whose compute stack is K8S.
+// Unlike GetAllVMClouds this does not deduplicate by provider: K8S clouds are
+// identified by their registered instance types (see ResolveK8sInstanceType),
+// not by provider-wide SKU catalogs, so two K8S clouds on the same provider
+// can still have different usable instance types.
+func GetAllK8sClouds(t *testing.T) []CloudInfo {
+	allClouds := GetAllConfiguredClouds(t)
+
+	var k8sClouds []CloudInfo
+	for _, cloud := range allClouds {
+		if cloud.IsK8s() {
+			k8sClouds = append(k8sClouds, cloud)
+			t.Logf("Selected K8S cloud for testing: %s (ID: %s)", cloud.Name, cloud.ID)
+		}
+	}
+
+	if len(k8sClouds) == 0 {
+		t.Logf("No K8S clouds available for testing")
+	}
+	return k8sClouds
+}
+
+// ResolveK8sInstanceType returns the name of the smallest CPU-only (non-GPU)
+// instance type registered for cloudID, via
+// GET /api/v2/clouds/{cloud_id}/additional_instance_types. This mirrors the
+// backend's own default-compute-config selection for K8S clouds (see
+// clouds_resource.py's get_smallest_cpu_instance_type in the Platform repo) -
+// K8S compute configs use instance_type values drawn from a cloud's own
+// registered/discovered set, not a fixed provider-wide SKU list like
+// "m5.large", which is why InstanceTypeSet.InstanceTypes() returns empty
+// placeholders for K8S clouds (see that function's TODO comment). Returns ""
+// if the cloud has no registered instance types (caller should skip).
+func ResolveK8sInstanceType(t *testing.T, cloudID string) string {
+	t.Helper()
+	client, err := GetTestClient()
+	if err != nil {
+		t.Logf("ResolveK8sInstanceType: failed to get test client: %v", err)
+		return ""
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/additional_instance_types", cloudID), nil)
+	if err != nil {
+		t.Logf("ResolveK8sInstanceType: request failed: %v", err)
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Logf("ResolveK8sInstanceType: API returned status %d", resp.StatusCode)
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Logf("ResolveK8sInstanceType: failed to read response: %v", err)
+		return ""
+	}
+
+	var instanceTypesResp struct {
+		Results []struct {
+			Name     string `json:"name"`
+			CPUCount int    `json:"cpu_count"`
+			GPUCount *int   `json:"gpu_count"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &instanceTypesResp); err != nil {
+		t.Logf("ResolveK8sInstanceType: failed to parse response: %v", err)
+		return ""
+	}
+
+	var smallestName string
+	smallestCPU := -1
+	for _, it := range instanceTypesResp.Results {
+		if it.GPUCount != nil && *it.GPUCount > 0 {
+			continue // CPU-only, matching the backend's own default-config selection
+		}
+		if smallestCPU == -1 || it.CPUCount < smallestCPU {
+			smallestCPU = it.CPUCount
+			smallestName = it.Name
+		}
+	}
+
+	if smallestName == "" {
+		t.Logf("ResolveK8sInstanceType: cloud %s has no registered CPU-only instance types", cloudID)
+	} else {
+		t.Logf("ResolveK8sInstanceType: selected %s (cpu_count=%d) for cloud %s", smallestName, smallestCPU, cloudID)
+	}
+	return smallestName
 }
 
 var (
