@@ -362,24 +362,30 @@ test-aws-eks-basic: build ## Test AWS EKS basic (K8S)
 	  STATE=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfstate; \
 	  CLOUD=tfacc-aws-eks-basic-$$SUFFIX; \
 	  EKSNAME=tfacc-eks-$$SUFFIX; \
+	  TAGVARS=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfvars.json; \
+	  printf "{\"tags\":{\"Environment\":\"test\",\"workload\":\"tf-provider-e2e-test\",\"Test\":\"true\",\"Repo\":\"terraform-kubernetes-anyscale-foundation-modules\",\"Example\":\"aws/eks-public\"}}" > $$TAGVARS; \
 	  cd examples/aws-eks-basic; \
-	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD -var=eks_cluster_name=$$EKSNAME || true" EXIT; \
-	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD -var=eks_cluster_name=$$EKSNAME'
+	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD -var=eks_cluster_name=$$EKSNAME -var-file=$$TAGVARS || true; rm -f $$TAGVARS" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD -var=eks_cluster_name=$$EKSNAME -var-file=$$TAGVARS'
 
 .PHONY: apply-aws-eks-basic
 apply-aws-eks-basic: build ## Apply AWS EKS basic only (override SUFFIX=<id> to pair with destroy)
 	@mkdir -p $(BUILD_DIR)
+	@printf '{"tags":{"Environment":"test","workload":"tf-provider-e2e-test","Test":"true","Repo":"terraform-kubernetes-anyscale-foundation-modules","Example":"aws/eks-public"}}' \
+	  > $(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfvars.json
 	cd examples/aws-eks-basic && terraform apply -auto-approve \
 	  -state=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfstate \
 	  -var=cloud_name=tfacc-aws-eks-basic-$(SUFFIX) \
-	  -var=eks_cluster_name=tfacc-eks-$(SUFFIX)
+	  -var=eks_cluster_name=tfacc-eks-$(SUFFIX) \
+	  -var-file=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfvars.json
 
 .PHONY: destroy-aws-eks-basic
 destroy-aws-eks-basic: ## Destroy AWS EKS basic (must match SUFFIX used by apply)
 	cd examples/aws-eks-basic && terraform destroy -auto-approve \
 	  -state=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfstate \
 	  -var=cloud_name=tfacc-aws-eks-basic-$(SUFFIX) \
-	  -var=eks_cluster_name=tfacc-eks-$(SUFFIX)
+	  -var=eks_cluster_name=tfacc-eks-$(SUFFIX) \
+	  -var-file=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfvars.json
 
 # ============================================================================
 # TERRAFORM TESTING - GCP VM
