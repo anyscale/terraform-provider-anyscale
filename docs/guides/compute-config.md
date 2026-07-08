@@ -66,11 +66,10 @@ config; they just surface the choice to you at different points.
 and it's easy to reach for the wrong one:
 
 - **`resources`** is the *logical* resources Ray schedules against for that node group — CPU, GPU,
-  memory, and custom resource counts. Leave it unset to let Ray auto-detect the instance's actual
-  capacity at runtime when the cluster launches; set it to override what Ray sees, independent of the
-  instance's real capacity. This is a Ray-runtime behavior, not something the compute config stores —
-  `resources` legitimately stays null in your config and state when you don't set it, on both API
-  generations; nothing pre-populates it for you at the config level.
+  memory, and custom resource counts. Leave it unset to fall back to the instance's actual capacity;
+  set it to override what Ray sees, independent of the instance's real hardware. `resources`
+  legitimately stays null in your config and state when you don't set it, on both API generations —
+  nothing pre-populates it for you at the config level.
 - **`required_resources`** is a *physical* resource specification used to select a custom instance
   shape (a "free pod shape") when `instance_type = "custom"` — explicit CPU, memory, GPU, accelerator,
   TPU, and TPU host counts that tell the cloud provider what to actually provision. It only makes sense
