@@ -38,9 +38,17 @@ jobs:
           rm -f "$SCRATCH_FRAGMENT"
 
       - name: Setup Terraform
+        # Pinned >= 1.15.0: that release fixed how `terraform init` handles a
+        # dev_overrides-active provider whose source has no real registry
+        # presence (our case below) -- pre-1.15 versions hard-fail querying
+        # the registry for it instead of skipping the query. Pinning to the
+        # latest stable rather than the bisected floor (1.15.0) deliberately,
+        # per team review. This version applies to every shard in this job's
+        # matrix, including acctest-data/acctest-resource, not just
+        # lint-and-unit -- verified those two stay green before landing this.
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.8"
+          terraform_version: "1.15.7"
           terraform_wrapper: false
 
       - name: Install golangci-lint
@@ -72,6 +80,49 @@ jobs:
       - name: Test
         if: matrix.shard == 'lint-and-unit'
         run: make test
+
+      - name: Validate Examples
+        if: matrix.shard == 'lint-and-unit'
+        # This step runs `terraform init` while dev_overrides is active for the
+        # anyscale provider, which CLAUDE.md's local-dev guidance says to avoid
+        # ("provider is not in the public registry"). That guidance is about
+        # local workflows on whatever Terraform happens to be on a developer's
+        # PATH; here the version is pinned above specifically so init resolves
+        # this correctly -- on Terraform >= 1.15, init skips registry
+        # resolution for a dev-overridden provider entirely (confirmed via the
+        # "not installed as part of init since they were overwritten" notice
+        # and an empty entry for it in the resulting .terraform.lock.hcl),
+        # while still installing the real providers (aws/google/random/etc.)
+        # each example also declares -- without those, `terraform validate`
+        # would have no schema to check resource blocks against and this gate
+        # would pass vacuously. Do not lower the pinned version above without
+        # re-verifying this interaction on a clean checkout.
+        run: |
+          set -euo pipefail
+          make build
+          override_dir="$(mktemp -d)"
+          cp terraform-provider-anyscale "$override_dir/"
+          cli_config="$(mktemp)"
+          cat > "$cli_config" <<RC
+          provider_installation {
+            dev_overrides {
+              "registry.terraform.io/terraform-providers/anyscale" = "$override_dir"
+            }
+            direct {}
+          }
+          RC
+          export TF_CLI_CONFIG_FILE="$cli_config"
+          status=0
+          for dir in examples/*/; do
+            [ -f "${dir}versions.tf" ] || continue
+            echo "==> terraform init + validate: ${dir}"
+            if ! (cd "$dir" && terraform init -backend=false -input=false -no-color \
+                && terraform validate -no-color); then
+              echo "::error::terraform validate failed for ${dir}"
+              status=1
+            fi
+          done
+          exit "$status"
 
       - name: Acceptance Tests - Data Sources
         if: matrix.shard == 'acctest-data'

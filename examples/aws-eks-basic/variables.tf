@@ -75,7 +75,7 @@ variable "eks_cluster_version" {
     ```
   EOT
   type        = string
-  default     = "1.34"
+  default     = "1.36"
 }
 
 variable "gpu_instance_types" {
@@ -112,6 +112,11 @@ variable "gpu_instance_types" {
 variable "node_group_disk_size" {
   description = <<-EOT
     (Optional) The disk size (GB) of the EKS nodes.
+
+    Bottlerocket nodes split storage into a small fixed-size OS volume and a
+    separate data volume; this value sizes the data volume, where container
+    images and ephemeral storage live.
+
     Possible values: [500, 1000]
 
     ex:

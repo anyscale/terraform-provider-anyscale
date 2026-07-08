@@ -1,0 +1,44 @@
+# Example gpu_instance_types values for the aws-eks-basic example.
+#
+# The default in variables.tf only configures a T4 node group so a first
+# `terraform apply` stays small. Copy the entries you want into your own
+# terraform.tfvars, or copy this whole file and pass it explicitly:
+#
+#   terraform apply -var-file=gpu_instances.tfvars.example
+#
+# `product_name` must match the GPU product label the NVIDIA device plugin
+# reports on the node (`nvidia.com/gpu.product`), which is how the module
+# labels each generated node group. If you add a GPU type that isn't listed
+# here, find the correct value by running `nvidia-smi --query-gpu=name
+# --format=csv` on an instance of that type and replacing spaces with `-`.
+
+gpu_instance_types = {
+  "T4" = {
+    product_name   = "Tesla-T4"
+    instance_types = ["g4dn.xlarge", "g4dn.2xlarge", "g4dn.4xlarge", "g4dn.8xlarge", "g4dn.12xlarge"]
+  }
+  "A10G" = {
+    product_name   = "NVIDIA-A10G"
+    instance_types = ["g5.xlarge", "g5.2xlarge", "g5.4xlarge", "g5.8xlarge", "g5.12xlarge", "g5.48xlarge"]
+  }
+  "L4" = {
+    product_name   = "NVIDIA-L4"
+    instance_types = ["g6.xlarge", "g6.2xlarge", "g6.4xlarge", "g6.8xlarge", "g6.12xlarge", "g6.48xlarge"]
+  }
+  "L40S" = {
+    product_name   = "NVIDIA-L40S"
+    instance_types = ["g6e.xlarge", "g6e.2xlarge", "g6e.4xlarge", "g6e.8xlarge", "g6e.12xlarge"]
+  }
+  "A100-40GB" = {
+    product_name   = "NVIDIA-A100-SXM4-40GB"
+    instance_types = ["p4d.24xlarge"]
+  }
+  "A100-80GB" = {
+    product_name   = "NVIDIA-A100-SXM4-80GB"
+    instance_types = ["p4de.24xlarge"]
+  }
+  "H100" = {
+    product_name   = "NVIDIA-H100-80GB-HBM3"
+    instance_types = ["p5.48xlarge"]
+  }
+}

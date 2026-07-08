@@ -67,12 +67,18 @@ Full GCP VM example with GCP Cloud Foundation modules. Creates both GCP infrastr
 
 #### [aws-eks-basic](./aws-eks-basic/)
 
-AWS EKS (Kubernetes) cloud example, using the all-in-one deployment pattern. Creates an Anyscale Cloud
-with AWS EKS compute stack in a single `anyscale_cloud` resource.
+AWS EKS (Kubernetes) cloud example, using the all-in-one deployment pattern. Creates a brand new
+VPC, S3 bucket, IAM roles, and EKS cluster, then registers the result with Anyscale as a K8S
+cloud in a single `anyscale_cloud` resource. Despite the "basic" name, this creates
+infrastructure via modules rather than assuming you already have a cluster to point at — see
+the [example README](./aws-eks-basic/README.md) for the full breakdown.
 
-**Use this when**: You want to register an AWS EKS cluster with Anyscale in one resource.
+**Use this when**: You want Terraform to stand up a new EKS cluster and register it with
+Anyscale in one apply. If you already have a cluster and want to register it without creating a
+second one, this isn't that example yet.
 
 **What it demonstrates**:
+- Creating a VPC, S3 bucket, IAM roles, and an EKS cluster (`terraform-aws-modules/eks` v21) via modules
 - Creating an `anyscale_cloud` resource with K8S compute stack and an embedded `kubernetes_config`
 - Object storage configuration
 
@@ -205,7 +211,7 @@ All examples require:
 | `aws-vm-basic-resource` | AWS | VM | Split | Uses existing |
 | `gcp-vm-basic` | GCP | VM | All-in-one | Uses existing |
 | `gcp-vm` | GCP | VM | All-in-one | Creates via modules |
-| `aws-eks-basic` | AWS | K8S | All-in-one | Uses existing EKS |
+| `aws-eks-basic` | AWS | K8S | All-in-one | Creates via modules |
 | `gcp-gke-basic` | GCP | K8S | Split | Uses existing GKE |
 | `multi-resource-cloud-basic` | AWS | VM | Split | Uses existing |
 
