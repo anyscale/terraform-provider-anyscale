@@ -511,23 +511,20 @@ resource "anyscale_compute_config" "test" {
 // TestAccComputeConfigResource_Disappears verifies that an out-of-band archive
 // of the compute config is detected by the next plan as drift.
 //
-// Currently fails for real (not a harness problem): GetAllConfiguredClouds
-// used to check an inline cloud_resources field that GET /api/v2/clouds never
-// actually populates, so this test silently skipped in every environment,
-// including CI, regardless of how many healthy clouds existed. Fixing that
-// discovery bug (see cloudHasResources) makes this test run for the first
-// time and immediately exposes the real, previously-hidden bug it was written
-// to catch: Read() does not treat an archived_at compute config as gone, so
-// an out-of-band archive produces an empty refresh plan instead of drift.
-// Skipping with this explicit reason rather than reverting the discovery fix,
-// so CI stays green without resurrecting the silent, unexplained skip. Remove
-// this skip once Read() treats archived_at as gone (tracked for forge
-// alongside CC1/CC5a's Read() changes).
+// GetAllConfiguredClouds used to check an inline cloud_resources field that
+// GET /api/v2/clouds never actually populates, so this test silently skipped
+// in every environment, including CI, regardless of how many healthy clouds
+// existed. Fixing that discovery bug (see cloudHasResources) made this test
+// run for the first time and immediately exposed the real, previously-hidden
+// bug it was written to catch: Read() did not treat an archived_at compute
+// config as gone, so an out-of-band archive produced an empty refresh plan
+// instead of drift. That is CC11, now fixed (Read and ImportState both check
+// ArchivedAt and remove the resource from state the same way as the 404
+// path) - this test was stopgap-skipped with a tracked reason in the
+// meantime and is un-skipped now that the fix is confirmed present.
 func TestAccComputeConfigResource_Disappears(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
-	t.Skip("known bug, tracked: Read() does not treat an archived compute config as gone, so drift " +
-		"from an out-of-band archive is not detected. See this function's doc comment.")
 
 	// K8S clouds use operator-defined pod shapes, not the basic instance_type
 	// shape used here. Pick the first VM cloud, mirroring TestAccComputeConfigResource_Basic.
