@@ -201,13 +201,13 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 			"cloud_id": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				Description:         "The ID of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified.",
-				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified.",
+				Description:         "The ID of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time (see Update), since this resource cannot detect that change from a cloud_name lookup at plan time without a network call.",
+				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time (see Update), since this resource cannot detect that change from a `cloud_name` lookup at plan time without a network call.",
 			},
 			"cloud_name": schema.StringAttribute{
 				Optional:            true,
-				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id.",
-				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id.",
+				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see cloud_id.",
+				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`.",
 			},
 			"cloud_resource": schema.StringAttribute{
 				Optional:            true,
@@ -1152,9 +1152,34 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		"old_version":   state.Version.ValueInt64(),
 	})
 
-	// Build the request using the same helper as Create
+	// Build the request using the same helper as Create. This also resolves
+	// plan.CloudID to its effective value below, whether the user configured
+	// cloud_id or cloud_name directly.
 	updateRequest, _ := r.buildComputeConfigRequest(ctx, &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// CC3b: the cloud is immutable in place. A compute config's identity is
+	// tied to the cloud it was created under; unlike Cloud resources, there is
+	// no per-field PATCH here, so an in-place cloud change would silently
+	// create a new version under the NEW cloud while leaving the old
+	// version's cloud unmanaged and unaware anything moved -- the same shape
+	// of orphan CC3a fixes for renames, just not detectable at plan time,
+	// since only an apply-time lookup can resolve what cloud_name resolves
+	// to. buildComputeConfigRequest has already resolved plan.CloudID to its
+	// effective value above (whether the user configured cloud_id or
+	// cloud_name), so this comparison also correctly does NOT fire when a
+	// user merely switches which of the two attributes they reference the
+	// same cloud by -- the resolved ID is identical either way.
+	if !state.CloudID.IsNull() && plan.CloudID.ValueString() != state.CloudID.ValueString() {
+		AddConfigError(&resp.Diagnostics,
+			"Compute Config Cloud Is Immutable",
+			fmt.Sprintf(
+				"This compute config is on cloud %q and cannot be moved to a different cloud in place: doing so would silently create a new version under the new cloud while leaving the existing version's cloud unmanaged. To intentionally move this compute config to a different cloud, replace the resource instead (terraform apply -replace, or taint it before applying).",
+				state.CloudID.ValueString(),
+			),
+		)
 		return
 	}
 
