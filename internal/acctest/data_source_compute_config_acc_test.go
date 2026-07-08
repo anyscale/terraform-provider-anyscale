@@ -40,6 +40,22 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 					// Verify versions list contains at least version 1
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.#", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.0", "1"),
+					// CC6: data source node topology parity with the resource.
+					// Confirmed live against the real API that "resources"
+					// itself comes back null from BOTH api/v2 and ext/v0 for an
+					// instance_type-only head node (no client-side auto-fill
+					// happens server-side despite the schema description's
+					// wording) -- identical between the two endpoints, which is
+					// exactly the CC5a claim this exercises, so instance_type is
+					// the meaningful, verified-true assertion here.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "head_node.instance_type", "m5.large"),
+
+					// CC5a acceptance (architect): the by-id lookup path must
+					// stay green after switching Read to the shared typed
+					// structs, not just the by-name path exercised above.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "name", configName),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "version", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "head_node.instance_type", "m5.large"),
 				),
 			},
 		},
@@ -102,6 +118,15 @@ resource "anyscale_compute_config" "test" {
 
 data "anyscale_compute_config" "by_name" {
   name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+
+data "anyscale_compute_config" "by_id" {
+  # The data source's id input is the version-specific API id (what the
+  # resource calls config_id), not the resource's own id (which is the
+  # stable name) -- confusingly overlapping names for two different things.
+  id = anyscale_compute_config.test.config_id
 
   depends_on = [anyscale_compute_config.test]
 }
