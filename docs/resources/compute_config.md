@@ -142,7 +142,7 @@ Optional:
 - `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.
 - `labels` (Map of String) Labels to associate the node with for scheduling purposes.
 - `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--head_node--required_resources))
-- `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to let Ray auto-detect the instance's actual capacity at runtime; set it to override what Ray sees, independent of the instance's real capacity.
+- `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.
 
 <a id="nestedatt--head_node--cloud_deployment"></a>
 ### Nested Schema for `head_node.cloud_deployment`
@@ -188,7 +188,7 @@ Optional:
 - `min_nodes` (Number) Minimum number of nodes of this type that will be kept running in the cluster.
 - `name` (String) Unique name of this worker group. Defaults to a human-friendly representation of the instance type.
 - `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
-- `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to let Ray auto-detect the instance's actual capacity at runtime; set it to override what Ray sees, independent of the instance's real capacity.
+- `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.
 
 <a id="nestedatt--worker_nodes--cloud_deployment"></a>
 ### Nested Schema for `worker_nodes.cloud_deployment`
