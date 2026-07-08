@@ -187,12 +187,10 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			// ─── Resource Identity ────────────────────────────────
 			"name": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The name of the cloud resource. If omitted, the provider computes one as `{compute_stack}-{provider}-{region}` (lowercased). Additional resources on the same cloud that share the same compute stack, provider, and region must set an explicit, distinct `name` - omitting it collides with the computed default and the create request fails with a 409. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with the same name (explicit, or the same computed default) fails with a duplicate-name error. Use `terraform import` to recover state instead.",
+				Required:            true,
+				MarkdownDescription: "The name of the cloud resource. Must be distinct among resources on the same cloud that share the same compute stack, provider, and region. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with the same name fails with a duplicate-name error. Use `terraform import` to recover state instead.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
-					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 
@@ -695,18 +693,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	// Set inferred provider in state
 	plan.CloudProvider = types.StringValue(provider)
 
-	// Generate a name when omitted. add_resource's response cannot be trusted
-	// to return the backend-generated name (confirmed defect: the handler
-	// echoes the request object rather than the created record - see
-	// CLOUD-RESOURCE-REPORT.md), so the provider computes and sends a
-	// concrete name up front instead of reading one back afterward.
 	name := plan.Name.ValueString()
-	if name == "" {
-		name = fmt.Sprintf("%s-%s-%s",
-			strings.ToLower(computeStack),
-			strings.ToLower(provider),
-			strings.ToLower(region))
-	}
 
 	tflog.Info(ctx, "Creating Anyscale Cloud Resource",
 		map[string]any{
