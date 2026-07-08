@@ -61,11 +61,22 @@ locals {
     iam_role_additional_policies = local.anyscale_iam
   }
 
-  # Taints are a safelist: only workloads whose compute config requests a GPU
-  # (and tolerates these keys) get scheduled onto GPU node groups, so CPU-only
-  # workloads never land on the more expensive GPU capacity by accident. The
-  # Anyscale operator sets the matching tolerations based on what a workload
-  # requests, so no manual toleration wiring is needed on the Anyscale side.
+  # Anyscale taints: these node groups are fenced off with taints so only
+  # workloads that explicitly request this capacity land here, keeping
+  # general-purpose pods off the pricier GPU / reserved-capacity nodes.
+  # Anyscale automatically adds matching tolerations to a Ray pod based on
+  # its compute config, so e.g. a workload that requests SPOT capacity
+  # tolerates the SPOT taint below, and one that requests a GPU tolerates
+  # the accelerator-type + nvidia.com/gpu taints -- no manual toleration
+  # wiring needed on the Anyscale side.
+  #   node.anyscale.com/capacity-type = ON_DEMAND|SPOT -> pins the node to
+  #     the capacity type it was provisioned as.
+  #   node.anyscale.com/accelerator-type = GPU -> Anyscale's generic GPU
+  #     selector (the specific model, e.g. T4/A100, is tracked separately
+  #     via node labels, not this taint).
+  #   nvidia.com/gpu = present -> conventional NVIDIA device-plugin taint
+  #     key; the value is not matched on -- the standard device-plugin
+  #     toleration uses `operator: Exists`, so any value works here.
   gpu_node_taints_base = {
     gpu_present = {
       key    = "nvidia.com/gpu"
