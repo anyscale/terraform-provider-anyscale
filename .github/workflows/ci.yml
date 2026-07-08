@@ -73,6 +73,35 @@ jobs:
         if: matrix.shard == 'lint-and-unit'
         run: make test
 
+      - name: Validate Examples
+        if: matrix.shard == 'lint-and-unit'
+        run: |
+          set -euo pipefail
+          make build
+          override_dir="$(mktemp -d)"
+          cp terraform-provider-anyscale "$override_dir/"
+          cli_config="$(mktemp)"
+          cat > "$cli_config" <<RC
+          provider_installation {
+            dev_overrides {
+              "registry.terraform.io/terraform-providers/anyscale" = "$override_dir"
+            }
+            direct {}
+          }
+          RC
+          export TF_CLI_CONFIG_FILE="$cli_config"
+          status=0
+          for dir in examples/*/; do
+            [ -f "${dir}versions.tf" ] || continue
+            echo "==> terraform init + validate: ${dir}"
+            if ! (cd "$dir" && terraform init -backend=false -input=false -no-color \
+                && terraform validate -no-color); then
+              echo "::error::terraform validate failed for ${dir}"
+              status=1
+            fi
+          done
+          exit "$status"
+
       - name: Acceptance Tests - Data Sources
         if: matrix.shard == 'acctest-data'
         env:
