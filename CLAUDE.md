@@ -98,6 +98,15 @@ make docs
 # Do not manually edit generated docs under docs/
 ```
 
+## Changelog Policy: When to Skip
+
+The `changelog-gate` CI check accepts EITHER a `.changelog/<PR#>.txt` fragment OR the `skip-changelog` label — one is required on every PR.
+
+- If a PR contains **no changes that require a new provider version** — e.g. examples-only edits, CI/tooling, tests, or internal docs with no user-facing provider behavior change — apply the **`skip-changelog`** label instead of adding a fragment.
+- Only changes to the provider itself (schemas, resources/data sources, observable provider behavior, user-facing bug fixes) require a `.changelog/<PR#>.txt` fragment and a version bump.
+
+If you are unsure whether a change is user-facing, add a fragment — it is the safe default.
+
 ## Terraform Local Testing (dev_overrides)
 
 This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provider binary.
