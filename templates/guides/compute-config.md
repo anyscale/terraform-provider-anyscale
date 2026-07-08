@@ -94,11 +94,11 @@ Practically, this means:
   participates in normal drift detection.
 
 This is deliberate, to avoid a perpetual diff from a value the API is free to re-represent differently
-than you wrote it, not an oversight. It also means neither is truly free-form: both pass through to the
-cloud provider and are validated against provider-specific schemas server-side (`advanced_instance_config`
-is checked against something close to the real cloud provider's instance-launch request shape, and
-unrecognized `flags` keys are rejected) — supply values shaped the way that provider actually expects,
-not arbitrary keys.
+than you wrote it, not an oversight. It also means neither is truly free-form: `advanced_instance_config`
+is validated server-side against something close to the real cloud provider's instance-launch request
+shape, and `flags` only accepts a fixed, specific set of recognized key names — an arbitrary custom key
+is rejected outright, not passed through silently. Supply values shaped the way each is actually
+validated, not arbitrary keys.
 
 ## Importing an existing compute config
 
