@@ -56,6 +56,7 @@ output "compute_config_region_by_id" {
 - `config_id` (String) The version-specific API ID of the compute config. This is the API identifier for the specific version.
 - `created_at` (String) The timestamp when the compute config was created.
 - `enable_cross_zone_scaling` (Boolean) Whether instances can run across multiple availability zones.
+- `head_node` (Attributes) Configuration for the head node of the cluster. (see [below for nested schema](#nestedatt--head_node))
 - `idle_termination_minutes` (Number) Number of minutes after which idle clusters will be terminated. 0 means disabled.
 - `last_modified_at` (String) The timestamp when the compute config was last modified.
 - `maximum_uptime_minutes` (Number) Maximum uptime in minutes before cluster termination.
@@ -64,3 +65,85 @@ output "compute_config_region_by_id" {
 - `region` (String) The region to launch clusters in.
 - `version` (Number) The version number of this compute config.
 - `versions` (List of Number) List of all available version numbers for this compute config, sorted in ascending order.
+- `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. (see [below for nested schema](#nestedatt--worker_nodes))
+- `zones` (List of String) Availability zones considered for this cluster.
+
+<a id="nestedatt--head_node"></a>
+### Nested Schema for `head_node`
+
+Read-Only:
+
+- `advanced_instance_config` (String) Advanced instance configuration passed through to the cloud provider, as a JSON string.
+- `cloud_deployment` (Attributes) Cloud deployment selectors for this node. (see [below for nested schema](#nestedatt--head_node--cloud_deployment))
+- `flags` (String) Node-level flags, as a JSON string.
+- `instance_type` (String) Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP).
+- `labels` (Map of String) Labels associated with the node for scheduling purposes.
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--head_node--required_resources))
+- `resources` (Map of Number) Logical resources available on this node.
+
+<a id="nestedatt--head_node--cloud_deployment"></a>
+### Nested Schema for `head_node.cloud_deployment`
+
+Read-Only:
+
+- `id` (String) Cloud deployment ID from cloud setup.
+- `machine_pool` (String) Machine pool name.
+- `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
+- `region` (String) Cloud provider region, e.g., `us-west-2`.
+
+
+<a id="nestedatt--head_node--required_resources"></a>
+### Nested Schema for `head_node.required_resources`
+
+Read-Only:
+
+- `accelerator` (String) Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).
+- `cpu` (Number) Number of CPUs allocated.
+- `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
+- `gpu` (Number) Number of GPUs allocated.
+- `memory` (String) Amount of memory allocated.
+- `tpu` (Number) Number of TPUs allocated.
+- `tpu_hosts` (Number) Number of TPU hosts.
+
+
+
+<a id="nestedatt--worker_nodes"></a>
+### Nested Schema for `worker_nodes`
+
+Read-Only:
+
+- `advanced_instance_config` (String) Advanced instance configuration passed through to the cloud provider, as a JSON string.
+- `cloud_deployment` (Attributes) Cloud deployment selectors for this node. (see [below for nested schema](#nestedatt--worker_nodes--cloud_deployment))
+- `flags` (String) Node-level flags, as a JSON string.
+- `instance_type` (String) Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP).
+- `labels` (Map of String) Labels associated with the node for scheduling purposes.
+- `market_type` (String) ON_DEMAND, SPOT, or PREFER_SPOT.
+- `max_nodes` (Number) Maximum number of nodes of this type.
+- `min_nodes` (Number) Minimum number of nodes of this type kept running.
+- `name` (String) Unique name of this worker group.
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
+- `resources` (Map of Number) Logical resources available on this node.
+
+<a id="nestedatt--worker_nodes--cloud_deployment"></a>
+### Nested Schema for `worker_nodes.cloud_deployment`
+
+Read-Only:
+
+- `id` (String) Cloud deployment ID from cloud setup.
+- `machine_pool` (String) Machine pool name.
+- `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
+- `region` (String) Cloud provider region, e.g., `us-west-2`.
+
+
+<a id="nestedatt--worker_nodes--required_resources"></a>
+### Nested Schema for `worker_nodes.required_resources`
+
+Read-Only:
+
+- `accelerator` (String) Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).
+- `cpu` (Number) Number of CPUs allocated.
+- `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
+- `gpu` (Number) Number of GPUs allocated.
+- `memory` (String) Amount of memory allocated.
+- `tpu` (Number) Number of TPUs allocated.
+- `tpu_hosts` (Number) Number of TPU hosts.

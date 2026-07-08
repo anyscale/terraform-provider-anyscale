@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	dsschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -40,6 +42,19 @@ func schemaOf(t *testing.T, r resource.Resource) schema.Schema {
 	t.Helper()
 	resp := &resource.SchemaResponse{}
 	r.Schema(context.Background(), resource.SchemaRequest{}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Schema() returned diagnostics: %s", resp.Diagnostics)
+	}
+	return resp.Schema
+}
+
+// datasourceSchemaOf is schemaOf's data-source analogue. datasource.Schema
+// and resource/schema.Schema are distinct Go types even where structurally
+// identical, so they need separate helpers.
+func datasourceSchemaOf(t *testing.T, d datasource.DataSource) dsschema.Schema {
+	t.Helper()
+	resp := &datasource.SchemaResponse{}
+	d.Schema(context.Background(), datasource.SchemaRequest{}, resp)
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("Schema() returned diagnostics: %s", resp.Diagnostics)
 	}
@@ -376,6 +391,61 @@ func TestComputeConfigCC3aNameRequiresReplace(t *testing.T) {
 		t.Errorf("name must include stringplanmodifier.RequiresReplace() (CC3a) — without it, renaming a compute " +
 			"config silently creates an orphaned, unmanaged duplicate in the backend instead of erroring or " +
 			"replacing (live-verified bug that motivated this fix)")
+	}
+}
+
+// TestComputeConfigCC6DataSourceTopologyParity pins CC6: the data source
+// gains zones/head_node/worker_nodes, matching the resource's node topology.
+// All three must be Computed-only (a data source has no Optional/Required
+// distinction) and, critically, NOT masked the way the resource's
+// maskNodeFromPrior masks Computed sub-attributes back to null — masking
+// exists only to protect a RESOURCE plan from drift against a prior state
+// the data source has no equivalent of, so a data source should report
+// exactly what the API returns. This test only pins the schema shape
+// (Computed-only); the "actually unmasked at runtime" half is an acceptance
+// concern covered by TestAccComputeConfigDataSource_Basic asserting real
+// head_node.instance_type values on real AWS.
+func TestComputeConfigCC6DataSourceTopologyParity(t *testing.T) {
+	s := datasourceSchemaOf(t, &ComputeConfigDataSource{})
+
+	zones, ok := s.Attributes["zones"].(dsschema.ListAttribute)
+	if !ok {
+		t.Fatalf("zones is not a dsschema.ListAttribute (got %T)", s.Attributes["zones"])
+	}
+	if !zones.Computed {
+		t.Errorf("zones must be Computed: true")
+	}
+	if zones.Optional || zones.Required {
+		t.Errorf("zones must be Computed-only (a data source has no Optional/Required distinction for output attributes)")
+	}
+
+	headNode, ok := s.Attributes["head_node"].(dsschema.SingleNestedAttribute)
+	if !ok {
+		t.Fatalf("head_node is not a dsschema.SingleNestedAttribute (got %T)", s.Attributes["head_node"])
+	}
+	if !headNode.Computed {
+		t.Errorf("head_node must be Computed: true")
+	}
+
+	// The data source's node attributes must include required_resources
+	// (CC1's rename), not physical_resources - a regression here would mean
+	// the data-source schema drifted from CC1 independently of the resource.
+	if _, present := headNode.Attributes["physical_resources"]; present {
+		t.Error("head_node must NOT have a physical_resources attribute on the data source either (CC1)")
+	}
+	if _, ok := headNode.Attributes["required_resources"]; !ok {
+		t.Error("head_node is missing required_resources (CC1)")
+	}
+
+	workerNodes, ok := s.Attributes["worker_nodes"].(dsschema.ListNestedAttribute)
+	if !ok {
+		t.Fatalf("worker_nodes is not a dsschema.ListNestedAttribute (got %T)", s.Attributes["worker_nodes"])
+	}
+	if !workerNodes.Computed {
+		t.Errorf("worker_nodes must be Computed: true")
+	}
+	if _, ok := workerNodes.NestedObject.Attributes["required_resources"]; !ok {
+		t.Error("worker_nodes[] is missing required_resources (CC1)")
 	}
 }
 
