@@ -26,14 +26,38 @@ locals {
     } : {}
   )
 
+  # Bottlerocket splits node storage into a small OS volume (xvda) and a
+  # separate data volume (xvdb) where container images and ephemeral
+  # storage live. xvdb is the one that needs to be sized for real
+  # workloads -- disk_size only sizes the OS volume and is ignored under
+  # a custom launch template, so it cannot grow the data volume.
+  bottlerocket_block_device_mappings = {
+    xvda = {
+      device_name = "/dev/xvda"
+      ebs = {
+        volume_size           = 4
+        volume_type           = "gp3"
+        delete_on_termination = true
+      }
+    }
+    xvdb = {
+      device_name = "/dev/xvdb"
+      ebs = {
+        volume_size           = var.node_group_disk_size
+        volume_type           = "gp3"
+        encrypted             = true
+        delete_on_termination = true
+      }
+    }
+  }
+
   # Base configuration for GPU node groups
   gpu_node_group_base = {
-    ami_type                     = "AL2023_x86_64_NVIDIA"
+    ami_type                     = "BOTTLEROCKET_x86_64_NVIDIA"
     min_size                     = 0
     max_size                     = 10
     desired_size                 = 0
-    disk_size                    = var.node_group_disk_size
-    use_custom_launch_template   = false
+    block_device_mappings        = local.bottlerocket_block_device_mappings
     iam_role_additional_policies = local.anyscale_iam
   }
 
@@ -153,7 +177,7 @@ module "eks" {
       # This node group is for management components such as CoreDNS, Cluster Autoscaler, AWS-LB controller, ingress-nginx, Anyscale Operator, etc.
       # Note that small instance types of Anyscale workloads can still be scheduled onto this node group.
       default = {
-        ami_type       = "AL2023_x86_64_STANDARD"
+        ami_type       = "BOTTLEROCKET_x86_64"
         instance_types = ["t3.medium"]
 
         min_size     = 1
@@ -173,7 +197,7 @@ module "eks" {
       }
 
       ondemand_cpu = {
-        ami_type = "AL2023_x86_64_STANDARD"
+        ami_type = "BOTTLEROCKET_x86_64"
         instance_types = [
           "m7i.8xlarge",
           "m7a.8xlarge",
@@ -185,12 +209,11 @@ module "eks" {
           "m5.4xlarge",
         ]
 
-        capacity_type              = "ON_DEMAND"
-        min_size                   = 0
-        max_size                   = 10
-        desired_size               = 0
-        disk_size                  = var.node_group_disk_size
-        use_custom_launch_template = false
+        capacity_type         = "ON_DEMAND"
+        min_size              = 0
+        max_size              = 10
+        desired_size          = 0
+        block_device_mappings = local.bottlerocket_block_device_mappings
 
         taints = {
           capacity_type = {
@@ -204,7 +227,7 @@ module "eks" {
       }
 
       spot_cpu = {
-        ami_type = "AL2023_x86_64_STANDARD"
+        ami_type = "BOTTLEROCKET_x86_64"
         instance_types = [
           "m7i.8xlarge",
           "m7a.8xlarge",
@@ -214,12 +237,11 @@ module "eks" {
           "m5.4xlarge",
         ]
 
-        capacity_type              = "SPOT"
-        min_size                   = 0
-        max_size                   = 10
-        desired_size               = 0
-        disk_size                  = var.node_group_disk_size
-        use_custom_launch_template = false
+        capacity_type         = "SPOT"
+        min_size              = 0
+        max_size              = 10
+        desired_size          = 0
+        block_device_mappings = local.bottlerocket_block_device_mappings
 
         taints = {
           capacity_type = {
