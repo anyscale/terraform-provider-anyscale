@@ -59,5 +59,19 @@ CLAUDE.md as provider-wide policy. Decision framework for immutable identity att
 full acceptance suite live-green vs real AWS, one honest disclosed `_K8S` skip. Integration
 branch independently re-verified (build/vet/gofmt/unit + full real-AWS suite) by assayer.
 
-**Outcome.** Integration branch built, docs regenerated (no drift), unit suite green. Release
-verdict: **READY TO SHIP AS MINOR**. PR pending (Mission 4). Not yet merged to `main`.
+**Outcome.** Integration branch `integration/compute-config-sync` (tip `6fe7c49`) built, docs
+regenerated (no drift), vet/gofmt/unit clean, top-level + per-node real-AWS acceptance green (one
+honest `_K8S` skip). Release verdict: **MINOR**. Open as **PR #50** with `.changelog/50.txt`; main
+untouched.
+
+**Wind-down close addendum (same day).** The integration + verification pass surfaced and resolved
+more, each caught by refusing a passive "green": **CC13** schema-contract pins (design invariants now
+CI-enforced); **CC14** `enable_cross_zone_scaling` left null on import → permanent phantom diff /
+silent version inflation, fixed (Read resolves false-if-absent); **CC15** `interfaceToAttrValue` built
+a `List` for JSON arrays where a Dynamic attribute infers a `Tuple` (+ a mixed-type-array coercion
+bug), fixed (per-element `TupleValue`/`TupleType`), blast-radius-checked to exactly two callers. And
+the **CC12 test gap**: the claimed import round-trip test did not exist; assayer wrote real ones —
+top-level (incl. arrays) and, per user direction, **per-node nested on workers** (`f7e566f`, real
+teeth) — both green, no fix needed (per-node values are plain JSON strings that `json.Marshal`
+byte-matches to `jsonencode`). Stale `ImportStateVerifyIgnore` skips removed. Every claim reconciled
+to exactly what is tested.
