@@ -97,7 +97,7 @@ output "compute_config_id" {
 ### Required
 
 - `head_node` (Attributes) Configuration for the head node of the cluster. (see [below for nested schema](#nestedatt--head_node))
-- `name` (String) The name of the compute config.
+- `name` (String) The name of the compute config. Changing this replaces the resource: Anyscale compute configs are looked up by name, so a rename cannot be applied to the existing config and must create a new one.
 
 ### Optional
 
@@ -108,7 +108,9 @@ output "compute_config_id" {
 - `cloud_resource` (String) The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.
 - `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Recommended for production services.
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
+- `idle_termination_minutes` (Number) Number of minutes after which idle clusters using this compute config will be terminated. `0` disables idle termination. Defaults to the backend's own default (120) when unset.
 - `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`)
+- `maximum_uptime_minutes` (Number) Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum.
 - `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`)
 - `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests. (see [below for nested schema](#nestedatt--worker_nodes))
 - `zones` (List of String) Availability zones to consider for this cluster. Defaults to all zones in the cloud's region.
@@ -135,7 +137,7 @@ Optional:
 - `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--head_node--cloud_deployment))
 - `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.
 - `labels` (Map of String) Labels to associate the node with for scheduling purposes.
-- `physical_resources` (Attributes) Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--head_node--physical_resources))
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--head_node--required_resources))
 - `resources` (Map of Number) Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.
 
 <a id="nestedatt--head_node--cloud_deployment"></a>
@@ -149,13 +151,14 @@ Optional:
 - `region` (String) Cloud provider region, e.g., `us-west-2`.
 
 
-<a id="nestedatt--head_node--physical_resources"></a>
-### Nested Schema for `head_node.physical_resources`
+<a id="nestedatt--head_node--required_resources"></a>
+### Nested Schema for `head_node.required_resources`
 
 Optional:
 
 - `accelerator` (String) Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).
 - `cpu` (Number) Number of CPUs to allocate.
+- `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
 - `gpu` (Number) Number of GPUs to allocate.
 - `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
 - `tpu` (Number) Number of TPUs to allocate.
@@ -180,7 +183,7 @@ Optional:
 - `max_nodes` (Number) Maximum number of nodes of this type that can be running in the cluster.
 - `min_nodes` (Number) Minimum number of nodes of this type that will be kept running in the cluster.
 - `name` (String) Unique name of this worker group. Defaults to a human-friendly representation of the instance type.
-- `physical_resources` (Attributes) Physical resources for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--worker_nodes--physical_resources))
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
 - `resources` (Map of Number) Logical resources that will be available on this node. Defaults to match the physical resources of the instance type.
 
 <a id="nestedatt--worker_nodes--cloud_deployment"></a>
@@ -194,13 +197,14 @@ Optional:
 - `region` (String) Cloud provider region, e.g., `us-west-2`.
 
 
-<a id="nestedatt--worker_nodes--physical_resources"></a>
-### Nested Schema for `worker_nodes.physical_resources`
+<a id="nestedatt--worker_nodes--required_resources"></a>
+### Nested Schema for `worker_nodes.required_resources`
 
 Optional:
 
 - `accelerator` (String) Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).
 - `cpu` (Number) Number of CPUs to allocate.
+- `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
 - `gpu` (Number) Number of GPUs to allocate.
 - `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
 - `tpu` (Number) Number of TPUs to allocate.
