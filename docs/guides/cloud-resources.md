@@ -70,6 +70,40 @@ in a Kubernetes cluster: `operator_status` (the same value as `status`, named ex
 `operator_version`, and `reported_at`. All three are null for VM resources, and null for a Kubernetes
 resource whose operator hasn't reported in yet — they populate once it has.
 
+## Multiple resource deployments on one cloud
+
+A cloud can have more than one `anyscale_cloud_resource` attached to it — for example, to add a
+second AWS region or a second compute stack alongside the one a cloud started with. The
+[`multi-resource-cloud-basic`](../../examples/multi-resource-cloud-basic) example is a complete,
+working two-resource configuration.
+
+A few things aren't obvious from the resource's schema alone:
+
+- **Only registered (BYOC) clouds accept additional resources.** A cloud that Anyscale manages
+  end-to-end (never had your own infrastructure explicitly attached) rejects a second
+  `anyscale_cloud_resource` at apply time with a `400`. To use more than one resource, the cloud needs
+  to be the "bring your own cloud" kind from the start.
+- **`name` only has to be unique per cloud, not globally.** Give any resource beyond the first its own
+  explicit, distinct `name` — the clearest way to know which backend resource a given
+  `anyscale_cloud_resource` block manages. Leaving `name` unset works too: the backend generates one
+  (`{compute_stack}-{provider}-{region}`, lowercased, with a numeric suffix appended on collision — e.g.
+  `vm-aws-us-east-2`, then `vm-aws-us-east-2-1`) and reads it back into state. Explicit is just more
+  self-documenting in your configuration.
+- **A duplicate explicit `name` on the same cloud fails loud, never silent.** `apply` surfaces the
+  API's error (`409`, name already in use) rather than merging into or overwriting the existing
+  resource. There's no "adopt" behavior — every `anyscale_cloud_resource` you apply either creates a
+  new backend resource or fails outright, never silently attaches to one that's already there.
+- **State loss recovers via `terraform import`, not a plain re-apply.** If a state entry for an
+  `anyscale_cloud_resource` is lost while the backend resource itself is still alive, re-running
+  `apply` does not reconcile the two:
+  - An explicitly-named block gets a `409` (that name is already taken on the cloud).
+  - An unnamed block may succeed and create a brand new, separately-suffixed backend resource instead
+    of reattaching to the original one — ordinary Terraform behavior for anything whose identity is
+    assigned by the server, not specific to this resource.
+
+  Either way, `terraform import` is the fix — see [Import](../resources/cloud_resource.md#import) for
+  the `cloud_id:name` syntax.
+
 ## Naming differences between resources and data sources
 
 A few concepts are named differently depending on which resource or data source you're looking at.

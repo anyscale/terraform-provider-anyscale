@@ -99,14 +99,16 @@ resource deployment separately.
 
 #### [multi-resource-cloud-basic](./multi-resource-cloud-basic/)
 
-Example demonstrating multiple resource deployments in a single cloud. Shows how to add multiple compute stacks to one cloud.
+Example demonstrating multiple resource deployments in a single cloud. Attaches two separate AWS VM
+foundations (distinct VPCs and `common_prefix`es, same region) to one Anyscale Cloud as two
+`anyscale_cloud_resource` blocks.
 
 **Use this when**: You need multiple resource deployments (e.g., multiple regions or compute stacks) in a single Anyscale Cloud.
 
 **What it demonstrates**:
 - Creating a cloud with multiple resource deployments
-- Managing multiple `anyscale_cloud_resource` resources
-- Multi-resource cloud patterns
+- Managing multiple `anyscale_cloud_resource` resources, each with its own explicit, distinct `name`
+- Multi-resource cardinality rules — see the [Cloud Resources guide](../docs/guides/cloud-resources.md#multiple-resource-deployments-on-one-cloud)
 
 ### Data Sources
 
