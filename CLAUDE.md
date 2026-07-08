@@ -98,6 +98,15 @@ make docs
 # Do not manually edit generated docs under docs/
 ```
 
+## Changelog Policy: When to Skip
+
+The `changelog-gate` CI check accepts EITHER a `.changelog/<PR#>.txt` fragment OR the `skip-changelog` label — one is required on every PR. See [CONTRIBUTING.md](CONTRIBUTING.md#changelog-fragments) ("No user-facing effect?") for the full policy and the fragment format; this section is the short agent-facing version.
+
+- If a PR contains **no changes that require a new provider version** — e.g. CI/tooling, tests, internal docs, or examples-only edits **outside `examples/resources/`, `examples/data-sources/`, and `examples/provider/`** — apply the **`skip-changelog`** label instead of adding a fragment. Those three example directories feed `tfplugindocs` and land on registry-published doc pages, so changes there are provider-facing even though they are "just an example."
+- Only changes to the provider itself (schemas, resources/data sources, observable provider behavior, user-facing bug fixes) require a `.changelog/<PR#>.txt` fragment — folded into the next version bump at release time, not immediately.
+
+If you are unsure whether a change is user-facing, add a fragment — it is the safe default.
+
 ## Terraform Local Testing (dev_overrides)
 
 This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provider binary.
@@ -253,6 +262,42 @@ These targets run terraform apply and terraform destroy. Ensure your credentials
   - Use Authorization: Bearer $ANYSCALE_CLI_TOKEN
   - Do not print real tokens
   - The $ANYSCALE_CLI_TOKEN may be read from an environment variable, or read from ~/.anyscale/credentials.json
+
+### API generations: always prefer `api/v2`
+
+The Anyscale backend exposes more than one API generation. Provider code should target
+`api/v2` whenever an equivalent endpoint exists.
+
+- **`api/v2/...`** — the current internal API generation. It receives changes and new
+  fields fastest and is the long-term migration target that every endpoint should converge
+  on. Default to it for all new resources, data sources, acctest helpers, and sweepers.
+- **`ext/v0/...`** — an older generation that may lag or have limitations (missing fields,
+  stale shapes). Do **not** add new `ext/v0` calls. When you touch code that still uses
+  `ext/v0`, prefer migrating it to the `api/v2` equivalent.
+
+When migrating an endpoint from `ext/v0` to `api/v2`, do **not** assume it is a pure rename.
+**Trace each call site against the real backend model** (both request and response shapes)
+before converting — some sites are field-identical aliases that swap near-free, but others
+are genuine code changes. Verify parity first, because a subtle mismatch can fail *silently*
+rather than erroring. Concrete example from the compute-config sync: list/search pagination
+is passed inside the request **body** on `ext/v0` but as URL **query parameters** on
+`api/v2`; getting that wrong silently truncates the result list (e.g. a sweep that misses
+candidates and leaks resources) rather than returning an error. Migrate all related call
+sites together, not piecemeal.
+
+Point-in-time note (2026-07, compute-config sync). The `anyscale_compute_config`
+**resource** already uses `api/v2/compute_templates`. Still on `ext/v0/cluster_computes` at
+the time of writing: the data-source **read** path, the acctest **CheckDestroy** helper, the
+**exists-in-API** check, and the **sweeper search** call. CC5a moved the data source's
+*parsing* onto shared typed structs but deliberately left the *endpoint* on `ext/v0`; the
+endpoint move was scoped as CC5b and **deferred** — a real per-site trace showed 5 of those
+8 touchpoints were near-free, but the sweeper search hit the body-vs-query pagination
+difference above, whose silent-truncation failure mode did not clear the bar for a
+non-blocking cleanup. Converging the remaining sites onto `api/v2` is the intended
+direction. This split is unlikely to be unique to compute_config — if another resource shows
+the same pattern (resource on `api/v2`, its data source or sweeper still on `ext/v0`), apply
+the same policy and the same trace-don't-guess method there. Re-check current code before
+relying on any specific detail in this note.
 
 ## Test Resource Naming and Sweeping
 

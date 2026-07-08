@@ -2,7 +2,8 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
+	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -25,7 +26,7 @@ func TestNodeConfigToAPI(t *testing.T) {
 				map[string]attr.Type{
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
@@ -40,7 +41,7 @@ func TestNodeConfigToAPI(t *testing.T) {
 							"RAM": types.Float64Value(32),
 						},
 					),
-					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
@@ -63,7 +64,7 @@ func TestNodeConfigToAPI(t *testing.T) {
 				map[string]attr.Type{
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
@@ -72,7 +73,7 @@ func TestNodeConfigToAPI(t *testing.T) {
 				map[string]attr.Value{
 					"instance_type":            types.StringValue("m5.xlarge"),
 					"resources":                types.MapNull(types.Float64Type),
-					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringValue(`{"disk_size": 100, "enable_monitoring": true}`),
 					"flags":                    types.StringNull(),
@@ -174,7 +175,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringType,
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
@@ -187,7 +188,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringValue("ON_DEMAND"),
 					"instance_type":            types.StringValue("m5.large"),
 					"resources":                types.MapNull(types.Float64Type),
-					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
@@ -214,7 +215,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringType,
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
@@ -227,7 +228,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringValue("SPOT"),
 					"instance_type":            types.StringValue("m5.xlarge"),
 					"resources":                types.MapNull(types.Float64Type),
-					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
@@ -254,7 +255,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringType,
 					"instance_type":            types.StringType,
 					"resources":                types.MapType{ElemType: types.Float64Type},
-					"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
@@ -267,7 +268,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"market_type":              types.StringValue("PREFER_SPOT"),
 					"instance_type":            types.StringValue("m5.2xlarge"),
 					"resources":                types.MapNull(types.Float64Type),
-					"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
+					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
@@ -381,75 +382,109 @@ func TestMarketTypeTranslation(t *testing.T) {
 	}
 }
 
-// TestDynamicToInterfaceConversion tests conversion of Dynamic values
+// TestDynamicToInterfaceConversion tests the real DynamicToInterface function
+// (framework_helpers.go) against types.Dynamic shapes matching how Terraform
+// actually represents flags/advanced_instance_config HCL object literals -
+// the previous version of this test only re-parsed raw JSON and never called
+// DynamicToInterface at all, so it could not have caught a bug in it.
 func TestDynamicToInterfaceConversion(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name      string
-		input     string
-		wantMap   bool
-		wantValue interface{}
-		wantErr   bool
+		name    string
+		dynamic types.Dynamic
+		want    map[string]interface{}
 	}{
 		{
-			name:    "simple flag object",
-			input:   `{"enable_autoscaling": true, "max_scale": 10}`,
-			wantMap: true,
-			wantValue: map[string]interface{}{
+			name: "flat object with mixed types",
+			dynamic: types.DynamicValue(types.ObjectValueMust(
+				map[string]attr.Type{
+					"enable_autoscaling": types.BoolType,
+					"max_scale":          types.NumberType,
+					"pool_name":          types.StringType,
+				},
+				map[string]attr.Value{
+					"enable_autoscaling": types.BoolValue(true),
+					"max_scale":          types.NumberValue(big.NewFloat(10)),
+					"pool_name":          types.StringValue("default"),
+				},
+			)),
+			want: map[string]interface{}{
 				"enable_autoscaling": true,
-				"max_scale":          float64(10),
+				"max_scale":          int64(10),
+				"pool_name":          "default",
 			},
-			wantErr: false,
 		},
 		{
-			name:    "nested configuration",
-			input:   `{"disk": {"size": 100, "type": "ssd"}, "monitoring": {"enabled": true}}`,
-			wantMap: true,
-			wantValue: map[string]interface{}{
+			// The schema's MarkdownDescription for flags/advanced_instance_config
+			// specifically promises nested object support - this is the case the
+			// old test claimed to cover via "nested configuration" but did not.
+			name: "nested object with mixed types",
+			dynamic: types.DynamicValue(types.ObjectValueMust(
+				map[string]attr.Type{
+					"monitoring": types.ObjectType{AttrTypes: map[string]attr.Type{
+						"enabled": types.BoolType,
+					}},
+					"disk": types.ObjectType{AttrTypes: map[string]attr.Type{
+						"size": types.NumberType,
+						"type": types.StringType,
+					}},
+				},
+				map[string]attr.Value{
+					"monitoring": types.ObjectValueMust(
+						map[string]attr.Type{"enabled": types.BoolType},
+						map[string]attr.Value{"enabled": types.BoolValue(true)},
+					),
+					"disk": types.ObjectValueMust(
+						map[string]attr.Type{"size": types.NumberType, "type": types.StringType},
+						map[string]attr.Value{
+							"size": types.NumberValue(big.NewFloat(100)),
+							"type": types.StringValue("ssd"),
+						},
+					),
+				},
+			)),
+			want: map[string]interface{}{
+				"monitoring": map[string]interface{}{"enabled": true},
 				"disk": map[string]interface{}{
-					"size": float64(100),
+					"size": int64(100),
 					"type": "ssd",
 				},
-				"monitoring": map[string]interface{}{
-					"enabled": true,
-				},
 			},
-			wantErr: false,
+		},
+		{
+			name: "list-valued attribute inside a dynamic object",
+			dynamic: types.DynamicValue(types.ObjectValueMust(
+				map[string]attr.Type{
+					"allowed_zones": types.ListType{ElemType: types.StringType},
+				},
+				map[string]attr.Value{
+					"allowed_zones": types.ListValueMust(types.StringType, []attr.Value{
+						types.StringValue("us-west-2a"),
+						types.StringValue("us-west-2b"),
+					}),
+				},
+			)),
+			want: map[string]interface{}{
+				"allowed_zones": []interface{}{"us-west-2a", "us-west-2b"},
+			},
+		},
+		{
+			name:    "null dynamic returns nil map and no error",
+			dynamic: types.DynamicNull(),
+			want:    nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Parse JSON to test conversion
-			var intermediate interface{}
-			err := json.Unmarshal([]byte(tt.input), &intermediate)
+			got, err := DynamicToInterface(ctx, tt.dynamic)
 			if err != nil {
-				t.Fatalf("Failed to parse test input: %v", err)
+				t.Fatalf("DynamicToInterface() unexpected error = %v", err)
 			}
-
-			// Verify structure matches expected
-			if tt.wantMap {
-				gotMap, ok := intermediate.(map[string]interface{})
-				if !ok {
-					t.Errorf("Expected map[string]interface{}, got %T", intermediate)
-					return
-				}
-
-				expectedMap := tt.wantValue.(map[string]interface{})
-				if len(gotMap) != len(expectedMap) {
-					t.Errorf("Map length = %d, want %d", len(gotMap), len(expectedMap))
-				}
-
-				// Verify all keys exist
-				for key := range expectedMap {
-					if _, ok := gotMap[key]; !ok {
-						t.Errorf("Missing expected key: %s", key)
-					}
-				}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("DynamicToInterface() = %#v, want %#v", got, tt.want)
 			}
-
-			_ = ctx // Use ctx to avoid unused variable warning
 		})
 	}
 }
@@ -466,7 +501,7 @@ func TestWorkerNameDefaulting(t *testing.T) {
 			"market_type":              types.StringType,
 			"instance_type":            types.StringType,
 			"resources":                types.MapType{ElemType: types.Float64Type},
-			"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
@@ -479,7 +514,7 @@ func TestWorkerNameDefaulting(t *testing.T) {
 			"market_type":              types.StringValue("ON_DEMAND"),
 			"instance_type":            types.StringValue("n2-standard-4"),
 			"resources":                types.MapNull(types.Float64Type),
-			"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
+			"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 			"labels":                   types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
@@ -498,27 +533,30 @@ func TestWorkerNameDefaulting(t *testing.T) {
 	}
 }
 
-// TestPhysicalResourcesConversion tests conversion of physical_resources for custom instance types
-func TestPhysicalResourcesConversion(t *testing.T) {
+// TestRequiredResourcesConversion tests conversion of required_resources for
+// custom instance types (CC1: renamed from physical_resources to match the
+// API field name; CC4: cpu_architecture added).
+func TestRequiredResourcesConversion(t *testing.T) {
 	ctx := context.Background()
 
-	// Build physical_resources object
-	physResourcesObj := types.ObjectValueMust(
+	requiredResourcesObj := types.ObjectValueMust(
 		map[string]attr.Type{
-			"cpu":         types.Int64Type,
-			"memory":      types.StringType,
-			"gpu":         types.Int64Type,
-			"accelerator": types.StringType,
-			"tpu":         types.Int64Type,
-			"tpu_hosts":   types.Int64Type,
+			"cpu":              types.Int64Type,
+			"memory":           types.StringType,
+			"gpu":              types.Int64Type,
+			"accelerator":      types.StringType,
+			"tpu":              types.Int64Type,
+			"tpu_hosts":        types.Int64Type,
+			"cpu_architecture": types.StringType,
 		},
 		map[string]attr.Value{
-			"cpu":         types.Int64Value(16),
-			"memory":      types.StringValue("64Gi"),
-			"gpu":         types.Int64Value(4),
-			"accelerator": types.StringValue("A100"),
-			"tpu":         types.Int64Null(),
-			"tpu_hosts":   types.Int64Null(),
+			"cpu":              types.Int64Value(16),
+			"memory":           types.StringValue("64Gi"),
+			"gpu":              types.Int64Value(4),
+			"accelerator":      types.StringValue("A100"),
+			"tpu":              types.Int64Null(),
+			"tpu_hosts":        types.Int64Null(),
+			"cpu_architecture": types.StringValue("arm64"),
 		},
 	)
 
@@ -526,7 +564,7 @@ func TestPhysicalResourcesConversion(t *testing.T) {
 		map[string]attr.Type{
 			"instance_type":            types.StringType,
 			"resources":                types.MapType{ElemType: types.Float64Type},
-			"physical_resources":       physResourcesObj.Type(ctx),
+			"required_resources":       requiredResourcesObj.Type(ctx),
 			"labels":                   types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
@@ -535,7 +573,7 @@ func TestPhysicalResourcesConversion(t *testing.T) {
 		map[string]attr.Value{
 			"instance_type":            types.StringValue("custom"),
 			"resources":                types.MapNull(types.Float64Type),
-			"physical_resources":       physResourcesObj,
+			"required_resources":       requiredResourcesObj,
 			"labels":                   types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
@@ -548,29 +586,36 @@ func TestPhysicalResourcesConversion(t *testing.T) {
 		t.Fatalf("nodeConfigToAPI() error = %v", err)
 	}
 
-	// Verify physical_resources was converted (API field name for physical_resources)
-	physRes, ok := got["physical_resources"]
+	// Verify required_resources was converted under its real API key - CC1's
+	// whole point is that "physical_resources" is rejected by the backend, so
+	// pinning the API key name here is the regression guard for the rename.
+	reqRes, ok := got["required_resources"]
 	if !ok {
-		t.Fatal("nodeConfigToAPI() missing physical_resources")
+		t.Fatal("nodeConfigToAPI() missing required_resources")
+	}
+	if _, ok := got["physical_resources"]; ok {
+		t.Error("nodeConfigToAPI() must NOT send physical_resources - the backend rejects it (CC1)")
 	}
 
-	physResMap, ok := physRes.(map[string]interface{})
+	reqResMap, ok := reqRes.(map[string]interface{})
 	if !ok {
-		t.Fatalf("physical_resources is not a map, got %T", physRes)
+		t.Fatalf("required_resources is not a map, got %T", reqRes)
 	}
 
-	// Verify fields
-	if physResMap["cpu"] != int64(16) {
-		t.Errorf("physical_resources.cpu = %v, want 16", physResMap["cpu"])
+	if reqResMap["cpu"] != int64(16) {
+		t.Errorf("required_resources.cpu = %v, want 16", reqResMap["cpu"])
 	}
-	if physResMap["memory"] != "64Gi" {
-		t.Errorf("physical_resources.memory = %v, want '64Gi'", physResMap["memory"])
+	if reqResMap["memory"] != "64Gi" {
+		t.Errorf("required_resources.memory = %v, want '64Gi'", reqResMap["memory"])
 	}
-	if physResMap["gpu"] != int64(4) {
-		t.Errorf("physical_resources.gpu = %v, want 4", physResMap["gpu"])
+	if reqResMap["gpu"] != int64(4) {
+		t.Errorf("required_resources.gpu = %v, want 4", reqResMap["gpu"])
 	}
-	if physResMap["accelerator"] != "A100" {
-		t.Errorf("physical_resources.accelerator = %v, want 'A100'", physResMap["accelerator"])
+	if reqResMap["accelerator"] != "A100" {
+		t.Errorf("required_resources.accelerator = %v, want 'A100'", reqResMap["accelerator"])
+	}
+	if reqResMap["cpu_architecture"] != "arm64" {
+		t.Errorf("required_resources.cpu_architecture = %v, want 'arm64'", reqResMap["cpu_architecture"])
 	}
 }
 
@@ -597,7 +642,7 @@ func TestCloudDeploymentConversion(t *testing.T) {
 		map[string]attr.Type{
 			"instance_type":            types.StringType,
 			"resources":                types.MapType{ElemType: types.Float64Type},
-			"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
@@ -606,7 +651,7 @@ func TestCloudDeploymentConversion(t *testing.T) {
 		map[string]attr.Value{
 			"instance_type":            types.StringValue("m5.large"),
 			"resources":                types.MapNull(types.Float64Type),
-			"physical_resources":       types.ObjectNull(map[string]attr.Type{}),
+			"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 			"labels":                   types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
@@ -650,7 +695,7 @@ func TestNodeLabelsConversion(t *testing.T) {
 		map[string]attr.Type{
 			"instance_type":            types.StringType,
 			"resources":                types.MapType{ElemType: types.Float64Type},
-			"physical_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
+			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
@@ -659,7 +704,7 @@ func TestNodeLabelsConversion(t *testing.T) {
 		map[string]attr.Value{
 			"instance_type":      types.StringValue("m5.xlarge"),
 			"resources":          types.MapNull(types.Float64Type),
-			"physical_resources": types.ObjectNull(map[string]attr.Type{}),
+			"required_resources": types.ObjectNull(map[string]attr.Type{}),
 			"labels": types.MapValueMust(
 				types.StringType,
 				map[string]attr.Value{

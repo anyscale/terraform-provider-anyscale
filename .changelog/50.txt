@@ -1,0 +1,44 @@
+```
+release-note:breaking-change
+resource/anyscale_compute_config: physical_resources is renamed to required_resources on head_node and worker_nodes to match what the API actually accepts. The backend has always rejected the old attribute name on any non-empty value, so this affects configuration text but not any resource that ever successfully applied; update the attribute name and re-run terraform plan. Existing state is upgraded automatically.
+```
+
+```
+release-note:breaking-change
+resource/anyscale_compute_config: changing name now replaces the resource instead of silently leaving an orphaned, unmanaged duplicate compute config behind. Review the plan before applying if you are renaming an existing resource.
+```
+
+```
+release-note:fixed
+resource/anyscale_compute_config: changing cloud_id or cloud_name to a different cloud is now rejected with a clear error at apply time instead of silently creating an orphaned, unmanaged duplicate compute config in the new cloud. To move a compute config to a different cloud, use terraform apply -replace or taint instead of editing cloud_id or cloud_name in place. Switching between cloud_id and cloud_name for the same cloud is unaffected.
+```
+
+```
+release-note:added
+resource/anyscale_compute_config: idle_termination_minutes and maximum_uptime_minutes are now settable; previously they were only readable through the data source.
+```
+
+```
+release-note:added
+resource/anyscale_compute_config: required_resources gains cpu_architecture for selecting x86_64 or arm64.
+```
+
+```
+release-note:fixed
+data-source/anyscale_compute_config: enable_cross_zone_scaling now correctly reflects the actual configured value instead of always reading as false.
+```
+
+```
+release-note:added
+data-source/anyscale_compute_config: gains zones, head_node, and worker_nodes for parity with the resource.
+```
+
+```
+release-note:fixed
+resource/anyscale_compute_config: a compute config archived outside Terraform is now correctly detected on the next refresh and removed from state instead of lingering forever.
+```
+
+```
+release-note:fixed
+resource/anyscale_compute_config: importing a compute config now recovers its flags and advanced_instance_config values from the backend into state instead of leaving them null; a config that already matches plans cleanly, one that omits these values now shows a clear diff instead of silently dropping them on the next apply.
+```

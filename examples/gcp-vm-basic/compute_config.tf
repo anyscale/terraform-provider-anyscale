@@ -185,31 +185,34 @@ resource "anyscale_compute_config" "simple" {
 #   cloud_id   = anyscale_cloud.primary.id
 #   project_id = var.anyscale_project_id
 #
-#   head_node {
+#   head_node = {
 #     instance_type = "custom"
 #
-#     required_resources {
-#       cpu    = 4
-#       memory = "16Gi"
+#     required_resources = {
+#       cpu              = 4
+#       memory           = "16Gi"
+#       cpu_architecture = "x86_64" # optional; also accepts "arm64"
 #     }
 #   }
 #
-#   worker_nodes {
-#     instance_type = "custom"
-#     min_nodes     = 1
-#     max_nodes     = 10
+#   worker_nodes = [
+#     {
+#       instance_type = "custom"
+#       min_nodes     = 1
+#       max_nodes     = 10
 #
-#     required_resources {
-#       cpu    = 8
-#       memory = "32Gi"
-#       gpu    = 1
-#       accelerator = "T4"
-#     }
+#       required_resources = {
+#         cpu         = 8
+#         memory      = "32Gi"
+#         gpu         = 1
+#         accelerator = "T4"
+#       }
 #
-#     labels = {
-#       "ray.io/accelerator-type" = "T4"
+#       labels = {
+#         "ray.io/accelerator-type" = "T4"
+#       }
 #     }
-#   }
+#   ]
 # }
 
 # TPU compute config example for GKE
@@ -220,38 +223,41 @@ resource "anyscale_compute_config" "simple" {
 #   cloud_id   = anyscale_cloud.primary.id
 #   project_id = var.anyscale_project_id
 #
-#   head_node {
+#   head_node = {
 #     instance_type = "n2-standard-8"
 #   }
 #
-#   worker_nodes {
-#     name          = "tpu-workers"
-#     instance_type = "custom"
-#     min_nodes     = 0
-#     max_nodes     = 4
+#   worker_nodes = [
+#     {
+#       name          = "tpu-workers"
+#       instance_type = "custom"
+#       min_nodes     = 0
+#       max_nodes     = 4
 #
-#     required_resources {
-#       cpu       = 7
-#       memory    = "12Gi"
-#       tpu       = 4
-#       tpu_hosts = 4
-#       accelerator = "TPU-V6E"
+#       required_resources = {
+#         cpu         = 7
+#         memory      = "12Gi"
+#         tpu         = 4
+#         tpu_hosts   = 4
+#         accelerator = "TPU-V6E"
+#       }
+#
+#       # TPU labels for node selector derivation
+#       labels = {
+#         "ray.io/accelerator-type" = "TPU-V6E"
+#         "ray.io/tpu-topology"     = "2x2"
+#       }
+#
+#       # Alternative: explicit node selectors (node-level advanced_instance_config
+#       # is a JSON string, unlike the top-level attribute of the same name)
+#       # advanced_instance_config = jsonencode({
+#       #   spec = {
+#       #     nodeSelector = {
+#       #       "cloud.google.com/gke-tpu-topology"    = "2x2"
+#       #       "cloud.google.com/gke-tpu-accelerator" = "tpu-v6e-podslice"
+#       #     }
+#       #   }
+#       # })
 #     }
-#
-#     # TPU labels for node selector derivation
-#     labels = {
-#       "ray.io/accelerator-type" = "TPU-V6E"
-#       "ray.io/tpu-topology"     = "2x2"
-#     }
-#
-#     # Alternative: explicit node selectors
-#     # advanced_instance_config = ({
-#     #   spec = {
-#     #     nodeSelector = {
-#     #       "cloud.google.com/gke-tpu-topology"     = "2x2"
-#     #       "cloud.google.com/gke-tpu-accelerator" = "tpu-v6e-podslice"
-#     #     }
-#     #   }
-#     # })
-#   }
+#   ]
 # }

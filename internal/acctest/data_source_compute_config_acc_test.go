@@ -40,6 +40,22 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 					// Verify versions list contains at least version 1
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.#", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.0", "1"),
+					// CC6: data source node topology parity with the resource.
+					// Confirmed live against the real API that "resources"
+					// itself comes back null from BOTH api/v2 and ext/v0 for an
+					// instance_type-only head node (no client-side auto-fill
+					// happens server-side despite the schema description's
+					// wording) -- identical between the two endpoints, which is
+					// exactly the CC5a claim this exercises, so instance_type is
+					// the meaningful, verified-true assertion here.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "head_node.instance_type", "m5.large"),
+
+					// CC5a acceptance (architect): the by-id lookup path must
+					// stay green after switching Read to the shared typed
+					// structs, not just the by-name path exercised above.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "name", configName),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "version", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "head_node.instance_type", "m5.large"),
 				),
 			},
 		},
@@ -89,6 +105,56 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 	})
 }
 
+// TestAccComputeConfigDataSource_EnableCrossZoneScaling is the regression
+// test for a real, pre-existing bug shipwright found while reviewing CC5a's
+// diff: the data source used to look for a top-level enable_cross_zone_scaling
+// JSON key on the config that has never existed - the real value has only
+// ever lived inside flags["allow-cross-zone-autoscaling"], exactly where the
+// resource correctly reads it from. That miss always failed silently (the
+// map-index `ok` check was always false), so the data source's
+// enable_cross_zone_scaling output read as false for every user regardless
+// of what was actually configured, since before this quest started. CC5a's
+// switch to the shared typed parsing (resolveEffectiveComputeConfig, the
+// same helper Read uses) fixes this as a side effect. This proves it against
+// a real, explicitly-true-configured value, not just by re-reading the code.
+func TestAccComputeConfigDataSource_EnableCrossZoneScaling(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetComputeConfigCloudID(t)
+	configName := UniqueName(t, "ds-compute-xzone")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name                      = %[1]q
+  cloud_id                  = %[2]q
+  enable_cross_zone_scaling = true
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+}
+
+data "anyscale_compute_config" "by_name" {
+  name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+`, configName, cloudID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "enable_cross_zone_scaling", "true"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "enable_cross_zone_scaling", "true"),
+				),
+			},
+		},
+	})
+}
+
 func testAccComputeConfigDataSourceConfig_basic(cloudID, configName string) string {
 	return fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
@@ -102,6 +168,15 @@ resource "anyscale_compute_config" "test" {
 
 data "anyscale_compute_config" "by_name" {
   name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+
+data "anyscale_compute_config" "by_id" {
+  # The data source's id input is the version-specific API id (what the
+  # resource calls config_id), not the resource's own id (which is the
+  # stable name) -- confusingly overlapping names for two different things.
+  id = anyscale_compute_config.test.config_id
 
   depends_on = [anyscale_compute_config.test]
 }

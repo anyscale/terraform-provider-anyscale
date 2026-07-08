@@ -2,10 +2,13 @@ package acctest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -73,14 +76,20 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 						// Import using config_id (version-specific API ID), not name
 						ImportStateIdFunc: testAccComputeConfigImportStateIdFunc("anyscale_compute_config.test"),
 						ImportStateVerifyIgnore: []string{
-							"head_node",                 // nested attrs auto-filled from instance_type by API; mask-vs-prior logic in Read cannot recover original null markers on import
-							"worker_nodes",              // same as head_node: API normalizes resources/physical_resources and import has no prior state to mask against
-							"enable_cross_zone_scaling", // serialized into flags["allow-cross-zone-autoscaling"]; default false matches null on configs that omit it
-							"min_resources",             // serialized into flags["min_resources"]; null on Basic test config but API returns whatever it normalized
-							"max_resources",             // serialized into flags["max_resources"]; null on Basic test config but API returns whatever it normalized
-							"advanced_instance_config",  // Dynamic type: API may return null vs empty maps differently; preserved-as-configured by Read
-							"flags",                     // Dynamic type at top level: user flags preserved-as-configured to avoid representation drift
-							"zones",                     // API replaces empty with ["any"]; preserved-as-configured by Read
+							"head_node",     // nested attrs auto-filled from instance_type by API; mask-vs-prior logic in Read cannot recover original null markers on import
+							"worker_nodes",  // same as head_node: API normalizes resources/physical_resources and import has no prior state to mask against
+							"min_resources", // serialized into flags["min_resources"]; null on Basic test config but API returns whatever it normalized
+							"max_resources", // serialized into flags["max_resources"]; null on Basic test config but API returns whatever it normalized
+							"zones",         // API replaces empty with ["any"]; preserved-as-configured by Read
+							// enable_cross_zone_scaling, advanced_instance_config, and flags used
+							// to be listed here too, with a comment that predates CC11/CC12/CC14:
+							// CC14 made enable_cross_zone_scaling resolve to false unconditionally
+							// on import instead of staying null, and CC12 made ImportState recover
+							// flags/advanced_instance_config from the API - for THIS test's config,
+							// which never sets any of the three, both now correctly stay/resolve to
+							// their pre-import values with nothing to ignore. See
+							// TestAccComputeConfigImportRecoversWriteOnlyFields(_RealAPI) for the
+							// actual CC12 recovery-with-real-values proof.
 						},
 					},
 				},
@@ -509,6 +518,18 @@ resource "anyscale_compute_config" "test" {
 
 // TestAccComputeConfigResource_Disappears verifies that an out-of-band archive
 // of the compute config is detected by the next plan as drift.
+//
+// GetAllConfiguredClouds used to check an inline cloud_resources field that
+// GET /api/v2/clouds never actually populates, so this test silently skipped
+// in every environment, including CI, regardless of how many healthy clouds
+// existed. Fixing that discovery bug (see cloudHasResources) made this test
+// run for the first time and immediately exposed the real, previously-hidden
+// bug it was written to catch: Read() did not treat an archived_at compute
+// config as gone, so an out-of-band archive produced an empty refresh plan
+// instead of drift. That is CC11, now fixed (Read and ImportState both check
+// ArchivedAt and remove the resource from state the same way as the 404
+// path) - this test was stopgap-skipped with a tracked reason in the
+// meantime and is un-skipped now that the fix is confirmed present.
 func TestAccComputeConfigResource_Disappears(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -581,6 +602,334 @@ func testAccDeleteComputeConfigViaAPI(resourceName string) resource.TestCheckFun
 		default:
 			body, _ := io.ReadAll(resp.Body)
 			return fmt.Errorf("unexpected status %d archiving compute config %s: %s", resp.StatusCode, configID, truncateBody(string(body), 256))
+		}
+	}
+}
+
+// TestAccComputeConfigImportRecoversWriteOnlyFields_RealAPI is the real-API
+// companion to the mock-server version of this test (see
+// resource_compute_config_lifecycle_acc_test.go for the full CC12 background
+// and the three-point verify-gate this proves). The mock version is the
+// CI-durable floor; this one proves the same three gates against the actual
+// Anyscale API and, specifically, against a REAL per-node-shaped payload the
+// backend accepts, closing forge's stated least-confident spot: whether Go's
+// json.Marshal of the recovered advanced_instance_config/flags actually
+// comes back byte-identical to what a user's own jsonencode() would produce,
+// which only a real round trip through the framework can prove.
+//
+// Payload validated live against the real API by forge before this test was
+// written (see quest chat): disable_gpu_health_checks/idle_termination_seconds
+// as generic top-level flags (neither is one of the three keys ImportState
+// strips out as special-cased: min_resources, max_resources,
+// allow-cross-zone-autoscaling), and a TagSpecifications-shaped
+// advanced_instance_config, both confirmed accepted as-is by the backend.
+func TestAccComputeConfigImportRecoversWriteOnlyFields_RealAPI(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	client, err := GetTestClient()
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	cloudID := GetComputeConfigCloudID(t)
+	ctx := context.Background()
+	configName := UniqueName(t, "cc12-import-real")
+
+	createPayload := map[string]interface{}{
+		"name": configName,
+		"config": map[string]interface{}{
+			"cloud_id": cloudID,
+			"head_node_type": map[string]interface{}{
+				"name":          "head",
+				"instance_type": "m5.large",
+			},
+			"flags": map[string]interface{}{
+				"disable_gpu_health_checks": true,
+				"idle_termination_seconds":  60,
+			},
+			"advanced_configurations_json": map[string]interface{}{
+				"TagSpecifications": []map[string]interface{}{
+					{
+						"ResourceType": "instance",
+						"Tags": []map[string]interface{}{
+							{"Key": "team", "Value": "ml-platform"},
+						},
+					},
+				},
+			},
+		},
+		"anonymous":   false,
+		"new_version": true,
+	}
+	body, _ := json.Marshal(createPayload)
+	resp, err := client.DoRequest(ctx, "POST", "/api/v2/compute_templates/", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	var created struct {
+		Result struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(raw, &created)
+	if created.Result.ID == "" {
+		t.Fatalf("create failed: status=%d body=%s", resp.StatusCode, truncateBody(string(raw), 500))
+	}
+	configID := created.Result.ID
+	t.Cleanup(func() {
+		r, err := client.DoRequest(context.Background(), "POST", fmt.Sprintf("/api/v2/compute_templates/%s/archive", configID), nil)
+		if err != nil {
+			t.Logf("cleanup archive %s failed: %v", configID, err)
+			return
+		}
+		_ = r.Body.Close()
+	})
+
+	configOmittingWriteOnlyFields := fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = %[1]q
+  cloud_id = %[2]q
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+}
+`, configName, cloudID)
+
+	configMatchingRecoveredValues := fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = %[1]q
+  cloud_id = %[2]q
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+
+  flags = {
+    disable_gpu_health_checks = true
+    idle_termination_seconds  = 60
+  }
+
+  advanced_instance_config = {
+    TagSpecifications = [
+      {
+        ResourceType = "instance"
+        Tags = [
+          { Key = "team", Value = "ml-platform" }
+        ]
+      }
+    ]
+  }
+}
+`, configName, cloudID)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				ResourceName:       "anyscale_compute_config.test",
+				ImportState:        true,
+				ImportStateId:      configID,
+				ImportStatePersist: true,
+				Config:             configOmittingWriteOnlyFields,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "config_id", configID),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "flags.disable_gpu_health_checks", "true"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "flags.idle_termination_seconds", "60"),
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "advanced_instance_config.TagSpecifications"),
+				),
+			},
+			{
+				// Gate 1 + gate 3: real json.Marshal round-trip proof, forge's
+				// stated least-confident spot.
+				Config:             configMatchingRecoveredValues,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+			{
+				// Gate 2: truthful removal diff, not silent.
+				Config:             configOmittingWriteOnlyFields,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// TestAccComputeConfigResource_K8S proves compute configs work on a K8S
+// cloud. Earlier framing here read "K8S clouds use operator-defined pod
+// shapes, not instance types" and skipped K8S entirely; that undersold it -
+// the Platform backend's own default-compute-config selection for K8S
+// (get_smallest_cpu_instance_type) draws from the cloud's own registered
+// instance types via GET /api/v2/clouds/{cloud_id}/additional_instance_types,
+// the same set ResolveK8sInstanceType queries here, rather than a
+// provider-wide SKU catalog like AWS/GCP's "m5.large". A fixed literal never
+// works across K8S clouds the way "m5.large" does for every AWS cloud, so
+// this must be resolved per-cloud instead of hardcoded like InstanceTypeSet.
+//
+// Honestly gated, not silently skipped: as of this writing the CI test org
+// has zero K8S clouds (verified directly against the live API - one AWS/VM
+// cloud total), so this reports why it is skipping rather than vanishing
+// without a trace, and runs for real the moment a K8S fixture exists.
+func TestAccComputeConfigResource_K8S(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	k8sClouds := GetAllK8sClouds(t)
+	if len(k8sClouds) == 0 {
+		t.Skip("No K8S clouds configured in this org - compute-config K8S coverage cannot run here. " +
+			"Not a code gap: ResolveK8sInstanceType and this test are ready, they need a K8S cloud fixture.")
+	}
+	cloud := k8sClouds[0]
+
+	instanceType := ResolveK8sInstanceType(t, cloud.ID)
+	if instanceType == "" {
+		t.Skipf("K8S cloud %s (%s) has no registered CPU-only instance types available for a compute config", cloud.Name, cloud.ID)
+	}
+
+	configName := UniqueName(t, "compute-config-k8s")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigResourceConfig_basic(configName, cloud.ID, instanceType),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "cloud_id", cloud.ID),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", instanceType),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+
+// TestAccComputeConfigResource_RenameForcesReplace is the regression test for
+// CC3a. Before this fix, renaming a compute config sent the new name to the
+// same backend "create-or-new-version" endpoint used for Update, which
+// silently created a brand-new config under the new name and left the old
+// one live and un-archived - a real, live-verified orphan bug (see
+// tfp-assayer's rename-orphan probe in the design discussion), not
+// hypothetical. name now carries RequiresReplace, so Terraform's own
+// destroy-then-create replace cycle runs the resource's normal Delete/Create
+// path instead: the old config gets archived (proving Delete ran on it, not
+// silently abandoned) and a genuinely new config is provisioned under the new
+// name. This is the actual regression coverage - a plan-only check would only
+// prove the plan LOOKS right; the archived-check after a real apply proves
+// the orphan is actually closed end to end.
+func TestAccComputeConfigResource_RenameForcesReplace(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetComputeConfigCloudID(t)
+	originalName := UniqueName(t, "compute-config-rename-orig")
+	renamedName := UniqueName(t, "compute-config-rename-new")
+
+	var originalConfigID string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/ext/v0/cluster_computes/%s", "result.archived_at"),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeConfigResourceConfig_update(cloudID, originalName, "m5.large"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", originalName),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					testAccCaptureComputeConfigID("anyscale_compute_config.test", &originalConfigID),
+				),
+			},
+			{
+				Config: testAccComputeConfigResourceConfig_update(cloudID, renamedName, "m5.large"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_compute_config.test", plancheck.ResourceActionReplace),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", renamedName),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
+					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources["anyscale_compute_config.test"]
+						if !ok {
+							return fmt.Errorf("not found: anyscale_compute_config.test")
+						}
+						newConfigID := rs.Primary.Attributes["config_id"]
+						if newConfigID == "" {
+							return fmt.Errorf("new config_id is empty")
+						}
+						if newConfigID == originalConfigID {
+							return fmt.Errorf("config_id did not change after a rename that should force replace: still %s", newConfigID)
+						}
+						return nil
+					},
+					testAccCheckComputeConfigArchivedByID(&originalConfigID),
+				),
+			},
+		},
+	})
+}
+
+// testAccCheckComputeConfigArchivedByID polls the given (pre-replace) config
+// ID directly via the API - not via Terraform state, since a replaced
+// resource's old ID is no longer in state by the time this runs - and
+// verifies it was archived as part of the replace's destroy-then-create
+// cycle. This is the actual proof the rename-orphan bug is closed: a clean
+// plan alone only shows the NEW config looks right, not that the OLD one was
+// ever cleaned up.
+func testAccCheckComputeConfigArchivedByID(id *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		if id == nil || *id == "" {
+			return fmt.Errorf("no prior config_id captured to check")
+		}
+		client, err := GetTestClient()
+		if err != nil {
+			return fmt.Errorf("failed to get test client: %w", err)
+		}
+
+		deadline := time.Now().Add(destroyCheckPollTimeout)
+		for {
+			resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/ext/v0/cluster_computes/%s", *id), nil)
+			if err != nil {
+				return fmt.Errorf("failed to check archived status of %s: %w", *id, err)
+			}
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				return fmt.Errorf("failed to read response for %s: %w", *id, readErr)
+			}
+			if resp.StatusCode != 200 {
+				return fmt.Errorf("unexpected status %d checking archived status of %s: %s", resp.StatusCode, *id, truncateBody(string(body), 256))
+			}
+
+			archived, perr := extractArchivedValue(body, "result.archived_at")
+			if perr != nil {
+				return fmt.Errorf("failed to parse archived_at for %s: %w", *id, perr)
+			}
+			if archived {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("the pre-rename compute config %s was never archived after the replace - "+
+					"the rename-orphan bug is NOT closed: renaming left it live and unmanaged", *id)
+			}
+			time.Sleep(destroyCheckPollInterval)
 		}
 	}
 }
