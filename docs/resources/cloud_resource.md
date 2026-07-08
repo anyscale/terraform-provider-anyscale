@@ -128,20 +128,20 @@ output "eks_operator_reported_at" {
 - `gcp_config` (Block, Optional) GCP-specific configuration. (see [below for nested schema](#nestedblock--gcp_config))
 - `is_private` (Boolean) Whether this is a private resource (private networking).
 - `kubernetes_config` (Block, Optional) Kubernetes-specific configuration. Required when compute_stack is K8S. (see [below for nested schema](#nestedblock--kubernetes_config))
-- `name` (String) The name of the cloud resource. Auto-generated if not provided.
+- `name` (String) The name of the cloud resource. If omitted, the backend generates one as `{compute_stack}-{provider}-{region}`, appending a numeric suffix (e.g. `-1`) when a resource with that same combination already exists on the cloud. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with an explicit `name` fails with a duplicate-name error, and one without `name` creates a new, separately-suffixed resource. Use `terraform import` to recover state instead.
 - `object_storage` (Block, Optional) Object storage configuration (S3, GCS). (see [below for nested schema](#nestedblock--object_storage))
 - `region` (String) The region for this cloud resource. Inferred from the cloud/provider configuration when not specified.
 
 ### Read-Only
 
-- `cloud_deployment_id` (String) The cloud deployment ID assigned by Anyscale.
+- `cloud_deployment_id` (String, Deprecated) The cloud deployment ID assigned by Anyscale.
 - `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale.
 - `id` (String) Composite identifier in format cloud_id:name
 - `is_default` (Boolean) Whether this is the default resource for the cloud.
 - `operator_status` (String) The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM). Same underlying value as `status`.
 - `operator_version` (String) The version of the Anyscale Operator that last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).
 - `reported_at` (String) Timestamp when the Anyscale Operator last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).
-- `status` (String) The current status of the cloud resource.
+- `status` (String, Deprecated) The current status of the cloud resource.
 
 <a id="nestedblock--aws_config"></a>
 ### Nested Schema for `aws_config`

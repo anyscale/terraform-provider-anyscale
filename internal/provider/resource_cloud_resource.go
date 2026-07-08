@@ -32,6 +32,13 @@ var (
 	_ resource.ResourceWithImportState = &CloudResourceResource{}
 )
 
+// statusDeprecationMessage: status and operator_status are set from the same
+// underlying value in readCloudResource; status is also always null for VM
+// cloud resources, making operator_status the clearer name. cloud_resource
+// only - anyscale_cloud/its data source's status/state fields are the
+// distinct cloud lifecycle status, not an operator_status duplicate.
+const statusDeprecationMessage = "Duplicates `operator_status` (identical value; always null for VM cloud resources). Will be removed in a future major release - use `operator_status` instead."
+
 // NewCloudResourceResource returns a new cloud resource resource.
 func NewCloudResourceResource() resource.Resource {
 	return &CloudResourceResource{}
@@ -182,7 +189,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			"name": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "The name of the cloud resource. Auto-generated if not provided.",
+				MarkdownDescription: "The name of the cloud resource. If omitted, the backend generates one as `{compute_stack}-{provider}-{region}`, appending a numeric suffix (e.g. `-1`) when a resource with that same combination already exists on the cloud. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with an explicit `name` fails with a duplicate-name error, and one without `name` creates a new, separately-suffixed resource. Use `terraform import` to recover state instead.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -242,6 +249,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			"cloud_deployment_id": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The cloud deployment ID assigned by Anyscale.",
+				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -250,6 +258,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			"status": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The current status of the cloud resource.",
+				DeprecationMessage:  statusDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -686,14 +695,10 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	// Set inferred provider in state
 	plan.CloudProvider = types.StringValue(provider)
 
-	// Generate or use provided name
+	// name is left empty when the user omits it in config; the backend
+	// generates {compute_stack}-{provider}-{region}[-N] and the assigned
+	// name is read back into state from the response below.
 	name := plan.Name.ValueString()
-	if name == "" {
-		name = fmt.Sprintf("%s-%s-%s",
-			strings.ToLower(computeStack),
-			strings.ToLower(provider),
-			strings.ToLower(region))
-	}
 
 	tflog.Info(ctx, "Creating Anyscale Cloud Resource",
 		map[string]any{
@@ -703,15 +708,6 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 			"region":        region,
 			"compute_stack": computeStack,
 		})
-
-	// Check if there's an existing default resource that we should update
-	existingDefault, err := r.findDefaultCloudResource(ctx, cloudID)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to check for existing default resource", map[string]any{"error": err.Error()})
-	} else if existingDefault != nil {
-		tflog.Info(ctx, "Found existing default resource, will update it instead of creating new", map[string]any{"name": existingDefault.Name})
-		name = existingDefault.Name
-	}
 
 	// Build deployment request
 	deployReq := CloudDeploymentRequest{
@@ -970,25 +966,6 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 		return "", "", fmt.Errorf("invalid cloud resource ID format: expected 'cloud_id:name', got '%s'", id)
 	}
 	return parts[0], parts[1], nil
-}
-
-// findDefaultCloudResource checks if the cloud has a single default resource
-func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cloudID string) (*CloudDeploymentResult, error) {
-	// listCloudResources pages through every page rather than just the first -
-	// a cloud with many resources attached would otherwise risk missing the
-	// default one.
-	results, err := listCloudResources(ctx, r.client, cloudID)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(results) == 1 && results[0].IsDefault {
-		tflog.Debug(ctx, "Found single default resource", map[string]any{"name": results[0].Name})
-		return &results[0], nil
-	}
-
-	tflog.Debug(ctx, "Cloud has multiple resources or no default", map[string]any{"count": len(results)})
-	return nil, nil
 }
 
 // readCloudResource reads a cloud resource from the API and updates the state model

@@ -18,6 +18,14 @@ import (
 // CLOUD-SYNC-DESIGN.md C5).
 const kubernetesConfigInertFieldDeprecationMessage = "not sent to the Anyscale API; has no effect. Will be removed in a future major release - remove from your configuration."
 
+// cloudDeploymentIDDeprecationMessage is shared by anyscale_cloud,
+// anyscale_cloud_resource, and the anyscale_cloud data source's
+// cloud_deployment_id attributes: the Anyscale API marks the underlying field
+// deprecated in favor of cloud_resource_id and no longer populates it. Named
+// explicitly rather than assuming a sibling cloud_resource_id attribute,
+// since only anyscale_cloud_resource actually has one.
+const cloudDeploymentIDDeprecationMessage = "Deprecated by the Anyscale API; the backend no longer populates this field. Will be removed in a future major release - use `anyscale_cloud_resource`'s `cloud_resource_id` instead."
+
 // ResolveCloudNameToID converts a cloud name to a cloud ID by querying the Anyscale API.
 // If multiple clouds have the same name, it returns the most recently created one.
 //

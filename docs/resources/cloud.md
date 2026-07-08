@@ -136,7 +136,7 @@ output "is_empty_cloud" {
 
 ### Read-Only
 
-- `cloud_deployment_id` (String) The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation.
+- `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation.
 - `id` (String) The unique identifier of the cloud.
 - `is_empty_cloud` (Boolean) Whether this cloud was created without embedded resource configuration. Use anyscale_cloud_resource to attach resources separately.
 
