@@ -447,15 +447,27 @@ func interfaceToAttrValue(value interface{}) (attr.Value, attr.Type) {
 	case bool:
 		return types.BoolValue(v), types.BoolType
 	case []interface{}:
+		// Tuple, not List: a literal HCL array under a Dynamic-typed
+		// attribute has no declared element type to coerce into, so
+		// Terraform Core evaluates it as a tuple (independently-tracked
+		// per-element types), never a list, regardless of whether the
+		// elements happen to look uniform. A List-shaped recovered value
+		// can never reach an empty plan against that -- List and Tuple are
+		// different concrete types to the framework even with identical
+		// visible content. Tracking each element's real type here (instead
+		// of the previous single elemType, which took whichever element
+		// happened to run last in the loop) also fixes a second latent bug:
+		// a genuinely mixed-type array previously got every element coerced
+		// to that last element's type.
 		elements := make([]attr.Value, 0, len(v))
-		var elemType attr.Type = types.StringType // Default
+		elemTypes := make([]attr.Type, 0, len(v))
 		for _, elem := range v {
 			elemValue, et := interfaceToAttrValue(elem)
 			elements = append(elements, elemValue)
-			elemType = et // Use the type of the last element
+			elemTypes = append(elemTypes, et)
 		}
-		listValue, _ := types.ListValue(elemType, elements)
-		return listValue, types.ListType{ElemType: elemType}
+		tupleValue, _ := types.TupleValue(elemTypes, elements)
+		return tupleValue, types.TupleType{ElemTypes: elemTypes}
 	case map[string]interface{}:
 		attrs := make(map[string]attr.Value)
 		attrTypes := make(map[string]attr.Type)
