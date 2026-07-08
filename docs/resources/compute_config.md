@@ -30,6 +30,10 @@ resource "anyscale_compute_config" "example" {
     }
   ]
 
+  # Terminate idle clusters after 30 minutes, and cap total uptime at 8 hours
+  idle_termination_minutes = 30
+  maximum_uptime_minutes   = 480
+
   # Native HCL syntax - no jsonencode needed!
   flags = {
     "ray-cluster-ray-version"        = "2.9.0"
