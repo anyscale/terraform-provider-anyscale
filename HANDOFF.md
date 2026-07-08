@@ -4,13 +4,23 @@ _Last updated: 2026-07-08 (Compute Config API Sync wind-down)_
 
 ## Current Status
 
-Compute Config API sync is **implementation-complete and certified**, assembled on the
-integration branch **`integration/compute-config-sync`** (main untouched). Release verdict:
-**READY TO SHIP AS MINOR**. Pull request pending (delegated to tfp-shipwright). Not yet merged
-to `main` and not yet Crystl-integrated beyond this branch.
+Compute Config API sync is assembled on integration branch **`integration/compute-config-sync`**
+(main untouched), exposed via **PR #50** with `.changelog/50.txt`. Release verdict: **MINOR**.
+**One gate remains before merge** (see Current Risks): the CC12 **per-node** import round-trip is
+untested. Do NOT merge until it is resolved.
 
-Scope: `anyscale_compute_config` resource + data source synchronized with the Platform API via
-the design-first CC1–CC12 matrix (CC5b deferred). See `QUEST-LOG.md` for the full narrative.
+Scope: `anyscale_compute_config` resource + data source synchronized with the Platform API via the
+design-first matrix CC1–CC15 (CC5b deferred). CC1–CC11 done+verified; CC12 top-level tested green;
+CC13 = schema-contract pins; CC14 (cross-zone import phantom-diff) + CC15 (Dynamic-array List→Tuple)
+found and fixed during the wind-down. See `QUEST-LOG.md`.
+
+**CC12 status — precise, not passive:** top-level `flags`/`advanced_instance_config` recovery on
+import is tested green on both mock-server and real-API, **including the array case** (that surfaced
+CC15). **Per-node** (inside `head_node`/`worker_nodes`) recovery is present in code but **not
+exercised by any test** — a third outcome (neither proven-green nor proven-to-need-the-fallback).
+It is **safe** (the values are recovered into state, so no silent data loss — worst case is a
+visible reconciliation diff), but the exact empty-plan round-trip for the per-node JSON-string case
+is **not asserted**. Caught by scribe, confirmed by forge + shipwright, before merge.
 
 ## Repository Health
 
@@ -41,12 +51,12 @@ the design-first CC1–CC12 matrix (CC5b deferred). See `QUEST-LOG.md` for the f
 
 ## Current Risks
 
-- **Nothing is merged to `main` or opened as a PR yet.** The work exists only on
-  `integration/compute-config-sync` (local) and the five hero branches. Cold-restart depends on
-  this branch surviving and being pushed.
-- **The `.changelog/<PR#>.txt` fragment does not exist yet** — its filename needs the PR number
-  (repo convention). shipwright owns creating it at PR time from the drafted content. Until then
-  the changelog gate will flag the PR.
+- **Not yet merged to `main`.** Work is on `integration/compute-config-sync` (pushed to origin)
+  and exposed via PR #50; the five hero branches remain intact. Cold-restart depends on the branch
+  and PR surviving.
+- **CI not fully green at hand-off:** changelog-gate + buildkite AWS e2e passed; the three GitHub
+  Actions jobs (lint-and-unit, both acctest shards) were still pending. Confirm all green before
+  merge. (`.changelog/50.txt` exists, so the changelog gate has a real fragment.)
 - **GCP/K8s acceptance coverage is unrunnable in CI** (no cloud fixture in the test org) — an
   honest, disclosed gap (`_K8S` skip), not a regression. Real GCP/K8s validation needs fixtures.
 - Wind-down process docs (`QUEST-LOG.md`, `HANDOFF.md`, `docs/heroes/RESUME-PROMPT.md`) are
@@ -55,15 +65,20 @@ the design-first CC1–CC12 matrix (CC5b deferred). See `QUEST-LOG.md` for the f
 
 ## Next Work
 
-1. **Open the PR** from `integration/compute-config-sync` → `main` (Mission 4; owner shipwright).
-   Push the branch to origin first.
-2. **Create the changelog fragment** `.changelog/<PR#>.txt` from the drafted breaking-change /
-   fixed / feature blocks once the PR number exists.
-3. **Crystl branch integration** of the hero branches (Crystl's mechanism), if still desired
-   separately from the git integration branch.
-4. **Deferred follow-ups:** CC5b endpoint convergence (`ext/v0`→`api/v2` for the DS search +
-   CheckDestroy/exists helpers + sweeper, handling the pagination-shape difference);
-   `required_labels` support; GCP/K8s test fixtures for real multi-provider coverage.
+1. **MERGE GATE — CC12 per-node/worker nested test (user-directed, blocks merge).** assayer(+scribe)
+   write a test exercising `advanced_instance_config` (and `flags`) nested inside `worker_nodes`
+   (and head_node) through the same 3-point import gate. Nested-on-workers is a common customer
+   pattern, so prove it. If the per-node JSON-string round-trip does not reach an empty plan, that
+   is a real forge fix (canonicalize the per-node JSON, same spirit as CC15) — not a documented
+   shrug. Then FF the integration branch to forge/assayer's new tips, re-verify, re-push.
+2. **Reconcile claims to the final per-node result** — PR #50 body, this file, `QUEST-LOG.md`, and
+   the implementation report: state exactly what is tested (top-level green now; per-node per the
+   test outcome). No passive green.
+3. **Finish Mission 5** — verify integration branch + QUEST-LOG + HANDOFF + RESUME-PROMPT + PR #50
+   describe the same state; print Branch Status / Documentation / Pull Request; dismiss the heroes.
+4. **Deferred follow-ups (not blockers):** CC5b endpoint convergence (`ext/v0`→`api/v2`, handling
+   the sweeper pagination-shape difference); `required_labels`; GCP/K8s test fixtures; optionally
+   drop the wind-down process docs from the final merge if a provider-only PR is preferred.
 
 ## Per-Hero Next Actions
 
