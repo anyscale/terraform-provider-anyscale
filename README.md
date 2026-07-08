@@ -146,6 +146,22 @@ Until the provider reaches a 1.0 release:
 - Resource schemas may change.
 - Terraform state migrations may be required.
 
+### Minor vs. patch releases
+
+Within the 0.x line, the version bump follows mechanically from the changelog fragment types a release
+contains (see [`.changelog/`](.changelog/)), not a case-by-case severity judgment:
+
+- A release with at least one `breaking-change` fragment is a **minor** bump. `breaking-change` covers
+  anything that forces an existing configuration to be edited, produces a plan diff that did not exist
+  before, or replaces a resource that previously updated in place — regardless of how safe, small, or
+  clearly-deserved the underlying fix is.
+- A release with no `breaking-change` fragments (only `added`, `fixed`, `deprecated`, or similar) is a
+  **patch** bump.
+
+For example, renaming a broken attribute that never worked, or adding `RequiresReplace` to stop a
+silent orphaned-resource bug, both still count as `breaking-change` and therefore ship as minor: the
+fragment type tracks the effect on existing configurations, not whether the change was a bug fix.
+
 ## Feedback
 
 Bug reports, feature requests, and pull requests are welcome.

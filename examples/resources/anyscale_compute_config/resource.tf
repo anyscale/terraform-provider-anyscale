@@ -1,40 +1,52 @@
-# Compute Config with Native HCL Syntax
+# Compute config with native HCL syntax for flags and advanced instance config
 resource "anyscale_compute_config" "example" {
   name     = "my-compute-config"
   cloud_id = "cld_abc123"
 
-  # Native HCL syntax - no jsonencode needed!
-  flags = {
-    "ray-cluster-ray-version"          = "2.9.0"
-    "ray-cluster-kubernetes-namespace" = "anyscale"
-    "ray-cluster-autoscaler-enabled"   = "true"
+  head_node = {
+    instance_type = "m5.2xlarge"
   }
 
-  # Native HCL for advanced configurations
-  advanced_instance_config = {
-    ray_head_node = {
-      instance_type = "m5.large"
-      min_instances = 1
-      max_instances = 1
+  worker_nodes = [
+    {
+      instance_type = "m5.4xlarge"
+      min_nodes     = 0
+      max_nodes     = 10
     }
-    ray_worker_nodes = [
+  ]
+
+  # Terminate idle clusters after 30 minutes, and cap total uptime at 8 hours
+  idle_termination_minutes = 30
+  maximum_uptime_minutes   = 480
+
+  # Native HCL syntax - no jsonencode needed!
+  flags = {
+    "ray-cluster-ray-version"        = "2.9.0"
+    "ray-cluster-autoscaler-enabled" = "true"
+  }
+
+  # Native HCL for advanced configurations passed through to the cloud provider
+  advanced_instance_config = {
+    BlockDeviceMappings = [
       {
-        instance_type = "m5.xlarge"
-        min_instances = 0
-        max_instances = 10
-        resources = {
-          CPU    = 4
-          memory = 16
+        DeviceName = "/dev/sda1"
+        Ebs = {
+          VolumeSize = 100
+          VolumeType = "gp3"
         }
       }
     ]
   }
 }
 
-# Minimal compute config
+# Minimal compute config - worker nodes are auto-selected based on workload
 resource "anyscale_compute_config" "minimal" {
   name     = "minimal-config"
   cloud_id = "cld_abc123"
+
+  head_node = {
+    instance_type = "m5.xlarge"
+  }
 }
 
 # GPU compute config
@@ -42,29 +54,23 @@ resource "anyscale_compute_config" "gpu" {
   name     = "gpu-compute-config"
   cloud_id = "cld_abc123"
 
-  flags = {
-    "ray-cluster-ray-version" = "2.9.0"
+  head_node = {
+    instance_type = "m5.2xlarge"
   }
 
-  advanced_instance_config = {
-    ray_head_node = {
-      instance_type = "m5.large"
-      min_instances = 1
-      max_instances = 1
-    }
-    ray_worker_nodes = [
-      {
-        instance_type = "g4dn.xlarge"
-        min_instances = 0
-        max_instances = 5
-        resources = {
-          CPU    = 4
-          memory = 16
-          GPU    = 1
-        }
+  worker_nodes = [
+    {
+      instance_type = "g4dn.xlarge"
+      min_nodes     = 0
+      max_nodes     = 5
+
+      resources = {
+        CPU    = 4
+        memory = 16
+        GPU    = 1
       }
-    ]
-  }
+    }
+  ]
 }
 
 # Output
