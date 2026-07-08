@@ -66,9 +66,11 @@ config; they just surface the choice to you at different points.
 and it's easy to reach for the wrong one:
 
 - **`resources`** is the *logical* resources Ray schedules against for that node group — CPU, GPU,
-  memory, and custom resource counts. It's Optional and Computed: leave it unset and it defaults to
-  match the physical resources of `instance_type`; set it to override what Ray sees, independent of
-  what the instance actually has.
+  memory, and custom resource counts. Leave it unset to let Ray auto-detect the instance's actual
+  capacity at runtime when the cluster launches; set it to override what Ray sees, independent of the
+  instance's real capacity. This is a Ray-runtime behavior, not something the compute config stores —
+  `resources` legitimately stays null in your config and state when you don't set it, on both API
+  generations; nothing pre-populates it for you at the config level.
 - **`required_resources`** is a *physical* resource specification used to select a custom instance
   shape (a "free pod shape") when `instance_type = "custom"` — explicit CPU, memory, GPU, accelerator,
   TPU, and TPU host counts that tell the cloud provider what to actually provision. It only makes sense
@@ -121,3 +123,15 @@ and it's worth knowing which is which:
   null**, the same way they'd read as unconfigured on an ordinary refresh. If the compute config you're
   importing sets any of these, add them to your `.tf` yourself; until you do, they'll plan as unset
   rather than reflecting what the backend actually has.
+
+## The data source's node topology is unmasked
+
+The `anyscale_compute_config` data source exposes `zones`, `head_node`, and `worker_nodes` too, but
+reports them differently than the resource does: with no masking at all. Every sub-attribute — including
+`resources`, `required_resources`, `labels`, and `cloud_deployment` — always reflects exactly what the
+API returns.
+
+This is intentional, not an inconsistency with the resource's behavior described above: masking exists
+specifically to stop a *resource's* plan from drifting toward values you never configured. A data source
+has no plan to protect — it's a lookup, refreshed in full on every read — so there's nothing to mask
+against, and no reason to hide real values behind a null.
