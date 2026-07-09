@@ -106,7 +106,7 @@ jobs:
           cat > "$cli_config" <<RC
           provider_installation {
             dev_overrides {
-              "registry.terraform.io/terraform-providers/anyscale" = "$override_dir"
+              "registry.terraform.io/anyscale/anyscale" = "$override_dir"
             }
             direct {}
           }
