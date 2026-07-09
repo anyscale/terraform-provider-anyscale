@@ -110,6 +110,25 @@ foundations (distinct VPCs and `common_prefix`es, same region) to one Anyscale C
 - Managing multiple `anyscale_cloud_resource` resources, each with its own explicit, distinct `name`
 - Multi-resource cardinality rules — see the [Cloud Resources guide](../docs/guides/cloud-resources.md#multiple-resource-deployments-on-one-cloud)
 
+### Container Images
+
+#### [container-image-compute-config](./container-image-compute-config/)
+
+Builds a container image and defines a compute config side by side, then surfaces the
+`name_version` handles you'd hand to a job or service submission command.
+
+**Use this when**: You want to see how a container image (built from a Containerfile, or
+registered from an existing registry) and a compute config fit together for running Ray
+workloads — including why they're independent resources rather than one referencing the other.
+
+**What it demonstrates**:
+- Creating an `anyscale_container_image_build` resource (with a commented-out
+  `anyscale_container_image_registry` alternative)
+- Creating an `anyscale_compute_config` resource
+- Using `name_version` as the identifier for job/service submission, instead of `image_uri` or `id`
+
+See the [Container Images guide](../docs/guides/container-images.md) for the full explanation.
+
 ### Data Sources
 
 #### [data-sources](./data-sources/)
@@ -122,6 +141,7 @@ Examples demonstrating how to use Anyscale data sources to look up existing reso
 - Using `anyscale_cloud` data source
 - Using `anyscale_clouds` data source
 - Using `anyscale_compute_config` data source
+- Using `anyscale_container_image` and `anyscale_container_images` data sources
 - Using `anyscale_project` and `anyscale_projects` data sources
 
 See the [data-sources README](./data-sources/README.md) for detailed documentation.
@@ -145,6 +165,18 @@ Minimal example showing just the `anyscale_cloud_resource` resource configuratio
 Minimal example showing just the `anyscale_compute_config` resource configuration.
 
 **Use this when**: You want a simple, focused example of the `anyscale_compute_config` resource.
+
+#### [resources/anyscale_container_image_build](./resources/anyscale_container_image_build/)
+
+Minimal example showing just the `anyscale_container_image_build` resource configuration.
+
+**Use this when**: You want a simple, focused example of building a container image from a Containerfile.
+
+#### [resources/anyscale_container_image_registry](./resources/anyscale_container_image_registry/)
+
+Minimal example showing just the `anyscale_container_image_registry` resource configuration.
+
+**Use this when**: You want a simple, focused example of registering an existing container image.
 
 ### Provider Configuration
 
