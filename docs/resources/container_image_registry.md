@@ -40,7 +40,7 @@ output "registry_id" {
 
 output "registry_image_digest" {
   value       = anyscale_container_image_registry.public.digest
-  description = "The content digest of the registered image (e.g. sha256:...), stable across refreshes"
+  description = "The content digest of this image's current latest successful build (e.g. sha256:...); like build_id, revision, and name_version, it can change on a later refresh if a new build supersedes this one"
 }
 ```
 
