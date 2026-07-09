@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
 // The sweeper half of the GATE-11 Part B orphan-prevention proof.
@@ -25,8 +27,8 @@ import (
 // was created but never got a build -- the exact orphan a failed registry
 // Create() call 2 leaves behind (see
 // resource_container_image_registry_orphan_prevention_test.go).
-func buildlessSweepCandidate(id, name string, createdAt time.Time, deletedAt *string) sweepContainerImageResult {
-	return sweepContainerImageResult{
+func buildlessSweepCandidate(id, name string, createdAt time.Time, deletedAt *string) provider.ApplicationTemplateResult {
+	return provider.ApplicationTemplateResult{
 		ID:        id,
 		Name:      name,
 		CreatedAt: createdAt.UTC().Format(time.RFC3339),
@@ -41,24 +43,24 @@ func buildlessSweepCandidate(id, name string, createdAt time.Time, deletedAt *st
 // returning candidate on the first search only, so cross-prefix dedup logic
 // isn't required to make the candidate appear exactly once -- and records
 // archive calls. Fails the test on any other request.
-func newBuildlessSweepServer(t *testing.T, candidate sweepContainerImageResult) (*httptest.Server, *int, *[]string) {
+func newBuildlessSweepServer(t *testing.T, candidate provider.ApplicationTemplateResult) (*httptest.Server, *int, *[]string) {
 	t.Helper()
 	searchCalls := 0
 	var archivedPaths []string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/ext/v0/cluster_environments/search":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/application_templates/":
 			searchCalls++
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			if searchCalls == 1 {
-				_ = json.NewEncoder(w).Encode(sweepContainerImageListResponse{
-					Results: []sweepContainerImageResult{candidate},
+				_ = json.NewEncoder(w).Encode(provider.ApplicationTemplatesListResponse{
+					Results: []provider.ApplicationTemplateResult{candidate},
 				})
 				return
 			}
-			_ = json.NewEncoder(w).Encode(sweepContainerImageListResponse{})
+			_ = json.NewEncoder(w).Encode(provider.ApplicationTemplatesListResponse{})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/"+candidate.ID+"/archive":
 			archivedPaths = append(archivedPaths, r.URL.Path)
 			w.WriteHeader(http.StatusOK)

@@ -53,6 +53,7 @@ output "container_image_uri_by_id" {
 - `build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
 - `created_at` (String) Timestamp when the cluster environment was created.
 - `creator_id` (String) The ID of the user who created this cluster environment.
+- `digest` (String) The content digest of the built container image (e.g. `sha256:...`).
 - `image_uri` (String) The URI of the container image.
 - `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.

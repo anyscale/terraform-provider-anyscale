@@ -597,11 +597,16 @@ type BuildResult struct {
 }
 
 // ResolvedRayVersion returns the most specific Ray version available for this build:
-// byod_ray_version (parsed from the BYOD image tag's suffix, e.g. "myimage:2.9.0" ->
-// "2.9.0") when present, otherwise the plain ray_version field set on Containerfile-based
-// builds. byod_ray_version is a raw tag-suffix parse, not a validated Ray version -- an
-// unversioned tag (e.g. ":latest") resolves to that same odd-but-stable substring rather
-// than an error or null.
+// byod_ray_version when present, otherwise the plain ray_version field. Both ultimately
+// trace back to the ray_version the client supplied at creation (BYOD's docker image
+// content itself is never inspected server-side): byod_ray_version is the backend's
+// legacy base-image round-trip of that value (see _get_byod_base_image /
+// get_ray_version in the product backend), which is normally byte-identical to the
+// original input but can differ for Ray 2.7.x, where the backend may silently prefer an
+// "optimized" base-image variant. ray_version is the plain field set on
+// Containerfile-based (non-BYOD) builds, parsed from the Containerfile's FROM line.
+// Neither field is validated here -- an odd stored value is returned as-is rather than
+// producing an error or null.
 func (b *BuildResult) ResolvedRayVersion() *string {
 	if b.ByodRayVersion != nil {
 		return b.ByodRayVersion

@@ -61,6 +61,7 @@ type ContainerImageBuildResourceModel struct {
 	ImageURI    types.String `tfsdk:"image_uri"`
 	RayVersion  types.String `tfsdk:"ray_version"`
 	Revision    types.Int64  `tfsdk:"revision"`
+	Digest      types.String `tfsdk:"digest"`
 	NameVersion types.String `tfsdk:"name_version"` // Formatted as "name:revision" for use with Anyscale APIs
 	CreatedAt   types.String `tfsdk:"created_at"`
 }
@@ -142,6 +143,10 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			"revision": schema.Int64Attribute{
 				Computed:            true,
 				MarkdownDescription: "The revision number of the container image build. Increments with each new build.",
+			},
+			"digest": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`).",
 			},
 			"name_version": schema.StringAttribute{
 				Computed:            true,
@@ -263,7 +268,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 	// waiting on the (potentially long-running) build. Without this, a build
 	// timeout/failure below would leave the cluster environment orphaned in
 	// the backend with no Terraform record to destroy it.
-	for _, computed := range []*types.String{&plan.BuildStatus, &plan.ImageURI, &plan.RayVersion, &plan.NameVersion, &plan.CreatedAt} {
+	for _, computed := range []*types.String{&plan.BuildStatus, &plan.ImageURI, &plan.RayVersion, &plan.NameVersion, &plan.CreatedAt, &plan.Digest} {
 		if computed.IsUnknown() {
 			*computed = types.StringNull()
 		}
@@ -309,6 +314,12 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 	// Set revision and name_version
 	plan.Revision = types.Int64Value(int64(build.Revision))
 	plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), build.Revision))
+
+	if build.Digest != nil {
+		plan.Digest = types.StringValue(*build.Digest)
+	} else {
+		plan.Digest = types.StringNull()
+	}
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -386,6 +397,10 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 			// Set revision and name_version
 			state.Revision = types.Int64Value(int64(build.Revision))
 			state.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", template.Name, build.Revision))
+
+			if build.Digest != nil {
+				state.Digest = types.StringValue(*build.Digest)
+			}
 		}
 	}
 
@@ -505,6 +520,12 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	// Set revision and name_version
 	plan.Revision = types.Int64Value(int64(build.Revision))
 	plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), build.Revision))
+
+	if build.Digest != nil {
+		plan.Digest = types.StringValue(*build.Digest)
+	} else {
+		plan.Digest = types.StringNull()
+	}
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)

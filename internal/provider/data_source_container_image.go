@@ -47,6 +47,7 @@ type ContainerImageDataSourceModel struct {
 	CreatedAt   types.String `tfsdk:"created_at"`
 	CreatorID   types.String `tfsdk:"creator_id"`
 	Revision    types.Int64  `tfsdk:"revision"`
+	Digest      types.String `tfsdk:"digest"`
 	NameVersion types.String `tfsdk:"name_version"` // Formatted as "name:revision" for use with Anyscale APIs
 }
 
@@ -110,6 +111,10 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 			"revision": schema.Int64Attribute{
 				Computed:            true,
 				MarkdownDescription: "The revision number of the latest build.",
+			},
+			"digest": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`).",
 			},
 			"name_version": schema.StringAttribute{
 				Computed:            true,
@@ -190,6 +195,7 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 			config.RayVersion = types.StringNull()
 			config.IsBYOD = types.BoolNull()
 			config.Revision = types.Int64Null()
+			config.Digest = types.StringNull()
 			config.NameVersion = types.StringNull()
 		} else {
 			config.BuildStatus = types.StringValue(build.Status)
@@ -208,6 +214,12 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 			} else {
 				config.RayVersion = types.StringNull()
 			}
+
+			if build.Digest != nil {
+				config.Digest = types.StringValue(*build.Digest)
+			} else {
+				config.Digest = types.StringNull()
+			}
 		}
 	} else {
 		config.BuildID = types.StringNull()
@@ -216,6 +228,7 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 		config.RayVersion = types.StringNull()
 		config.IsBYOD = types.BoolNull()
 		config.Revision = types.Int64Null()
+		config.Digest = types.StringNull()
 		config.NameVersion = types.StringNull()
 	}
 
