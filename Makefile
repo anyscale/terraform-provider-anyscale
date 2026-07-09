@@ -670,6 +670,12 @@ tag: ## Create and push a release tag once CHANGELOG.md is finalized on main (us
 		echo "Run 'make changelog-release VERSION=$(VERSION)' and merge that PR first."; \
 		exit 1; \
 	fi
+	@leftover="$$(find .changelog -maxdepth 1 -name '*.txt' 2>/dev/null | head -1)"; \
+	if [ -n "$$leftover" ]; then \
+		echo "ERROR: .changelog/ still has an unconsumed fragment (e.g. $$leftover)."; \
+		echo "It would silently roll into the NEXT release. Run 'make changelog-release VERSION=$(VERSION)' and merge that PR so all fragments are folded into CHANGELOG.md before tagging."; \
+		exit 1; \
+	fi
 	@echo "==> Creating tag v$(VERSION)..."
 	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
 	@echo "==> Pushing tag v$(VERSION)..."
