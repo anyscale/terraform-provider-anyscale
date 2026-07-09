@@ -93,6 +93,8 @@ Look up an existing container image by ID or name.
 - Get the `name_version` handle to pass to job/service submission tooling
 - Check an image's current `build_status` before submitting a workload against it
 - Reference `image_uri` for inspection outside Anyscale tooling (e.g. `docker pull`)
+- Pin to an exact image `digest` when `name_version` (a named revision) isn't a strong
+  enough guarantee
 
 **Example:**
 ```terraform
@@ -102,6 +104,10 @@ data "anyscale_container_image" "training" {
 
 output "training_image_name_version" {
   value = data.anyscale_container_image.training.name_version
+}
+
+output "training_image_digest" {
+  value = data.anyscale_container_image.training.digest
 }
 ```
 

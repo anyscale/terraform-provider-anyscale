@@ -2,7 +2,7 @@
 page_title: "Container Images: Build vs. Register, Identity, and Lifecycle"
 subcategory: ""
 description: |-
-  Build vs. register workflows, the name_version identifier, id semantics, and lifecycle behavior for the Container Image resources and data sources that aren't obvious from the schema tables alone.
+  Build vs. register workflows, the name_version identifier, digest-based pinning, id semantics, and lifecycle behavior for the Container Image resources and data sources that aren't obvious from the schema tables alone.
 ---
 
 # Container Images: Build vs. Register, Identity, and Lifecycle
@@ -47,18 +47,47 @@ exact compute config version.
 [example below](#container-images-and-compute-configs-are-managed-independently) for both used side by
 side.
 
-## Digest-based image pinning is planned, not yet available
+## Digest-based image pinning
 
-A future release will add a Computed `digest` attribute to `anyscale_container_image_build`,
-`anyscale_container_image_registry`, and the
-[`anyscale_container_image`](../data-sources/container_image.md) data source. `digest` will hold the
-image's content hash (for example `sha256:...`) — a stronger pinning guarantee than `name_version`,
-which pins to a named build revision rather than to the exact bytes of that revision's contents.
+`anyscale_container_image_build`, `anyscale_container_image_registry`, and the
+[`anyscale_container_image`](../data-sources/container_image.md) data source (the singular lookup, not
+the plural [`anyscale_container_images`](../data-sources/container_images.md) list) all expose a
+Computed `digest` attribute: the image's content digest (for example `sha256:...`) — a stronger pinning
+guarantee than `name_version`, which pins to a named build revision rather than to the exact bytes of
+that revision's contents.
 
-**This attribute does not exist yet.** Referencing `digest` in your configuration today fails with a
-schema error ("Unsupported attribute"), not a null value — there's nothing to read yet, so don't add it
-until it ships. Once it's available, this section will be updated with the resource and data source
-attribute references and an example showing digest-based pinning alongside `name_version`.
+```terraform
+resource "anyscale_container_image_build" "training" {
+  name          = "training-image"
+  containerfile = <<-EOT
+    FROM anyscale/ray:2.9.0-py310
+  EOT
+}
+
+output "training_image_digest" {
+  value       = anyscale_container_image_build.training.digest
+  description = "Pin a job/service submission to these exact image bytes, not just this name:revision"
+}
+```
+
+`digest` behaves differently across the three surfaces, and the difference is deliberate rather than an
+inconsistency:
+
+- **`anyscale_container_image_build`** rebuilds *in place* — changing `containerfile` /
+  `containerfile_path` triggers a new build revision under `Update`, not a replacement — so `digest`
+  legitimately changes on a rebuild. It has no plan modifiers: Terraform shows it as "known after apply"
+  on any plan that changes the Containerfile, the same way `image_uri` and `build_id` do.
+- **`anyscale_container_image_registry`** is fully immutable (every optional attribute change is
+  `RequiresReplace`; see above), so its `digest` can't change without a full resource replacement. It
+  carries `UseStateForUnknown`, pinning it to its last-known value between ordinary refreshes instead of
+  showing a spurious "known after apply" on every plan.
+- **The data source** has no plan-modifier concept at all — every `Read` is a fresh lookup, so `digest`
+  is a plain Computed value that simply reflects whatever the latest successful build's digest is right
+  now.
+
+`digest` can be null on the data source: specifically when the underlying build lookup fails, or when
+the image has no `latest_build` yet (a cluster environment that's never had a successful build). Don't
+assume it's always populated — check for null in configurations that consume it conditionally.
 
 ## What `build_status` means
 
@@ -67,37 +96,51 @@ is one of six values: `pending`, `in_progress`, `succeeded`, `failed`, `pending_
 `canceled` — one L. `pending_cancellation` means a cancel request was received but the build is still
 tearing down; it is not yet terminal. Only `succeeded`, `failed`, and `canceled` are terminal.
 
-## `id` means something different on each resource today
+## `id`, `build_id`, and `cluster_environment_id`
 
-`anyscale_container_image_build.id` is the cluster environment ID — a durable identifier for the
-underlying entity that doesn't change across builds/revisions.
+`id` is the **cluster environment ID** on both resources — a durable identifier for the underlying
+entity that doesn't change across builds/revisions. `cluster_environment_id`, exposed separately on
+both resources, is identical to `id`; it's there so a config that's already reading
+`cluster_environment_id` off one of these resources doesn't need a second lookup to also get `id`, not
+because the two values can diverge.
 
-`anyscale_container_image_registry.id`, today, is the **build ID** of the registration, not the
-cluster environment ID — even though both `build_id` and `cluster_environment_id` are separately
-exposed as read-only attributes on the same resource. In other words, `id` is not necessarily the same
-kind of handle across the two resources in this family.
+`build_id` is a different kind of handle: the ID of the *latest* build for this image. Unlike `id`, it
+can change without the resource itself being replaced. On `anyscale_container_image_build`, it changes
+every time `Update` creates a new revision. On `anyscale_container_image_registry`, it can also advance
+between refreshes even though the resource is immutable — a registry's underlying build can be
+superseded by a newer one without the Terraform resource changing, which is exactly why `id` had to mean
+the cluster environment rather than "whichever build happened to be latest when the resource was
+created."
 
-> **Upcoming change:** a future release converges `anyscale_container_image_registry.id` onto the
-> cluster environment ID, matching `anyscale_container_image_build.id`. Existing state upgrades
-> automatically — a `StateUpgrader` rewrites `id` from the `cluster_environment_id` already stored in
-> state — so there's no re-import and no manual steps, and Terraform's own plan/apply stays seamless
-> across the upgrade. The **import key** for `anyscale_container_image_registry` changes too, from a
-> build ID to a cluster environment ID; check this page's own Import section for whichever key is
-> current at the time you read this. The one real exception to "seamless": anything *outside*
-> Terraform that parses `registry.id` today and expects a build ID will observe a changed value after
-> the upgrade — auto-migration covers Terraform's own view of the resource, not every external
-> consumer of its state. This is a breaking change (a MINOR version bump), not a silent one — it ships
-> with a changelog entry, and this section will be rewritten to describe the new, unified behavior
-> once it lands. **Don't treat the registry resource's current import key as a stable long-term
-> contract** until then.
+### If you're upgrading from a version where `registry.id` was a build ID
+
+Earlier provider versions used the build ID for `anyscale_container_image_registry.id`. A
+`StateUpgrader` migrates existing state automatically the next time you run `plan` or `apply`: it
+rewrites `id` to the `cluster_environment_id` value already in your state, and initializes the new
+`digest` attribute (see above) to null so it can populate on the following refresh. There's no
+re-import and no manual steps — Terraform's own view of the resource stays seamless across the upgrade.
+
+The one real exception to "seamless": **anything outside Terraform that parsed `registry.id` and
+expected a build ID** — a saved `terraform output`, a script, a CI variable — will see a different value
+after the upgrade, since auto-migration covers Terraform's own state, not every external consumer of it.
+If you have tooling like that, update it to use `cluster_environment_id` (or the migrated `id`, now the
+same value) going forward.
+
+The **import key** changed the same way: `terraform import anyscale_container_image_registry.<name>`
+now takes a cluster environment ID, not a build ID. See this resource's own
+[Import section](../resources/container_image_registry.md#import) for a copy-pasteable example.
 
 ## The default Ray version, if you don't set one
 
-`anyscale_container_image_registry`'s `ray_version` is optional. If you don't set it, the provider
-does not resolve "the latest available Ray version" — it falls back to a specific version pinned
-inside the provider itself. Don't rely on that fallback staying at any particular value across
-provider releases: if your workload needs a specific Ray version, set `ray_version` explicitly rather
-than omitting it.
+`anyscale_container_image_registry`'s `ray_version` is Optional and Computed. If you don't set it, the
+provider still sends a concrete default value when registering the image — not "the latest available
+Ray version." Whichever value ends up in state, whether it's the one you typed or the provider's
+fallback, is resolved once, at creation, and left alone on every later refresh: it won't get silently
+rewritten out from under you, and changing it yourself still replaces the resource (`ray_version` is
+`RequiresReplace`, like every other optional attribute on this resource) rather than updating in place.
+
+Don't rely on the fallback staying at any particular value across provider releases: if your workload
+needs a specific Ray version, set `ray_version` explicitly rather than omitting it.
 
 ## Deleting a container image archives it — and defaults can't be archived
 
@@ -138,6 +181,3 @@ example that builds an image and defines a compute config side by side, and surf
   building from a structured configuration (a base image plus separate pip/conda/apt package lists,
   environment variables, and post-build commands) instead of a Containerfile. This provider does not
   expose that path yet; use `containerfile` / `containerfile_path` in the meantime.
-
-See also [Digest-based image pinning is planned, not yet available](#digest-based-image-pinning-is-planned-not-yet-available)
-above for the other attribute that's planned but not yet available.

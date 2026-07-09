@@ -427,6 +427,11 @@ output "training_image_build_status" {
   description = "The current build status of the image (pending, in_progress, succeeded, failed, pending_cancellation, canceled)"
 }
 
+output "training_image_digest" {
+  value       = data.anyscale_container_image.training.digest
+  description = "The content digest of the latest build (e.g. sha256:...); null until a build succeeds"
+}
+
 # Example 29: List and filter container images
 data "anyscale_container_images" "recent" {
   name_contains    = "training"
