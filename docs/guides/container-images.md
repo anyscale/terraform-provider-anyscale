@@ -96,13 +96,13 @@ is one of six values: `pending`, `in_progress`, `succeeded`, `failed`, `pending_
 `canceled` — one L. `pending_cancellation` means a cancel request was received but the build is still
 tearing down; it is not yet terminal. Only `succeeded`, `failed`, and `canceled` are terminal.
 
-## `id`, `build_id`, and `cluster_environment_id`
+## `id` and `build_id`
 
 `id` is the **cluster environment ID** on both resources — a durable identifier for the underlying
-entity that doesn't change across builds/revisions. `cluster_environment_id`, exposed separately on
-both resources, is identical to `id`; it's there so a config that's already reading
-`cluster_environment_id` off one of these resources doesn't need a second lookup to also get `id`, not
-because the two values can diverge.
+entity that doesn't change across builds/revisions, and the only identity attribute either resource
+exposes. (Earlier provider versions also exposed a separate `cluster_environment_id` attribute that was
+always identical to `id`; it has been removed as redundant — see the upgrade note below if you're
+migrating from a version that still has it.)
 
 `build_id` is a different kind of handle: the ID of the *latest* build for this image. Unlike `id`, it
 can change without the resource itself being replaced. On `anyscale_container_image_build`, it changes
@@ -113,29 +113,39 @@ the cluster environment rather than "whichever build happened to be latest when 
 created."
 
 **On `anyscale_container_image_registry` specifically, `build_id`, `revision`, and `name_version` can
-all change on a plain `terraform plan` with no config edits.** `Read` always resolves whichever build is
-currently latest for the underlying cluster environment, and `revision`/`name_version` are read from
-that same latest build — so if something outside this resource's own `apply` registers a new build
-against the same cluster environment, your next `plan` can show all three updating in place. This is
-expected, not a bug: none of the three carry `RequiresReplace`, so it's an ordinary Computed-attribute
-refresh — Terraform updates state to match reality, and nothing gets destroyed or recreated.
+all change during the refresh that precedes a plain `terraform plan`, with no config edits.** `Read`
+always resolves whichever build is currently latest for the underlying cluster environment, and
+`revision`/`name_version` are read from that same latest build — so if something outside this resource's
+own `apply` registers a new build against the same cluster environment, your state picks up all three
+the next time Terraform refreshes. This is expected, not a bug — and it's quieter than it sounds: none
+of the three carry `RequiresReplace`, and none of them show up as an in-place update either. Terraform
+folds the refreshed value into state during the refresh step, before the plan-vs-config comparison runs,
+so there's nothing left to diff by the time `plan` renders. You'll see `No changes` (a NoOp plan), not an
+"updating in place" line — state silently catches up to the new values, and nothing gets destroyed,
+recreated, or shown as changed.
 `anyscale_container_image_build` doesn't share this exposure: its `Read` prefers the build ID already in
 its own state over the cluster environment's latest, so only its own `Update` — triggered by your own
 `containerfile` / `containerfile_path` change — advances these attributes.
 
-### If you're upgrading from a version where `registry.id` was a build ID
+### If you're upgrading from a version with `cluster_environment_id`, or where `registry.id` was a build ID
 
-Earlier provider versions used the build ID for `anyscale_container_image_registry.id`. A
-`StateUpgrader` migrates existing state automatically the next time you run `plan` or `apply`: it
-rewrites `id` to the `cluster_environment_id` value already in your state, and initializes the new
-`digest` attribute (see above) to null so it can populate on the following refresh. There's no
-re-import and no manual steps — Terraform's own view of the resource stays seamless across the upgrade.
+Two related changes to `anyscale_container_image_registry` ship together in the same release, and both
+are handled by the same automatic `StateUpgrader` the next time you run `plan` or `apply` — there's no
+re-import and no manual steps either way:
 
-The one real exception to "seamless": **anything outside Terraform that parsed `registry.id` and
-expected a build ID** — a saved `terraform output`, a script, a CI variable — will see a different value
-after the upgrade, since auto-migration covers Terraform's own state, not every external consumer of it.
-If you have tooling like that, update it to use `cluster_environment_id` (or the migrated `id`, now the
-same value) going forward.
+- **`registry.id` used to be a build ID; it's now the cluster environment ID.** The upgrader rewrites
+  `id` to the cluster environment identity already present in your state, and initializes the new
+  `digest` attribute (see above) to null so it can populate on the following refresh.
+- **`cluster_environment_id` is removed.** It used to sit alongside `id` as an always-identical,
+  redundant value; now `id` is the only identity attribute this resource exposes. The upgrader simply
+  drops the attribute from state — there's nothing to migrate it to, since `id` already carries the same
+  value.
+
+The one real exception to "seamless": **anything outside Terraform** that read either of these — a saved
+`terraform output`, a script, a `terraform state show | jq` pipeline, a CI variable — gets no automatic
+fix, since the upgrader only covers Terraform's own state, not every external consumer of it. If you have
+tooling like that, referencing `cluster_environment_id` or expecting a build ID from `registry.id`,
+update it to read `id` going forward.
 
 The **import key** changed the same way: `terraform import anyscale_container_image_registry.<name>`
 now takes a cluster environment ID, not a build ID. See this resource's own
