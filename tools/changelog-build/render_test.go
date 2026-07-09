@@ -177,6 +177,205 @@ func TestFinalize_RenamesUnreleasedAndInsertsFreshOne(t *testing.T) {
 	}
 }
 
+func TestFinalize_UpdatesFooterLinks(t *testing.T) {
+	// Real anyscale footer, drifted exactly as CHANGELOG.md is today: [Unreleased]
+	// still compares from v0.1.1 and there's no [0.2.0] tag link yet.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Added\n\n- new thing\n\n" +
+		"## [0.1.1] - 2026-07-06\n\nold content\n\n" +
+		"[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD\n" +
+		"[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n" +
+		"[0.0.1-dev]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1-dev\n"
+
+	newChangelog, _, err := Finalize(changelog, "0.2.0", "2026-08-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// [Unreleased] must now compare FROM the new version, and the old compare
+	// base (v0.1.1) must be gone from the Unreleased line.
+	wantUnreleased := "[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.2.0...HEAD"
+	if !strings.Contains(newChangelog, wantUnreleased+"\n") {
+		t.Errorf("expected rewritten Unreleased compare line %q, got changelog:\n%s", wantUnreleased, newChangelog)
+	}
+	if strings.Contains(newChangelog, "compare/v0.1.1...HEAD") {
+		t.Errorf("stale compare base v0.1.1 should no longer appear on the Unreleased line:\n%s", newChangelog)
+	}
+
+	// A new [0.2.0] tag link must be inserted immediately below [Unreleased]
+	// (newest-first), and the previous version links must be preserved.
+	wantTag020 := "[0.2.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.2.0"
+	if !strings.Contains(newChangelog, wantTag020+"\n") {
+		t.Errorf("expected new tag link %q in footer, got:\n%s", wantTag020, newChangelog)
+	}
+	if !strings.Contains(newChangelog, "[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n") {
+		t.Errorf("existing [0.1.1] link must be preserved:\n%s", newChangelog)
+	}
+	if !strings.Contains(newChangelog, "[0.0.1-dev]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1-dev\n") {
+		t.Errorf("existing [0.0.1-dev] link must be preserved:\n%s", newChangelog)
+	}
+
+	// Ordering: the whole footer block must be newest-first, exactly.
+	wantFooter := wantUnreleased + "\n" +
+		wantTag020 + "\n" +
+		"[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n" +
+		"[0.0.1-dev]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1-dev\n"
+	if !strings.HasSuffix(newChangelog, wantFooter) {
+		t.Errorf("footer ordering/content wrong.\ngot changelog:\n%s\nwant footer suffix:\n%s", newChangelog, wantFooter)
+	}
+}
+
+func TestFinalize_FooterBaseURLIsParsedNotHardcoded(t *testing.T) {
+	// A completely different repo host/owner. If the base URL were hardcoded to
+	// the anyscale one, these assertions would fail.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Fixed\n\n- a bug\n\n" +
+		"## [1.0.0] - 2026-01-01\n\nstuff\n\n" +
+		"[Unreleased]: https://gitlab.example.com/team/widget/compare/v1.0.0...HEAD\n" +
+		"[1.0.0]: https://gitlab.example.com/team/widget/releases/tag/v1.0.0\n"
+
+	newChangelog, _, err := Finalize(changelog, "1.1.0", "2026-02-02")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantUnreleased := "[Unreleased]: https://gitlab.example.com/team/widget/compare/v1.1.0...HEAD"
+	wantTag := "[1.1.0]: https://gitlab.example.com/team/widget/releases/tag/v1.1.0"
+	if !strings.Contains(newChangelog, wantUnreleased+"\n") {
+		t.Errorf("base URL not derived from footer; expected %q in:\n%s", wantUnreleased, newChangelog)
+	}
+	if !strings.Contains(newChangelog, wantTag+"\n") {
+		t.Errorf("base URL not derived from footer; expected %q in:\n%s", wantTag, newChangelog)
+	}
+	if strings.Contains(newChangelog, "anyscale") {
+		t.Errorf("footer must not contain a hardcoded anyscale URL:\n%s", newChangelog)
+	}
+}
+
+func TestFinalize_NoFooterSectionLeavesBodyIntact(t *testing.T) {
+	// No reference-link footer at all. Documented behavior: leave the changelog
+	// body correct and do NOT fabricate a footer (we can't derive the repo URL).
+	changelog := "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
+
+	newChangelog, notes, err := Finalize(changelog, "0.2.0", "2026-08-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The body transform (rename + fresh Unreleased) must still be correct...
+	wantChangelog := "# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-08-01\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
+	if newChangelog != wantChangelog {
+		t.Errorf("body should be finalized unchanged when there is no footer.\ngot:\n%q\nwant:\n%q", newChangelog, wantChangelog)
+	}
+	// ...and no footer link definitions should have been fabricated.
+	if strings.Contains(newChangelog, "compare/") || strings.Contains(newChangelog, "releases/tag/") {
+		t.Errorf("no footer should be fabricated when none exists:\n%s", newChangelog)
+	}
+	if notes != "### Added\n\n- new thing" {
+		t.Errorf("release notes wrong: %q", notes)
+	}
+}
+
+func TestFinalize_FooterBaseFallsBackToTagURL(t *testing.T) {
+	// The [Unreleased] line is present but its target is NOT a parseable
+	// compare URL (here it just points at a bare tree URL). The base URL must
+	// then be derived from the [1.0.0] tag line instead, proving the fallback
+	// path is real and not dead code.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Fixed\n\n- a bug\n\n" +
+		"## [1.0.0] - 2026-01-01\n\nstuff\n\n" +
+		"[Unreleased]: https://example.org/acme/thing/tree/main\n" +
+		"[1.0.0]: https://example.org/acme/thing/releases/tag/v1.0.0\n"
+
+	newChangelog, _, err := Finalize(changelog, "1.1.0", "2026-02-02")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantUnreleased := "[Unreleased]: https://example.org/acme/thing/compare/v1.1.0...HEAD"
+	wantTag := "[1.1.0]: https://example.org/acme/thing/releases/tag/v1.1.0"
+	if !strings.Contains(newChangelog, wantUnreleased+"\n") {
+		t.Errorf("expected base derived from tag URL in Unreleased line %q, got:\n%s", wantUnreleased, newChangelog)
+	}
+	if !strings.Contains(newChangelog, wantTag+"\n") {
+		t.Errorf("expected new tag link %q, got:\n%s", wantTag, newChangelog)
+	}
+}
+
+func TestFinalize_FooterWithNoDerivableBaseLeftUnchanged(t *testing.T) {
+	// An [Unreleased] line exists but there is NO compare URL and NO tag line to
+	// derive a base URL from. We can't safely edit it, so the footer (and body)
+	// must be left exactly as-is rather than emitting a malformed URL.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Fixed\n\n- a bug\n\n" +
+		"## [1.0.0] - 2026-01-01\n\nstuff\n\n" +
+		"[Unreleased]: see the git log\n"
+
+	newChangelog, _, err := Finalize(changelog, "1.1.0", "2026-02-02")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasSuffix(newChangelog, "[Unreleased]: see the git log\n") {
+		t.Errorf("footer with no derivable base URL must be left unchanged, got:\n%s", newChangelog)
+	}
+	if strings.Contains(newChangelog, "compare/") || strings.Contains(newChangelog, "releases/tag/") {
+		t.Errorf("must not fabricate URLs when no base is derivable:\n%s", newChangelog)
+	}
+}
+
+func TestFinalize_FooterMaintenanceIsIdempotentInSpirit(t *testing.T) {
+	// Finalizing X.Y.Z, then re-finalizing the SAME X.Y.Z against the produced
+	// footer, must leave a consistent footer: [Unreleased] still compares from
+	// X.Y.Z and the [X.Y.Z] tag link is present exactly once (no duplicate, no
+	// drift). This proves the footer transform re-parses stably.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Added\n\n- new thing\n\n" +
+		"## [0.1.1] - 2026-07-06\n\nold\n\n" +
+		"[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD\n" +
+		"[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n"
+
+	once, _, err := Finalize(changelog, "0.2.0", "2026-08-01")
+	if err != nil {
+		t.Fatalf("first Finalize: %v", err)
+	}
+	// Re-run updateFooterLinks directly for the same version against the already
+	// finalized footer: this is the "re-parsing is stable" property.
+	twiceFooter := updateFooterLinks(once, "0.2.0")
+
+	wantUnreleasedCount := strings.Count(twiceFooter, "compare/v0.2.0...HEAD")
+	if wantUnreleasedCount != 1 {
+		t.Errorf("expected exactly one Unreleased compare-from-0.2.0 line, got %d:\n%s", wantUnreleasedCount, twiceFooter)
+	}
+	tagCount := strings.Count(twiceFooter, "[0.2.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.2.0")
+	if tagCount != 1 {
+		t.Errorf("expected exactly one [0.2.0] tag link after re-parse, got %d:\n%s", tagCount, twiceFooter)
+	}
+	if strings.Contains(twiceFooter, "compare/v0.1.1...HEAD") {
+		t.Errorf("re-parse must not resurrect the stale v0.1.1 compare base:\n%s", twiceFooter)
+	}
+}
+
+func TestFinalize_ReleaseNotesExcludeFooterLinks(t *testing.T) {
+	// The releaseNotes value must be the section body only — never any footer
+	// link definitions, even when a footer is present and gets maintained.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Added\n\n- new thing\n\n" +
+		"## [0.1.1] - 2026-07-06\n\nold\n\n" +
+		"[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD\n" +
+		"[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n"
+
+	_, notes, err := Finalize(changelog, "0.2.0", "2026-08-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if notes != "### Added\n\n- new thing" {
+		t.Errorf("release notes must be the section body only, got:\n%q", notes)
+	}
+	if strings.Contains(notes, "compare/") || strings.Contains(notes, "releases/tag/") || strings.Contains(notes, "[Unreleased]:") {
+		t.Errorf("release notes must not contain footer link definitions, got:\n%q", notes)
+	}
+}
+
 func TestFinalize_ReleaseNotesMatchChangelogSection(t *testing.T) {
 	// Acceptance criterion 5: GitHub Release body must byte-match the
 	// CHANGELOG.md section for that version once rendered back with the heading.

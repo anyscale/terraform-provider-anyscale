@@ -6,7 +6,11 @@ version: 2
 
 before:
   hooks:
-    - go mod tidy
+    # `go mod download`, not `go mod tidy`, on purpose: tidy can rewrite
+    # go.mod/go.sum mid-release, which dirties the tree GoReleaser builds from
+    # and makes the release non-deterministic. download only populates the
+    # module cache and leaves committed files untouched.
+    - go mod download
 
 builds:
   - id: terraform-provider-anyscale

@@ -22,17 +22,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.25"
 
       - name: Changelog fragment presence check
+        # PR_NUM/HEAD_REF come in via env rather than being interpolated
+        # straight into the script body: head.ref is attacker-controlled (a PR
+        # author picks their branch name), so splicing it into an inline shell
+        # script is a script-injection vector. Passing it through the runner
+        # environment keeps it as inert data. (See actionlint's [expression]
+        # check and GitHub's script-injection hardening guidance.)
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          PR_NUM="${{ github.event.pull_request.number }}"
-          HEAD_REF="${{ github.event.pull_request.head.ref }}"
           FRAGMENT=".changelog/${PR_NUM}.txt"
           HAS_SKIP_LABEL=$(jq -r '[.pull_request.labels[].name] | any(. == "skip-changelog")' "$GITHUB_EVENT_PATH")
           if [[ "$HEAD_REF" =~ ^changelog/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
