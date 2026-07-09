@@ -14,8 +14,8 @@
 #   make tag VERSION=0.1.0                 # verifies CHANGELOG.md is finalized on main, tags, pushes
 #
 # See the `changelog-release` and `tag` targets in the Makefile, and
-# .crystl/quest/changelog-release-contract.md for why the changelog step
-# goes through a PR instead of a direct push to main.
+# RELEASING.md for why the changelog step goes through a PR instead of a
+# direct push to main.
 
 name: Release
 

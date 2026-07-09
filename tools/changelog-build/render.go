@@ -7,7 +7,7 @@ import (
 
 const unreleasedMarker = "## [Unreleased]"
 
-// RenderSection groups entries by type (contract sec3 order) and renders them
+// RenderSection groups entries by type (the order in .changelog/README.md) and renders them
 // as Keep a Changelog-style Markdown subsections. Deterministic: the same
 // entries in the same order always render identically, which is what makes
 // the fold step idempotent.
@@ -64,7 +64,7 @@ func Fold(changelog, body string) (string, error) {
 // heading, inserts a fresh empty ## [Unreleased] above it, and returns the
 // updated changelog plus the finalized section's own body (for feeding
 // GoReleaser --release-notes so the GitHub Release matches CHANGELOG.md
-// byte-for-byte, per contract sec7).
+// byte-for-byte; see RELEASING.md).
 func Finalize(changelog, version, date string) (newChangelog, releaseNotes string, err error) {
 	idx := strings.Index(changelog, unreleasedMarker)
 	if idx == -1 {
@@ -91,7 +91,7 @@ func Finalize(changelog, version, date string) (newChangelog, releaseNotes strin
 // section, without modifying changelog. This is what release.yml uses on a
 // fresh checkout at the release tag to hand GoReleaser the exact same text
 // `make tag` already committed to CHANGELOG.md, so the GitHub Release body
-// byte-matches the CHANGELOG.md section for that version (contract sec7/10.5).
+// byte-matches the CHANGELOG.md section for that version (see RELEASING.md).
 func Extract(changelog, version string) (string, error) {
 	marker := fmt.Sprintf("## [%s]", version)
 	idx := strings.Index(changelog, marker)

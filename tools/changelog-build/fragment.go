@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// EntryType is a release-note fragment type from the ratified changelog contract
-// (.crystl/quest/changelog-release-contract.md, sec3).
+// EntryType is a release-note fragment type. The complete list, and the order
+// the types render in, is documented in .changelog/README.md.
 type EntryType string
 
 const (
