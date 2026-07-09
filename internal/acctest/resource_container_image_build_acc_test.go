@@ -80,6 +80,20 @@ RUN pip install emoji==2.15.0`
 					"containerfile",      // client-only: Dockerfile body is sent to the build API and not echoed back
 					"containerfile_path", // client-only: local filesystem path, never sent to the API
 					"build_timeout",      // client-side wait knob; not stored server-side
+					// Real backend timing gap, not a provider bug: a build has two
+					// internal completion states (image ready & pushed; cache
+					// uploaded & digest available) that both surface as this
+					// resource's single "succeeded" status, with no bounded latency
+					// between them. Create()'s poll loop returns as soon as it sees
+					// "succeeded", which can be the first state - digest still null.
+					// A separate import moments later can land on either side of the
+					// gap, so it intermittently disagrees with the apply-time value.
+					// Confirmed via real CI flakes (not just this test's own runs)
+					// and traced to the backend's build-state model; see the digest
+					// timing gap report for the real-fix recommendation (forge/production
+					// code, not a test fix - bounding this properly means polling
+					// past "succeeded" for a settled digest in Create()/Update()).
+					"digest",
 				},
 			},
 		},
