@@ -1,13 +1,18 @@
 # AWS Basic Scenario - Cloud Foundation Module
 # No EFS, No MemoryDB
-#
-# local.full_tags is defined once in aws_anyscale_1.tf and shared here -
-# both scenarios compute it identically, and locals share one namespace
-# per module regardless of which file declares them.
+
+locals {
+  full_tags_2 = merge(tomap({
+    anyscale-cloud-id           = var.anyscale_cloud_id,
+    anyscale-deploy-environment = var.anyscale_deploy_env
+    }),
+    var.tags
+  )
+}
 
 module "aws_anyscale_2" {
   source = "anyscale/anyscale-cloudfoundation-modules/aws"
-  tags   = local.full_tags
+  tags   = local.full_tags_2
 
   anyscale_deploy_env  = var.anyscale_deploy_env
   anyscale_cloud_id    = var.anyscale_cloud_id

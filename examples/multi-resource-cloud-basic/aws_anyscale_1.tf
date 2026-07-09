@@ -2,7 +2,7 @@
 # No EFS, No MemoryDB
 
 locals {
-  full_tags = merge(tomap({
+  full_tags_1 = merge(tomap({
     anyscale-cloud-id           = var.anyscale_cloud_id,
     anyscale-deploy-environment = var.anyscale_deploy_env
     }),
@@ -12,7 +12,7 @@ locals {
 
 module "aws_anyscale_1" {
   source = "anyscale/anyscale-cloudfoundation-modules/aws"
-  tags   = local.full_tags
+  tags   = local.full_tags_1
 
   anyscale_deploy_env  = var.anyscale_deploy_env
   anyscale_cloud_id    = var.anyscale_cloud_id
