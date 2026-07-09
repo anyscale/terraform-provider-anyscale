@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -110,7 +112,7 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 						},
 						"latest_build_status": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).",
+							MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
 						},
 						"revision": schema.Int64Attribute{
 							Computed:            true,
@@ -153,42 +155,31 @@ func (d *ContainerImagesDataSource) Read(ctx context.Context, req datasource.Rea
 		return
 	}
 
-	// Build search query request body
-	query := ClusterEnvironmentsSearchQuery{
-		IncludeArchived:  false,
-		IncludeAnonymous: false,
-		Paging: PageQuery{
-			Count: 100,
-		},
-	}
+	// Build query parameters for GET /api/v2/application_templates/
+	params := url.Values{}
 
 	if !config.NameContains.IsNull() && config.NameContains.ValueString() != "" {
-		query.Name = &TextQuery{
-			Contains: config.NameContains.ValueString(),
-		}
+		params.Set("name_contains", config.NameContains.ValueString())
 	}
 
 	if !config.CreatorID.IsNull() && config.CreatorID.ValueString() != "" {
-		creatorID := config.CreatorID.ValueString()
-		query.CreatorID = &creatorID
+		params.Set("creator_id", config.CreatorID.ValueString())
 	}
 
 	if !config.ProjectID.IsNull() && config.ProjectID.ValueString() != "" {
-		projectID := config.ProjectID.ValueString()
-		query.ProjectID = &projectID
+		params.Set("project_id", config.ProjectID.ValueString())
 	}
 
-	// Set include_archived (defaults to false if not specified)
-	if !config.IncludeArchived.IsNull() {
-		query.IncludeArchived = config.IncludeArchived.ValueBool()
-	}
+	// include_archived defaults to false if not specified
+	includeArchived := !config.IncludeArchived.IsNull() && config.IncludeArchived.ValueBool()
+	params.Set("include_archived", strconv.FormatBool(includeArchived))
 
-	tflog.Debug(ctx, "Fetching container images with search query", map[string]any{
-		"include_archived": query.IncludeArchived,
+	tflog.Debug(ctx, "Fetching container images", map[string]any{
+		"include_archived": includeArchived,
 	})
 
 	// Fetch container images
-	containerImages, err := d.fetchContainerImages(ctx, query)
+	containerImages, err := d.fetchContainerImages(ctx, params)
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "list container images", err)
 		return
@@ -205,83 +196,43 @@ func (d *ContainerImagesDataSource) Read(ctx context.Context, req datasource.Rea
 
 // Helper functions
 
-// fetchContainerImages fetches container images using POST /ext/v0/cluster_environments/search, handling pagination automatically.
-func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, query ClusterEnvironmentsSearchQuery) ([]ContainerImageSummaryModel, error) {
-	var allResults []ClusterEnvironmentResult
-
-	// Handle pagination
-	for {
-		reqBody, err := MarshalRequestBody(query)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal search query: %w", err)
-		}
-
-		listResp, err := DoRequestAndParse[ClusterEnvironmentsListResponse](
-			ctx,
-			d.client,
-			"POST",
-			"/ext/v0/cluster_environments/search",
-			reqBody,
-			http.StatusOK,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list cluster environments: %w", err)
-		}
-
-		allResults = append(allResults, listResp.Results...)
-
-		// Check for next page
-		if listResp.Metadata.NextPagingToken == nil || *listResp.Metadata.NextPagingToken == "" {
-			break
-		}
-
-		// Update paging token for next request
-		query.Paging.PagingToken = listResp.Metadata.NextPagingToken
+// fetchContainerImages fetches container images from GET /api/v2/application_templates/, handling pagination automatically.
+// Each result's latest build summary (id/revision/status) is embedded directly on the decorated
+// application template, so no per-item build lookup is required.
+func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, params url.Values) ([]ContainerImageSummaryModel, error) {
+	results, err := PaginatedRequest(ctx, d.client, "/api/v2/application_templates/", params,
+		func(body []byte) ([]ApplicationTemplateResult, *string, error) {
+			var listResp ApplicationTemplatesListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, err
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list application templates: %w", err)
 	}
 
-	// Fetch build details for each cluster environment
-	allImages := make([]ContainerImageSummaryModel, 0, len(allResults))
-	for _, env := range allResults {
+	allImages := make([]ContainerImageSummaryModel, 0, len(results))
+	for _, tmpl := range results {
 		imageModel := ContainerImageSummaryModel{
-			ID:         types.StringValue(env.ID),
-			Name:       types.StringValue(env.Name),
-			CreatedAt:  types.StringValue(env.CreatedAt),
-			IsArchived: types.BoolValue(env.IsArchived()),
+			ID:         types.StringValue(tmpl.ID),
+			Name:       types.StringValue(tmpl.Name),
+			CreatedAt:  types.StringValue(tmpl.CreatedAt),
+			IsArchived: types.BoolValue(tmpl.IsArchived()),
 		}
 
-		if env.CreatorID != "" {
-			imageModel.CreatorID = types.StringValue(env.CreatorID)
+		if tmpl.CreatorID != "" {
+			imageModel.CreatorID = types.StringValue(tmpl.CreatorID)
 		} else {
 			imageModel.CreatorID = types.StringNull()
 		}
 
-		// Fetch the latest build for this cluster environment
-		buildID, err := d.getLatestBuildID(ctx, env.ID)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
-				"cluster_environment_id": env.ID,
-				"error":                  err.Error(),
-			})
-		}
-
-		if buildID != "" {
-			imageModel.LatestBuildID = types.StringValue(buildID)
-
-			// Fetch build details
-			build, err := d.getBuild(ctx, buildID)
-			if err != nil {
-				tflog.Warn(ctx, "Failed to get build details", map[string]any{
-					"build_id": buildID,
-					"error":    err.Error(),
-				})
-				imageModel.LatestBuildStatus = types.StringNull()
-				imageModel.Revision = types.Int64Null()
-				imageModel.NameVersion = types.StringNull()
-			} else {
-				imageModel.LatestBuildStatus = types.StringValue(build.Status)
-				imageModel.Revision = types.Int64Value(int64(build.Revision))
-				imageModel.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", env.Name, build.Revision))
-			}
+		if tmpl.LatestBuild != nil {
+			imageModel.LatestBuildID = types.StringValue(tmpl.LatestBuild.ID)
+			imageModel.LatestBuildStatus = types.StringValue(tmpl.LatestBuild.Status)
+			imageModel.Revision = types.Int64Value(int64(tmpl.LatestBuild.Revision))
+			imageModel.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", tmpl.Name, tmpl.LatestBuild.Revision))
 		} else {
 			imageModel.LatestBuildID = types.StringNull()
 			imageModel.LatestBuildStatus = types.StringNull()
@@ -293,46 +244,4 @@ func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, qu
 	}
 
 	return allImages, nil
-}
-
-// getBuild fetches build details by ID.
-func (d *ContainerImagesDataSource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
-	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
-		ctx,
-		d.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get build %s: %w", buildID, err)
-	}
-
-	return &buildResp.Result, nil
-}
-
-// getLatestBuildID fetches the latest build ID for a cluster environment.
-func (d *ContainerImagesDataSource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
-	// Note: The Anyscale API may return 201 for GET build endpoints
-	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
-		ctx,
-		d.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to list builds for cluster environment %s: %w", clusterEnvID, err)
-	}
-
-	if len(buildsResp.Results) == 0 {
-		return "", nil // No builds yet - not an error
-	}
-
-	return buildsResp.Results[0].ID, nil
 }

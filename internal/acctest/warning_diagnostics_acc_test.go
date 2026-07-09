@@ -128,11 +128,11 @@ provider "anyscale" {
 	return result
 }
 
-// TestAccKubernetesConfigDeprecatedFields_WarningActuallyFires is the
+// TestAccCloudResource_KubernetesConfigDeprecatedFields_WarningActuallyFires is the
 // corrected C5 acceptance criterion: setting each of the 5 inert
 // kubernetes_config fields must produce a real, served deprecation warning,
 // not just a schema struct field asserted by a unit test.
-func TestAccKubernetesConfigDeprecatedFields_WarningActuallyFires(t *testing.T) {
+func TestAccCloudResource_KubernetesConfigDeprecatedFields_WarningActuallyFires(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	binDir := buildProviderBinaryForCLICheck(t)
@@ -260,11 +260,11 @@ provider "anyscale" {
 	return lines
 }
 
-// TestAccCloudCredentialPlaceholder_WarningActuallyFires is the corrected C9
+// TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires is the corrected C9
 // acceptance criterion: an all-in-one cloud whose aws_config is present but
 // has no way to derive a credential must produce a real, served warning
 // during apply - not just a struct-level "wasPlaceholder" assertion.
-func TestAccCloudCredentialPlaceholder_WarningActuallyFires(t *testing.T) {
+func TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	binDir := buildProviderBinaryForCLICheck(t)

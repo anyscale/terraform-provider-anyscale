@@ -427,3 +427,61 @@ func TestCloudDeploymentsResponseJSON(t *testing.T) {
 		t.Errorf("NextPagingToken = %v, want %q", resp.Metadata.NextPagingToken, "token123")
 	}
 }
+
+// TestBuildResultResolvedRayVersion tests F4's resolution order: a BYOD build's
+// byod_ray_version (parsed from the docker image tag, may differ from what the user
+// requested) takes precedence over the plain ray_version field when both are present,
+// since only byod_ray_version reflects what the image actually resolved to.
+func TestBuildResultResolvedRayVersion(t *testing.T) {
+	tests := []struct {
+		name           string
+		byodRayVersion *string
+		rayVersion     *string
+		want           *string
+	}{
+		{
+			name:           "byod_ray_version present takes precedence over ray_version",
+			byodRayVersion: strPtr("2.9.3"),
+			rayVersion:     strPtr("2.9.0"),
+			want:           strPtr("2.9.3"),
+		},
+		{
+			name:           "only ray_version present (non-BYOD build)",
+			byodRayVersion: nil,
+			rayVersion:     strPtr("2.44.0"),
+			want:           strPtr("2.44.0"),
+		},
+		{
+			name:           "only byod_ray_version present",
+			byodRayVersion: strPtr("2.9.3"),
+			rayVersion:     nil,
+			want:           strPtr("2.9.3"),
+		},
+		{
+			name:           "neither present",
+			byodRayVersion: nil,
+			rayVersion:     nil,
+			want:           nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildResult{
+				ByodRayVersion: tt.byodRayVersion,
+				RayVersion:     tt.rayVersion,
+			}
+
+			got := result.ResolvedRayVersion()
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("ResolvedRayVersion() = %v, want nil", *got)
+				}
+				return
+			}
+			if got == nil || *got != *tt.want {
+				t.Errorf("ResolvedRayVersion() = %v, want %v", got, *tt.want)
+			}
+		})
+	}
+}

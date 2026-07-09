@@ -93,10 +93,10 @@ provider "anyscale" {
 `, serverURL)
 }
 
-// TestAccCloudLifecycle_AWS_MockServer proves C3's headline gates for the AWS
+// TestAccCloudResource_Lifecycle_AWS_MockServer proves C3's headline gates for the AWS
 // all-in-one pattern against a mock backend: fresh create -> apply -> plan
 // empty; import -> populates cleanly, ImportStateVerify matches, no replace.
-func TestAccCloudLifecycle_AWS_MockServer(t *testing.T) {
+func TestAccCloudResource_Lifecycle_AWS_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudID = "cld_c3_aws_mock"
@@ -179,9 +179,9 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudLifecycle_GCP_MockServer is the GCP analogue: proves the
+// TestAccCloudResource_Lifecycle_GCP_MockServer is the GCP analogue: proves the
 // bucket_name gs:// hazard and GCP config round-trip cleanly.
-func TestAccCloudLifecycle_GCP_MockServer(t *testing.T) {
+func TestAccCloudResource_Lifecycle_GCP_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudID = "cld_c3_gcp_mock"
@@ -298,9 +298,9 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudLifecycle_K8S_MockServer, using the all-in-one pattern (a
+// TestAccCloudResource_Lifecycle_K8S_MockServer, using the all-in-one pattern (a
 // single anyscale_cloud resource with an embedded kubernetes_config block).
-func TestAccCloudLifecycle_K8S_MockServer(t *testing.T) {
+func TestAccCloudResource_Lifecycle_K8S_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudID = "cld_c3_k8s_mock"

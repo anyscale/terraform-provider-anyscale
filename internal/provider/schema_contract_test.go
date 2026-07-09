@@ -329,7 +329,7 @@ func TestComputeConfigCC1RequiredResourcesRename(t *testing.T) {
 // flags. Both fields instead use UseStateForUnknown plus populating from the
 // API response in Create/Update (mirroring Read), which reflects whatever
 // the backend actually set once and then holds steady - see
-// TestAccComputeConfigLifecycle_MockServer's empty-plan-after-refresh step
+// TestAccComputeConfigResource_Lifecycle_MockServer's empty-plan-after-refresh step
 // for the acceptance-level proof that this actually holds (a schema-only
 // check like this one cannot catch a RUNTIME failure to populate the value).
 func TestComputeConfigCC2IdleAndMaxUptimeSettable(t *testing.T) {
@@ -650,4 +650,55 @@ func TestComputeConfigWorkerNodeNameIsServerInferred(t *testing.T) {
 		t.Errorf("worker_nodes[].name must include stringplanmodifier.UseNonNullStateForUnknown() — the variant " +
 			"safe for an attribute nested inside a list that can be null after creation (task 451e2845 + 1f2d592f)")
 	}
+}
+
+// TestContainerImageBuildStatusDescriptionsMatchAcceptedEnum pins F1's documentation half: all
+// three build_status/latest_build_status surfaces must advertise the exact six-value enum
+// evaluateBuildStatus actually accepts (see resource_container_image_build_test.go's
+// TestEvaluateBuildStatus_AllAcceptedStatuses for the code-side proof of that same enum). Before
+// F1, all three MarkdownDescriptions advertised only five values — pending_cancellation was
+// missing entirely, not merely misspelled — and used the two-L "cancelled" spelling the backend
+// never actually sends.
+func TestContainerImageBuildStatusDescriptionsMatchAcceptedEnum(t *testing.T) {
+	wantTokens := []string{"pending", "in_progress", "succeeded", "failed", "pending_cancellation", "canceled"}
+
+	assertHasAllTokens := func(t *testing.T, label, desc string) {
+		t.Helper()
+		for _, token := range wantTokens {
+			if !strings.Contains(desc, "`"+token+"`") {
+				t.Errorf("%s MarkdownDescription is missing status value `%s`; got: %s", label, token, desc)
+			}
+		}
+	}
+
+	t.Run("container_image_build.build_status", func(t *testing.T) {
+		s := schemaOf(t, &ContainerImageBuildResource{})
+		attr, ok := s.Attributes["build_status"].(schema.StringAttribute)
+		if !ok {
+			t.Fatalf("build_status is not a schema.StringAttribute (got %T)", s.Attributes["build_status"])
+		}
+		assertHasAllTokens(t, "container_image_build.build_status", attr.MarkdownDescription)
+	})
+
+	t.Run("container_image.build_status", func(t *testing.T) {
+		s := datasourceSchemaOf(t, &ContainerImageDataSource{})
+		attr, ok := s.Attributes["build_status"].(dsschema.StringAttribute)
+		if !ok {
+			t.Fatalf("build_status is not a dsschema.StringAttribute (got %T)", s.Attributes["build_status"])
+		}
+		assertHasAllTokens(t, "container_image.build_status", attr.MarkdownDescription)
+	})
+
+	t.Run("container_images.container_images[].latest_build_status", func(t *testing.T) {
+		s := datasourceSchemaOf(t, &ContainerImagesDataSource{})
+		list, ok := s.Attributes["container_images"].(dsschema.ListNestedAttribute)
+		if !ok {
+			t.Fatalf("container_images is not a dsschema.ListNestedAttribute (got %T)", s.Attributes["container_images"])
+		}
+		attr, ok := list.NestedObject.Attributes["latest_build_status"].(dsschema.StringAttribute)
+		if !ok {
+			t.Fatalf("latest_build_status is not a dsschema.StringAttribute (got %T)", list.NestedObject.Attributes["latest_build_status"])
+		}
+		assertHasAllTokens(t, "container_images.container_images[].latest_build_status", attr.MarkdownDescription)
+	})
 }

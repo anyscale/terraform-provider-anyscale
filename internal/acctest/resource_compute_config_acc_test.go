@@ -88,7 +88,7 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 							// flags/advanced_instance_config from the API - for THIS test's config,
 							// which never sets any of the three, both now correctly stay/resolve to
 							// their pre-import values with nothing to ignore. See
-							// TestAccComputeConfigImportRecoversWriteOnlyFields(_RealAPI) for the
+							// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields(_RealAPI) for the
 							// actual CC12 recovery-with-real-values proof.
 						},
 					},
@@ -606,11 +606,13 @@ func testAccDeleteComputeConfigViaAPI(resourceName string) resource.TestCheckFun
 	}
 }
 
-// TestAccComputeConfigImportRecoversWriteOnlyFields_RealAPI is the real-API
+// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI is the real-API
 // companion to the mock-server version of this test (see
 // resource_compute_config_lifecycle_acc_test.go for the full CC12 background
-// and the three-point verify-gate this proves). The mock version is the
-// CI-durable floor; this one proves the same three gates against the actual
+// and the three-point verify-gate this proves). The mock version is intended
+// to be the CI-durable floor (it was NOT, until 2026-07-08 - see the
+// TestAcc<Thing>Resource_/DataSource_ naming-gap fix that made it actually
+// selectable by CI for the first time); this one proves the same three gates against the actual
 // Anyscale API and, specifically, against a REAL per-node-shaped payload the
 // backend accepts, closing forge's stated least-confident spot: whether Go's
 // json.Marshal of the recovered advanced_instance_config/flags actually
@@ -623,7 +625,7 @@ func testAccDeleteComputeConfigViaAPI(resourceName string) resource.TestCheckFun
 // strips out as special-cased: min_resources, max_resources,
 // allow-cross-zone-autoscaling), and a TagSpecifications-shaped
 // advanced_instance_config, both confirmed accepted as-is by the backend.
-func TestAccComputeConfigImportRecoversWriteOnlyFields_RealAPI(t *testing.T) {
+func TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 

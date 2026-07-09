@@ -149,16 +149,14 @@ RUN sudo mkdir -p /anyscale/init`
 }
 
 // TestAccContainerImageBuildResource_WithProjectID tests building with a project association.
-// Commented out to reduce test runtime - can be enabled when testing project_id functionality.
-/*
 func TestAccContainerImageBuildResource_WithProjectID(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
 	cloudID := GetTestCloudID(t)
 
-	imageName := fmt.Sprintf("tfacc-test-build-project-%d", time.Now().UnixNano())
-	projectName := fmt.Sprintf("tfacc-test-project-build-%d", time.Now().UnixNano())
+	imageName := UniqueName(t, "img-build-project")
+	projectName := UniqueName(t, "project-build")
 
 	containerfile := `FROM anyscale/ray:2.53.0-slim-py312
 RUN pip install emoji==2.15.0`
@@ -179,7 +177,6 @@ RUN pip install emoji==2.15.0`
 		},
 	})
 }
-*/
 
 // Helper functions
 
@@ -228,8 +225,6 @@ EOF
 `, name, containerfile)
 }
 
-// Kept for potential future use with project_id testing
-/*
 func testAccContainerImageBuildResourceWithProjectConfig(cloudID, projectName, imageName, containerfile string) string {
 	return fmt.Sprintf(`
 resource "anyscale_project" "test" {
@@ -248,4 +243,3 @@ EOF
 }
 `, projectName, cloudID, imageName, containerfile)
 }
-*/

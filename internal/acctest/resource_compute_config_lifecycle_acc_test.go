@@ -218,10 +218,10 @@ func toLowerASCII(s string) string {
 	return string(b)
 }
 
-// TestAccComputeConfigLifecycle_MockServer proves the framework-level create
+// TestAccComputeConfigResource_Lifecycle_MockServer proves the framework-level create
 // -> apply -> plan(empty) -> update(new version) -> import lifecycle against
 // a mock backend carrying the two hazards described in this file's header.
-func TestAccComputeConfigLifecycle_MockServer(t *testing.T) {
+func TestAccComputeConfigResource_Lifecycle_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	server := newMockComputeConfigServer(t)
@@ -324,7 +324,7 @@ resource "anyscale_compute_config" "test" {
 					// advanced_instance_config, and flags used to be listed here too
 					// (pre-CC11/CC12/CC14); this config sets none of the three, so
 					// they now correctly resolve/stay at their pre-import values with
-					// nothing to ignore - see TestAccComputeConfigImportRecoversWriteOnlyFields
+					// nothing to ignore - see TestAccComputeConfigResource_ImportRecoversWriteOnlyFields
 					// for the actual CC12 recovery-with-real-values proof.
 					"head_node", "worker_nodes",
 					"min_resources", "max_resources", "zones",
@@ -369,7 +369,7 @@ func newCC12MockComputeConfigServer(t *testing.T, configID, configName, cloudID 
 	return server
 }
 
-// TestAccComputeConfigImportRecoversWriteOnlyFields is CC12's verify-gate,
+// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields is CC12's verify-gate,
 // assigned jointly to assayer and forge when CC12 was designed but not
 // actually written until caught reviewing the release PR text that claimed
 // it existed. Read intentionally never reads flags/advanced_instance_config
@@ -385,7 +385,7 @@ func newCC12MockComputeConfigServer(t *testing.T, configID, configName, cloudID 
 //     re-masked back to invisible.
 //  3. The recovered values survive the immediate post-import refresh Read
 //     (Read must leave them alone, not wipe them back out).
-func TestAccComputeConfigImportRecoversWriteOnlyFields(t *testing.T) {
+func TestAccComputeConfigResource_ImportRecoversWriteOnlyFields(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const configID = "cpt_cc12_mock"
@@ -532,8 +532,8 @@ func newCC12PerNodeMockComputeConfigServer(t *testing.T, configID, configName, c
 	return server
 }
 
-// TestAccComputeConfigImportRecoversPerNodeAdvancedInstanceConfig is CC12's
-// per-node companion to TestAccComputeConfigImportRecoversWriteOnlyFields,
+// TestAccComputeConfigResource_ImportRecoversPerNodeAdvancedInstanceConfig is CC12's
+// per-node companion to TestAccComputeConfigResource_ImportRecoversWriteOnlyFields,
 // requested explicitly by the user after review caught that the top-level
 // test never actually exercised the nested case despite a comment implying
 // it did. Unlike the top-level Dynamic fields (CC15's structural List-vs-
@@ -547,7 +547,7 @@ func newCC12PerNodeMockComputeConfigServer(t *testing.T, configID, configName, c
 // canonicalization fix for forge (in the same spirit as CC15), not a
 // shrug-and-document fallback - the user confirmed this is a common real
 // customer pattern, not an edge case.
-func TestAccComputeConfigImportRecoversPerNodeAdvancedInstanceConfig(t *testing.T) {
+func TestAccComputeConfigResource_ImportRecoversPerNodeAdvancedInstanceConfig(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const configID = "cpt_cc12_pernode_mock"
