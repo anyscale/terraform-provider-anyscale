@@ -44,7 +44,7 @@ output "build_image_uri" {
 
 output "build_status" {
   value       = anyscale_container_image_build.inline.build_status
-  description = "The current status of the build (pending, in_progress, succeeded, failed, cancelled)"
+  description = "The current status of the build (pending, in_progress, succeeded, failed, pending_cancellation, canceled)"
 }
 ```
 

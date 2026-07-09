@@ -85,6 +85,52 @@ resource "anyscale_compute_config" "custom" {
 }
 ```
 
+### `anyscale_container_image`
+
+Look up an existing container image by ID or name.
+
+**Use cases:**
+- Get the `name_version` handle to pass to job/service submission tooling
+- Check an image's current `build_status` before submitting a workload against it
+- Reference `image_uri` for inspection outside Anyscale tooling (e.g. `docker pull`)
+
+**Example:**
+```terraform
+data "anyscale_container_image" "training" {
+  name = "training-image"
+}
+
+output "training_image_name_version" {
+  value = data.anyscale_container_image.training.name_version
+}
+```
+
+### `anyscale_container_images`
+
+List and filter container images.
+
+**Use cases:**
+- List all container images in a project
+- Filter by name pattern, creator, or archived status
+- Get the latest build status across many images at once, without fetching each one individually
+
+**Example:**
+```terraform
+data "anyscale_container_images" "recent" {
+  name_contains    = "training"
+  include_archived = false
+}
+
+output "recent_container_images" {
+  value = [
+    for img in data.anyscale_container_images.recent.container_images : {
+      name         = img.name
+      name_version = img.name_version
+    }
+  ]
+}
+```
+
 ## Running the Examples
 
 1. **Set up authentication:**
@@ -114,6 +160,8 @@ resource "anyscale_compute_config" "custom" {
 - **Authentication required** - You need valid Anyscale credentials
 - **Name lookups** - If multiple resources have the same name, the most recently created one is returned
 - **Anonymous configs** - Compute configs created without a name can only be looked up by ID
+- **Container image name lookups** - Same rule as clouds: if multiple non-archived images share a
+  name, the most recently created one is returned, and Terraform logs a warning when this happens
 
 ## Common Patterns
 
@@ -198,4 +246,7 @@ resource "anyscale_compute_config" "west_config" {
 - [Provider Documentation](../../docs/index.md)
 - [Cloud Data Source](../../docs/data-sources/cloud.md)
 - [Compute Config Data Source](../../docs/data-sources/compute_config.md)
+- [Container Image Data Source](../../docs/data-sources/container_image.md)
+- [Container Images Data Source](../../docs/data-sources/container_images.md)
+- [Container Images guide](../../docs/guides/container-images.md)
 - [Anyscale Documentation](https://docs.anyscale.com/)
