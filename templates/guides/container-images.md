@@ -112,6 +112,17 @@ superseded by a newer one without the Terraform resource changing, which is exac
 the cluster environment rather than "whichever build happened to be latest when the resource was
 created."
 
+**On `anyscale_container_image_registry` specifically, `build_id`, `revision`, and `name_version` can
+all change on a plain `terraform plan` with no config edits.** `Read` always resolves whichever build is
+currently latest for the underlying cluster environment, and `revision`/`name_version` are read from
+that same latest build — so if something outside this resource's own `apply` registers a new build
+against the same cluster environment, your next `plan` can show all three updating in place. This is
+expected, not a bug: none of the three carry `RequiresReplace`, so it's an ordinary Computed-attribute
+refresh — Terraform updates state to match reality, and nothing gets destroyed or recreated.
+`anyscale_container_image_build` doesn't share this exposure: its `Read` prefers the build ID already in
+its own state over the cluster environment's latest, so only its own `Update` — triggered by your own
+`containerfile` / `containerfile_path` change — advances these attributes.
+
 ### If you're upgrading from a version where `registry.id` was a build ID
 
 Earlier provider versions used the build ID for `anyscale_container_image_registry.id`. A
