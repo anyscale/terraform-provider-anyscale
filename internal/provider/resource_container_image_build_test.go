@@ -193,6 +193,18 @@ func TestEvaluateBuildStatus_AllAcceptedStatuses(t *testing.T) {
 			wantErrContains: "build failed",
 		},
 		{
+			// Non-nil but empty must fall back the same as nil, not render a bare
+			// trailing colon (was covered only by a hand-copied test, never the
+			// real function — see TestBuildErrorMessageHandling's removal).
+			name:            "failed with an empty (non-nil) error message also falls back to a generic message",
+			status:          "failed",
+			errorMessage:    strPtr(""),
+			wantDone:        true,
+			wantErr:         true,
+			wantErrContains: "build failed",
+			wantErrExcludes: "build failed:",
+		},
+		{
 			// This is the F1 regression case: the backend's real wire value is one L.
 			name:            "canceled (one L, the real backend spelling) is a clean terminal cancellation",
 			status:          "canceled",
@@ -423,47 +435,6 @@ func TestCreateClusterEnvironmentRequestStructure(t *testing.T) {
 	}
 	if req.ProjectID == nil || *req.ProjectID != "prj_123" {
 		t.Errorf("project_id = %v, want 'prj_123'", req.ProjectID)
-	}
-}
-
-// TestBuildErrorMessageHandling tests handling of build error messages
-func TestBuildErrorMessageHandling(t *testing.T) {
-	tests := []struct {
-		name         string
-		errorMessage *string
-		wantMsg      string
-	}{
-		{
-			name:         "with error message",
-			errorMessage: strPtr("Build failed: dependency not found"),
-			wantMsg:      "build failed: Build failed: dependency not found",
-		},
-		{
-			name:         "without error message",
-			errorMessage: nil,
-			wantMsg:      "build failed",
-		},
-		{
-			name:         "empty error message",
-			errorMessage: strPtr(""),
-			wantMsg:      "build failed",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate error message construction from waitForBuild
-			var errMsg string
-			if tt.errorMessage != nil && *tt.errorMessage != "" {
-				errMsg = "build failed: " + *tt.errorMessage
-			} else {
-				errMsg = "build failed"
-			}
-
-			if errMsg != tt.wantMsg {
-				t.Errorf("error message = %v, want %v", errMsg, tt.wantMsg)
-			}
-		})
 	}
 }
 
