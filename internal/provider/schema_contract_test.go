@@ -329,7 +329,7 @@ func TestComputeConfigCC1RequiredResourcesRename(t *testing.T) {
 // flags. Both fields instead use UseStateForUnknown plus populating from the
 // API response in Create/Update (mirroring Read), which reflects whatever
 // the backend actually set once and then holds steady - see
-// TestAccComputeConfigLifecycle_MockServer's empty-plan-after-refresh step
+// TestAccComputeConfigResource_Lifecycle_MockServer's empty-plan-after-refresh step
 // for the acceptance-level proof that this actually holds (a schema-only
 // check like this one cannot catch a RUNTIME failure to populate the value).
 func TestComputeConfigCC2IdleAndMaxUptimeSettable(t *testing.T) {
