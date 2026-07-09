@@ -72,7 +72,7 @@ output "build_image_digest" {
 - `build_id` (String) The unique identifier of the build. Changes when a new build is created.
 - `build_status` (String) The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
 - `created_at` (String) Timestamp when the build was created. Changes when a new build is created.
-- `digest` (String) The content digest of the built container image (e.g. `sha256:...`).
+- `digest` (String) The content digest of the built container image (e.g. `sha256:...`). May occasionally be briefly empty immediately after creation, or after an update that triggers a new build, if the build is still settling.
 - `id` (String) The unique identifier of the cluster environment.
 - `image_uri` (String) The URI of the built container image.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.

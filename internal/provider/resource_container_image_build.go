@@ -146,7 +146,7 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			},
 			"digest": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`).",
+				MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`). May occasionally be briefly empty immediately after creation, or after an update that triggers a new build, if the build is still settling.",
 			},
 			"name_version": schema.StringAttribute{
 				Computed:            true,
@@ -286,6 +286,15 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "wait for build", err)
 		return
+	}
+
+	// The backend can report a build as "succeeded" slightly before its digest is
+	// populated (see waitForBuildDigest) - wait for it to settle so Create reliably
+	// returns a non-null digest in the common case, rather than depending on a later
+	// refresh to fill it in.
+	build, digestSettled := waitForBuildDigest(ctx, r.client, build)
+	if !digestSettled {
+		AddDigestNotSettledWarning(&resp.Diagnostics, build.ID)
 	}
 
 	tflog.Info(ctx, "Container image build completed", map[string]any{
@@ -488,6 +497,13 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "wait for build", err)
 		return
+	}
+
+	// See the matching comment in Create: wait for the digest to settle rather than
+	// depending on a later refresh to fill it in.
+	build, digestSettled := waitForBuildDigest(ctx, r.client, build)
+	if !digestSettled {
+		AddDigestNotSettledWarning(&resp.Diagnostics, build.ID)
 	}
 
 	tflog.Info(ctx, "Container image build completed", map[string]any{

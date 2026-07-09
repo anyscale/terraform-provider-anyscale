@@ -173,7 +173,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		},
 		"digest": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`).",
+			MarkdownDescription: "The content digest of this image's current latest successful build (e.g. `sha256:...`). May occasionally be briefly empty immediately after creation if the build is still settling. Like `build_id`, `revision`, and `name_version`, it reflects whichever build is currently latest for the underlying cluster environment, and can change on a later refresh if a new build supersedes this one outside this resource's own apply.",
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
 			},
@@ -353,6 +353,17 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		"build_id":               result.ID,
 		"cluster_environment_id": result.ApplicationTemplateID,
 	})
+
+	// Unlike the build resource, this Create has no pre-existing poll loop to extend -
+	// the single synchronous response above is mapped straight into state today, which
+	// leaves this resource more exposed to the backend's succeeded-before-digest-settles
+	// race (see waitForBuildDigest) than the build resource's Create. Wait here so this
+	// resource reliably gets a non-null digest too.
+	settledBuild, digestSettled := waitForBuildDigest(ctx, r.client, &result)
+	if !digestSettled {
+		AddDigestNotSettledWarning(&resp.Diagnostics, settledBuild.ID)
+	}
+	result = *settledBuild
 
 	// Map response to model. id is not touched here - it was already set to
 	// templateID above and stays the cluster environment id for the resource's entire
