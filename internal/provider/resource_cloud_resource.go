@@ -190,7 +190,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			// ─── Resource Identity ────────────────────────────────
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name of the cloud resource. Must be a non-empty string, distinct among resources on the same cloud that share the same compute stack, provider, and region. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with the same name fails with a duplicate-name error. Use `terraform import` to recover state instead.",
+				MarkdownDescription: "The name of the cloud resource. Must be a non-empty string, distinct among resources on the same cloud. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with the same name fails with a duplicate-name error. Use `terraform import` to recover state instead.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
