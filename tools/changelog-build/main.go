@@ -1,5 +1,5 @@
 // Command changelog-build folds .changelog/<PR#>.txt release-note fragments
-// (contract: .crystl/quest/changelog-release-contract.md) into CHANGELOG.md's
+// (see RELEASING.md and .changelog/README.md) into CHANGELOG.md's
 // "## [Unreleased]" section, and, at release time, finalizes that section into
 // a dated version heading while emitting a release-notes file for GoReleaser.
 //
