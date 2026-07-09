@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,70 +15,92 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestContainerfileValidation tests validation of containerfile vs containerfile_path
-func TestContainerfileValidation(t *testing.T) {
-	tests := []struct {
-		name              string
-		containerfile     types.String
-		containerfilePath types.String
-		wantError         bool
-		errorContains     string
-	}{
-		{
-			name:              "containerfile provided",
-			containerfile:     types.StringValue("FROM anyscale/ray:2.9.0-py310\nRUN pip install requests"),
-			containerfilePath: types.StringNull(),
-			wantError:         false,
-		},
-		{
-			name:              "containerfile_path provided",
-			containerfile:     types.StringNull(),
-			containerfilePath: types.StringValue("/path/to/Containerfile"),
-			wantError:         false,
-		},
-		{
-			name:              "neither provided",
-			containerfile:     types.StringNull(),
-			containerfilePath: types.StringNull(),
-			wantError:         true,
-			errorContains:     "either containerfile or containerfile_path must be specified",
-		},
-		{
-			name:              "empty containerfile",
-			containerfile:     types.StringValue(""),
-			containerfilePath: types.StringNull(),
-			wantError:         true,
-			errorContains:     "either containerfile or containerfile_path must be specified",
-		},
-	}
+// TestResolveContainerfile proves the real resolveContainerfile, not a hand-copy of its
+// validation branch. The previous version of this test (TestContainerfileValidation) only ever
+// simulated the "neither provided" branch inline; its "containerfile_path provided" case asserted
+// wantError:false without ever reading a file, so the entire os.ReadFile branch -- including the
+// wrapped read-error path -- had no real coverage at all.
+func TestResolveContainerfile(t *testing.T) {
+	r := &ContainerImageBuildResource{}
+	const wantNeitherErr = "either containerfile or containerfile_path must be specified"
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate resolveContainerfile logic
-			var gotError bool
-			var gotErrorMsg string
+	t.Run("containerfile provided", func(t *testing.T) {
+		plan := &ContainerImageBuildResourceModel{
+			Containerfile:     types.StringValue("FROM anyscale/ray:2.9.0-py310\nRUN pip install requests"),
+			ContainerfilePath: types.StringNull(),
+		}
+		got, err := r.resolveContainerfile(plan)
+		if err != nil {
+			t.Fatalf("resolveContainerfile() error = %v, want nil", err)
+		}
+		if got != plan.Containerfile.ValueString() {
+			t.Errorf("resolveContainerfile() = %q, want %q", got, plan.Containerfile.ValueString())
+		}
+	})
 
-			hasContainerfile := !tt.containerfile.IsNull() && tt.containerfile.ValueString() != ""
-			hasContainerfilePath := !tt.containerfilePath.IsNull() && tt.containerfilePath.ValueString() != ""
+	t.Run("containerfile_path provided reads the real file from disk", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "Containerfile")
+		want := "FROM anyscale/ray:2.9.0-py310\nRUN pip install pandas\n"
+		if err := os.WriteFile(path, []byte(want), 0o600); err != nil {
+			t.Fatalf("write fixture file: %v", err)
+		}
+		plan := &ContainerImageBuildResourceModel{
+			Containerfile:     types.StringNull(),
+			ContainerfilePath: types.StringValue(path),
+		}
+		got, err := r.resolveContainerfile(plan)
+		if err != nil {
+			t.Fatalf("resolveContainerfile() error = %v, want nil", err)
+		}
+		if got != want {
+			t.Errorf("resolveContainerfile() = %q, want file content %q", got, want)
+		}
+	})
 
-			if !hasContainerfile && !hasContainerfilePath {
-				gotError = true
-				gotErrorMsg = "either containerfile or containerfile_path must be specified"
-			}
+	t.Run("containerfile_path pointing at a nonexistent file surfaces a wrapped read error", func(t *testing.T) {
+		plan := &ContainerImageBuildResourceModel{
+			Containerfile:     types.StringNull(),
+			ContainerfilePath: types.StringValue(filepath.Join(t.TempDir(), "does-not-exist")),
+		}
+		_, err := r.resolveContainerfile(plan)
+		if err == nil {
+			t.Fatal("resolveContainerfile() error = nil, want a file-read error")
+		}
+		if !strings.Contains(err.Error(), "failed to read containerfile from") {
+			t.Errorf("resolveContainerfile() error = %q, want it to name the file that failed to read", err.Error())
+		}
+	})
 
-			if gotError != tt.wantError {
-				t.Errorf("validation error = %v, wantError %v", gotError, tt.wantError)
-			}
+	t.Run("neither provided", func(t *testing.T) {
+		plan := &ContainerImageBuildResourceModel{
+			Containerfile:     types.StringNull(),
+			ContainerfilePath: types.StringNull(),
+		}
+		_, err := r.resolveContainerfile(plan)
+		if err == nil || err.Error() != wantNeitherErr {
+			t.Errorf("resolveContainerfile() error = %v, want %q", err, wantNeitherErr)
+		}
+	})
 
-			if tt.wantError && gotErrorMsg != tt.errorContains {
-				t.Errorf("error message = %v, want %v", gotErrorMsg, tt.errorContains)
-			}
-		})
-	}
+	t.Run("empty containerfile with no path falls through to the same neither-provided error", func(t *testing.T) {
+		plan := &ContainerImageBuildResourceModel{
+			Containerfile:     types.StringValue(""),
+			ContainerfilePath: types.StringNull(),
+		}
+		_, err := r.resolveContainerfile(plan)
+		if err == nil || err.Error() != wantNeitherErr {
+			t.Errorf("resolveContainerfile() error = %v, want %q", err, wantNeitherErr)
+		}
+	})
 }
 
-// TestBuildTimeoutParsing tests parsing of build timeout durations
-func TestBuildTimeoutParsing(t *testing.T) {
+// TestParseTimeout proves the real parseTimeout, not a hand-copy of it. The previous version
+// (TestBuildTimeoutParsing) duplicated defaultBuildTimeout as a bare "30 * time.Minute" literal
+// (silently drifts if the constant ever changes) and populated errorContains on two cases without
+// ever asserting it -- both invalid-format cases would have passed even with an empty or wrong
+// error message.
+func TestParseTimeout(t *testing.T) {
+	r := &ContainerImageBuildResource{}
 	tests := []struct {
 		name          string
 		timeoutStr    string
@@ -84,72 +108,34 @@ func TestBuildTimeoutParsing(t *testing.T) {
 		wantError     bool
 		errorContains string
 	}{
-		{
-			name:         "30 minutes",
-			timeoutStr:   "30m",
-			wantDuration: 30 * time.Minute,
-			wantError:    false,
-		},
-		{
-			name:         "1 hour",
-			timeoutStr:   "1h",
-			wantDuration: 1 * time.Hour,
-			wantError:    false,
-		},
-		{
-			name:         "45 minutes",
-			timeoutStr:   "45m",
-			wantDuration: 45 * time.Minute,
-			wantError:    false,
-		},
-		{
-			name:         "1 hour 30 minutes",
-			timeoutStr:   "1h30m",
-			wantDuration: 90 * time.Minute,
-			wantError:    false,
-		},
-		{
-			name:         "empty string - default",
-			timeoutStr:   "",
-			wantDuration: 30 * time.Minute, // default
-			wantError:    false,
-		},
-		{
-			name:          "invalid format",
-			timeoutStr:    "invalid",
-			wantDuration:  0,
-			wantError:     true,
-			errorContains: "invalid timeout format",
-		},
-		{
-			name:          "missing unit",
-			timeoutStr:    "30",
-			wantDuration:  0,
-			wantError:     true,
-			errorContains: "invalid timeout format",
-		},
+		{name: "30 minutes", timeoutStr: "30m", wantDuration: 30 * time.Minute},
+		{name: "1 hour", timeoutStr: "1h", wantDuration: 1 * time.Hour},
+		{name: "45 minutes", timeoutStr: "45m", wantDuration: 45 * time.Minute},
+		{name: "1 hour 30 minutes", timeoutStr: "1h30m", wantDuration: 90 * time.Minute},
+		{name: "empty string uses the provider's real default constant", timeoutStr: "", wantDuration: defaultBuildTimeout},
+		{name: "invalid format", timeoutStr: "invalid", wantError: true, errorContains: "invalid timeout format"},
+		{name: "missing unit", timeoutStr: "30", wantError: true, errorContains: "invalid timeout format"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate parseTimeout logic
-			var duration time.Duration
-			var err error
+			duration, err := r.parseTimeout(tt.timeoutStr)
 
-			if tt.timeoutStr == "" {
-				duration = 30 * time.Minute // default
-			} else {
-				duration, err = time.ParseDuration(tt.timeoutStr)
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("parseTimeout(%q) error = nil, want an error", tt.timeoutStr)
+				}
+				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("parseTimeout(%q) error = %q, want it to contain %q", tt.timeoutStr, err.Error(), tt.errorContains)
+				}
+				return
 			}
 
-			gotError := err != nil
-
-			if gotError != tt.wantError {
-				t.Errorf("parse error = %v, wantError %v", gotError, tt.wantError)
+			if err != nil {
+				t.Fatalf("parseTimeout(%q) error = %v, want nil", tt.timeoutStr, err)
 			}
-
-			if !gotError && duration != tt.wantDuration {
-				t.Errorf("duration = %v, want %v", duration, tt.wantDuration)
+			if duration != tt.wantDuration {
+				t.Errorf("parseTimeout(%q) = %v, want %v", tt.timeoutStr, duration, tt.wantDuration)
 			}
 		})
 	}
