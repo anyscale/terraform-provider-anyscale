@@ -1,0 +1,16 @@
+# Copy this file to terraform.tfvars and fill in your own values:
+#   cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvars is gitignored -- it's the right place for values specific to your
+# Anyscale org/cloud, not for secrets (this example doesn't need any).
+
+# Required: an existing Anyscale cloud to attach the compute config to.
+cloud_id = "cld_abc123"
+
+# Optional -- uncomment to override the defaults shown.
+# project_id              = "prj_abc123"
+# image_name              = "container-image-compute-config-example"
+# compute_config_name     = "container-image-compute-config-example"
+# head_node_instance_type = "m5.2xlarge"
+# worker_instance_type    = "m5.4xlarge"
+# worker_min_nodes        = 0
+# worker_max_nodes        = 5

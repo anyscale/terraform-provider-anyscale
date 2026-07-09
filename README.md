@@ -52,6 +52,7 @@ provider "anyscale" {
   - Anyscale Clouds with self contained deployment pattern
   - Cloud resource deployments with split deployment pattern
   - Compute configurations
+  - Container images (build from a Containerfile, or register existing images from a registry)
   - Projects
 - **Automatic Detection**: Cloud provider and region auto-detected from configuration blocks
 - **Flexible Authentication**: Environment variable, credentials file, or provider configuration

@@ -456,47 +456,53 @@ type DetachMachinePoolFromCloudResponse struct {
 	Result struct{} `json:"result"`
 }
 
-// Container Image / Cluster Environment API Models (/ext/v0)
+// Container Image / Application Template API Models (/api/v2)
+//
+// The Anyscale API calls this resource "application_template" (and its versioned
+// builds "builds"); the provider's user-facing "container image" resources/data
+// sources translate to/from this shape at the boundary (see resource_container_image_*.go
+// and data_source_container_image*.go), keeping Terraform-facing attribute names
+// (e.g. cluster_environment_id) stable across the ext/v0 -> api/v2 migration.
 
-// CreateClusterEnvironmentRequest is the request body for creating a cluster environment
-// POST /ext/v0/cluster_environments/
-type CreateClusterEnvironmentRequest struct {
+// CreateApplicationTemplateRequest is the request body for creating an application template from a Containerfile
+// POST /api/v2/application_templates/
+type CreateApplicationTemplateRequest struct {
 	Name          string  `json:"name"`
 	Containerfile string  `json:"containerfile,omitempty"`
 	ProjectID     *string `json:"project_id,omitempty"`
 }
 
-// CreateClusterEnvironmentBuildRequest is the request body for creating a new build for an existing cluster environment
-// POST /ext/v0/cluster_environment_builds/
-type CreateClusterEnvironmentBuildRequest struct {
-	ClusterEnvironmentID string  `json:"cluster_environment_id"`
-	Containerfile        string  `json:"containerfile,omitempty"`
-	DockerImageName      *string `json:"docker_image_name,omitempty"`
-	RegistryLoginSecret  *string `json:"registry_login_secret,omitempty"`
-	RayVersion           *string `json:"ray_version,omitempty"`
+// CreateBuildRequest is the request body for creating a new build for an existing application template
+// POST /api/v2/builds/
+type CreateBuildRequest struct {
+	ApplicationTemplateID string  `json:"application_template_id"`
+	Containerfile         string  `json:"containerfile,omitempty"`
+	DockerImageName       *string `json:"docker_image_name,omitempty"`
+	RegistryLoginSecret   *string `json:"registry_login_secret,omitempty"`
+	RayVersion            *string `json:"ray_version,omitempty"`
 }
 
-// CreateBYODClusterEnvironmentRequest is the request body for creating a BYOD cluster environment
-// POST /ext/v0/cluster_environments/byod
-type CreateBYODClusterEnvironmentRequest struct {
-	Name       string                                 `json:"name"`
-	ConfigJSON CreateBYODClusterEnvironmentConfigJSON `json:"config_json"`
-	Anonymous  bool                                   `json:"anonymous,omitempty"`
+// CreateBYODApplicationTemplateRequest is the request body for creating a BYOD application template
+// POST /api/v2/application_templates/byod
+type CreateBYODApplicationTemplateRequest struct {
+	Name       string                                  `json:"name"`
+	ConfigJSON CreateBYODApplicationTemplateConfigJSON `json:"config_json"`
+	Anonymous  bool                                    `json:"anonymous,omitempty"`
 }
 
-// CreateBYODClusterEnvironmentConfigJSON is the config_json for BYOD cluster environment creation
-type CreateBYODClusterEnvironmentConfigJSON struct {
+// CreateBYODApplicationTemplateConfigJSON is the config_json for BYOD application template creation
+type CreateBYODApplicationTemplateConfigJSON struct {
 	DockerImage         string            `json:"docker_image"`
 	RayVersion          string            `json:"ray_version"`
 	EnvVars             map[string]string `json:"env_vars,omitempty"`
 	RegistryLoginSecret *string           `json:"registry_login_secret,omitempty"`
 }
 
-// CreateBYODClusterEnvironmentBuildRequest is the request body for creating a BYOD build
-// POST /ext/v0/cluster_environment_builds/byod
-type CreateBYODClusterEnvironmentBuildRequest struct {
-	ClusterEnvironmentID string                        `json:"cluster_environment_id"`
-	ConfigJSON           CreateBYODAppConfigConfigJSON `json:"config_json"`
+// CreateBYODBuildRequest is the request body for creating a BYOD build
+// POST /api/v2/builds/byod
+type CreateBYODBuildRequest struct {
+	ApplicationTemplateID string                        `json:"application_template_id"`
+	ConfigJSON            CreateBYODAppConfigConfigJSON `json:"config_json"`
 }
 
 // CreateBYODAppConfigConfigJSON is the config_json for BYOD build creation
@@ -507,99 +513,103 @@ type CreateBYODAppConfigConfigJSON struct {
 	RegistryLoginSecret *string           `json:"registry_login_secret,omitempty"`
 }
 
-// ClusterEnvironmentResponse represents a single cluster environment from the API
-type ClusterEnvironmentResponse struct {
-	Result ClusterEnvironmentResult `json:"result"`
+// ApplicationTemplateResponse represents a single application template from the API
+type ApplicationTemplateResponse struct {
+	Result ApplicationTemplateResult `json:"result"`
 }
 
-// ClusterEnvironmentsListResponse represents the response from listing cluster environments
-type ClusterEnvironmentsListResponse struct {
-	Results  []ClusterEnvironmentResult `json:"results"`
+// ApplicationTemplatesListResponse represents the response from listing application templates
+// GET /api/v2/application_templates/
+type ApplicationTemplatesListResponse struct {
+	Results  []ApplicationTemplateResult `json:"results"`
 	Metadata struct {
 		Total           int     `json:"total"`
 		NextPagingToken *string `json:"next_paging_token"`
 	} `json:"metadata"`
 }
 
-// ClusterEnvironmentResult represents a cluster environment from the API
-// Matches the /ext/v0/cluster_environments/ endpoint response
-type ClusterEnvironmentResult struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	ProjectID      *string `json:"project_id,omitempty"`
-	OrganizationID string  `json:"organization_id,omitempty"`
-	CreatorID      string  `json:"creator_id"`
-	CreatedAt      string  `json:"created_at"`
-	LastModifiedAt string  `json:"last_modified_at,omitempty"`
-	DeletedAt      *string `json:"deleted_at,omitempty"`
-	Anonymous      bool    `json:"anonymous"`
-	IsDefault      bool    `json:"is_default"`
+// ApplicationTemplateResult represents an application template from the API.
+// Matches both the /api/v2/application_templates/{id} and list endpoint responses.
+// LatestBuild is only populated on those decorated responses (never on a bare
+// create response), and only carries enough to resolve the latest build's ID
+// contract-based -- full build detail still requires GET /api/v2/builds/{id}.
+type ApplicationTemplateResult struct {
+	ID             string           `json:"id"`
+	Name           string           `json:"name"`
+	ProjectID      *string          `json:"project_id,omitempty"`
+	OrganizationID string           `json:"organization_id,omitempty"`
+	CreatorID      string           `json:"creator_id"`
+	CreatedAt      string           `json:"created_at"`
+	LastModifiedAt string           `json:"last_modified_at,omitempty"`
+	DeletedAt      *string          `json:"deleted_at,omitempty"`
+	Anonymous      bool             `json:"anonymous"`
+	IsDefault      bool             `json:"is_default"`
+	LatestBuild    *MiniBuildResult `json:"latest_build,omitempty"`
 }
 
-// IsArchived returns true if the cluster environment has been deleted/archived
-func (c *ClusterEnvironmentResult) IsArchived() bool {
-	return c.DeletedAt != nil && *c.DeletedAt != ""
+// IsArchived returns true if the application template has been deleted/archived
+func (a *ApplicationTemplateResult) IsArchived() bool {
+	return a.DeletedAt != nil && *a.DeletedAt != ""
 }
 
-// ClusterEnvironmentBuildResponse represents a single cluster environment build from the API
-// GET /ext/v0/cluster_environment_builds/{id}
-type ClusterEnvironmentBuildResponse struct {
-	Result ClusterEnvironmentBuildResult `json:"result"`
+// MiniBuildResult is the summarized latest-build reference embedded on a decorated
+// application template response.
+type MiniBuildResult struct {
+	ID       string `json:"id"`
+	Revision int    `json:"revision"`
+	Status   string `json:"status"`
 }
 
-// ClusterEnvironmentBuildOperationResponse represents the response from creating a build (async operation)
-// POST /ext/v0/cluster_environment_builds/
-type ClusterEnvironmentBuildOperationResponse struct {
-	Result ClusterEnvironmentBuildResult `json:"result"`
+// BuildResponse represents a single build from the API. Returned by both
+// POST /api/v2/builds/ (create, bare) and GET /api/v2/builds/{id} (decorated get);
+// ByodRayVersion is only populated by the latter.
+type BuildResponse struct {
+	Result BuildResult `json:"result"`
 }
 
-// ClusterEnvironmentBuildsListResponse represents the response from listing builds
-// GET /ext/v0/cluster_environment_builds/?cluster_environment_id=...
-type ClusterEnvironmentBuildsListResponse struct {
-	Results  []ClusterEnvironmentBuildResult `json:"results"`
+// BuildsListResponse represents the response from listing builds
+type BuildsListResponse struct {
+	Results  []BuildResult `json:"results"`
 	Metadata struct {
 		Total           int     `json:"total"`
 		NextPagingToken *string `json:"next_paging_token"`
 	} `json:"metadata"`
 }
 
-// ClusterEnvironmentBuildResult represents a cluster environment build from the API
-type ClusterEnvironmentBuildResult struct {
-	ID                   string  `json:"id"`
-	ClusterEnvironmentID string  `json:"cluster_environment_id"`
-	Containerfile        *string `json:"containerfile,omitempty"`
-	DockerImageName      *string `json:"docker_image_name,omitempty"`
-	RegistryLoginSecret  *string `json:"registry_login_secret,omitempty"`
-	RayVersion           *string `json:"ray_version,omitempty"`
-	Revision             int     `json:"revision"`
-	CreatorID            string  `json:"creator_id"`
-	ErrorMessage         *string `json:"error_message,omitempty"`
-	Status               string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, canceled
-	CreatedAt            string  `json:"created_at"`
-	LastModifiedAt       string  `json:"last_modified_at"`
-	IsBYOD               bool    `json:"is_byod"`
-	CloudID              *string `json:"cloud_id,omitempty"`
-	Digest               *string `json:"digest,omitempty"`
+// BuildResult represents a build from the API.
+type BuildResult struct {
+	ID                    string  `json:"id"`
+	ApplicationTemplateID string  `json:"application_template_id"`
+	Containerfile         *string `json:"containerfile,omitempty"`
+	DockerImageName       *string `json:"docker_image_name,omitempty"`
+	RegistryLoginSecret   *string `json:"registry_login_secret,omitempty"`
+	RayVersion            *string `json:"ray_version,omitempty"`
+	ByodRayVersion        *string `json:"byod_ray_version,omitempty"`
+	Revision              int     `json:"revision"`
+	CreatorID             string  `json:"creator_id"`
+	ErrorMessage          *string `json:"error_message,omitempty"`
+	Status                string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, canceled
+	CreatedAt             string  `json:"created_at"`
+	LastModifiedAt        string  `json:"last_modified_at"`
+	IsBYOD                bool    `json:"is_byod"`
+	CloudID               *string `json:"cloud_id,omitempty"`
+	Digest                *string `json:"digest,omitempty"`
 }
 
-// ClusterEnvironmentsSearchQuery is the request body for POST /ext/v0/cluster_environments/search
-type ClusterEnvironmentsSearchQuery struct {
-	ProjectID        *string    `json:"project_id,omitempty"`
-	CreatorID        *string    `json:"creator_id,omitempty"`
-	Name             *TextQuery `json:"name,omitempty"`
-	ImageName        *TextQuery `json:"image_name,omitempty"`
-	Paging           PageQuery  `json:"paging"`
-	IncludeArchived  bool       `json:"include_archived"`
-	IncludeAnonymous bool       `json:"include_anonymous"`
-}
-
-// TextQuery represents a text search filter
-type TextQuery struct {
-	Contains string `json:"contains"`
-}
-
-// PageQuery represents pagination parameters
-type PageQuery struct {
-	Count       int     `json:"count,omitempty"`
-	PagingToken *string `json:"paging_token,omitempty"`
+// ResolvedRayVersion returns the most specific Ray version available for this build:
+// byod_ray_version when present, otherwise the plain ray_version field. Both ultimately
+// trace back to the ray_version the client supplied at creation (BYOD's docker image
+// content itself is never inspected server-side): byod_ray_version is the backend's
+// legacy base-image round-trip of that value (see _get_byod_base_image /
+// get_ray_version in the product backend), which is normally byte-identical to the
+// original input but can differ for Ray 2.7.x, where the backend may silently prefer an
+// "optimized" base-image variant. ray_version is the plain field set on
+// Containerfile-based (non-BYOD) builds, parsed from the Containerfile's FROM line.
+// Neither field is validated here -- an odd stored value is returned as-is rather than
+// producing an error or null.
+func (b *BuildResult) ResolvedRayVersion() *string {
+	if b.ByodRayVersion != nil {
+		return b.ByodRayVersion
+	}
+	return b.RayVersion
 }

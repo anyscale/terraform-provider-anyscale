@@ -31,13 +31,13 @@ import (
 // change only being caught at apply time instead of plan time -- an
 // intentional, documented asymmetry with CC3a's name handling.
 //
-// TestAccComputeConfigLifecycle_CloudNameOnly_MockServer proves the
+// TestAccComputeConfigResource_Lifecycle_CloudNameOnly_MockServer proves the
 // non-regression and switching-representation halves: a cloud_name-only
 // config plans empty forever (no modifier to misfire in the first place now),
 // and switching from cloud_name to an explicit, matching cloud_id is a plain
 // update, not a replace, settling to an empty plan.
 //
-// TestAccComputeConfigCloudImmutable_ErrorGuard_MockServer proves the actual
+// TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer proves the actual
 // protection: changing to a genuinely different cloud is refused with a
 // clear error before any request that would create the orphan is ever sent.
 //
@@ -99,10 +99,10 @@ func newCC3bMockComputeConfigServer(t *testing.T, cloudID, cloudName, configID, 
 	return server
 }
 
-// TestAccComputeConfigLifecycle_CloudNameOnly_MockServer is the CC3b proof:
+// TestAccComputeConfigResource_Lifecycle_CloudNameOnly_MockServer is the CC3b proof:
 // a cloud_name-only config (cloud_id always Computed) must plan empty on the
 // very next plan, not just on the apply that created it.
-func TestAccComputeConfigLifecycle_CloudNameOnly_MockServer(t *testing.T) {
+func TestAccComputeConfigResource_Lifecycle_CloudNameOnly_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudID = "cld_cc3b_mock"
@@ -237,7 +237,7 @@ func newCC3bTwoCloudMockServer(t *testing.T, cloudAID, cloudAName, cloudBID, clo
 	return server
 }
 
-// TestAccComputeConfigCloudImmutable_ErrorGuard_MockServer is CC3b's core
+// TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer is CC3b's core
 // proof: attempting to move an existing compute config to a genuinely
 // different cloud (here, via cloud_name -- the harder path, since it needs
 // resolution; a direct cloud_id change hits the identical comparison in
@@ -247,7 +247,7 @@ func newCC3bTwoCloudMockServer(t *testing.T, cloudAID, cloudAName, cloudBID, clo
 // config; if Update ever sent a cross-cloud create it would be evidence of
 // exactly the bug this guard exists to prevent, though the test asserts on
 // the error rather than depending on that as its primary signal).
-func TestAccComputeConfigCloudImmutable_ErrorGuard_MockServer(t *testing.T) {
+func TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudAID = "cld_cc3b_a"
