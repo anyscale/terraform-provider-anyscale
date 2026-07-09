@@ -26,5 +26,10 @@ output "build_image_uri" {
 
 output "build_status" {
   value       = anyscale_container_image_build.inline.build_status
-  description = "The current status of the build (pending, in_progress, succeeded, failed, cancelled)"
+  description = "The current status of the build (pending, in_progress, succeeded, failed, pending_cancellation, canceled)"
+}
+
+output "build_image_digest" {
+  value       = anyscale_container_image_build.inline.digest
+  description = "The content digest of the built image (e.g. sha256:...); changes when a new build revision is created"
 }
