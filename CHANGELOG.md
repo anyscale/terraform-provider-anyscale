@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-09
+
+### Breaking Changes
+
+- resource/anyscale_compute_config: physical_resources is renamed to required_resources on head_node and worker_nodes to match what the API actually accepts. The backend has always rejected the old attribute name on any non-empty value, so this affects configuration text but not any resource that ever successfully applied; update the attribute name and re-run terraform plan. Existing state is upgraded automatically.
+- resource/anyscale_compute_config: changing name now replaces the resource instead of silently leaving an orphaned, unmanaged duplicate compute config behind. Review the plan before applying if you are renaming an existing resource.
+- resource/anyscale_cloud_resource: `name` is now a required attribute instead of an optional one the provider could compute a default for; set an explicit `name` on every `anyscale_cloud_resource` block before upgrading, since a configuration that omits it now fails `terraform plan` instead of receiving a computed value.
+
+### Added
+
+- resource/anyscale_compute_config: idle_termination_minutes and maximum_uptime_minutes are now settable; previously they were only readable through the data source.
+- resource/anyscale_compute_config: required_resources gains cpu_architecture for selecting x86_64 or arm64.
+- data-source/anyscale_compute_config: gains zones, head_node, and worker_nodes for parity with the resource.
+
+### Deprecated
+
+- resource/anyscale_cloud_resource: `cloud_deployment_id` is deprecated in favor of `cloud_resource_id`; the backend no longer populates it. It will be removed in a future major version.
+- resource/anyscale_cloud: `cloud_deployment_id` is deprecated in favor of `anyscale_cloud_resource`'s `cloud_resource_id`; the backend no longer populates it. It will be removed in a future major version.
+- data-source/anyscale_cloud: `cloud_deployment_id` is deprecated in favor of `anyscale_cloud_resource`'s `cloud_resource_id`; the backend no longer populates it. It will be removed in a future major version.
+- resource/anyscale_cloud_resource: `status` is deprecated in favor of `operator_status` (identical value, and always null for VM cloud resources); it will be removed in a future major version.
+
+### Fixed
+
+- resource/anyscale_compute_config: changing cloud_id or cloud_name to a different cloud is now rejected with a clear error at apply time instead of silently creating an orphaned, unmanaged duplicate compute config in the new cloud. To move a compute config to a different cloud, use terraform apply -replace or taint instead of editing cloud_id or cloud_name in place. Switching between cloud_id and cloud_name for the same cloud is unaffected.
+- data-source/anyscale_compute_config: enable_cross_zone_scaling now correctly reflects the actual configured value instead of always reading as false.
+- resource/anyscale_compute_config: a compute config archived outside Terraform is now correctly detected on the next refresh and removed from state instead of lingering forever.
+- resource/anyscale_compute_config: importing a compute config now recovers its flags and advanced_instance_config values from the backend into state instead of leaving them null; a config that already matches plans cleanly, one that omits these values now shows a clear diff instead of silently dropping them on the next apply.
+- resource/anyscale_cloud_resource: Fix `terraform apply` failing when adding a second cloud resource to a cloud that already has one; Create no longer renames the new resource to match an existing resource before calling the backend, which always rejected that duplicate name.
+- resource/anyscale_cloud_resource: Fix spurious `Provider returned invalid result object after apply` errors (4 diagnostics) when Create fails; `is_default`, `operator_status`, `operator_version`, and `reported_at` are now given a concrete value before Create's defensive early state save instead of being left unknown.
+
 ## [0.1.2] - 2026-07-07
 
 ### Added
