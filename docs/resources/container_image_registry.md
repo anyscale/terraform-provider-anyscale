@@ -61,10 +61,9 @@ output "registry_image_digest" {
 
 - `build_id` (String) The unique identifier of the latest build for this image.
 - `build_status` (String) The status of the build (typically `succeeded` for registered images).
-- `cluster_environment_id` (String) The ID of the cluster environment (app config) that holds this image. Identical to `id`.
 - `created_at` (String) Timestamp when the build was created.
 - `digest` (String) The content digest of the built container image (e.g. `sha256:...`).
-- `id` (String) The unique identifier of the cluster environment holding this image (same as `cluster_environment_id`). Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored this value out of band (e.g. a `terraform output`) must be updated to use `cluster_environment_id` going forward.
+- `id` (String) The unique identifier of the cluster environment holding this image. Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored the old build-id value out of band (e.g. a `terraform output`) must use `id` going forward.
 - `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image. Always true for registered images.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
 - `revision` (Number) The revision number of the container image.
