@@ -128,7 +128,11 @@ jobs:
           exit "$status"
 
       - name: Acceptance Tests - Data Sources
-        if: matrix.shard == 'acctest-data'
+        # Skipped on Dependabot PRs: GitHub withholds Actions secrets from
+        # Dependabot-triggered runs, so ANYSCALE_CLI_TOKEN is empty and these
+        # real-infra tests can't authenticate. See the Dependabot notice step
+        # below, which keeps this required check green and explains the skip.
+        if: matrix.shard == 'acctest-data' && github.actor != 'dependabot[bot]'
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
@@ -138,7 +142,7 @@ jobs:
           .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Data Sources"
 
       - name: Acceptance Tests - Resources
-        if: matrix.shard == 'acctest-resource'
+        if: matrix.shard == 'acctest-resource' && github.actor != 'dependabot[bot]'
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
@@ -147,3 +151,15 @@ jobs:
           TF_ACC=1 go test ./internal/acctest/ -v -timeout 90m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' 2>&1 | tee /tmp/acctest.log
           .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Resources"
           .github/scripts/summarize-compute-config-coverage.sh /tmp/acctest.log "Acceptance Tests - Resources"
+
+      - name: Acceptance Tests skipped (Dependabot PR)
+        # Dependabot-triggered runs get no access to Actions secrets, so the
+        # acctest steps above are skipped (their `github.actor` guard). This
+        # step keeps the acctest-data / acctest-resource required checks green
+        # and records WHY, so the skip is explicit rather than silent. Dep
+        # bumps are still gated by lint-and-unit (build + unit tests against the
+        # updated deps) and release-preflight. To force real acctests on a
+        # specific bump, push a commit to its branch so the run is
+        # human-triggered (secrets are then available).
+        if: (matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource') && github.actor == 'dependabot[bot]'
+        run: echo "::notice::Acceptance tests skipped for Dependabot PR (Actions secrets are unavailable to Dependabot runs); this PR is gated by lint-and-unit + release-preflight instead."
