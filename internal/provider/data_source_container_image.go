@@ -91,7 +91,7 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 			},
 			"build_status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).",
+				MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
 			},
 			"is_byod": schema.BoolAttribute{
 				Computed:            true,

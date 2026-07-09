@@ -65,7 +65,7 @@ output "build_status" {
 ### Read-Only
 
 - `build_id` (String) The unique identifier of the build. Changes when a new build is created.
-- `build_status` (String) The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).
+- `build_status` (String) The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
 - `created_at` (String) Timestamp when the build was created. Changes when a new build is created.
 - `id` (String) The unique identifier of the cluster environment.
 - `image_uri` (String) The URI of the built container image.

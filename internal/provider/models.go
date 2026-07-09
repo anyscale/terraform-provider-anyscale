@@ -574,7 +574,7 @@ type ClusterEnvironmentBuildResult struct {
 	Revision             int     `json:"revision"`
 	CreatorID            string  `json:"creator_id"`
 	ErrorMessage         *string `json:"error_message,omitempty"`
-	Status               string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, cancelled
+	Status               string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, canceled
 	CreatedAt            string  `json:"created_at"`
 	LastModifiedAt       string  `json:"last_modified_at"`
 	IsBYOD               bool    `json:"is_byod"`
