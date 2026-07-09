@@ -392,7 +392,14 @@ func TestContainerImageBuildCreate_MapsFieldsFromThreeCallSequence(t *testing.T)
 			name:            "nullable fields absent",
 			rayVersion:      nil,
 			dockerImageName: nil,
-			digest:          nil,
+			// Deliberately non-nil, unlike rayVersion/dockerImageName above: a
+			// permanently-nil digest now drives Create()'s waitForBuildDigest into
+			// its real 30s poll-then-give-up path (the GET handler below is static,
+			// so it would echo nil on every poll). That timeout path is already
+			// covered fast in container_image_helpers_test.go; this case is about
+			// nullable-field mapping, not digest-settle timing, so give it a
+			// pre-settled digest to keep this test on its fast path.
+			digest: strPtr("sha256:buildtestdigestnullablecase00000000000000000000000000"),
 		},
 	}
 
