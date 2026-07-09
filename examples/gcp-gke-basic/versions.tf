@@ -2,7 +2,7 @@ terraform {
   required_version = ">= 1.0"
   required_providers {
     anyscale = {
-      source = "terraform-providers/anyscale"
+      source = "anyscale/anyscale"
     }
 
     google = {

@@ -72,6 +72,24 @@ jobs:
           echo "==> release notes for $version:"
           cat release-notes.md
 
+      # Fail the release BEFORE GoReleaser runs if there is no real changelog
+      # entry for this tag. The extract step above already errors when there is
+      # no "## [<version>]" section at all (changelog-build's Extract returns an
+      # error on a missing heading), which stops a tag pushed without a
+      # finalized changelog. This step adds the other half: a section that
+      # exists but is empty would otherwise sail through and publish a blank
+      # GitHub Release. Together they make "this tag has a finalized, non-empty
+      # changelog entry" a server-side guarantee that holds no matter how the
+      # tag was pushed (make tag, the GitHub UI, or a raw `git tag`) -- not just
+      # a client-side check in the `make tag` target.
+      - name: Verify release notes are non-empty
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::Release notes for ${GITHUB_REF_NAME} are empty -- CHANGELOG.md has no finalized, non-empty '## [${version}]' section. Run 'make changelog-release VERSION=${version}', merge that PR, then 'make tag VERSION=${version}'."
+            exit 1
+          fi
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

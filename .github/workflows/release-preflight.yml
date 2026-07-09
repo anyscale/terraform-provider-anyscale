@@ -1,0 +1,79 @@
+# Release Preflight
+#
+# Validates the release machinery on every PR and every push to main, so that a
+# broken .goreleaser.yml, a missing/incorrect Terraform Registry manifest, or an
+# unparseable changelog fragment fails HERE -- on a pull request -- instead of
+# after a `vX.Y.Z` tag is already public and the changelog-finalize PR is already
+# merged. A released version is immutable (re-tagging breaks Registry checksums),
+# so a failure discovered post-tag is expensive to unwind; this moves those
+# failures left, before the irreversible step.
+#
+# This is a dry run only: no secrets, no signing, no publishing. It complements
+# (does not replace) release.yml, which does the real signed publish on a tag.
+name: Release Preflight
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Read-only. This job never needs secrets, which also keeps it safe to run on
+# pull requests opened from forks.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # GoReleaser derives the snapshot version from git history/tags.
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Changelog fragments parse cleanly
+        run: go run ./tools/changelog-build -check
+
+      - name: Registry manifest is present and protocol 6.0
+        # A Terraform Plugin Framework provider must advertise protocol 6.0.
+        # If this manifest is missing or wrong, the Registry silently defaults
+        # published versions to protocol 5.0 -- wrong for this provider, and not
+        # caught anywhere else in CI. Assert it explicitly.
+        run: |
+          set -euo pipefail
+          test -f terraform-registry-manifest.json
+          got="$(jq -c '.metadata.protocol_versions' terraform-registry-manifest.json)"
+          if [ "$got" != '["6.0"]' ]; then
+            echo "::error file=terraform-registry-manifest.json::protocol_versions must be [\"6.0\"] for a Plugin Framework provider (got: $got)"
+            exit 1
+          fi
+          echo "manifest OK: protocol_versions $got"
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          install-only: true
+
+      - name: Validate config and build a snapshot (no publish, no signing)
+        # `check` validates the config schema/deprecations. The snapshot build
+        # then exercises the full cross-compile matrix, the zip archives, and the
+        # checksum step -- including the manifest's checksum entry, which is wired
+        # via checksum.extra_files in .goreleaser.yml. `--skip=sign` avoids needing
+        # a GPG key, which is what keeps this whole job secret-free and fork-safe.
+        run: |
+          goreleaser check
+          goreleaser release --snapshot --clean --skip=sign
