@@ -108,3 +108,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # GPG fingerprint for signing checksums
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+
+      # The two guards above only ever look at release-notes.md BEFORE
+      # GoReleaser runs -- they can't see whether GoReleaser actually put
+      # that content into the published release. That's exactly the gap
+      # that let v0.3.0 publish with an empty body despite both of them
+      # passing (root cause: a `changelog: disable: true` in .goreleaser.yml
+      # that also discards --release-notes; see the comment there). This
+      # step closes the gap by checking the real, published body after the
+      # fact. It can't undo a bad publish -- the release already exists by
+      # this point -- but it fails the workflow loudly instead of leaving an
+      # empty release body to be found by manual inspection later.
+      - name: Verify published release notes are non-empty
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body="$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body)"
+          if ! printf '%s' "$body" | grep -q '[^[:space:]]'; then
+            echo "::error::Published GitHub Release ${GITHUB_REF_NAME} has an empty body even though release-notes.md was verified non-empty before GoReleaser ran. Fix (description-only, does not touch assets/signatures): go run ./tools/changelog-build -extract ${GITHUB_REF_NAME#v} -notes-out /tmp/notes.md && gh release edit ${GITHUB_REF_NAME} --notes-file /tmp/notes.md"
+            exit 1
+          fi

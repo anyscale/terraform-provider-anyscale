@@ -91,11 +91,22 @@ release:
   # Release name template
   name_template: "{{ .ProjectName }} v{{ .Version }}"
 
-# CHANGELOG.md (via tools/changelog-build, see
-# RELEASING.md) is the single source of truth
-# for release notes now. GoReleaser's own commit-scraped changelog is
-# disabled; release.yml extracts this version's CHANGELOG.md section and
-# passes it via `--release-notes`, so the GitHub Release body byte-matches
-# CHANGELOG.md instead of being a second, independently-generated story.
-changelog:
-  disable: true
+# CHANGELOG.md (via tools/changelog-build, see RELEASING.md) is the single
+# source of truth for release notes. release.yml extracts this version's
+# CHANGELOG.md section and passes it via `--release-notes`, which already
+# makes GoReleaser skip its own commit-scraped changelog generation on its
+# own -- no `changelog:` config is needed to achieve that.
+#
+# Do NOT add `changelog: disable: true` here. It reads like the obvious way
+# to spell "no auto-generated changelog," but GoReleaser's own docs say it
+# does more than that: "this will also ignore any changelog files passed via
+# --release-notes, and will render an empty changelog ... may result in an
+# empty release notes on GitHub/GitLab/Gitea"
+# (https://goreleaser.com/customization/changelog/). That flag was set here
+# from #44 (2026-07-07) through v0.3.0 and silently discarded --release-notes
+# the whole time. It coexisted with the v0.1.2 dist/-wipe bug (see the
+# "Extract release notes" step in release.yml) -- both independently produce
+# an identical empty-body symptom, so v0.1.2 can't be pinned on one or the
+# other in hindsight. #59 fixed the dist/-wipe mechanism; this flag was the
+# second, undiagnosed one, confirmed still live and sufficient on its own
+# when it produced the same empty body again on v0.3.0.
