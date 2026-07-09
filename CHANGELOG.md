@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-09
+
+### Breaking Changes
+
+- resource/anyscale_container_image_registry: id now identifies the cluster environment instead of the latest build, and the redundant cluster_environment_id attribute has been removed; existing state is upgraded automatically, but external tooling reading cluster_environment_id or expecting a build ID from id (e.g. a saved terraform output) must be updated to read id instead, and terraform import now takes a cluster environment ID rather than a build ID.
+
+### Added
+
+- resource/anyscale_container_image_build: gains digest, the built image's content digest (e.g. sha256:...), for pinning a workload to exact image bytes rather than just a name:revision.
+- resource/anyscale_container_image_registry: gains digest, the registered image's content digest (e.g. sha256:...); pinned to its last-known value between refreshes since this resource is immutable.
+- data-source/anyscale_container_image: gains digest, the image's content digest (e.g. sha256:...); may be null if the image has no successful build yet.
+
+### Fixed
+
+- resource/anyscale_container_image_build: a cancelled build now surfaces a clear "build was cancelled" error during apply instead of "unknown build status: canceled". The backend reports the cancelled state as "canceled" (one L); the provider only recognized the two-L spelling.
+- resource/anyscale_container_image_registry: ray_version left unset now correctly reflects the provider-resolved default in state instead of remaining null forever; it still resolves once at creation and won't change on later refreshes.
+- data-source/anyscale_container_image: looking up an image by name now searches every page of results instead of only the first, so a match beyond the first page is no longer missed.
+
 ## [0.2.0] - 2026-07-09
 
 ### Breaking Changes
@@ -366,7 +384,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.0
 [0.2.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.2.0
 [0.1.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.2
 [0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1
