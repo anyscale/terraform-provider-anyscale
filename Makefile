@@ -584,7 +584,7 @@ release: ## Create and publish a release (requires GPG_FINGERPRINT env var)
 # ============================================================================
 # CHANGELOG
 # ============================================================================
-# Fragment-based changelog automation. See .crystl/quest/changelog-release-contract.md
+# Fragment-based changelog automation. See RELEASING.md
 # and tools/changelog-build/.
 
 .PHONY: changelog-build
