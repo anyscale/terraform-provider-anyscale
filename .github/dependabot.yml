@@ -7,6 +7,14 @@ updates:
   # cut review noise; majors open their own PR (they can carry breaking changes).
   - package-ecosystem: "github-actions"
     directory: "/"
+    # skip-changelog: Dependabot PRs have no user-facing provider effect, so the
+    # changelog-gate is satisfied by this label instead of a .changelog fragment
+    # (which Dependabot can't author). dependencies/github_actions preserve the
+    # labels Dependabot would otherwise apply by default.
+    labels:
+      - "dependencies"
+      - "github_actions"
+      - "skip-changelog"
     schedule:
       interval: "weekly"
     groups:
@@ -19,6 +27,10 @@ updates:
   # together, majors are reviewed individually.
   - package-ecosystem: "gomod"
     directory: "/"
+    labels:
+      - "dependencies"
+      - "go"
+      - "skip-changelog"
     schedule:
       interval: "weekly"
     groups:
