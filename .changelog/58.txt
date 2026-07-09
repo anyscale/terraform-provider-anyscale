@@ -1,0 +1,29 @@
+```
+release-note:breaking-change
+resource/anyscale_container_image_registry: id now identifies the cluster environment instead of the latest build, and the redundant cluster_environment_id attribute has been removed; existing state is upgraded automatically, but external tooling reading cluster_environment_id or expecting a build ID from id (e.g. a saved terraform output) must be updated to read id instead, and terraform import now takes a cluster environment ID rather than a build ID.
+```
+
+```
+release-note:fixed
+resource/anyscale_container_image_registry: ray_version left unset now correctly reflects the provider-resolved default in state instead of remaining null forever; it still resolves once at creation and won't change on later refreshes.
+```
+
+```
+release-note:fixed
+data-source/anyscale_container_image: looking up an image by name now searches every page of results instead of only the first, so a match beyond the first page is no longer missed.
+```
+
+```
+release-note:added
+resource/anyscale_container_image_build: gains digest, the built image's content digest (e.g. sha256:...), for pinning a workload to exact image bytes rather than just a name:revision.
+```
+
+```
+release-note:added
+resource/anyscale_container_image_registry: gains digest, the registered image's content digest (e.g. sha256:...); pinned to its last-known value between refreshes since this resource is immutable.
+```
+
+```
+release-note:added
+data-source/anyscale_container_image: gains digest, the image's content digest (e.g. sha256:...); may be null if the image has no successful build yet.
+```
