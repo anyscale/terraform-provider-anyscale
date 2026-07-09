@@ -4,7 +4,7 @@ terraform {
   required_providers {
 
     anyscale = {
-      source = "terraform-providers/anyscale"
+      source = "anyscale/anyscale"
     }
 
     aws = {
