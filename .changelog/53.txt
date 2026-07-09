@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_container_image_build: a cancelled build now surfaces a clear "build was cancelled" error during apply instead of "unknown build status: canceled". The backend reports the cancelled state as "canceled" (one L); the provider only recognized the two-L spelling.
+```

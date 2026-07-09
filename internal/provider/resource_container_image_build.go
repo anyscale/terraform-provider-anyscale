@@ -129,7 +129,7 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			},
 			"build_status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).",
+				MarkdownDescription: "The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
 			},
 			"image_uri": schema.StringAttribute{
 				Computed:            true,
@@ -674,25 +674,42 @@ func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID 
 			"status":   build.Status,
 		})
 
-		switch build.Status {
-		case "succeeded":
-			return build, nil
-		case "failed":
-			if build.ErrorMessage != nil && *build.ErrorMessage != "" {
-				return nil, fmt.Errorf("build failed: %s", *build.ErrorMessage)
-			}
-			return nil, fmt.Errorf("build failed")
-		case "cancelled":
-			return nil, fmt.Errorf("build was cancelled")
-		case "pending", "in_progress", "pending_cancellation":
-			// Continue polling
-			time.Sleep(buildPollInterval)
-		default:
-			return nil, fmt.Errorf("unknown build status: %s", build.Status)
+		done, statusErr := evaluateBuildStatus(build)
+		if statusErr != nil {
+			return nil, statusErr
 		}
+		if done {
+			return build, nil
+		}
+		time.Sleep(buildPollInterval)
 	}
 
 	return nil, fmt.Errorf("build timed out after %v", timeout)
+}
+
+// evaluateBuildStatus classifies a build's current status into a terminal outcome or an
+// in-progress state that should keep polling. done is true once no further polling is useful;
+// err is set for a terminal failure/cancellation, nil for terminal success or while in progress.
+//
+// The backend's real wire value for a cancelled build is "canceled" (one L, per the
+// BuildStatus/ClusterEnvironmentBuildStatus enums). "cancelled" (two L) is also accepted here
+// defensively so an unexpected respelling never falls through to the unknown-status error.
+func evaluateBuildStatus(build *ClusterEnvironmentBuildResult) (done bool, err error) {
+	switch build.Status {
+	case "succeeded":
+		return true, nil
+	case "failed":
+		if build.ErrorMessage != nil && *build.ErrorMessage != "" {
+			return true, fmt.Errorf("build failed: %s", *build.ErrorMessage)
+		}
+		return true, fmt.Errorf("build failed")
+	case "canceled", "cancelled":
+		return true, fmt.Errorf("build was cancelled")
+	case "pending", "in_progress", "pending_cancellation":
+		return false, nil
+	default:
+		return true, fmt.Errorf("unknown build status: %s", build.Status)
+	}
 }
 
 // getBuild fetches the current build details.
