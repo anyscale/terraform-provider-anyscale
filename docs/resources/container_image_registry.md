@@ -40,7 +40,7 @@ output "registry_id" {
 
 output "registry_image_digest" {
   value       = anyscale_container_image_registry.public.digest
-  description = "The content digest of the registered image (e.g. sha256:...), stable across refreshes"
+  description = "The content digest of this image's current latest successful build (e.g. sha256:...); like build_id, revision, and name_version, it can change on a later refresh if a new build supersedes this one"
 }
 ```
 
@@ -62,7 +62,7 @@ output "registry_image_digest" {
 - `build_id` (String) The unique identifier of the latest build for this image.
 - `build_status` (String) The status of the build (typically `succeeded` for registered images).
 - `created_at` (String) Timestamp when the build was created.
-- `digest` (String) The content digest of the built container image (e.g. `sha256:...`).
+- `digest` (String) The content digest of this image's current latest successful build (e.g. `sha256:...`). May occasionally be briefly empty immediately after creation if the build is still settling. Like `build_id`, `revision`, and `name_version`, it reflects whichever build is currently latest for the underlying cluster environment, and can change on a later refresh if a new build supersedes this one outside this resource's own apply.
 - `id` (String) The unique identifier of the cluster environment holding this image. Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored the old build-id value out of band (e.g. a `terraform output`) must use `id` going forward.
 - `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image. Always true for registered images.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.

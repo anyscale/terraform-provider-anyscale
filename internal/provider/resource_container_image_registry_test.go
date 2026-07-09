@@ -282,6 +282,9 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 					ID: buildID, ApplicationTemplateID: templateID, RayVersion: strPtr(rayVersion),
 					Revision: 1, CreatorID: "user_1", Status: "succeeded",
 					CreatedAt: "2024-06-01T00:00:00Z", LastModifiedAt: "2024-06-01T00:00:00Z", IsBYOD: true,
+					// Already-settled digest -- this test is about name generation, not
+					// the digest-settle wait, so give waitForBuildDigest its fast path.
+					Digest: strPtr("sha256:generatednametestdigest0000000000000000000000000000000000"),
 				},
 			})
 		default:

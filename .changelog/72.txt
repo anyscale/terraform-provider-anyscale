@@ -1,0 +1,8 @@
+```
+release-note:fixed
+resource/anyscale_container_image_build: `digest` could come back empty from `Create` or a Containerfile-triggered `Update` even though the build succeeded, because the backend can report status "succeeded" a few seconds before the digest itself finishes populating. Create/Update now wait (up to 30s) for the digest to settle before returning; a still-unsettled digest after that window no longer fails the apply, it proceeds with digest left null plus a warning, and self-heals on a later refresh.
+```
+```
+release-note:fixed
+resource/anyscale_container_image_registry: same fix as `anyscale_container_image_build` for the identical race on `Create` — `digest` could come back empty even though the underlying build succeeded. `Update` is unaffected (every optional attribute already forces replacement).
+```
