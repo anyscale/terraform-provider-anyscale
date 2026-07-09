@@ -58,14 +58,13 @@ type ContainerImageRegistryResourceModel struct {
 	RegistryLoginSecret types.String `tfsdk:"registry_login_secret"` // Optional, sensitive
 
 	// Computed attributes
-	BuildID              types.String `tfsdk:"build_id"`
-	ClusterEnvironmentID types.String `tfsdk:"cluster_environment_id"`
-	BuildStatus          types.String `tfsdk:"build_status"`
-	CreatedAt            types.String `tfsdk:"created_at"`
-	IsBYOD               types.Bool   `tfsdk:"is_byod"`
-	Revision             types.Int64  `tfsdk:"revision"`
-	Digest               types.String `tfsdk:"digest"`
-	NameVersion          types.String `tfsdk:"name_version"` // Formatted as "name:revision" for use with Anyscale APIs
+	BuildID     types.String `tfsdk:"build_id"`
+	BuildStatus types.String `tfsdk:"build_status"`
+	CreatedAt   types.String `tfsdk:"created_at"`
+	IsBYOD      types.Bool   `tfsdk:"is_byod"`
+	Revision    types.Int64  `tfsdk:"revision"`
+	Digest      types.String `tfsdk:"digest"`
+	NameVersion types.String `tfsdk:"name_version"` // Formatted as "name:revision" for use with Anyscale APIs
 }
 
 // Metadata returns the resource type name.
@@ -87,8 +86,9 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 }
 
 // containerImageRegistryAttributes returns the v1 (current) attribute map. It must NOT be
-// reused as the v0 PriorSchema in UpgradeState: F5 added the digest attribute to this same
-// function after v0 shipped, so v0's real on-disk state never had it, and id's
+// reused as the v0 PriorSchema in UpgradeState: F5 added the digest attribute and V1(c)
+// removed cluster_environment_id after v0 shipped, so v0's real on-disk state has digest
+// absent and cluster_environment_id present - the opposite of this function - and id's
 // MarkdownDescription here describes the current (v1) meaning, not what it meant under v0.
 // See containerImageRegistrySchemaV0 in resource_container_image_registry_upgrade.go for
 // the frozen v0 snapshot used to decode prior state.
@@ -96,7 +96,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"id": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The unique identifier of the cluster environment holding this image (same as `cluster_environment_id`). Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored this value out of band (e.g. a `terraform output`) must be updated to use `cluster_environment_id` going forward.",
+			MarkdownDescription: "The unique identifier of the cluster environment holding this image. Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored the old build-id value out of band (e.g. a `terraform output`) must use `id` going forward.",
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
 			},
@@ -139,13 +139,6 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		"build_id": schema.StringAttribute{
 			Computed:            true,
 			MarkdownDescription: "The unique identifier of the latest build for this image.",
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		},
-		"cluster_environment_id": schema.StringAttribute{
-			Computed:            true,
-			MarkdownDescription: "The ID of the cluster environment (app config) that holds this image. Identical to `id`.",
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
 			},
@@ -302,8 +295,8 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	})
 
 	// Persist state now that the template exists remotely, before the build-create
-	// call below that can still fail. Delete() acts on ClusterEnvironmentID, so that
-	// (not just ID) must be recorded here. Without this, a call-2 failure would leave
+	// call below that can still fail. Delete() acts on ID (the cluster environment id),
+	// so it must be recorded here. Without this, a call-2 failure would leave
 	// the template orphaned in the backend with no Terraform record to archive it -
 	// the 2-call split widens the window the old atomic call never had, so this early
 	// write (already used below for the build wait) is now essential rather than
@@ -314,7 +307,6 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	// mistaken for deleted (see GATE test: call-2 fails -> state holds the template ->
 	// Delete archives it -> no orphan).
 	plan.ID = types.StringValue(templateID)
-	plan.ClusterEnvironmentID = types.StringValue(templateID)
 	plan.BuildID = types.StringNull()
 	plan.BuildStatus = types.StringNull()
 	plan.CreatedAt = types.StringNull()
@@ -366,7 +358,6 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	// templateID above and stays the cluster environment id for the resource's entire
 	// lifetime (see the identity comment on ContainerImageRegistryResourceModel.ID).
 	plan.BuildID = types.StringValue(result.ID)
-	plan.ClusterEnvironmentID = types.StringValue(result.ApplicationTemplateID)
 	plan.BuildStatus = types.StringValue(result.Status)
 	plan.CreatedAt = types.StringValue(result.CreatedAt)
 	plan.IsBYOD = types.BoolValue(result.IsBYOD)
@@ -446,8 +437,6 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 		resp.State.RemoveResource(ctx)
 		return
 	}
-
-	state.ClusterEnvironmentID = types.StringValue(clusterEnvID)
 
 	// A Create() that failed between the two BYOD calls (see the defensive State.Set
 	// there) leaves a template with no build yet - template.LatestBuild is nil in
@@ -551,7 +540,7 @@ func (r *ContainerImageRegistryResource) Delete(ctx context.Context, req resourc
 		return
 	}
 
-	clusterEnvID := state.ClusterEnvironmentID.ValueString()
+	clusterEnvID := state.ID.ValueString()
 
 	tflog.Info(ctx, "Archiving cluster environment for container image", map[string]any{
 		"cluster_environment_id": clusterEnvID,

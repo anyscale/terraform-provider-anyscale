@@ -93,9 +93,10 @@ func TestContainerImageRegistryCreate_Call2Failure_StateHoldsTemplateForCleanup(
 	}
 
 	// The defensive early State.Set before call 2 must have survived: state
-	// holds the template's own id under BOTH id and cluster_environment_id
-	// (Delete keys on ClusterEnvironmentID, not BuildID), with every field
-	// that only the build call would have populated left null.
+	// holds the template's own id under id (Delete keys directly on ID since
+	// V1(c) removed the separate cluster_environment_id attribute; ID carries
+	// the same value ID always did), with every field that only the build
+	// call would have populated left null.
 	var stateAfterFailure ContainerImageRegistryResourceModel
 	getDiags := createResp.State.Get(ctx, &stateAfterFailure)
 	if getDiags.HasError() {
@@ -103,10 +104,7 @@ func TestContainerImageRegistryCreate_Call2Failure_StateHoldsTemplateForCleanup(
 	}
 
 	if stateAfterFailure.ID.ValueString() != templateID {
-		t.Errorf("state.ID = %q, want template id %q -- orphan-prevention state capture is broken", stateAfterFailure.ID.ValueString(), templateID)
-	}
-	if stateAfterFailure.ClusterEnvironmentID.ValueString() != templateID {
-		t.Errorf("state.ClusterEnvironmentID = %q, want template id %q -- Delete() keys on this field, a wrong value here means Delete() can't clean up", stateAfterFailure.ClusterEnvironmentID.ValueString(), templateID)
+		t.Errorf("state.ID = %q, want template id %q -- Delete() keys on this field directly; a wrong value here means Delete() can't clean up", stateAfterFailure.ID.ValueString(), templateID)
 	}
 	if !stateAfterFailure.BuildID.IsNull() {
 		t.Errorf("state.BuildID = %q, want null -- call 2 never succeeded, there is no build", stateAfterFailure.BuildID.ValueString())

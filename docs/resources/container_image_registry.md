@@ -33,9 +33,14 @@ resource "anyscale_container_image_registry" "private_ecr" {
 }
 
 # Outputs
-output "registry_cluster_environment_id" {
-  value       = anyscale_container_image_registry.public.cluster_environment_id
-  description = "The cluster environment (app config) ID created to hold this image"
+output "registry_id" {
+  value       = anyscale_container_image_registry.public.id
+  description = "The durable ID of the cluster environment (app config) created to hold this image"
+}
+
+output "registry_image_digest" {
+  value       = anyscale_container_image_registry.public.digest
+  description = "The content digest of the registered image (e.g. sha256:...), stable across refreshes"
 }
 ```
 
@@ -56,10 +61,9 @@ output "registry_cluster_environment_id" {
 
 - `build_id` (String) The unique identifier of the latest build for this image.
 - `build_status` (String) The status of the build (typically `succeeded` for registered images).
-- `cluster_environment_id` (String) The ID of the cluster environment (app config) that holds this image. Identical to `id`.
 - `created_at` (String) Timestamp when the build was created.
 - `digest` (String) The content digest of the built container image (e.g. `sha256:...`).
-- `id` (String) The unique identifier of the cluster environment holding this image (same as `cluster_environment_id`). Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored this value out of band (e.g. a `terraform output`) must be updated to use `cluster_environment_id` going forward.
+- `id` (String) The unique identifier of the cluster environment holding this image. Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored the old build-id value out of band (e.g. a `terraform output`) must use `id` going forward.
 - `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image. Always true for registered images.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
 - `revision` (Number) The revision number of the container image.
@@ -71,6 +75,6 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the build ID
-terraform import anyscale_container_image_registry.example bld_abc123
+# Import using the cluster environment ID
+terraform import anyscale_container_image_registry.example cenv_abc123
 ```

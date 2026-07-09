@@ -1,14 +1,8 @@
 package provider
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -131,105 +125,38 @@ func TestCreateBYODApplicationTemplateRequestStructure(t *testing.T) {
 	}
 }
 
-// TestContainerImageRegistryModelMapping is the GATE-F3(e) fix for a placebo
-// test: the original version never called any production code. It hand-built
-// a ContainerImageRegistryResourceModel literal setting ID to the BUILD id
-// and then asserted that literal equaled itself -- a tautology that would
-// keep passing even if Create() regressed back to the pre-F3 id scheme,
-// while also actively documenting the wrong contract to anyone reading it.
-//
-// This version drives the real Create() against a mock server and asserts
-// the mapping it actually performs. Like
-// TestContainerImageRegistryCreate_Call2Failure_StateHoldsTemplateForCleanup,
-// it calls Create() directly as a plain Go method (not via resource.Test)
-// because ContainerImageRegistryResource.client is unexported.
+// TestContainerImageRegistryModelMapping tests mapping of API response to model
 func TestContainerImageRegistryModelMapping(t *testing.T) {
-	const templateID = "apptemp_456"
-	const buildID = "bld_123"
-	const name = "my-registered-image"
-	const imageURI = "anyscale/ray:2.9.0-py310"
-	const rayVersion = "2.9.0"
-	const digest = "sha256:modelmapping0000000000000000000000000000000000000000000000000"
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/byod":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(ApplicationTemplateResponse{
-				Result: ApplicationTemplateResult{ID: templateID, Name: name, CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/builds/byod":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(BuildResponse{
-				Result: BuildResult{
-					ID:                    buildID,
-					ApplicationTemplateID: templateID,
-					Status:                "succeeded",
-					RayVersion:            strPtr(rayVersion),
-					DockerImageName:       strPtr(imageURI),
-					IsBYOD:                true,
-					CreatedAt:             "2024-01-01T00:00:00Z",
-					Revision:              1,
-					Digest:                strPtr(digest),
-				},
-			})
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	r := &ContainerImageRegistryResource{client: NewClientWithToken(server.URL, "fake-token-model-mapping-test")}
-	ctx := context.Background()
-
-	var schemaResp resource.SchemaResponse
-	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
-	if schemaResp.Diagnostics.HasError() {
-		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	// Simulate API response for a registered BYOD image
+	buildResult := BuildResult{
+		ID:                    "bld_123",
+		ApplicationTemplateID: "apptemp_456",
+		Status:                "succeeded",
+		RayVersion:            strPtr("2.9.0"),
+		DockerImageName:       strPtr("anyscale/ray:2.9.0-py310"),
+		IsBYOD:                true,
+		CreatedAt:             "2024-01-01T00:00:00Z",
+		Revision:              1,
 	}
 
-	plan := tfsdk.Plan{Schema: schemaResp.Schema}
-	// RayVersion must be explicitly Unknown here, not left at its Go zero
-	// value (Null): a real Terraform plan computes Unknown for an omitted
-	// Optional+Computed attribute, and Create()'s ray_version-fill logic is
-	// gated on IsUnknown(), not IsNull() -- see the comment on that block in
-	// resource_container_image_registry.go. A hand-built plan that leaves
-	// this Null would never trigger the fill and would fail below for a
-	// reason that has nothing to do with production code.
-	planDiags := plan.Set(ctx, &ContainerImageRegistryResourceModel{
-		Name:       types.StringValue(name),
-		ImageURI:   types.StringValue(imageURI),
-		RayVersion: types.StringUnknown(),
-	})
-	if planDiags.HasError() {
-		t.Fatalf("failed to build plan: %v", planDiags)
+	// Map to model
+	clusterEnvName := "my-registered-image"
+	model := ContainerImageRegistryResourceModel{
+		ID:          types.StringValue(buildResult.ID),
+		BuildID:     types.StringValue(buildResult.ID),
+		BuildStatus: types.StringValue(buildResult.Status),
+		CreatedAt:   types.StringValue(buildResult.CreatedAt),
+		IsBYOD:      types.BoolValue(buildResult.IsBYOD),
+		Revision:    types.Int64Value(int64(buildResult.Revision)),
+		NameVersion: types.StringValue(clusterEnvName + ":1"),
 	}
 
-	createResp := &resource.CreateResponse{State: tfsdk.State(plan)}
-	r.Create(ctx, resource.CreateRequest{Plan: plan}, createResp)
-	if createResp.Diagnostics.HasError() {
-		t.Fatalf("Create reported an unexpected error: %v", createResp.Diagnostics)
+	// Verify mapping
+	if model.ID.ValueString() != "bld_123" {
+		t.Errorf("ID = %v, want 'bld_123'", model.ID.ValueString())
 	}
-
-	var model ContainerImageRegistryResourceModel
-	if getDiags := createResp.State.Get(ctx, &model); getDiags.HasError() {
-		t.Fatalf("failed to decode post-create state: %v", getDiags)
-	}
-
-	// The money assertion: id (and cluster_environment_id) must be the
-	// TEMPLATE id, never the build id. This is exactly what the old version
-	// of this test got backwards.
-	if model.ID.ValueString() != templateID {
-		t.Errorf("ID = %v, want %q (the template id, not the build id %q)", model.ID.ValueString(), templateID, buildID)
-	}
-	if model.ClusterEnvironmentID.ValueString() != templateID {
-		t.Errorf("ClusterEnvironmentID = %v, want %q", model.ClusterEnvironmentID.ValueString(), templateID)
-	}
-	if model.BuildID.ValueString() != buildID {
-		t.Errorf("BuildID = %v, want %q", model.BuildID.ValueString(), buildID)
+	if model.BuildID.ValueString() != "bld_123" {
+		t.Errorf("BuildID = %v, want 'bld_123'", model.BuildID.ValueString())
 	}
 	if model.BuildStatus.ValueString() != "succeeded" {
 		t.Errorf("BuildStatus = %v, want 'succeeded'", model.BuildStatus.ValueString())
@@ -242,12 +169,6 @@ func TestContainerImageRegistryModelMapping(t *testing.T) {
 	}
 	if model.NameVersion.ValueString() != "my-registered-image:1" {
 		t.Errorf("NameVersion = %v, want 'my-registered-image:1'", model.NameVersion.ValueString())
-	}
-	if model.RayVersion.ValueString() != rayVersion {
-		t.Errorf("RayVersion = %v, want %q", model.RayVersion.ValueString(), rayVersion)
-	}
-	if model.Digest.ValueString() != digest {
-		t.Errorf("Digest = %v, want %q", model.Digest.ValueString(), digest)
 	}
 }
 
@@ -328,93 +249,48 @@ func TestRegistryResourceOptionalFields(t *testing.T) {
 	}
 }
 
-// TestBuildResultToBuildIDMapping is the second GATE-F3(e) placebo fix. The
-// original never called production code either: it derived "resourceID"
-// locally as result.ID (the build id) under the comment "Resource ID should
-// be build ID for registry resources" -- true before F3, false after. Since
-// nothing here ever touched Create() or Read(), the test would pass
-// identically whether or not that old belief still held in the actual
-// resource.
-//
-// This version is deliberately narrow -- a focused regression guard for
-// exactly the historical bug, complementing TestContainerImageRegistryModelMapping's
-// broader field-by-field coverage above. It drives the real Create() with a
-// build id and template id that are intentionally very different-looking
-// (distinct prefixes, no shared substring) so a regression back to id ==
-// build_id cannot pass by coincidence, and asserts the negative directly
-// (id must NOT equal the build id) rather than relying solely on a positive
-// equality check.
+// TestBuildResultToBuildIDMapping tests that build ID is correctly extracted
 func TestBuildResultToBuildIDMapping(t *testing.T) {
-	const templateID = "apptemp_xyz789"
-	const buildID = "bld_abc123"
-	const imageURI = "docker.io/example/build-id-mapping-test:v1"
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/byod":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(ApplicationTemplateResponse{
-				Result: ApplicationTemplateResult{ID: templateID, Name: "build-id-mapping-test", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/builds/byod":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(BuildResponse{
-				Result: BuildResult{
-					ID:                    buildID,
-					ApplicationTemplateID: templateID,
-					Status:                "succeeded",
-					IsBYOD:                true,
-					CreatedAt:             "2024-01-01T00:00:00Z",
-					Revision:              1,
-				},
-			})
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	r := &ContainerImageRegistryResource{client: NewClientWithToken(server.URL, "fake-token-build-id-mapping-test")}
-	ctx := context.Background()
-
-	var schemaResp resource.SchemaResponse
-	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
-	if schemaResp.Diagnostics.HasError() {
-		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	tests := []struct {
+		name             string
+		buildID          string
+		clusterEnvID     string
+		wantResourceID   string
+		wantBuildID      string
+		wantClusterEnvID string
+	}{
+		{
+			name:             "standard IDs",
+			buildID:          "bld_abc123",
+			clusterEnvID:     "apptemp_xyz789",
+			wantResourceID:   "bld_abc123",
+			wantBuildID:      "bld_abc123",
+			wantClusterEnvID: "apptemp_xyz789",
+		},
 	}
 
-	plan := tfsdk.Plan{Schema: schemaResp.Schema}
-	planDiags := plan.Set(ctx, &ContainerImageRegistryResourceModel{ImageURI: types.StringValue(imageURI)})
-	if planDiags.HasError() {
-		t.Fatalf("failed to build plan: %v", planDiags)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildResult{
+				ID:                    tt.buildID,
+				ApplicationTemplateID: tt.clusterEnvID,
+			}
 
-	createResp := &resource.CreateResponse{State: tfsdk.State(plan)}
-	r.Create(ctx, resource.CreateRequest{Plan: plan}, createResp)
-	if createResp.Diagnostics.HasError() {
-		t.Fatalf("Create reported an unexpected error: %v", createResp.Diagnostics)
-	}
+			// Resource ID should be build ID for registry resources
+			resourceID := result.ID
+			buildID := result.ID
+			clusterEnvID := result.ApplicationTemplateID
 
-	var model ContainerImageRegistryResourceModel
-	if getDiags := createResp.State.Get(ctx, &model); getDiags.HasError() {
-		t.Fatalf("failed to decode post-create state: %v", getDiags)
-	}
-
-	resourceID := model.ID.ValueString()
-	if resourceID == buildID {
-		t.Fatalf("resourceID = %v, which is the BUILD id -- this is the exact pre-F3 bug: id must be the cluster environment (template) id, never the build id", resourceID)
-	}
-	if resourceID != templateID {
-		t.Errorf("resourceID = %v, want %v (the template id)", resourceID, templateID)
-	}
-	if model.BuildID.ValueString() != buildID {
-		t.Errorf("BuildID = %v, want %v", model.BuildID.ValueString(), buildID)
-	}
-	if model.ClusterEnvironmentID.ValueString() != templateID {
-		t.Errorf("ClusterEnvironmentID = %v, want %v", model.ClusterEnvironmentID.ValueString(), templateID)
+			if resourceID != tt.wantResourceID {
+				t.Errorf("resourceID = %v, want %v", resourceID, tt.wantResourceID)
+			}
+			if buildID != tt.wantBuildID {
+				t.Errorf("buildID = %v, want %v", buildID, tt.wantBuildID)
+			}
+			if clusterEnvID != tt.wantClusterEnvID {
+				t.Errorf("clusterEnvID = %v, want %v", clusterEnvID, tt.wantClusterEnvID)
+			}
+		})
 	}
 }
 

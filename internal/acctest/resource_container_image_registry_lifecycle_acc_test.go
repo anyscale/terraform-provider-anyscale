@@ -2,17 +2,19 @@ package acctest
 
 // GATE-F3 (c)/(d): resource.Test mock-server lifecycle coverage for the id
 // migration. resource_container_image_registry_upgrade_test.go (package
-// provider) proves the StateUpgrader function itself re-keys id to
-// cluster_environment_id in isolation; it cannot prove that the ordinary
-// framework-level Read/plan/import path actually works once a resource is
-// living under that new id scheme - the same "mapping function correct in
-// isolation, framework-level plan still unstable" gap the compute-config
-// C3/C12 precedent hit. This file closes that gap: a resource created fresh
-// under the current (v1) schema already carries id == cluster_environment_id
-// end-to-end, so driving it through create -> apply -> plan(empty) ->
-// import -> plan(empty) exercises the exact Read() codepath
-// (state.ID.ValueString() -> GET /api/v2/application_templates/{id}) a
-// migrated resource's next refresh would also take.
+// provider) proves the StateUpgrader function itself re-keys id to the
+// cluster environment id (formerly its own cluster_environment_id attribute,
+// removed outright by V1(c) - id alone is the durable handle now) in
+// isolation; it cannot prove that the ordinary framework-level Read/plan/
+// import path actually works once a resource is living under that new id
+// scheme - the same "mapping function correct in isolation, framework-level
+// plan still unstable" gap the compute-config C3/C12 precedent hit. This file
+// closes that gap: a resource created fresh under the current (v1) schema
+// already carries id == the cluster environment id end-to-end, so driving it
+// through create -> apply -> plan(empty) -> import -> plan(empty) exercises
+// the exact Read() codepath (state.ID.ValueString() -> GET
+// /api/v2/application_templates/{id}) a migrated resource's next refresh
+// would also take.
 //
 // Mirrors the house *_MockServer idiom from resource_cloud_c3_lifecycle_acc_test.go:
 // httptest server + testAccProviderBlock, no real infra, no
@@ -131,10 +133,10 @@ func newRegistryF3MockServer(t *testing.T, templateID, buildID, name, imageURI, 
 // (c)/(d) proof: a v1-schema registry resource's id is the cluster
 // environment id (never the build id) all the way through create -> apply ->
 // plan(empty) -> import-by-id -> plan(empty). Import is passthrough on `id`
-// (resource.ImportStatePassthroughID, path.Root("id")) - post-F3 that IS the
-// cluster_environment_id, so a clean ImportStateVerify here is exactly
-// GATE-F3(d)'s "import-by-cluster_environment_id" coverage, not a separate
-// mechanism needing separate proof.
+// (resource.ImportStatePassthroughID, path.Root("id")) - since V1(c), id is
+// the resource's ONLY identity attribute, so a clean ImportStateVerify here
+// is exactly GATE-F3(d)'s import coverage, not a separate mechanism needing
+// separate proof.
 func TestAccContainerImageRegistryResource_Lifecycle_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -160,12 +162,13 @@ resource "anyscale_container_image_registry" "test" {
 			{
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// The money assertions: id and cluster_environment_id
-					// must both be the TEMPLATE id, never the build id -
-					// this is what F3 changed and what a regression back to
-					// the v0 behavior would get wrong.
+					// The money assertion: id must be the TEMPLATE id, never
+					// the build id - this is what F3 changed and what a
+					// regression back to the v0 behavior would get wrong.
+					// (V1(c) removed the separate cluster_environment_id
+					// attribute that used to carry this same value alongside
+					// id; id alone is the durable handle now.)
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "id", templateID),
-					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "cluster_environment_id", templateID),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "build_id", buildID),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "image_uri", imageURI),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "ray_version", rayVersion),
@@ -184,9 +187,10 @@ resource "anyscale_container_image_registry" "test" {
 				},
 			},
 			// GATE-F3(d): import is passthrough on `id`, which post-F3 is
-			// the cluster_environment_id - so importing by the resource's
-			// own id (as Terraform always does) IS importing by
-			// cluster_environment_id.
+			// the cluster environment id (formerly duplicated onto its own
+			// cluster_environment_id attribute, removed by V1(c)) - so
+			// importing by the resource's own id (as Terraform always does)
+			// IS importing by the cluster environment id.
 			{
 				ResourceName:      "anyscale_container_image_registry.test",
 				ImportState:       true,

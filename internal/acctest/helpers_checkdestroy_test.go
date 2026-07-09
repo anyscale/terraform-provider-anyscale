@@ -61,9 +61,13 @@ func TestExtractArchivedValue(t *testing.T) {
 // 1 (application_templates/byod) but before call 2 (builds/byod) ever
 // succeeded -- see the orphan-prevention proof in
 // internal/provider/resource_container_image_registry_orphan_prevention_test.go.
-// Deliberately carries ONLY cluster_environment_id; there is no build_id key
-// at all, not even an empty one, matching what the resource's defensive
-// early State.Set actually produces.
+// Primary.ID alone carries the template's identity (matching what the real,
+// plain non-ByAttr CheckDestroy call reads -- see
+// resource_container_image_registry_acc_test.go). Attributes is deliberately
+// empty: there is no build_id key at all, not even an empty one, matching
+// what the resource's defensive early State.Set actually produces, and
+// since V1(c) there is no cluster_environment_id attribute in the schema to
+// carry either.
 func buildlessRegistryState(templateID string) *terraform.State {
 	return &terraform.State{
 		Modules: []*terraform.ModuleState{
@@ -74,7 +78,7 @@ func buildlessRegistryState(templateID string) *terraform.State {
 						Type: "anyscale_container_image_registry",
 						Primary: &terraform.InstanceState{
 							ID:         templateID,
-							Attributes: map[string]string{"cluster_environment_id": templateID},
+							Attributes: map[string]string{},
 						},
 					},
 				},
@@ -86,11 +90,11 @@ func buildlessRegistryState(templateID string) *terraform.State {
 // TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds is the GATE
 // proof for part B of the orphan-prevention gate: the registry's real
 // CheckDestroy call
-// (NewAPIArchivedDestroyCheckByAttr("anyscale_container_image_registry",
-// "cluster_environment_id", "/api/v2/application_templates/%s",
-// "result.archived_at") -- see resource_container_image_registry_acc_test.go)
-// must correctly confirm cleanup of a template that never had a build,
-// using nothing but the template's own id. It never needs, and must never
+// (NewAPIArchivedDestroyCheck("anyscale_container_image_registry",
+// "/api/v2/application_templates/%s", "result.archived_at") -- see
+// resource_container_image_registry_acc_test.go) must correctly confirm
+// cleanup of a template that never had a build, using nothing but the
+// template's own id (rs.Primary.ID). It never needs, and must never
 // require, a build_id.
 func TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds(t *testing.T) {
 	const templateID = "apptemp_buildless_archived"
@@ -110,8 +114,8 @@ func TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds(t *testing.T) {
 	t.Setenv("ANYSCALE_API_URL", server.URL)
 	t.Setenv("ANYSCALE_CLI_TOKEN", "fake-token-checkdestroy-buildless-archived")
 
-	checkFn := NewAPIArchivedDestroyCheckByAttr(
-		"anyscale_container_image_registry", "cluster_environment_id",
+	checkFn := NewAPIArchivedDestroyCheck(
+		"anyscale_container_image_registry",
 		"/api/v2/application_templates/%s", "result.archived_at",
 	)
 
@@ -142,8 +146,8 @@ func TestRegistryCheckDestroy_BuildlessTemplate_GoneSucceeds(t *testing.T) {
 	t.Setenv("ANYSCALE_API_URL", server.URL)
 	t.Setenv("ANYSCALE_CLI_TOKEN", "fake-token-checkdestroy-buildless-gone")
 
-	checkFn := NewAPIArchivedDestroyCheckByAttr(
-		"anyscale_container_image_registry", "cluster_environment_id",
+	checkFn := NewAPIArchivedDestroyCheck(
+		"anyscale_container_image_registry",
 		"/api/v2/application_templates/%s", "result.archived_at",
 	)
 
@@ -156,9 +160,10 @@ func TestRegistryCheckDestroy_BuildlessTemplate_GoneSucceeds(t *testing.T) {
 }
 
 // TestRegistryCheckDestroy_KeyingOnBuildIDWouldSilentlySkipBuildlessOrphan is
-// the regression guard for part B: it proves WHY the real call site keys on
-// cluster_environment_id rather than build_id. A build-less orphan's state
-// has no build_id attribute at all, so rs.Primary.Attributes["build_id"]
+// the regression guard for part B: it proves WHY the real call site keys
+// directly on the resource's own id (rs.Primary.ID, via the plain
+// non-ByAttr check) rather than a separate build_id attribute. A build-less
+// orphan's state has no build_id attribute at all, so rs.Primary.Attributes["build_id"]
 // evaluates to "" (Go's zero value for a missing map key, not an error or
 // panic) and newAPIDestroyCheckImpl's `if id == "" { continue }` guard
 // silently skips the resource entirely -- CheckDestroy reports success (nil)
@@ -192,5 +197,72 @@ func TestRegistryCheckDestroy_KeyingOnBuildIDWouldSilentlySkipBuildlessOrphan(t 
 	}
 	if requestCount != 0 {
 		t.Fatalf("expected the build_id-keyed check to never even call the API (empty id -> skipped), got %d requests -- if this now fails, newAPIDestroyCheckImpl's empty-id handling changed and this test should be revisited", requestCount)
+	}
+}
+
+// TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDWouldSilentlySkip
+// is the regression guard for the specific V1(c) bug this session found and
+// fixed: before the fix, the registry's real CheckDestroy call was
+// NewAPIArchivedDestroyCheckByAttr("anyscale_container_image_registry",
+// "cluster_environment_id", ...). V1(c) then removed cluster_environment_id
+// from the schema entirely, so on any real post-V1(c) state
+// rs.Primary.Attributes["cluster_environment_id"] evaluates to "" (a Go map
+// miss on a key that no longer exists anywhere, not an error), tripping
+// newAPIDestroyCheckImpl's `if id == "" { continue }` guard and silently
+// skipping the resource -- CheckDestroy would report success having never
+// made a single request, regardless of whether the resource was actually
+// cleaned up. Exercises this directly against buildlessRegistryState, which
+// is shaped exactly like a real post-V1(c) resource's state (Primary.ID
+// set, no cluster_environment_id attribute anywhere), then proves the
+// actual fix -- the plain, non-ByAttr NewAPIArchivedDestroyCheck the real
+// call site uses today -- does not share the blind spot: it queries the API
+// using the resource's real id and gets a definitive answer.
+//
+// Deliberately uses a 404 ("confirmed gone") response rather than an
+// un-archived-leak response for the second half: the archived-vs-leak
+// polling behavior itself is already covered by
+// TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds/_GoneSucceeds
+// above, and an un-archived response here would poll for the full
+// destroyCheckPollTimeout before returning, uselessly slowing this test
+// down without adding coverage. The property this test needs to prove is
+// narrower and cheaper to observe: does the real call shape query the API
+// at all (requestCount), not how it resolves once it does.
+func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDWouldSilentlySkip(t *testing.T) {
+	const templateID = "apptemp_v1c_wouldskip"
+	var requestCount int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+	t.Setenv("ANYSCALE_API_URL", server.URL)
+	t.Setenv("ANYSCALE_CLI_TOKEN", "fake-token-checkdestroy-v1c-wouldskip")
+
+	state := buildlessRegistryState(templateID)
+
+	wrongKeyCheckFn := NewAPIArchivedDestroyCheckByAttr(
+		"anyscale_container_image_registry", "cluster_environment_id",
+		"/api/v2/application_templates/%s", "result.archived_at",
+	)
+	if err := wrongKeyCheckFn(state); err != nil {
+		t.Fatalf("expected the cluster_environment_id-keyed check to silently report success against a post-V1(c) state (that's the pre-fix bug this test documents), got an error instead: %v", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("expected the cluster_environment_id-keyed check to never even call the API (empty id -> skipped), got %d requests -- it should have no way to resolve an id from a state that never carries this attribute", requestCount)
+	}
+
+	// Now prove the actual fix does NOT share this blind spot: the plain
+	// variant the real call site uses today must actually reach the API
+	// using the resource's real id (rs.Primary.ID), not silently no-op.
+	realCheckFn := NewAPIArchivedDestroyCheck(
+		"anyscale_container_image_registry",
+		"/api/v2/application_templates/%s", "result.archived_at",
+	)
+	if err := realCheckFn(state); err != nil {
+		t.Fatalf("expected the real (plain, ID-based) CheckDestroy to confirm a 404'd template as cleanly gone, got an error instead: %v", err)
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected exactly 1 GET request from the real check (it must resolve rs.Primary.ID and actually query the API), got %d", requestCount)
 	}
 }
