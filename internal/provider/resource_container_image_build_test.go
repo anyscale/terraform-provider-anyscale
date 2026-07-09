@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -335,180 +338,233 @@ func TestWaitForBuildRealPath_TerminalStatuses(t *testing.T) {
 	}
 }
 
-// TestContainerImageBuildModelMapping tests mapping of API response to model
-func TestContainerImageBuildModelMapping(t *testing.T) {
-	// Simulate API responses: an application template plus its build (contract-based,
-	// via GET /api/v2/builds/{id} - not a separate list call).
-	templateResult := ApplicationTemplateResult{
-		ID:        "apptemp_123",
-		Name:      "my-custom-image",
-		CreatorID: "user_456",
-		CreatedAt: "2024-01-01T00:00:00Z",
-	}
+// This file previously held four more tests (TestContainerImageBuildModelMapping,
+// TestCreateApplicationTemplateRequestStructure, TestNullableFieldHandling,
+// TestNameVersionFormatting) that built ApplicationTemplateResult/BuildResult/
+// CreateApplicationTemplateRequest literals and either hand-copied Create()'s/
+// Read()'s field-mapping and nil-check branches inline, or (TestNameVersionFormatting)
+// bare re-implemented the one-line fmt.Sprintf("%s:%d", ...) expression those methods
+// use -- none of them called the resource's real Create() or Read(), so none could
+// catch a regression in either.
+//
+// TestContainerImageBuildCreate_MapsFieldsFromThreeCallSequence below replaces all
+// four. It drives the resource's real Create() directly as a plain Go call (not
+// through resource.Test/terraform apply) because ContainerImageBuildResource.client
+// is unexported, so a test that constructs the resource directly against a mock
+// server must live in package provider rather than internal/acctest -- the same
+// constraint and pattern as resource_container_image_registry_test.go and its
+// orphan-prevention neighbor.
 
-	buildResult := BuildResult{
-		ID:                    "bld_789",
-		ApplicationTemplateID: "apptemp_123",
-		Status:                "succeeded",
-		RayVersion:            strPtr("2.9.0"),
-		DockerImageName:       strPtr("anyscale/my-custom-image:v1"),
-		CreatedAt:             "2024-01-01T00:00:00Z",
-		Revision:              3,
-	}
-
-	// Map to model
-	model := ContainerImageBuildResourceModel{
-		ID:          types.StringValue(templateResult.ID),
-		Name:        types.StringValue(templateResult.Name),
-		BuildID:     types.StringValue(buildResult.ID),
-		BuildStatus: types.StringValue(buildResult.Status),
-		CreatedAt:   types.StringValue(buildResult.CreatedAt),
-		Revision:    types.Int64Value(int64(buildResult.Revision)),
-		NameVersion: types.StringValue(templateResult.Name + ":" + "3"),
-	}
-
-	if buildResult.DockerImageName != nil {
-		model.ImageURI = types.StringValue(*buildResult.DockerImageName)
-	}
-
-	if buildResult.RayVersion != nil {
-		model.RayVersion = types.StringValue(*buildResult.RayVersion)
-	}
-
-	// Verify mapping
-	if model.ID.ValueString() != "apptemp_123" {
-		t.Errorf("ID = %v, want 'apptemp_123'", model.ID.ValueString())
-	}
-	if model.Name.ValueString() != "my-custom-image" {
-		t.Errorf("Name = %v, want 'my-custom-image'", model.Name.ValueString())
-	}
-	if model.BuildID.ValueString() != "bld_789" {
-		t.Errorf("BuildID = %v, want 'bld_789'", model.BuildID.ValueString())
-	}
-	if model.BuildStatus.ValueString() != "succeeded" {
-		t.Errorf("BuildStatus = %v, want 'succeeded'", model.BuildStatus.ValueString())
-	}
-	if model.ImageURI.ValueString() != "anyscale/my-custom-image:v1" {
-		t.Errorf("ImageURI = %v, want 'anyscale/my-custom-image:v1'", model.ImageURI.ValueString())
-	}
-	if model.RayVersion.ValueString() != "2.9.0" {
-		t.Errorf("RayVersion = %v, want '2.9.0'", model.RayVersion.ValueString())
-	}
-	if model.Revision.ValueInt64() != 3 {
-		t.Errorf("Revision = %v, want 3", model.Revision.ValueInt64())
-	}
-	if model.NameVersion.ValueString() != "my-custom-image:3" {
-		t.Errorf("NameVersion = %v, want 'my-custom-image:3'", model.NameVersion.ValueString())
-	}
-}
-
-// TestCreateApplicationTemplateRequestStructure tests the structure of the
-// application template create request (POST /api/v2/application_templates/,
-// call 1 of the containerfile-build 2-call sequence).
-func TestCreateApplicationTemplateRequestStructure(t *testing.T) {
-	projectID := "prj_123"
-
-	req := CreateApplicationTemplateRequest{
-		Name:          "test-image",
-		Containerfile: "FROM anyscale/ray:2.9.0-py310\nRUN pip install requests",
-		ProjectID:     &projectID,
-	}
-
-	if req.Name != "test-image" {
-		t.Errorf("name = %v, want 'test-image'", req.Name)
-	}
-	if req.Containerfile != "FROM anyscale/ray:2.9.0-py310\nRUN pip install requests" {
-		t.Errorf("containerfile mismatch")
-	}
-	if req.ProjectID == nil || *req.ProjectID != "prj_123" {
-		t.Errorf("project_id = %v, want 'prj_123'", req.ProjectID)
-	}
-}
-
-// TestNullableFieldHandling tests handling of nullable fields in build response
-func TestNullableFieldHandling(t *testing.T) {
-	// Build without optional fields
-	build := BuildResult{
-		ID:                    "bld_123",
-		ApplicationTemplateID: "apptemp_456",
-		Status:                "succeeded",
-		CreatedAt:             "2024-01-01T00:00:00Z",
-		// Optional fields are nil
-		RayVersion:      nil,
-		DockerImageName: nil,
-		ErrorMessage:    nil,
-	}
-
-	// Map to model - should handle nil values
-	model := ContainerImageBuildResourceModel{
-		ID:          types.StringValue(build.ApplicationTemplateID),
-		BuildID:     types.StringValue(build.ID),
-		BuildStatus: types.StringValue(build.Status),
-		CreatedAt:   types.StringValue(build.CreatedAt),
-	}
-
-	if build.DockerImageName != nil {
-		model.ImageURI = types.StringValue(*build.DockerImageName)
-	} else {
-		model.ImageURI = types.StringNull()
-	}
-
-	if build.RayVersion != nil {
-		model.RayVersion = types.StringValue(*build.RayVersion)
-	} else {
-		model.RayVersion = types.StringNull()
-	}
-
-	// Verify nullable fields are properly set to null
-	if !model.ImageURI.IsNull() {
-		t.Error("ImageURI should be null when DockerImageName is nil")
-	}
-	if !model.RayVersion.IsNull() {
-		t.Error("RayVersion should be null when RayVersion is nil")
-	}
-}
-
-// TestNameVersionFormatting tests the name_version field formatting
-func TestNameVersionFormatting(t *testing.T) {
+// TestContainerImageBuildCreate_MapsFieldsFromThreeCallSequence drives the real
+// Create() against a mock server that implements all three calls in its real
+// sequence: POST /api/v2/application_templates/ (creates the template and
+// triggers a build), GET /api/v2/application_templates/{id} (getLatestBuildID's
+// re-fetch -- must carry a populated LatestBuild since the bare create response
+// never does, and getLatestBuildID reads template.LatestBuild.ID off exactly this
+// response), and GET /api/v2/builds/{id} (waitForBuild/getBuild -- returns status
+// "succeeded" immediately so the poll loop exits on its first iteration, since
+// evaluateBuildStatus's polling behavior itself is already covered by
+// TestWaitForBuildRealPath_TerminalStatuses above).
+//
+// It captures the real request body Create() sends on call 1, salvaging
+// TestCreateApplicationTemplateRequestStructure's genuine intent against what
+// Create() actually puts on the wire instead of a hand-built literal, and
+// table-drives over the build response's nullable fields (RayVersion,
+// DockerImageName, Digest) being present vs. absent, salvaging
+// TestNullableFieldHandling's genuine intent against Create()'s real nil-check
+// branches. The final NameVersion assertion salvages TestNameVersionFormatting's
+// intent against the real fmt.Sprintf("%s:%d", ...) call in Create(), which is not
+// factored into a standalone helper in production code.
+func TestContainerImageBuildCreate_MapsFieldsFromThreeCallSequence(t *testing.T) {
 	tests := []struct {
 		name            string
-		imageName       string
-		revision        int
-		wantNameVersion string
+		rayVersion      *string
+		dockerImageName *string
+		digest          *string
 	}{
 		{
-			name:            "basic formatting",
-			imageName:       "my-image",
-			revision:        1,
-			wantNameVersion: "my-image:1",
+			name:            "with all optional fields populated",
+			rayVersion:      strPtr("2.9.0"),
+			dockerImageName: strPtr("anyscale/my-custom-image:v1"),
+			digest:          strPtr("sha256:buildtestdigest000000000000000000000000000000000000000000000"),
 		},
 		{
-			name:            "higher revision",
-			imageName:       "production-image",
-			revision:        42,
-			wantNameVersion: "production-image:42",
-		},
-		{
-			name:            "revision zero",
-			imageName:       "new-image",
-			revision:        0,
-			wantNameVersion: "new-image:0",
-		},
-		{
-			name:            "image name with hyphens",
-			imageName:       "my-custom-ray-image",
-			revision:        5,
-			wantNameVersion: "my-custom-ray-image:5",
+			name:            "nullable fields absent",
+			rayVersion:      nil,
+			dockerImageName: nil,
+			digest:          nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the name_version formatting logic
-			nameVersion := tt.imageName + ":" + fmt.Sprintf("%d", tt.revision)
+			const (
+				templateID           = "apptemp_create_test_123"
+				buildID              = "bld_create_test_789"
+				resourceName         = "my-custom-image"
+				projectID            = "prj_create_test"
+				containerfileContent = "FROM anyscale/ray:2.9.0-py310\nRUN pip install requests"
+				revision             = 3
+				createdAt            = "2024-01-01T00:00:00Z"
+			)
 
-			if nameVersion != tt.wantNameVersion {
-				t.Errorf("name_version = %v, want %v", nameVersion, tt.wantNameVersion)
+			var templateReq CreateApplicationTemplateRequest
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/":
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
+						t.Fatalf("failed to read request body: %v", err)
+					}
+					if err := json.Unmarshal(body, &templateReq); err != nil {
+						t.Fatalf("failed to decode template request: %v", err)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					// Call 1's response is deliberately bare (no LatestBuild) -- this is
+					// the real API contract Create() relies on to justify the separate
+					// getLatestBuildID re-fetch below.
+					_ = json.NewEncoder(w).Encode(ApplicationTemplateResponse{
+						Result: ApplicationTemplateResult{
+							ID:        templateID,
+							Name:      resourceName,
+							CreatorID: "user_1",
+							CreatedAt: createdAt,
+						},
+					})
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/application_templates/"+templateID:
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					// This re-fetch must carry LatestBuild -- getLatestBuildID reads
+					// template.LatestBuild.ID directly off this response.
+					_ = json.NewEncoder(w).Encode(ApplicationTemplateResponse{
+						Result: ApplicationTemplateResult{
+							ID:          templateID,
+							Name:        resourceName,
+							CreatorID:   "user_1",
+							CreatedAt:   createdAt,
+							LatestBuild: &MiniBuildResult{ID: buildID, Revision: revision, Status: "succeeded"},
+						},
+					})
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/builds/"+buildID:
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					// Status "succeeded" makes waitForBuild's poll loop return on its
+					// first iteration.
+					_ = json.NewEncoder(w).Encode(BuildResponse{
+						Result: BuildResult{
+							ID:                    buildID,
+							ApplicationTemplateID: templateID,
+							Status:                "succeeded",
+							RayVersion:            tt.rayVersion,
+							DockerImageName:       tt.dockerImageName,
+							Revision:              revision,
+							CreatorID:             "user_1",
+							CreatedAt:             createdAt,
+							LastModifiedAt:        createdAt,
+							Digest:                tt.digest,
+						},
+					})
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+
+			r := &ContainerImageBuildResource{client: NewClientWithToken(server.URL, "fake-token-build-create-test")}
+			ctx := context.Background()
+
+			var schemaResp resource.SchemaResponse
+			r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+			if schemaResp.Diagnostics.HasError() {
+				t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+			}
+
+			plan := tfsdk.Plan{Schema: schemaResp.Schema}
+			planDiags := plan.Set(ctx, &ContainerImageBuildResourceModel{
+				Name:          types.StringValue(resourceName),
+				Containerfile: types.StringValue(containerfileContent),
+				ProjectID:     types.StringValue(projectID),
+				BuildTimeout:  types.StringValue("30m"),
+			})
+			if planDiags.HasError() {
+				t.Fatalf("failed to build plan: %v", planDiags)
+			}
+
+			createResp := &resource.CreateResponse{
+				// The real runtime pre-populates CreateResponse.State from CreateRequest.Plan.
+				State: tfsdk.State(plan),
+			}
+			r.Create(ctx, resource.CreateRequest{Plan: plan}, createResp)
+
+			if createResp.Diagnostics.HasError() {
+				t.Fatalf("Create reported an unexpected error: %v", createResp.Diagnostics)
+			}
+
+			// Real request-body assertions against what Create() actually sent on call 1.
+			if templateReq.Name != resourceName {
+				t.Errorf("call 1 request Name = %q, want %q", templateReq.Name, resourceName)
+			}
+			if templateReq.Containerfile != containerfileContent {
+				t.Errorf("call 1 request Containerfile = %q, want %q", templateReq.Containerfile, containerfileContent)
+			}
+			if templateReq.ProjectID == nil || *templateReq.ProjectID != projectID {
+				t.Errorf("call 1 request ProjectID = %v, want %q", templateReq.ProjectID, projectID)
+			}
+
+			var state ContainerImageBuildResourceModel
+			getDiags := createResp.State.Get(ctx, &state)
+			if getDiags.HasError() {
+				t.Fatalf("failed to decode final state: %v", getDiags)
+			}
+
+			// This resource's documented identity is the cluster environment
+			// (application template) id, never the build id.
+			if state.ID.ValueString() != templateID {
+				t.Errorf("state.ID = %q, want template id %q (NOT build id %q)", state.ID.ValueString(), templateID, buildID)
+			}
+			if state.BuildID.ValueString() != buildID {
+				t.Errorf("state.BuildID = %q, want %q", state.BuildID.ValueString(), buildID)
+			}
+			if state.BuildStatus.ValueString() != "succeeded" {
+				t.Errorf("state.BuildStatus = %q, want %q", state.BuildStatus.ValueString(), "succeeded")
+			}
+			if state.CreatedAt.ValueString() != createdAt {
+				t.Errorf("state.CreatedAt = %q, want %q", state.CreatedAt.ValueString(), createdAt)
+			}
+			if state.Revision.ValueInt64() != int64(revision) {
+				t.Errorf("state.Revision = %d, want %d", state.Revision.ValueInt64(), revision)
+			}
+
+			if tt.dockerImageName == nil {
+				if !state.ImageURI.IsNull() {
+					t.Errorf("state.ImageURI = %q, want null when DockerImageName is nil", state.ImageURI.ValueString())
+				}
+			} else if state.ImageURI.ValueString() != *tt.dockerImageName {
+				t.Errorf("state.ImageURI = %q, want %q", state.ImageURI.ValueString(), *tt.dockerImageName)
+			}
+
+			if tt.rayVersion == nil {
+				if !state.RayVersion.IsNull() {
+					t.Errorf("state.RayVersion = %q, want null when RayVersion is nil", state.RayVersion.ValueString())
+				}
+			} else if state.RayVersion.ValueString() != *tt.rayVersion {
+				t.Errorf("state.RayVersion = %q, want %q", state.RayVersion.ValueString(), *tt.rayVersion)
+			}
+
+			if tt.digest == nil {
+				if !state.Digest.IsNull() {
+					t.Errorf("state.Digest = %q, want null when Digest is nil", state.Digest.ValueString())
+				}
+			} else if state.Digest.ValueString() != *tt.digest {
+				t.Errorf("state.Digest = %q, want %q", state.Digest.ValueString(), *tt.digest)
+			}
+
+			wantNameVersion := fmt.Sprintf("%s:%d", resourceName, revision)
+			if state.NameVersion.ValueString() != wantNameVersion {
+				t.Errorf("state.NameVersion = %q, want %q", state.NameVersion.ValueString(), wantNameVersion)
 			}
 		})
 	}
