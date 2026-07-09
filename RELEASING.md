@@ -99,7 +99,14 @@ it. Pushing the tag is what triggers the automated release.
    zips them, produces `..._SHA256SUMS`, GPG-detach-signs the checksums, and uploads everything —
    plus `terraform-registry-manifest.json` (as `..._manifest.json`, advertising **protocol 6.0** for
    this Plugin Framework provider) — to a GitHub Release whose body is `release-notes.md`.
-4. The Terraform Registry ingests the new release through its GitHub webhook and publishes it under
+4. Verifies the **published** Release body is non-empty (`gh release view --json body`) and fails the
+   workflow loudly if not. This closes a gap step 2 can't see on its own: step 2 only checks that
+   `release-notes.md` is non-empty *before* GoReleaser runs, not what actually lands in the published
+   body — GoReleaser can still discard that file internally and publish an empty body anyway (this
+   happened on v0.3.0). It can't undo an already-public bad release, but it turns a silent defect into
+   a loud CI failure instead of one found later by manual inspection — see
+   [If something goes wrong](#if-something-goes-wrong).
+5. The Terraform Registry ingests the new release through its GitHub webhook and publishes it under
    the **`anyscale/anyscale`** namespace.
 
 ---
@@ -161,7 +168,11 @@ its changelog section the same way (`make changelog-release VERSION=1.2.3-rc1`).
   immutable and ship the next patch instead.
 - **Empty or wrong GitHub Release body**: the body is sliced from `CHANGELOG.md` at release time. Fix
   the `## [x.y.z]` section on `main` and re-cut only if the version was never published; otherwise
-  correct it in the next release. (An empty body now fails the workflow before publishing.)
+  correct it in the next release. Step 4 of the automated flow above fails the workflow loudly if the
+  *published* body is empty — but only after the fact, since the release already exists by then;
+  treat it like any other post-publish defect (fix forward) rather than grounds for a re-cut. The
+  failing step's log includes the exact remediation command (description-only `gh release edit`;
+  assets and signatures are untouched).
 - **A local dry-run before tagging** to catch config problems without touching anything remote:
   ```bash
   make release-dry-run    # goreleaser release --skip=publish --clean
