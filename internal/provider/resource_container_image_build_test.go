@@ -1,7 +1,12 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,98 +155,183 @@ func TestBuildTimeoutParsing(t *testing.T) {
 	}
 }
 
-// TestBuildStatusValues tests valid build status values
-func TestBuildStatusValues(t *testing.T) {
-	validStatuses := []string{"pending", "in_progress", "succeeded", "failed", "pending_cancellation", "cancelled"}
-
-	for _, status := range validStatuses {
-		t.Run("status_"+status, func(t *testing.T) {
-			// Simulate checking for terminal status
-			isTerminal := status == "succeeded" || status == "failed" || status == "cancelled"
-
-			switch status {
-			case "succeeded", "failed", "cancelled":
-				if !isTerminal {
-					t.Errorf("status %s should be terminal", status)
-				}
-			case "pending", "in_progress", "pending_cancellation":
-				if isTerminal {
-					t.Errorf("status %s should not be terminal", status)
-				}
-			}
-		})
-	}
-}
-
-// TestBuildStatusTerminalCheck tests the terminal status check logic
-func TestBuildStatusTerminalCheck(t *testing.T) {
+// TestEvaluateBuildStatus_AllAcceptedStatuses proves evaluateBuildStatus — the pure classifier
+// waitForBuild's polling loop now delegates to — correctly classifies every status the backend's
+// BuildStatus/ClusterEnvironmentBuildStatus enums actually emit, by calling the REAL function
+// rather than a hand-copied switch. That distinction is the whole point: the two tests this
+// replaced (TestBuildStatusValues, TestBuildStatusTerminalCheck) each re-implemented the switch
+// inline using the two-L "cancelled" spelling, so both passed even while the real waitForBuild
+// switch only matched two-L and silently mis-handled the backend's actual one-L "canceled" value
+// as "unknown build status" (F1).
+func TestEvaluateBuildStatus_AllAcceptedStatuses(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     string
-		isTerminal bool
-		isSuccess  bool
+		name            string
+		status          string
+		errorMessage    *string
+		wantDone        bool
+		wantErr         bool
+		wantErrContains string
+		wantErrExcludes string
 	}{
+		{name: "pending is not done", status: "pending", wantDone: false, wantErr: false},
+		{name: "in_progress is not done", status: "in_progress", wantDone: false, wantErr: false},
+		{name: "pending_cancellation is not done", status: "pending_cancellation", wantDone: false, wantErr: false},
+		{name: "succeeded is done with no error", status: "succeeded", wantDone: true, wantErr: false},
 		{
-			name:       "succeeded",
-			status:     "succeeded",
-			isTerminal: true,
-			isSuccess:  true,
+			name:            "failed surfaces the build's error message",
+			status:          "failed",
+			errorMessage:    strPtr("dependency not found"),
+			wantDone:        true,
+			wantErr:         true,
+			wantErrContains: "dependency not found",
 		},
 		{
-			name:       "failed",
-			status:     "failed",
-			isTerminal: true,
-			isSuccess:  false,
+			name:            "failed with no error message falls back to a generic message",
+			status:          "failed",
+			wantDone:        true,
+			wantErr:         true,
+			wantErrContains: "build failed",
 		},
 		{
-			name:       "cancelled",
-			status:     "cancelled",
-			isTerminal: true,
-			isSuccess:  false,
+			// This is the F1 regression case: the backend's real wire value is one L.
+			name:            "canceled (one L, the real backend spelling) is a clean terminal cancellation",
+			status:          "canceled",
+			wantDone:        true,
+			wantErr:         true,
+			wantErrContains: "cancelled",
+			wantErrExcludes: "unknown build status",
 		},
 		{
-			name:       "pending",
-			status:     "pending",
-			isTerminal: false,
-			isSuccess:  false,
+			name:            "cancelled (two L, defensive) is also a clean terminal cancellation",
+			status:          "cancelled",
+			wantDone:        true,
+			wantErr:         true,
+			wantErrContains: "cancelled",
+			wantErrExcludes: "unknown build status",
 		},
 		{
-			name:       "in_progress",
-			status:     "in_progress",
-			isTerminal: false,
-			isSuccess:  false,
-		},
-		{
-			name:       "pending_cancellation",
-			status:     "pending_cancellation",
-			isTerminal: false,
-			isSuccess:  false,
+			name:            "an unrecognized status is a terminal error, not a silent hang",
+			status:          "some_future_status_the_provider_does_not_know_about",
+			wantDone:        true,
+			wantErr:         true,
+			wantErrContains: "unknown build status",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the waitForBuild status check
-			var isTerminal, isSuccess bool
-
-			switch tt.status {
-			case "succeeded":
-				isTerminal = true
-				isSuccess = true
-			case "failed", "cancelled":
-				isTerminal = true
-				isSuccess = false
-			case "pending", "in_progress", "pending_cancellation":
-				isTerminal = false
-				isSuccess = false
+			build := &ClusterEnvironmentBuildResult{
+				ID:           "bld_test",
+				Status:       tt.status,
+				ErrorMessage: tt.errorMessage,
 			}
 
-			if isTerminal != tt.isTerminal {
-				t.Errorf("isTerminal = %v, want %v", isTerminal, tt.isTerminal)
+			done, err := evaluateBuildStatus(build)
+
+			if done != tt.wantDone {
+				t.Errorf("evaluateBuildStatus(status=%q) done = %v, want %v", tt.status, done, tt.wantDone)
+			}
+			if tt.wantErr && err == nil {
+				t.Fatalf("evaluateBuildStatus(status=%q) err = nil, want an error", tt.status)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("evaluateBuildStatus(status=%q) err = %v, want nil", tt.status, err)
+			}
+			if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Errorf("evaluateBuildStatus(status=%q) err = %q, want it to contain %q", tt.status, err.Error(), tt.wantErrContains)
+			}
+			if tt.wantErrExcludes != "" && strings.Contains(err.Error(), tt.wantErrExcludes) {
+				t.Errorf("evaluateBuildStatus(status=%q) err = %q, must NOT contain %q — that is the exact F1 "+
+					"regression signature of a real status falling through to the default case", tt.status, err.Error(), tt.wantErrExcludes)
+			}
+		})
+	}
+}
+
+// TestWaitForBuildRealPath_TerminalStatuses is the end-to-end companion to
+// TestEvaluateBuildStatus_AllAcceptedStatuses: it drives the REAL waitForBuild against a mock
+// backend (not evaluateBuildStatus directly), proving the poll loop's HTTP plumbing — request
+// method/path and response decoding — correctly reaches evaluateBuildStatus and returns its
+// verdict, especially for a one-L "canceled" build. The two layers are deliberately not
+// redundant: this one guards the wiring around evaluateBuildStatus, the other guards the
+// classification logic itself (matches the three-test-layers-not-two lesson from prior review).
+func TestWaitForBuildRealPath_TerminalStatuses(t *testing.T) {
+	tests := []struct {
+		name            string
+		status          string
+		errorMessage    *string
+		wantErr         bool
+		wantErrContains string
+		wantErrExcludes string
+	}{
+		{
+			name:            "canceled (one L) resolves to a clean cancelled error, not unknown status",
+			status:          "canceled",
+			wantErr:         true,
+			wantErrContains: "cancelled",
+			wantErrExcludes: "unknown build status",
+		},
+		{
+			name:    "succeeded returns the build with no error",
+			status:  "succeeded",
+			wantErr: false,
+		},
+		{
+			name:            "failed surfaces the build's error message",
+			status:          "failed",
+			errorMessage:    strPtr("dependency not found"),
+			wantErr:         true,
+			wantErrContains: "dependency not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(ClusterEnvironmentBuildResponse{
+					Result: ClusterEnvironmentBuildResult{
+						ID:           "bld_test",
+						Status:       tt.status,
+						ErrorMessage: tt.errorMessage,
+					},
+				})
+			}))
+			defer server.Close()
+
+			r := &ContainerImageBuildResource{client: NewClientWithToken(server.URL, "test-token")}
+			build, err := r.waitForBuild(context.Background(), "bld_test", 5*time.Second)
+
+			if gotMethod != http.MethodGet {
+				t.Errorf("request method = %q, want GET", gotMethod)
+			}
+			if gotPath != "/ext/v0/cluster_environment_builds/bld_test" {
+				t.Errorf("request path = %q, want /ext/v0/cluster_environment_builds/bld_test", gotPath)
 			}
 
-			if isSuccess != tt.isSuccess {
-				t.Errorf("isSuccess = %v, want %v", isSuccess, tt.isSuccess)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("waitForBuild() error = %v, want nil", err)
+				}
+				if build == nil {
+					t.Fatal("waitForBuild() returned a nil build alongside a nil error")
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("waitForBuild() error = nil, want an error containing %q", tt.wantErrContains)
+			}
+			if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Errorf("waitForBuild() error = %q, want it to contain %q", err.Error(), tt.wantErrContains)
+			}
+			if tt.wantErrExcludes != "" && strings.Contains(err.Error(), tt.wantErrExcludes) {
+				t.Errorf("waitForBuild() error = %q, must NOT contain %q — this is F1: a real cancelled build "+
+					"falling through to the default case instead of a clean cancellation error", err.Error(), tt.wantErrExcludes)
 			}
 		})
 	}

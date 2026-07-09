@@ -50,7 +50,7 @@ output "container_image_uri_by_id" {
 ### Read-Only
 
 - `build_id` (String) The unique identifier of the latest build for this cluster environment.
-- `build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).
+- `build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
 - `created_at` (String) Timestamp when the cluster environment was created.
 - `creator_id` (String) The ID of the user who created this cluster environment.
 - `image_uri` (String) The URI of the container image.

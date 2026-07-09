@@ -59,7 +59,7 @@ Read-Only:
 - `id` (String) The unique identifier of the cluster environment.
 - `is_archived` (Boolean) Whether this container image is archived.
 - `latest_build_id` (String) The ID of the latest build for this container image.
-- `latest_build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).
+- `latest_build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
 - `name` (String) The name of the container image.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
 - `revision` (Number) The revision number of the latest build.
