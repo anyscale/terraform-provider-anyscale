@@ -2,14 +2,6 @@
 # Consolidated example with optional Filestore and Memorystore
 # Uses split pattern: empty cloud + cloud_resource
 
-# Data source to get Filestore IP address (only when Filestore is enabled)
-data "google_filestore_instance" "anyscale" {
-  count    = var.enable_filestore ? 1 : 0
-  name     = module.google_anyscale_v2.filestore_name
-  location = var.gcp_zone
-  project  = module.google_anyscale_v2.project_id
-}
-
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "primary" {
   name = var.cloud_name
@@ -28,6 +20,8 @@ resource "anyscale_cloud" "primary" {
 
 # Step 2: Attach cloud resource with configuration
 resource "anyscale_cloud_resource" "primary" {
+  name = var.cloud_name
+
   cloud_id      = anyscale_cloud.primary.id
   region        = var.gcp_region
   compute_stack = var.compute_stack
