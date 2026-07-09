@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -143,14 +145,14 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	var clusterEnv *ClusterEnvironmentResult
+	var template *ApplicationTemplateResult
 	var err error
 
 	// Look up by ID or name
 	if !config.ID.IsNull() && config.ID.ValueString() != "" {
-		clusterEnv, err = d.getClusterEnvironmentByID(ctx, config.ID.ValueString())
+		template, err = d.getApplicationTemplateByID(ctx, config.ID.ValueString())
 	} else if !config.Name.IsNull() && config.Name.ValueString() != "" {
-		clusterEnv, err = d.getClusterEnvironmentByName(ctx, config.Name.ValueString())
+		template, err = d.getApplicationTemplateByName(ctx, config.Name.ValueString())
 	} else {
 		AddConfigError(&resp.Diagnostics, "Missing Required Attribute",
 			"Either 'id' or 'name' must be specified.")
@@ -162,39 +164,38 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	// Map cluster environment to model
-	config.ID = types.StringValue(clusterEnv.ID)
-	config.Name = types.StringValue(clusterEnv.Name)
-	config.CreatedAt = types.StringValue(clusterEnv.CreatedAt)
-	config.CreatorID = types.StringValue(clusterEnv.CreatorID)
-
-	// Fetch the latest build for this cluster environment
-	buildID, err := d.getLatestBuildID(ctx, clusterEnv.ID)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
-			"cluster_environment_id": clusterEnv.ID,
-			"error":                  err.Error(),
-		})
+	// Map application template to model
+	config.ID = types.StringValue(template.ID)
+	config.Name = types.StringValue(template.Name)
+	config.CreatedAt = types.StringValue(template.CreatedAt)
+	if template.CreatorID != "" {
+		config.CreatorID = types.StringValue(template.CreatorID)
+	} else {
+		config.CreatorID = types.StringNull()
 	}
 
-	// Get build details if available
-	if buildID != "" {
-		config.BuildID = types.StringValue(buildID)
+	// Resolve the latest build contract-based, via the template's own latest_build reference.
+	if template.LatestBuild != nil {
+		config.BuildID = types.StringValue(template.LatestBuild.ID)
 
 		// Get full build details
-		build, err := d.getBuild(ctx, buildID)
+		build, err := d.getBuild(ctx, template.LatestBuild.ID)
 		if err != nil {
 			tflog.Warn(ctx, "Failed to get build details", map[string]any{
-				"build_id": buildID,
+				"build_id": template.LatestBuild.ID,
 				"error":    err.Error(),
 			})
+			config.BuildStatus = types.StringNull()
+			config.ImageURI = types.StringNull()
+			config.RayVersion = types.StringNull()
+			config.IsBYOD = types.BoolNull()
 			config.Revision = types.Int64Null()
 			config.NameVersion = types.StringNull()
 		} else {
 			config.BuildStatus = types.StringValue(build.Status)
 			config.IsBYOD = types.BoolValue(build.IsBYOD)
 			config.Revision = types.Int64Value(int64(build.Revision))
-			config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", clusterEnv.Name, build.Revision))
+			config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", template.Name, build.Revision))
 
 			if build.DockerImageName != nil {
 				config.ImageURI = types.StringValue(*build.DockerImageName)
@@ -224,15 +225,15 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 
 // Helper functions
 
-// getClusterEnvironmentByID fetches a cluster environment by ID.
-func (d *ContainerImageDataSource) getClusterEnvironmentByID(ctx context.Context, id string) (*ClusterEnvironmentResult, error) {
-	tflog.Debug(ctx, "Fetching cluster environment by ID", map[string]any{"id": id})
+// getApplicationTemplateByID fetches the decorated application template by ID.
+func (d *ContainerImageDataSource) getApplicationTemplateByID(ctx context.Context, id string) (*ApplicationTemplateResult, error) {
+	tflog.Debug(ctx, "Fetching application template by ID", map[string]any{"id": id})
 
-	clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environments/%s", id),
+		fmt.Sprintf("/api/v2/application_templates/%s", id),
 		nil,
 		http.StatusOK,
 	)
@@ -240,49 +241,36 @@ func (d *ContainerImageDataSource) getClusterEnvironmentByID(ctx context.Context
 		return nil, fmt.Errorf("failed to get cluster environment %s: %w", id, err)
 	}
 
-	return &clusterEnvResp.Result, nil
+	return &templateResp.Result, nil
 }
 
-// getClusterEnvironmentByName fetches a cluster environment by name.
-func (d *ContainerImageDataSource) getClusterEnvironmentByName(ctx context.Context, name string) (*ClusterEnvironmentResult, error) {
-	tflog.Debug(ctx, "Fetching cluster environment by name", map[string]any{"name": name})
+// getApplicationTemplateByName fetches an application template by exact name match.
+// GET /api/v2/application_templates/ only supports a name_contains substring filter, so this
+// pages through the full result set (via PaginatedRequest, following next_paging_token) and
+// filters client-side for an exact, non-archived match across ALL pages - not just the first.
+func (d *ContainerImageDataSource) getApplicationTemplateByName(ctx context.Context, name string) (*ApplicationTemplateResult, error) {
+	tflog.Debug(ctx, "Fetching application template by name", map[string]any{"name": name})
 
-	// Search for cluster environment by name using POST /ext/v0/cluster_environments/search
-	searchQuery := ClusterEnvironmentsSearchQuery{
-		Name: &TextQuery{
-			Contains: name,
+	params := url.Values{}
+	params.Set("name_contains", name)
+	params.Set("include_archived", "false")
+
+	results, err := PaginatedRequest(ctx, d.client, "/api/v2/application_templates/", params,
+		func(body []byte) ([]ApplicationTemplateResult, *string, error) {
+			var listResp ApplicationTemplatesListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, err
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
 		},
-		Paging: PageQuery{
-			Count: 100,
-		},
-		IncludeArchived:  false,
-		IncludeAnonymous: false,
-	}
-
-	reqBody, err := MarshalRequestBody(searchQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal search query: %w", err)
-	}
-
-	clusterEnvsResp, err := DoRequestAndParse[ClusterEnvironmentsListResponse](
-		ctx,
-		d.client,
-		"POST",
-		"/ext/v0/cluster_environments/search",
-		reqBody,
-		http.StatusOK,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search cluster environments: %w", err)
 	}
 
-	// Find exact match
-	var matches []ClusterEnvironmentResult
-	for _, env := range clusterEnvsResp.Results {
-		if env.Name == name && !env.IsArchived() {
-			matches = append(matches, env)
-		}
-	}
+	// Find exact match across every page - name_contains is a substring filter, so an exact
+	// match may sit on any page, not just the first.
+	matches := filterExactApplicationTemplateMatches(results, name)
 
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("no cluster environment found with name '%s'", name)
@@ -296,14 +284,26 @@ func (d *ContainerImageDataSource) getClusterEnvironmentByName(ctx context.Conte
 	return &matches[0], nil
 }
 
-// getBuild fetches build details by ID.
-func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
+// filterExactApplicationTemplateMatches narrows a name_contains substring search down to
+// non-archived results whose name is an exact match.
+func filterExactApplicationTemplateMatches(results []ApplicationTemplateResult, name string) []ApplicationTemplateResult {
+	var matches []ApplicationTemplateResult
+	for _, tmpl := range results {
+		if tmpl.Name == name && !tmpl.IsArchived() {
+			matches = append(matches, tmpl)
+		}
+	}
+	return matches
+}
+
+// getBuild fetches the current build details.
+func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
+	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
+		fmt.Sprintf("/api/v2/builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,
@@ -313,29 +313,4 @@ func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string)
 	}
 
 	return &buildResp.Result, nil
-}
-
-// getLatestBuildID fetches the latest build ID for a cluster environment.
-func (d *ContainerImageDataSource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
-	tflog.Debug(ctx, "Fetching latest build for cluster environment", map[string]any{"cluster_environment_id": clusterEnvID})
-
-	// Note: The Anyscale API may return 201 for GET build endpoints
-	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
-		ctx,
-		d.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to list builds for cluster environment %s: %w", clusterEnvID, err)
-	}
-
-	if len(buildsResp.Results) == 0 {
-		return "", nil // No builds yet - not an error
-	}
-
-	return buildsResp.Results[0].ID, nil
 }

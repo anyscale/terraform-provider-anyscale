@@ -194,8 +194,7 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		rayVersion = plan.RayVersion.ValueString()
 	}
 
-	// Build BYOD cluster environment create request
-	configJSON := CreateBYODClusterEnvironmentConfigJSON{
+	configJSON := CreateBYODApplicationTemplateConfigJSON{
 		DockerImage: plan.ImageURI.ValueString(),
 		RayVersion:  rayVersion,
 	}
@@ -219,14 +218,13 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		name = fmt.Sprintf("%s-%d", baseName, timestamp)
 	}
 
-	createReq := CreateBYODClusterEnvironmentRequest{
+	templateReq := CreateBYODApplicationTemplateRequest{
 		Name:       name,
 		ConfigJSON: configJSON,
 		Anonymous:  false,
 	}
 
-	// Marshal request to JSON
-	reqBody, err := MarshalRequestBody(createReq)
+	templateReqBody, err := MarshalRequestBody(templateReq)
 	if err != nil {
 		AddJSONError(&resp.Diagnostics, "marshal", "container image registry request", err)
 		return
@@ -237,13 +235,17 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		"name":      name,
 	})
 
-	// Create BYOD cluster environment
-	clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
+	// Call 1 of 2: create the application template. Unlike the old atomic
+	// /ext/v0/cluster_environments/byod endpoint (a single DB transaction), api/v2
+	// has no combined template+build BYOD endpoint - the build is created
+	// separately below, which opens a partial-failure window that call 1 alone
+	// never had.
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 		ctx,
 		r.client,
 		"POST",
-		"/ext/v0/cluster_environments/byod",
-		reqBody,
+		"/api/v2/application_templates/byod",
+		templateReqBody,
 		http.StatusOK,
 		http.StatusCreated,
 	)
@@ -252,21 +254,28 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	clusterEnvID := clusterEnvResp.Result.ID
-	clusterEnvName := clusterEnvResp.Result.Name
+	templateID := templateResp.Result.ID
+	templateName := templateResp.Result.Name
 
-	tflog.Info(ctx, "BYOD cluster environment created", map[string]any{
-		"cluster_environment_id": clusterEnvID,
-		"name":                   clusterEnvName,
+	tflog.Info(ctx, "BYOD application template created", map[string]any{
+		"cluster_environment_id": templateID,
+		"name":                   templateName,
 	})
 
-	// Persist state now that the cluster environment exists remotely, before
-	// the subsequent build lookup calls that can fail. Delete() acts on
-	// ClusterEnvironmentID, so that (not just ID) must be recorded here.
-	// Without this, a failure below would leave the cluster environment
-	// orphaned in the backend with no Terraform record to destroy it.
-	plan.ID = types.StringValue(clusterEnvID)
-	plan.ClusterEnvironmentID = types.StringValue(clusterEnvID)
+	// Persist state now that the template exists remotely, before the build-create
+	// call below that can still fail. Delete() acts on ClusterEnvironmentID, so that
+	// (not just ID) must be recorded here. Without this, a call-2 failure would leave
+	// the template orphaned in the backend with no Terraform record to archive it -
+	// the 2-call split widens the window the old atomic call never had, so this early
+	// write (already used below for the build wait) is now essential rather than
+	// optional. id is set to the template id only for this transient window; once the
+	// build succeeds below, id is overwritten with the build id to keep this
+	// migration behavior-neutral on the happy path. Read() below tolerates a null
+	// BuildID so a resource left in this partial state survives a refresh instead of
+	// being mistaken for deleted (see GATE test: call-2 fails -> state holds the
+	// template -> Delete archives it -> no orphan).
+	plan.ID = types.StringValue(templateID)
+	plan.ClusterEnvironmentID = types.StringValue(templateID)
 	plan.BuildID = types.StringNull()
 	plan.BuildStatus = types.StringNull()
 	plan.CreatedAt = types.StringNull()
@@ -278,59 +287,54 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	// Get the build ID by listing builds for this cluster environment
-	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		AddAPIError(&resp.Diagnostics, "get build ID", err)
-		return
+	// Call 2 of 2: create the build from the registered image.
+	buildReq := CreateBYODBuildRequest{
+		ApplicationTemplateID: templateID,
+		ConfigJSON: CreateBYODAppConfigConfigJSON{
+			DockerImage:         plan.ImageURI.ValueString(),
+			RayVersion:          rayVersion,
+			RegistryLoginSecret: configJSON.RegistryLoginSecret,
+		},
 	}
-	if len(buildsResp.Results) == 0 {
-		AddAPIError(&resp.Diagnostics, "get build ID", fmt.Errorf("no builds found for cluster environment"))
-		return
-	}
-	buildID := buildsResp.Results[0].ID
 
-	// Get build details
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
+	buildReqBody, err := MarshalRequestBody(buildReq)
+	if err != nil {
+		AddJSONError(&resp.Diagnostics, "marshal", "container image registry build request", err)
+		return
+	}
+
+	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		r.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
-		nil,
+		"POST",
+		"/api/v2/builds/byod",
+		buildReqBody,
 		http.StatusOK,
 		http.StatusCreated,
 	)
 	if err != nil {
-		AddAPIError(&resp.Diagnostics, "get build details", err)
+		AddAPIError(&resp.Diagnostics, "register container image build", err)
 		return
 	}
 
 	result := buildResp.Result
 	tflog.Info(ctx, "Container image registered successfully", map[string]any{
 		"build_id":               result.ID,
-		"cluster_environment_id": result.ClusterEnvironmentID,
+		"cluster_environment_id": result.ApplicationTemplateID,
 	})
 
 	// Map response to model
 	plan.ID = types.StringValue(result.ID)
 	plan.BuildID = types.StringValue(result.ID)
-	plan.ClusterEnvironmentID = types.StringValue(result.ClusterEnvironmentID)
+	plan.ClusterEnvironmentID = types.StringValue(result.ApplicationTemplateID)
 	plan.BuildStatus = types.StringValue(result.Status)
 	plan.CreatedAt = types.StringValue(result.CreatedAt)
 	plan.IsBYOD = types.BoolValue(result.IsBYOD)
 	plan.Revision = types.Int64Value(int64(result.Revision))
 
 	// Set name_version
-	if clusterEnvName != "" {
-		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", clusterEnvName, result.Revision))
+	if templateName != "" {
+		plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", templateName, result.Revision))
 	} else {
 		plan.NameVersion = types.StringNull()
 	}
@@ -349,17 +353,50 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 		return
 	}
 
+	// A Create() that failed between the two BYOD calls (see the defensive State.Set
+	// there) leaves a template with no build yet. There is no build to fetch in that
+	// case; confirm the template itself is still live and otherwise leave state
+	// untouched, rather than treating the missing build as evidence the whole
+	// resource was deleted (which would silently re-orphan the template on the very
+	// next refresh).
+	if state.BuildID.IsNull() || state.BuildID.ValueString() == "" {
+		clusterEnvID := state.ClusterEnvironmentID.ValueString()
+		tflog.Debug(ctx, "Reading container image registry with no build yet", map[string]any{"cluster_environment_id": clusterEnvID})
+
+		_, err := DoRequestAndParse[ApplicationTemplateResponse](
+			ctx,
+			r.client,
+			"GET",
+			fmt.Sprintf("/api/v2/application_templates/%s", clusterEnvID),
+			nil,
+			http.StatusOK,
+		)
+		if err != nil {
+			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+				tflog.Warn(ctx, "Cluster environment not found, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
+				resp.State.RemoveResource(ctx)
+				return
+			}
+
+			AddAPIError(&resp.Diagnostics, "read container image registry", err)
+			return
+		}
+
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+		return
+	}
+
 	buildID := state.ID.ValueString()
 
 	tflog.Debug(ctx, "Reading container image registry", map[string]any{"build_id": buildID})
 
 	// Get build details
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
+	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
+		fmt.Sprintf("/api/v2/builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,
@@ -379,7 +416,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 
 	// Update state
 	state.BuildID = types.StringValue(result.ID)
-	state.ClusterEnvironmentID = types.StringValue(result.ClusterEnvironmentID)
+	state.ClusterEnvironmentID = types.StringValue(result.ApplicationTemplateID)
 	state.BuildStatus = types.StringValue(result.Status)
 	state.CreatedAt = types.StringValue(result.CreatedAt)
 	state.IsBYOD = types.BoolValue(result.IsBYOD)
@@ -405,16 +442,16 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	if !state.Name.IsNull() {
 		clusterEnvName = state.Name.ValueString()
 	} else {
-		clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
+		templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 			ctx,
 			r.client,
 			"GET",
-			fmt.Sprintf("/ext/v0/cluster_environments/%s", result.ClusterEnvironmentID),
+			fmt.Sprintf("/api/v2/application_templates/%s", result.ApplicationTemplateID),
 			nil,
 			http.StatusOK,
 		)
 		if err == nil {
-			clusterEnvName = clusterEnvResp.Result.Name
+			clusterEnvName = templateResp.Result.Name
 		}
 	}
 	if clusterEnvName != "" {

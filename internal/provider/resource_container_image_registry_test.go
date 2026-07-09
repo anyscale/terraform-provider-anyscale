@@ -62,8 +62,10 @@ func TestImageURIValidation(t *testing.T) {
 	}
 }
 
-// TestCreateBYODClusterEnvironmentRequestStructure tests the structure of the BYOD request
-func TestCreateBYODClusterEnvironmentRequestStructure(t *testing.T) {
+// TestCreateBYODApplicationTemplateRequestStructure tests the structure of the BYOD
+// application template create request (POST /api/v2/application_templates/byod,
+// call 1 of the registry resource's 2-call Create sequence).
+func TestCreateBYODApplicationTemplateRequestStructure(t *testing.T) {
 	tests := []struct {
 		name                string
 		dockerImage         string
@@ -92,13 +94,13 @@ func TestCreateBYODClusterEnvironmentRequestStructure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			configJSON := CreateBYODClusterEnvironmentConfigJSON{
+			configJSON := CreateBYODApplicationTemplateConfigJSON{
 				DockerImage:         tt.dockerImage,
 				RayVersion:          tt.rayVersion,
 				RegistryLoginSecret: tt.registryLoginSecret,
 			}
 
-			req := CreateBYODClusterEnvironmentRequest{
+			req := CreateBYODApplicationTemplateRequest{
 				Name:       "test-image",
 				ConfigJSON: configJSON,
 				Anonymous:  false,
@@ -126,15 +128,15 @@ func TestCreateBYODClusterEnvironmentRequestStructure(t *testing.T) {
 // TestContainerImageRegistryModelMapping tests mapping of API response to model
 func TestContainerImageRegistryModelMapping(t *testing.T) {
 	// Simulate API response for a registered BYOD image
-	buildResult := ClusterEnvironmentBuildResult{
-		ID:                   "bld_123",
-		ClusterEnvironmentID: "apptemp_456",
-		Status:               "succeeded",
-		RayVersion:           strPtr("2.9.0"),
-		DockerImageName:      strPtr("anyscale/ray:2.9.0-py310"),
-		IsBYOD:               true,
-		CreatedAt:            "2024-01-01T00:00:00Z",
-		Revision:             1,
+	buildResult := BuildResult{
+		ID:                    "bld_123",
+		ApplicationTemplateID: "apptemp_456",
+		Status:                "succeeded",
+		RayVersion:            strPtr("2.9.0"),
+		DockerImageName:       strPtr("anyscale/ray:2.9.0-py310"),
+		IsBYOD:                true,
+		CreatedAt:             "2024-01-01T00:00:00Z",
+		Revision:              1,
 	}
 
 	// Map to model
@@ -142,7 +144,7 @@ func TestContainerImageRegistryModelMapping(t *testing.T) {
 	model := ContainerImageRegistryResourceModel{
 		ID:                   types.StringValue(buildResult.ID),
 		BuildID:              types.StringValue(buildResult.ID),
-		ClusterEnvironmentID: types.StringValue(buildResult.ClusterEnvironmentID),
+		ClusterEnvironmentID: types.StringValue(buildResult.ApplicationTemplateID),
 		BuildStatus:          types.StringValue(buildResult.Status),
 		CreatedAt:            types.StringValue(buildResult.CreatedAt),
 		IsBYOD:               types.BoolValue(buildResult.IsBYOD),
@@ -273,15 +275,15 @@ func TestBuildResultToBuildIDMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ClusterEnvironmentBuildResult{
-				ID:                   tt.buildID,
-				ClusterEnvironmentID: tt.clusterEnvID,
+			result := BuildResult{
+				ID:                    tt.buildID,
+				ApplicationTemplateID: tt.clusterEnvID,
 			}
 
 			// Resource ID should be build ID for registry resources
 			resourceID := result.ID
 			buildID := result.ID
-			clusterEnvID := result.ClusterEnvironmentID
+			clusterEnvID := result.ApplicationTemplateID
 
 			if resourceID != tt.wantResourceID {
 				t.Errorf("resourceID = %v, want %v", resourceID, tt.wantResourceID)
@@ -300,7 +302,7 @@ func TestBuildResultToBuildIDMapping(t *testing.T) {
 func TestRegisteredImageBuildStatus(t *testing.T) {
 	// For registered images, the build status should typically be "succeeded"
 	// since there's no actual build process
-	result := ClusterEnvironmentBuildResult{
+	result := BuildResult{
 		ID:     "bld_123",
 		Status: "succeeded",
 		IsBYOD: true,

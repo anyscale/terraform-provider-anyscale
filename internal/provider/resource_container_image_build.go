@@ -196,7 +196,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 	}
 
 	// Build create request
-	createReq := CreateClusterEnvironmentRequest{
+	createReq := CreateApplicationTemplateRequest{
 		Name:          plan.Name.ValueString(),
 		Containerfile: containerfileContent,
 	}
@@ -218,12 +218,12 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		"timeout": timeout.String(),
 	})
 
-	// Create the cluster environment (which triggers a build)
-	clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
+	// Create the application template (which triggers a build)
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 		ctx,
 		r.client,
 		"POST",
-		"/ext/v0/cluster_environments/",
+		"/api/v2/application_templates/",
 		reqBody,
 		http.StatusOK,
 		http.StatusCreated,
@@ -233,19 +233,20 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	result := clusterEnvResp.Result
-	clusterEnvID := result.ID
+	result := templateResp.Result
+	templateID := result.ID
 
-	tflog.Info(ctx, "Cluster environment created, waiting for build", map[string]any{
-		"cluster_environment_id": clusterEnvID,
+	tflog.Info(ctx, "Application template created, waiting for build", map[string]any{
+		"cluster_environment_id": templateID,
 		"name":                   result.Name,
 	})
 
-	// Set the cluster environment ID immediately
-	plan.ID = types.StringValue(clusterEnvID)
+	// Set the application template ID immediately
+	plan.ID = types.StringValue(templateID)
 
-	// Get the build ID by listing builds for this cluster environment
-	buildID, err := r.getLatestBuildID(ctx, clusterEnvID)
+	// Resolve the build the create just triggered. The create response is bare (no
+	// latest_build), so this re-fetches the template in its decorated form.
+	buildID, err := r.getLatestBuildID(ctx, templateID)
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "get build ID", err)
 		return
@@ -253,7 +254,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 
 	tflog.Debug(ctx, "Found build ID", map[string]any{
 		"build_id":               buildID,
-		"cluster_environment_id": clusterEnvID,
+		"cluster_environment_id": templateID,
 	})
 
 	plan.BuildID = types.StringValue(buildID)
@@ -284,7 +285,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 
 	tflog.Info(ctx, "Container image build completed", map[string]any{
 		"build_id":               buildID,
-		"cluster_environment_id": clusterEnvID,
+		"cluster_environment_id": templateID,
 		"status":                 build.Status,
 	})
 
@@ -323,76 +324,53 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	clusterEnvID := state.ID.ValueString()
+	templateID := state.ID.ValueString()
 
-	tflog.Debug(ctx, "Reading container image build", map[string]any{"cluster_environment_id": clusterEnvID})
+	tflog.Debug(ctx, "Reading container image build", map[string]any{"cluster_environment_id": templateID})
 
-	// Get cluster environment details
-	clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environments/%s", clusterEnvID),
-		nil,
-		http.StatusOK,
-	)
+	// Get application template details (decorated: carries latest_build for free)
+	template, err := r.getApplicationTemplate(ctx, templateID)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			tflog.Warn(ctx, "Cluster environment not found, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
+			tflog.Warn(ctx, "Application template not found, removing from state", map[string]any{"cluster_environment_id": templateID})
 			resp.State.RemoveResource(ctx)
 			return
 		}
 
-		AddAPIError(&resp.Diagnostics, "read cluster environment", err)
+		AddAPIError(&resp.Diagnostics, "read application template", err)
 		return
 	}
 
-	result := clusterEnvResp.Result
-
 	// Check if archived
-	if result.IsArchived() {
-		tflog.Warn(ctx, "Cluster environment is archived, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
+	if template.IsArchived() {
+		tflog.Warn(ctx, "Application template is archived, removing from state", map[string]any{"cluster_environment_id": templateID})
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	// Update name from cluster environment (important for import)
-	state.Name = types.StringValue(result.Name)
+	// Update name from application template (important for import)
+	state.Name = types.StringValue(template.Name)
 
-	// Get the build ID from state or by listing builds
+	// Get the build ID from state, falling back to the template's own latest_build
+	// reference (already fetched above, no extra call needed).
 	var buildID string
 	if !state.BuildID.IsNull() {
 		buildID = state.BuildID.ValueString()
+	} else if template.LatestBuild != nil {
+		buildID = template.LatestBuild.ID
 	} else {
-		// List builds to get the latest
-		buildID, err = r.getLatestBuildID(ctx, clusterEnvID)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-				"error":                  err.Error(),
-			})
-		}
+		tflog.Warn(ctx, "Application template has no builds", map[string]any{"cluster_environment_id": templateID})
 	}
 
 	// If we have a build ID, get build details
 	if buildID != "" {
-		// Note: The Anyscale API returns 201 for GET build endpoints
-		buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
-			ctx,
-			r.client,
-			"GET",
-			fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
-			nil,
-			http.StatusOK,
-			http.StatusCreated,
-		)
+		build, err := r.getBuild(ctx, buildID)
 		if err != nil {
 			tflog.Warn(ctx, "Failed to get build details", map[string]any{
 				"build_id": buildID,
 				"error":    err.Error(),
 			})
 		} else {
-			build := buildResp.Result
 			state.BuildID = types.StringValue(build.ID)
 			state.BuildStatus = types.StringValue(build.Status)
 			state.CreatedAt = types.StringValue(build.CreatedAt)
@@ -407,7 +385,7 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 
 			// Set revision and name_version
 			state.Revision = types.Int64Value(int64(build.Revision))
-			state.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", result.Name, build.Revision))
+			state.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", template.Name, build.Revision))
 		}
 	}
 
@@ -454,12 +432,12 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	clusterEnvID := state.ID.ValueString()
+	templateID := state.ID.ValueString()
 
-	// Create a new build for the existing cluster environment
-	createBuildReq := CreateClusterEnvironmentBuildRequest{
-		ClusterEnvironmentID: clusterEnvID,
-		Containerfile:        containerfileContent,
+	// Create a new build for the existing application template
+	createBuildReq := CreateBuildRequest{
+		ApplicationTemplateID: templateID,
+		Containerfile:         containerfileContent,
 	}
 
 	reqBody, err := MarshalRequestBody(createBuildReq)
@@ -469,11 +447,11 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	}
 
 	// POST to create new build
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildOperationResponse](
+	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		r.client,
 		"POST",
-		"/ext/v0/cluster_environment_builds/",
+		"/api/v2/builds/",
 		reqBody,
 		http.StatusOK,
 		http.StatusCreated,
@@ -487,7 +465,7 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 
 	tflog.Info(ctx, "New build created, waiting for completion", map[string]any{
 		"build_id":               buildID,
-		"cluster_environment_id": clusterEnvID,
+		"cluster_environment_id": templateID,
 	})
 
 	// Wait for build to complete
@@ -499,7 +477,7 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 
 	tflog.Info(ctx, "Container image build completed", map[string]any{
 		"build_id":               buildID,
-		"cluster_environment_id": clusterEnvID,
+		"cluster_environment_id": templateID,
 		"status":                 build.Status,
 		"revision":               build.Revision,
 	})
@@ -629,31 +607,42 @@ func (r *ContainerImageBuildResource) parseTimeout(timeoutStr string) (time.Dura
 	return duration, nil
 }
 
-// getLatestBuildID fetches the latest build ID for a cluster environment.
-func (r *ContainerImageBuildResource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
-	// List builds for this cluster environment
-	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
+// getLatestBuildID resolves the latest build ID for an application template
+// contract-based, via the template's own latest_build reference. A bare create
+// response never carries latest_build, so this always re-fetches the decorated
+// template rather than trusting a builds-list call's ordering.
+func (r *ContainerImageBuildResource) getLatestBuildID(ctx context.Context, templateID string) (string, error) {
+	template, err := r.getApplicationTemplate(ctx, templateID)
+	if err != nil {
+		return "", err
+	}
+
+	if template.LatestBuild == nil {
+		return "", fmt.Errorf("no builds found for application template %s", templateID)
+	}
+
+	return template.LatestBuild.ID, nil
+}
+
+// getApplicationTemplate fetches the decorated application template by ID.
+func (r *ContainerImageBuildResource) getApplicationTemplate(ctx context.Context, templateID string) (*ApplicationTemplateResult, error) {
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
+		fmt.Sprintf("/api/v2/application_templates/%s", templateID),
 		nil,
 		http.StatusOK,
-		http.StatusCreated,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to list builds: %w", err)
+		return nil, fmt.Errorf("failed to get application template %s: %w", templateID, err)
 	}
 
-	if len(buildsResp.Results) == 0 {
-		return "", fmt.Errorf("no builds found for cluster environment %s", clusterEnvID)
-	}
-
-	return buildsResp.Results[0].ID, nil
+	return &templateResp.Result, nil
 }
 
 // waitForBuild polls the build status until it reaches a terminal state.
-func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID string, timeout time.Duration) (*ClusterEnvironmentBuildResult, error) {
+func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID string, timeout time.Duration) (*BuildResult, error) {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
@@ -694,7 +683,7 @@ func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID 
 // The backend's real wire value for a cancelled build is "canceled" (one L, per the
 // BuildStatus/ClusterEnvironmentBuildStatus enums). "cancelled" (two L) is also accepted here
 // defensively so an unexpected respelling never falls through to the unknown-status error.
-func evaluateBuildStatus(build *ClusterEnvironmentBuildResult) (done bool, err error) {
+func evaluateBuildStatus(build *BuildResult) (done bool, err error) {
 	switch build.Status {
 	case "succeeded":
 		return true, nil
@@ -713,13 +702,13 @@ func evaluateBuildStatus(build *ClusterEnvironmentBuildResult) (done bool, err e
 }
 
 // getBuild fetches the current build details.
-func (r *ContainerImageBuildResource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
+func (r *ContainerImageBuildResource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
+	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
+		fmt.Sprintf("/api/v2/builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,

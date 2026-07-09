@@ -3,15 +3,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"net/url"
 	"testing"
 )
 
 // TestFetchContainerImages_MultiPage is the GATE-F2 multi-page proof for the
-// plural container-images data source's search call site. Sibling proof for
+// plural container-images data source's list call site. Sibling proof for
 // the sweeper's identical search endpoint lives in
 // internal/acctest/sweeper_container_image_pagination_test.go - same shape,
 // same silent-truncation failure mode, different call site. A single-page
@@ -20,92 +19,68 @@ import (
 // against a 2-page mock and asserts both pages are collected AND that the
 // second request carries the exact token the first response returned.
 //
-// Characterizes TODAY's ext/v0 body-shaped pagination contract. Once forge
-// migrates this call to api/v2 query params, only the request-shape
-// assertions below move from the JSON body to the URL query string - the
-// two-page collection assertion is unchanged.
+// Post-F2 (6e6ea79): fetchContainerImages calls GET /api/v2/application_templates/
+// via the shared PaginatedRequest helper, which threads next_paging_token as a
+// URL query parameter (paging_token) rather than an ext/v0-style request body
+// field. Each result's latest-build summary now arrives embedded on the
+// decorated ApplicationTemplateResult (LatestBuild), so there is no more
+// per-item build lookup to stub out here.
 func TestFetchContainerImages_MultiPage(t *testing.T) {
-	var searchRequests []map[string]interface{}
+	requestCount := 0
+	var pagingTokens []string
 
 	const token = "images-page-2-token"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/ext/v0/cluster_environments/search":
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Fatalf("read request body: %v", err)
-			}
-			var payload map[string]interface{}
-			if err := json.Unmarshal(body, &payload); err != nil {
-				t.Fatalf("unmarshal request body: %v", err)
-			}
-			searchRequests = append(searchRequests, payload)
-
-			w.Header().Set("Content-Type", "application/json")
-
-			if len(searchRequests) == 1 {
-				if paging, ok := payload["paging"].(map[string]interface{}); ok {
-					if _, hasToken := paging["paging_token"]; hasToken {
-						t.Errorf("first request should not carry a paging_token, got %v", paging)
-					}
-				}
-				resp := ClusterEnvironmentsListResponse{
-					Results: []ClusterEnvironmentResult{
-						{ID: "apptemp_img_a", Name: "tfacc-images-a", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
-						{ID: "apptemp_img_b", Name: "tfacc-images-b", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
-					},
-				}
-				nextToken := token
-				resp.Metadata.NextPagingToken = &nextToken
-				_ = json.NewEncoder(w).Encode(resp)
-				return
-			}
-
-			paging, ok := payload["paging"].(map[string]interface{})
-			if !ok {
-				t.Fatalf("second request missing paging object: %v", payload)
-			}
-			gotToken, _ := paging["paging_token"].(string)
-			if gotToken != token {
-				t.Errorf("second request paging_token = %q, want %q -- loop is not following the token", gotToken, token)
-			}
-			resp := ClusterEnvironmentsListResponse{
-				Results: []ClusterEnvironmentResult{
-					{ID: "apptemp_img_c", Name: "tfacc-images-c", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
-				},
-			}
-			// NextPagingToken stays nil -> loop must terminate after this page.
-			_ = json.NewEncoder(w).Encode(resp)
-
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/ext/v0/cluster_environment_builds/"):
-			// None of the fixtures above have builds. Returning an empty list
-			// keeps this test focused on the search-pagination loop, not
-			// build-detail mapping (that's covered elsewhere).
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(ClusterEnvironmentBuildsListResponse{})
-
-		default:
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/application_templates/" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+
+		requestCount++
+		pagingTokens = append(pagingTokens, r.URL.Query().Get("paging_token"))
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if requestCount == 1 {
+			resp := ApplicationTemplatesListResponse{
+				Results: []ApplicationTemplateResult{
+					{ID: "apptemp_img_a", Name: "tfacc-images-a", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
+					{ID: "apptemp_img_b", Name: "tfacc-images-b", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
+				},
+			}
+			nextToken := token
+			resp.Metadata.NextPagingToken = &nextToken
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		resp := ApplicationTemplatesListResponse{
+			Results: []ApplicationTemplateResult{
+				{ID: "apptemp_img_c", Name: "tfacc-images-c", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
+			},
+		}
+		// NextPagingToken stays nil -> loop must terminate after this page.
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
 	d := &ContainerImagesDataSource{client: NewClientWithToken(server.URL, "fake-token-images-multipage")}
-	query := ClusterEnvironmentsSearchQuery{
-		Paging:           PageQuery{Count: 100},
-		IncludeArchived:  false,
-		IncludeAnonymous: false,
-	}
 
-	images, err := d.fetchContainerImages(context.Background(), query)
+	images, err := d.fetchContainerImages(context.Background(), url.Values{})
 	if err != nil {
 		t.Fatalf("fetchContainerImages returned error: %v", err)
 	}
 
-	if len(searchRequests) != 2 {
-		t.Fatalf("expected exactly 2 search requests (one per page), got %d", len(searchRequests))
+	if requestCount != 2 {
+		t.Fatalf("expected exactly 2 requests (one per page), got %d", requestCount)
+	}
+	if pagingTokens[0] != "" {
+		t.Errorf("first request should not carry a paging_token, got %q", pagingTokens[0])
+	}
+	if pagingTokens[1] != token {
+		t.Errorf("second request paging_token = %q, want %q -- loop is not following the token", pagingTokens[1], token)
 	}
 
 	wantIDs := map[string]bool{"apptemp_img_a": false, "apptemp_img_b": false, "apptemp_img_c": false}
@@ -133,41 +108,35 @@ func TestFetchContainerImages_MultiPage(t *testing.T) {
 // re-requests (or infinite-loops on a nil/empty token) would only show up
 // as a hang or duplicate results, not a clean test failure.
 func TestFetchContainerImages_SinglePageStopsAfterOnePage(t *testing.T) {
-	searchRequestCount := 0
+	requestCount := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/ext/v0/cluster_environments/search":
-			searchRequestCount++
-			w.Header().Set("Content-Type", "application/json")
-			resp := ClusterEnvironmentsListResponse{
-				Results: []ClusterEnvironmentResult{
-					{ID: "apptemp_only", Name: "tfacc-singlepage", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
-				},
-			}
-			_ = json.NewEncoder(w).Encode(resp)
-
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/ext/v0/cluster_environment_builds/"):
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(ClusterEnvironmentBuildsListResponse{})
-
-		default:
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/application_templates/" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		resp := ApplicationTemplatesListResponse{
+			Results: []ApplicationTemplateResult{
+				{ID: "apptemp_only", Name: "tfacc-singlepage", CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
 	d := &ContainerImagesDataSource{client: NewClientWithToken(server.URL, "fake-token-images-singlepage")}
-	query := ClusterEnvironmentsSearchQuery{Paging: PageQuery{Count: 100}}
 
-	images, err := d.fetchContainerImages(context.Background(), query)
+	images, err := d.fetchContainerImages(context.Background(), url.Values{})
 	if err != nil {
 		t.Fatalf("fetchContainerImages returned error: %v", err)
 	}
 
-	if searchRequestCount != 1 {
-		t.Errorf("expected exactly 1 search request for a single-page response, got %d", searchRequestCount)
+	if requestCount != 1 {
+		t.Errorf("expected exactly 1 request for a single-page response, got %d", requestCount)
 	}
 	if len(images) != 1 || images[0].ID.ValueString() != "apptemp_only" {
 		t.Errorf("got %+v, want exactly one image with ID apptemp_only", images)

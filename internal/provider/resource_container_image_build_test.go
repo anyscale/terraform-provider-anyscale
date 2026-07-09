@@ -218,7 +218,7 @@ func TestEvaluateBuildStatus_AllAcceptedStatuses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			build := &ClusterEnvironmentBuildResult{
+			build := &BuildResult{
 				ID:           "bld_test",
 				Status:       tt.status,
 				ErrorMessage: tt.errorMessage,
@@ -291,8 +291,8 @@ func TestWaitForBuildRealPath_TerminalStatuses(t *testing.T) {
 				gotPath = r.URL.Path
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				_ = json.NewEncoder(w).Encode(ClusterEnvironmentBuildResponse{
-					Result: ClusterEnvironmentBuildResult{
+				_ = json.NewEncoder(w).Encode(BuildResponse{
+					Result: BuildResult{
 						ID:           "bld_test",
 						Status:       tt.status,
 						ErrorMessage: tt.errorMessage,
@@ -307,8 +307,8 @@ func TestWaitForBuildRealPath_TerminalStatuses(t *testing.T) {
 			if gotMethod != http.MethodGet {
 				t.Errorf("request method = %q, want GET", gotMethod)
 			}
-			if gotPath != "/ext/v0/cluster_environment_builds/bld_test" {
-				t.Errorf("request path = %q, want /ext/v0/cluster_environment_builds/bld_test", gotPath)
+			if gotPath != "/api/v2/builds/bld_test" {
+				t.Errorf("request path = %q, want /api/v2/builds/bld_test", gotPath)
 			}
 
 			if !tt.wantErr {
@@ -337,35 +337,34 @@ func TestWaitForBuildRealPath_TerminalStatuses(t *testing.T) {
 
 // TestContainerImageBuildModelMapping tests mapping of API response to model
 func TestContainerImageBuildModelMapping(t *testing.T) {
-	// Simulate API responses
-	// Note: LatestBuildID/LatestBuildStatus are no longer in ClusterEnvironmentResult
-	// Build info is fetched separately via listing builds
-	clusterEnvResult := ClusterEnvironmentResult{
+	// Simulate API responses: an application template plus its build (contract-based,
+	// via GET /api/v2/builds/{id} - not a separate list call).
+	templateResult := ApplicationTemplateResult{
 		ID:        "apptemp_123",
 		Name:      "my-custom-image",
 		CreatorID: "user_456",
 		CreatedAt: "2024-01-01T00:00:00Z",
 	}
 
-	buildResult := ClusterEnvironmentBuildResult{
-		ID:                   "bld_789",
-		ClusterEnvironmentID: "apptemp_123",
-		Status:               "succeeded",
-		RayVersion:           strPtr("2.9.0"),
-		DockerImageName:      strPtr("anyscale/my-custom-image:v1"),
-		CreatedAt:            "2024-01-01T00:00:00Z",
-		Revision:             3,
+	buildResult := BuildResult{
+		ID:                    "bld_789",
+		ApplicationTemplateID: "apptemp_123",
+		Status:                "succeeded",
+		RayVersion:            strPtr("2.9.0"),
+		DockerImageName:       strPtr("anyscale/my-custom-image:v1"),
+		CreatedAt:             "2024-01-01T00:00:00Z",
+		Revision:              3,
 	}
 
 	// Map to model
 	model := ContainerImageBuildResourceModel{
-		ID:          types.StringValue(clusterEnvResult.ID),
-		Name:        types.StringValue(clusterEnvResult.Name),
+		ID:          types.StringValue(templateResult.ID),
+		Name:        types.StringValue(templateResult.Name),
 		BuildID:     types.StringValue(buildResult.ID),
 		BuildStatus: types.StringValue(buildResult.Status),
 		CreatedAt:   types.StringValue(buildResult.CreatedAt),
 		Revision:    types.Int64Value(int64(buildResult.Revision)),
-		NameVersion: types.StringValue(clusterEnvResult.Name + ":" + "3"),
+		NameVersion: types.StringValue(templateResult.Name + ":" + "3"),
 	}
 
 	if buildResult.DockerImageName != nil {
@@ -403,11 +402,13 @@ func TestContainerImageBuildModelMapping(t *testing.T) {
 	}
 }
 
-// TestCreateClusterEnvironmentRequestStructure tests the structure of create request
-func TestCreateClusterEnvironmentRequestStructure(t *testing.T) {
+// TestCreateApplicationTemplateRequestStructure tests the structure of the
+// application template create request (POST /api/v2/application_templates/,
+// call 1 of the containerfile-build 2-call sequence).
+func TestCreateApplicationTemplateRequestStructure(t *testing.T) {
 	projectID := "prj_123"
 
-	req := CreateClusterEnvironmentRequest{
+	req := CreateApplicationTemplateRequest{
 		Name:          "test-image",
 		Containerfile: "FROM anyscale/ray:2.9.0-py310\nRUN pip install requests",
 		ProjectID:     &projectID,
@@ -427,11 +428,11 @@ func TestCreateClusterEnvironmentRequestStructure(t *testing.T) {
 // TestNullableFieldHandling tests handling of nullable fields in build response
 func TestNullableFieldHandling(t *testing.T) {
 	// Build without optional fields
-	build := ClusterEnvironmentBuildResult{
-		ID:                   "bld_123",
-		ClusterEnvironmentID: "apptemp_456",
-		Status:               "succeeded",
-		CreatedAt:            "2024-01-01T00:00:00Z",
+	build := BuildResult{
+		ID:                    "bld_123",
+		ApplicationTemplateID: "apptemp_456",
+		Status:                "succeeded",
+		CreatedAt:             "2024-01-01T00:00:00Z",
 		// Optional fields are nil
 		RayVersion:      nil,
 		DockerImageName: nil,
@@ -440,7 +441,7 @@ func TestNullableFieldHandling(t *testing.T) {
 
 	// Map to model - should handle nil values
 	model := ContainerImageBuildResourceModel{
-		ID:          types.StringValue(build.ClusterEnvironmentID),
+		ID:          types.StringValue(build.ApplicationTemplateID),
 		BuildID:     types.StringValue(build.ID),
 		BuildStatus: types.StringValue(build.Status),
 		CreatedAt:   types.StringValue(build.CreatedAt),
