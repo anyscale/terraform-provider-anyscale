@@ -54,16 +54,17 @@ output "registry_image_digest" {
 ### Optional
 
 - `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated.
-- `ray_version` (String) The Ray version to associate with this image (e.g., `2.9.0`). If not specified, the latest available Ray version will be used.
+- `ray_version` (String) The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; the API rejects unsupported values at creation time. If not specified, a supported default is used automatically.
 - `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries.
 
 ### Read-Only
 
-- `build_id` (String) The unique identifier of the build.
+- `build_id` (String) The unique identifier of the latest build for this image.
 - `build_status` (String) The status of the build (typically `succeeded` for registered images).
-- `cluster_environment_id` (String) The ID of the cluster environment (app config) that holds this image.
+- `cluster_environment_id` (String) The ID of the cluster environment (app config) that holds this image. Identical to `id`.
 - `created_at` (String) Timestamp when the build was created.
-- `id` (String) The unique identifier of the build (same as build_id).
+- `digest` (String) The content digest of the built container image (e.g. `sha256:...`).
+- `id` (String) The unique identifier of the cluster environment holding this image (same as `cluster_environment_id`). Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored this value out of band (e.g. a `terraform output`) must be updated to use `cluster_environment_id` going forward.
 - `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image. Always true for registered images.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
 - `revision` (Number) The revision number of the container image.
