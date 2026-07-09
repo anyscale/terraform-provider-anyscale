@@ -20,6 +20,8 @@ resource "anyscale_cloud" "primary" {
 
 # Step 2: Attach cloud resource with configuration
 resource "anyscale_cloud_resource" "primary" {
+  name = var.cloud_name
+
   cloud_id      = anyscale_cloud.primary.id
   region        = var.aws_region
   compute_stack = "VM"

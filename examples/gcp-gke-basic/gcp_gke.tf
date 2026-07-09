@@ -224,7 +224,7 @@ resource "google_compute_subnetwork" "anyscale" {
 }
 
 # Allow common external ingress traffic (HTTPS, SSH, ICMP)
-resource "google_compute_firewall" "allow-common-ingress" {
+resource "google_compute_firewall" "allow_common_ingress" {
   #checkov:skip=CKV_GCP_2: "Ensure Google compute firewall ingress does not allow unrestricted ssh access"
 
   name    = "${var.gke_cluster_name}-allow-common-ingress"
@@ -246,7 +246,7 @@ resource "google_compute_firewall" "allow-common-ingress" {
 
 # Allow all internal traffic within VPC.
 # VPC by default only allows all internal traffic on the same subnet.
-resource "google_compute_firewall" "allow-internal" {
+resource "google_compute_firewall" "allow_internal" {
   #checkov:skip=CKV2_GCP_12: "GCP compute firewall ingress allow access to all ports"
 
   name    = "${var.gke_cluster_name}-allow-internal"

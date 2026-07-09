@@ -70,6 +70,49 @@ in a Kubernetes cluster: `operator_status` (the same value as `status`, named ex
 `operator_version`, and `reported_at`. All three are null for VM resources, and null for a Kubernetes
 resource whose operator hasn't reported in yet — they populate once it has.
 
+## Multiple resource deployments on one cloud
+
+A cloud can have more than one `anyscale_cloud_resource` attached to it — for example, to add a
+second AWS region or a second compute stack alongside the one a cloud started with. The
+[`multi-resource-cloud-basic`](../../examples/multi-resource-cloud-basic) example is a complete,
+working two-resource configuration.
+
+A few things aren't obvious from the resource's schema alone:
+
+- **Only registered (BYOC) clouds accept additional resources.** A cloud that Anyscale manages
+  end-to-end (never had your own infrastructure explicitly attached) rejects a second
+  `anyscale_cloud_resource` at apply time with a `400`. To use more than one resource, the cloud needs
+  to be the "bring your own cloud" kind from the start.
+- **`name` is required, and only has to be unique per cloud, not globally.** Give every
+  `anyscale_cloud_resource` on the same cloud its own distinct value — there's no default to fall back
+  on, so this is enforced by Terraform at plan time (a missing `name` fails before anything is sent to
+  the API), not discovered later as a collision.
+- **A `name` collision on the same cloud fails loud, never silent.** If two resources on the same cloud
+  end up with the same `name`, `apply` fails with the API's own `409`: `A cloud deployment with the name
+  <name> already exists in this cloud.` There's no "adopt" behavior — every `anyscale_cloud_resource` you
+  apply either creates a new backend resource or fails outright, never merging into or silently attaching
+  to one that's already there. If you land on this page from that error message: check for a duplicate
+  `name` among the `anyscale_cloud_resource` blocks attached to the same cloud, including ones in other
+  `.tf` files or workspaces targeting the same `cloud_id`.
+- **State loss recovers via `terraform import`, not a plain re-apply.** If a state entry for an
+  `anyscale_cloud_resource` is lost while the backend resource itself is still alive, re-running `apply`
+  sends the same `name` your configuration already specifies, so it hits the same `409` collision rather
+  than reconciling the two or creating a duplicate. `terraform import` is the fix — see
+  [Import](../resources/cloud_resource.md#import) for the `cloud_id:name` syntax.
+
+## Upgrading to a required `name`
+
+As of v0.2.0, `name` on `anyscale_cloud_resource` is `Required` — it has no default, and a
+configuration that omits it now fails at `terraform plan`, before anything reaches the API. Add an
+explicit, non-empty `name` to every `anyscale_cloud_resource` block; that's the entire change.
+
+Previously, an omitted `name` fell back to a value the provider computed from
+`compute_stack`/`cloud_provider`/`region`. That computed value was never echoed back by the API, so
+it produced a permanent plan diff on every run after the first. Requiring `name` closes that at the
+source instead of working around it — see [Multiple resource deployments on one
+cloud](#multiple-resource-deployments-on-one-cloud) above for what a good value looks like once a
+cloud has more than one resource attached.
+
 ## Naming differences between resources and data sources
 
 A few concepts are named differently depending on which resource or data source you're looking at.

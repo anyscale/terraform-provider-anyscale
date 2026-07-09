@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -20,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -31,6 +33,13 @@ var (
 	_ resource.ResourceWithConfigure   = &CloudResourceResource{}
 	_ resource.ResourceWithImportState = &CloudResourceResource{}
 )
+
+// statusDeprecationMessage: status and operator_status are set from the same
+// underlying value in readCloudResource; status is also always null for VM
+// cloud resources, making operator_status the clearer name. cloud_resource
+// only - anyscale_cloud/its data source's status/state fields are the
+// distinct cloud lifecycle status, not an operator_status duplicate.
+const statusDeprecationMessage = "Duplicates `operator_status` (identical value; always null for VM cloud resources). Will be removed in a future major release - use `operator_status` instead."
 
 // NewCloudResourceResource returns a new cloud resource resource.
 func NewCloudResourceResource() resource.Resource {
@@ -180,12 +189,13 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			// ─── Resource Identity ────────────────────────────────
 			"name": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The name of the cloud resource. Auto-generated if not provided.",
+				Required:            true,
+				MarkdownDescription: "The name of the cloud resource. Must be a non-empty string, distinct among resources on the same cloud. Part of the resource's identity - used in the `cloud_id:name` import ID - so changing it requires replacing the resource. If Terraform state is lost, re-applying does not recover the existing resource: a configuration with the same name fails with a duplicate-name error. Use `terraform import` to recover state instead.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
-					stringplanmodifier.UseStateForUnknown(),
+				},
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
 				},
 			},
 
@@ -241,7 +251,8 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			"cloud_deployment_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID assigned by Anyscale.",
+				MarkdownDescription: "The cloud deployment ID. The Anyscale API no longer populates this field; use `cloud_resource_id` instead.",
+				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -249,7 +260,8 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			"status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The current status of the cloud resource.",
+				MarkdownDescription: "The operator status of the cloud resource. Duplicates `operator_status` (identical value; null for VM); use `operator_status` instead.",
+				DeprecationMessage:  statusDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -686,14 +698,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	// Set inferred provider in state
 	plan.CloudProvider = types.StringValue(provider)
 
-	// Generate or use provided name
 	name := plan.Name.ValueString()
-	if name == "" {
-		name = fmt.Sprintf("%s-%s-%s",
-			strings.ToLower(computeStack),
-			strings.ToLower(provider),
-			strings.ToLower(region))
-	}
 
 	tflog.Info(ctx, "Creating Anyscale Cloud Resource",
 		map[string]any{
@@ -703,15 +708,6 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 			"region":        region,
 			"compute_stack": computeStack,
 		})
-
-	// Check if there's an existing default resource that we should update
-	existingDefault, err := r.findDefaultCloudResource(ctx, cloudID)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to check for existing default resource", map[string]any{"error": err.Error()})
-	} else if existingDefault != nil {
-		tflog.Info(ctx, "Found existing default resource, will update it instead of creating new", map[string]any{"name": existingDefault.Name})
-		name = existingDefault.Name
-	}
 
 	// Build deployment request
 	deployReq := CloudDeploymentRequest{
@@ -771,6 +767,25 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	// Initialize Status to known null - will be updated by readCloudResource if available
 	if plan.Status.IsUnknown() {
 		plan.Status = types.StringNull()
+	}
+
+	// Same reasoning for the remaining operator/default fields: none of them
+	// are set yet at this point, so without this they'd still be Unknown at
+	// the early State.Set below - Terraform Core rejects a post-apply state
+	// with Unknown attributes, so a failure between here and the read-back
+	// would produce an "invalid result object" diagnostic per field left
+	// this way, independent of whatever caused that failure.
+	if plan.OperatorStatus.IsUnknown() {
+		plan.OperatorStatus = types.StringNull()
+	}
+	if plan.OperatorVersion.IsUnknown() {
+		plan.OperatorVersion = types.StringNull()
+	}
+	if plan.ReportedAt.IsUnknown() {
+		plan.ReportedAt = types.StringNull()
+	}
+	if plan.IsDefault.IsUnknown() {
+		plan.IsDefault = types.BoolValue(false)
 	}
 
 	// compute_stack/region may still be unknown here (e.g. omitted in config);
@@ -970,25 +985,6 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 		return "", "", fmt.Errorf("invalid cloud resource ID format: expected 'cloud_id:name', got '%s'", id)
 	}
 	return parts[0], parts[1], nil
-}
-
-// findDefaultCloudResource checks if the cloud has a single default resource
-func (r *CloudResourceResource) findDefaultCloudResource(ctx context.Context, cloudID string) (*CloudDeploymentResult, error) {
-	// listCloudResources pages through every page rather than just the first -
-	// a cloud with many resources attached would otherwise risk missing the
-	// default one.
-	results, err := listCloudResources(ctx, r.client, cloudID)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(results) == 1 && results[0].IsDefault {
-		tflog.Debug(ctx, "Found single default resource", map[string]any{"name": results[0].Name})
-		return &results[0], nil
-	}
-
-	tflog.Debug(ctx, "Cloud has multiple resources or no default", map[string]any{"count": len(results)})
-	return nil, nil
 }
 
 // readCloudResource reads a cloud resource from the API and updates the state model

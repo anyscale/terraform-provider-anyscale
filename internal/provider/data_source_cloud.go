@@ -106,7 +106,8 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 			},
 			"cloud_deployment_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation.",
+				MarkdownDescription: "The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.",
+				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
 			},
 			"auto_add_user": schema.BoolAttribute{
 				Computed:            true,

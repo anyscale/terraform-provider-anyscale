@@ -17,6 +17,8 @@ resource "anyscale_cloud" "primary" {
 }
 
 resource "anyscale_cloud_resource" "primary" {
+  name = var.cloud_name
+
   cloud_id       = anyscale_cloud.primary.id
   region         = var.google_region
   compute_stack  = "K8S"

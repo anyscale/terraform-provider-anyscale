@@ -1,5 +1,5 @@
-# Variables for AWS Basic Test Scenario
-# No EFS, No MemoryDB - Minimal AWS cloud configuration
+# Variables for Multi-Resource Cloud Basic Test Scenario
+# Two AWS foundations (aws_anyscale_1, aws_anyscale_2) feeding one cloud with two cloud resources
 # ---------------------------------------------------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -75,7 +75,7 @@ variable "anyscale_deploy_env" {
 }
 
 variable "common_prefix_1" {
-  description = "Common prefix for resource names. Must be unique per scenario."
+  description = "Common prefix for resource names in the first AWS foundation (aws_anyscale_1). Must be unique per scenario."
   type        = string
   default     = "as-aws-basic1-"
   validation {
@@ -85,7 +85,7 @@ variable "common_prefix_1" {
 }
 
 variable "common_prefix_2" {
-  description = "Common prefix for resource names. Must be unique per scenario."
+  description = "Common prefix for resource names in the second AWS foundation (aws_anyscale_2). Must be unique per scenario."
   type        = string
   default     = "as-aws-basic2-"
   validation {

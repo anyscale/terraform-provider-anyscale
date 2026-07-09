@@ -1,0 +1,48 @@
+# Copy this file to terraform.tfvars and fill in the values below:
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is gitignored in this repo -- your values are never committed.
+
+# ---------------------------------------------------------------------------------------------------------------------
+# REQUIRED VARIABLES
+# ---------------------------------------------------------------------------------------------------------------------
+
+aws_region = "us-east-2"
+
+# Comma-delimited IPv4 CIDR ranges allowed to reach the cluster (opens 443/https and 22/ssh).
+# Replace with your own IP(s)/range(s) -- avoid "0.0.0.0/0" outside of throwaway testing.
+customer_ingress_cidr_ranges = "203.0.113.0/24,198.51.100.42/32"
+
+# Free-form string used as the IAM trust policy external ID for both AWS foundations below.
+anyscale_external_id = "my-external-id-12345"
+
+# Your Anyscale Organization ID (starts with "org_"). Find it at
+# https://console.anyscale.com/ under Organization Settings.
+anyscale_org_id = "org_abc123xyz"
+
+# ---------------------------------------------------------------------------------------------------------------------
+# OPTIONAL VARIABLES -- defaults shown below match variables.tf; uncomment to override.
+# ---------------------------------------------------------------------------------------------------------------------
+
+cloud_name = "my-multi-resource-cloud"
+
+# anyscale_cloud_id = null # Only used for tagging the AWS foundations; this example creates its own
+#                          # cloud in the same apply, so there's nothing to reference here yet.
+
+# tags = {
+#   "test"        = "true"
+#   "environment" = "test"
+#   "scenario"    = "aws-basic"
+# }
+
+# anyscale_deploy_env = "test" # one of: production, development, test
+
+# Must be unique per scenario -- the two foundations share an AWS account, so their generated
+# resource names (and the VPC CIDRs hardcoded in aws_anyscale_1.tf/aws_anyscale_2.tf) must not collide.
+# common_prefix_1 = "as-aws-basic1-"
+# common_prefix_2 = "as-aws-basic2-"
+
+# is_private_cloud          = false
+# auto_add_user             = false
+# anyscale_s3_force_destroy = true

@@ -350,6 +350,35 @@ destroy-aws-vm-full: ## Destroy AWS VM full (must match SUFFIX used by apply)
 	  -var='vpc_public_subnets=["172.27.21.0/24", "172.27.22.0/24", "172.27.23.0/24"]'
 
 # ============================================================================
+# TERRAFORM TESTING - AWS MULTI-RESOURCE CLOUD
+# ============================================================================
+
+.PHONY: test-multi-resource-cloud-basic
+test-multi-resource-cloud-basic: build ## Test multi-resource cloud basic (2 cloud resources on 1 cloud)
+	@echo "==> Testing multi-resource cloud basic scenario..."
+	@mkdir -p $(BUILD_DIR)
+	@bash -c 'set -u; \
+	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
+	  STATE=$(CURDIR)/$(BUILD_DIR)/multi-resource-cloud-basic-$$SUFFIX.tfstate; \
+	  CLOUD=tfacc-multi-resource-$$SUFFIX; \
+	  cd examples/multi-resource-cloud-basic; \
+	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
+
+.PHONY: apply-multi-resource-cloud-basic
+apply-multi-resource-cloud-basic: build ## Apply multi-resource cloud basic only (override SUFFIX=<id> to pair with destroy)
+	@mkdir -p $(BUILD_DIR)
+	cd examples/multi-resource-cloud-basic && terraform apply -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/multi-resource-cloud-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-multi-resource-$(SUFFIX)
+
+.PHONY: destroy-multi-resource-cloud-basic
+destroy-multi-resource-cloud-basic: ## Destroy multi-resource cloud basic (must match SUFFIX used by apply)
+	cd examples/multi-resource-cloud-basic && terraform destroy -auto-approve \
+	  -state=$(CURDIR)/$(BUILD_DIR)/multi-resource-cloud-basic-$(SUFFIX).tfstate \
+	  -var=cloud_name=tfacc-multi-resource-$(SUFFIX)
+
+# ============================================================================
 # TERRAFORM TESTING - AWS EKS
 # ============================================================================
 

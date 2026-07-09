@@ -137,6 +137,7 @@ See the [`examples/`](examples/) directory for complete, working examples:
 - **AWS EKS**: [`examples/aws-eks-basic/`](examples/aws-eks-basic/) - AWS EKS Kubernetes cloud
 - **GCP GKE**: [`examples/gcp-gke-basic/`](examples/gcp-gke-basic/) - GCP GKE Kubernetes cloud
 - **Split Deployment**: [`examples/aws-vm-basic-resource/`](examples/aws-vm-basic-resource/) - Empty cloud with separate resource deployment
+- **Multi-Resource Cloud**: [`examples/multi-resource-cloud-basic/`](examples/multi-resource-cloud-basic/) - One cloud with two AWS VM resource deployments
 
 ## Versioning
 

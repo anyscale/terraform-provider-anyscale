@@ -50,7 +50,7 @@ output "cloud_provider_by_id" {
 ### Read-Only
 
 - `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
-- `cloud_deployment_id` (String) The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation.
+- `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
 - `compute_stack` (String) The compute stack (VM or K8S).
 - `created_at` (String) Timestamp when the cloud was created.
