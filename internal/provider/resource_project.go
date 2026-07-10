@@ -413,7 +413,7 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 		http.StatusNotFound,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "409") {
+		if strings.Contains(err.Error(), "status 409") {
 			resp.Diagnostics.AddError(
 				"Project Has Active Resources",
 				fmt.Sprintf("Cannot delete project %s: it still has running clusters or workspaces. Terminate all clusters and workspaces in this project, then retry. (%s)", projectID, err.Error()),
