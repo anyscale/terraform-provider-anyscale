@@ -285,8 +285,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				Description:         "If set to true, worker node groups will automatically be selected based on workload.",
-				MarkdownDescription: "If set to true, worker node groups will automatically be selected based on workload.",
+				Description:         "If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from worker_nodes. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into worker_nodes in Terraform state.",
+				MarkdownDescription: "If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from `worker_nodes`. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into `worker_nodes` in Terraform state.",
 			},
 			"flags": schema.DynamicAttribute{
 				Optional:            true,
@@ -316,8 +316,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 			},
 			"worker_nodes": schema.ListNestedAttribute{
 				Optional:            true,
-				Description:         "Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests.",
-				MarkdownDescription: "Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests.",
+				Description:         "Configuration for the worker nodes of the cluster. If not provided, the cluster has no worker nodes (head node only). See auto_select_worker_config for a way to request an organization-managed worker pool instead of listing worker node types explicitly here.",
+				MarkdownDescription: "Configuration for the worker nodes of the cluster. If not provided, the cluster has no worker nodes (head node only). See `auto_select_worker_config` for a way to request an organization-managed worker pool instead of listing worker node types explicitly here.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: workerNodeConfigAttributes(),
 				},

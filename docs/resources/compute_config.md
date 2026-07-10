@@ -54,7 +54,8 @@ resource "anyscale_compute_config" "example" {
   }
 }
 
-# Minimal compute config - worker nodes are auto-selected based on workload
+# Minimal compute config with a single head node and no worker nodes.
+# Add a worker_nodes block to define autoscaling worker groups.
 resource "anyscale_compute_config" "minimal" {
   name     = "minimal-config"
   cloud_id = "cld_abc123"
@@ -106,7 +107,7 @@ output "compute_config_id" {
 ### Optional
 
 - `advanced_instance_config` (Dynamic) Advanced instance configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.
-- `auto_select_worker_config` (Boolean) If set to true, worker node groups will automatically be selected based on workload.
+- `auto_select_worker_config` (Boolean) If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from `worker_nodes`. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into `worker_nodes` in Terraform state.
 - `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time (see Update), since this resource cannot detect that change from a `cloud_name` lookup at plan time without a network call.
 - `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`.
 - `cloud_resource` (String) The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.
@@ -116,7 +117,7 @@ output "compute_config_id" {
 - `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`)
 - `maximum_uptime_minutes` (Number) Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum.
 - `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`)
-- `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. If not provided, worker nodes will be automatically selected based on logical resource requests. (see [below for nested schema](#nestedatt--worker_nodes))
+- `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. If not provided, the cluster has no worker nodes (head node only). See `auto_select_worker_config` for a way to request an organization-managed worker pool instead of listing worker node types explicitly here. (see [below for nested schema](#nestedatt--worker_nodes))
 - `zones` (List of String) Availability zones to consider for this cluster. Defaults to all zones in the cloud's region.
 
 ### Read-Only
