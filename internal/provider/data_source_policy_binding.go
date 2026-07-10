@@ -74,7 +74,7 @@ func (d *PolicyBindingDataSource) Schema(ctx context.Context, req datasource.Sch
 					Attributes: map[string]schema.Attribute{
 						"role_name": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The name of the role. Valid values depend on resource type:\n  - **Cloud**: `write`, `readonly`\n  - **Project**: `owner`, `write`, `readonly`\n  - **Organization**: `owner`, `collaborator`",
+							MarkdownDescription: "The name of the role. Valid values depend on resource type:\n  - **Organization**: `owner`, `collaborator`\n  - **Cloud**: `collaborator`, `readonly`\n  - **Project**: `owner`, `write`, `readonly`",
 						},
 						"principals": schema.ListAttribute{
 							ElementType:         types.StringType,
