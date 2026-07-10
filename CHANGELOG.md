@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-10
+
+### Breaking Changes
+
+- resource/anyscale_project: collaborator `permission_level` value `"writer"` — previously accepted by the provider schema but always rejected by the Anyscale API (HTTP 422) — is replaced by `"write"`; valid values are now `"owner"`, `"write"`, `"readonly"`. Any configuration using `"writer"` never applied successfully; update it to `"write"`.
+
+### Changed
+
+- resource/anyscale_project: `name` values of `"-"` or `"default"` (case-insensitive) now fail at plan time with a clear error instead of failing later at apply with a generic API error; the Anyscale API has always rejected these reserved names.
+- resource/anyscale_project: deleting a project that still has running clusters or workspaces now returns a clearer "Project Has Active Resources" error instead of a generic API error; it still fails rather than being silently ignored.
+
+### Fixed
+
+- data-source/anyscale_project: `collaborator` now returns every collaborator across all pages of API results instead of only the first page.
+- resource/anyscale_project: `terraform import` now recovers the project's real collaborator list (including the API's auto-added creator-owner collaborator) instead of always importing an empty `collaborator` block. This only applies to imports performed with this version or later; a project already imported under a prior version keeps its empty collaborator state and must be re-imported (`terraform state rm` then `terraform import` again) to pick up the fix — upgrading the provider in place or running `terraform apply -refresh-only` will not recover it.
+
 ## [0.3.4] - 2026-07-10
 
 ### Changed
@@ -424,7 +440,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.4.0
 [0.3.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.4
 [0.3.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.3
 [0.3.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.2
