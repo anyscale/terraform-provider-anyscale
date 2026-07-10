@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-10
+
+### Fixed
+
+- resource/anyscale_cloud: Retry the transient "still being applied, try again" 409 on `auto_add_user` updates instead of failing `terraform apply` outright; the underlying reconciliation check is organization-wide, so a pending change on an unrelated cloud could previously block an update to this one.
+
 ## [0.3.2] - 2026-07-10
 
 ### Added
@@ -403,7 +409,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.3
 [0.3.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.2
 [0.3.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.1
 [0.3.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.0
