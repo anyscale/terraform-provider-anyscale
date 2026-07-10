@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-10
+
+### Added
+
+- provider: Add a quick-start example (creating a minimal Compute Config) and an authentication precedence summary to the Registry index page.
+
+### Fixed
+
+- provider: Surface the beta-status warning on the Terraform Registry index page; previously it only appeared in the repository README, whose GitHub-style alert syntax does not render on the Registry.
+- resource/anyscale_compute_config: Fix the `worker_nodes` and `auto_select_worker_config` descriptions, which incorrectly claimed omitting `worker_nodes` or enabling `auto_select_worker_config` automatically provisions workload-appropriate workers.
+
 ## [0.3.1] - 2026-07-10
 
 ### Fixed
@@ -392,7 +403,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.2
 [0.3.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.1
 [0.3.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.0
 [0.2.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.2.0

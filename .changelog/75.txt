@@ -1,4 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_compute_config: Fix the `worker_nodes` and `auto_select_worker_config` descriptions, which incorrectly claimed omitting `worker_nodes` or enabling `auto_select_worker_config` automatically provisions workload-appropriate workers.
-```
