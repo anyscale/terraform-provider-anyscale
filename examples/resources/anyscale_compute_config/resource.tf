@@ -39,7 +39,8 @@ resource "anyscale_compute_config" "example" {
   }
 }
 
-# Minimal compute config - worker nodes are auto-selected based on workload
+# Minimal compute config with a single head node and no worker nodes.
+# Add a worker_nodes block to define autoscaling worker groups.
 resource "anyscale_compute_config" "minimal" {
   name     = "minimal-config"
   cloud_id = "cld_abc123"
