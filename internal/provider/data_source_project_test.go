@@ -1,294 +1,261 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestProjectDataSourceLookupValidation tests validation of ID vs Name lookup
-func TestProjectDataSourceLookupValidation(t *testing.T) {
-	tests := []struct {
-		name      string
-		id        types.String
-		projName  types.String
-		wantError bool
-		errorMsg  string
-	}{
-		{
-			name:      "ID provided",
-			id:        types.StringValue("prj_123"),
-			projName:  types.StringNull(),
-			wantError: false,
-		},
-		{
-			name:      "name provided",
-			id:        types.StringNull(),
-			projName:  types.StringValue("my-project"),
-			wantError: false,
-		},
-		{
-			name:      "neither provided",
-			id:        types.StringNull(),
-			projName:  types.StringNull(),
-			wantError: true,
-			errorMsg:  "Either 'id' or 'name' must be specified",
-		},
+// runProjectDataSourceRead drives ProjectDataSource's real Read() method
+// end-to-end against a config model, the same pattern used in
+// data_source_container_image_test.go's runContainerImageDataSourceRead.
+//
+// tfsdk.Config has no Set method (unlike tfsdk.Plan/tfsdk.State), so this
+// builds the raw value through a throwaway tfsdk.State.Set and converts it to
+// a tfsdk.Config -- both types share the same underlying {Raw, Schema} shape.
+func runProjectDataSourceRead(t *testing.T, d *ProjectDataSource, model ProjectDataSourceModel) (ProjectDataSourceModel, diag.Diagnostics) {
+	t.Helper()
+	ctx := context.Background()
+
+	var schemaResp datasource.SchemaResponse
+	d.Schema(ctx, datasource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate validation logic from Read method
-			hasID := !tt.id.IsNull()
-			hasName := !tt.projName.IsNull()
+	state := tfsdk.State{Schema: schemaResp.Schema}
+	setDiags := state.Set(ctx, &model)
+	if setDiags.HasError() {
+		t.Fatalf("failed to build config fixture: %v", setDiags)
+	}
+	config := tfsdk.Config(state)
 
-			var gotError bool
-			var gotErrorMsg string
+	readResp := &datasource.ReadResponse{
+		// The real runtime pre-populates ReadResponse.State from ReadRequest.Config.
+		State: tfsdk.State(config),
+	}
+	d.Read(ctx, datasource.ReadRequest{Config: config}, readResp)
 
-			if !hasID && !hasName {
-				gotError = true
-				gotErrorMsg = "Either 'id' or 'name' must be specified"
-			}
+	if readResp.Diagnostics.HasError() {
+		return ProjectDataSourceModel{}, readResp.Diagnostics
+	}
 
-			if gotError != tt.wantError {
-				t.Errorf("validation error = %v, wantError %v", gotError, tt.wantError)
-			}
+	var result ProjectDataSourceModel
+	getDiags := readResp.State.Get(ctx, &result)
+	if getDiags.HasError() {
+		t.Fatalf("failed to decode result state: %v", getDiags)
+	}
+	return result, readResp.Diagnostics
+}
 
-			if tt.wantError && gotErrorMsg != tt.errorMsg {
-				t.Errorf("error message = %v, want %v", gotErrorMsg, tt.errorMsg)
-			}
-		})
+// TestProjectDataSourceRead_LookupValidation replaces the old
+// TestProjectDataSourceLookupValidation, which re-implemented the id/name
+// requirement inline instead of calling Read(). This also proves the
+// validation short-circuits before any HTTP call.
+func TestProjectDataSourceRead_LookupValidation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s: validation must short-circuit before any API call", r.Method, r.URL.String())
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	d := &ProjectDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	_, diags := runProjectDataSourceRead(t, d, ProjectDataSourceModel{})
+
+	if !diags.HasError() {
+		t.Fatal("expected a diagnostic error, got none")
+	}
+	if !diagsContainSummary(diags, "Missing Required Attribute") {
+		t.Errorf("expected 'Missing Required Attribute' diagnostic, got: %v", diags)
 	}
 }
 
-// TestProjectCollaboratorMapping tests mapping of collaborators
-func TestProjectCollaboratorMapping(t *testing.T) {
-	apiCollab := struct {
-		ID              string
-		PermissionLevel string
-		Value           struct {
-			ID    string
-			Email string
+// TestProjectDataSourceRead_ByID replaces the old tautological
+// TestProjectFieldMapping/TestProjectCollaboratorMapping/
+// TestProjectCollaboratorList (which built model structs and checked they
+// held the fields they were given). This drives the real Read() against a
+// mock API and checks the fields it actually produces, including collaborator
+// mapping and ordering.
+func TestProjectDataSourceRead_ByID(t *testing.T) {
+	const projectID = "prj_abc"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID:
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
+				ID:              projectID,
+				Name:            "production-project",
+				Description:     strPtr("Production environment project"),
+				ParentCloudID:   "cld_def",
+				CreatorID:       strPtr("user_123"),
+				CreatedAt:       "2024-01-01T00:00:00Z",
+				LastUsedCloudID: strPtr("cld_def"),
+				IsDefault:       false,
+				DirectoryName:   "production-project-dir",
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID+"/collaborators/users":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectCollaboratorListResponse{
+				Results: []ProjectCollaboratorResult{
+					{
+						ID:              "identity_1",
+						PermissionLevel: "owner",
+						Value: struct {
+							ID    string `json:"id"`
+							Name  string `json:"name"`
+							Email string `json:"email"`
+						}{ID: "user_1", Name: "User One", Email: "user1@example.com"},
+					},
+					{
+						ID:              "identity_2",
+						PermissionLevel: "write",
+						Value: struct {
+							ID    string `json:"id"`
+							Name  string `json:"name"`
+							Email string `json:"email"`
+						}{ID: "user_2", Name: "User Two", Email: "user2@example.com"},
+					},
+				},
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
 		}
-	}{
-		ID:              "identity_123",
-		PermissionLevel: "writer",
-		Value: struct {
-			ID    string
-			Email string
-		}{
-			ID:    "user_456",
-			Email: "user@example.com",
-		},
+	}))
+	defer server.Close()
+
+	d := &ProjectDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runProjectDataSourceRead(t, d, ProjectDataSourceModel{ID: types.StringValue(projectID)})
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
 	}
 
-	// Map to model
-	model := ProjectDataSourceCollaboratorModel{
-		Email:           types.StringValue(apiCollab.Value.Email),
-		PermissionLevel: types.StringValue(apiCollab.PermissionLevel),
-		IdentityID:      types.StringValue(apiCollab.ID),
-		UserID:          types.StringValue(apiCollab.Value.ID),
+	if result.Name.ValueString() != "production-project" {
+		t.Errorf("name = %q, want %q", result.Name.ValueString(), "production-project")
 	}
-
-	// Verify mapping
-	if model.Email.ValueString() != "user@example.com" {
-		t.Errorf("Email = %v, want 'user@example.com'", model.Email.ValueString())
+	if result.CloudID.ValueString() != "cld_def" {
+		t.Errorf("cloud_id = %q, want %q", result.CloudID.ValueString(), "cld_def")
 	}
-	if model.PermissionLevel.ValueString() != "writer" {
-		t.Errorf("PermissionLevel = %v, want 'writer'", model.PermissionLevel.ValueString())
+	if result.Description.ValueString() != "Production environment project" {
+		t.Errorf("description = %q, want %q", result.Description.ValueString(), "Production environment project")
 	}
-	if model.IdentityID.ValueString() != "identity_123" {
-		t.Errorf("IdentityID = %v, want 'identity_123'", model.IdentityID.ValueString())
+	if result.IsDefault.ValueBool() {
+		t.Error("is_default = true, want false")
 	}
-	if model.UserID.ValueString() != "user_456" {
-		t.Errorf("UserID = %v, want 'user_456'", model.UserID.ValueString())
+	if len(result.Collaborators) != 2 {
+		t.Fatalf("collaborators count = %d, want 2", len(result.Collaborators))
+	}
+	if result.Collaborators[0].Email.ValueString() != "user1@example.com" || result.Collaborators[0].PermissionLevel.ValueString() != "owner" ||
+		result.Collaborators[0].IdentityID.ValueString() != "identity_1" || result.Collaborators[0].UserID.ValueString() != "user_1" {
+		t.Errorf("collaborators[0] = %+v, want email=user1@example.com permission_level=owner identity_id=identity_1 user_id=user_1", result.Collaborators[0])
+	}
+	if result.Collaborators[1].Email.ValueString() != "user2@example.com" || result.Collaborators[1].PermissionLevel.ValueString() != "write" {
+		t.Errorf("collaborators[1] = %+v, want email=user2@example.com permission_level=write", result.Collaborators[1])
 	}
 }
 
-// TestProjectFieldMapping tests mapping of project fields
-func TestProjectFieldMapping(t *testing.T) {
-	model := ProjectDataSourceModel{
-		ID:              types.StringValue("prj_abc"),
-		Name:            types.StringValue("production-project"),
-		CloudID:         types.StringValue("cld_def"),
-		Description:     types.StringValue("Production environment project"),
-		CreatorID:       types.StringValue("user_123"),
-		CreatedAt:       types.StringValue("2024-01-01T00:00:00Z"),
-		LastUsedCloudID: types.StringValue("cld_def"),
-		IsDefault:       types.BoolValue(false),
-		DirectoryName:   types.StringValue("production-project-dir"),
+// TestProjectDataSourceRead_NullableFieldsAndDefaultFlag replaces the old
+// TestProjectNullableFields/TestProjectDefaultFlag/TestProjectEmptyCollaborators,
+// which all built model structs by hand instead of exercising Read(). A
+// project with none of the optional fields set (legacy/default-project shape)
+// must come back with those fields null, not zero-valued/empty-string.
+func TestProjectDataSourceRead_NullableFieldsAndDefaultFlag(t *testing.T) {
+	const projectID = "prj_legacy_default"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID:
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
+				ID:            projectID,
+				Name:          "default-project",
+				ParentCloudID: "cld_def",
+				CreatedAt:     "2024-01-01T00:00:00Z",
+				IsDefault:     true,
+				DirectoryName: "default-project-dir",
+				// Description, CreatorID, LastUsedCloudID intentionally absent.
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID+"/collaborators/users":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectCollaboratorListResponse{Results: []ProjectCollaboratorResult{}})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	d := &ProjectDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runProjectDataSourceRead(t, d, ProjectDataSourceModel{ID: types.StringValue(projectID)})
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
 	}
 
-	// Verify all fields
-	if model.ID.ValueString() != "prj_abc" {
-		t.Errorf("ID = %v, want 'prj_abc'", model.ID.ValueString())
+	if !result.Description.IsNull() {
+		t.Errorf("description should be null when absent from the API, got %q", result.Description.ValueString())
 	}
-	if model.Name.ValueString() != "production-project" {
-		t.Errorf("Name = %v, want 'production-project'", model.Name.ValueString())
+	if !result.CreatorID.IsNull() {
+		t.Errorf("creator_id should be null when absent from the API, got %q", result.CreatorID.ValueString())
 	}
-	if model.CloudID.ValueString() != "cld_def" {
-		t.Errorf("CloudID = %v, want 'cld_def'", model.CloudID.ValueString())
+	if !result.LastUsedCloudID.IsNull() {
+		t.Errorf("last_used_cloud_id should be null when absent from the API, got %q", result.LastUsedCloudID.ValueString())
 	}
-	if model.IsDefault.ValueBool() != false {
-		t.Errorf("IsDefault = %v, want false", model.IsDefault.ValueBool())
+	if !result.IsDefault.ValueBool() {
+		t.Error("is_default = false, want true")
 	}
-	if model.DirectoryName.ValueString() != "production-project-dir" {
-		t.Errorf("DirectoryName = %v, want 'production-project-dir'", model.DirectoryName.ValueString())
+	if len(result.Collaborators) != 0 {
+		t.Errorf("collaborators count = %d, want 0", len(result.Collaborators))
 	}
 }
 
-// TestProjectNullableFields tests handling of optional/nullable fields
-func TestProjectNullableFields(t *testing.T) {
-	model := ProjectDataSourceModel{
-		ID:              types.StringValue("prj_123"),
-		Name:            types.StringValue("test-project"),
-		CloudID:         types.StringValue("cld_456"),
-		Description:     types.StringNull(), // Might not have description
-		CreatorID:       types.StringNull(), // Might not be available
-		LastUsedCloudID: types.StringNull(), // Might not have been used yet
+// TestProjectDataSourceRead_ByName exercises findProjectByName for real,
+// including the multiple-matches-picks-most-recent behavior, which was
+// previously only checked for cloud names (TestProjectCloudNameResolution
+// duplicated logic already covered for real by
+// cloud_helpers_test.go:TestResolveCloudNameToID and never actually tested
+// the project-lookup-by-name path at all).
+func TestProjectDataSourceRead_ByName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectsListResponse{Results: []ProjectResult{
+				{ID: "prj_old", Name: "my-project", ParentCloudID: "cld_1", CreatedAt: "2023-01-01T00:00:00Z", DirectoryName: "d1"},
+				{ID: "prj_new", Name: "my-project", ParentCloudID: "cld_1", CreatedAt: "2024-06-01T00:00:00Z", DirectoryName: "d2"},
+				{ID: "prj_other", Name: "other-project", ParentCloudID: "cld_1", CreatedAt: "2024-01-01T00:00:00Z", DirectoryName: "d3"},
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/prj_new":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
+				ID: "prj_new", Name: "my-project", ParentCloudID: "cld_1", CreatedAt: "2024-06-01T00:00:00Z", DirectoryName: "d2",
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/prj_new/collaborators/users":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectCollaboratorListResponse{Results: []ProjectCollaboratorResult{}})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	d := &ProjectDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runProjectDataSourceRead(t, d, ProjectDataSourceModel{Name: types.StringValue("my-project")})
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
 	}
-
-	if !model.Description.IsNull() {
-		t.Error("Description should be null")
-	}
-	if !model.CreatorID.IsNull() {
-		t.Error("CreatorID should be null")
-	}
-	if !model.LastUsedCloudID.IsNull() {
-		t.Error("LastUsedCloudID should be null")
-	}
-}
-
-// TestProjectDefaultFlag tests handling of default project flag
-func TestProjectDefaultFlag(t *testing.T) {
-	tests := []struct {
-		name      string
-		isDefault bool
-	}{
-		{"default project", true},
-		{"non-default project", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			model := ProjectDataSourceModel{
-				IsDefault: types.BoolValue(tt.isDefault),
-			}
-
-			if model.IsDefault.ValueBool() != tt.isDefault {
-				t.Errorf("IsDefault = %v, want %v", model.IsDefault.ValueBool(), tt.isDefault)
-			}
-		})
-	}
-}
-
-// TestProjectCloudNameResolution tests cloud name resolution for filtering
-func TestProjectCloudNameResolution(t *testing.T) {
-	tests := []struct {
-		name            string
-		cloudID         types.String
-		cloudName       types.String
-		expectedCloudID string
-	}{
-		{
-			name:            "cloud_id provided",
-			cloudID:         types.StringValue("cld_123"),
-			cloudName:       types.StringNull(),
-			expectedCloudID: "cld_123",
-		},
-		{
-			name:            "cloud_name provided (resolved)",
-			cloudID:         types.StringNull(),
-			cloudName:       types.StringValue("my-cloud"),
-			expectedCloudID: "cld_456", // Simulated resolved ID
-		},
-		{
-			name:            "neither provided",
-			cloudID:         types.StringNull(),
-			cloudName:       types.StringNull(),
-			expectedCloudID: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate cloud resolution logic
-			cloudID := ""
-			if !tt.cloudID.IsNull() {
-				cloudID = tt.cloudID.ValueString()
-			} else if !tt.cloudName.IsNull() {
-				// Simulated resolution
-				cloudID = "cld_456"
-			}
-
-			if cloudID != tt.expectedCloudID {
-				t.Errorf("cloudID = %v, want %v", cloudID, tt.expectedCloudID)
-			}
-		})
-	}
-}
-
-// TestProjectCollaboratorList tests handling of multiple collaborators
-func TestProjectCollaboratorList(t *testing.T) {
-	collaborators := []ProjectDataSourceCollaboratorModel{
-		{
-			Email:           types.StringValue("user1@example.com"),
-			PermissionLevel: types.StringValue("owner"),
-			IdentityID:      types.StringValue("identity_1"),
-			UserID:          types.StringValue("user_1"),
-		},
-		{
-			Email:           types.StringValue("user2@example.com"),
-			PermissionLevel: types.StringValue("writer"),
-			IdentityID:      types.StringValue("identity_2"),
-			UserID:          types.StringValue("user_2"),
-		},
-		{
-			Email:           types.StringValue("user3@example.com"),
-			PermissionLevel: types.StringValue("readonly"),
-			IdentityID:      types.StringValue("identity_3"),
-			UserID:          types.StringValue("user_3"),
-		},
-	}
-
-	model := ProjectDataSourceModel{
-		Collaborators: collaborators,
-	}
-
-	if len(model.Collaborators) != 3 {
-		t.Errorf("Collaborators count = %v, want 3", len(model.Collaborators))
-	}
-
-	// Verify first collaborator
-	if model.Collaborators[0].PermissionLevel.ValueString() != "owner" {
-		t.Errorf("First collaborator permission = %v, want 'owner'", model.Collaborators[0].PermissionLevel.ValueString())
-	}
-}
-
-// TestProjectPermissionLevels tests all valid permission levels
-func TestProjectPermissionLevels(t *testing.T) {
-	validLevels := []string{"owner", "writer", "readonly"}
-
-	for _, level := range validLevels {
-		t.Run("level_"+level, func(t *testing.T) {
-			collab := ProjectDataSourceCollaboratorModel{
-				PermissionLevel: types.StringValue(level),
-			}
-
-			if collab.PermissionLevel.ValueString() != level {
-				t.Errorf("PermissionLevel = %v, want %v", collab.PermissionLevel.ValueString(), level)
-			}
-		})
-	}
-}
-
-// TestProjectEmptyCollaborators tests handling of projects without collaborators
-func TestProjectEmptyCollaborators(t *testing.T) {
-	model := ProjectDataSourceModel{
-		Collaborators: []ProjectDataSourceCollaboratorModel{},
-	}
-
-	if len(model.Collaborators) != 0 {
-		t.Errorf("Collaborators count = %v, want 0", len(model.Collaborators))
+	if result.ID.ValueString() != "prj_new" {
+		t.Errorf("id = %q, want %q (most recently created project with a matching name)", result.ID.ValueString(), "prj_new")
 	}
 }
