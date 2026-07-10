@@ -32,6 +32,11 @@ resource "anyscale_project" "with_collaborators" {
   }
 
   collaborator {
+    email            = "developer@example.com"
+    permission_level = "write"
+  }
+
+  collaborator {
     email            = "analyst@example.com"
     permission_level = "readonly"
   }
