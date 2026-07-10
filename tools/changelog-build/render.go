@@ -63,10 +63,26 @@ func RenderSection(entries []Entry) string {
 // Fold replaces the ## [Unreleased] section body in changelog with body
 // (the output of RenderSection). It is a pure text transform: same inputs,
 // same output, every time.
+//
+// Finalize no longer leaves a standing empty ## [Unreleased] heading behind
+// (see below), so between releases the changelog may have no such heading at
+// all. If body is non-empty, Fold creates one fresh, immediately above the
+// newest version heading (or at EOF if there is no version heading yet). If
+// body is empty and no heading exists, there is nothing to fold and nothing
+// to clean up, so the changelog is returned unchanged rather than manufacturing
+// an empty heading purely to have one.
 func Fold(changelog, body string) (string, error) {
 	idx := strings.Index(changelog, unreleasedMarker)
 	if idx == -1 {
-		return "", fmt.Errorf("no %q heading found in changelog", unreleasedMarker)
+		if body == "" {
+			return changelog, nil
+		}
+		insertAt := len(changelog)
+		if nvh := nextVersionHeading(changelog); nvh != -1 {
+			insertAt = nvh
+		}
+		section := unreleasedMarker + "\n\n" + strings.TrimRight(body, "\n") + "\n\n"
+		return changelog[:insertAt] + section + changelog[insertAt:], nil
 	}
 	afterHeading := idx + len(unreleasedMarker)
 	rest := changelog[afterHeading:]
@@ -85,11 +101,15 @@ func Fold(changelog, body string) (string, error) {
 }
 
 // Finalize renames the current ## [Unreleased] section to a dated version
-// heading, inserts a fresh empty ## [Unreleased] above it, maintains the
-// Keep a Changelog reference-link footer for the new version, and returns the
-// updated changelog plus the finalized section's own body (for feeding
-// GoReleaser --release-notes so the GitHub Release matches CHANGELOG.md
-// byte-for-byte; see RELEASING.md).
+// heading, in place - it does NOT leave a fresh empty ## [Unreleased] behind,
+// so the changelog leads with the newest real version instead of an empty
+// placeholder heading. Fold (above) is what reintroduces ## [Unreleased] the
+// next time there is an actual fragment to fold in, so the accumulation
+// workflow is unaffected; only the standing empty header between releases is
+// gone. Finalize also maintains the Keep a Changelog reference-link footer for
+// the new version, and returns the updated changelog plus the finalized
+// section's own body (for feeding GoReleaser --release-notes so the GitHub
+// Release matches CHANGELOG.md byte-for-byte; see RELEASING.md).
 //
 // releaseNotes is the finalized section body ONLY — footer link definitions are
 // not part of the release notes, so they never appear in the returned notes.
@@ -110,7 +130,7 @@ func Finalize(changelog, version, date string) (newChangelog, releaseNotes strin
 
 	releaseNotes = strings.TrimSpace(body)
 	versionHeading := fmt.Sprintf("## [%s] - %s", version, date)
-	newSection := unreleasedMarker + "\n\n" + versionHeading + body
+	newSection := versionHeading + body
 
 	newChangelog = changelog[:idx] + newSection + tail
 	// Footer maintenance operates on the whole document (the link section lives
