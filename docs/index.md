@@ -50,7 +50,7 @@ provider "anyscale" {
 ## Quick Start
 
 Create a minimal [Compute Config](resources/compute_config.md) with a single head node in an
-existing Anyscale cloud. This is a valid starting point on its own.
+existing Anyscale cloud.
 
 ```terraform
 # A minimal compute config with a single head node, in an existing Anyscale
