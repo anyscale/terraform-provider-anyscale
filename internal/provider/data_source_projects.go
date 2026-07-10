@@ -52,6 +52,7 @@ type ProjectSummaryModel struct {
 	LastUsedCloudID types.String `tfsdk:"last_used_cloud_id"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	DirectoryName   types.String `tfsdk:"directory_name"`
+	OrganizationID  types.String `tfsdk:"organization_id"`
 }
 
 // Metadata returns the data source type name.
@@ -125,6 +126,10 @@ func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 						"directory_name": schema.StringAttribute{
 							Computed:            true,
 							MarkdownDescription: "The directory name used for this project's storage.",
+						},
+						"organization_id": schema.StringAttribute{
+							Computed:            true,
+							MarkdownDescription: "The ID of the organization this project belongs to.",
 						},
 					},
 				},
@@ -243,12 +248,13 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 	allProjects := make([]ProjectSummaryModel, 0, len(results))
 	for _, project := range results {
 		projectModel := ProjectSummaryModel{
-			ID:            types.StringValue(project.ID),
-			Name:          types.StringValue(project.Name),
-			CloudID:       types.StringValue(project.ParentCloudID),
-			CreatedAt:     types.StringValue(project.CreatedAt),
-			IsDefault:     types.BoolValue(project.IsDefault),
-			DirectoryName: types.StringValue(project.DirectoryName),
+			ID:             types.StringValue(project.ID),
+			Name:           types.StringValue(project.Name),
+			CloudID:        types.StringValue(project.ParentCloudID),
+			CreatedAt:      types.StringValue(project.CreatedAt),
+			IsDefault:      types.BoolValue(project.IsDefault),
+			DirectoryName:  types.StringValue(project.DirectoryName),
+			OrganizationID: types.StringValue(project.OrganizationID),
 		}
 
 		if project.CreatorID != nil {

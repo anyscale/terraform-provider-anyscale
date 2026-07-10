@@ -59,6 +59,7 @@ type ProjectResourceModel struct {
 	LastUsedCloudID types.String `tfsdk:"last_used_cloud_id"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	DirectoryName   types.String `tfsdk:"directory_name"`
+	OrganizationID  types.String `tfsdk:"organization_id"`
 }
 
 // ProjectCollaboratorModel represents a project collaborator.
@@ -107,9 +108,12 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			// Core attributes
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name of the project.",
+				MarkdownDescription: "The name of the project. The API reserves the names `-` and `default` (case-insensitive); using either fails the request.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.NoneOfCaseInsensitive("-", "default"),
 				},
 			},
 			"description": schema.StringAttribute{
@@ -124,7 +128,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			},
 			"initial_cluster_config_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The initial cluster configuration ID to use for workspaces in this project.",
+				MarkdownDescription: "The initial cluster configuration ID to use for workspaces in this project. This is a create-time-only input (API field `cluster_config`): the provider does not read its current value back from the API after creation, so it is not refreshed on `terraform plan`/`refresh` and will always be null immediately after `terraform import`. Changing it forces replacement of the project.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -166,6 +170,13 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"organization_id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The ID of the organization this project belongs to.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 		},
 
 		Blocks: map[string]schema.Block{
@@ -179,9 +190,9 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 						},
 						"permission_level": schema.StringAttribute{
 							Required:            true,
-							MarkdownDescription: "Permission level: 'owner', 'writer', or 'readonly'.",
+							MarkdownDescription: "Permission level granted to the collaborator: `owner`, `write`, or `readonly`. See the [Project guide](../guides/project.md) for how this differs from `anyscale_policy_binding`.",
 							Validators: []validator.String{
-								stringvalidator.OneOf("owner", "writer", "readonly"),
+								stringvalidator.OneOf("owner", "write", "readonly"),
 							},
 						},
 						"identity_id": schema.StringAttribute{
@@ -402,6 +413,13 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 		http.StatusNotFound,
 	)
 	if err != nil {
+		if strings.Contains(err.Error(), "409") {
+			resp.Diagnostics.AddError(
+				"Project Has Active Resources",
+				fmt.Sprintf("Cannot delete project %s: it still has running clusters or workspaces. Terminate all clusters and workspaces in this project, then retry. (%s)", projectID, err.Error()),
+			)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "delete project", err)
 		return
 	}
@@ -472,6 +490,7 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 
 	model.IsDefault = types.BoolValue(result.IsDefault)
 	model.DirectoryName = types.StringValue(result.DirectoryName)
+	model.OrganizationID = types.StringValue(result.OrganizationID)
 
 	// Only fetch collaborators if they were specified in the configuration
 	// This avoids inconsistency with auto-added creator collaborator
