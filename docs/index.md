@@ -29,8 +29,7 @@ v1.0 release.
 terraform {
   required_providers {
     anyscale = {
-      source  = "anyscale/anyscale"
-      version = "~> 0.1"
+      source = "anyscale/anyscale"
     }
   }
 }
