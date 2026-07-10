@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -21,10 +20,6 @@ func init() {
 		F:    sweepProjects,
 	})
 }
-
-// sweepProjectPrefixes are the only name prefixes the project sweeper will
-// delete. This is a safety invariant: nothing else is ever touched.
-var sweepProjectPrefixes = []string{"tfacc-", "tf-test-", "tfprovider-"}
 
 const sweepProjectDefaultMinAge = 2 * time.Hour
 
@@ -51,13 +46,9 @@ func sweepProjects(_ string) error {
 		return nil
 	}
 
-	minAge := sweepProjectDefaultMinAge
-	if raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE"); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil {
-			return fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, parseErr)
-		}
-		minAge = parsed
+	minAge, err := resolveSweepMinAge(sweepProjectDefaultMinAge)
+	if err != nil {
+		return err
 	}
 	cutoff := time.Now().Add(-minAge)
 
@@ -75,7 +66,7 @@ func sweepProjects(_ string) error {
 		if p.IsDefault || p.Name == "default" {
 			continue
 		}
-		if !hasAnyPrefix(p.Name, sweepProjectPrefixes) {
+		if !hasAnyPrefix(p.Name, sweepableResourcePrefixes) {
 			continue
 		}
 
@@ -125,7 +116,7 @@ func listAllProjectsForSweep(ctx context.Context, client *provider.Client) ([]sw
 			return nil, fmt.Errorf("read projects response: %w", readErr)
 		}
 		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("list projects: status %d: %s", resp.StatusCode, truncateSweepBody(body))
+			return nil, fmt.Errorf("list projects: status %d: %s", resp.StatusCode, truncateBody(string(body), 256))
 		}
 
 		var page sweepProjectListResponse
@@ -162,8 +153,8 @@ func sweepDeleteProject(ctx context.Context, client *provider.Client, p sweepPro
 		log.Printf("[sweep:anyscale_project] DELETE OK %s (%s): status=%d", p.ID, p.Name, resp.StatusCode)
 		return nil
 	default:
-		log.Printf("[sweep:anyscale_project] DELETE FAILED %s (%s): status=%d body=%s", p.ID, p.Name, resp.StatusCode, truncateSweepBody(body))
-		return fmt.Errorf("status %d: %s", resp.StatusCode, truncateSweepBody(body))
+		log.Printf("[sweep:anyscale_project] DELETE FAILED %s (%s): status=%d body=%s", p.ID, p.Name, resp.StatusCode, truncateBody(string(body), 256))
+		return fmt.Errorf("status %d: %s", resp.StatusCode, truncateBody(string(body), 256))
 	}
 }
 
@@ -174,12 +165,4 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 		}
 	}
 	return false
-}
-
-func truncateSweepBody(b []byte) string {
-	const max = 256
-	if len(b) <= max {
-		return string(b)
-	}
-	return string(b[:max]) + "...(truncated)"
 }

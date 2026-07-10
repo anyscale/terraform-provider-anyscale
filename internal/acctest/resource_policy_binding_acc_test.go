@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -77,20 +78,9 @@ func testAccCheckPolicyBindingDestroyed(s *terraform.State) error {
 	}
 
 	if len(leaks) > 0 {
-		return fmt.Errorf("CheckDestroy(anyscale_policy_binding) found leaked bindings:\n  %s", joinLeaks(leaks))
+		return fmt.Errorf("CheckDestroy(anyscale_policy_binding) found leaked bindings:\n  %s", strings.Join(leaks, "\n  "))
 	}
 	return nil
-}
-
-func joinLeaks(leaks []string) string {
-	out := ""
-	for i, l := range leaks {
-		if i > 0 {
-			out += "\n  "
-		}
-		out += l
-	}
-	return out
 }
 
 func TestAccPolicyBindingResource_CloudBasic(t *testing.T) {
@@ -110,7 +100,7 @@ func TestAccPolicyBindingResource_CloudBasic(t *testing.T) {
 	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
@@ -164,7 +154,7 @@ func TestAccPolicyBindingResource_ProjectBasic(t *testing.T) {
 	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
@@ -207,7 +197,7 @@ func TestAccPolicyBindingResource_InvalidRoleForCloud(t *testing.T) {
 	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
@@ -232,7 +222,7 @@ func TestAccPolicyBindingResource_InvalidRoleForProject(t *testing.T) {
 	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
@@ -266,7 +256,7 @@ func TestAccPolicyBindingResource_MultipleBindings(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
@@ -294,7 +284,7 @@ func TestAccPolicyBindingResource_EmptyBindings(t *testing.T) {
 	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{
@@ -329,7 +319,7 @@ func TestAccPolicyBindingResource_Delete(t *testing.T) {
 	testGroupID := GetTestUserGroupID(t)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckPolicyBindingDestroyed,
 		Steps: []resource.TestStep{

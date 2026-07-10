@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -44,13 +43,9 @@ func sweepClouds(region string) error {
 		return nil
 	}
 
-	minAge := defaultSweepMinAge
-	if raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE"); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil {
-			return fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, parseErr)
-		}
-		minAge = parsed
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
+	if err != nil {
+		return err
 	}
 
 	ctx := context.Background()
@@ -92,7 +87,7 @@ func sweepClouds(region string) error {
 			log.Printf("[sweepClouds] KEEP %s (%s): protected static test fixture", cloud.Name, cloud.ID)
 			continue
 		}
-		if !hasSweepablePrefix(cloud.Name) {
+		if !hasAnyPrefix(cloud.Name, sweepableCloudPrefixes) {
 			continue
 		}
 
@@ -136,15 +131,6 @@ func sweepClouds(region string) error {
 		return fmt.Errorf("sweepClouds: %d failure(s): %s", len(failures), strings.Join(failures, "; "))
 	}
 	return nil
-}
-
-func hasSweepablePrefix(name string) bool {
-	for _, prefix := range sweepableCloudPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func truncateBody(s string, max int) string {

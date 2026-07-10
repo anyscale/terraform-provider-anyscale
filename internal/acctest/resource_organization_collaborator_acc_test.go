@@ -18,7 +18,7 @@ func TestAccOrganizationCollaboratorResource_CreateFails(t *testing.T) {
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		// No CheckDestroy: direct create is rejected, so nothing is ever created
 		// to verify the destroy of.
@@ -71,7 +71,7 @@ func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
 	warnDestructiveCollaboratorTest(t, testIdentityID)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		// No CheckDestroy: the API has no GET-by-ID endpoint for collaborators
 		// (only list-and-filter). CheckDestroy would only verify what happens
@@ -133,7 +133,7 @@ func TestAccOrganizationCollaboratorResource_UpdatePermission(t *testing.T) {
 	warnDestructiveCollaboratorTest(t, testIdentityID)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		// No CheckDestroy: API has no GET-by-ID for collaborators. See
 		// warnDestructiveCollaboratorTest above — destroy DOES remove this
@@ -200,7 +200,7 @@ func TestAccOrganizationCollaboratorResource_Delete(t *testing.T) {
 	warnDestructiveCollaboratorTest(t, testIdentityID)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		// No CheckDestroy: API has no GET-by-ID for collaborators; the inline
 		// testAccCheckCollaboratorDoesNotExist below covers post-destroy state.

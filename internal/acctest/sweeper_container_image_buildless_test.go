@@ -39,7 +39,7 @@ func buildlessSweepCandidate(id, name string, createdAt time.Time, deletedAt *st
 }
 
 // newBuildlessSweepServer wires a mock server that answers all 3 configured
-// sweepContainerImagePrefixes searches (tfacc-, tf-test-, tfprovider-) --
+// sweepableResourcePrefixes searches (tfacc-, tf-test-, tfprovider-) --
 // returning candidate on the first search only, so cross-prefix dedup logic
 // isn't required to make the candidate appear exactly once -- and records
 // archive calls. Fails the test on any other request.
@@ -93,8 +93,8 @@ func TestSweepContainerImages_BuildlessOrphan_ArchivesCleanly(t *testing.T) {
 		t.Fatalf("sweepContainerImages returned an error for a build-less orphan: %v", err)
 	}
 
-	if *searchCalls != len(sweepContainerImagePrefixes) {
-		t.Fatalf("expected %d search calls (one per configured prefix), got %d -- did GetTestClient resolve the mock server?", len(sweepContainerImagePrefixes), *searchCalls)
+	if *searchCalls != len(sweepableResourcePrefixes) {
+		t.Fatalf("expected %d search calls (one per configured prefix), got %d -- did GetTestClient resolve the mock server?", len(sweepableResourcePrefixes), *searchCalls)
 	}
 	if len(*archivedPaths) != 1 {
 		t.Fatalf("expected exactly 1 archive call, got %d -- build-less orphan was not swept", len(*archivedPaths))

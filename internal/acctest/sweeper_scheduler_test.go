@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -20,8 +19,6 @@ func init() {
 		F:    sweepSchedulers,
 	})
 }
-
-var sweepSchedulerPrefixes = []string{"tfacc-", "tf-test-", "tfprovider-"}
 
 const sweepSchedulerDefaultMinAge = 2 * time.Hour
 
@@ -47,13 +44,9 @@ func sweepSchedulers(_ string) error {
 		return nil
 	}
 
-	minAge := sweepSchedulerDefaultMinAge
-	if raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE"); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil {
-			return fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, parseErr)
-		}
-		minAge = parsed
+	minAge, err := resolveSweepMinAge(sweepSchedulerDefaultMinAge)
+	if err != nil {
+		return err
 	}
 	cutoff := time.Now().Add(-minAge)
 
@@ -68,7 +61,7 @@ func sweepSchedulers(_ string) error {
 	var failures []string
 	swept := 0
 	for _, s := range schedulers {
-		if !hasAnyPrefix(s.MachinePoolName, sweepSchedulerPrefixes) {
+		if !hasAnyPrefix(s.MachinePoolName, sweepableResourcePrefixes) {
 			continue
 		}
 
