@@ -59,7 +59,6 @@ type ProjectResourceModel struct {
 	LastUsedCloudID types.String `tfsdk:"last_used_cloud_id"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	DirectoryName   types.String `tfsdk:"directory_name"`
-	OrganizationID  types.String `tfsdk:"organization_id"`
 }
 
 // ProjectCollaboratorModel represents a project collaborator.
@@ -166,13 +165,6 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"directory_name": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The directory name used for this project's storage.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"organization_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the organization this project belongs to.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -490,7 +482,6 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 
 	model.IsDefault = types.BoolValue(result.IsDefault)
 	model.DirectoryName = types.StringValue(result.DirectoryName)
-	model.OrganizationID = types.StringValue(result.OrganizationID)
 
 	// Only fetch collaborators if they were specified in the configuration
 	// This avoids inconsistency with auto-added creator collaborator

@@ -59,7 +59,6 @@ output "project_description_by_id" {
 - `directory_name` (String) The directory name used for this project's storage.
 - `is_default` (Boolean) Whether this is the default project for the organization.
 - `last_used_cloud_id` (String) The ID of the cloud last used by this project.
-- `organization_id` (String) The ID of the organization this project belongs to.
 
 <a id="nestedatt--collaborators"></a>
 ### Nested Schema for `collaborators`

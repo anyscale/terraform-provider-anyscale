@@ -46,7 +46,6 @@ type ProjectDataSourceModel struct {
 	LastUsedCloudID types.String `tfsdk:"last_used_cloud_id"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	DirectoryName   types.String `tfsdk:"directory_name"`
-	OrganizationID  types.String `tfsdk:"organization_id"`
 
 	// Collaborators (nested list of objects)
 	Collaborators []ProjectDataSourceCollaboratorModel `tfsdk:"collaborators"`
@@ -113,10 +112,6 @@ func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 			"directory_name": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The directory name used for this project's storage.",
-			},
-			"organization_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the organization this project belongs to.",
 			},
 			"collaborators": schema.ListNestedAttribute{
 				Computed:            true,
@@ -263,7 +258,6 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 
 	config.IsDefault = types.BoolValue(project.IsDefault)
 	config.DirectoryName = types.StringValue(project.DirectoryName)
-	config.OrganizationID = types.StringValue(project.OrganizationID)
 	config.Collaborators = collaborators
 
 	// Save data into Terraform state
