@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -107,9 +106,12 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			// Core attributes
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name of the project.",
+				MarkdownDescription: "The name of the project. The API reserves the names `-` and `default` (case-insensitive); using either fails the request.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.NoneOfCaseInsensitive("-", "default"),
 				},
 			},
 			"description": schema.StringAttribute{
@@ -124,7 +126,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			},
 			"initial_cluster_config_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The initial cluster configuration ID to use for workspaces in this project.",
+				MarkdownDescription: "The initial cluster configuration ID to use for workspaces in this project. This is a create-time-only input (API field `cluster_config`): the provider does not read its current value back from the API after creation, so it is not refreshed on `terraform plan`/`refresh` and will always be null immediately after `terraform import`. Changing it forces replacement of the project.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -179,9 +181,9 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 						},
 						"permission_level": schema.StringAttribute{
 							Required:            true,
-							MarkdownDescription: "Permission level: 'owner', 'writer', or 'readonly'.",
+							MarkdownDescription: "Permission level granted to the collaborator: `owner`, `write`, or `readonly`. See the [Project guide](../guides/project.md) for how this differs from `anyscale_policy_binding`.",
 							Validators: []validator.String{
-								stringvalidator.OneOf("owner", "writer", "readonly"),
+								stringvalidator.OneOf("owner", "write", "readonly"),
 							},
 						},
 						"identity_id": schema.StringAttribute{
@@ -402,6 +404,13 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 		http.StatusNotFound,
 	)
 	if err != nil {
+		if strings.Contains(err.Error(), "status 409") {
+			resp.Diagnostics.AddError(
+				"Project Has Active Resources",
+				fmt.Sprintf("Cannot delete project %s: it still has running clusters or workspaces. Terminate all clusters and workspaces in this project, then retry. (%s)", projectID, err.Error()),
+			)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "delete project", err)
 		return
 	}
@@ -411,8 +420,43 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 // ImportState imports the resource into Terraform state.
 func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by project ID
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	projectID := req.ID
+
+	// Read the project first (with a still-empty model.Collaborators, so
+	// readProject's own gate skips fetching them here) so a bad project ID
+	// surfaces as a clean "not found" instead of an unrelated-looking
+	// collaborators-endpoint error.
+	var model ProjectResourceModel
+	if err := r.readProject(ctx, projectID, &model); err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			AddConfigError(&resp.Diagnostics, "Project Not Found",
+				fmt.Sprintf("No project exists with ID %q.", projectID))
+			return
+		}
+		AddAPIError(&resp.Diagnostics, "read project for import", err)
+		return
+	}
+
+	// readProject only fetches collaborators when the incoming model already
+	// has some - correct for ordinary refresh, where it stops a project
+	// managed with no collaborator block from perpetually diffing against
+	// the API's auto-added creator-owner collaborator, but fatal for import:
+	// there is no prior state yet, so that heuristic can never see "was
+	// configured" and would silently drop every real collaborator, no
+	// matter how many exist. Import is the one lifecycle point where
+	// recovering them unconditionally is unambiguous - there's no prior
+	// state to confuse "recovered at import" with "never configured" (same
+	// reasoning as CC12 in resource_compute_config.go's ImportState). Fetch
+	// them explicitly here; every later refresh re-fetches them again on its
+	// own since this seeds a non-empty list into state.
+	collaborators, err := r.getCollaborators(ctx, projectID)
+	if err != nil {
+		AddAPIError(&resp.Diagnostics, "read collaborators for import", err)
+		return
+	}
+	model.Collaborators = collaborators
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
 }
 
 // Helper functions

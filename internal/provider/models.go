@@ -264,7 +264,7 @@ type ProjectCollaboratorEntry struct {
 	Value struct {
 		Email string `json:"email"`
 	} `json:"value"`
-	PermissionLevel string `json:"permission_level"` // "owner", "writer", "readonly"
+	PermissionLevel string `json:"permission_level"` // "owner", "write", "readonly"
 }
 
 // ProjectCollaboratorListResponse for listing collaborators

@@ -21,7 +21,7 @@ resource "anyscale_project" "basic" {
 #
 #   collaborator {
 #     email            = "bob@example.com"
-#     permission_level = "writer"
+#     permission_level = "write"
 #   }
 #
 #   collaborator {

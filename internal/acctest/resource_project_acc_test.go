@@ -51,6 +51,15 @@ func TestAccProjectResource_Basic(t *testing.T) {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"cloud_name", // input-only alias for cloud_id; project API stores only parent_cloud_id
+					// F13: import now recovers the real collaborator list,
+					// which always includes the API's auto-added
+					// creator-owner even though this config never declares a
+					// collaborator block. That's correct, honest behavior
+					// (see PROJECT-API-SYNC-DESIGN.md F13) -- this config
+					// just isn't the place asserting collaborator semantics;
+					// TestAccProjectResource_WriteCollaboratorSymmetry does
+					// that with no ignore on this attribute.
+					"collaborator",
 				},
 			},
 		},
@@ -326,7 +335,7 @@ resource "anyscale_project" "test" {
 
   collaborator {
     email            = "%s"
-    permission_level = "writer"
+    permission_level = "write"
   }
 }
 `, projectName, cloudID, email1, email2)
@@ -341,7 +350,7 @@ resource "anyscale_project" "test" {
 
   collaborator {
     email            = "%s"
-    permission_level = "writer"
+    permission_level = "write"
   }
 }
 `, projectName, cloudID, email1)
@@ -362,7 +371,7 @@ resource "anyscale_project" "test" {
 
   collaborator {
     email            = "%s"
-    permission_level = "writer"
+    permission_level = "write"
   }
 }
 `, projectName, cloudID, email1, email2)
@@ -376,7 +385,7 @@ resource "anyscale_project" "test" {
 
   collaborator {
     email            = "%s"
-    permission_level = "writer"
+    permission_level = "write"
   }
 }
 `, projectName, cloudID, email1)

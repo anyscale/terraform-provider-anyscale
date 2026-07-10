@@ -124,7 +124,7 @@ func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 						},
 						"permission_level": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "Permission level: 'owner', 'writer', or 'readonly'.",
+							MarkdownDescription: "Permission level: `owner`, `write`, or `readonly`.",
 						},
 						"identity_id": schema.StringAttribute{
 							Computed:            true,
@@ -329,17 +329,27 @@ func (d *ProjectDataSource) getProject(ctx context.Context, projectID string) (*
 }
 
 // getCollaborators fetches the list of collaborators for a project.
+//
+// Pages through every page rather than just the first, so a project with
+// more collaborators than fit on one page doesn't silently drop the rest.
 func (d *ProjectDataSource) getCollaborators(ctx context.Context, projectID string) ([]ProjectDataSourceCollaboratorModel, error) {
-	collabResp, err := DoRequestAndParse[ProjectCollaboratorListResponse](
-		ctx, d.client, "GET", fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil, http.StatusOK,
+	results, err := PaginatedRequest(
+		ctx, d.client, fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil,
+		func(body []byte) ([]ProjectCollaboratorResult, *string, error) {
+			var listResp ProjectCollaboratorListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal collaborators response: %w", err)
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collaborators: %w", err)
 	}
 
 	// Map to model
-	collaborators := make([]ProjectDataSourceCollaboratorModel, 0, len(collabResp.Results))
-	for _, collab := range collabResp.Results {
+	collaborators := make([]ProjectDataSourceCollaboratorModel, 0, len(results))
+	for _, collab := range results {
 		collaborators = append(collaborators, ProjectDataSourceCollaboratorModel{
 			Email:           types.StringValue(collab.Value.Email),
 			PermissionLevel: types.StringValue(collab.PermissionLevel),

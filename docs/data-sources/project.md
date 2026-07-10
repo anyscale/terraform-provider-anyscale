@@ -67,5 +67,5 @@ Read-Only:
 
 - `email` (String) Email address of the collaborator.
 - `identity_id` (String) The identity ID of the collaborator.
-- `permission_level` (String) Permission level: 'owner', 'writer', or 'readonly'.
+- `permission_level` (String) Permission level: `owner`, `write`, or `readonly`.
 - `user_id` (String) The user ID of the collaborator.
