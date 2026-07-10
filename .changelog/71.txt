@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_container_image_registry: corrected documentation that claimed `digest` is "stable across refreshes" and pinned because the resource is immutable — `digest` is actually a latest-build-derived value, like `build_id`, `revision`, and `name_version`, and can change on a later refresh if a new build supersedes this one outside Terraform; no behavior changed, only the docs.
+```

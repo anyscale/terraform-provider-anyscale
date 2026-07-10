@@ -77,10 +77,13 @@ inconsistency:
   `containerfile_path` triggers a new build revision under `Update`, not a replacement — so `digest`
   legitimately changes on a rebuild. It has no plan modifiers: Terraform shows it as "known after apply"
   on any plan that changes the Containerfile, the same way `image_uri` and `build_id` do.
-- **`anyscale_container_image_registry`** is fully immutable (every optional attribute change is
-  `RequiresReplace`; see above), so its `digest` can't change without a full resource replacement. It
-  carries `UseStateForUnknown`, pinning it to its last-known value between ordinary refreshes instead of
-  showing a spurious "known after apply" on every plan.
+- **`anyscale_container_image_registry`** doesn't rebuild in place, but that immutability doesn't pin
+  `digest` — it's a latest-build-derived value, exactly like `build_id`, `revision`, and `name_version`
+  (see [below](#id-and-build_id)): it reflects whichever build is currently latest for the underlying
+  cluster environment, and moves if that build is superseded from outside this resource's own `apply`.
+  It carries `UseStateForUnknown` like the other three, which only keeps a plan from showing a spurious
+  "known after apply" on an unrelated change — refresh still picks up a new value when the latest build
+  advances, the same as described below.
 - **The data source** has no plan-modifier concept at all — every `Read` is a fresh lookup, so `digest`
   is a plain Computed value that simply reflects whatever the latest successful build's digest is right
   now.
@@ -112,17 +115,17 @@ superseded by a newer one without the Terraform resource changing, which is exac
 the cluster environment rather than "whichever build happened to be latest when the resource was
 created."
 
-**On `anyscale_container_image_registry` specifically, `build_id`, `revision`, and `name_version` can
-all change during the refresh that precedes a plain `terraform plan`, with no config edits.** `Read`
-always resolves whichever build is currently latest for the underlying cluster environment, and
-`revision`/`name_version` are read from that same latest build — so if something outside this resource's
-own `apply` registers a new build against the same cluster environment, your state picks up all three
-the next time Terraform refreshes. This is expected, not a bug — and it's quieter than it sounds: none
-of the three carry `RequiresReplace`, and none of them show up as an in-place update either. Terraform
-folds the refreshed value into state during the refresh step, before the plan-vs-config comparison runs,
-so there's nothing left to diff by the time `plan` renders. You'll see `No changes` (a NoOp plan), not an
-"updating in place" line — state silently catches up to the new values, and nothing gets destroyed,
-recreated, or shown as changed.
+**On `anyscale_container_image_registry` specifically, `build_id`, `revision`, `name_version`, and
+`digest` can all change during the refresh that precedes a plain `terraform plan`, with no config
+edits.** `Read` always resolves whichever build is currently latest for the underlying cluster
+environment, and `revision`/`name_version`/`digest` are all read from that same latest build — so if
+something outside this resource's own `apply` registers a new build against the same cluster
+environment, your state picks up all four the next time Terraform refreshes. This is expected, not a
+bug — and it's quieter than it sounds: none of the four carry `RequiresReplace`, and none of them show
+up as an in-place update either. Terraform folds the refreshed value into state during the refresh step,
+before the plan-vs-config comparison runs, so there's nothing left to diff by the time `plan` renders.
+You'll see `No changes` (a NoOp plan), not an "updating in place" line — state silently catches up to the
+new values, and nothing gets destroyed, recreated, or shown as changed.
 `anyscale_container_image_build` doesn't share this exposure: its `Read` prefers the build ID already in
 its own state over the cluster environment's latest, so only its own `Update` — triggered by your own
 `containerfile` / `containerfile_path` change — advances these attributes.
