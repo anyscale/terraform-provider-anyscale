@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -421,8 +420,40 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 // ImportState imports the resource into Terraform state.
 func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by project ID
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	projectID := req.ID
+
+	// readProject only fetches collaborators when the incoming model already
+	// has some (see below) - correct for ordinary refresh, where it stops a
+	// project managed with no collaborator block from perpetually diffing
+	// against the API's auto-added creator-owner collaborator, but fatal for
+	// import: there is no prior state yet, so that heuristic can never see
+	// "was configured" and would silently drop every real collaborator, no
+	// matter how many exist. Import is the one lifecycle point where
+	// recovering them unconditionally is unambiguous - there's no prior
+	// state to confuse "recovered at import" with "never configured" (same
+	// reasoning as CC12 in resource_compute_config.go's ImportState). Fetch
+	// them here so readProject's own gate sees a real, non-empty list and
+	// keeps it fresh on every later refresh too.
+	collaborators, err := r.getCollaborators(ctx, projectID)
+	if err != nil {
+		AddAPIError(&resp.Diagnostics, "read collaborators for import", err)
+		return
+	}
+
+	var model ProjectResourceModel
+	model.Collaborators = collaborators
+
+	if err := r.readProject(ctx, projectID, &model); err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			AddConfigError(&resp.Diagnostics, "Project Not Found",
+				fmt.Sprintf("No project exists with ID %q.", projectID))
+			return
+		}
+		AddAPIError(&resp.Diagnostics, "read project for import", err)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
 }
 
 // Helper functions
