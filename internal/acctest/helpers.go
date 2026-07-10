@@ -1159,10 +1159,6 @@ var (
 	// shared, real project. Those should call createEphemeralTestProject instead.
 	cachedTestProjectID string
 	testProjectIDMutex  sync.Mutex
-
-	// Cache for a test user group ID, used e.g. as a policy binding principal.
-	cachedTestUserGroupID string
-	testUserGroupIDMutex  sync.Mutex
 )
 
 // GetTestProjectID returns a project ID for READ-ONLY acceptance tests, with
@@ -1243,77 +1239,6 @@ func GetTestProjectID(t *testing.T) string {
 	t.Logf("Using first available project for test: %s (ID: %s)", projectsResp.Results[0].Name, projectsResp.Results[0].ID)
 	cachedTestProjectID = projectsResp.Results[0].ID
 	return cachedTestProjectID
-}
-
-// GetTestUserGroupID returns a user group ID for acceptance tests that need
-// to reference an existing group (e.g. as a policy binding principal), with
-// priority:
-//  1. ANYSCALE_TEST_USER_GROUP_ID environment variable (explicit override)
-//  2. Auto-discover: list user groups, use the first non-deleted result.
-//
-// User groups are normally synced from an IdP via SCIM rather than created by
-// tests, so unlike clouds/projects there is no ephemeral-creation fallback:
-// if the org has no groups, the test skips.
-func GetTestUserGroupID(t *testing.T) string {
-	testUserGroupIDMutex.Lock()
-	defer testUserGroupIDMutex.Unlock()
-
-	if cachedTestUserGroupID != "" {
-		return cachedTestUserGroupID
-	}
-
-	if envGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID"); envGroupID != "" {
-		t.Logf("Using test user group ID from ANYSCALE_TEST_USER_GROUP_ID: %s", envGroupID)
-		cachedTestUserGroupID = envGroupID
-		return cachedTestUserGroupID
-	}
-
-	client, err := GetTestClient()
-	if err != nil {
-		t.Skip("No user group available - failed to get test client.")
-		return ""
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/user_groups", nil)
-	if err != nil {
-		t.Skip("No user group available - failed to list user groups.")
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		t.Skip("No user group available - API error listing user groups.")
-		return ""
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Skip("No user group available - failed to read response.")
-		return ""
-	}
-
-	var groupsResp struct {
-		Results []struct {
-			ID        string  `json:"id"`
-			Name      string  `json:"name"`
-			DeletedAt *string `json:"deleted_at"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &groupsResp); err != nil {
-		t.Skip("No user group available - failed to parse response.")
-		return ""
-	}
-
-	for _, g := range groupsResp.Results {
-		if g.DeletedAt == nil {
-			t.Logf("Using user group for test: %s (ID: %s)", g.Name, g.ID)
-			cachedTestUserGroupID = g.ID
-			return cachedTestUserGroupID
-		}
-	}
-
-	t.Skip("No user group available - org has no active user groups. Set ANYSCALE_TEST_USER_GROUP_ID, or ensure SCIM group sync has run.")
-	return ""
 }
 
 // createEphemeralTestProject creates a minimal disposable project under a
