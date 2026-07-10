@@ -1,9 +1,9 @@
 ```
 release-note:removed
-provider: Remove seven unused internal helper functions with no remaining callers and a redundant per-poll-iteration API call in the cloud-creation wait loop that only fed a debug log line; no user-visible behavior change.
+provider: Remove seven unused internal helper functions with no remaining callers; no user-visible behavior change.
 ```
 
 ```
 release-note:changed
-provider: Delete-failure diagnostics on anyscale_cloud, anyscale_organization_collaborator, anyscale_organization_invitation, and anyscale_policy_binding now use a shared error helpers title and wording instead of each resources own custom phrasing; the underlying error status and body are unchanged, and this only surfaces on a genuine delete failure.
+provider: Delete-failure diagnostics on anyscale_cloud, anyscale_organization_collaborator, anyscale_organization_invitation, and anyscale_policy_binding now use a shared error helpers title and wording instead of each resources own custom phrasing, with the underlying status and body unchanged and only visible on a genuine delete failure; cloud-creation polling also makes one fewer API call per iteration, a debug-only resources lookup that previously fed a log line and nothing else.
 ```
