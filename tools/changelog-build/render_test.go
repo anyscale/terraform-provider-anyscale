@@ -139,9 +139,33 @@ func TestFold_NoNextHeadingReplacesToEOF(t *testing.T) {
 	}
 }
 
-func TestFold_MissingMarkerErrors(t *testing.T) {
-	if _, err := Fold("# Changelog\n\nno marker here\n", "x"); err == nil {
-		t.Fatal("expected an error when ## [Unreleased] is missing, got nil")
+func TestFold_MissingMarkerInsertsFreshOneBeforeNewestVersion(t *testing.T) {
+	// Finalize no longer leaves a standing empty ## [Unreleased] behind, so this
+	// is the normal state of CHANGELOG.md between releases. A real fragment to
+	// fold must still produce a correct, freshly-created Unreleased section,
+	// placed immediately above the newest version heading.
+	changelog := "# Changelog\n\nintro\n\n## [0.2.0] - 2026-08-01\n\nstuff\n"
+	got, err := Fold(changelog, "### Added\n\n- new thing\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "# Changelog\n\nintro\n\n## [Unreleased]\n\n### Added\n\n- new thing\n\n## [0.2.0] - 2026-08-01\n\nstuff\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestFold_MissingMarkerAndEmptyBodyIsANoOp(t *testing.T) {
+	// No Unreleased heading, and nothing to fold: don't manufacture an empty
+	// heading just to have one - that's the exact cosmetic problem this design
+	// avoids. The changelog is returned byte-for-byte unchanged.
+	changelog := "# Changelog\n\n## [0.2.0] - 2026-08-01\n\nstuff\n"
+	got, err := Fold(changelog, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != changelog {
+		t.Errorf("expected no-op, got:\n%q\nwant:\n%q", got, changelog)
 	}
 }
 
@@ -161,15 +185,21 @@ func TestFold_RunningTwiceWithSameInputIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestFinalize_RenamesUnreleasedAndInsertsFreshOne(t *testing.T) {
+func TestFinalize_RenamesUnreleasedInPlaceWithNoFreshOne(t *testing.T) {
+	// The changelog must lead with the newest real version - no empty
+	// ## [Unreleased] placeholder left standing above it. Fold is what brings
+	// Unreleased back, the next time there is a real fragment to fold in.
 	changelog := "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
 	newChangelog, notes, err := Finalize(changelog, "0.2.0", "2026-08-01")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantChangelog := "# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-08-01\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
+	wantChangelog := "# Changelog\n\n## [0.2.0] - 2026-08-01\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
 	if newChangelog != wantChangelog {
 		t.Errorf("changelog:\ngot:\n%q\nwant:\n%q", newChangelog, wantChangelog)
+	}
+	if strings.Contains(newChangelog, unreleasedMarker) {
+		t.Errorf("no ## [Unreleased] heading should remain after finalize:\n%s", newChangelog)
 	}
 	wantNotes := "### Added\n\n- new thing"
 	if notes != wantNotes {
@@ -262,8 +292,8 @@ func TestFinalize_NoFooterSectionLeavesBodyIntact(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// The body transform (rename + fresh Unreleased) must still be correct...
-	wantChangelog := "# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-08-01\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
+	// The body transform (rename in place, no fresh Unreleased) must still be correct...
+	wantChangelog := "# Changelog\n\n## [0.2.0] - 2026-08-01\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
 	if newChangelog != wantChangelog {
 		t.Errorf("body should be finalized unchanged when there is no footer.\ngot:\n%q\nwant:\n%q", newChangelog, wantChangelog)
 	}
