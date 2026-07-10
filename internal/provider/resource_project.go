@@ -181,7 +181,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 						},
 						"permission_level": schema.StringAttribute{
 							Required:            true,
-							MarkdownDescription: "Permission level granted to the collaborator: `owner`, `write`, or `readonly`. See the [Project guide](../guides/project.md) for how this differs from `anyscale_policy_binding`.",
+							MarkdownDescription: "Permission level granted to the collaborator: `owner`, `write`, or `readonly`. See the [Project guide](../guides/project.md) for more on managing project collaborators.",
 							Validators: []validator.String{
 								stringvalidator.OneOf("owner", "write", "readonly"),
 							},

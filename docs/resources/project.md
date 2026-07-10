@@ -84,7 +84,7 @@ output "project_directory_name" {
 Required:
 
 - `email` (String) Email address of the collaborator.
-- `permission_level` (String) Permission level granted to the collaborator: `owner`, `write`, or `readonly`. See the [Project guide](../guides/project.md) for how this differs from `anyscale_policy_binding`.
+- `permission_level` (String) Permission level granted to the collaborator: `owner`, `write`, or `readonly`. See the [Project guide](../guides/project.md) for more on managing project collaborators.
 
 Read-Only:
 

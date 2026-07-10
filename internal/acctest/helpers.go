@@ -1156,13 +1156,9 @@ var (
 	// Cache for a read-only test project ID. Only for tests that merely read
 	// a project (e.g. data source lookups) — never for tests that create,
 	// update, or replace project-scoped state, since this may resolve to a
-	// shared, real project. Those should call createEphemeralTestProject instead.
+	// shared, real project. Those should call CreateEphemeralTestProject instead.
 	cachedTestProjectID string
 	testProjectIDMutex  sync.Mutex
-
-	// Cache for a test user group ID, used e.g. as a policy binding principal.
-	cachedTestUserGroupID string
-	testUserGroupIDMutex  sync.Mutex
 )
 
 // GetTestProjectID returns a project ID for READ-ONLY acceptance tests, with
@@ -1172,9 +1168,9 @@ var (
 //     present, stable across runs), else the first result.
 //
 // Do not use this for tests that mutate or replace state scoped to the
-// project itself (e.g. policy bindings, which replace all bindings on the
-// target resource) — call createEphemeralTestProject instead so the test
-// never touches a shared/real project.
+// project itself — this may resolve to a shared, real project. Call
+// CreateEphemeralTestProject instead so the test never touches one it does
+// not own.
 func GetTestProjectID(t *testing.T) string {
 	testProjectIDMutex.Lock()
 	defer testProjectIDMutex.Unlock()
@@ -1245,84 +1241,12 @@ func GetTestProjectID(t *testing.T) string {
 	return cachedTestProjectID
 }
 
-// GetTestUserGroupID returns a user group ID for acceptance tests that need
-// to reference an existing group (e.g. as a policy binding principal), with
-// priority:
-//  1. ANYSCALE_TEST_USER_GROUP_ID environment variable (explicit override)
-//  2. Auto-discover: list user groups, use the first non-deleted result.
-//
-// User groups are normally synced from an IdP via SCIM rather than created by
-// tests, so unlike clouds/projects there is no ephemeral-creation fallback:
-// if the org has no groups, the test skips.
-func GetTestUserGroupID(t *testing.T) string {
-	testUserGroupIDMutex.Lock()
-	defer testUserGroupIDMutex.Unlock()
-
-	if cachedTestUserGroupID != "" {
-		return cachedTestUserGroupID
-	}
-
-	if envGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID"); envGroupID != "" {
-		t.Logf("Using test user group ID from ANYSCALE_TEST_USER_GROUP_ID: %s", envGroupID)
-		cachedTestUserGroupID = envGroupID
-		return cachedTestUserGroupID
-	}
-
-	client, err := GetTestClient()
-	if err != nil {
-		t.Skip("No user group available - failed to get test client.")
-		return ""
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/user_groups", nil)
-	if err != nil {
-		t.Skip("No user group available - failed to list user groups.")
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		t.Skip("No user group available - API error listing user groups.")
-		return ""
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Skip("No user group available - failed to read response.")
-		return ""
-	}
-
-	var groupsResp struct {
-		Results []struct {
-			ID        string  `json:"id"`
-			Name      string  `json:"name"`
-			DeletedAt *string `json:"deleted_at"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &groupsResp); err != nil {
-		t.Skip("No user group available - failed to parse response.")
-		return ""
-	}
-
-	for _, g := range groupsResp.Results {
-		if g.DeletedAt == nil {
-			t.Logf("Using user group for test: %s (ID: %s)", g.Name, g.ID)
-			cachedTestUserGroupID = g.ID
-			return cachedTestUserGroupID
-		}
-	}
-
-	t.Skip("No user group available - org has no active user groups. Set ANYSCALE_TEST_USER_GROUP_ID, or ensure SCIM group sync has run.")
-	return ""
-}
-
-// createEphemeralTestProject creates a minimal disposable project under a
+// CreateEphemeralTestProject creates a minimal disposable project under a
 // resolved test cloud, named with the "tfacc-" prefix so the existing project
-// sweeper cleans it up if test cleanup is interrupted. Tests that mutate
-// project-scoped state (e.g. policy bindings, which replace all bindings on
-// the target resource) should use this instead of GetTestProjectID, so they
-// never touch a shared/real project.
-func createEphemeralTestProject(t *testing.T) (projectID string, projectName string, err error) {
+// sweeper cleans it up if test cleanup is interrupted. Tests that mutate or
+// replace project-scoped state should use this instead of GetTestProjectID,
+// so they never touch a shared/real project.
+func CreateEphemeralTestProject(t *testing.T) (projectID string, projectName string, err error) {
 	client, err := GetTestClient()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get test client: %w", err)
@@ -1330,7 +1254,7 @@ func createEphemeralTestProject(t *testing.T) (projectID string, projectName str
 
 	parentCloudID := GetTestCloudID(t)
 
-	projectName = UniqueName(t, "policy-binding")
+	projectName = UniqueName(t, "project")
 	t.Logf("Creating ephemeral test project: %s (parent cloud: %s)", projectName, parentCloudID)
 
 	createReq := struct {

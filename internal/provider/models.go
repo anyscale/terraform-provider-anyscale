@@ -341,43 +341,6 @@ type OrganizationCollaboratorsListResponse struct {
 	} `json:"metadata"`
 }
 
-// Policy Binding API Models
-
-// SetPolicyBindingRequest is the request body for setting policy bindings
-type SetPolicyBindingRequest struct {
-	Bindings []PolicyBindingEntry `json:"bindings"`
-}
-
-// PolicyBindingEntry represents a single role binding
-type PolicyBindingEntry struct {
-	RoleName   string   `json:"role_name"`
-	Principals []string `json:"principals"` // List of user group IDs (ug_*)
-}
-
-// PolicyBindingResponse represents a single policy binding from the API
-type PolicyBindingResponse struct {
-	Result PolicyBindingResult `json:"result"`
-}
-
-// PolicyBindingResult represents the policy data
-type PolicyBindingResult struct {
-	Bindings   []PolicyBindingEntry `json:"bindings"`
-	SyncStatus *string              `json:"sync_status,omitempty"`
-}
-
-// PolicyBindingsListResponse represents the response from listing all policies
-type PolicyBindingsListResponse struct {
-	Results []PolicyBindingWithMetadata `json:"results"`
-}
-
-// PolicyBindingWithMetadata includes resource identification
-type PolicyBindingWithMetadata struct {
-	ResourceID   string               `json:"resource_id"`
-	ResourceType string               `json:"resource_type"`
-	Bindings     []PolicyBindingEntry `json:"bindings"`
-	SyncStatus   string               `json:"sync_status"`
-}
-
 // Machine Pool API Models
 
 // CreateMachinePoolRequest is the request body for creating a machine pool

@@ -77,7 +77,7 @@ import (
 // closes a second gap Required alone left open: Required:true stops an
 // OMITTED name but not an explicitly EMPTY one, since "" is a valid
 // "present" value -- so name also gains a stringvalidator.LengthAtLeast(1)
-// validator (forge, b500175, same pattern as resource_policy_binding.go:123)
+// validator (forge, b500175)
 // to reject "" at plan time too. Together the two checks mean the provider
 // can never again send the backend an empty name by construction, not by
 // convention -- closing CR1's real-backend echo defect (see above) at the
@@ -517,7 +517,7 @@ resource "anyscale_cloud_resource" "b" {
 // OMITTED name (see BothOmitName_RequiredArgumentError above) but does not
 // stop an explicitly EMPTY one -- name = "" is a valid "present" value under
 // plain Required. The schema's stringvalidator.LengthAtLeast(1)
-// (resource_cloud_resource.go, same pattern as resource_policy_binding.go:123)
+// (resource_cloud_resource.go)
 // closes that second door: an empty name must fail at plan time too, before
 // any add_resource call, so the provider can never again send the backend
 // an empty name -- the exact precondition of CR1's original real-backend
