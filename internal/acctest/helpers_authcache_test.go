@@ -24,6 +24,23 @@ func resetAuthProbeCache(t *testing.T) {
 	})
 }
 
+// resetAllConfiguredCloudsCache clears GetAllConfiguredClouds's package-level
+// cache and restores it after the test, for the same reason as
+// resetAuthProbeCache above.
+func resetAllConfiguredCloudsCache(t *testing.T) {
+	t.Helper()
+	allConfiguredCloudsMutex.Lock()
+	origClouds, origCached := cachedAllConfiguredClouds, allConfiguredCloudsCached
+	cachedAllConfiguredClouds, allConfiguredCloudsCached = nil, false
+	allConfiguredCloudsMutex.Unlock()
+
+	t.Cleanup(func() {
+		allConfiguredCloudsMutex.Lock()
+		cachedAllConfiguredClouds, allConfiguredCloudsCached = origClouds, origCached
+		allConfiguredCloudsMutex.Unlock()
+	})
+}
+
 func TestValidateAuthOrSkip_CachesA401AndDoesNotReprobe(t *testing.T) {
 	resetAuthProbeCache(t)
 
@@ -80,15 +97,7 @@ func TestValidateAuthOrSkip_DoesNotCacheARequestError(t *testing.T) {
 }
 
 func TestGetAllConfiguredClouds_CachesAndDoesNotReprobe(t *testing.T) {
-	allConfiguredCloudsMutex.Lock()
-	origClouds, origCached := cachedAllConfiguredClouds, allConfiguredCloudsCached
-	cachedAllConfiguredClouds, allConfiguredCloudsCached = nil, false
-	allConfiguredCloudsMutex.Unlock()
-	t.Cleanup(func() {
-		allConfiguredCloudsMutex.Lock()
-		cachedAllConfiguredClouds, allConfiguredCloudsCached = origClouds, origCached
-		allConfiguredCloudsMutex.Unlock()
-	})
+	resetAllConfiguredCloudsCache(t)
 
 	var listCalls int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -120,5 +129,93 @@ func TestGetAllConfiguredClouds_CachesAndDoesNotReprobe(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(&listCalls); got != 1 {
 		t.Errorf("list-clouds request count = %d, want exactly 1 - the second call should have used the cache", got)
+	}
+}
+
+// TestGetAllConfiguredClouds_TransientResourcesCheckFailureNotCached
+// reproduces the exact gap assayer found in review: a per-cloud resources
+// check that fails transiently (not a confirmed absence of resources) must
+// not get baked into the cache, or a single blip would silently and
+// permanently exclude a genuinely healthy cloud for the rest of the whole
+// test binary run.
+func TestGetAllConfiguredClouds_TransientResourcesCheckFailureNotCached(t *testing.T) {
+	resetAllConfiguredCloudsCache(t)
+
+	var resourcesCalls int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/clouds":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"results":[{"id":"cld_1","name":"test-cloud","provider":"AWS","compute_stack":"VM"}]}`))
+		case "/api/v2/clouds/cld_1/resources":
+			call := atomic.AddInt64(&resourcesCalls, 1)
+			if call == 1 {
+				// First check: a transient failure, not a real "no resources"
+				// answer.
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			// Every later check: the cloud is genuinely healthy.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"results":[{"id":"res_1"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("ANYSCALE_API_URL", server.URL)
+	t.Setenv("ANYSCALE_CLI_TOKEN", "test-token")
+
+	first := GetAllConfiguredClouds(t)
+	if len(first) != 0 {
+		t.Fatalf("first call = %+v, want zero clouds - the transient 500 was correctly inconclusive this round", first)
+	}
+
+	second := GetAllConfiguredClouds(t)
+	if len(second) != 1 || second[0].ID != "cld_1" {
+		t.Fatalf("second call = %+v, want cld_1 - the first round must not have been cached, so this call gets a real re-check and sees the now-healthy cloud", second)
+	}
+
+	if got := atomic.LoadInt64(&resourcesCalls); got != 2 {
+		t.Errorf("resources-check request count = %d, want exactly 2 - the second GetAllConfiguredClouds call must have actually re-probed, not served a stale cached empty result", got)
+	}
+}
+
+// TestGetAllConfiguredClouds_ConfirmedUnhealthyCloudIsCached proves the fix
+// above did not overcorrect: a real, definitive "no resources" answer (a
+// clean 200 with an empty list, not an error) is a genuine result and must
+// still be cached like any other definitive outcome.
+func TestGetAllConfiguredClouds_ConfirmedUnhealthyCloudIsCached(t *testing.T) {
+	resetAllConfiguredCloudsCache(t)
+
+	var resourcesCalls int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/clouds":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"results":[{"id":"cld_1","name":"test-cloud","provider":"AWS","compute_stack":"VM"}]}`))
+		case "/api/v2/clouds/cld_1/resources":
+			atomic.AddInt64(&resourcesCalls, 1)
+			// Confirmed, definitive: this cloud genuinely has no resources.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("ANYSCALE_API_URL", server.URL)
+	t.Setenv("ANYSCALE_CLI_TOKEN", "test-token")
+
+	first := GetAllConfiguredClouds(t)
+	second := GetAllConfiguredClouds(t)
+
+	if len(first) != 0 || len(second) != 0 {
+		t.Fatalf("first = %+v, second = %+v, want both empty - the cloud is confirmed to have no resources", first, second)
+	}
+	if got := atomic.LoadInt64(&resourcesCalls); got != 1 {
+		t.Errorf("resources-check request count = %d, want exactly 1 - a confirmed definitive answer must still be cached, not re-probed every call", got)
 	}
 }

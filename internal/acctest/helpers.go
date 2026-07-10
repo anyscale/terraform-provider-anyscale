@@ -877,6 +877,7 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	}
 
 	var clouds []CloudInfo
+	allDefinitive := true
 
 	// Collect all clouds with a healthy resource. GET /api/v2/clouds never
 	// embeds cloud_resources inline (confirmed against the real API: the key
@@ -892,7 +893,17 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 		if !isKnownProvider(cloud.Provider, computeStack) {
 			continue
 		}
-		if !cloudHasResources(client, cloud.ID) {
+		hasResources, definitive := cloudHasResources(client, cloud.ID)
+		if !definitive {
+			// Transient failure, not a confirmed absence of resources - do
+			// not let this round's result get cached (see below), so a
+			// later call gets a real chance to see this cloud once the
+			// blip clears, instead of it being silently excluded forever.
+			allDefinitive = false
+			t.Logf("  skipping %s (ID: %s): could not determine resource status (transient error), not caching this result", cloud.Name, cloud.ID)
+			continue
+		}
+		if !hasResources {
 			t.Logf("  skipping %s (ID: %s): no cloud resources configured", cloud.Name, cloud.ID)
 			continue
 		}
@@ -924,32 +935,43 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 		t.Logf("  - %s (ID: %s, provider: %s, compute_stack: %s)", c.Name, c.ID, c.Provider, c.ComputeStack)
 	}
 
-	// Only a genuine successful resolution is cached - the early returns above
-	// (client/list/read/parse failure) are transient and must not be baked in,
-	// so a later call gets a chance to succeed.
-	cachedAllConfiguredClouds = clouds
-	allConfiguredCloudsCached = true
+	// Only a genuine, fully-definitive resolution is cached - the early
+	// returns above (client/list/read/parse failure) and any per-cloud
+	// transient resources-check failure (allDefinitive) must not be baked
+	// in, so a later call gets a real chance to succeed instead of a
+	// transient blip silently and permanently excluding a healthy cloud.
+	if allDefinitive {
+		cachedAllConfiguredClouds = clouds
+		allConfiguredCloudsCached = true
+	}
 	return clouds
 }
 
 // cloudHasResources reports whether cloudID has at least one cloud resource
-// configured, via GET /api/v2/clouds/{id}/resources. The list-clouds endpoint
-// (GET /api/v2/clouds) never embeds cloud_resources inline, so this dedicated
-// per-cloud lookup is the only reliable way to detect a usable cloud; treat
-// any error as "no resources" so a transient failure just excludes that one
-// cloud rather than failing the whole discovery pass.
-func cloudHasResources(client *provider.Client, cloudID string) bool {
+// configured, via GET /api/v2/clouds/{id}/resources, and whether that answer
+// is definitive. The list-clouds endpoint (GET /api/v2/clouds) never embeds
+// cloud_resources inline, so this dedicated per-cloud lookup is the only
+// reliable way to detect a usable cloud.
+//
+// definitive is false on any request/read/parse error or non-200 - the
+// caller must treat that as "unknown", not as a confirmed absence of
+// resources: GetAllConfiguredClouds caches its overall result, and baking an
+// inconclusive per-cloud answer into that cache would silently and
+// permanently exclude a genuinely healthy cloud after one transient blip,
+// for the rest of the whole test binary run (100+ call sites), rather than
+// just costing that one call the way it did before caching existed.
+func cloudHasResources(client *provider.Client, cloudID string) (hasResources bool, definitive bool) {
 	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
-		return false
+		return false, false
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false
+		return false, false
 	}
 	var resourcesResp struct {
 		Results []struct {
@@ -957,9 +979,9 @@ func cloudHasResources(client *provider.Client, cloudID string) bool {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &resourcesResp); err != nil {
-		return false
+		return false, false
 	}
-	return len(resourcesResp.Results) > 0
+	return len(resourcesResp.Results) > 0, true
 }
 
 // GetComputeConfigCloudID returns the ID of a cloud suitable for creating
