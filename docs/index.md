@@ -49,12 +49,12 @@ provider "anyscale" {
 
 ## Quick Start
 
-Create a minimal [Compute Config](resources/compute_config.md) in an existing Anyscale cloud.
-Omitting `worker_nodes` lets Anyscale auto-select workers for your workload.
+Create a minimal [Compute Config](resources/compute_config.md) with a single head node in an
+existing Anyscale cloud. This is a valid starting point on its own.
 
 ```terraform
-# Create a minimal compute configuration in an existing Anyscale cloud.
-# Omitting worker_nodes lets Anyscale auto-select workers for your workload.
+# A minimal compute config with a single head node, in an existing Anyscale
+# cloud. Add a worker_nodes block to define autoscaling worker groups.
 resource "anyscale_compute_config" "example" {
   name       = "my-first-compute-config"
   cloud_name = "my-anyscale-cloud" # name of a cloud already registered in Anyscale
@@ -65,7 +65,9 @@ resource "anyscale_compute_config" "example" {
 }
 ```
 
-Replace `my-anyscale-cloud` with the name of a cloud already registered in your Anyscale organization.
+Replace `my-anyscale-cloud` with the name of a cloud already registered in your Anyscale
+organization. To scale out, add a `worker_nodes` block - see the
+[Compute Config resource page](resources/compute_config.md) for examples.
 
 ## Authentication
 
