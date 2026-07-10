@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-10
+
+### Changed
+
+- provider: Delete-failure diagnostics on anyscale_cloud, anyscale_organization_collaborator, anyscale_organization_invitation, and anyscale_policy_binding now use a shared error helpers title and wording instead of each resources own custom phrasing, with the underlying status and body unchanged and only visible on a genuine delete failure; cloud-creation polling also makes one fewer API call per iteration, a debug-only resources lookup that previously fed a log line and nothing else.
+
+### Removed
+
+- provider: Remove seven unused internal helper functions with no remaining callers; no user-visible behavior change.
+
+### Fixed
+
+- data-source/anyscale_policy_binding: Correct the `role_name` description for Cloud-scoped bindings; it previously listed `write` as a valid value, but the enforced set is `collaborator`/`readonly`.
+- data-source/anyscale_policy_bindings: Correct the generic `role_name` description to list the actual valid values per resource type (`collaborator`/`readonly` for Cloud, `owner`/`write`/`readonly` for Project).
+
 ## [0.3.3] - 2026-07-10
 
 ### Fixed
@@ -409,7 +424,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.4
 [0.3.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.3
 [0.3.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.2
 [0.3.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.1
