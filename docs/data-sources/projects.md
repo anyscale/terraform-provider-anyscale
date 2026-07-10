@@ -64,4 +64,3 @@ Read-Only:
 - `is_default` (Boolean) Whether this is the default project for the organization.
 - `last_used_cloud_id` (String) The ID of the cloud last used by this project.
 - `name` (String) The name of the project.
-- `organization_id` (String) The ID of the organization this project belongs to.

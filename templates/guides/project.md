@@ -40,6 +40,34 @@ with each other — a project can have both individual collaborators and group p
 once — but don't use both to manage the *same* group's access, since only `anyscale_policy_binding`
 will ever remove a group binding on apply.
 
+## Importing an existing project
+
+`terraform import anyscale_project.example <project_id>` recovers the project's full, current
+`collaborator` set from the API — every real collaborator, not just the ones you've declared in
+configuration so far. This includes collaborators added outside Terraform, and the collaborator the
+API automatically adds for the project's creator.
+
+Every project has this creator-owner collaborator whether or not you ever write a `collaborator`
+block for it: the API adds it automatically at creation time. A project managed with no
+`collaborator` blocks at all never shows this collaborator in state during ordinary use — the
+provider only fetches collaborators when your configuration declares at least one, specifically to
+avoid a perpetual diff against a collaborator nothing in your config is managing — but import has no
+prior configuration to protect, so it surfaces every real collaborator, creator-owner included.
+
+**After importing a project with existing collaborators, add a matching `collaborator` block for
+every collaborator that import brought into state — the creator-owner one too.** The `collaborator`
+list is authoritative: on the next `apply`, any real collaborator missing from your configuration is
+treated as one to remove, and the provider calls the API to remove their access — for the
+creator-owner collaborator, that can mean revoking the very access that created the project.
+Reconcile your configuration with the imported state before your next `apply`, not after.
+
+If you already imported a project with real collaborators using a provider version older than
+v0.4.0, upgrading alone does not fix it: the empty `collaborator` list from that import is already
+saved in your state, and ordinary refreshes only re-fetch collaborators when state already has some
+— once it's empty, it stays empty on its own. Re-import that resource to pick up the real
+collaborator set: `terraform state rm anyscale_project.<name>` followed by
+`terraform import anyscale_project.<name> <project_id>`.
+
 ## Upgrading `permission_level` from `writer` to `write`
 
 The only valid `permission_level` values on `anyscale_project`'s `collaborator` block are `owner`,
