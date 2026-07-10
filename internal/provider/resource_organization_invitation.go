@@ -345,33 +345,11 @@ func (r *OrganizationInvitationResource) Delete(ctx context.Context, req resourc
 		"invitation_id": invitationID,
 	})
 
-	// Invalidate the invitation
-	httpResp, err := r.client.DoRequest(ctx, "POST", fmt.Sprintf("/api/v2/organization_invitations/%s/invalidate", invitationID), nil)
+	// Invalidate the invitation - 404 is OK (already gone)
+	_, err := DoRequestRaw(ctx, r.client, "POST", fmt.Sprintf("/api/v2/organization_invitations/%s/invalidate", invitationID), nil,
+		http.StatusOK, http.StatusAccepted, http.StatusNoContent, http.StatusNotFound)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error invalidating invitation",
-			fmt.Sprintf("Could not invalidate invitation %s: %s", invitationID, err.Error()),
-		)
-		return
-	}
-	defer func() { _ = httpResp.Body.Close() }()
-
-	// Handle response
-	if httpResp.StatusCode != http.StatusOK &&
-		httpResp.StatusCode != http.StatusAccepted &&
-		httpResp.StatusCode != http.StatusNoContent &&
-		httpResp.StatusCode != http.StatusNotFound {
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			tflog.Error(ctx, "Failed to read response", map[string]any{"error": err.Error()})
-			resp.Diagnostics.AddError("Read Error", err.Error())
-			return
-		}
-
-		resp.Diagnostics.AddError(
-			"Error invalidating invitation",
-			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(body)),
-		)
+		AddAPIError(&resp.Diagnostics, fmt.Sprintf("invalidate invitation %s", invitationID), err)
 		return
 	}
 

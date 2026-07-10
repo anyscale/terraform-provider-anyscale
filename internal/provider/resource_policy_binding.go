@@ -332,31 +332,11 @@ func (r *PolicyBindingResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 
-	// Send PUT request with empty bindings
-	httpResp, err := r.client.DoRequest(ctx, "PUT", fmt.Sprintf("/api/v2/policy/%s/%s", resourceType, resourceID), strings.NewReader(string(jsonData)))
+	// Send PUT request with empty bindings - 404 is OK (already gone)
+	_, err = DoRequestRaw(ctx, r.client, "PUT", fmt.Sprintf("/api/v2/policy/%s/%s", resourceType, resourceID), strings.NewReader(string(jsonData)),
+		http.StatusOK, http.StatusAccepted, http.StatusNoContent, http.StatusNotFound)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error deleting policy binding",
-			fmt.Sprintf("Could not delete policy binding: %s", err.Error()),
-		)
-		return
-	}
-	defer func() { _ = httpResp.Body.Close() }()
-
-	// Handle response - 404 is OK (already gone)
-	if httpResp.StatusCode != http.StatusOK &&
-		httpResp.StatusCode != http.StatusAccepted &&
-		httpResp.StatusCode != http.StatusNoContent &&
-		httpResp.StatusCode != http.StatusNotFound {
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			resp.Diagnostics.AddError("Read Error", err.Error())
-			return
-		}
-		resp.Diagnostics.AddError(
-			"Error deleting policy binding",
-			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(body)),
-		)
+		AddAPIError(&resp.Diagnostics, "delete policy binding", err)
 		return
 	}
 
