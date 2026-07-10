@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -20,8 +19,6 @@ func init() {
 		F:    sweepComputeConfigs,
 	})
 }
-
-var sweepComputeConfigPrefixes = []string{"tfacc-", "tf-test-", "tfprovider-"}
 
 const sweepComputeConfigDefaultMinAge = 2 * time.Hour
 
@@ -46,13 +43,9 @@ func sweepComputeConfigs(_ string) error {
 		return nil
 	}
 
-	minAge := sweepComputeConfigDefaultMinAge
-	if raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE"); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil {
-			return fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, parseErr)
-		}
-		minAge = parsed
+	minAge, err := resolveSweepMinAge(sweepComputeConfigDefaultMinAge)
+	if err != nil {
+		return err
 	}
 	cutoff := time.Now().Add(-minAge)
 
@@ -63,7 +56,7 @@ func sweepComputeConfigs(_ string) error {
 	// org when most are unrelated.
 	seen := make(map[string]struct{})
 	var candidates []sweepComputeConfigResult
-	for _, prefix := range sweepComputeConfigPrefixes {
+	for _, prefix := range sweepableResourcePrefixes {
 		results, listErr := searchComputeConfigsByContains(ctx, client, prefix)
 		if listErr != nil {
 			return listErr
@@ -85,7 +78,7 @@ func sweepComputeConfigs(_ string) error {
 		if c.Anonymous {
 			continue
 		}
-		if !hasAnyPrefix(c.Name, sweepComputeConfigPrefixes) {
+		if !hasAnyPrefix(c.Name, sweepableResourcePrefixes) {
 			continue
 		}
 

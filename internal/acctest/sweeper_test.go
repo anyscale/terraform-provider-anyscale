@@ -1,8 +1,10 @@
 package acctest
 
 import (
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -20,4 +22,26 @@ func TestMain(m *testing.M) {
 // "dry run" archived 96 real container images.
 func isSweepDryRun() bool {
 	return os.Getenv("ANYSCALE_SWEEP_DRY_RUN") != ""
+}
+
+// sweepableResourcePrefixes are the only name prefixes any sweeper will ever
+// delete - a safety invariant shared across resource types (compute_config,
+// container_image, project, global_resource_scheduler). anyscale_cloud's own
+// sweeper additionally sweeps "tfacc-ephemeral-", so it keeps its own,
+// separate prefix list rather than sharing this one.
+var sweepableResourcePrefixes = []string{"tfacc-", "tf-test-", "tfprovider-"}
+
+// resolveSweepMinAge returns defaultMinAge, or the ANYSCALE_SWEEP_MIN_AGE
+// override if set (time.ParseDuration syntax). Every sweeper uses this same
+// age guard to avoid racing live tests.
+func resolveSweepMinAge(defaultMinAge time.Duration) (time.Duration, error) {
+	raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE")
+	if raw == "" {
+		return defaultMinAge, nil
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, err)
+	}
+	return parsed, nil
 }

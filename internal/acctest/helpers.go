@@ -38,6 +38,18 @@ var (
 	cachedAnyCloudID string
 	anyCloudIDMutex  sync.Mutex
 
+	// Cache for GetAllConfiguredClouds - avoids repeating its list-clouds-then
+	// per-cloud-resources-check API calls on every call site across a test run.
+	cachedAllConfiguredClouds []CloudInfo
+	allConfiguredCloudsCached bool
+	allConfiguredCloudsMutex  sync.Mutex
+
+	// Cache for ValidateAuthOrSkip's live probe - see its doc comment for why
+	// only a definitive answer (not a request error) is cached.
+	authProbeDone    bool
+	authProbeInvalid bool
+	authProbeMutex   sync.Mutex
+
 	// Track ephemeral clouds created by tests for cleanup. Keyed by cloud ID
 	// so concurrent createEphemeralTestCloud calls do not clobber each other.
 	ephemeralClouds      = map[string]ephemeralCloud{}
@@ -660,11 +672,6 @@ func (i InstanceTypeSet) IsValid() bool {
 	return i.Small != "" && i.Medium != ""
 }
 
-// IsK8s returns true if this instance type set is for a K8S cloud
-func (i InstanceTypeSet) IsK8s() bool {
-	return i.ComputeStack == "K8S"
-}
-
 // normalizeComputeStack returns a normalized compute stack value.
 // Empty string defaults to "VM" for backwards compatibility.
 func normalizeComputeStack(computeStack string) string {
@@ -817,7 +824,20 @@ func GetConfiguredCloudID(t *testing.T) string {
 // GetAllConfiguredClouds returns all clouds that have cloud resources configured.
 // This is useful for running tests across multiple cloud types (AWS VM, GCP VM, AWS K8S, etc.).
 // Returns an empty slice if no clouds are available.
+//
+// The result is cached for the duration of the test binary run (same
+// assumption GetTestCloudID/GetAnyCloudID already make: acceptance tests
+// don't mutate the shared cloud fleet mid-run outside their own tracked
+// ephemeral clouds), since this does a full list-clouds call plus one
+// per-cloud resources check for every candidate.
 func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
+	allConfiguredCloudsMutex.Lock()
+	defer allConfiguredCloudsMutex.Unlock()
+
+	if allConfiguredCloudsCached {
+		return cachedAllConfiguredClouds
+	}
+
 	client, err := GetTestClient()
 	if err != nil {
 		t.Logf("Failed to get test client: %v", err)
@@ -857,6 +877,7 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	}
 
 	var clouds []CloudInfo
+	allDefinitive := true
 
 	// Collect all clouds with a healthy resource. GET /api/v2/clouds never
 	// embeds cloud_resources inline (confirmed against the real API: the key
@@ -872,7 +893,17 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 		if !isKnownProvider(cloud.Provider, computeStack) {
 			continue
 		}
-		if !cloudHasResources(client, cloud.ID) {
+		hasResources, definitive := cloudHasResources(client, cloud.ID)
+		if !definitive {
+			// Transient failure, not a confirmed absence of resources - do
+			// not let this round's result get cached (see below), so a
+			// later call gets a real chance to see this cloud once the
+			// blip clears, instead of it being silently excluded forever.
+			allDefinitive = false
+			t.Logf("  skipping %s (ID: %s): could not determine resource status (transient error), not caching this result", cloud.Name, cloud.ID)
+			continue
+		}
+		if !hasResources {
 			t.Logf("  skipping %s (ID: %s): no cloud resources configured", cloud.Name, cloud.ID)
 			continue
 		}
@@ -904,27 +935,43 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 		t.Logf("  - %s (ID: %s, provider: %s, compute_stack: %s)", c.Name, c.ID, c.Provider, c.ComputeStack)
 	}
 
+	// Only a genuine, fully-definitive resolution is cached - the early
+	// returns above (client/list/read/parse failure) and any per-cloud
+	// transient resources-check failure (allDefinitive) must not be baked
+	// in, so a later call gets a real chance to succeed instead of a
+	// transient blip silently and permanently excluding a healthy cloud.
+	if allDefinitive {
+		cachedAllConfiguredClouds = clouds
+		allConfiguredCloudsCached = true
+	}
 	return clouds
 }
 
 // cloudHasResources reports whether cloudID has at least one cloud resource
-// configured, via GET /api/v2/clouds/{id}/resources. The list-clouds endpoint
-// (GET /api/v2/clouds) never embeds cloud_resources inline, so this dedicated
-// per-cloud lookup is the only reliable way to detect a usable cloud; treat
-// any error as "no resources" so a transient failure just excludes that one
-// cloud rather than failing the whole discovery pass.
-func cloudHasResources(client *provider.Client, cloudID string) bool {
+// configured, via GET /api/v2/clouds/{id}/resources, and whether that answer
+// is definitive. The list-clouds endpoint (GET /api/v2/clouds) never embeds
+// cloud_resources inline, so this dedicated per-cloud lookup is the only
+// reliable way to detect a usable cloud.
+//
+// definitive is false on any request/read/parse error or non-200 - the
+// caller must treat that as "unknown", not as a confirmed absence of
+// resources: GetAllConfiguredClouds caches its overall result, and baking an
+// inconclusive per-cloud answer into that cache would silently and
+// permanently exclude a genuinely healthy cloud after one transient blip,
+// for the rest of the whole test binary run (100+ call sites), rather than
+// just costing that one call the way it did before caching existed.
+func cloudHasResources(client *provider.Client, cloudID string) (hasResources bool, definitive bool) {
 	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
-		return false
+		return false, false
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false
+		return false, false
 	}
 	var resourcesResp struct {
 		Results []struct {
@@ -932,9 +979,9 @@ func cloudHasResources(client *provider.Client, cloudID string) bool {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &resourcesResp); err != nil {
-		return false
+		return false, false
 	}
-	return len(resourcesResp.Results) > 0
+	return len(resourcesResp.Results) > 0, true
 }
 
 // GetComputeConfigCloudID returns the ID of a cloud suitable for creating
@@ -1348,83 +1395,6 @@ func createEphemeralTestProject(t *testing.T) (projectID string, projectName str
 	return createdID, projectName, nil
 }
 
-var (
-	// Cache for the caller's own org ID.
-	cachedTestOrgID string
-	testOrgIDMutex  sync.Mutex
-)
-
-// GetTestOrgID returns the org ID of the credential running the tests, with
-// priority:
-//  1. ANYSCALE_TEST_ORG_ID environment variable (explicit override)
-//  2. Resolve via GET /api/v2/userinfo, which returns the current user's own
-//     record including an organizations array — there is no dedicated
-//     list-organizations endpoint (confirmed 404 on guessed paths).
-//
-// Same shape already used in HCL via the anyscale_user data source with no
-// email filter (see testAccPolicyBindingDataSourceOrganizationConfig's
-// data.anyscale_user.current.organizations[0].id); this is that lookup one
-// layer lower, for tests that need the raw ID in Go rather than in config.
-func GetTestOrgID(t *testing.T) string {
-	testOrgIDMutex.Lock()
-	defer testOrgIDMutex.Unlock()
-
-	if cachedTestOrgID != "" {
-		return cachedTestOrgID
-	}
-
-	if envOrgID := os.Getenv("ANYSCALE_TEST_ORG_ID"); envOrgID != "" {
-		t.Logf("Using test org ID from ANYSCALE_TEST_ORG_ID: %s", envOrgID)
-		cachedTestOrgID = envOrgID
-		return cachedTestOrgID
-	}
-
-	client, err := GetTestClient()
-	if err != nil {
-		t.Skip("No org ID available - failed to get test client.")
-		return ""
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/userinfo", nil)
-	if err != nil {
-		t.Skip("No org ID available - failed to fetch userinfo.")
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		t.Skip("No org ID available - API error fetching userinfo.")
-		return ""
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Skip("No org ID available - failed to read userinfo response.")
-		return ""
-	}
-
-	var userInfoResp struct {
-		Result struct {
-			Organizations []struct {
-				ID string `json:"id"`
-			} `json:"organizations"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(body, &userInfoResp); err != nil {
-		t.Skip("No org ID available - failed to parse userinfo response.")
-		return ""
-	}
-
-	if len(userInfoResp.Result.Organizations) == 0 {
-		t.Skip("No org ID available - userinfo returned no organizations.")
-		return ""
-	}
-
-	t.Logf("Using org ID from userinfo: %s", userInfoResp.Result.Organizations[0].ID)
-	cachedTestOrgID = userInfoResp.Result.Organizations[0].ID
-	return cachedTestOrgID
-}
-
 // GetTestClient returns an authenticated client for testing
 func GetTestClient() (*provider.Client, error) {
 	// Get API URL from environment or use default
@@ -1473,7 +1443,26 @@ func PreCheck(t *testing.T) {
 // ValidateAuthOrSkip probes the Anyscale API with the configured token and
 // SKIPS the test if the API returns 401. Other errors (network, etc.) are
 // logged and ignored — they will surface naturally if they affect the test.
+//
+// The live probe result (valid vs. 401-invalid) is cached for the run once
+// definitively known, since this is called from PreCheck on every single
+// acceptance test (100+ call sites) and the token's validity doesn't change
+// mid-run. A request error is deliberately NOT cached - unlike an actual
+// 401, that's the same "inconclusive, try again" case the uncached version
+// already tolerated per-test, and caching it would let one transient network
+// blip silently suppress the real 401 check for every later test in the run.
 func ValidateAuthOrSkip(t *testing.T) {
+	authProbeMutex.Lock()
+	if authProbeDone {
+		invalid := authProbeInvalid
+		authProbeMutex.Unlock()
+		if invalid {
+			t.Skip("ANYSCALE_CLI_TOKEN is invalid or expired (401 from /api/v2/clouds); skipping acceptance test")
+		}
+		return
+	}
+	authProbeMutex.Unlock()
+
 	client, err := GetTestClient()
 	if err != nil {
 		t.Skipf("No usable Anyscale credentials: %v", err)
@@ -1484,6 +1473,12 @@ func ValidateAuthOrSkip(t *testing.T) {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	authProbeMutex.Lock()
+	authProbeDone = true
+	authProbeInvalid = resp.StatusCode == 401
+	authProbeMutex.Unlock()
+
 	if resp.StatusCode == 401 {
 		t.Skip("ANYSCALE_CLI_TOKEN is invalid or expired (401 from /api/v2/clouds); skipping acceptance test")
 	}

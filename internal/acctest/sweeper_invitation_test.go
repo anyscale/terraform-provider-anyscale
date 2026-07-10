@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -49,13 +48,9 @@ func sweepInvitations(_ string) error {
 		return nil
 	}
 
-	minAge := sweepInvitationDefaultMinAge
-	if raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE"); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil {
-			return fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, parseErr)
-		}
-		minAge = parsed
+	minAge, err := resolveSweepMinAge(sweepInvitationDefaultMinAge)
+	if err != nil {
+		return err
 	}
 	cutoff := time.Now().Add(-minAge)
 
