@@ -59,6 +59,7 @@ output "project_description_by_id" {
 - `directory_name` (String) The directory name used for this project's storage.
 - `is_default` (Boolean) Whether this is the default project for the organization.
 - `last_used_cloud_id` (String) The ID of the cloud last used by this project.
+- `organization_id` (String) The ID of the organization this project belongs to.
 
 <a id="nestedatt--collaborators"></a>
 ### Nested Schema for `collaborators`
@@ -67,5 +68,5 @@ Read-Only:
 
 - `email` (String) Email address of the collaborator.
 - `identity_id` (String) The identity ID of the collaborator.
-- `permission_level` (String) Permission level: 'owner', 'writer', or 'readonly'.
+- `permission_level` (String) Permission level: `owner`, `write`, or `readonly`.
 - `user_id` (String) The user ID of the collaborator.
