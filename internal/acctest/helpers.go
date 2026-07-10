@@ -1156,7 +1156,7 @@ var (
 	// Cache for a read-only test project ID. Only for tests that merely read
 	// a project (e.g. data source lookups) — never for tests that create,
 	// update, or replace project-scoped state, since this may resolve to a
-	// shared, real project.
+	// shared, real project. Those should call CreateEphemeralTestProject instead.
 	cachedTestProjectID string
 	testProjectIDMutex  sync.Mutex
 )
@@ -1167,8 +1167,10 @@ var (
 //  2. Auto-discover: list projects, prefer the org's default project (always
 //     present, stable across runs), else the first result.
 //
-// Do not use this for tests that mutate or replace project-scoped state,
-// since it may resolve to a shared, real project.
+// Do not use this for tests that mutate or replace state scoped to the
+// project itself — this may resolve to a shared, real project. Call
+// CreateEphemeralTestProject instead so the test never touches one it does
+// not own.
 func GetTestProjectID(t *testing.T) string {
 	testProjectIDMutex.Lock()
 	defer testProjectIDMutex.Unlock()
@@ -1237,6 +1239,84 @@ func GetTestProjectID(t *testing.T) string {
 	t.Logf("Using first available project for test: %s (ID: %s)", projectsResp.Results[0].Name, projectsResp.Results[0].ID)
 	cachedTestProjectID = projectsResp.Results[0].ID
 	return cachedTestProjectID
+}
+
+// CreateEphemeralTestProject creates a minimal disposable project under a
+// resolved test cloud, named with the "tfacc-" prefix so the existing project
+// sweeper cleans it up if test cleanup is interrupted. Tests that mutate or
+// replace project-scoped state should use this instead of GetTestProjectID,
+// so they never touch a shared/real project.
+func CreateEphemeralTestProject(t *testing.T) (projectID string, projectName string, err error) {
+	client, err := GetTestClient()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get test client: %w", err)
+	}
+
+	parentCloudID := GetTestCloudID(t)
+
+	projectName = UniqueName(t, "project")
+	t.Logf("Creating ephemeral test project: %s (parent cloud: %s)", projectName, parentCloudID)
+
+	createReq := struct {
+		Name          string `json:"name"`
+		ParentCloudID string `json:"parent_cloud_id"`
+		Description   string `json:"description"`
+	}{
+		Name:          projectName,
+		ParentCloudID: parentCloudID,
+		Description:   "Ephemeral project created by terraform-provider-anyscale acceptance tests",
+	}
+
+	reqBody, err := json.Marshal(createReq)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal create request: %w", err)
+	}
+
+	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/projects", strings.NewReader(string(reqBody)))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create project: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return "", "", fmt.Errorf("failed to create project (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var projectResp struct {
+		Result struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &projectResp); err != nil {
+		return "", "", fmt.Errorf("failed to parse project response: %w", err)
+	}
+
+	createdID := projectResp.Result.ID
+	t.Logf("Created ephemeral test project: %s (ID: %s)", projectName, createdID)
+
+	if os.Getenv("ANYSCALE_TEST_KEEP") == "1" {
+		t.Logf("ANYSCALE_TEST_KEEP=1: Project will be preserved after tests")
+	} else {
+		t.Cleanup(func() {
+			delResp, delErr := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/projects/%s", createdID), nil)
+			if delErr != nil {
+				t.Logf("Warning: Failed to delete ephemeral project %s: %v", createdID, delErr)
+				return
+			}
+			defer func() { _ = delResp.Body.Close() }()
+			if delResp.StatusCode != 200 && delResp.StatusCode != 202 && delResp.StatusCode != 204 && delResp.StatusCode != 404 {
+				t.Logf("Warning: Failed to delete ephemeral project %s: status %d", createdID, delResp.StatusCode)
+			}
+		})
+	}
+
+	return createdID, projectName, nil
 }
 
 // GetTestClient returns an authenticated client for testing
