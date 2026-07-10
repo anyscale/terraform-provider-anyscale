@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-10
+
+### Breaking Changes
+
+- resource/anyscale_policy_binding: This resource managed an alpha SCIM-provisioning feature that was never fully functional and has been removed; before upgrading, remove any `anyscale_policy_binding` blocks from your configuration and apply (or run `terraform destroy -target`) with your current provider version so the underlying bindings are actually cleared from Anyscale, since a plain `terraform state rm` only forgets the resource locally and leaves any real bindings in place.
+- data-source/anyscale_policy_binding: This data source belonged to the same alpha SCIM-provisioning feature as the removed `anyscale_policy_binding` resource and has been removed; delete any matching `data` blocks from your configuration.
+- data-source/anyscale_policy_bindings: This data source belonged to the same alpha SCIM-provisioning feature as the removed `anyscale_policy_binding` resource and has been removed; delete any matching `data` blocks from your configuration.
+- data-source/anyscale_user_group: This data source surfaced SCIM-synced user groups, an alpha feature that has been removed; delete any matching `data` blocks from your configuration.
+- data-source/anyscale_user_groups: This data source surfaced SCIM-synced user groups, an alpha feature that has been removed; delete any matching `data` blocks from your configuration.
+
 ## [0.4.0] - 2026-07-10
 
 ### Breaking Changes
@@ -438,7 +448,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.5.0
 [0.4.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.4.0
 [0.3.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.4
 [0.3.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.3
