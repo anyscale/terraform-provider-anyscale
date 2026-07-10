@@ -55,6 +55,6 @@ Read-Only:
 
 - `principals` (List of String) List of user group IDs (format: `ug_*`) assigned to this role.
 - `role_name` (String) The name of the role. Valid values depend on resource type:
-  - **Cloud**: `write`, `readonly`
-  - **Project**: `owner`, `write`, `readonly`
   - **Organization**: `owner`, `collaborator`
+  - **Cloud**: `collaborator`, `readonly`
+  - **Project**: `owner`, `write`, `readonly`

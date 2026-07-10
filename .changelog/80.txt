@@ -1,0 +1,9 @@
+```
+release-note:fixed
+data-source/anyscale_policy_binding: Correct the `role_name` description for Cloud-scoped bindings; it previously listed `write` as a valid value, but the enforced set is `collaborator`/`readonly`.
+```
+
+```
+release-note:fixed
+data-source/anyscale_policy_bindings: Correct the generic `role_name` description to list the actual valid values per resource type (`collaborator`/`readonly` for Cloud, `owner`/`write`/`readonly` for Project).
+```
