@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-10
+
+### Fixed
+
+- resource/anyscale_container_image_registry: corrected documentation that claimed `digest` is "stable across refreshes" and pinned because the resource is immutable — `digest` is actually a latest-build-derived value, like `build_id`, `revision`, and `name_version`, and can change on a later refresh if a new build supersedes this one outside Terraform; no behavior changed, only the docs.
+- resource/anyscale_container_image_build: `digest` could come back empty from `Create` or a Containerfile-triggered `Update` even though the build succeeded, because the backend can report status "succeeded" a few seconds before the digest itself finishes populating. Create/Update now wait (up to 30s) for the digest to settle before returning; a still-unsettled digest after that window no longer fails the apply, it proceeds with digest left null plus a warning, and self-heals on a later refresh.
+- resource/anyscale_container_image_registry: same fix as `anyscale_container_image_build` for the identical race on `Create` — `digest` could come back empty even though the underlying build succeeded. `Update` is unaffected (every optional attribute already forces replacement).
+
 ## [0.3.0] - 2026-07-09
 
 ### Breaking Changes
@@ -384,7 +392,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.1
 [0.3.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.0
 [0.2.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.2.0
 [0.1.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.2
