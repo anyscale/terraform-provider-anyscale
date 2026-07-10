@@ -422,27 +422,11 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	projectID := req.ID
 
-	// readProject only fetches collaborators when the incoming model already
-	// has some (see below) - correct for ordinary refresh, where it stops a
-	// project managed with no collaborator block from perpetually diffing
-	// against the API's auto-added creator-owner collaborator, but fatal for
-	// import: there is no prior state yet, so that heuristic can never see
-	// "was configured" and would silently drop every real collaborator, no
-	// matter how many exist. Import is the one lifecycle point where
-	// recovering them unconditionally is unambiguous - there's no prior
-	// state to confuse "recovered at import" with "never configured" (same
-	// reasoning as CC12 in resource_compute_config.go's ImportState). Fetch
-	// them here so readProject's own gate sees a real, non-empty list and
-	// keeps it fresh on every later refresh too.
-	collaborators, err := r.getCollaborators(ctx, projectID)
-	if err != nil {
-		AddAPIError(&resp.Diagnostics, "read collaborators for import", err)
-		return
-	}
-
+	// Read the project first (with a still-empty model.Collaborators, so
+	// readProject's own gate skips fetching them here) so a bad project ID
+	// surfaces as a clean "not found" instead of an unrelated-looking
+	// collaborators-endpoint error.
 	var model ProjectResourceModel
-	model.Collaborators = collaborators
-
 	if err := r.readProject(ctx, projectID, &model); err != nil {
 		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
 			AddConfigError(&resp.Diagnostics, "Project Not Found",
@@ -452,6 +436,25 @@ func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportSt
 		AddAPIError(&resp.Diagnostics, "read project for import", err)
 		return
 	}
+
+	// readProject only fetches collaborators when the incoming model already
+	// has some - correct for ordinary refresh, where it stops a project
+	// managed with no collaborator block from perpetually diffing against
+	// the API's auto-added creator-owner collaborator, but fatal for import:
+	// there is no prior state yet, so that heuristic can never see "was
+	// configured" and would silently drop every real collaborator, no
+	// matter how many exist. Import is the one lifecycle point where
+	// recovering them unconditionally is unambiguous - there's no prior
+	// state to confuse "recovered at import" with "never configured" (same
+	// reasoning as CC12 in resource_compute_config.go's ImportState). Fetch
+	// them explicitly here; every later refresh re-fetches them again on its
+	// own since this seeds a non-empty list into state.
+	collaborators, err := r.getCollaborators(ctx, projectID)
+	if err != nil {
+		AddAPIError(&resp.Diagnostics, "read collaborators for import", err)
+		return
+	}
+	model.Collaborators = collaborators
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
 }
