@@ -1043,16 +1043,88 @@ func (r *CloudResource) updateMutableFields(ctx context.Context, cloudID string,
 	return nil
 }
 
+// Backoff for the transient auto_add_user 409 retry in updateCloudBoolField,
+// same shape as waitForCloudReady (resource_cloud_resource.go): 5s initial,
+// doubling, 60s cap, 3 minutes total. These are vars rather than consts
+// purely so tests can override them to milliseconds for the duration of a
+// test (save, set, defer-restore) instead of a unit test actually waiting
+// out real minutes; production code never changes them.
+var (
+	autoAddUserRetryInitialBackoff = 5 * time.Second
+	autoAddUserRetryMaxBackoff     = 60 * time.Second
+	autoAddUserRetryTotalCap       = 3 * time.Minute
+)
+
+const autoAddUserRetryBackoffFactor = 2.0
+
 // updateCloudBoolField calls one of the cloud's single-boolean PUT routes
 // (auto_add_user or lineage_tracking_enabled). Both take the new value as a
 // query parameter with an empty body - confirmed against the generated
 // OpenAPI client (the ground truth for the wire format), since neither
 // route accepts a JSON request body.
+//
+// auto_add_user's backend check queries pending auto-add-user reconciliation
+// org-wide, not scoped to this cloud (confirmed against the product repo,
+// read only), so it can 409 with a transient "still being applied, try
+// again" error even when this specific cloud has no in-flight change of its
+// own - a real user can hit this on an ordinary terraform apply, not just
+// concurrent CI runs. Retrying that one documented condition here fixes the
+// real UX, not just a test flake; every other error, including any other
+// 409, still propagates on the first attempt. Sharing this retry with
+// lineage_tracking_enabled is fine: it keys on the specific error message,
+// not the field name, so it only ever engages for the auto_add_user case.
+//
+// Retrying is safe here ONLY because this specific PUT is idempotent -
+// setting the same boolean value twice has no side effect - and because the
+// retry condition below matches narrowly on the one documented transient
+// 409, not on 409s or errors in general. This is not a general-purpose
+// retry-on-failure; do not widen the match to make other errors retry too.
 func (r *CloudResource) updateCloudBoolField(ctx context.Context, cloudID, fieldName string, value bool) error {
 	path := fmt.Sprintf("/api/v2/clouds/%s/%s?%s=%t", cloudID, fieldName, fieldName, value)
-	tflog.Debug(ctx, "PUT "+path)
-	_, err := DoRequestRaw(ctx, r.client, "PUT", path, nil, http.StatusOK, http.StatusNoContent)
-	return err
+
+	deadline := time.Now().Add(autoAddUserRetryTotalCap)
+	currentBackoff := autoAddUserRetryInitialBackoff
+
+	for {
+		tflog.Debug(ctx, "PUT "+path)
+		_, err := DoRequestRaw(ctx, r.client, "PUT", path, nil, http.StatusOK, http.StatusNoContent)
+		if err == nil {
+			return nil
+		}
+		if !isTransientAutoAddUserConflict(err) || !time.Now().Before(deadline) {
+			return err
+		}
+
+		tflog.Warn(ctx, "Transient auto_add_user conflict, retrying", map[string]any{
+			"cloud_id": cloudID,
+			"field":    fieldName,
+			"backoff":  currentBackoff.String(),
+		})
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(currentBackoff):
+		}
+
+		currentBackoff = time.Duration(float64(currentBackoff) * autoAddUserRetryBackoffFactor)
+		if currentBackoff > autoAddUserRetryMaxBackoff {
+			currentBackoff = autoAddUserRetryMaxBackoff
+		}
+	}
+}
+
+// isTransientAutoAddUserConflict reports whether err is the documented,
+// explicitly-retryable 409 from the backend's org-wide auto-add-user
+// reconciliation check (see updateCloudBoolField). Any other error,
+// including a differently-worded 409, must propagate immediately rather
+// than be retried.
+func isTransientAutoAddUserConflict(err error) bool {
+	msg := err.Error()
+	if !strings.Contains(msg, "status 409") {
+		return false
+	}
+	return strings.Contains(msg, "still being applied") || strings.Contains(msg, "try again")
 }
 
 // updateCloudAggregatedLogsConfig calls the aggregated-logs PUT route. Its

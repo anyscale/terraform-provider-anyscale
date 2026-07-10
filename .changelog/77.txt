@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_cloud: Retry the transient "still being applied, try again" 409 on `auto_add_user` updates instead of failing `terraform apply` outright; the underlying reconciliation check is organization-wide, so a pending change on an unrelated cloud could previously block an update to this one.
+```
