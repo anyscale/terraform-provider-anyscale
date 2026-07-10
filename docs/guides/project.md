@@ -64,7 +64,8 @@ Reconcile your configuration with the imported state before your next `apply`, n
 If you already imported a project with real collaborators using a provider version older than
 v0.4.0, upgrading alone does not fix it: the empty `collaborator` list from that import is already
 saved in your state, and ordinary refreshes only re-fetch collaborators when state already has some
-— once it's empty, it stays empty on its own. Re-import that resource to pick up the real
+— once it's empty, it stays empty on its own, so neither upgrading in place nor
+`terraform apply -refresh-only` recovers it. Re-import that resource to pick up the real
 collaborator set: `terraform state rm anyscale_project.<name>` followed by
 `terraform import anyscale_project.<name> <project_id>`.
 
