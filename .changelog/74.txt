@@ -1,0 +1,9 @@
+```
+release-note:fixed
+provider: Surface the beta-status warning on the Terraform Registry index page; previously it only appeared in the repository README, whose GitHub-style alert syntax does not render on the Registry.
+```
+
+```
+release-note:added
+provider: Add a quick-start example (creating a minimal Compute Config) and an authentication precedence summary to the Registry index page.
+```
