@@ -333,32 +333,11 @@ func (r *OrganizationCollaboratorResource) Delete(ctx context.Context, req resou
 		"email_domain": getEmailDomain(state.Email.ValueString()),
 	})
 
-	// Delete the collaborator
-	httpResp, err := r.client.DoRequest(ctx, "DELETE", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), nil)
+	// Delete the collaborator - treat 404 as success (already removed)
+	_, err := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), nil,
+		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error removing collaborator",
-			fmt.Sprintf("Could not remove collaborator %s: %s", identityID, err.Error()),
-		)
-		return
-	}
-	defer func() { _ = httpResp.Body.Close() }()
-
-	// Handle response - treat 404 as success (already removed)
-	if httpResp.StatusCode != http.StatusOK &&
-		httpResp.StatusCode != http.StatusNoContent &&
-		httpResp.StatusCode != http.StatusNotFound {
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			tflog.Error(ctx, "Failed to read response", map[string]any{"error": err.Error()})
-			resp.Diagnostics.AddError("Read Error", err.Error())
-			return
-		}
-
-		resp.Diagnostics.AddError(
-			"Error removing collaborator",
-			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(body)),
-		)
+		AddAPIError(&resp.Diagnostics, fmt.Sprintf("remove collaborator %s", identityID), err)
 		return
 	}
 

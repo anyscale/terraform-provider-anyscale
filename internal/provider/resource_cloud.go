@@ -1159,31 +1159,11 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		// Continue with deletion - the API will tell us if we can't delete
 	}
 
-	httpResp, err := r.client.DoRequest(ctx, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	_, err := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
+		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
 	if err != nil {
 		tflog.Error(ctx, "Failed to delete cloud", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := httpResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent && httpResp.StatusCode != http.StatusNotFound {
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			tflog.Error(ctx, "Failed to read response", map[string]any{"error": err.Error()})
-			resp.Diagnostics.AddError("Read Error", err.Error())
-			return
-		}
-
-		tflog.Error(ctx, "Failed to delete cloud", map[string]any{"status": httpResp.Status, "body": string(body)})
-		resp.Diagnostics.AddError(
-			"Delete Failed",
-			fmt.Sprintf("Failed to delete cloud: %s - %s", httpResp.Status, string(body)),
-		)
+		AddAPIError(&resp.Diagnostics, "delete cloud", err)
 		return
 	}
 

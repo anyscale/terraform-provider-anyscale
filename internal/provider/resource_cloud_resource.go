@@ -1504,6 +1504,7 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		backoffFactor  = 2.0
 	)
 	currentBackoff := initialBackoff
+	cloudPath := fmt.Sprintf("/api/v2/clouds/%s", cloudID)
 
 	tflog.Info(ctx, "Waiting for cloud to be ready", map[string]any{"cloud_id": cloudID, "timeout": timeout.String()})
 
@@ -1511,7 +1512,7 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		pollCount++
 		tflog.Debug(ctx, "Polling cloud status", map[string]any{"poll_count": pollCount, "cloud_id": cloudID})
 
-		bodyBytes, err := DoRequestRaw(ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
+		bodyBytes, err := DoRequestRaw(ctx, client, "GET", cloudPath, nil,
 			http.StatusOK, http.StatusTooManyRequests)
 		if err != nil {
 			// Handle rate limiting (429) with backoff
@@ -1541,12 +1542,6 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		state := cloudResp.Result.State
 
 		tflog.Info(ctx, "Cloud status check", map[string]any{"poll_count": pollCount, "status": status, "state": state})
-
-		// Also check cloud resources for debugging
-		resourcesBody, err := DoRequestRaw(ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
-		if err == nil {
-			tflog.Debug(ctx, "Cloud resources", map[string]any{"poll_count": pollCount, "resources": string(resourcesBody)})
-		}
 
 		if status == "ready" && state == "ACTIVE" {
 			tflog.Info(ctx, "Cloud is ready", map[string]any{"poll_count": pollCount})
