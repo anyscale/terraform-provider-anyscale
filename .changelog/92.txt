@@ -1,4 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_project: `terraform destroy` immediately after `terraform apply` no longer intermittently fails with a spurious 403 Permission denied on delete; the provider now retries a bounded number of times for a project created in the last few minutes, since this specific error was a known backend permission-check consistency race rather than a real permission problem.
-```
