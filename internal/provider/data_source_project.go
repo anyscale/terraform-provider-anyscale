@@ -66,78 +66,54 @@ func (d *ProjectDataSource) Metadata(ctx context.Context, req datasource.Metadat
 
 // Schema defines the schema for the data source.
 func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		MarkdownDescription: "Fetches details about an Anyscale Project by ID or name.",
-
-		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the project. Either `id` or `name` must be specified.",
-			},
-			"name": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The name of the project. Either `id` or `name` must be specified.",
-			},
-			"cloud_id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The cloud ID this project belongs to. Can be used as a filter when looking up by name.",
-			},
-			"cloud_name": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The cloud name this project belongs to. Can be used as a filter when looking up by name. Will be resolved to cloud_id.",
-			},
-			"description": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Description of the project.",
-			},
-			"creator_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the user who created the project.",
-			},
-			"created_at": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Timestamp when the project was created.",
-			},
-			"last_used_cloud_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the cloud last used by this project.",
-			},
-			"is_default": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is the default project for the organization.",
-			},
-			"directory_name": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The directory name used for this project's storage.",
-			},
-			"collaborators": schema.ListNestedAttribute{
-				Computed:            true,
-				MarkdownDescription: "List of collaborators with access to this project.",
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"email": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Email address of the collaborator.",
-						},
-						"permission_level": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Permission level: `owner`, `write`, or `readonly`.",
-						},
-						"identity_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The identity ID of the collaborator.",
-						},
-						"user_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The user ID of the collaborator.",
-						},
-					},
+	attributes := projectSharedAttributes()
+	attributes["id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the project. Either `id` or `name` must be specified.",
+	}
+	attributes["name"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The name of the project. Either `id` or `name` must be specified.",
+	}
+	attributes["cloud_id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The cloud ID this project belongs to. Can be used as a filter when looking up by name.",
+	}
+	attributes["cloud_name"] = schema.StringAttribute{
+		Optional:            true,
+		MarkdownDescription: "The cloud name this project belongs to. Can be used as a filter when looking up by name. Will be resolved to cloud_id.",
+	}
+	attributes["collaborators"] = schema.ListNestedAttribute{
+		Computed:            true,
+		MarkdownDescription: "List of collaborators with access to this project.",
+		NestedObject: schema.NestedAttributeObject{
+			Attributes: map[string]schema.Attribute{
+				"email": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "Email address of the collaborator.",
+				},
+				"permission_level": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "Permission level: `owner`, `write`, or `readonly`.",
+				},
+				"identity_id": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "The identity ID of the collaborator.",
+				},
+				"user_id": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "The user ID of the collaborator.",
 				},
 			},
 		},
+	}
+
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "Fetches details about an Anyscale Project by ID or name.",
+		Attributes:          attributes,
 	}
 }
 

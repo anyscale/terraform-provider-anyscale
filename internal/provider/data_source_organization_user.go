@@ -48,38 +48,26 @@ func (d *OrganizationUserDataSource) Metadata(ctx context.Context, req datasourc
 
 // Schema defines the data source schema.
 func (d *OrganizationUserDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	attributes := organizationUserSharedAttributes()
+	attributes["id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The identity ID of the user. Either `id`, `user_id`, or `email` must be specified.",
+	}
+	attributes["user_id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The user ID of the user. Either `id`, `user_id`, or `email` must be specified.",
+	}
+	attributes["email"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The email address of the user. Either `id`, `user_id`, or `email` must be specified.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "**BETA FEATURE**: Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.",
-
-		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The identity ID of the user. Either `id`, `user_id`, or `email` must be specified.",
-			},
-			"user_id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The user ID of the user. Either `id`, `user_id`, or `email` must be specified.",
-			},
-			"email": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The email address of the user. Either `id`, `user_id`, or `email` must be specified.",
-			},
-			"name": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The name of the user.",
-			},
-			"permission_level": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The organization permission level (owner, collaborator, etc.).",
-			},
-			"created_at": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The timestamp when the user was added to the organization.",
-			},
-		},
+		Attributes:          attributes,
 	}
 }
 
