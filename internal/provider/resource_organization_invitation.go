@@ -168,49 +168,20 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		"email_domain": getEmailDomain(plan.Email.ValueString()),
 	})
 
-	// Send create request
-	httpResp, err := r.client.DoRequest(ctx, "POST", "/api/v2/organization_invitations", strings.NewReader(string(jsonData)))
+	// Send create request. The API only returns the invitation ID here (full details are
+	// fetched separately below via getInvitationByID) - OrganizationInvitationResponse's other
+	// fields are simply left at their zero value by json.Unmarshal, which is fine since only
+	// Result.ID is read.
+	invitationResp, err := DoRequestAndParse[OrganizationInvitationResponse](
+		ctx, r.client, "POST", "/api/v2/organization_invitations", strings.NewReader(string(jsonData)),
+		http.StatusOK, http.StatusCreated,
+	)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error creating invitation",
-			fmt.Sprintf("Could not send invitation: %s", err.Error()),
-		)
-		return
-	}
-	defer func() { _ = httpResp.Body.Close() }()
-
-	body, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error reading response",
-			fmt.Sprintf("Could not read invitation response: %s", err.Error()),
-		)
+		AddAPIError(&resp.Diagnostics, "create invitation", err)
 		return
 	}
 
-	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusCreated {
-		resp.Diagnostics.AddError(
-			"Error creating invitation",
-			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(body)),
-		)
-		return
-	}
-
-	// Parse response (only contains invitation ID)
-	var invitationBaseResp struct {
-		Result struct {
-			ID string `json:"id"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(body, &invitationBaseResp); err != nil {
-		resp.Diagnostics.AddError(
-			"Error parsing response",
-			fmt.Sprintf("Could not parse invitation response: %s", err.Error()),
-		)
-		return
-	}
-
-	invitationID := invitationBaseResp.Result.ID
+	invitationID := invitationResp.Result.ID
 	plan.ID = types.StringValue(invitationID)
 
 	tflog.Info(ctx, "Created organization invitation", map[string]interface{}{
