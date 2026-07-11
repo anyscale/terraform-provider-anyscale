@@ -66,7 +66,7 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 			"id": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "The unique identifier of the cluster environment. Either `id` or `name` must be specified.",
+				MarkdownDescription: "The unique identifier of the container image. Either `id` or `name` must be specified.",
 				Validators: []validator.String{
 					stringvalidator.AtLeastOneOf(
 						path.MatchRoot("id"),
@@ -76,13 +76,13 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 			},
 			"name": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The name of the cluster environment. Either `id` or `name` must be specified.",
+				MarkdownDescription: "The name of the container image. Either `id` or `name` must be specified.",
 			},
 
 			// Output attributes
 			"build_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The unique identifier of the latest build for this cluster environment.",
+				MarkdownDescription: "The unique identifier of the latest build for this container image.",
 			},
 			"image_uri": schema.StringAttribute{
 				Computed:            true,
@@ -102,11 +102,11 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 			},
 			"created_at": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "Timestamp when the cluster environment was created.",
+				MarkdownDescription: "Timestamp when the container image was created.",
 			},
 			"creator_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The ID of the user who created this cluster environment.",
+				MarkdownDescription: "The ID of the user who created this container image.",
 			},
 			"revision": schema.Int64Attribute{
 				Computed:            true,

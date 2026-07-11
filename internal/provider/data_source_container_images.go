@@ -88,7 +88,7 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The unique identifier of the cluster environment.",
+							MarkdownDescription: "The unique identifier of the container image.",
 						},
 						"name": schema.StringAttribute{
 							Computed:            true,
