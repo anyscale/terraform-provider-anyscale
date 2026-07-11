@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -761,84 +760,9 @@ func TestExpandFileStorage(t *testing.T) {
 	}
 }
 
-// TestAddProviderConfig_LowercaseProviderNormalizes is a regression test for a bug found during
-// the cloud-config dedup investigation: addProviderConfig switched on the raw provider string
-// with no case normalization and no default case, so cloud_provider = "aws" (lowercase) matched
-// no case and silently left the CloudDeploymentRequest's AWSConfig/GCPConfig/etc. unpopulated -
-// an incomplete apply with no error. resource_cloud.go's addCloudResource already normalized via
-// strings.ToUpper and was unaffected. Proves the fix (ToUpper added to addProviderConfig's
-// switch) actually populates config for lowercase, mixed-case, and canonical-case input alike.
-func TestAddProviderConfig_LowercaseProviderNormalizes(t *testing.T) {
-	ctx := context.Background()
-
-	awsConfigObj := types.ObjectValueMust(
-		map[string]attr.Type{
-			"vpc_id":                      types.StringType,
-			"subnet_ids":                  types.ListType{ElemType: types.StringType},
-			"subnet_ids_to_az":            types.MapType{ElemType: types.StringType},
-			"security_group_ids":          types.ListType{ElemType: types.StringType},
-			"controlplane_iam_role_arn":   types.StringType,
-			"dataplane_iam_role_arn":      types.StringType,
-			"cluster_instance_profile_id": types.StringType,
-			"external_id":                 types.StringType,
-			"memorydb_cluster_name":       types.StringType,
-			"memorydb_cluster_arn":        types.StringType,
-			"memorydb_cluster_endpoint":   types.StringType,
-		},
-		map[string]attr.Value{
-			"vpc_id": types.StringValue("vpc-123"),
-			"subnet_ids": types.ListValueMust(
-				types.StringType,
-				[]attr.Value{types.StringValue("subnet-111")},
-			),
-			"subnet_ids_to_az": types.MapNull(types.StringType),
-			"security_group_ids": types.ListValueMust(
-				types.StringType,
-				[]attr.Value{types.StringValue("sg-111")},
-			),
-			"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::123456789012:role/anyscale-controlplane"),
-			"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::123456789012:role/anyscale-dataplane"),
-			"cluster_instance_profile_id": types.StringNull(),
-			"external_id":                 types.StringNull(),
-			"memorydb_cluster_name":       types.StringNull(),
-			"memorydb_cluster_arn":        types.StringNull(),
-			"memorydb_cluster_endpoint":   types.StringNull(),
-		},
-	)
-
-	tests := []struct {
-		name     string
-		provider string
-	}{
-		{name: "lowercase", provider: "aws"},
-		{name: "mixed case", provider: "Aws"},
-		{name: "canonical uppercase", provider: "AWS"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &CloudResourceResource{}
-			plan := &CloudResourceResourceModel{
-				AWSConfig:        awsConfigObj,
-				GCPConfig:        types.ObjectNull(map[string]attr.Type{}),
-				KubernetesConfig: types.ObjectNull(map[string]attr.Type{}),
-				ObjectStorage:    types.ObjectNull(map[string]attr.Type{}),
-				FileStorage:      types.ObjectNull(map[string]attr.Type{}),
-			}
-			deployReq := &CloudDeploymentRequest{}
-			var diags diag.Diagnostics
-
-			err := r.addProviderConfig(ctx, deployReq, plan, tt.provider, "VM", &diags)
-			if err != nil {
-				t.Fatalf("addProviderConfig() unexpected error = %v", err)
-			}
-
-			if deployReq.AWSConfig == nil {
-				t.Fatalf("addProviderConfig() left AWSConfig nil for provider %q - the case-normalization bug is not fixed", tt.provider)
-			}
-			if deployReq.AWSConfig.VPCID != "vpc-123" {
-				t.Errorf("addProviderConfig() AWSConfig.VPCID = %v, want vpc-123", deployReq.AWSConfig.VPCID)
-			}
-		})
-	}
-}
+// The case-normalization regression test that lived here against addProviderConfig
+// (TestAddProviderConfig_LowercaseProviderNormalizes, added in the PR that fixed the bug) moved
+// to TestBuildProviderConfig_RequiredCombos in cloud_helpers_test.go's "lowercase and mixed-case
+// provider still match" subtest, once addProviderConfig itself was consolidated into
+// buildProviderConfig (workbench #6) - same coverage, now against the function that actually
+// exists.
