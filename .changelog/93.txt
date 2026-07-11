@@ -1,6 +1,6 @@
 ```
 release-note:changed
-resource/anyscale_cloud: the `kubernetes_config`/`object_storage`-required validation errors for a K8S `compute_stack` now name the `cloud_provider` explicitly (e.g. "kubernetes_config is required when cloud_provider is AWS and compute_stack is K8S"), instead of the previous provider-agnostic wording.
+resource/anyscale_cloud: the `kubernetes_config`/`object_storage`-required validation errors for a K8S `compute_stack` now name the `cloud_provider` explicitly (e.g. "kubernetes_config is required when cloud_provider is AWS and compute_stack is K8S"), instead of the previous provider-agnostic wording; and errors expanding `aws_config`/`gcp_config`/`kubernetes_config`/`object_storage`/`file_storage` are now wrapped with a "failed to expand <field>:" prefix instead of surfacing the underlying error unwrapped.
 ```
 
 ```
