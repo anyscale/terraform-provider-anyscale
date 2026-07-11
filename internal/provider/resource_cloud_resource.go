@@ -1058,7 +1058,11 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 
 // addProviderConfig adds provider-specific configuration to the deployment request
 func (r *CloudResourceResource) addProviderConfig(ctx context.Context, deployReq *CloudDeploymentRequest, plan *CloudResourceResourceModel, provider, computeStack string, diags *diag.Diagnostics) error {
-	switch provider {
+	// Normalize case so a lowercase/mixed-case cloud_provider (e.g. "aws") still matches -
+	// matches addCloudResource's existing strings.ToUpper(provider) in resource_cloud.go.
+	// Previously this switched on the raw value with no default case, so an unnormalized
+	// match silently fell through and sent an incomplete CloudDeploymentRequest.
+	switch strings.ToUpper(provider) {
 	case "AWS":
 		if computeStack == "K8S" {
 			// K8S requires: kubernetes_config, object_storage
