@@ -2,6 +2,7 @@ package provider
 
 import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // cloudSharedAttributes returns the anyscale_cloud / anyscale_clouds attributes that are
@@ -100,6 +101,106 @@ func containerImageSharedAttributes() map[string]schema.Attribute {
 		"name_version": schema.StringAttribute{
 			Computed:            true,
 			MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
+		},
+	}
+}
+
+// globalResourceSchedulerSharedAttributes returns the anyscale_global_resource_scheduler /
+// anyscale_global_resource_schedulers attributes that are identical in name, type, and
+// MarkdownDescription on both sides. Called directly by the singular data source and wrapped
+// inside the plural's per-item NestedObject.
+//
+// Deliberately excluded: name (singular's is Required - the sole lookup key - while the
+// plural's per-item name is Computed-only output; matching text, divergent optionality, same
+// structural-divergence class as the cloud/container_image id/name exclusions). spec (the
+// whole nested machine-type/partition tree) is singular-only - the plural's own description
+// says "without detailed spec for performance". Schema-only: this file must never gain
+// machine-pool/GRS request or read logic - the GRSv2 deferral applies to provider behavior,
+// not to deduplicating already-identical schema text.
+func globalResourceSchedulerSharedAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The unique identifier of the global resource scheduler.",
+		},
+		"organization_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The organization ID that owns the global resource scheduler.",
+		},
+		"enable_rootless_dataplane_config": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether rootless dataplane configuration is enabled.",
+		},
+		"cloud_ids": schema.ListAttribute{
+			Computed:            true,
+			ElementType:         types.StringType,
+			MarkdownDescription: "List of cloud IDs attached to this global resource scheduler.",
+		},
+	}
+}
+
+// organizationUserSharedAttributes returns the anyscale_organization_user /
+// anyscale_organization_users attributes that are identical in name, type, and
+// MarkdownDescription on both sides. Called directly by the singular data source and wrapped
+// inside the plural's per-item NestedObject.
+//
+// Deliberately excluded: id/user_id/email (singular carries the either-id-or-user_id-or-email
+// selector clause and Optional; plural's per-item versions are Computed-only output with
+// shorter text - same structural reason as the cloud/container_image id/name exclusions).
+func organizationUserSharedAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"name": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The name of the user.",
+		},
+		"permission_level": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The organization permission level (owner, collaborator, etc.).",
+		},
+		"created_at": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The timestamp when the user was added to the organization.",
+		},
+	}
+}
+
+// projectSharedAttributes returns the anyscale_project / anyscale_projects attributes that are
+// identical in name, type, and MarkdownDescription on both sides. Called directly by the
+// singular data source and wrapped inside the plural's per-item NestedObject.
+//
+// Deliberately excluded: id/name (singular carries the either-id-or-name selector clause and
+// Optional; plural's per-item versions are Computed-only output). cloud_id (singular is
+// dual-purpose - Optional filter-or-selector AND Computed, with an extra sentence; plural's
+// per-item is Computed-only with shorter text - structurally different, not just textually).
+// cloud_name (singular is an Optional selector-side filter; the plural's cloud_name is a
+// top-level filter input with no per-item output counterpart at all - no shared attribute to
+// factor). collaborators (nested list) is singular-only; the plural's own description notes it
+// omits collaborator details for performance.
+func projectSharedAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"description": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Description of the project.",
+		},
+		"creator_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The ID of the user who created the project.",
+		},
+		"created_at": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Timestamp when the project was created.",
+		},
+		"last_used_cloud_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The ID of the cloud last used by this project.",
+		},
+		"is_default": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether this is the default project for the organization.",
+		},
+		"directory_name": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The directory name used for this project's storage.",
 		},
 	}
 }

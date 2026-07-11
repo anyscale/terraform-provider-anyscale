@@ -61,6 +61,20 @@ func (d *ProjectsDataSource) Metadata(ctx context.Context, req datasource.Metada
 
 // Schema defines the schema for the data source.
 func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	itemAttributes := projectSharedAttributes()
+	itemAttributes["id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the project.",
+	}
+	itemAttributes["name"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The name of the project.",
+	}
+	itemAttributes["cloud_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The cloud ID this project belongs to.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Lists and filters Anyscale Projects. This data source returns a list of projects without collaborator details for performance.",
 
@@ -89,44 +103,7 @@ func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				Computed:            true,
 				MarkdownDescription: "List of projects matching the filters. Does not include collaborator details for performance.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The unique identifier of the project.",
-						},
-						"name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name of the project.",
-						},
-						"description": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Description of the project.",
-						},
-						"cloud_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The cloud ID this project belongs to.",
-						},
-						"creator_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the user who created the project.",
-						},
-						"created_at": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Timestamp when the project was created.",
-						},
-						"last_used_cloud_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the cloud last used by this project.",
-						},
-						"is_default": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is the default project for the organization.",
-						},
-						"directory_name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The directory name used for this project's storage.",
-						},
-					},
+					Attributes: itemAttributes,
 				},
 			},
 		},

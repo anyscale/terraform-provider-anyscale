@@ -56,6 +56,20 @@ func (d *OrganizationUsersDataSource) Metadata(ctx context.Context, req datasour
 
 // Schema defines the data source schema.
 func (d *OrganizationUsersDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	itemAttributes := organizationUserSharedAttributes()
+	itemAttributes["id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The identity ID of the user.",
+	}
+	itemAttributes["user_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The user ID of the user.",
+	}
+	itemAttributes["email"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The email address of the user.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. This is useful for SCIM provisioning and user management.",
 
@@ -76,32 +90,7 @@ func (d *OrganizationUsersDataSource) Schema(ctx context.Context, req datasource
 				Computed:            true,
 				MarkdownDescription: "List of users in the organization.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The identity ID of the user.",
-						},
-						"user_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The user ID of the user.",
-						},
-						"name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name of the user.",
-						},
-						"email": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The email address of the user.",
-						},
-						"permission_level": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The organization permission level (owner, collaborator, etc.).",
-						},
-						"created_at": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The timestamp when the user was added to the organization.",
-						},
-					},
+					Attributes: itemAttributes,
 				},
 			},
 		},
