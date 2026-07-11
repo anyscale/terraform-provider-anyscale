@@ -9,9 +9,13 @@ package acctest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -227,18 +231,18 @@ func testAccCheckGlobalResourceSchedulerExistsInAPI(resourceName string) resourc
 			return fmt.Errorf("failed to get test client: %w", err)
 		}
 
-		// List global resource schedulers and find by name
-		resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/machine_pools/", nil)
+		pools, err := listMachinePoolsForTest(context.Background(), client)
 		if err != nil {
 			return fmt.Errorf("failed to list global resource schedulers: %w", err)
 		}
-		defer func() { _ = resp.Body.Close() }()
 
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("failed to list global resource schedulers: status %d", resp.StatusCode)
+		for _, pool := range pools {
+			if pool.MachinePoolName == schedulerName {
+				return nil
+			}
 		}
 
-		return nil
+		return fmt.Errorf("global resource scheduler %s not found in machine_pools list (%d entries)", schedulerName, len(pools))
 	}
 }
 
@@ -248,28 +252,150 @@ func testAccCheckGlobalResourceSchedulerDestroy(s *terraform.State) error {
 		return fmt.Errorf("failed to get test client: %w", err)
 	}
 
+	var names []string
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "anyscale_global_resource_scheduler" {
 			continue
 		}
-
-		schedulerName := rs.Primary.Attributes["name"]
-		if schedulerName == "" {
-			continue
+		if name := rs.Primary.Attributes["name"]; name != "" {
+			names = append(names, name)
 		}
+	}
 
-		// List global resource schedulers and check if this one still exists
-		resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/machine_pools/", nil)
-		if err != nil {
-			return fmt.Errorf("failed to list global resource schedulers: %w", err)
+	if len(names) == 0 {
+		return nil
+	}
+
+	pools, err := listMachinePoolsForTest(context.Background(), client)
+	if err != nil {
+		return fmt.Errorf("failed to list global resource schedulers: %w", err)
+	}
+
+	for _, schedulerName := range names {
+		for _, pool := range pools {
+			if pool.MachinePoolName == schedulerName {
+				return fmt.Errorf("global resource scheduler %s still present in machine_pools list after destroy", schedulerName)
+			}
 		}
-		defer func() { _ = resp.Body.Close() }()
-
-		// If we can still find the pool, it wasn't destroyed properly
-		// For now, we'll just return nil as the API behavior may vary
 	}
 
 	return nil
+}
+
+// listMachinePoolsForTest lists every global resource scheduler (machine
+// pool), mirroring GlobalResourceSchedulerResource.readMachinePool in
+// internal/provider (an unexported method there, so not reusable across
+// packages). Not paginated - ListMachinePoolsResponse has no paging token,
+// matching how the real resource's own Read path treats this endpoint.
+func listMachinePoolsForTest(ctx context.Context, client *provider.Client) ([]provider.MachinePoolResult, error) {
+	listResp, err := provider.DoRequestAndParse[provider.ListMachinePoolsResponse](
+		ctx, client, "GET", "/api/v2/machine_pools/", nil, http.StatusOK,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return listResp.Result.MachinePools, nil
+}
+
+// schedulerState hand-builds the exact terraform.State shape the GRS
+// exists/destroy checks see, matching the pattern established in
+// helpers_checkdestroy_test.go: these TestCheckFuncs can be called directly
+// against a fake state and a mock server, no real resource.Test apply needed.
+// TEST-ONLY: this and the tests below exercise nothing but the acctest
+// package's own CheckFunc wiring against a local mock - no provider
+// GRS/machine-pool logic is touched, matching the standing GRSv2 deferral.
+func schedulerState(schedulerName string) *terraform.State {
+	return &terraform.State{
+		Modules: []*terraform.ModuleState{
+			{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					"anyscale_global_resource_scheduler.test": {
+						Type: "anyscale_global_resource_scheduler",
+						Primary: &terraform.InstanceState{
+							ID:         schedulerName,
+							Attributes: map[string]string{"name": schedulerName},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// machinePoolsListServer starts a mock /api/v2/machine_pools/ endpoint
+// returning exactly the given pools (single page - the real endpoint has no
+// pagination either, see listMachinePoolsForTest).
+func machinePoolsListServer(t *testing.T, pools []provider.MachinePoolResult) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		resp := provider.ListMachinePoolsResponse{}
+		resp.Result.MachinePools = pools
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANYSCALE_API_URL", server.URL)
+	t.Setenv("ANYSCALE_CLI_TOKEN", "fake-token-grs-checks")
+	return server
+}
+
+// TestGRSExistsInAPI_SucceedsWhenPresent is the positive control: the
+// scheduler IS in the mocked list, so the check must pass.
+func TestGRSExistsInAPI_SucceedsWhenPresent(t *testing.T) {
+	const schedulerName = "scheduler-present"
+	machinePoolsListServer(t, []provider.MachinePoolResult{
+		{MachinePoolID: "mp_1", MachinePoolName: schedulerName},
+	})
+
+	if err := testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test")(schedulerState(schedulerName)); err != nil {
+		t.Fatalf("expected success for a scheduler present in the API list, got: %v", err)
+	}
+}
+
+// TestGRSExistsInAPI_FailsWhenAbsent is the mutation proof this check is no
+// longer a placebo: before the fix, this exact scenario (the scheduler is
+// genuinely absent from the API) still returned nil because the old code
+// never parsed the response at all. It must now fail loudly.
+func TestGRSExistsInAPI_FailsWhenAbsent(t *testing.T) {
+	const schedulerName = "scheduler-absent"
+	machinePoolsListServer(t, []provider.MachinePoolResult{
+		{MachinePoolID: "mp_2", MachinePoolName: "some-other-scheduler"},
+	})
+
+	err := testAccCheckGlobalResourceSchedulerExistsInAPI("anyscale_global_resource_scheduler.test")(schedulerState(schedulerName))
+	if err == nil {
+		t.Fatal("expected an error when the scheduler is absent from the API list, got nil (this is the exact placebo behavior being fixed)")
+	}
+}
+
+// TestGRSDestroy_SucceedsWhenAbsent is the positive control for the
+// post-destroy check: the scheduler is genuinely gone, so it must pass.
+func TestGRSDestroy_SucceedsWhenAbsent(t *testing.T) {
+	const schedulerName = "scheduler-destroyed"
+	machinePoolsListServer(t, []provider.MachinePoolResult{
+		{MachinePoolID: "mp_3", MachinePoolName: "some-other-scheduler"},
+	})
+
+	if err := testAccCheckGlobalResourceSchedulerDestroy(schedulerState(schedulerName)); err != nil {
+		t.Fatalf("expected success when the scheduler is genuinely absent, got: %v", err)
+	}
+}
+
+// TestGRSDestroy_FailsWhenPresent is the mutation proof for the post-destroy
+// check: before the fix, a scheduler that was NOT actually removed (still
+// present in the API) still passed silently. It must now fail.
+func TestGRSDestroy_FailsWhenPresent(t *testing.T) {
+	const schedulerName = "scheduler-leaked"
+	machinePoolsListServer(t, []provider.MachinePoolResult{
+		{MachinePoolID: "mp_4", MachinePoolName: schedulerName},
+	})
+
+	err := testAccCheckGlobalResourceSchedulerDestroy(schedulerState(schedulerName))
+	if err == nil {
+		t.Fatal("expected an error when the scheduler is still present after destroy, got nil (this is the exact placebo behavior being fixed)")
+	}
 }
 
 // Configuration templates
