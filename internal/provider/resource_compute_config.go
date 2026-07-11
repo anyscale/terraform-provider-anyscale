@@ -1435,31 +1435,27 @@ func resourceMapToAPI(resources types.Map) map[string]interface{} {
 	return apiResources
 }
 
-// nodeConfigToAPI converts a head_node or worker_node object to API format
-func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]interface{}, error) {
-	if nodeObj.IsNull() || nodeObj.IsUnknown() {
-		return nil, nil
-	}
+// commonNodeFieldsToAPI populates the API request fields shared by nodeConfigToAPI and
+// workerNodeConfigToAPI: resources, required_resources, labels, advanced_configurations_json,
+// cloud_deployment, and flags. Each caller merges the returned map with its own node-type-
+// specific fields (name/instance_type for head; name/instance_type/min_workers/max_workers/
+// use_spot/fallback_to_ondemand for worker) - see workbench #7.
+//
+// Returns a fresh map per call (never shared/aliased between head and worker conversions).
+// Only the flags parse failure is a hard error, matching the original two copies' behavior -
+// advanced_instance_config's parse failure is silently skipped there too, not an inconsistency
+// introduced here.
+func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredResources types.Object, labels types.Map, advancedInstanceConfig types.String, cloudDeployment types.Object, flags types.String) (map[string]interface{}, error) {
+	config := map[string]interface{}{}
 
-	var node NodeConfigModel
-	diags := nodeObj.As(ctx, &node, basetypes.ObjectAsOptions{})
-	if diags.HasError() {
-		return nil, fmt.Errorf("failed to convert node config: %v", diags)
-	}
-
-	config := map[string]interface{}{
-		"name":          "head",
-		"instance_type": node.InstanceType.ValueString(),
-	}
-
-	if resourcesMap := resourceMapToAPI(node.Resources); len(resourcesMap) > 0 {
+	if resourcesMap := resourceMapToAPI(resources); len(resourcesMap) > 0 {
 		config["resources"] = resourcesMap
 	}
 
 	// Add required_resources
-	if !node.RequiredResources.IsNull() {
+	if !requiredResources.IsNull() {
 		var reqRes RequiredResourcesModel
-		diags := node.RequiredResources.As(ctx, &reqRes, basetypes.ObjectAsOptions{})
+		diags := requiredResources.As(ctx, &reqRes, basetypes.ObjectAsOptions{})
 		if !diags.HasError() {
 			requiredResourcesMap := make(map[string]interface{})
 
@@ -1492,9 +1488,9 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 	}
 
 	// Add labels
-	if !node.Labels.IsNull() {
+	if !labels.IsNull() {
 		labelsMap := make(map[string]interface{})
-		elements := node.Labels.Elements()
+		elements := labels.Elements()
 		for key, value := range elements {
 			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
 				labelsMap[key] = strVal.ValueString()
@@ -1506,16 +1502,16 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 	}
 
 	// Add advanced_instance_config (JSON string) - map to API field name
-	if !node.AdvancedInstanceConfig.IsNull() && node.AdvancedInstanceConfig.ValueString() != "" {
+	if !advancedInstanceConfig.IsNull() && advancedInstanceConfig.ValueString() != "" {
 		var advancedConfig map[string]interface{}
-		if err := json.Unmarshal([]byte(node.AdvancedInstanceConfig.ValueString()), &advancedConfig); err == nil {
+		if err := json.Unmarshal([]byte(advancedInstanceConfig.ValueString()), &advancedConfig); err == nil {
 			config["advanced_configurations_json"] = advancedConfig
 		}
 	}
 
-	if !node.CloudDeployment.IsNull() {
+	if !cloudDeployment.IsNull() {
 		var cloudDep CloudDeploymentModel
-		diags := node.CloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
+		diags := cloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
 		if !diags.HasError() {
 			cloudDepMap := make(map[string]interface{})
 
@@ -1538,16 +1534,39 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 		}
 	}
 
-	flags := map[string]interface{}{}
-	if !node.Flags.IsNull() && node.Flags.ValueString() != "" {
-		if err := json.Unmarshal([]byte(node.Flags.ValueString()), &flags); err != nil {
+	flagsMap := map[string]interface{}{}
+	if !flags.IsNull() && flags.ValueString() != "" {
+		if err := json.Unmarshal([]byte(flags.ValueString()), &flagsMap); err != nil {
 			return nil, err
 		}
 	}
 
-	if len(flags) > 0 {
-		config["flags"] = flags
+	if len(flagsMap) > 0 {
+		config["flags"] = flagsMap
 	}
+
+	return config, nil
+}
+
+// nodeConfigToAPI converts a head_node object to API format
+func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]interface{}, error) {
+	if nodeObj.IsNull() || nodeObj.IsUnknown() {
+		return nil, nil
+	}
+
+	var node NodeConfigModel
+	diags := nodeObj.As(ctx, &node, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		return nil, fmt.Errorf("failed to convert node config: %v", diags)
+	}
+
+	config, err := commonNodeFieldsToAPI(ctx, node.Resources, node.RequiredResources, node.Labels, node.AdvancedInstanceConfig, node.CloudDeployment, node.Flags)
+	if err != nil {
+		return nil, err
+	}
+
+	config["name"] = "head"
+	config["instance_type"] = node.InstanceType.ValueString()
 
 	return config, nil
 }
@@ -1564,11 +1583,14 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 		return nil, fmt.Errorf("failed to convert worker node config: %v", diags)
 	}
 
+	config, err := commonNodeFieldsToAPI(ctx, worker.Resources, worker.RequiredResources, worker.Labels, worker.AdvancedInstanceConfig, worker.CloudDeployment, worker.Flags)
+	if err != nil {
+		return nil, err
+	}
+
 	// Start with base node config
 	instanceType := worker.InstanceType.ValueString()
-	config := map[string]interface{}{
-		"instance_type": instanceType,
-	}
+	config["instance_type"] = instanceType
 
 	// Add worker-specific fields with API translations
 	// Name: Default to instance type if not provided (per CLI behavior)
@@ -1608,135 +1630,42 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 		config["fallback_to_ondemand"] = false
 	}
 
-	if resourcesMap := resourceMapToAPI(worker.Resources); len(resourcesMap) > 0 {
-		config["resources"] = resourcesMap
-	}
-
-	// Add required_resources
-	if !worker.RequiredResources.IsNull() {
-		var reqRes RequiredResourcesModel
-		diags := worker.RequiredResources.As(ctx, &reqRes, basetypes.ObjectAsOptions{})
-		if !diags.HasError() {
-			requiredResourcesMap := make(map[string]interface{})
-
-			if !reqRes.CPU.IsNull() {
-				requiredResourcesMap["cpu"] = reqRes.CPU.ValueInt64()
-			}
-			if !reqRes.Memory.IsNull() {
-				requiredResourcesMap["memory"] = reqRes.Memory.ValueString()
-			}
-			if !reqRes.GPU.IsNull() {
-				requiredResourcesMap["gpu"] = reqRes.GPU.ValueInt64()
-			}
-			if !reqRes.Accelerator.IsNull() {
-				requiredResourcesMap["accelerator"] = reqRes.Accelerator.ValueString()
-			}
-			if !reqRes.TPU.IsNull() {
-				requiredResourcesMap["tpu"] = reqRes.TPU.ValueInt64()
-			}
-			if !reqRes.TPUHosts.IsNull() {
-				requiredResourcesMap["anyscale/tpu_hosts"] = reqRes.TPUHosts.ValueInt64()
-			}
-			if !reqRes.CPUArchitecture.IsNull() {
-				requiredResourcesMap["cpu_architecture"] = reqRes.CPUArchitecture.ValueString()
-			}
-
-			if len(requiredResourcesMap) > 0 {
-				config["required_resources"] = requiredResourcesMap
-			}
-		}
-	}
-
-	// Add labels
-	if !worker.Labels.IsNull() {
-		labelsMap := make(map[string]interface{})
-		elements := worker.Labels.Elements()
-		for key, value := range elements {
-			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
-				labelsMap[key] = strVal.ValueString()
-			}
-		}
-		if len(labelsMap) > 0 {
-			config["labels"] = labelsMap
-		}
-	}
-
-	// Add advanced_instance_config (JSON string) - map to API field name
-	if !worker.AdvancedInstanceConfig.IsNull() && worker.AdvancedInstanceConfig.ValueString() != "" {
-		var advancedConfig map[string]interface{}
-		if err := json.Unmarshal([]byte(worker.AdvancedInstanceConfig.ValueString()), &advancedConfig); err == nil {
-			config["advanced_configurations_json"] = advancedConfig
-		}
-	}
-
-	if !worker.CloudDeployment.IsNull() {
-		var cloudDep CloudDeploymentModel
-		diags := worker.CloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
-		if !diags.HasError() {
-			cloudDepMap := make(map[string]interface{})
-
-			if !cloudDep.Provider.IsNull() {
-				cloudDepMap["provider"] = cloudDep.Provider.ValueString()
-			}
-			if !cloudDep.Region.IsNull() {
-				cloudDepMap["region"] = cloudDep.Region.ValueString()
-			}
-			if !cloudDep.MachinePool.IsNull() {
-				cloudDepMap["machine_pool"] = cloudDep.MachinePool.ValueString()
-			}
-			if !cloudDep.ID.IsNull() {
-				cloudDepMap["id"] = cloudDep.ID.ValueString()
-			}
-
-			if len(cloudDepMap) > 0 {
-				config["cloud_deployment"] = cloudDepMap
-			}
-		}
-	}
-
-	flags := map[string]interface{}{}
-	if !worker.Flags.IsNull() && worker.Flags.ValueString() != "" {
-		if err := json.Unmarshal([]byte(worker.Flags.ValueString()), &flags); err != nil {
-			return nil, err
-		}
-	}
-
-	if len(flags) > 0 {
-		config["flags"] = flags
-	}
-
 	return config, nil
 }
 
-// apiNodeTypeToTerraform converts an API head_node_type response to a Terraform types.Object
-func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{}) (types.Object, diag.Diagnostics) {
+// commonNodeAttrsFromAPI extracts the API response fields shared by apiNodeTypeToTerraform and
+// apiWorkerNodeTypeToTerraform: instance_type, resources, required_resources, labels,
+// advanced_instance_config (from advanced_configurations_json), flags (with cloud_deployment
+// stripped out), and cloud_deployment (extracted from flags, per CLI behavior). Returns a fresh
+// attr.Value map per call; each caller merges in its own node-type-specific fields (none for
+// head; name/min_nodes/max_nodes/market_type for worker) before building its final
+// types.Object - see workbench #7.
+func commonNodeAttrsFromAPI(ctx context.Context, apiMap map[string]interface{}) (map[string]attr.Value, diag.Diagnostics) {
 	var diags diag.Diagnostics
-
-	nodeAttrTypes := nodeConfigAttrTypes()
 
 	// Extract instance_type
 	instanceType := types.StringNull()
-	if it, ok := apiNode["instance_type"].(string); ok {
+	if it, ok := apiMap["instance_type"].(string); ok {
 		instanceType = types.StringValue(it)
 	}
 
 	// Extract resources (logical resources)
 	resources := types.MapNull(types.Float64Type)
-	if res, ok := apiNode["resources"].(map[string]interface{}); ok {
+	if res, ok := apiMap["resources"].(map[string]interface{}); ok {
 		resourcesMap, resourcesDiags := apiResourcesToTerraformMap(ctx, res)
 		diags.Append(resourcesDiags...)
 		resources = resourcesMap
 	}
 
 	requiredResources := types.ObjectNull(requiredResourcesAttrTypes())
-	if rr, ok := apiNode["required_resources"].(map[string]interface{}); ok {
+	if rr, ok := apiMap["required_resources"].(map[string]interface{}); ok {
 		reqResObj, reqResDiags := apiRequiredResourcesToTerraform(ctx, rr)
 		diags.Append(reqResDiags...)
 		requiredResources = reqResObj
 	}
 
 	labels := types.MapNull(types.StringType)
-	if lbl, ok := apiNode["labels"].(map[string]interface{}); ok {
+	if lbl, ok := apiMap["labels"].(map[string]interface{}); ok {
 		labelsMap, labelsDiags := InterfaceMapToString(ctx, lbl)
 		diags.Append(labelsDiags...)
 		labels = labelsMap
@@ -1744,7 +1673,7 @@ func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{})
 
 	// Extract advanced_instance_config from advanced_configurations_json
 	advancedInstanceConfig := types.StringNull()
-	if advConfig := getAdvancedConfigJSON(apiNode); advConfig != nil {
+	if advConfig := getAdvancedConfigJSON(apiMap); advConfig != nil {
 		if jsonBytes, err := json.Marshal(advConfig); err == nil {
 			advancedInstanceConfig = types.StringValue(string(jsonBytes))
 		}
@@ -1752,7 +1681,7 @@ func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{})
 
 	// Extract flags (excluding cloud_deployment which is handled separately)
 	flagsStr := types.StringNull()
-	if flagsMap, ok := apiNode["flags"].(map[string]interface{}); ok {
+	if flagsMap, ok := apiMap["flags"].(map[string]interface{}); ok {
 		// Remove cloud_deployment from flags for separate handling
 		flagsCopy := make(map[string]interface{})
 		for k, v := range flagsMap {
@@ -1769,7 +1698,7 @@ func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{})
 
 	// Extract cloud_deployment from flags (per CLI behavior)
 	cloudDeployment := types.ObjectNull(cloudDeploymentAttrTypes())
-	if flagsMap, ok := apiNode["flags"].(map[string]interface{}); ok {
+	if flagsMap, ok := apiMap["flags"].(map[string]interface{}); ok {
 		if cdMap, ok := flagsMap["cloud_deployment"].(map[string]interface{}); ok {
 			cdObj, cdDiags := apiCloudDeploymentToTerraform(ctx, cdMap)
 			diags.Append(cdDiags...)
@@ -1777,7 +1706,7 @@ func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{})
 		}
 	}
 
-	nodeAttrs := map[string]attr.Value{
+	return map[string]attr.Value{
 		"instance_type":            instanceType,
 		"resources":                resources,
 		"required_resources":       requiredResources,
@@ -1785,7 +1714,14 @@ func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{})
 		"advanced_instance_config": advancedInstanceConfig,
 		"flags":                    flagsStr,
 		"cloud_deployment":         cloudDeployment,
-	}
+	}, diags
+}
+
+// apiNodeTypeToTerraform converts an API head_node_type response to a Terraform types.Object
+func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{}) (types.Object, diag.Diagnostics) {
+	nodeAttrTypes := nodeConfigAttrTypes()
+
+	nodeAttrs, diags := commonNodeAttrsFromAPI(ctx, apiNode)
 
 	nodeObj, objDiags := types.ObjectValue(nodeAttrTypes, nodeAttrs)
 	diags.Append(objDiags...)
@@ -1826,9 +1762,9 @@ func apiWorkerNodeTypesToTerraform(ctx context.Context, apiWorkers []interface{}
 
 // apiWorkerNodeTypeToTerraform converts a single API worker_node_type to Terraform types.Object
 func apiWorkerNodeTypeToTerraform(ctx context.Context, apiWorker map[string]interface{}) (types.Object, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
 	workerAttrTypes := workerNodeConfigAttrTypes()
+
+	workerAttrs, diags := commonNodeAttrsFromAPI(ctx, apiWorker)
 
 	// Extract worker-specific fields
 	name := types.StringNull()
@@ -1860,77 +1796,10 @@ func apiWorkerNodeTypeToTerraform(ctx context.Context, apiWorker map[string]inte
 		}
 	}
 
-	// Extract common node fields
-	instanceType := types.StringNull()
-	if it, ok := apiWorker["instance_type"].(string); ok {
-		instanceType = types.StringValue(it)
-	}
-
-	resources := types.MapNull(types.Float64Type)
-	if res, ok := apiWorker["resources"].(map[string]interface{}); ok {
-		resourcesMap, resourcesDiags := apiResourcesToTerraformMap(ctx, res)
-		diags.Append(resourcesDiags...)
-		resources = resourcesMap
-	}
-
-	requiredResources := types.ObjectNull(requiredResourcesAttrTypes())
-	if rr, ok := apiWorker["required_resources"].(map[string]interface{}); ok {
-		reqResObj, reqResDiags := apiRequiredResourcesToTerraform(ctx, rr)
-		diags.Append(reqResDiags...)
-		requiredResources = reqResObj
-	}
-
-	labels := types.MapNull(types.StringType)
-	if lbl, ok := apiWorker["labels"].(map[string]interface{}); ok {
-		labelsMap, labelsDiags := InterfaceMapToString(ctx, lbl)
-		diags.Append(labelsDiags...)
-		labels = labelsMap
-	}
-
-	advancedInstanceConfig := types.StringNull()
-	if advConfig := getAdvancedConfigJSON(apiWorker); advConfig != nil {
-		if jsonBytes, err := json.Marshal(advConfig); err == nil {
-			advancedInstanceConfig = types.StringValue(string(jsonBytes))
-		}
-	}
-
-	flagsStr := types.StringNull()
-	if flagsMap, ok := apiWorker["flags"].(map[string]interface{}); ok {
-		flagsCopy := make(map[string]interface{})
-		for k, v := range flagsMap {
-			if k != "cloud_deployment" {
-				flagsCopy[k] = v
-			}
-		}
-		if len(flagsCopy) > 0 {
-			if jsonBytes, err := json.Marshal(flagsCopy); err == nil {
-				flagsStr = types.StringValue(string(jsonBytes))
-			}
-		}
-	}
-
-	cloudDeployment := types.ObjectNull(cloudDeploymentAttrTypes())
-	if flagsMap, ok := apiWorker["flags"].(map[string]interface{}); ok {
-		if cdMap, ok := flagsMap["cloud_deployment"].(map[string]interface{}); ok {
-			cdObj, cdDiags := apiCloudDeploymentToTerraform(ctx, cdMap)
-			diags.Append(cdDiags...)
-			cloudDeployment = cdObj
-		}
-	}
-
-	workerAttrs := map[string]attr.Value{
-		"name":                     name,
-		"min_nodes":                minNodes,
-		"max_nodes":                maxNodes,
-		"market_type":              marketType,
-		"instance_type":            instanceType,
-		"resources":                resources,
-		"required_resources":       requiredResources,
-		"labels":                   labels,
-		"advanced_instance_config": advancedInstanceConfig,
-		"flags":                    flagsStr,
-		"cloud_deployment":         cloudDeployment,
-	}
+	workerAttrs["name"] = name
+	workerAttrs["min_nodes"] = minNodes
+	workerAttrs["max_nodes"] = maxNodes
+	workerAttrs["market_type"] = marketType
 
 	workerObj, objDiags := types.ObjectValue(workerAttrTypes, workerAttrs)
 	diags.Append(objDiags...)
