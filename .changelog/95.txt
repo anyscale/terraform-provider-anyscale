@@ -1,0 +1,9 @@
+```
+release-note:changed
+resource/anyscale_organization_invitation: on a failed create, the error title/detail changed from "Error creating invitation"/"Error reading response"/"Error parsing response" (three different titles depending on the failure point) to a single consistent "API Request Failed" title with a "Failed to create invitation: <detail>" message.
+```
+
+```
+release-note:changed
+resource/anyscale_organization_collaborator: on a failed update, the error title/detail changed from "Error updating collaborator"/"Error reading response" (two different titles depending on the failure point) to a single consistent "API Request Failed" title with a "Failed to update collaborator <identity_id>: <detail>" message.
+```
