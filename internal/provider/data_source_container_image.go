@@ -58,69 +58,50 @@ func (d *ContainerImageDataSource) Metadata(ctx context.Context, req datasource.
 
 // Schema defines the schema for the data source.
 func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	attributes := containerImageSharedAttributes()
+	attributes["id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the container image. Either `id` or `name` must be specified.",
+		Validators: []validator.String{
+			stringvalidator.AtLeastOneOf(
+				path.MatchRoot("id"),
+				path.MatchRoot("name"),
+			),
+		},
+	}
+	attributes["name"] = schema.StringAttribute{
+		Optional:            true,
+		MarkdownDescription: "The name of the container image. Either `id` or `name` must be specified.",
+	}
+	attributes["build_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the latest build for this container image.",
+	}
+	attributes["image_uri"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The URI of the container image.",
+	}
+	attributes["ray_version"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The Ray version used in the build.",
+	}
+	attributes["build_status"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
+	}
+	attributes["is_byod"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this is a BYOD (Bring Your Own Docker) image.",
+	}
+	attributes["digest"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`).",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Retrieves information about an existing Anyscale container image (cluster environment). Use this data source to look up container images by ID or name.",
-
-		Attributes: map[string]schema.Attribute{
-			// Input attributes
-			"id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the container image. Either `id` or `name` must be specified.",
-				Validators: []validator.String{
-					stringvalidator.AtLeastOneOf(
-						path.MatchRoot("id"),
-						path.MatchRoot("name"),
-					),
-				},
-			},
-			"name": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The name of the container image. Either `id` or `name` must be specified.",
-			},
-
-			// Output attributes
-			"build_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the latest build for this container image.",
-			},
-			"image_uri": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The URI of the container image.",
-			},
-			"ray_version": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The Ray version used in the build.",
-			},
-			"build_status": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
-			},
-			"is_byod": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is a BYOD (Bring Your Own Docker) image.",
-			},
-			"created_at": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Timestamp when the container image was created.",
-			},
-			"creator_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the user who created this container image.",
-			},
-			"revision": schema.Int64Attribute{
-				Computed:            true,
-				MarkdownDescription: "The revision number of the latest build.",
-			},
-			"digest": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`).",
-			},
-			"name_version": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
-			},
-		},
+		Attributes:          attributes,
 	}
 }
 

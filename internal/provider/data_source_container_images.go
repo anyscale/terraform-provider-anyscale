@@ -61,6 +61,28 @@ func (d *ContainerImagesDataSource) Metadata(ctx context.Context, req datasource
 
 // Schema defines the schema for the data source.
 func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	itemAttributes := containerImageSharedAttributes()
+	itemAttributes["id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the container image.",
+	}
+	itemAttributes["name"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The name of the container image.",
+	}
+	itemAttributes["is_archived"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this container image is archived.",
+	}
+	itemAttributes["latest_build_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The ID of the latest build for this container image.",
+	}
+	itemAttributes["latest_build_status"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Lists and filters Anyscale container images (cluster environments). This data source returns a list of container images with their latest build information.",
 
@@ -85,44 +107,7 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 				Computed:            true,
 				MarkdownDescription: "List of container images matching the filters.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The unique identifier of the container image.",
-						},
-						"name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name of the container image.",
-						},
-						"creator_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the user who created this container image.",
-						},
-						"created_at": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Timestamp when the container image was created.",
-						},
-						"is_archived": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this container image is archived.",
-						},
-						"latest_build_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the latest build for this container image.",
-						},
-						"latest_build_status": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
-						},
-						"revision": schema.Int64Attribute{
-							Computed:            true,
-							MarkdownDescription: "The revision number of the latest build.",
-						},
-						"name_version": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
-						},
-					},
+					Attributes: itemAttributes,
 				},
 			},
 		},

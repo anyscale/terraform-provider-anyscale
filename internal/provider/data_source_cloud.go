@@ -68,94 +68,41 @@ func (d *CloudDataSource) Metadata(ctx context.Context, req datasource.MetadataR
 
 // Schema defines the data source schema.
 func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	attributes := cloudSharedAttributes()
+	attributes["id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the cloud. Either `id` or `name` must be specified.",
+	}
+	attributes["name"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The name of the cloud. Either `id` or `name` must be specified. If multiple clouds have the same name, the most recently created one will be returned.",
+	}
+	attributes["is_empty_cloud"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this is an empty cloud (created without embedded resource configuration).",
+	}
+	attributes["cloud_deployment_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.",
+		DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
+	}
+	// C7: same backend field as the plural's lineage_tracking_enabled/is_aggregated_logs_enabled,
+	// kept under these names since renaming a shipped attribute is breaking. See
+	// CLOUD-SYNC-DESIGN.md C7 and schema_shared_attributes.go's cloudSharedAttributes doc.
+	attributes["enable_lineage_tracking"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
+	}
+	attributes["enable_log_ingestion"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Use this data source to retrieve information about an existing Anyscale Cloud. You can look up a cloud by its ID or name.",
-
-		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the cloud. Either `id` or `name` must be specified.",
-			},
-			"name": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The name of the cloud. Either `id` or `name` must be specified. If multiple clouds have the same name, the most recently created one will be returned.",
-			},
-
-			// Computed fields
-			"cloud_provider": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The cloud provider (AWS, GCP, AZURE, or GENERIC).",
-			},
-			"region": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The region where the cloud is deployed.",
-			},
-			"status": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The operational status of the cloud (e.g., ready, pending, failed).",
-			},
-			"state": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).",
-			},
-			"is_empty_cloud": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is an empty cloud (created without embedded resource configuration).",
-			},
-			"cloud_deployment_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.",
-				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
-			},
-			"auto_add_user": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether users are automatically added to this cloud.",
-			},
-			"enable_lineage_tracking": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
-			},
-			"enable_log_ingestion": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
-			},
-
-			// C2: parity with the plural anyscale_clouds data source.
-			"compute_stack": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The compute stack (VM or K8S).",
-			},
-			"created_at": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Timestamp when the cloud was created.",
-			},
-			"creator_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the user who created the cloud.",
-			},
-			"is_default": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is the default cloud for the organization.",
-			},
-			"is_aioa": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is an AIOA (Anyscale In Your Own Account) cloud.",
-			},
-			"is_bring_your_own_resource": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this cloud allows bringing your own resources.",
-			},
-			"is_private_cloud": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is a private cloud.",
-			},
-			"is_private_service_cloud": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is a private service cloud.",
-			},
-		},
+		Attributes:          attributes,
 	}
 }
 
