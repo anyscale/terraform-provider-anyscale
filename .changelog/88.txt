@@ -1,0 +1,14 @@
+```
+release-note:fixed
+data-source/anyscale_clouds: `status` and `state` attribute descriptions now include example values (e.g., ready/pending/failed and ACTIVE/CREATING/FAILED), matching `anyscale_cloud`.
+```
+
+```
+release-note:fixed
+data-source/anyscale_container_image: Attribute descriptions no longer refer to "cluster environment" (terminology left over from before this data source was renamed) and consistently say "container image" instead.
+```
+
+```
+release-note:fixed
+data-source/anyscale_container_images: The `id` attribute description no longer refers to "cluster environment"; it now says "container image", matching `anyscale_container_image`.
+```
