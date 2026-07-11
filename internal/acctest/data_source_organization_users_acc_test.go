@@ -1,7 +1,6 @@
 package acctest
 
 import (
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -9,10 +8,7 @@ import (
 
 func TestAccOrganizationUsersDataSource_Basic(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -31,10 +27,7 @@ func TestAccOrganizationUsersDataSource_Basic(t *testing.T) {
 
 func TestAccOrganizationUsersDataSource_UserFieldsPopulated(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -59,10 +52,7 @@ func TestAccOrganizationUsersDataSource_UserFieldsPopulated(t *testing.T) {
 
 func TestAccOrganizationUsersDataSource_FilterByEmail(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	// Get current user info to use for filtering
 	resource.Test(t, resource.TestCase{
@@ -82,10 +72,7 @@ func TestAccOrganizationUsersDataSource_FilterByEmail(t *testing.T) {
 
 func TestAccOrganizationUsersDataSource_FilterByName(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -104,10 +91,7 @@ func TestAccOrganizationUsersDataSource_FilterByName(t *testing.T) {
 
 func TestAccOrganizationUsersDataSource_ServiceAccountsOnly(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -126,10 +110,7 @@ func TestAccOrganizationUsersDataSource_ServiceAccountsOnly(t *testing.T) {
 
 func TestAccOrganizationUsersDataSource_UsersOnly(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

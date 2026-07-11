@@ -1518,6 +1518,72 @@ func NewAPIArchivedDestroyCheckByAttr(resourceType, attrName, getPathFmt, archiv
 	return newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath)
 }
 
+// NewAPIArchivedDestroyCheckForID is the ID-pinned variant of
+// NewAPIArchivedDestroyCheck: rather than discovering which resources to
+// check by scanning Terraform state for resourceType, it polls the single id
+// the caller supplies via a *string. Use this when the fact under test
+// concerns an id a prior step has already dropped from state — e.g. a
+// RequiresReplace swapped in a new id, and the point of the check is that the
+// OLD id was actually archived server-side, not merely that the new resource
+// looks right. Populate id with a TestCheckFunc earlier in the same Check
+// chain, since its value isn't known until that step runs.
+//
+// Unlike the CheckDestroy-oriented family above, an unexpected status here is
+// a hard error rather than a logged warning: this runs inside a Check as a
+// positive assertion about one known id, not a best-effort leak scan across
+// however many resources remain in state.
+//
+// failureHint is an optional trailing string appended to the timeout error,
+// for a caller that wants the failure message to name the specific
+// regression it proves rather than just the generic timeout.
+func NewAPIArchivedDestroyCheckForID(resourceType string, id *string, getPathFmt, archivedJSONPath string, failureHint ...string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		if id == nil || *id == "" {
+			return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): no id captured to check", resourceType)
+		}
+
+		client, err := GetTestClient()
+		if err != nil {
+			return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): failed to get test client: %w", resourceType, err)
+		}
+
+		path := fmt.Sprintf(getPathFmt, *id)
+		deadline := time.Now().Add(destroyCheckPollTimeout)
+		for {
+			resp, err := client.DoRequest(context.Background(), "GET", path, nil)
+			if err != nil {
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): failed to check archived status of %s: %w", resourceType, *id, err)
+			}
+
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): failed to read response for %s: %w", resourceType, *id, readErr)
+			}
+			if resp.StatusCode != 200 {
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): unexpected status %d checking %s: %s",
+					resourceType, resp.StatusCode, *id, body[:min(len(body), 256)])
+			}
+
+			archived, perr := extractArchivedValue(body, archivedJSONPath)
+			if perr != nil {
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): failed to parse %s for %s: %w", resourceType, archivedJSONPath, *id, perr)
+			}
+			if archived {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				hint := ""
+				if len(failureHint) > 0 && failureHint[0] != "" {
+					hint = " - " + failureHint[0]
+				}
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): %s was never archived (checked %s) within the poll window%s", resourceType, *id, archivedJSONPath, hint)
+			}
+			time.Sleep(destroyCheckPollInterval)
+		}
+	}
+}
+
 // Anyscale archives/deletes are asynchronous: the API accepts the request but
 // the archive marker (e.g. result.deleted_at) can take a few seconds to
 // persist. CheckDestroy polls for the archived variant up to this bound so it

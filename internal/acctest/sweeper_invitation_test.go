@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
@@ -94,43 +97,55 @@ func sweepInvitations(_ string) error {
 }
 
 func listAllInvitationsForSweep(ctx context.Context, client *provider.Client) ([]sweepInvitationResult, error) {
-	var all []sweepInvitationResult
-	pagingToken := ""
+	return provider.PaginatedRequest(ctx, client, "/api/v2/organization_invitations", url.Values{},
+		func(body []byte) ([]sweepInvitationResult, *string, error) {
+			var page sweepInvitationListResponse
+			if err := json.Unmarshal(body, &page); err != nil {
+				return nil, nil, fmt.Errorf("parse invitations response: %w", err)
+			}
+			return page.Results, page.Metadata.NextPagingToken, nil
+		},
+	)
+}
 
-	for {
-		path := "/api/v2/organization_invitations"
-		if pagingToken != "" {
-			params := url.Values{}
-			params.Set("paging_token", pagingToken)
-			path = fmt.Sprintf("%s?%s", path, params.Encode())
+// TestListAllInvitationsForSweep_MultiPage proves listAllInvitationsForSweep
+// actually follows next_paging_token across pages instead of silently
+// truncating to page one - a truncation bug here would not error, it would
+// just make the sweeper blind to leaked invitations on later pages.
+func TestListAllInvitationsForSweep_MultiPage(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			if got := r.URL.Query().Get("paging_token"); got != "" {
+				t.Errorf("first request should not carry a paging_token, got %q", got)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"results":[{"id":"i1","email":"tfacc-invite-one@example.com","created_at":"2020-01-01T00:00:00Z"}],"metadata":{"next_paging_token":"page2"}}`)
+			return
 		}
+		if got := r.URL.Query().Get("paging_token"); got != "page2" {
+			t.Errorf("second request should carry paging_token=page2 as a query param, got %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"results":[{"id":"i2","email":"tfacc-invite-two@example.com","created_at":"2020-01-01T00:00:00Z"}],"metadata":{"next_paging_token":null}}`)
+	}))
+	defer server.Close()
 
-		resp, err := client.DoRequest(ctx, "GET", path, nil)
-		if err != nil {
-			return nil, fmt.Errorf("list invitations: %w", err)
-		}
-		body, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("read invitations response: %w", readErr)
-		}
-		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("list invitations: status %d: %s", resp.StatusCode, truncateBody(string(body), 256))
-		}
-
-		var page sweepInvitationListResponse
-		if err := json.Unmarshal(body, &page); err != nil {
-			return nil, fmt.Errorf("parse invitations response: %w", err)
-		}
-		all = append(all, page.Results...)
-
-		if page.Metadata.NextPagingToken == nil || *page.Metadata.NextPagingToken == "" {
-			break
-		}
-		pagingToken = *page.Metadata.NextPagingToken
+	client := provider.NewClientWithToken(server.URL, "test-token")
+	invitations, err := listAllInvitationsForSweep(context.Background(), client)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	return all, nil
+	if requestCount != 2 {
+		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
+	}
+	if len(invitations) != 2 {
+		t.Fatalf("expected 2 invitations across both pages, got %d (silent truncation would show up as a short result here)", len(invitations))
+	}
+	if invitations[0].ID != "i1" || invitations[1].ID != "i2" {
+		t.Fatalf("expected [i1, i2] in page order, got %+v", invitations)
+	}
 }
 
 func sweepInvalidateInvitation(ctx context.Context, client *provider.Client, inv sweepInvitationResult) error {

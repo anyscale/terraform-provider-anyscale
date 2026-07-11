@@ -644,26 +644,13 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-east-2"
   compute_stack  = "VM"
 
-  aws_config {
-    vpc_id             = "vpc-test123"
-    subnet_ids         = ["subnet-test1", "subnet-test2"]
-    security_group_ids = ["sg-test1"]
-
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/tfacc-cloudres-aws-crossaccount-%s"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/tfacc-cloudres-aws-cluster-node-%s"
-    external_id               = "anyscale-external-id-test"
-
-    subnet_ids_to_az = {
-      "subnet-test1" = "us-east-2a"
-      "subnet-test2" = "us-east-2b"
-    }
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-cres-aws-bucket-%s"
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix, randSuffix)
+`, cloudName, resourceName, awsConfigBlock("tfacc-cloudres-aws", randSuffix), randSuffix)
 }
 
 func testAccCloudResourceResourceGCPConfig(cloudName, resourceName, randSuffix string) string {
@@ -681,21 +668,13 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-central1"
   compute_stack  = "VM"
 
-  gcp_config {
-    project_id                        = "my-gcp-project"
-    vpc_name                          = "anyscale-vpc"
-    subnet_names                      = ["anyscale-subnet-1", "anyscale-subnet-2"]
-    firewall_policy_names             = ["anyscale-fw-ssh"]
-    provider_name                     = "projects/123456789012/locations/global/workloadIdentityPools/tf-cres-gcp-pool-%s/providers/tf-cres-gcp-prov-%s"
-    controlplane_service_account_email = "tf-cres-gcp-cp-%s@my-gcp-project.iam.gserviceaccount.com"
-    dataplane_service_account_email    = "tf-cres-gcp-dp-%s@my-gcp-project.iam.gserviceaccount.com"
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-cres-gcp-bucket-%s"
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix, randSuffix, randSuffix, randSuffix)
+`, cloudName, resourceName, gcpConfigBlock("tf-cres-gcp", randSuffix), randSuffix)
 }
 
 func testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix, namespace string) string {
@@ -717,17 +696,13 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-east-2"
   compute_stack  = "K8S"
 
-  kubernetes_config {
-    namespace                       = "%s"
-    anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/tfacc-cloudres-k8s-operator-%s"
-    zones                           = ["us-east-2a", "us-east-2b"]
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-cres-k8s-bucket-%s"
   }
 }
-`, cloudName, resourceName, namespace, randSuffix, randSuffix)
+`, cloudName, resourceName, k8sConfigBlock(namespace, fmt.Sprintf("arn:aws:iam::123456789012:role/tfacc-cloudres-k8s-operator-%s", randSuffix), []string{"us-east-2a", "us-east-2b"}), randSuffix)
 }
 
 func testAccCloudResourceResourceGCPK8SConfig(cloudName, resourceName, randSuffix string) string {
@@ -749,17 +724,13 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-central1"
   compute_stack  = "K8S"
 
-  kubernetes_config {
-    namespace                       = "anyscale"
-    anyscale_operator_iam_identity  = "tfacc-cloudres-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com"
-    zones                           = ["us-central1-a", "us-central1-b"]
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-cres-gcp-k8s-bucket-%s"
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix)
+`, cloudName, resourceName, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-cloudres-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}), randSuffix)
 }
 
 func testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix, mountPath, mountTargetZone string) string {
@@ -777,20 +748,7 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-east-2"
   compute_stack  = "VM"
 
-  aws_config {
-    vpc_id             = "vpc-test123"
-    subnet_ids         = ["subnet-test1", "subnet-test2"]
-    security_group_ids = ["sg-test1"]
-
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/tfacc-cloudres-fs-crossaccount-%s"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/tfacc-cloudres-fs-cluster-node-%s"
-    external_id               = "anyscale-external-id-test"
-
-    subnet_ids_to_az = {
-      "subnet-test1" = "us-east-2a"
-      "subnet-test2" = "us-east-2b"
-    }
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-cres-fs-bucket-%s"
@@ -805,5 +763,5 @@ resource "anyscale_cloud_resource" "test" {
     }
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix, randSuffix, mountPath, mountTargetZone)
+`, cloudName, resourceName, awsConfigBlock("tfacc-cloudres-fs", randSuffix), randSuffix, mountPath, mountTargetZone)
 }

@@ -343,6 +343,26 @@ resource "anyscale_cloud" "test" {
 `
 }
 
+// awsConfigBlockLifecycle renders the minimal aws_config nested block used
+// throughout this file's multi-resource lifecycle scenarios, where every
+// field is derived from a single letter ("a" or "b") identifying which
+// sibling cloud_resource block it belongs to. Kept local to this file
+// (unlike awsConfigBlock/gcpConfigBlock/k8sConfigBlock in
+// helpers_config_test.go): all 7 uses live here, so this does not belong in
+// the cross-file shared namespace.
+func awsConfigBlockLifecycle(letter string) string {
+	return fmt.Sprintf(`  aws_config {
+    vpc_id                    = "vpc-%s"
+    subnet_ids_to_az = {
+      "subnet-%s1" = "us-east-2a"
+    }
+    security_group_ids        = ["sg-%s"]
+    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/%s-crossaccount"
+    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/%s-cluster-node"
+    external_id               = "%s-external-id"
+  }`, letter, letter, letter, letter, letter, letter)
+}
+
 // TestAccCloudResourceMulti_DistinctExplicitNames is acceptance criterion 1
 // (CLOUD-RESOURCE-DESIGN.md): two anyscale_cloud_resource blocks with
 // distinct explicit names on one cloud must produce 2 distinct backend
@@ -363,16 +383,7 @@ resource "anyscale_cloud_resource" "a" {
   region        = "us-east-2"
   compute_stack = "VM"
 
-  aws_config {
-    vpc_id                    = "vpc-a"
-    subnet_ids_to_az = {
-      "subnet-a1" = "us-east-2a"
-    }
-    security_group_ids        = ["sg-a"]
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/a-crossaccount"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/a-cluster-node"
-    external_id               = "a-external-id"
-  }
+` + awsConfigBlockLifecycle("a") + `
 
   object_storage {
     bucket_name = "bucket-a"
@@ -386,16 +397,7 @@ resource "anyscale_cloud_resource" "b" {
   compute_stack = "VM"
   depends_on    = [anyscale_cloud_resource.a]
 
-  aws_config {
-    vpc_id                    = "vpc-b"
-    subnet_ids_to_az = {
-      "subnet-b1" = "us-east-2a"
-    }
-    security_group_ids        = ["sg-b"]
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/b-crossaccount"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/b-cluster-node"
-    external_id               = "b-external-id"
-  }
+` + awsConfigBlockLifecycle("b") + `
 
   object_storage {
     bucket_name = "bucket-b"
@@ -453,16 +455,7 @@ resource "anyscale_cloud_resource" "a" {
   region        = "us-east-2"
   compute_stack = "VM"
 
-  aws_config {
-    vpc_id                    = "vpc-a"
-    subnet_ids_to_az = {
-      "subnet-a1" = "us-east-2a"
-    }
-    security_group_ids        = ["sg-a"]
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/a-crossaccount"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/a-cluster-node"
-    external_id               = "a-external-id"
-  }
+` + awsConfigBlockLifecycle("a") + `
 
   object_storage {
     bucket_name = "bucket-a"
@@ -475,16 +468,7 @@ resource "anyscale_cloud_resource" "b" {
   compute_stack = "VM"
   depends_on    = [anyscale_cloud_resource.a]
 
-  aws_config {
-    vpc_id                    = "vpc-b"
-    subnet_ids_to_az = {
-      "subnet-b1" = "us-east-2a"
-    }
-    security_group_ids        = ["sg-b"]
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/b-crossaccount"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/b-cluster-node"
-    external_id               = "b-external-id"
-  }
+` + awsConfigBlockLifecycle("b") + `
 
   object_storage {
     bucket_name = "bucket-b"
@@ -539,16 +523,7 @@ resource "anyscale_cloud_resource" "a" {
   region        = "us-east-2"
   compute_stack = "VM"
 
-  aws_config {
-    vpc_id                    = "vpc-a"
-    subnet_ids_to_az = {
-      "subnet-a1" = "us-east-2a"
-    }
-    security_group_ids        = ["sg-a"]
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/a-crossaccount"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/a-cluster-node"
-    external_id               = "a-external-id"
-  }
+` + awsConfigBlockLifecycle("a") + `
 
   object_storage {
     bucket_name = "bucket-a"
@@ -596,16 +571,7 @@ resource "anyscale_cloud_resource" "a" {
   region        = "us-east-2"
   compute_stack = "VM"
 
-  aws_config {
-    vpc_id                    = "vpc-a"
-    subnet_ids_to_az = {
-      "subnet-a1" = "us-east-2a"
-    }
-    security_group_ids        = ["sg-a"]
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/a-crossaccount"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/a-cluster-node"
-    external_id               = "a-external-id"
-  }
+` + awsConfigBlockLifecycle("a") + `
 
   object_storage {
     bucket_name = "bucket-a"
@@ -619,16 +585,7 @@ resource "anyscale_cloud_resource" "b" {
   compute_stack = "VM"
   depends_on    = [anyscale_cloud_resource.a]
 
-  aws_config {
-    vpc_id                    = "vpc-b"
-    subnet_ids_to_az = {
-      "subnet-b1" = "us-east-2a"
-    }
-    security_group_ids        = ["sg-b"]
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/b-crossaccount"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/b-cluster-node"
-    external_id               = "b-external-id"
-  }
+` + awsConfigBlockLifecycle("b") + `
 
   object_storage {
     bucket_name = "bucket-b"

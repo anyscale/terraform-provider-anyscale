@@ -20,10 +20,7 @@ import (
 
 func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	// Skip by default to avoid rate limits (20 invitations per 24 hours)
 	// Set ANYSCALE_TEST_INVITATIONS=1 to run these tests
@@ -72,10 +69,7 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 
 func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	// Skip by default to avoid rate limits (20 invitations per 24 hours)
 	if os.Getenv("ANYSCALE_TEST_INVITATIONS") == "" {
@@ -122,10 +116,7 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 
 func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	// Skip by default to avoid rate limits (20 invitations per 24 hours)
 	if os.Getenv("ANYSCALE_TEST_INVITATIONS") == "" {

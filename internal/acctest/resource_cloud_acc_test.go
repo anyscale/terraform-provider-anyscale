@@ -436,22 +436,9 @@ resource "anyscale_cloud" "test" {
   compute_stack  = "VM"
   region         = "us-east-2"
 
-  aws_config {
-    vpc_id             = "vpc-test123"
-    subnet_ids         = ["subnet-test1", "subnet-test2"]
-    security_group_ids = ["sg-test1"]
-
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/tfacc-aws-basic-crossaccount-%s"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/tfacc-aws-basic-cluster-node-%s"
-    external_id               = "anyscale-external-id-test"
-
-    subnet_ids_to_az = {
-      "subnet-test1" = "us-east-2a"
-      "subnet-test2" = "us-east-2b"
-    }
-  }
+%s
 }
-`, name, randSuffix, randSuffix)
+`, name, awsConfigBlock("tfacc-aws-basic", randSuffix))
 }
 
 func testAccCloudResourceAWSEmptyConfig(name string) string {
@@ -487,17 +474,9 @@ resource "anyscale_cloud" "test" {
   compute_stack  = "VM"
   region         = "us-central1"
 
-  gcp_config {
-    project_id                        = "my-gcp-project"
-    vpc_name                          = "anyscale-vpc"
-    subnet_names                      = ["anyscale-subnet-1", "anyscale-subnet-2"]
-    firewall_policy_names             = ["anyscale-fw-ssh"]
-    provider_name                     = "projects/123456789012/locations/global/workloadIdentityPools/tfacc-gcp-basic-pool-%s/providers/tfacc-gcp-basic-prov-%s"
-    controlplane_service_account_email = "tfacc-gcp-basic-cp-%s@my-gcp-project.iam.gserviceaccount.com"
-    dataplane_service_account_email    = "tfacc-gcp-basic-dp-%s@my-gcp-project.iam.gserviceaccount.com"
-  }
+%s
 }
-`, name, randSuffix, randSuffix, randSuffix, randSuffix)
+`, name, gcpConfigBlock("tfacc-gcp-basic", randSuffix))
 }
 
 func testAccCloudResourceAWSK8SConfig(name, randSuffix, namespace string) string {
@@ -508,17 +487,13 @@ resource "anyscale_cloud" "test" {
   compute_stack  = "K8S"
   region         = "us-east-2"
 
-  kubernetes_config {
-    namespace                       = "%s"
-    anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/tfacc-aws-k8s-operator-%s"
-    zones                           = ["us-east-2a", "us-east-2b"]
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-aws-k8s-bucket-%s"
   }
 }
-`, name, namespace, randSuffix, randSuffix)
+`, name, k8sConfigBlock(namespace, fmt.Sprintf("arn:aws:iam::123456789012:role/tfacc-aws-k8s-operator-%s", randSuffix), []string{"us-east-2a", "us-east-2b"}), randSuffix)
 }
 
 func testAccCloudResourceGCPK8SConfig(name, randSuffix string) string {
@@ -529,17 +504,13 @@ resource "anyscale_cloud" "test" {
   compute_stack  = "K8S"
   region         = "us-central1"
 
-  kubernetes_config {
-    namespace                       = "anyscale"
-    anyscale_operator_iam_identity  = "tfacc-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com"
-    zones                           = ["us-central1-a", "us-central1-b"]
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-gcp-k8s-bucket-%s"
   }
 }
-`, name, randSuffix, randSuffix)
+`, name, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}), randSuffix)
 }
 
 // TestAccCloudResource_Disappears verifies that an out-of-band cloud deletion
