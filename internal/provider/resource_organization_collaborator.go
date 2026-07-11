@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -261,31 +260,13 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 		return
 	}
 
-	// Send update request
-	httpResp, err := r.client.DoRequest(ctx, "PUT", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), strings.NewReader(string(jsonData)))
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error updating collaborator",
-			fmt.Sprintf("Could not update collaborator %s: %s", identityID, err.Error()),
-		)
-		return
-	}
-	defer func() { _ = httpResp.Body.Close() }()
-
-	body, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error reading response",
-			fmt.Sprintf("Could not read update response: %s", err.Error()),
-		)
-		return
-	}
-
-	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent {
-		resp.Diagnostics.AddError(
-			"Error updating collaborator",
-			fmt.Sprintf("API returned status %d: %s", httpResp.StatusCode, string(body)),
-		)
+	// Send update request. The response body isn't parsed into anything - the resource re-reads
+	// current state via findCollaboratorByID right after, so only the status code matters here.
+	if _, err := DoRequestRaw(
+		ctx, r.client, "PUT", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), strings.NewReader(string(jsonData)),
+		http.StatusOK, http.StatusNoContent,
+	); err != nil {
+		AddAPIError(&resp.Diagnostics, fmt.Sprintf("update collaborator %s", identityID), err)
 		return
 	}
 
