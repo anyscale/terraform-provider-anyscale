@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_cloud_resource: `cloud_provider` values that aren't canonical uppercase (e.g. `aws` instead of `AWS`) no longer silently produce an incomplete apply with the provider-specific config block (`aws_config`, `gcp_config`, etc.) left unpopulated and no error; the value is now case-normalized before matching, consistent with `anyscale_cloud`.
+```
