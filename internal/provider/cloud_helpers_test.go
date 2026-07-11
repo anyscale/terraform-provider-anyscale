@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 func TestResolveCloudNameToID(t *testing.T) {
@@ -228,6 +231,325 @@ func TestResolveCloudNameToID(t *testing.T) {
 
 		if cloudID != "cloud-123" {
 			t.Errorf("expected cloud ID 'cloud-123', got '%s'", cloudID)
+		}
+	})
+}
+
+// --- buildProviderConfig test fixtures ---
+//
+// Minimal-but-valid objects for each config type, reused across combos below. Field shapes
+// mirror TestExpandAWSConfig/TestExpandGCPConfig/TestExpandKubernetesConfig/
+// TestExpandObjectStorage/TestExpandFileStorage in resource_cloud_resource_test.go.
+
+func testAWSConfigObj(vpcID string) types.Object {
+	return types.ObjectValueMust(
+		map[string]attr.Type{
+			"vpc_id":                      types.StringType,
+			"subnet_ids":                  types.ListType{ElemType: types.StringType},
+			"subnet_ids_to_az":            types.MapType{ElemType: types.StringType},
+			"security_group_ids":          types.ListType{ElemType: types.StringType},
+			"controlplane_iam_role_arn":   types.StringType,
+			"dataplane_iam_role_arn":      types.StringType,
+			"cluster_instance_profile_id": types.StringType,
+			"external_id":                 types.StringType,
+			"memorydb_cluster_name":       types.StringType,
+			"memorydb_cluster_arn":        types.StringType,
+			"memorydb_cluster_endpoint":   types.StringType,
+		},
+		map[string]attr.Value{
+			"vpc_id":                      types.StringValue(vpcID),
+			"subnet_ids":                  types.ListValueMust(types.StringType, []attr.Value{types.StringValue("subnet-111")}),
+			"subnet_ids_to_az":            types.MapNull(types.StringType),
+			"security_group_ids":          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("sg-111")}),
+			"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::123456789012:role/cp"),
+			"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::123456789012:role/dp"),
+			"cluster_instance_profile_id": types.StringNull(),
+			"external_id":                 types.StringNull(),
+			"memorydb_cluster_name":       types.StringNull(),
+			"memorydb_cluster_arn":        types.StringNull(),
+			"memorydb_cluster_endpoint":   types.StringNull(),
+		},
+	)
+}
+
+func testGCPConfigObj(projectID string) types.Object {
+	return types.ObjectValueMust(
+		map[string]attr.Type{
+			"project_id":                         types.StringType,
+			"host_project_id":                    types.StringType,
+			"provider_name":                      types.StringType,
+			"vpc_name":                           types.StringType,
+			"subnet_names":                       types.ListType{ElemType: types.StringType},
+			"controlplane_service_account_email": types.StringType,
+			"dataplane_service_account_email":    types.StringType,
+			"firewall_policy_names":              types.ListType{ElemType: types.StringType},
+			"memorystore_instance_name":          types.StringType,
+			"memorystore_endpoint":               types.StringType,
+		},
+		map[string]attr.Value{
+			"project_id":                         types.StringValue(projectID),
+			"host_project_id":                    types.StringNull(),
+			"provider_name":                      types.StringValue("projects/123/locations/global/workloadIdentityPools/pool/providers/provider"),
+			"vpc_name":                           types.StringValue("anyscale-vpc"),
+			"subnet_names":                       types.ListValueMust(types.StringType, []attr.Value{types.StringValue("subnet-a")}),
+			"controlplane_service_account_email": types.StringValue("cp@my-project.iam.gserviceaccount.com"),
+			"dataplane_service_account_email":    types.StringValue("dp@my-project.iam.gserviceaccount.com"),
+			"firewall_policy_names":              types.ListNull(types.StringType),
+			"memorystore_instance_name":          types.StringNull(),
+			"memorystore_endpoint":               types.StringNull(),
+		},
+	)
+}
+
+func testKubernetesConfigObj(operatorIdentity string) types.Object {
+	return types.ObjectValueMust(
+		map[string]attr.Type{
+			"anyscale_operator_iam_identity": types.StringType,
+			"zones":                          types.ListType{ElemType: types.StringType},
+			"redis_endpoint":                 types.StringType,
+			"namespace":                      types.StringType,
+			"ingress_host":                   types.StringType,
+			"cluster_name":                   types.StringType,
+			"context":                        types.StringType,
+			"kubeconfig_path":                types.StringType,
+		},
+		map[string]attr.Value{
+			"anyscale_operator_iam_identity": types.StringValue(operatorIdentity),
+			"zones":                          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("us-east-2a")}),
+			"redis_endpoint":                 types.StringNull(),
+			"namespace":                      types.StringNull(),
+			"ingress_host":                   types.StringNull(),
+			"cluster_name":                   types.StringNull(),
+			"context":                        types.StringNull(),
+			"kubeconfig_path":                types.StringNull(),
+		},
+	)
+}
+
+// testKubernetesConfigObjMissingIdentity has anyscale_operator_iam_identity set to "" rather
+// than being null - expandKubernetesConfig still returns a non-nil *KubernetesConfig, so this
+// exercises buildProviderConfig's own explicit check for an empty identity, not just a null object.
+func testKubernetesConfigObjMissingIdentity() types.Object {
+	return testKubernetesConfigObj("")
+}
+
+func testObjectStorageObj(bucketName string) types.Object {
+	return types.ObjectValueMust(
+		map[string]attr.Type{
+			"bucket_name": types.StringType,
+			"region":      types.StringType,
+			"endpoint":    types.StringType,
+		},
+		map[string]attr.Value{
+			"bucket_name": types.StringValue(bucketName),
+			"region":      types.StringValue("us-west-2"),
+			"endpoint":    types.StringNull(),
+		},
+	)
+}
+
+func testFileStorageObj(id string) types.Object {
+	return types.ObjectValueMust(
+		map[string]attr.Type{
+			"file_storage_id":             types.StringType,
+			"mount_path":                  types.StringType,
+			"persistent_volume_claim":     types.StringType,
+			"csi_ephemeral_volume_driver": types.StringType,
+			"mount_targets":               types.ListType{ElemType: types.ObjectType{AttrTypes: map[string]attr.Type{"address": types.StringType, "zone": types.StringType}}},
+		},
+		map[string]attr.Value{
+			"file_storage_id":             types.StringValue(id),
+			"mount_path":                  types.StringNull(),
+			"persistent_volume_claim":     types.StringNull(),
+			"csi_ephemeral_volume_driver": types.StringNull(),
+			"mount_targets":               types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{"address": types.StringType, "zone": types.StringType}}),
+		},
+	)
+}
+
+func nullObj() types.Object {
+	return types.ObjectNull(map[string]attr.Type{})
+}
+
+// TestBuildProviderConfig_RequiredCombos proves buildProviderConfig populates the right
+// deployReq fields for every AWS/GCP x VM/K8S combo, matching the behavior previously
+// duplicated across resource_cloud.go's addCloudResource and resource_cloud_resource.go's
+// addProviderConfig (workbench #6).
+func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("AWS VM: aws_config required, populates AWSConfig", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-aws-vm"), nullObj(), nullObj(), nullObj(), nullObj())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deployReq.AWSConfig == nil || deployReq.AWSConfig.VPCID != "vpc-aws-vm" {
+			t.Errorf("AWSConfig not populated correctly, got %+v", deployReq.AWSConfig)
+		}
+		if deployReq.ObjectStorage != nil || deployReq.FileStorage != nil || deployReq.GCPConfig != nil || deployReq.KubernetesConfig != nil {
+			t.Errorf("only AWSConfig should be populated, got ObjectStorage=%v FileStorage=%v GCPConfig=%v KubernetesConfig=%v",
+				deployReq.ObjectStorage, deployReq.FileStorage, deployReq.GCPConfig, deployReq.KubernetesConfig)
+		}
+	})
+
+	t.Run("AWS VM: missing aws_config errors with canonical wording", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
+		wantErr := "aws_config is required when cloud_provider is AWS and compute_stack is VM"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("AWS VM: optional object_storage and file_storage populate with s3 prefix", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-1"), nullObj(), nullObj(), testObjectStorageObj("my-bucket"), testFileStorageObj("fs-1"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deployReq.ObjectStorage == nil || deployReq.ObjectStorage.BucketName != "s3://my-bucket" {
+			t.Errorf("ObjectStorage bucket not s3-prefixed correctly, got %+v", deployReq.ObjectStorage)
+		}
+		if deployReq.FileStorage == nil || deployReq.FileStorage.FileStorageID != "fs-1" {
+			t.Errorf("FileStorage not populated correctly, got %+v", deployReq.FileStorage)
+		}
+	})
+
+	t.Run("AWS VM: bucket_name already s3-prefixed is not double-prefixed", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-1"), nullObj(), nullObj(), testObjectStorageObj("s3://already-prefixed"), nullObj())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deployReq.ObjectStorage == nil || deployReq.ObjectStorage.BucketName != "s3://already-prefixed" {
+			t.Errorf("bucket_name got double-prefixed or mishandled, got %+v", deployReq.ObjectStorage)
+		}
+	})
+
+	t.Run("AWS K8S: kubernetes_config and object_storage required, aws_config optional", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), testKubernetesConfigObj("arn:aws:iam::123:role/operator"), testObjectStorageObj("k8s-bucket"), nullObj())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deployReq.KubernetesConfig == nil || deployReq.KubernetesConfig.AnyscaleOperatorIAMIdentity != "arn:aws:iam::123:role/operator" {
+			t.Errorf("KubernetesConfig not populated correctly, got %+v", deployReq.KubernetesConfig)
+		}
+		if deployReq.ObjectStorage == nil || deployReq.ObjectStorage.BucketName != "s3://k8s-bucket" {
+			t.Errorf("ObjectStorage not populated correctly, got %+v", deployReq.ObjectStorage)
+		}
+		if deployReq.AWSConfig != nil {
+			t.Errorf("aws_config was not provided, AWSConfig should stay nil, got %+v", deployReq.AWSConfig)
+		}
+	})
+
+	t.Run("AWS K8S: missing kubernetes_config errors", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), nullObj(), testObjectStorageObj("b"), nullObj())
+		wantErr := "kubernetes_config is required when cloud_provider is AWS and compute_stack is K8S"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("AWS K8S: missing object_storage errors", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), testKubernetesConfigObj("arn:aws:iam::123:role/operator"), nullObj(), nullObj())
+		wantErr := "object_storage is required when cloud_provider is AWS and compute_stack is K8S"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("AWS K8S: empty anyscale_operator_iam_identity errors", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), testKubernetesConfigObjMissingIdentity(), testObjectStorageObj("b"), nullObj())
+		wantErr := "kubernetes_config.anyscale_operator_iam_identity is required for AWS K8S clouds"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("GCP VM: gcp_config required, populates GCPConfig with gs prefix", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "GCP", "VM", nullObj(), testGCPConfigObj("my-gcp-project"), nullObj(), testObjectStorageObj("gcp-bucket"), nullObj())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deployReq.GCPConfig == nil || deployReq.GCPConfig.ProjectID != "my-gcp-project" {
+			t.Errorf("GCPConfig not populated correctly, got %+v", deployReq.GCPConfig)
+		}
+		if deployReq.ObjectStorage == nil || deployReq.ObjectStorage.BucketName != "gs://gcp-bucket" {
+			t.Errorf("ObjectStorage bucket not gs-prefixed correctly, got %+v", deployReq.ObjectStorage)
+		}
+	})
+
+	t.Run("GCP VM: missing gcp_config errors with canonical wording", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "GCP", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
+		wantErr := "gcp_config is required when cloud_provider is GCP and compute_stack is VM"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("GCP K8S: kubernetes_config and object_storage required, gcp_config optional", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "GCP", "K8S", nullObj(), nullObj(), testKubernetesConfigObj("operator@my-project.iam.gserviceaccount.com"), testObjectStorageObj("k8s-gcp-bucket"), nullObj())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deployReq.ObjectStorage == nil || deployReq.ObjectStorage.BucketName != "gs://k8s-gcp-bucket" {
+			t.Errorf("ObjectStorage not populated correctly, got %+v", deployReq.ObjectStorage)
+		}
+		if deployReq.GCPConfig != nil {
+			t.Errorf("gcp_config was not provided, GCPConfig should stay nil, got %+v", deployReq.GCPConfig)
+		}
+	})
+
+	t.Run("lowercase and mixed-case provider still match (case-normalization)", func(t *testing.T) {
+		for _, p := range []string{"aws", "Aws", "AWS"} {
+			deployReq := &CloudDeploymentRequest{}
+			err := buildProviderConfig(ctx, deployReq, p, "VM", testAWSConfigObj("vpc-case"), nullObj(), nullObj(), nullObj(), nullObj())
+			if err != nil {
+				t.Errorf("provider %q: unexpected error: %v", p, err)
+			}
+			if deployReq.AWSConfig == nil {
+				t.Errorf("provider %q: AWSConfig not populated", p)
+			}
+		}
+	})
+
+	t.Run("AZURE returns the detailed not-supported error", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AZURE", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
+		wantErr := "azure clouds are not yet supported by this provider; azure_config cannot be applied"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("GENERIC returns the not-supported error", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "GENERIC", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
+		wantErr := "generic clouds are not yet supported by this provider"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("expand failure is wrapped with context", func(t *testing.T) {
+		// An object missing a required attribute key fails obj.As() inside expandAWSConfig,
+		// proving buildProviderConfig wraps that failure rather than returning it bare.
+		malformed := types.ObjectValueMust(
+			map[string]attr.Type{"vpc_id": types.StringType},
+			map[string]attr.Value{"vpc_id": types.StringValue("vpc-1")},
+		)
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", malformed, nullObj(), nullObj(), nullObj(), nullObj())
+		if err == nil || !strings.Contains(err.Error(), "failed to expand aws_config") {
+			t.Errorf("error = %v, want it wrapped with 'failed to expand aws_config'", err)
 		}
 	})
 }
