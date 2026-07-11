@@ -68,6 +68,31 @@ func (d *CloudsDataSource) Metadata(ctx context.Context, req datasource.Metadata
 
 // Schema defines the schema for the data source.
 func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	itemAttributes := cloudSharedAttributes()
+	itemAttributes["id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the cloud.",
+	}
+	itemAttributes["name"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The name of the cloud.",
+	}
+	itemAttributes["is_k8s"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this cloud uses Kubernetes.",
+	}
+	// C7: same backend fields as the singular's enable_lineage_tracking/enable_log_ingestion,
+	// kept under these names since renaming a shipped attribute is breaking. See
+	// CLOUD-SYNC-DESIGN.md C7 and schema_shared_attributes.go's cloudSharedAttributes doc.
+	itemAttributes["lineage_tracking_enabled"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
+	}
+	itemAttributes["is_aggregated_logs_enabled"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information.",
 
@@ -88,80 +113,7 @@ func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 				Computed:            true,
 				MarkdownDescription: "List of clouds matching the filters.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The unique identifier of the cloud.",
-						},
-						"name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name of the cloud.",
-						},
-						"cloud_provider": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The cloud provider (AWS, GCP, AZURE, or GENERIC).",
-						},
-						"compute_stack": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The compute stack (VM or K8S).",
-						},
-						"region": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The region where the cloud is deployed.",
-						},
-						"status": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The operational status of the cloud (e.g., ready, pending, failed).",
-						},
-						"state": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).",
-						},
-						"created_at": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Timestamp when the cloud was created.",
-						},
-						"creator_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the user who created the cloud.",
-						},
-						"is_default": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is the default cloud for the organization.",
-						},
-						"is_k8s": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this cloud uses Kubernetes.",
-						},
-						"is_aioa": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is an AIOA (Anyscale In Your Own Account) cloud.",
-						},
-						"is_bring_your_own_resource": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this cloud allows bringing your own resources.",
-						},
-						"is_private_cloud": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is a private cloud.",
-						},
-						"is_private_service_cloud": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is a private service cloud.",
-						},
-						"auto_add_user": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether users are automatically added to this cloud.",
-						},
-						"lineage_tracking_enabled": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
-						},
-						"is_aggregated_logs_enabled": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
-						},
-					},
+					Attributes: itemAttributes,
 				},
 			},
 		},
