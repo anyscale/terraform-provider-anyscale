@@ -111,11 +111,11 @@ func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 						},
 						"status": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The operational status of the cloud.",
+							MarkdownDescription: "The operational status of the cloud (e.g., ready, pending, failed).",
 						},
 						"state": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The lifecycle state of the cloud.",
+							MarkdownDescription: "The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).",
 						},
 						"created_at": schema.StringAttribute{
 							Computed:            true,

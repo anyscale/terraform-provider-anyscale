@@ -49,15 +49,15 @@ output "container_image_digest" {
 
 ### Optional
 
-- `id` (String) The unique identifier of the cluster environment. Either `id` or `name` must be specified.
-- `name` (String) The name of the cluster environment. Either `id` or `name` must be specified.
+- `id` (String) The unique identifier of the container image. Either `id` or `name` must be specified.
+- `name` (String) The name of the container image. Either `id` or `name` must be specified.
 
 ### Read-Only
 
-- `build_id` (String) The unique identifier of the latest build for this cluster environment.
+- `build_id` (String) The unique identifier of the latest build for this container image.
 - `build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
-- `created_at` (String) Timestamp when the cluster environment was created.
-- `creator_id` (String) The ID of the user who created this cluster environment.
+- `created_at` (String) Timestamp when the container image was created.
+- `creator_id` (String) The ID of the user who created this container image.
 - `digest` (String) The content digest of the built container image (e.g. `sha256:...`).
 - `image_uri` (String) The URI of the container image.
 - `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image.

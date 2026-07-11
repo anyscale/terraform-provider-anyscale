@@ -77,5 +77,5 @@ Read-Only:
 - `lineage_tracking_enabled` (Boolean) Whether lineage tracking is enabled for this cloud.
 - `name` (String) The name of the cloud.
 - `region` (String) The region where the cloud is deployed.
-- `state` (String) The lifecycle state of the cloud.
-- `status` (String) The operational status of the cloud.
+- `state` (String) The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).
+- `status` (String) The operational status of the cloud (e.g., ready, pending, failed).

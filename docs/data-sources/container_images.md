@@ -56,7 +56,7 @@ Read-Only:
 
 - `created_at` (String) Timestamp when the container image was created.
 - `creator_id` (String) The ID of the user who created this container image.
-- `id` (String) The unique identifier of the cluster environment.
+- `id` (String) The unique identifier of the container image.
 - `is_archived` (Boolean) Whether this container image is archived.
 - `latest_build_id` (String) The ID of the latest build for this container image.
 - `latest_build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
