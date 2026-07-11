@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -392,17 +393,7 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	tflog.Info(ctx, "Deleting project", map[string]any{"project_id": projectID})
 
-	// Delete project
-	_, err := DoRequestRaw(
-		ctx,
-		r.client,
-		"DELETE",
-		fmt.Sprintf("/api/v2/projects/%s", projectID),
-		nil,
-		http.StatusOK,
-		http.StatusNoContent,
-		http.StatusNotFound,
-	)
+	err := r.deleteProjectWithRetry(ctx, projectID, state.CreatedAt.ValueString())
 	if err != nil {
 		if strings.Contains(err.Error(), "status 409") {
 			resp.Diagnostics.AddError(
@@ -416,6 +407,88 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	tflog.Info(ctx, "Project deleted successfully", map[string]any{"project_id": projectID})
+}
+
+// recentlyCreatedRetryWindow bounds how new a project must be (per its own
+// created_at) to qualify for the delete-time 403 retry below.
+const recentlyCreatedRetryWindow = 5 * time.Minute
+
+const (
+	deleteProjectRetryAttempts = 3
+	deleteProjectRetryBackoff  = 2 * time.Second
+)
+
+// deleteProjectWithRetry issues the delete call, retrying a 403 a bounded
+// number of times ONLY when createdAt shows the project was created very
+// recently (within recentlyCreatedRetryWindow).
+//
+// This targets a known backend race: the delete-time permission check is
+// SpiceDB-backed and its CheckPermission call does not request a
+// fully-consistent read, so it can read a stale replica shortly after the
+// create-time permission grant (no zookie is threaded from the create write
+// to the delete-time check) — see the project-delete-403 investigation notes.
+// A genuine, long-standing permission denial is indistinguishable from this
+// race by status code or message alone (both are a bare 403 "Permission
+// denied"), so this does NOT retry every 403 — only ones on a project new
+// enough that the race is a plausible explanation. A project that has existed
+// longer than the window is not retried at all and surfaces its error
+// immediately, exactly as before this change.
+func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID, createdAt string) error {
+	eligible := isRecentlyCreated(createdAt, recentlyCreatedRetryWindow)
+
+	attempts := 1
+	if eligible {
+		attempts = deleteProjectRetryAttempts
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		_, err := DoRequestRaw(
+			ctx,
+			r.client,
+			"DELETE",
+			fmt.Sprintf("/api/v2/projects/%s", projectID),
+			nil,
+			http.StatusOK,
+			http.StatusNoContent,
+			http.StatusNotFound,
+		)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		if !eligible || !strings.Contains(err.Error(), "status 403") || attempt == attempts {
+			return lastErr
+		}
+
+		tflog.Warn(ctx, "Delete project got a 403 shortly after creation; retrying (known delete-time permission-check consistency race)", map[string]any{
+			"project_id": projectID,
+			"attempt":    attempt,
+			"created_at": createdAt,
+		})
+
+		select {
+		case <-ctx.Done():
+			return lastErr
+		default:
+		}
+		time.Sleep(deleteProjectRetryBackoff)
+	}
+
+	return lastErr
+}
+
+// isRecentlyCreated reports whether createdAt (RFC3339) is within window of
+// now. An unparseable or empty createdAt is treated as NOT recent (fails
+// closed to no-retry), since the retry should only activate when the timing
+// signal is actually known-good, not when it's missing or malformed.
+func isRecentlyCreated(createdAt string, window time.Duration) bool {
+	t, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return false
+	}
+	return time.Since(t) < window
 }
 
 // ImportState imports the resource into Terraform state.

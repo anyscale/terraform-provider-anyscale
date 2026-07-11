@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -690,6 +691,166 @@ func TestProjectResourceDelete_409Detection(t *testing.T) {
 		}
 		if diagsContainSummary(diags, "Project Has Active Resources") {
 			t.Errorf("false-positived 'Project Has Active Resources' on a decoy 409 substring, diags: %v", diags)
+		}
+	})
+}
+
+// TestProjectResourceDelete_403Retry covers the bounded, age-scoped retry for
+// the known delete-time permission-check consistency race (see the
+// project-delete-403 investigation notes): a project's own created_at is the
+// ONLY signal that gates the retry, deliberately not "are we in a test" or
+// any message-content check, since the race and a genuine long-standing
+// denial produce the identical bare "Permission denied" 403.
+func TestProjectResourceDelete_403Retry(t *testing.T) {
+	t.Run("recently created project retries a 403 and succeeds", func(t *testing.T) {
+		const projectID = "prj_recent_retry_succeeds"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			if requestCount < 3 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue(projectID),
+			CreatedAt: types.StringValue(time.Now().Format(time.RFC3339)),
+		})
+
+		if diags.HasError() {
+			t.Fatalf("expected the retry to eventually succeed, got diagnostics: %v", diags)
+		}
+		if requestCount != 3 {
+			t.Fatalf("expected exactly 3 requests (2 failed + 1 success), got %d", requestCount)
+		}
+	})
+
+	t.Run("old project does NOT retry a 403 - surfaces immediately", func(t *testing.T) {
+		const projectID = "prj_old_no_retry"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue(projectID),
+			CreatedAt: types.StringValue(time.Now().Add(-1 * time.Hour).Format(time.RFC3339)),
+		})
+
+		if !diags.HasError() {
+			t.Fatal("expected a diagnostic error for an old project's genuine-looking 403, got none")
+		}
+		if requestCount != 1 {
+			t.Fatalf("an old project's 403 must NOT be retried (a real, long-standing permission denial must surface immediately) - expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
+	t.Run("recently created project exhausts retries and still surfaces the error", func(t *testing.T) {
+		const projectID = "prj_recent_exhausts"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue(projectID),
+			CreatedAt: types.StringValue(time.Now().Format(time.RFC3339)),
+		})
+
+		if !diags.HasError() {
+			t.Fatal("expected the error to still surface once retries are exhausted, got none")
+		}
+		if requestCount != deleteProjectRetryAttempts {
+			t.Fatalf("expected exactly %d requests (retries exhausted), got %d", deleteProjectRetryAttempts, requestCount)
+		}
+	})
+
+	t.Run("missing created_at fails closed - no retry", func(t *testing.T) {
+		const projectID = "prj_missing_created_at"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID: types.StringValue(projectID),
+			// CreatedAt deliberately left unset (empty string).
+		})
+
+		if !diags.HasError() {
+			t.Fatal("expected a diagnostic error, got none")
+		}
+		if requestCount != 1 {
+			t.Fatalf("an unparseable/missing created_at must fail closed to no-retry, expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
+	t.Run("a 409 is still detected correctly and never retried", func(t *testing.T) {
+		const projectID = "prj_409_recent"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"detail":"Project has active clusters"}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue(projectID),
+			CreatedAt: types.StringValue(time.Now().Format(time.RFC3339)),
+		})
+
+		if !diagsContainSummary(diags, "Project Has Active Resources") {
+			t.Errorf("expected 'Project Has Active Resources' diagnostic even for a recently-created project, got: %v", diags)
+		}
+		if requestCount != 1 {
+			t.Fatalf("a 409 must never be retried by the 403-specific retry, expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
+	t.Run("clean success on a recently created project needs no retry", func(t *testing.T) {
+		const projectID = "prj_recent_clean"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue(projectID),
+			CreatedAt: types.StringValue(time.Now().Format(time.RFC3339)),
+		})
+
+		if diags.HasError() {
+			t.Fatalf("expected a clean delete, got diagnostics: %v", diags)
+		}
+		if requestCount != 1 {
+			t.Fatalf("a clean success must not trigger any retry, expected exactly 1 request, got %d", requestCount)
 		}
 	})
 }
