@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-07-11
+
+### Changed
+
+- resource/anyscale_cloud: the `kubernetes_config`/`object_storage`-required validation errors for a K8S `compute_stack` now name the `cloud_provider` explicitly (e.g. "kubernetes_config is required when cloud_provider is AWS and compute_stack is K8S"), instead of the previous provider-agnostic wording; and errors expanding `aws_config`/`gcp_config`/`kubernetes_config`/`object_storage`/`file_storage` are now wrapped with a "failed to expand <field>:" prefix instead of surfacing the underlying error unwrapped.
+- resource/anyscale_cloud_resource: several plan-time validation error messages were reworded to match `anyscale_cloud`'s existing phrasing as part of consolidating shared provider-config logic between the two resources: `aws_config`/`gcp_config`-required messages now say "required when cloud_provider is X and compute_stack is Y" (previously "required when using X provider with Y compute_stack"); the `kubernetes_config`/`object_storage`-required messages for K8S now name the provider explicitly, same as `anyscale_cloud`; and the azure-unsupported message now also states that `azure_config` cannot be applied, matching `anyscale_cloud`'s wording.
+- resource/anyscale_organization_invitation: on a failed create, the error title/detail changed from "Error creating invitation"/"Error reading response"/"Error parsing response" (three different titles depending on the failure point) to a single consistent "API Request Failed" title with a "Failed to create invitation: <detail>" message.
+- resource/anyscale_organization_collaborator: on a failed update, the error title/detail changed from "Error updating collaborator"/"Error reading response" (two different titles depending on the failure point) to a single consistent "API Request Failed" title with a "Failed to update collaborator <identity_id>: <detail>" message.
+
+### Fixed
+
+- data-source/anyscale_clouds: `status` and `state` attribute descriptions now include example values (e.g., ready/pending/failed and ACTIVE/CREATING/FAILED), matching `anyscale_cloud`.
+- data-source/anyscale_container_image: Attribute descriptions no longer refer to "cluster environment" (terminology left over from before this data source was renamed) and consistently say "container image" instead.
+- data-source/anyscale_container_images: The `id` attribute description no longer refers to "cluster environment"; it now says "container image", matching `anyscale_container_image`.
+- resource/anyscale_cloud_resource: `cloud_provider` values that aren't canonical uppercase (e.g. `aws` instead of `AWS`) no longer silently produce an incomplete apply with the provider-specific config block (`aws_config`, `gcp_config`, etc.) left unpopulated and no error; the value is now case-normalized before matching, consistent with `anyscale_cloud`.
+- resource/anyscale_project: `terraform destroy` immediately after `terraform apply` no longer intermittently fails with a spurious 403 Permission denied on delete; the provider now retries a bounded number of times for a project created in the last few minutes, since this specific error was a known backend permission-check consistency race rather than a real permission problem.
+
 ## [0.5.0] - 2026-07-10
 
 ### Breaking Changes
@@ -448,7 +465,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.5.1
 [0.5.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.5.0
 [0.4.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.4.0
 [0.3.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.3.4
