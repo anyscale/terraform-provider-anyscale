@@ -3,10 +3,11 @@ package acctest
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -469,8 +470,13 @@ func TestAccProjectResource_Disappears(t *testing.T) {
 	})
 }
 
-// testAccDeleteProjectViaAPI deletes the project directly via the Anyscale API
-// so the next plan must observe drift. 200/202/204/404 all count as success.
+// testAccDeleteProjectViaAPI deletes the project directly via the Anyscale API so the next plan
+// must observe drift. Retries a 403 on the exact same bounded capped-exponential schedule as the
+// provider's own Delete - see provider.DeleteProjectWithRetry's doc comment - since this helper
+// provokes the identical delete-time permission-check consistency race from outside the
+// provider. The project was created moments ago by this same test step, so time.Now() is passed
+// as createdAt; no separate no-retry code path is needed for "always eligible" since a fresh
+// timestamp trivially satisfies the same age gate the resource itself uses.
 func testAccDeleteProjectViaAPI(resourceName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[resourceName]
@@ -488,18 +494,9 @@ func testAccDeleteProjectViaAPI(resourceName string) resource.TestCheckFunc {
 			return fmt.Errorf("failed to get test client: %w", err)
 		}
 
-		resp, err := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/projects/%s", projectID), nil)
-		if err != nil {
+		if err := provider.DeleteProjectWithRetry(context.Background(), client, projectID, time.Now().Format(time.RFC3339)); err != nil {
 			return fmt.Errorf("failed to delete project %s via API: %w", projectID, err)
 		}
-		defer func() { _ = resp.Body.Close() }()
-
-		switch resp.StatusCode {
-		case 200, 202, 204, 404:
-			return nil
-		default:
-			body, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("unexpected status %d deleting project %s: %s", resp.StatusCode, projectID, truncateBody(string(body), 256))
-		}
+		return nil
 	}
 }
