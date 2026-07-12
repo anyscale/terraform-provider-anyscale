@@ -63,16 +63,22 @@ collaborator {
 
 ## Brief delay on `terraform destroy` shortly after `terraform apply`
 
-Deleting a project you just created can occasionally retry for a few seconds before succeeding.
-This targets a known backend timing race in the delete-time permission check, not a provider bug —
-a project's create-time permission grant can take a moment to become visible to the delete-time
-check, so a destroy run within about 5 minutes of the matching apply can hit a `403 Permission
-denied` that would not reproduce a moment later. The provider retries automatically, up to 3
-attempts a couple of seconds apart, only for a project this recently created — a project that has
-existed longer than that surfaces any real `403` immediately, exactly as before this behavior was
-added, so a genuine permission problem is never masked.
+Deleting a project you just created can occasionally retry for a few seconds — up to a minute in
+rare cases — before succeeding. This targets a known backend timing race in the delete-time
+permission check, not a provider bug — a project's create-time permission grant can take a moment
+to become visible to the delete-time check, so a destroy run within about 5 minutes of the matching
+apply can hit a `403 Permission denied` that would not reproduce a moment later. The provider
+retries automatically with a capped-exponential backoff — starting at 1 second and holding at a
+short cap up to a 60 second total ceiling — only for a project this recently created; a project
+that has existed longer than that surfaces any real `403` immediately, exactly as before this
+behavior was added, so a genuine permission problem is never masked.
 
 With `TF_LOG` unset (the default), this is invisible — destroy just takes a few extra seconds
 before completing normally. Set `TF_LOG` to `WARN` or higher to see the retry logged explicitly. If
-every retry is exhausted, the error is identical to what you would see without this behavior, so a
+the retry is exhausted, the error is identical to what you would see without this behavior, so a
 persistent, real permission problem still surfaces exactly as it always has.
+
+Deleting a project that still has active jobs or services is not affected by this retry — the
+provider recognizes that specific error and surfaces the friendly "Project Has Active Resources"
+message immediately, the same way it already does when the API reports active resources with a
+different status code.
