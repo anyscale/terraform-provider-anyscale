@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -360,7 +361,9 @@ func TestProjectResourceSyncCollaborators(t *testing.T) {
 			defer server.Close()
 
 			r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
-			if err := r.syncCollaborators(context.Background(), "proj-1", tt.planned, tt.current); err != nil {
+			// createdAt is irrelevant to this test - the mock server always succeeds immediately for
+			// adds, so retry-eligibility never comes into play; an old timestamp keeps that explicit.
+			if err := r.syncCollaborators(context.Background(), "proj-1", time.Now().Add(-1*time.Hour).Format(time.RFC3339), tt.planned, tt.current); err != nil {
 				t.Fatalf("syncCollaborators returned error: %v", err)
 			}
 
@@ -912,6 +915,197 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		}
 		if requestCount != 1 {
 			t.Fatalf("a clean success must not trigger any retry, expected exactly 1 request, got %d", requestCount)
+		}
+	})
+}
+
+// TestCreateCollaborators_403Retry mirrors TestProjectResourceDelete_403Retry: createCollaborators
+// targets the same delete-time permission-check consistency race (see that test's doc comment and
+// createCollaborators' own doc comment), on a different permission (MANAGE_IAM, not DELETE), so it
+// shares the identical age-gate/schedule/anti-masking shape, just with no known non-transient
+// exclusion message yet (a bare 403 always retries here, unlike delete's active-jobs case).
+func TestCreateCollaborators_403Retry(t *testing.T) {
+	withFastRetryTiming(t)
+
+	testCollaborators := []ProjectCollaboratorModel{
+		{Email: types.StringValue("user1@example.com"), PermissionLevel: types.StringValue("owner")},
+	}
+
+	t.Run("recently created project retries a 403 across multiple ramp steps and succeeds", func(t *testing.T) {
+		const projectID = "prj_collab_recent_retry_succeeds"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			if requestCount < 4 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
+
+		if err != nil {
+			t.Fatalf("expected the retry to eventually succeed, got: %v", err)
+		}
+		if requestCount != 4 {
+			t.Fatalf("expected exactly 4 requests (3 failed across the ramp + 1 success), got %d", requestCount)
+		}
+	})
+
+	t.Run("old project does NOT retry a 403 - surfaces immediately", func(t *testing.T) {
+		const projectID = "prj_collab_old_no_retry"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, time.Now().Add(-1*time.Hour).Format(time.RFC3339), testCollaborators)
+
+		if err == nil {
+			t.Fatal("expected an error for an old project's genuine-looking 403, got none")
+		}
+		if requestCount != 1 {
+			t.Fatalf("an old project's 403 must NOT be retried - expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
+	t.Run("recently created project exhausts retries and still surfaces the error", func(t *testing.T) {
+		const projectID = "prj_collab_recent_exhausts"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
+
+		if err == nil {
+			t.Fatal("expected the error to still surface once retries are exhausted, got none")
+		}
+		// Same derivation as the delete exhaust subtest: withFastRetryTiming's 1ms/4ms-cap/15ms
+		// schedule produces exactly 6 requests before elapsed (15ms) reaches the ceiling.
+		const wantRequests = 6
+		if requestCount != wantRequests {
+			t.Fatalf("expected exactly %d requests (retries exhausted), got %d", wantRequests, requestCount)
+		}
+	})
+
+	t.Run("missing created_at fails closed - no retry", func(t *testing.T) {
+		const projectID = "prj_collab_missing_created_at"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, "", testCollaborators)
+
+		if err == nil {
+			t.Fatal("expected an error, got none")
+		}
+		if requestCount != 1 {
+			t.Fatalf("an unparseable/missing created_at must fail closed to no-retry, expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
+	t.Run("a 409 (already has permissions) is an immediate success, never retried", func(t *testing.T) {
+		const projectID = "prj_collab_409_recent"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"detail":"already has permissions"}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
+
+		if err != nil {
+			t.Fatalf("expected a 409 to be treated as success (already has permissions), got: %v", err)
+		}
+		if requestCount != 1 {
+			t.Fatalf("a 409 must never be retried, expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
+	t.Run("clean success on a recently created project needs no retry", func(t *testing.T) {
+		const projectID = "prj_collab_recent_clean"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
+
+		if err != nil {
+			t.Fatalf("expected a clean create, got: %v", err)
+		}
+		if requestCount != 1 {
+			t.Fatalf("a clean success must not trigger any retry, expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
+	t.Run("multiple retry attempts each send the full request body, not an empty one", func(t *testing.T) {
+		// Regression guard for the single-use io.Reader bug: reusing one bytes.Reader across
+		// retry attempts would silently send an empty body on attempt 2+, since a Reader is
+		// consumed after being read once. createCollaborators must construct a fresh reader per
+		// attempt (see its doc comment) so every retried request still carries the real payload.
+		const projectID = "prj_collab_body_survives_retry"
+		var requestCount int
+		var bodyLengths []int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			body, _ := io.ReadAll(r.Body)
+			bodyLengths = append(bodyLengths, len(body))
+			if requestCount < 3 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
+
+		if err != nil {
+			t.Fatalf("expected the retry to eventually succeed, got: %v", err)
+		}
+		if len(bodyLengths) != 3 {
+			t.Fatalf("expected exactly 3 requests, got %d", len(bodyLengths))
+		}
+		for i, n := range bodyLengths {
+			if n == 0 {
+				t.Errorf("attempt %d sent an empty body (want the real payload on every attempt, not just the first)", i+1)
+			}
+		}
+		if bodyLengths[0] != bodyLengths[1] || bodyLengths[1] != bodyLengths[2] {
+			t.Errorf("expected identical body length on every attempt, got %v", bodyLengths)
 		}
 	})
 }

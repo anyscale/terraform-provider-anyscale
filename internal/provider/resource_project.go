@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -304,7 +305,7 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 
 	// Create collaborators if specified
 	if len(plan.Collaborators) > 0 {
-		if err := r.createCollaborators(ctx, projectID, plan.Collaborators); err != nil {
+		if err := r.createCollaborators(ctx, projectID, projectResp.Result.CreatedAt, plan.Collaborators); err != nil {
 			AddAPIError(&resp.Diagnostics, "add collaborators (project created)", err)
 			// Continue to read state even if collaborators failed
 		}
@@ -364,7 +365,7 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 	tflog.Info(ctx, "Updating project collaborators", map[string]any{"project_id": projectID})
 
 	// Only collaborators can be updated; other fields require replacement
-	if err := r.syncCollaborators(ctx, projectID, plan.Collaborators, state.Collaborators); err != nil {
+	if err := r.syncCollaborators(ctx, projectID, state.CreatedAt.ValueString(), plan.Collaborators, state.Collaborators); err != nil {
 		AddAPIError(&resp.Diagnostics, "update collaborators", err)
 		return
 	}
@@ -510,41 +511,65 @@ func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID,
 // that could silently drift out of sync with this one.
 func DeleteProjectWithRetry(ctx context.Context, client *Client, projectID, createdAt string) error {
 	eligible := isRecentlyCreated(createdAt, recentlyCreatedRetryWindow)
+	_, err := retryOn403(ctx, eligible, isKnownNonTransient403,
+		func() ([]byte, error) {
+			return DoRequestRaw(
+				ctx, client, "DELETE", fmt.Sprintf("/api/v2/projects/%s", projectID), nil,
+				http.StatusOK, http.StatusNoContent, http.StatusNotFound,
+			)
+		},
+		func(attempt int, next time.Duration) {
+			tflog.Warn(ctx, "Delete project got a 403 shortly after creation; retrying (known delete-time permission-check consistency race)", map[string]any{
+				"project_id": projectID,
+				"attempt":    attempt,
+				"created_at": createdAt,
+				"next_wait":  next,
+			})
+		},
+	)
+	return err
+}
 
+// retryOn403 issues doRequest repeatedly on the bounded capped-exponential schedule above
+// (deleteProjectRetryInitialInterval et al.) while it keeps failing with a 403, stopping as soon
+// as doRequest succeeds, fails with a non-403 error, is excluded by isNonTransient, or the
+// schedule is exhausted. onRetry is called just before each sleep so a caller can log its own
+// site-specific context (project ID, attempt, etc). isNonTransient may be nil (no exclusions -
+// every eligible 403 retries).
+//
+// Shared core so every call site targeting this family of bug (a permission check reading a
+// just-written grant before it has propagated) uses one schedule instead of a hand-copied loop
+// per site - see DeleteProjectWithRetry and createCollaboratorsWithRetry, which share this
+// exact schedule but differ in request, accepted statuses, and exclusion list.
+func retryOn403(
+	ctx context.Context,
+	eligible bool,
+	isNonTransient func(error) bool,
+	doRequest func() ([]byte, error),
+	onRetry func(attempt int, next time.Duration),
+) ([]byte, error) {
 	var lastErr error
 	interval := deleteProjectRetryInitialInterval
 	var elapsed time.Duration
 
 	for attempt := 1; ; attempt++ {
-		_, err := DoRequestRaw(
-			ctx,
-			client,
-			"DELETE",
-			fmt.Sprintf("/api/v2/projects/%s", projectID),
-			nil,
-			http.StatusOK,
-			http.StatusNoContent,
-			http.StatusNotFound,
-		)
+		body, err := doRequest()
 		if err == nil {
-			return nil
+			return body, nil
 		}
 		lastErr = err
 
-		if !eligible || !strings.Contains(err.Error(), "status 403") || isKnownNonTransient403(err) || elapsed >= deleteProjectRetryMaxWait {
-			return lastErr
+		if !eligible || !strings.Contains(err.Error(), "status 403") || (isNonTransient != nil && isNonTransient(err)) || elapsed >= deleteProjectRetryMaxWait {
+			return nil, lastErr
 		}
 
-		tflog.Warn(ctx, "Delete project got a 403 shortly after creation; retrying (known delete-time permission-check consistency race)", map[string]any{
-			"project_id": projectID,
-			"attempt":    attempt,
-			"created_at": createdAt,
-			"next_wait":  interval,
-		})
+		if onRetry != nil {
+			onRetry(attempt, interval)
+		}
 
 		select {
 		case <-ctx.Done():
-			return lastErr
+			return nil, lastErr
 		default:
 		}
 		time.Sleep(interval)
@@ -757,8 +782,28 @@ func (r *ProjectResource) getCollaborators(ctx context.Context, projectID string
 	return collaborators, nil
 }
 
-// createCollaborators batch creates collaborators for a project.
-func (r *ProjectResource) createCollaborators(ctx context.Context, projectID string, collaborators []ProjectCollaboratorModel) error {
+// createCollaborators batch creates collaborators for a project, retrying a 403 on the shared
+// capped-exponential schedule (see retryOn403) ONLY when createdAt shows the project was created
+// very recently (within recentlyCreatedRetryWindow) - same age-gated shape as
+// DeleteProjectWithRetry, same reasoning: a genuine, long-standing permission denial is
+// indistinguishable from the race by status code alone, so this must not retry every 403.
+//
+// This targets the same backend race as delete's retry, on a different permission: the
+// collaborator-add MANAGE_IAM check and delete's DELETE check both resolve through the SAME
+// role_binding tuple that project-creation writes (confirmed against the SpiceDB schema and,
+// independently, by directly observing a real failing case's own 403->409 transition converge in
+// ~10.3s - a 409 is only reachable past the permission gate, so the gate itself was observed
+// clearing, not just inferred from delete's tuple). No known collaborator-add-specific
+// non-transient 403 message exists yet (unlike delete's active-jobs case), so there is no
+// exclusion list here - every eligible 403 retries, which is the correct default until a real
+// non-transient case turns up (fail-toward-retry, same principle as delete's exclusion list).
+//
+// A 409 ("already has permissions" - e.g. re-adding the creator, who is auto-added as owner at
+// project creation) is deliberately NOT retried: it is already in the accepted-statuses list
+// below, so DoRequestRaw treats it as an immediate success and this function's retry loop never
+// even sees it as an error. That is correct - a 409 is only reachable once the permission check
+// has already passed, so it is a business-rule outcome, not a symptom of the race.
+func (r *ProjectResource) createCollaborators(ctx context.Context, projectID, createdAt string, collaborators []ProjectCollaboratorModel) error {
 	if len(collaborators) == 0 {
 		return nil
 	}
@@ -781,30 +826,35 @@ func (r *ProjectResource) createCollaborators(ctx context.Context, projectID str
 		})
 	}
 
-	reqBody, err := MarshalRequestBody(entries)
+	jsonBytes, err := json.Marshal(entries)
 	if err != nil {
 		return fmt.Errorf("failed to serialize collaborators request: %w", err)
 	}
 
-	_, err = DoRequestRaw(
-		ctx,
-		r.client,
-		"POST",
-		fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID),
-		reqBody,
-		http.StatusOK,
-		http.StatusNoContent,
-		http.StatusCreated,
-		http.StatusConflict, // Accept 409 Conflict as success
+	eligible := isRecentlyCreated(createdAt, recentlyCreatedRetryWindow)
+	_, err = retryOn403(ctx, eligible, nil,
+		func() ([]byte, error) {
+			// Fresh reader each attempt - bytes.Reader is consumed after one read, so reusing a
+			// single reader across retries would silently send an empty body on attempt 2+.
+			return DoRequestRaw(
+				ctx, r.client, "POST", fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID),
+				bytes.NewReader(jsonBytes),
+				http.StatusOK,
+				http.StatusNoContent,
+				http.StatusCreated,
+				http.StatusConflict, // Accept 409 Conflict as success (already has permissions)
+			)
+		},
+		func(attempt int, next time.Duration) {
+			tflog.Warn(ctx, "Add collaborators got a 403 shortly after project creation; retrying (known permission-check consistency race, same tuple as delete)", map[string]any{
+				"project_id": projectID,
+				"attempt":    attempt,
+				"created_at": createdAt,
+				"next_wait":  next,
+			})
+		},
 	)
 	if err != nil {
-		// Check if it's a 409 Conflict (already exists)
-		if strings.Contains(err.Error(), "409") {
-			tflog.Info(ctx, "Collaborator already exists (409), treating as success", map[string]any{
-				"project_id": projectID,
-			})
-			return nil
-		}
 		return fmt.Errorf("failed to create collaborators: %w", err)
 	}
 
@@ -816,8 +866,11 @@ func (r *ProjectResource) createCollaborators(ctx context.Context, projectID str
 	return nil
 }
 
-// syncCollaborators reconciles collaborator changes between plan and state.
-func (r *ProjectResource) syncCollaborators(ctx context.Context, projectID string, planned, current []ProjectCollaboratorModel) error {
+// syncCollaborators reconciles collaborator changes between plan and state. createdAt is the
+// project's own created_at (from prior state) so a newly-added collaborator on a
+// still-recently-created project is eligible for createCollaborators' retry, same as an add at
+// create time - see createCollaborators' doc comment.
+func (r *ProjectResource) syncCollaborators(ctx context.Context, projectID, createdAt string, planned, current []ProjectCollaboratorModel) error {
 	// Build maps for comparison
 	planMap := make(map[string]ProjectCollaboratorModel)
 	for _, collab := range planned {
@@ -857,7 +910,7 @@ func (r *ProjectResource) syncCollaborators(ctx context.Context, projectID strin
 	// Execute changes
 	if len(toAdd) > 0 {
 		tflog.Info(ctx, "Adding collaborators", map[string]any{"count": len(toAdd)})
-		if err := r.createCollaborators(ctx, projectID, toAdd); err != nil {
+		if err := r.createCollaborators(ctx, projectID, createdAt, toAdd); err != nil {
 			return fmt.Errorf("failed to add collaborators: %w", err)
 		}
 	}
