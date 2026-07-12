@@ -695,19 +695,43 @@ func TestProjectResourceDelete_409Detection(t *testing.T) {
 	})
 }
 
+// withFastRetryTiming overrides the three retry-timing vars to millisecond-scale values for the
+// duration of a test (saving and defer-restoring the real production values), so the
+// exhaust-path and multi-attempt-then-succeed subtests below run in low-single-digit
+// milliseconds instead of really sleeping for the production ~60s ceiling - per assayer's
+// test-speed note. The relative shape (ramp then cap, same doubling) is preserved exactly, just
+// scaled down, so the subtests below exercise the identical control flow as production.
+func withFastRetryTiming(t *testing.T) {
+	t.Helper()
+	origInitial, origMax, origWait := deleteProjectRetryInitialInterval, deleteProjectRetryMaxInterval, deleteProjectRetryMaxWait
+	deleteProjectRetryInitialInterval = 1 * time.Millisecond
+	deleteProjectRetryMaxInterval = 4 * time.Millisecond
+	deleteProjectRetryMaxWait = 15 * time.Millisecond
+	t.Cleanup(func() {
+		deleteProjectRetryInitialInterval, deleteProjectRetryMaxInterval, deleteProjectRetryMaxWait = origInitial, origMax, origWait
+	})
+}
+
 // TestProjectResourceDelete_403Retry covers the bounded, age-scoped retry for
 // the known delete-time permission-check consistency race (see the
 // project-delete-403 investigation notes): a project's own created_at is the
 // ONLY signal that gates the retry, deliberately not "are we in a test" or
 // any message-content check, since the race and a genuine long-standing
 // denial produce the identical bare "Permission denied" 403.
+//
+// Retry timing is capped-exponential (ramp 1/2/4/8s then held at the 8s cap, to a 60s ceiling
+// in production); withFastRetryTiming scales that down to 1/2/4ms held at a 4ms cap to a 15ms
+// ceiling for these subtests, so the exact request counts below are derived from that scaled
+// schedule, not the production one - see withFastRetryTiming's doc comment for why that's safe.
 func TestProjectResourceDelete_403Retry(t *testing.T) {
-	t.Run("recently created project retries a 403 and succeeds", func(t *testing.T) {
+	withFastRetryTiming(t)
+
+	t.Run("recently created project retries a 403 across multiple ramp steps and succeeds", func(t *testing.T) {
 		const projectID = "prj_recent_retry_succeeds"
 		var requestCount int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestCount++
-			if requestCount < 3 {
+			if requestCount < 4 {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
@@ -726,8 +750,9 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		if diags.HasError() {
 			t.Fatalf("expected the retry to eventually succeed, got diagnostics: %v", diags)
 		}
-		if requestCount != 3 {
-			t.Fatalf("expected exactly 3 requests (2 failed + 1 success), got %d", requestCount)
+		// 3 failures (exercising the 1ms, 2ms, and capped-4ms steps of the ramp) + 1 success.
+		if requestCount != 4 {
+			t.Fatalf("expected exactly 4 requests (3 failed across the ramp + 1 success), got %d", requestCount)
 		}
 	})
 
@@ -776,8 +801,14 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		if !diags.HasError() {
 			t.Fatal("expected the error to still surface once retries are exhausted, got none")
 		}
-		if requestCount != deleteProjectRetryAttempts {
-			t.Fatalf("expected exactly %d requests (retries exhausted), got %d", deleteProjectRetryAttempts, requestCount)
+		// Derived from withFastRetryTiming's 1ms/4ms-cap/15ms-ceiling schedule: elapsed reaches
+		// 0,1,3,7,11,15ms across attempts 1-6, and the 6th check (elapsed 15 >= ceiling 15) stops
+		// the loop without a further sleep. This is a direct trace of the production loop in
+		// deleteProjectWithRetry, just at millisecond instead of second scale - see that
+		// function's ceiling check (elapsed >= deleteProjectRetryMaxWait) before each sleep.
+		const wantRequests = 6
+		if requestCount != wantRequests {
+			t.Fatalf("expected exactly %d requests (retries exhausted), got %d", wantRequests, requestCount)
 		}
 	})
 

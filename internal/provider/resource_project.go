@@ -413,13 +413,37 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 // created_at) to qualify for the delete-time 403 retry below.
 const recentlyCreatedRetryWindow = 5 * time.Minute
 
-const (
-	deleteProjectRetryAttempts = 3
-	deleteProjectRetryBackoff  = 2 * time.Second
+// deleteProjectRetryInitialInterval, deleteProjectRetryMaxInterval, and deleteProjectRetryMaxWait
+// are vars, not consts, so tests can override them to near-zero for the duration of a test
+// (save, shrink, defer-restore) and keep the exhaust-path/retry-then-succeed unit tests instant
+// instead of really sleeping for the production ~60s. Real acctests hitting the live API are
+// unaffected either way.
+//
+// Capped exponential backoff: 1s, 2s, 4s, 8s, then HELD at the 8s cap for the rest of the 60s
+// ceiling (~10-11 attempts total). Two properties this shape is chosen for, together: (1) short
+// lags are still detected fast via the initial ramp (same fast-catch property a fixed fine
+// interval gives), and (2) overshoot past the actual convergence moment stays bounded to
+// roughly the cap size (~8s) rather than growing with the ceiling, unlike UNCAPPED exponential
+// (1,2,4,8,16,32...) whose late steps get large enough to badly overshoot a step-function
+// convergence event (observed once in practice at ~15.2s) - e.g. a convergence at ~17s under an
+// uncapped schedule isn't rechecked until the 32s step. Capping keeps the per-step overshoot
+// small at any ceiling while still reaching a much longer ceiling in far fewer calls than a
+// fixed-fine-interval schedule would need (~10 vs ~30 calls to reach 60s).
+var (
+	deleteProjectRetryInitialInterval = 1 * time.Second
+	deleteProjectRetryMaxInterval     = 8 * time.Second
+	deleteProjectRetryMaxWait         = 60 * time.Second
 )
 
-// deleteProjectWithRetry issues the delete call, retrying a 403 a bounded
-// number of times ONLY when createdAt shows the project was created very
+// deleteProjectWithRetry is a thin wrapper so the resource's own Delete goes through the exact
+// same exported schedule as the acctest package's out-of-band deletion helper - see
+// DeleteProjectWithRetry's doc comment.
+func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID, createdAt string) error {
+	return DeleteProjectWithRetry(ctx, r.client, projectID, createdAt)
+}
+
+// DeleteProjectWithRetry issues DELETE /api/v2/projects/{projectID}, retrying a 403 on a
+// bounded capped-exponential schedule ONLY when createdAt shows the project was created very
 // recently (within recentlyCreatedRetryWindow).
 //
 // This targets a known backend race: the delete-time permission check is
@@ -433,19 +457,29 @@ const (
 // enough that the race is a plausible explanation. A project that has existed
 // longer than the window is not retried at all and surfaces its error
 // immediately, exactly as before this change.
-func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID, createdAt string) error {
+//
+// The bounded ~60s ceiling is deliberate and must stay bounded, not grow unbounded: a project
+// whose owner-grant tuple was genuinely never written (a separate, backend-config-caused
+// failure mode, not this lag) is textually identical to a slow-but-real lag and will also
+// exhaust this retry before surfacing its 403 - correct, since no client-side wait can produce a
+// tuple that doesn't exist. That case needs a backend tuple backfill, not a longer wait here.
+//
+// Exported (and package-external callers pass createdAt = time.Now() rather than a bare
+// "always eligible" flag) so the acctest package's TestAccProjectResource_Disappears helper -
+// which provokes the identical race from outside the provider by deleting a project the same
+// test just created - shares this exact schedule and eligibility check instead of a second copy
+// that could silently drift out of sync with this one.
+func DeleteProjectWithRetry(ctx context.Context, client *Client, projectID, createdAt string) error {
 	eligible := isRecentlyCreated(createdAt, recentlyCreatedRetryWindow)
 
-	attempts := 1
-	if eligible {
-		attempts = deleteProjectRetryAttempts
-	}
-
 	var lastErr error
-	for attempt := 1; attempt <= attempts; attempt++ {
+	interval := deleteProjectRetryInitialInterval
+	var elapsed time.Duration
+
+	for attempt := 1; ; attempt++ {
 		_, err := DoRequestRaw(
 			ctx,
-			r.client,
+			client,
 			"DELETE",
 			fmt.Sprintf("/api/v2/projects/%s", projectID),
 			nil,
@@ -458,7 +492,7 @@ func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID,
 		}
 		lastErr = err
 
-		if !eligible || !strings.Contains(err.Error(), "status 403") || attempt == attempts {
+		if !eligible || !strings.Contains(err.Error(), "status 403") || elapsed >= deleteProjectRetryMaxWait {
 			return lastErr
 		}
 
@@ -466,6 +500,7 @@ func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID,
 			"project_id": projectID,
 			"attempt":    attempt,
 			"created_at": createdAt,
+			"next_wait":  interval,
 		})
 
 		select {
@@ -473,10 +508,14 @@ func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID,
 			return lastErr
 		default:
 		}
-		time.Sleep(deleteProjectRetryBackoff)
-	}
+		time.Sleep(interval)
+		elapsed += interval
 
-	return lastErr
+		interval *= 2
+		if interval > deleteProjectRetryMaxInterval {
+			interval = deleteProjectRetryMaxInterval
+		}
+	}
 }
 
 // isRecentlyCreated reports whether createdAt (RFC3339) is within window of
