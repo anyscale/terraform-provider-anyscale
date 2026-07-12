@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - resource/anyscale_cloud_resource: several plan-time validation error messages were reworded to match `anyscale_cloud`'s existing phrasing as part of consolidating shared provider-config logic between the two resources: `aws_config`/`gcp_config`-required messages now say "required when cloud_provider is X and compute_stack is Y" (previously "required when using X provider with Y compute_stack"); the `kubernetes_config`/`object_storage`-required messages for K8S now name the provider explicitly, same as `anyscale_cloud`; and the azure-unsupported message now also states that `azure_config` cannot be applied, matching `anyscale_cloud`'s wording.
 - resource/anyscale_organization_invitation: on a failed create, the error title/detail changed from "Error creating invitation"/"Error reading response"/"Error parsing response" (three different titles depending on the failure point) to a single consistent "API Request Failed" title with a "Failed to create invitation: <detail>" message.
 - resource/anyscale_organization_collaborator: on a failed update, the error title/detail changed from "Error updating collaborator"/"Error reading response" (two different titles depending on the failure point) to a single consistent "API Request Failed" title with a "Failed to update collaborator <identity_id>: <detail>" message.
+- resource/anyscale_project: the delete-time 403 retry for a recently-created project now uses a capped-exponential backoff, retrying for up to 60 seconds total, since real-world backend permission-check lag can exceed a short fixed window.
 
 ### Fixed
 
@@ -21,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - data-source/anyscale_container_images: The `id` attribute description no longer refers to "cluster environment"; it now says "container image", matching `anyscale_container_image`.
 - resource/anyscale_cloud_resource: `cloud_provider` values that aren't canonical uppercase (e.g. `aws` instead of `AWS`) no longer silently produce an incomplete apply with the provider-specific config block (`aws_config`, `gcp_config`, etc.) left unpopulated and no error; the value is now case-normalized before matching, consistent with `anyscale_cloud`.
 - resource/anyscale_project: `terraform destroy` immediately after `terraform apply` no longer intermittently fails with a spurious 403 Permission denied on delete; the provider now retries a bounded number of times for a project created in the last few minutes, since this specific error was a known backend permission-check consistency race rather than a real permission problem.
+- resource/anyscale_project: deleting a project that still has active jobs or services now surfaces the friendly Project Has Active Resources error immediately, instead of being misidentified as the delete-time permission-check race and retried for up to a minute before showing the same message.
+- resource/anyscale_project: adding a collaborator immediately after creating the project no longer intermittently fails with a spurious 403 Permission denied; the provider now retries this call the same way it already does for delete, since it hits the identical backend permission-check consistency race.
 
 ## [0.5.0] - 2026-07-10
 
