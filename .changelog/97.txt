@@ -1,9 +1,9 @@
 ```
-release-note:fixed
-resource/anyscale_project: the delete-time 403 retry for a recently-created project (introduced in the previous release) now waits up to 60 seconds using a capped-exponential backoff instead of a fixed 3 attempts over about 6 seconds, since observed lag before the delete-time permission grant becomes visible can exceed 6 seconds; a project older than 5 minutes is still never retried.
+release-note:changed
+resource/anyscale_project: the delete-time 403 retry for a recently-created project (introduced in v0.5.1) now uses a capped-exponential backoff up to 60 seconds total, instead of a fixed 3 attempts over about 6 seconds, since real-world backend permission-check lag can exceed the original window.
 ```
 
 ```
 release-note:fixed
-resource/anyscale_project: a project that still has active jobs or services now fails a `terraform destroy` immediately with the same "Project Has Active Resources" message already used for active sessions, instead of silently riding out the full delete-time retry window (up to 60 seconds) first.
+resource/anyscale_project: deleting a project that still has active jobs or services now surfaces the friendly Project Has Active Resources error immediately, instead of being misidentified as the delete-time permission-check race and retried for up to a minute before showing the same message.
 ```
