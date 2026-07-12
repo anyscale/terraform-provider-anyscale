@@ -781,6 +781,36 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		}
 	})
 
+	t.Run("recently created project with active jobs/services does NOT retry a 403 - surfaces immediately", func(t *testing.T) {
+		// Parallels the old-project anti-masking assertion above: this 403 is on a project well
+		// within the recently-created window (so eligible would otherwise be true), but its body
+		// matches a known non-transient message (deleteProjectNonTransient403Messages), so it
+		// must still fail fast rather than riding out the full 60s ceiling - see
+		// isKnownNonTransient403's doc comment for why this exclusion is safe.
+		const projectID = "prj_recent_active_jobs"
+		var requestCount int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"detail":"You cannot delete a project unless it has no jobs or services"}}`))
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		diags := runProjectResourceDelete(t, r, ProjectResourceModel{
+			ID:        types.StringValue(projectID),
+			CreatedAt: types.StringValue(time.Now().Format(time.RFC3339)),
+		})
+
+		if !diagsContainSummary(diags, "Project Has Active Resources") {
+			t.Errorf("expected the friendly 'Project Has Active Resources' diagnostic for a known active-jobs 403, got: %v", diags)
+		}
+		if requestCount != 1 {
+			t.Fatalf("a known non-transient 403 (active jobs/services) must NOT be retried even on a recently-created project - expected exactly 1 request, got %d", requestCount)
+		}
+	})
+
 	t.Run("recently created project exhausts retries and still surfaces the error", func(t *testing.T) {
 		const projectID = "prj_recent_exhausts"
 		var requestCount int

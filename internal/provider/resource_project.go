@@ -402,6 +402,13 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 			)
 			return
 		}
+		if isKnownNonTransient403(err) {
+			resp.Diagnostics.AddError(
+				"Project Has Active Resources",
+				fmt.Sprintf("Cannot delete project %s: it still has running jobs or services. Terminate all jobs and services in this project, then retry. (%s)", projectID, err.Error()),
+			)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "delete project", err)
 		return
 	}
@@ -435,6 +442,30 @@ var (
 	deleteProjectRetryMaxWait         = 60 * time.Second
 )
 
+// deleteProjectNonTransient403Messages holds substrings of 403 error bodies known to indicate a
+// genuine, non-transient rejection rather than the delete-time permission-check consistency
+// race, even on a recently-created project. This is a NEGATIVE exclusion, not a positive "this
+// text proves it's the race" inference - the race and a permanent denial share the identical
+// bare "Permission denied" text, so text can never prove transience, and this list does not try
+// to. It only ever NARROWS an already-eligible retry: an unrecognized 403 message still retries
+// by default, so the primary race-fix stays unweakened. Best-effort and deliberately brittle: if
+// the backend rewords one of these messages, matching silently lapses and that case just falls
+// back to the full 60s wait - the same behavior as before this exclusion existed, not worse.
+var deleteProjectNonTransient403Messages = []string{
+	"You cannot delete a project unless it has no jobs or services",
+}
+
+// isKnownNonTransient403 reports whether err's body matches one of
+// deleteProjectNonTransient403Messages.
+func isKnownNonTransient403(err error) bool {
+	for _, msg := range deleteProjectNonTransient403Messages {
+		if strings.Contains(err.Error(), msg) {
+			return true
+		}
+	}
+	return false
+}
+
 // deleteProjectWithRetry is a thin wrapper so the resource's own Delete goes through the exact
 // same exported schedule as the acctest package's out-of-band deletion helper - see
 // DeleteProjectWithRetry's doc comment.
@@ -457,6 +488,14 @@ func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID,
 // enough that the race is a plausible explanation. A project that has existed
 // longer than the window is not retried at all and surfaces its error
 // immediately, exactly as before this change.
+//
+// A recent project can still 403 for a reason that is neither the race nor an identity-level
+// denial: it has active jobs or services, which the backend also reports as a bare 403 (not the
+// 409 used for the narrower active-session case below), and is exactly as textually
+// indistinguishable from the race as a genuine permission denial is. Unlike a permission denial
+// though, this message is specific and known, so deleteProjectNonTransient403Messages excludes
+// it from eligibility - see that var's doc comment for why this is a safe, retry-narrowing-only
+// exclusion rather than a rule that positively decides some other 403 is "fine."
 //
 // The bounded ~60s ceiling is deliberate and must stay bounded, not grow unbounded: a project
 // whose owner-grant tuple was genuinely never written (a separate, backend-config-caused
@@ -492,7 +531,7 @@ func DeleteProjectWithRetry(ctx context.Context, client *Client, projectID, crea
 		}
 		lastErr = err
 
-		if !eligible || !strings.Contains(err.Error(), "status 403") || elapsed >= deleteProjectRetryMaxWait {
+		if !eligible || !strings.Contains(err.Error(), "status 403") || isKnownNonTransient403(err) || elapsed >= deleteProjectRetryMaxWait {
 			return lastErr
 		}
 
