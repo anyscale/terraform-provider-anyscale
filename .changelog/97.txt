@@ -7,3 +7,8 @@ resource/anyscale_project: the delete-time 403 retry for a recently-created proj
 release-note:fixed
 resource/anyscale_project: deleting a project that still has active jobs or services now surfaces the friendly Project Has Active Resources error immediately, instead of being misidentified as the delete-time permission-check race and retried for up to a minute before showing the same message.
 ```
+
+```
+release-note:fixed
+resource/anyscale_project: adding a collaborator immediately after creating the project no longer intermittently fails with a spurious 403 Permission denied; the provider now retries this call the same way it already does for delete, since it hits the identical backend permission-check consistency race.
+```
