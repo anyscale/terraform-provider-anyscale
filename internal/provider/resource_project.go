@@ -303,9 +303,15 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 
 	tflog.Info(ctx, "Project created successfully", map[string]any{"project_id": projectID})
 
-	// Create collaborators if specified
+	// Create collaborators if specified. createdAt uses time.Now() rather than
+	// projectResp.Result.CreatedAt: the real POST /api/v2/projects response never includes
+	// created_at (confirmed against the live API - it unmarshals to "" here, which would fail
+	// isRecentlyCreated closed and silently disable the retry below for exactly the call site it
+	// targets), and readProject (which does populate a real CreatedAt) hasn't run yet at this
+	// point. We are provably moments past actual creation either way, so time.Now() is the
+	// correct proxy - same precedent as the acctest package's testAccDeleteProjectViaAPI helper.
 	if len(plan.Collaborators) > 0 {
-		if err := r.createCollaborators(ctx, projectID, projectResp.Result.CreatedAt, plan.Collaborators); err != nil {
+		if err := r.createCollaborators(ctx, projectID, time.Now().Format(time.RFC3339), plan.Collaborators); err != nil {
 			AddAPIError(&resp.Diagnostics, "add collaborators (project created)", err)
 			// Continue to read state even if collaborators failed
 		}

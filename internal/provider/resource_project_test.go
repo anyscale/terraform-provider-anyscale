@@ -1109,3 +1109,70 @@ func TestCreateCollaborators_403Retry(t *testing.T) {
 		}
 	})
 }
+
+// TestProjectResourceCreate_CollaboratorRetryEngagesEndToEnd is a regression test for a real bug:
+// Create() originally passed projectResp.Result.CreatedAt as createCollaborators' age-gate signal,
+// but the real POST /api/v2/projects response never includes created_at (confirmed against the
+// live API), so it unmarshals to "" and isRecentlyCreated fails closed to not-eligible - silently
+// disabling the retry for exactly the call site it targets. TestCreateCollaborators_403Retry alone
+// didn't catch this because it calls createCollaborators directly with a manually-constructed
+// createdAt, never exercising the real Create() -> createCollaborators wiring. This test drives
+// the real Create() method with a POST /api/v2/projects mock that deliberately omits created_at
+// (matching the real API), so it would have failed before the time.Now() fix and passes after it.
+func TestProjectResourceCreate_CollaboratorRetryEngagesEndToEnd(t *testing.T) {
+	withFastRetryTiming(t)
+
+	const projectID = "prj_e2e_collab_retry"
+	var batchCreateCount int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/projects":
+			// Deliberately no CreatedAt field, matching the real API's actual POST response body.
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
+				ID: projectID, Name: "test-project", ParentCloudID: "cld_123", DirectoryName: "test-project-dir",
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID:
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
+				ID: projectID, Name: "test-project", ParentCloudID: "cld_123",
+				CreatedAt: time.Now().Format(time.RFC3339), DirectoryName: "test-project-dir",
+			}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/projects/"+projectID+"/collaborators/users/batch_create":
+			batchCreateCount++
+			if batchCreateCount < 3 {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID+"/collaborators/users":
+			// readProject fetches collaborators since the plan specifies one; empty is fine, this
+			// test only cares whether the batch_create retry engaged, not collaborator state.
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectCollaboratorListResponse{})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+	_, diags := runProjectResourceCreate(t, r, ProjectResourceModel{
+		Name:    types.StringValue("test-project"),
+		CloudID: types.StringValue("cld_123"),
+		Collaborators: []ProjectCollaboratorModel{
+			{Email: types.StringValue("user1@example.com"), PermissionLevel: types.StringValue("owner")},
+		},
+	})
+
+	if diags.HasError() {
+		t.Fatalf("expected the collaborator-add retry to engage and eventually succeed, got diagnostics: %v", diags)
+	}
+	if batchCreateCount != 3 {
+		t.Fatalf("expected exactly 3 batch_create requests (2 failed + 1 success, proving the retry actually engaged from the real Create() path), got %d", batchCreateCount)
+	}
+}
