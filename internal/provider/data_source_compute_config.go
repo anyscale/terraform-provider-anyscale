@@ -314,16 +314,23 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 
 	// CC5a: fetch and parse using the same typed structs the resource uses
 	// (computeTemplateResponse/computeTemplate/computeTemplateConfig, see
-	// resource_compute_config.go) instead of hand-parsing a raw
-	// map[string]interface{}. Still calls /ext/v0/cluster_computes -- the
-	// endpoint migration to /api/v2/compute_templates itself is CC5b, gated
-	// and deferred separately; ext/v0 and api/v2 are reshapings of the same
-	// underlying record, so the same JSON field names decode correctly here.
+	// resource_compute_config.go). CC5b: migrated onto api/v2/compute_templates
+	// (the resource already used this endpoint) - api/v2's response is a
+	// verified strict field superset of ext/v0's, same underlying record, so
+	// computeTemplateResponse decodes identically. Deliberately keeps only
+	// http.StatusOK as the accepted status (not adding http.StatusNotFound):
+	// DoRequestAndParse returns a non-nil zero-valued result on a 404 whose
+	// body happens to decode without error (json.Unmarshal doesn't fail on an
+	// unrecognized-shape object), so an "accept 404, check apiResult == nil"
+	// pattern silently fails to detect not-found - confirmed this is actually
+	// broken in resource_compute_config.go's Read/ImportState. Keeping only
+	// StatusOK here means a real 404 fails isStatusExpected and produces a
+	// genuine err != nil, which already flows correctly into AddAPIError below.
 	computeResp, err := DoRequestAndParse[computeTemplateResponse](
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_computes/%s", configID),
+		fmt.Sprintf("/api/v2/compute_templates/%s", configID),
 		nil,
 		http.StatusOK,
 	)

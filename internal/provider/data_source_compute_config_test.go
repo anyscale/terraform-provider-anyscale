@@ -8,7 +8,133 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// computeConfigDataSourceLookupFixture builds a minimal valid by-id lookup
+// plan: every Object/List-typed attribute must be explicitly typed-null
+// (matching the schema's exact attr types), not left at its Go zero value,
+// or tfsdk.Config.Set rejects it with a Value Conversion Error.
+func computeConfigDataSourceLookupFixture(id string) ComputeConfigDataSourceModel {
+	return ComputeConfigDataSourceModel{
+		ID:          types.StringValue(id),
+		Versions:    types.ListNull(types.Int64Type),
+		Zones:       types.ListNull(types.StringType),
+		HeadNode:    types.ObjectNull(nodeConfigAttrTypes()),
+		WorkerNodes: types.ListNull(types.ObjectType{AttrTypes: workerNodeConfigAttrTypes()}),
+	}
+}
+
+// runComputeConfigDataSourceRead drives ComputeConfigDataSource's real Read()
+// method end-to-end against a model representing the user's config, the same
+// pattern as runContainerImageDataSourceRead/runProjectDataSourceRead.
+func runComputeConfigDataSourceRead(t *testing.T, d *ComputeConfigDataSource, model ComputeConfigDataSourceModel) (ComputeConfigDataSourceModel, diag.Diagnostics) {
+	t.Helper()
+	ctx := context.Background()
+
+	var schemaResp datasource.SchemaResponse
+	d.Schema(ctx, datasource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+
+	state := tfsdk.State{Schema: schemaResp.Schema}
+	setDiags := state.Set(ctx, &model)
+	if setDiags.HasError() {
+		t.Fatalf("failed to build config fixture: %v", setDiags)
+	}
+	config := tfsdk.Config(state)
+
+	readResp := &datasource.ReadResponse{
+		State: tfsdk.State(config),
+	}
+	d.Read(ctx, datasource.ReadRequest{Config: config}, readResp)
+
+	if readResp.Diagnostics.HasError() {
+		return ComputeConfigDataSourceModel{}, readResp.Diagnostics
+	}
+
+	var result ComputeConfigDataSourceModel
+	getDiags := readResp.State.Get(ctx, &result)
+	if getDiags.HasError() {
+		t.Fatalf("failed to decode result state: %v", getDiags)
+	}
+	return result, readResp.Diagnostics
+}
+
+// TestComputeConfigRead_HitsAPIV2Endpoint is the CC5b GET-migration proof:
+// Read()'s by-id lookup must hit api/v2/compute_templates, not the deprecated
+// ext/v0/cluster_computes. The mock's catch-all failure handler on any other
+// path is what makes this load-bearing - it would fail if the old path were
+// still hit.
+func TestComputeConfigRead_HitsAPIV2Endpoint(t *testing.T) {
+	const configID = "cpt_abc123"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/compute_templates/"+configID:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"result": {
+				"id": "` + configID + `", "name": "tfacc-cc-v2", "version": 3,
+				"created_at": "2024-01-01T00:00:00Z", "last_modified_at": "2024-01-02T00:00:00Z",
+				"config": {}
+			}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/ext/v0/cluster_computes/search":
+			// fetchComputeConfigVersions still runs (unrelated to this PR - PR B
+			// migrates the search endpoint separately) and errors are only
+			// warned/tolerated, but serve it properly so this test proves a
+			// clean end-to-end Read, not a Read that happens to succeed despite
+			// a swallowed versions-fetch error.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"results": [{"id": "` + configID + `", "name": "tfacc-cc-v2", "version": 3}], "metadata": {"next_paging_token": null}}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture(configID))
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if result.ID.ValueString() != configID {
+		t.Errorf("id = %q, want %q", result.ID.ValueString(), configID)
+	}
+	if result.Name.ValueString() != "tfacc-cc-v2" {
+		t.Errorf("name = %q, want %q", result.Name.ValueString(), "tfacc-cc-v2")
+	}
+	if result.Version.ValueInt64() != 3 {
+		t.Errorf("version = %d, want 3", result.Version.ValueInt64())
+	}
+}
+
+// TestComputeConfigRead_NotFoundByID_ProducesAPIError confirms the not-found
+// path still works, unchanged, after the URL migration: only http.StatusOK is
+// accepted (deliberately not widened to also accept http.StatusNotFound - see
+// the comment on the GET call in data_source_compute_config.go), so a real 404
+// fails isStatusExpected and produces a genuine error, not a silently-empty
+// success.
+func TestComputeConfigRead_NotFoundByID_ProducesAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail": "compute template not found"}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	_, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture("cpt_missing"))
+	if !diags.HasError() {
+		t.Fatal("expected an error on a 404, got none")
+	}
+}
 
 // This file previously only "tested" hand-copied re-implementations of the
 // data source's logic (e.g. re-running the same if-statement inline in the
