@@ -186,6 +186,54 @@ func PaginatedRequest[T any](
 	return allItems, nil
 }
 
+// PickMostRecentMatch scans candidates for every one satisfying matches, and returns the ID of
+// the most-recently-created match (string comparison of getCreatedAt works because the API's
+// created_at is an ISO-8601 timestamp: lexicographic order is chronological order). Warns via
+// WarnIfMultipleMatches when more than one candidate satisfies matches. Returns "" if none do.
+//
+// This is the shared tiebreak for every by-name lookup in the provider (cloud, project, compute
+// config, container image, and the cloud_name-filter resolver): each previously hand-rolled an
+// identical "exact match, pick newest on duplicates, warn" loop, sometimes with the count subtly
+// wrong (warning based on total candidates scanned rather than actual match count). Each call site
+// still owns its own fetch (paginated GET via PaginatedRequest, or a paginated POST search) and its
+// own match predicate, since those legitimately differ per endpoint.
+//
+// Example usage:
+//
+//	id := PickMostRecentMatch(ctx, "cloud", name, results,
+//	    func(c CloudResult) bool { return c.Name == name },
+//	    func(c CloudResult) string { return c.ID },
+//	    func(c CloudResult) string { return c.CreatedAt },
+//	)
+func PickMostRecentMatch[T any](
+	ctx context.Context,
+	resourceType string,
+	name string,
+	candidates []T,
+	matches func(T) bool,
+	getID func(T) string,
+	getCreatedAt func(T) string,
+) string {
+	var matchedID, latestCreatedAt string
+	matchCount := 0
+
+	for _, c := range candidates {
+		if !matches(c) {
+			continue
+		}
+		matchCount++
+		id, createdAt := getID(c), getCreatedAt(c)
+		if matchedID == "" || createdAt > latestCreatedAt {
+			matchedID = id
+			latestCreatedAt = createdAt
+		}
+	}
+
+	WarnIfMultipleMatches(ctx, resourceType, name, matchCount, matchedID)
+
+	return matchedID
+}
+
 // MarshalRequestBody marshals a request struct to JSON and returns it as an io.Reader.
 // This is a convenience helper for preparing request bodies.
 //
