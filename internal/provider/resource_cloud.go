@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -126,7 +127,7 @@ func (r *CloudResource) Metadata(ctx context.Context, req resource.MetadataReque
 // Schema defines the resource schema.
 func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource).",
+		MarkdownDescription: "Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -662,45 +663,68 @@ func regionRequiredForCreateError(region string) (summary, detail string, hasErr
 	return "Region Could Not Be Determined", "region could not be determined; set region explicitly on the anyscale_cloud.", true
 }
 
-// findCloudByName looks for an existing cloud with the given name
+// multipleCloudsWithNameError signals findCloudByName's ambiguity case: 2+ clouds share the
+// given name, and the adopt path must hard-stop rather than guess which one to attach
+// Terraform management to. Distinguished from findCloudByName's other errors (network, parse,
+// non-2xx) via errors.As, not string-matching, so Create() can treat this case as a hard error
+// while still treating everything else as the existing lenient "warn and fall through to a
+// fresh create" case.
+//
+// Every other by-name site in this provider (data_source_cloud.go, cloud_helpers.go's
+// ResolveCloudNameToID, data_source_compute_config.go, api_helpers.go's PickMostRecentMatch
+// itself) warns and silently picks the most recent match. This is deliberately the one
+// exception: this lookup gates an ADOPT decision (Create attaches Terraform management to
+// whatever ID comes back), so picking the wrong one among duplicates means silently managing
+// the wrong live cloud - higher stakes than a read. See .crystl/quest/spec.json's
+// resource_adopt_path design_decision.
+type multipleCloudsWithNameError struct {
+	name string
+	ids  []string
+}
+
+func (e *multipleCloudsWithNameError) Error() string {
+	return fmt.Sprintf(
+		"found %d clouds named %q (ids: %s); refusing to guess which one to adopt - delete or "+
+			"rename the duplicates, or if this create is recovering an interrupted apply, "+
+			"import the specific cloud you intend to manage with "+
+			"`terraform import anyscale_cloud.<name> <id>`",
+		len(e.ids), e.name, strings.Join(e.ids, ", "),
+	)
+}
+
+// findCloudByName looks for an existing cloud with the given name, paginating through every
+// page of GET /api/v2/clouds (mirrors CloudDataSource.findCloudByName's PaginatedRequest/
+// CloudsListResponse mechanics in data_source_cloud.go). Returns ("", nil) if no cloud has
+// this name, (id, nil) if exactly one does, or a *multipleCloudsWithNameError if 2+ do.
 func (r *CloudResource) findCloudByName(ctx context.Context, name string) (string, error) {
-	resp, err := r.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
+	results, err := PaginatedRequest(ctx, r.client, "/api/v2/clouds", nil,
+		func(body []byte) ([]CloudResult, *string, error) {
+			var cloudsResp CloudsListResponse
+			if err := json.Unmarshal(body, &cloudsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
+			}
+			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
+		},
+	)
 	if err != nil {
-		return "", err
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", err
-	}
-
-	for _, cloud := range cloudsResp.Results {
+	var matchIDs []string
+	for _, cloud := range results {
 		if cloud.Name == name {
-			return cloud.ID, nil
+			matchIDs = append(matchIDs, cloud.ID)
 		}
 	}
 
-	return "", nil
+	switch len(matchIDs) {
+	case 0:
+		return "", nil
+	case 1:
+		return matchIDs[0], nil
+	default:
+		return "", &multipleCloudsWithNameError{name: name, ids: matchIDs}
+	}
 }
 
 // Create creates the resource and sets the initial Terraform state.
@@ -773,7 +797,11 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	// Check if a cloud with this name already exists (handles interrupted creates)
 	existingCloudID, err := r.findCloudByName(ctx, name)
-	if err != nil {
+	var ambiguousCloudErr *multipleCloudsWithNameError
+	if errors.As(err, &ambiguousCloudErr) {
+		resp.Diagnostics.AddError("Multiple Clouds Found", ambiguousCloudErr.Error())
+		return
+	} else if err != nil {
 		tflog.Warn(ctx, "Failed to check for existing cloud", map[string]any{"error": err.Error()})
 	} else if existingCloudID != "" {
 		tflog.Info(ctx, "Found existing cloud, adopting", map[string]any{"name": name, "id": existingCloudID})
