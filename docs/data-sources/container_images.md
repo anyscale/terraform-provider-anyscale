@@ -40,7 +40,9 @@ output "training_image_ids" {
 
 ### Optional
 
+- `cloud_id` (String) Filter container images by cloud ID.
 - `creator_id` (String) Filter container images by creator ID.
+- `image_name_contains` (String) Filter container images by a partial match on the underlying base or BYOD image name (distinct from `name_contains`, which matches the user-given template name).
 - `include_archived` (Boolean) Whether to include archived container images in results. Defaults to false.
 - `name_contains` (String) Filter container images by partial name match.
 - `project_id` (String) Filter container images by project ID.
@@ -54,12 +56,17 @@ output "training_image_ids" {
 
 Read-Only:
 
+- `cloud_id` (String) The cloud ID this container image is associated with. Null if the image isn't associated with a specific cloud.
 - `created_at` (String) Timestamp when the container image was created.
-- `creator_id` (String) The ID of the user who created this container image.
+- `creator_id` (String) The ID of the user who created this container image. Null if the API does not report a creator for this image.
 - `id` (String) The unique identifier of the container image.
+- `image_uri` (String) The registry image URI (docker image path) of the container image's latest build. Null if the image has no build yet, or if the latest build hasn't produced an image yet (pending, in progress, or failed).
 - `is_archived` (Boolean) Whether this container image is archived.
-- `latest_build_id` (String) The ID of the latest build for this container image.
-- `latest_build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
+- `is_default` (Boolean) Whether this is an Anyscale-provided base container image, as opposed to one created by a user in this organization.
+- `is_experimental` (Boolean) Whether this is an experimental container image.
+- `last_modified_at` (String) Timestamp when the container image was last modified.
+- `latest_build_id` (String) The ID of the latest build for this container image. Null if no build has been triggered yet.
+- `latest_build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`). Null if no build has been triggered yet.
 - `name` (String) The name of the container image.
-- `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
-- `revision` (Number) The revision number of the latest build.
+- `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.
+- `revision` (Number) The revision number of the latest build. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.

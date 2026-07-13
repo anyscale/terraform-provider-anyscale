@@ -37,6 +37,11 @@ type ContainerImagesDataSourceModel struct {
 	ProjectID       types.String `tfsdk:"project_id"`
 	IncludeArchived types.Bool   `tfsdk:"include_archived"`
 
+	// DS-IMG-3 (Phase B): new filters, both genuinely distinct params the
+	// backend already accepts.
+	ImageNameContains types.String `tfsdk:"image_name_contains"`
+	CloudID           types.String `tfsdk:"cloud_id"`
+
 	// Computed output
 	ContainerImages []ContainerImageSummaryModel `tfsdk:"container_images"`
 }
@@ -52,6 +57,14 @@ type ContainerImageSummaryModel struct {
 	LatestBuildStatus types.String `tfsdk:"latest_build_status"`
 	Revision          types.Int64  `tfsdk:"revision"`
 	NameVersion       types.String `tfsdk:"name_version"`
+
+	// DS-IMG-2/DS-IMG-4 (Phase B): shared with the singular via
+	// containerImageSharedAttributes.
+	ImageURI       types.String `tfsdk:"image_uri"`
+	CloudID        types.String `tfsdk:"cloud_id"`
+	IsDefault      types.Bool   `tfsdk:"is_default"`
+	IsExperimental types.Bool   `tfsdk:"is_experimental"`
+	LastModifiedAt types.String `tfsdk:"last_modified_at"`
 }
 
 // Metadata returns the data source type name.
@@ -76,11 +89,11 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 	}
 	itemAttributes["latest_build_id"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The ID of the latest build for this container image.",
+		MarkdownDescription: "The ID of the latest build for this container image. Null if no build has been triggered yet.",
 	}
 	itemAttributes["latest_build_status"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
+		MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`). Null if no build has been triggered yet.",
 	}
 
 	resp.Schema = schema.Schema{
@@ -91,6 +104,13 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 				Optional:            true,
 				MarkdownDescription: "Filter container images by partial name match.",
 			},
+			// DS-IMG-3 (Phase B): a second, distinct filter from name_contains -
+			// this matches the underlying base/BYOD image name, not the
+			// user-given template name.
+			"image_name_contains": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Filter container images by a partial match on the underlying base or BYOD image name (distinct from `name_contains`, which matches the user-given template name).",
+			},
 			"creator_id": schema.StringAttribute{
 				Optional:            true,
 				MarkdownDescription: "Filter container images by creator ID.",
@@ -98,6 +118,10 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 			"project_id": schema.StringAttribute{
 				Optional:            true,
 				MarkdownDescription: "Filter container images by project ID.",
+			},
+			"cloud_id": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Filter container images by cloud ID.",
 			},
 			"include_archived": schema.BoolAttribute{
 				Optional:            true,
@@ -147,12 +171,21 @@ func (d *ContainerImagesDataSource) Read(ctx context.Context, req datasource.Rea
 		params.Set("name_contains", config.NameContains.ValueString())
 	}
 
+	// DS-IMG-3 (Phase B): distinct from name_contains above.
+	if !config.ImageNameContains.IsNull() && config.ImageNameContains.ValueString() != "" {
+		params.Set("image_name_contains", config.ImageNameContains.ValueString())
+	}
+
 	if !config.CreatorID.IsNull() && config.CreatorID.ValueString() != "" {
 		params.Set("creator_id", config.CreatorID.ValueString())
 	}
 
 	if !config.ProjectID.IsNull() && config.ProjectID.ValueString() != "" {
 		params.Set("project_id", config.ProjectID.ValueString())
+	}
+
+	if !config.CloudID.IsNull() && config.CloudID.ValueString() != "" {
+		params.Set("cloud_id", config.CloudID.ValueString())
 	}
 
 	// include_archived defaults to false if not specified
@@ -205,24 +238,29 @@ func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, pa
 			Name:       types.StringValue(tmpl.Name),
 			CreatedAt:  types.StringValue(tmpl.CreatedAt),
 			IsArchived: types.BoolValue(tmpl.IsArchived()),
+			// DS-IMG-4 (Phase B): template-level fields, always available.
+			CloudID:        types.StringPointerValue(tmpl.CloudID),
+			IsDefault:      types.BoolValue(tmpl.IsDefault),
+			IsExperimental: types.BoolValue(tmpl.IsExperimental),
+			LastModifiedAt: stringOrNull(tmpl.LastModifiedAt),
 		}
 
-		if tmpl.CreatorID != "" {
-			imageModel.CreatorID = types.StringValue(tmpl.CreatorID)
-		} else {
-			imageModel.CreatorID = types.StringNull()
-		}
+		imageModel.CreatorID = stringOrNull(tmpl.CreatorID)
 
 		if tmpl.LatestBuild != nil {
 			imageModel.LatestBuildID = types.StringValue(tmpl.LatestBuild.ID)
 			imageModel.LatestBuildStatus = types.StringValue(tmpl.LatestBuild.Status)
 			imageModel.Revision = types.Int64Value(int64(tmpl.LatestBuild.Revision))
 			imageModel.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", tmpl.Name, tmpl.LatestBuild.Revision))
+			// DS-IMG-2 (Phase B): free per-item image_uri, no extra call - the
+			// embedded latest_build summary already carries docker_image_name.
+			imageModel.ImageURI = types.StringPointerValue(tmpl.LatestBuild.DockerImageName)
 		} else {
 			imageModel.LatestBuildID = types.StringNull()
 			imageModel.LatestBuildStatus = types.StringNull()
 			imageModel.Revision = types.Int64Null()
 			imageModel.NameVersion = types.StringNull()
+			imageModel.ImageURI = types.StringNull()
 		}
 
 		allImages = append(allImages, imageModel)

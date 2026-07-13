@@ -193,7 +193,10 @@ func TestContainerImageDataSourceRead_MapsBuildFields(t *testing.T) {
 			const templateID = "apptemp_mapfields"
 			template := ApplicationTemplateResult{
 				ID: templateID, Name: "my-custom-image", CreatorID: "user_456", CreatedAt: "2024-01-01T00:00:00Z",
-				LatestBuild: &MiniBuildResult{ID: tt.build.ID, Revision: tt.build.Revision, Status: tt.build.Status},
+				// DockerImageName mirrors what a real decorated application
+				// template response embeds on latest_build - DS-IMG-2 reads
+				// image_uri from here now, not from the second build call.
+				LatestBuild: &MiniBuildResult{ID: tt.build.ID, Revision: tt.build.Revision, Status: tt.build.Status, DockerImageName: tt.build.DockerImageName},
 			}
 
 			server, buildRequests := newContainerImageDataSourceTestServer(t, template, &tt.build)

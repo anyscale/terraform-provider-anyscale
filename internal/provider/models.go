@@ -508,6 +508,10 @@ type ApplicationTemplateResult struct {
 	Anonymous      bool             `json:"anonymous"`
 	IsDefault      bool             `json:"is_default"`
 	LatestBuild    *MiniBuildResult `json:"latest_build,omitempty"`
+	// DS-IMG-4: CloudID is genuinely Optional[str] server-side (AppConfig.cloud_id);
+	// IsExperimental is a plain bool with a backend default, never null.
+	CloudID        *string `json:"cloud_id,omitempty"`
+	IsExperimental bool    `json:"is_experimental"`
 }
 
 // IsArchived returns true if the application template has been deleted/archived
@@ -521,6 +525,13 @@ type MiniBuildResult struct {
 	ID       string `json:"id"`
 	Revision int    `json:"revision"`
 	Status   string `json:"status"`
+	// DS-IMG-2: both genuinely Optional[str] server-side (MiniBuild.docker_image_name/
+	// cloud_id) - present on the SAME embedded object both DS already fetch for free,
+	// so the plural gains a per-item image_uri with zero extra calls, and the singular
+	// can populate image_uri without needing the second GET /builds/{id} call (still
+	// made for digest/ray_version/etc, just no longer required for this one field).
+	DockerImageName *string `json:"docker_image_name,omitempty"`
+	CloudID         *string `json:"cloud_id,omitempty"`
 }
 
 // BuildResponse represents a single build from the API. Returned by both
