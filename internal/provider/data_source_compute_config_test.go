@@ -69,8 +69,8 @@ func runComputeConfigDataSourceRead(t *testing.T, d *ComputeConfigDataSource, mo
 // TestComputeConfigRead_HitsAPIV2Endpoint is the CC5b GET-migration proof:
 // Read()'s by-id lookup must hit api/v2/compute_templates, not the deprecated
 // ext/v0/cluster_computes. The mock's catch-all failure handler on any other
-// path is what makes this load-bearing - it would fail if the old path were
-// still hit.
+// path is what makes this load-bearing - it would fail if either the old GET
+// path or the old search path were still hit.
 func TestComputeConfigRead_HitsAPIV2Endpoint(t *testing.T) {
 	const configID = "cpt_abc123"
 
@@ -84,12 +84,16 @@ func TestComputeConfigRead_HitsAPIV2Endpoint(t *testing.T) {
 				"created_at": "2024-01-01T00:00:00Z", "last_modified_at": "2024-01-02T00:00:00Z",
 				"config": {}
 			}}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/ext/v0/cluster_computes/search":
-			// fetchComputeConfigVersions still runs (unrelated to this PR - PR B
-			// migrates the search endpoint separately) and errors are only
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/compute_templates/search":
+			// fetchComputeConfigVersions still runs and errors are only
 			// warned/tolerated, but serve it properly so this test proves a
 			// clean end-to-end Read, not a Read that happens to succeed despite
-			// a swallowed versions-fetch error.
+			// a swallowed versions-fetch error. CC5b migrated this call from
+			// POST /ext/v0/cluster_computes/search to this endpoint (#113) -
+			// matched on path only (not the count/paging_token query string)
+			// since this test doesn't exercise pagination itself; see
+			// TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody
+			// for the dedicated query-vs-body proof.
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"results": [{"id": "` + configID + `", "name": "tfacc-cc-v2", "version": 3}], "metadata": {"next_paging_token": null}}`))
 		default:
