@@ -81,7 +81,7 @@ func newProjectCreateTestServer(t *testing.T, cloudID, cloudName string) *httpte
 		_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
 			ID:            projectID,
 			Name:          "test-project",
-			ParentCloudID: cloudID,
+			ParentCloudID: strPtr(cloudID),
 			CreatedAt:     "2024-01-01T00:00:00Z",
 			IsDefault:     false,
 			DirectoryName: "test-project-dir",
@@ -216,14 +216,14 @@ func TestProjectResourceCreate_RequestBody(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-				ID: "prj_test", Name: "test-project", ParentCloudID: "cld_123",
+				ID: "prj_test", Name: "test-project", ParentCloudID: strPtr("cld_123"),
 				CreatedAt: "2024-01-01T00:00:00Z", DirectoryName: "test-project-dir",
 			}})
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-			ID: "prj_test", Name: "test-project", ParentCloudID: "cld_123",
+			ID: "prj_test", Name: "test-project", ParentCloudID: strPtr("cld_123"),
 			CreatedAt: "2024-01-01T00:00:00Z", DirectoryName: "test-project-dir",
 		}})
 	}))
@@ -413,7 +413,7 @@ func TestProjectResourceReadProject(t *testing.T) {
 			ID:              projectID,
 			Name:            "test-project",
 			Description:     strPtr("a description"),
-			ParentCloudID:   "cld_789",
+			ParentCloudID:   strPtr("cld_789"),
 			CreatorID:       strPtr("user_789"),
 			CreatedAt:       "2024-01-01T00:00:00Z",
 			LastUsedCloudID: strPtr("cld_789"),
@@ -1180,12 +1180,12 @@ func TestProjectResourceCreate_CollaboratorRetryEngagesEndToEnd(t *testing.T) {
 			// Deliberately no CreatedAt field, matching the real API's actual POST response body.
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-				ID: projectID, Name: "test-project", ParentCloudID: "cld_123", DirectoryName: "test-project-dir",
+				ID: projectID, Name: "test-project", ParentCloudID: strPtr("cld_123"), DirectoryName: "test-project-dir",
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID:
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-				ID: projectID, Name: "test-project", ParentCloudID: "cld_123",
+				ID: projectID, Name: "test-project", ParentCloudID: strPtr("cld_123"),
 				CreatedAt: time.Now().Format(time.RFC3339), DirectoryName: "test-project-dir",
 			}})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/projects/"+projectID+"/collaborators/users/batch_create":

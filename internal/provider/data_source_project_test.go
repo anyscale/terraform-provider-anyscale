@@ -95,7 +95,7 @@ func TestProjectDataSourceRead_ByID(t *testing.T) {
 				ID:              projectID,
 				Name:            "production-project",
 				Description:     strPtr("Production environment project"),
-				ParentCloudID:   "cld_def",
+				ParentCloudID:   strPtr("cld_def"),
 				CreatorID:       strPtr("user_123"),
 				CreatedAt:       "2024-01-01T00:00:00Z",
 				LastUsedCloudID: strPtr("cld_def"),
@@ -179,7 +179,7 @@ func TestProjectDataSourceRead_NullableFieldsAndDefaultFlag(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
 				ID:            projectID,
 				Name:          "default-project",
-				ParentCloudID: "cld_def",
+				ParentCloudID: strPtr("cld_def"),
 				CreatedAt:     "2024-01-01T00:00:00Z",
 				IsDefault:     true,
 				DirectoryName: "default-project-dir",
@@ -278,14 +278,14 @@ func TestProjectDataSourceRead_ByName(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects":
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(ProjectsListResponse{Results: []ProjectResult{
-				{ID: "prj_old", Name: "my-project", ParentCloudID: "cld_1", CreatedAt: "2023-01-01T00:00:00Z", DirectoryName: "d1"},
-				{ID: "prj_new", Name: "my-project", ParentCloudID: "cld_1", CreatedAt: "2024-06-01T00:00:00Z", DirectoryName: "d2"},
-				{ID: "prj_other", Name: "other-project", ParentCloudID: "cld_1", CreatedAt: "2024-01-01T00:00:00Z", DirectoryName: "d3"},
+				{ID: "prj_old", Name: "my-project", ParentCloudID: strPtr("cld_1"), CreatedAt: "2023-01-01T00:00:00Z", DirectoryName: "d1"},
+				{ID: "prj_new", Name: "my-project", ParentCloudID: strPtr("cld_1"), CreatedAt: "2024-06-01T00:00:00Z", DirectoryName: "d2"},
+				{ID: "prj_other", Name: "other-project", ParentCloudID: strPtr("cld_1"), CreatedAt: "2024-01-01T00:00:00Z", DirectoryName: "d3"},
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/prj_new":
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-				ID: "prj_new", Name: "my-project", ParentCloudID: "cld_1", CreatedAt: "2024-06-01T00:00:00Z", DirectoryName: "d2",
+				ID: "prj_new", Name: "my-project", ParentCloudID: strPtr("cld_1"), CreatedAt: "2024-06-01T00:00:00Z", DirectoryName: "d2",
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/prj_new/collaborators/users":
 			w.WriteHeader(http.StatusOK)

@@ -245,10 +245,13 @@ type ProjectsListResponse struct {
 
 // ProjectResult is the actual project data
 type ProjectResult struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	Description     *string `json:"description"`
-	ParentCloudID   string  `json:"parent_cloud_id"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	// DS-PROJ-1: genuinely Optional[str] server-side; shared by both data
+	// sources and resource_project.go's Read - all three must map it via
+	// StringPointerValue, never collapse a null cloud association to "".
+	ParentCloudID   *string `json:"parent_cloud_id"`
 	CreatorID       *string `json:"creator_id,omitempty"`
 	CreatedAt       string  `json:"created_at"`
 	LastUsedCloudID *string `json:"last_used_cloud_id,omitempty"`

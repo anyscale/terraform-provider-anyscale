@@ -216,34 +216,22 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 		return nil, err
 	}
 
-	// Convert to model
+	// Convert to model. X-1: CreatorID/Description/LastUsedCloudID are already
+	// *string - StringPointerValue directly instead of a verbose if-nil-else
+	// block. DS-PROJ-1: CloudID (from ParentCloudID) is genuinely nullable
+	// server-side, same treatment.
 	allProjects := make([]ProjectSummaryModel, 0, len(results))
 	for _, project := range results {
 		projectModel := ProjectSummaryModel{
-			ID:            types.StringValue(project.ID),
-			Name:          types.StringValue(project.Name),
-			CloudID:       types.StringValue(project.ParentCloudID),
-			CreatedAt:     types.StringValue(project.CreatedAt),
-			IsDefault:     types.BoolValue(project.IsDefault),
-			DirectoryName: types.StringValue(project.DirectoryName),
-		}
-
-		if project.CreatorID != nil {
-			projectModel.CreatorID = types.StringValue(*project.CreatorID)
-		} else {
-			projectModel.CreatorID = types.StringNull()
-		}
-
-		if project.Description != nil {
-			projectModel.Description = types.StringValue(*project.Description)
-		} else {
-			projectModel.Description = types.StringNull()
-		}
-
-		if project.LastUsedCloudID != nil {
-			projectModel.LastUsedCloudID = types.StringValue(*project.LastUsedCloudID)
-		} else {
-			projectModel.LastUsedCloudID = types.StringNull()
+			ID:              types.StringValue(project.ID),
+			Name:            types.StringValue(project.Name),
+			CloudID:         types.StringPointerValue(project.ParentCloudID),
+			CreatedAt:       types.StringValue(project.CreatedAt),
+			IsDefault:       types.BoolValue(project.IsDefault),
+			DirectoryName:   types.StringValue(project.DirectoryName),
+			CreatorID:       types.StringPointerValue(project.CreatorID),
+			Description:     types.StringPointerValue(project.Description),
+			LastUsedCloudID: types.StringPointerValue(project.LastUsedCloudID),
 		}
 
 		allProjects = append(allProjects, projectModel)

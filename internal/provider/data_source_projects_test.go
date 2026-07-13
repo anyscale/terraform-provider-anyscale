@@ -166,7 +166,7 @@ func TestProjectsDataSourceRead_FieldMapping(t *testing.T) {
 				ID:              "prj_1",
 				Name:            "production",
 				Description:     strPtr("Production project"),
-				ParentCloudID:   "cld_def",
+				ParentCloudID:   strPtr("cld_def"),
 				CreatorID:       strPtr("user_123"),
 				CreatedAt:       "2024-01-01T00:00:00Z",
 				LastUsedCloudID: strPtr("cld_def"),
@@ -179,7 +179,7 @@ func TestProjectsDataSourceRead_FieldMapping(t *testing.T) {
 				// zero-valued/empty string.
 				ID:            "prj_2",
 				Name:          "default",
-				ParentCloudID: "cld_def",
+				ParentCloudID: strPtr("cld_def"),
 				CreatedAt:     "2023-01-01T00:00:00Z",
 				IsDefault:     true,
 				DirectoryName: "default-dir",
