@@ -193,7 +193,10 @@ func TestContainerImageDataSourceRead_MapsBuildFields(t *testing.T) {
 			const templateID = "apptemp_mapfields"
 			template := ApplicationTemplateResult{
 				ID: templateID, Name: "my-custom-image", CreatorID: "user_456", CreatedAt: "2024-01-01T00:00:00Z",
-				LatestBuild: &MiniBuildResult{ID: tt.build.ID, Revision: tt.build.Revision, Status: tt.build.Status},
+				// DockerImageName mirrors what a real decorated application
+				// template response embeds on latest_build - DS-IMG-2 reads
+				// image_uri from here now, not from the second build call.
+				LatestBuild: &MiniBuildResult{ID: tt.build.ID, Revision: tt.build.Revision, Status: tt.build.Status, DockerImageName: tt.build.DockerImageName},
 			}
 
 			server, buildRequests := newContainerImageDataSourceTestServer(t, template, &tt.build)
@@ -243,6 +246,46 @@ func TestContainerImageDataSourceRead_MapsBuildFields(t *testing.T) {
 				t.Errorf("CreatorID = %q, want %q", result.CreatorID.ValueString(), template.CreatorID)
 			}
 		})
+	}
+}
+
+// TestContainerImageDataSourceRead_BYODRayVersionPrefersByodField is the
+// DS-IMG-1 mutation-proof regression guard. Read() maps ray_version from the
+// raw build.RayVersion field directly (~data_source_container_image.go:194),
+// ignoring the existing BuildResult.ResolvedRayVersion() helper (models.go)
+// which prefers byod_ray_version when present. BYOD images often have
+// ray_version=null while byod_ray_version is populated, so the DS reports
+// null for a version the backend actually knows. This currently FAILS - the
+// mapped ray_version comes back null instead of the byod_ray_version value -
+// which is the mutation-proof evidence. Must pass once Read() calls
+// build.ResolvedRayVersion() instead of reading build.RayVersion directly.
+func TestContainerImageDataSourceRead_BYODRayVersionPrefersByodField(t *testing.T) {
+	const templateID = "apptemp_byod_null_rayversion"
+	build := BuildResult{
+		ID: "bld_byod_null_rv", Status: "succeeded", Revision: 1, IsBYOD: true,
+		RayVersion:      nil,
+		ByodRayVersion:  strPtr("2.9.0"),
+		DockerImageName: strPtr("docker.io/myorg/byod-image:latest"),
+	}
+	template := ApplicationTemplateResult{
+		ID: templateID, Name: "byod-image", CreatorID: "user_456", CreatedAt: "2024-01-01T00:00:00Z",
+		LatestBuild: &MiniBuildResult{ID: build.ID, Revision: build.Revision, Status: build.Status},
+	}
+
+	server, buildRequests := newContainerImageDataSourceTestServer(t, template, &build)
+	defer server.Close()
+
+	d := &ContainerImageDataSource{client: NewClientWithToken(server.URL, "fake-token-byod-rayversion")}
+	result, diags := runContainerImageDataSourceRead(t, d, ContainerImageDataSourceModel{ID: types.StringValue(templateID)})
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if *buildRequests != 1 {
+		t.Fatalf("expected exactly 1 build request, got %d", *buildRequests)
+	}
+
+	if got := result.RayVersion.ValueString(); got != "2.9.0" {
+		t.Errorf("RayVersion = %q, want %q (byod_ray_version, since ray_version is null on this BYOD build)", got, "2.9.0")
 	}
 }
 

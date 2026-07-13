@@ -396,3 +396,194 @@ func TestContainerImagesNameVersionFormatting(t *testing.T) {
 		})
 	}
 }
+
+// TestContainerImagesDataSourceRead_SendsNewPhaseBFilterParams is the missing
+// DS-IMG-3 coverage: image_name_contains and cloud_id are new filter inputs
+// added in this same change, but TestContainerImagesDataSourceRead_SendsFilterParams
+// above predates them and was not extended. Mirrors that test's pattern
+// exactly - drives the real Read() and asserts on the actual query string the
+// mock server receives, so a dropped filter or wrong key would fail this.
+func TestContainerImagesDataSourceRead_SendsNewPhaseBFilterParams(t *testing.T) {
+	tests := []struct {
+		name              string
+		imageNameContains types.String
+		cloudID           types.String
+		wantQuery         map[string]string
+	}{
+		{
+			name:              "image_name_contains only",
+			imageNameContains: types.StringValue("ray-base"),
+			cloudID:           types.StringNull(),
+			wantQuery: map[string]string{
+				"image_name_contains": "ray-base",
+				"include_archived":    "false",
+			},
+		},
+		{
+			name:              "cloud_id only",
+			imageNameContains: types.StringNull(),
+			cloudID:           types.StringValue("cld_123"),
+			wantQuery: map[string]string{
+				"cloud_id":         "cld_123",
+				"include_archived": "false",
+			},
+		},
+		{
+			name:              "both set, distinct from name_contains",
+			imageNameContains: types.StringValue("ray-base"),
+			cloudID:           types.StringValue("cld_123"),
+			wantQuery: map[string]string{
+				"image_name_contains": "ray-base",
+				"cloud_id":            "cld_123",
+				"include_archived":    "false",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotQuery map[string]string
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/v2/application_templates/" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+
+				gotQuery = make(map[string]string)
+				for key, values := range r.URL.Query() {
+					if len(values) > 0 {
+						gotQuery[key] = values[0]
+					}
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(ApplicationTemplatesListResponse{Results: []ApplicationTemplateResult{}})
+			}))
+			defer server.Close()
+
+			d := &ContainerImagesDataSource{client: NewClientWithToken(server.URL, "fake-token-newfilterparams")}
+			_, diags := runContainerImagesDataSourceRead(t, d, ContainerImagesDataSourceModel{
+				ImageNameContains: tt.imageNameContains,
+				CloudID:           tt.cloudID,
+			})
+			if diags.HasError() {
+				t.Fatalf("unexpected error: %v", diags)
+			}
+
+			for key, want := range tt.wantQuery {
+				got, ok := gotQuery[key]
+				if !ok {
+					t.Errorf("request query missing param %q, want %q", key, want)
+					continue
+				}
+				if got != want {
+					t.Errorf("request query param %q = %q, want %q", key, got, want)
+				}
+			}
+			for key := range gotQuery {
+				if key == "paging_token" {
+					continue
+				}
+				if _, ok := tt.wantQuery[key]; !ok {
+					t.Errorf("request query has unexpected param %q=%q", key, gotQuery[key])
+				}
+			}
+		})
+	}
+}
+
+// TestContainerImagesDataSourceRead_MapsNewPhaseBFields is the missing
+// DS-IMG-2/DS-IMG-4 coverage: image_uri, cloud_id, is_default, is_experimental,
+// and last_modified_at are new per-item output fields added in this same
+// change, but TestContainerImagesDataSourceRead_MapsBuildFields above predates
+// them and was not extended. Covers both a fully-populated build (image_uri
+// present) and the nullable fields' null case (image_uri and cloud_id are
+// genuinely Optional[str] server-side per the traced backend model).
+func TestContainerImagesDataSourceRead_MapsNewPhaseBFields(t *testing.T) {
+	t.Run("populated", func(t *testing.T) {
+		const templateID = "apptemp_newfields"
+		template := ApplicationTemplateResult{
+			ID: templateID, Name: "my-image", CreatorID: "user_456", CreatedAt: "2024-01-01T00:00:00Z",
+			LastModifiedAt: "2024-02-01T00:00:00Z",
+			IsDefault:      true,
+			IsExperimental: true,
+			CloudID:        strPtr("cld_789"),
+			LatestBuild: &MiniBuildResult{
+				ID: "bld_789", Status: "succeeded", Revision: 1,
+				DockerImageName: strPtr("docker.io/myorg/my-image:latest"),
+			},
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ApplicationTemplatesListResponse{Results: []ApplicationTemplateResult{template}})
+		}))
+		defer server.Close()
+
+		d := &ContainerImagesDataSource{client: NewClientWithToken(server.URL, "fake-token-newfields")}
+		result, diags := runContainerImagesDataSourceRead(t, d, ContainerImagesDataSourceModel{})
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+		if len(result.ContainerImages) != 1 {
+			t.Fatalf("got %d container_images, want 1", len(result.ContainerImages))
+		}
+		image := result.ContainerImages[0]
+
+		if got := image.ImageURI.ValueString(); got != "docker.io/myorg/my-image:latest" {
+			t.Errorf("ImageURI = %q, want %q", got, "docker.io/myorg/my-image:latest")
+		}
+		if got := image.CloudID.ValueString(); got != "cld_789" {
+			t.Errorf("CloudID = %q, want %q", got, "cld_789")
+		}
+		if !image.IsDefault.ValueBool() {
+			t.Error("IsDefault = false, want true")
+		}
+		if !image.IsExperimental.ValueBool() {
+			t.Error("IsExperimental = false, want true")
+		}
+		if got := image.LastModifiedAt.ValueString(); got != "2024-02-01T00:00:00Z" {
+			t.Errorf("LastModifiedAt = %q, want %q", got, "2024-02-01T00:00:00Z")
+		}
+	})
+
+	t.Run("nullable fields null when absent", func(t *testing.T) {
+		const templateID = "apptemp_nullfields"
+		template := ApplicationTemplateResult{
+			ID: templateID, Name: "my-image", CreatorID: "user_456", CreatedAt: "2024-01-01T00:00:00Z",
+			// LastModifiedAt, CloudID absent; LatestBuild present but with no DockerImageName.
+			LatestBuild: &MiniBuildResult{ID: "bld_1", Status: "in_progress", Revision: 1},
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ApplicationTemplatesListResponse{Results: []ApplicationTemplateResult{template}})
+		}))
+		defer server.Close()
+
+		d := &ContainerImagesDataSource{client: NewClientWithToken(server.URL, "fake-token-nullfields")}
+		result, diags := runContainerImagesDataSourceRead(t, d, ContainerImagesDataSourceModel{})
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+		if len(result.ContainerImages) != 1 {
+			t.Fatalf("got %d container_images, want 1", len(result.ContainerImages))
+		}
+		image := result.ContainerImages[0]
+
+		if !image.ImageURI.IsNull() {
+			t.Errorf("ImageURI = %#v, want null when docker_image_name is absent", image.ImageURI)
+		}
+		if !image.CloudID.IsNull() {
+			t.Errorf("CloudID = %#v, want null when cloud_id is absent", image.CloudID)
+		}
+		if !image.LastModifiedAt.IsNull() {
+			t.Errorf("LastModifiedAt = %#v, want null when absent", image.LastModifiedAt)
+		}
+	})
+}

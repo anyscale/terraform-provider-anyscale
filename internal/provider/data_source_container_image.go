@@ -49,6 +49,14 @@ type ContainerImageDataSourceModel struct {
 	Revision    types.Int64  `tfsdk:"revision"`
 	Digest      types.String `tfsdk:"digest"`
 	NameVersion types.String `tfsdk:"name_version"` // Formatted as "name:revision" for use with Anyscale APIs
+
+	// DS-IMG-4 (Phase B). BuildErrorMessage is singular-only: it comes from the
+	// full per-build GET, which only this data source makes.
+	BuildErrorMessage types.String `tfsdk:"build_error_message"`
+	CloudID           types.String `tfsdk:"cloud_id"`
+	IsDefault         types.Bool   `tfsdk:"is_default"`
+	IsExperimental    types.Bool   `tfsdk:"is_experimental"`
+	LastModifiedAt    types.String `tfsdk:"last_modified_at"`
 }
 
 // Metadata returns the data source type name.
@@ -62,7 +70,7 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 	attributes["id"] = schema.StringAttribute{
 		Optional:            true,
 		Computed:            true,
-		MarkdownDescription: "The unique identifier of the container image. Either `id` or `name` must be specified.",
+		MarkdownDescription: "The unique identifier of the container image. Either `id` or `name` must be specified. If both are set, `id` takes precedence.",
 		Validators: []validator.String{
 			stringvalidator.AtLeastOneOf(
 				path.MatchRoot("id"),
@@ -76,27 +84,32 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 	}
 	attributes["build_id"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The unique identifier of the latest build for this container image.",
-	}
-	attributes["image_uri"] = schema.StringAttribute{
-		Computed:            true,
-		MarkdownDescription: "The URI of the container image.",
+		MarkdownDescription: "The unique identifier of the latest build for this container image. Null if no build has been triggered yet.",
 	}
 	attributes["ray_version"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The Ray version used in the build.",
+		MarkdownDescription: "The Ray version used in the build. For BYOD images, this resolves from the build's `byod_ray_version` field when the standard field is absent. Null if the image has no build yet, if the build's details couldn't be retrieved, or if the latest build hasn't reported a Ray version yet.",
 	}
 	attributes["build_status"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
+		MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`). Null if no build has been triggered yet, or if the build's details couldn't be retrieved.",
 	}
 	attributes["is_byod"] = schema.BoolAttribute{
 		Computed:            true,
-		MarkdownDescription: "Whether this is a BYOD (Bring Your Own Docker) image.",
+		MarkdownDescription: "Whether this is a BYOD (Bring Your Own Docker) image. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.",
 	}
 	attributes["digest"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`).",
+		MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`). Null if the image has no build yet, if the build's details couldn't be retrieved, or if the latest build hasn't produced a digest yet.",
+	}
+	// DS-IMG-4 (Phase B): is_default/is_experimental/last_modified_at/cloud_id are
+	// template-level fields, present on both the get-by-id and list responses -
+	// shared with the plural via containerImageSharedAttributes below except
+	// build_error_message, which only this data source's second per-build GET
+	// can populate.
+	attributes["build_error_message"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The error message from the latest build, if it failed. Null if the build succeeded, is still in progress, or hasn't started yet. Only available on this singular lookup - the plural `anyscale_container_images` data source's lighter per-item response doesn't include build error details without an extra network call per image.",
 	}
 
 	resp.Schema = schema.Schema{
@@ -154,15 +167,24 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 	config.ID = types.StringValue(template.ID)
 	config.Name = types.StringValue(template.Name)
 	config.CreatedAt = types.StringValue(template.CreatedAt)
-	if template.CreatorID != "" {
-		config.CreatorID = types.StringValue(template.CreatorID)
-	} else {
-		config.CreatorID = types.StringNull()
-	}
+	config.CreatorID = stringOrNull(template.CreatorID)
 
-	// Resolve the latest build contract-based, via the template's own latest_build reference.
+	// DS-IMG-4 (Phase B): template-level fields, always available regardless
+	// of whether a build exists.
+	config.CloudID = types.StringPointerValue(template.CloudID)
+	config.IsDefault = types.BoolValue(template.IsDefault)
+	config.IsExperimental = types.BoolValue(template.IsExperimental)
+	config.LastModifiedAt = stringOrNull(template.LastModifiedAt)
+
+	// Resolve the latest build contract-based, via the template's own latest_build
+	// reference. DS-IMG-2: image_uri now reads straight off the embedded
+	// latest_build.docker_image_name - it no longer depends on the second
+	// per-build GET succeeding, unlike build_status/is_byod/revision/digest/
+	// name_version/build_error_message below, which still need that full
+	// build record.
 	if template.LatestBuild != nil {
 		config.BuildID = types.StringValue(template.LatestBuild.ID)
+		config.ImageURI = types.StringPointerValue(template.LatestBuild.DockerImageName)
 
 		// Get full build details
 		build, err := d.getBuild(ctx, template.LatestBuild.ID)
@@ -172,35 +194,23 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 				"error":    err.Error(),
 			})
 			config.BuildStatus = types.StringNull()
-			config.ImageURI = types.StringNull()
 			config.RayVersion = types.StringNull()
 			config.IsBYOD = types.BoolNull()
 			config.Revision = types.Int64Null()
 			config.Digest = types.StringNull()
 			config.NameVersion = types.StringNull()
+			config.BuildErrorMessage = types.StringNull()
 		} else {
 			config.BuildStatus = types.StringValue(build.Status)
 			config.IsBYOD = types.BoolValue(build.IsBYOD)
 			config.Revision = types.Int64Value(int64(build.Revision))
 			config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", template.Name, build.Revision))
-
-			if build.DockerImageName != nil {
-				config.ImageURI = types.StringValue(*build.DockerImageName)
-			} else {
-				config.ImageURI = types.StringNull()
-			}
-
-			if build.RayVersion != nil {
-				config.RayVersion = types.StringValue(*build.RayVersion)
-			} else {
-				config.RayVersion = types.StringNull()
-			}
-
-			if build.Digest != nil {
-				config.Digest = types.StringValue(*build.Digest)
-			} else {
-				config.Digest = types.StringNull()
-			}
+			// DS-IMG-1: resolves to byod_ray_version when the plain ray_version
+			// field is absent (the common case for BYOD images), instead of
+			// reporting null for a version the backend actually knows.
+			config.RayVersion = types.StringPointerValue(build.ResolvedRayVersion())
+			config.Digest = types.StringPointerValue(build.Digest)
+			config.BuildErrorMessage = types.StringPointerValue(build.ErrorMessage)
 		}
 	} else {
 		config.BuildID = types.StringNull()
@@ -211,6 +221,7 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 		config.Revision = types.Int64Null()
 		config.Digest = types.StringNull()
 		config.NameVersion = types.StringNull()
+		config.BuildErrorMessage = types.StringNull()
 	}
 
 	// Save data into Terraform state

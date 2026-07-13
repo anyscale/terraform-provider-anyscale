@@ -98,13 +98,15 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 // output). build_id/latest_build_id differ in both name and wording (pre-existing, not a
 // confirmed drift). build_status/latest_build_status are identical text under different
 // already-shipped names - same class as the cloud pair's excluded fields, so it stays local
-// on both sides rather than being unified via a rename. image_uri/ray_version/is_byod/digest
-// (singular-only) and is_archived (plural-only) have no counterpart to share against.
+// on both sides rather than being unified via a rename. ray_version/is_byod/digest
+// (singular-only, since they still depend on the second per-build GET) and is_archived
+// (plural-only) have no counterpart to share against. image_uri (DS-IMG-2) moved into this
+// shared map since it is now identical text on both sides, no longer singular-only.
 func containerImageSharedAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"creator_id": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The ID of the user who created this container image.",
+			MarkdownDescription: "The ID of the user who created this container image. Null if the API does not report a creator for this image.",
 		},
 		"created_at": schema.StringAttribute{
 			Computed:            true,
@@ -112,11 +114,33 @@ func containerImageSharedAttributes() map[string]schema.Attribute {
 		},
 		"revision": schema.Int64Attribute{
 			Computed:            true,
-			MarkdownDescription: "The revision number of the latest build.",
+			MarkdownDescription: "The revision number of the latest build. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.",
 		},
 		"name_version": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
+			MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.",
+		},
+		"image_uri": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The registry image URI (docker image path) of the container image's latest build. Null if the image has no build yet, or if the latest build hasn't produced an image yet (pending, in progress, or failed).",
+		},
+		// DS-IMG-4 (Phase B): template-level fields, present on both the get-by-id
+		// and list responses.
+		"cloud_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The cloud ID this container image is associated with. Null if the image isn't associated with a specific cloud.",
+		},
+		"is_default": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether this is an Anyscale-provided base container image, as opposed to one created by a user in this organization.",
+		},
+		"is_experimental": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether this is an experimental container image.",
+		},
+		"last_modified_at": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Timestamp when the container image was last modified.",
 		},
 	}
 }
