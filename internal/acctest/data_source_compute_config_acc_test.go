@@ -62,10 +62,19 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 	})
 }
 
-// TestAccComputeConfigDataSource_WithVersions tests that version-related attributes
-// are populated correctly after updates to a compute config.
-// Note: The Anyscale API search may not return all historical versions, so we verify
-// that the current version is correctly reflected in both version and name_version.
+// TestAccComputeConfigDataSource_WithVersions is DS-CC-1's mutation-proof
+// acceptance guard, proving version enumeration against a real, genuine
+// two-version history rather than a mock. The old version only asserted
+// versions.# was "set" (non-zero) at each step, which passes identically
+// whether versions correctly enumerates history or - per DS-CC-1 - only ever
+// returns the single latest version: after step 2's update, a broken
+// versions attribute would still show exactly 1 entry (the new latest), and
+// "1" still counts as "set". The old comment ("the API may not return all
+// historical versions") was quietly documenting this exact bug as a
+// permanent constraint instead of a fix target. Now that DS-CC-1 sends the
+// real "don't filter by version" sentinel and pages through results, this
+// asserts the real, falsifiable claim: after two versions exist, versions.#
+// is exactly 2 and contains both 1 and 2 (sorted ascending).
 func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -86,8 +95,9 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "version", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "name_version", configName+":1"),
-					// Versions list should contain at least the current version
-					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.lookup", "versions.#"),
+					// Exactly 1 version exists so far.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.#", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.0", "1"),
 				),
 			},
 			// Step 2: Update to create version 2
@@ -97,8 +107,10 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "2"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "version", "2"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "name_version", configName+":2"),
-					// Versions list should contain at least the current version
-					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.lookup", "versions.#"),
+					// Both historical versions must be enumerated now, not just the latest.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.#", "2"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.0", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.1", "2"),
 				),
 			},
 		},

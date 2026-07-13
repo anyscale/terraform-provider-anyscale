@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -97,7 +99,7 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 			},
 			"name_version": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The compute config name and version formatted as `name:version` for use with Anyscale APIs.",
+				MarkdownDescription: "The compute config name and version formatted as `name:version` for use with Anyscale APIs. Null for anonymous compute configs (created without a name).",
 			},
 			"versions": schema.ListAttribute{
 				ElementType:         types.Int64Type,
@@ -106,7 +108,7 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 			},
 			"region": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The region to launch clusters in.",
+				MarkdownDescription: "The region to launch clusters in. Null if the API doesn't report a region for this compute config.",
 			},
 			"idle_termination_minutes": schema.Int64Attribute{
 				Computed:            true,
@@ -130,15 +132,15 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 			},
 			"version": schema.Int64Attribute{
 				Computed:            true,
-				MarkdownDescription: "The version number of this compute config.",
+				MarkdownDescription: "The version number of this compute config. Null if the API doesn't report a version number.",
 			},
 			"created_at": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The timestamp when the compute config was created.",
+				MarkdownDescription: "The timestamp when the compute config was created. Null if the API doesn't report a creation timestamp.",
 			},
 			"last_modified_at": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The timestamp when the compute config was last modified.",
+				MarkdownDescription: "The timestamp when the compute config was last modified. Null if the API doesn't report a last-modified timestamp.",
 			},
 			"zones": schema.ListAttribute{
 				ElementType:         types.StringType,
@@ -341,9 +343,14 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		config.Name = types.StringValue(configName)
 	}
 
+	// DS-CC-3: explicit null on the else branch - version numbers are 1-indexed,
+	// so 0 means absent, matching computeTemplate.Version's own convention.
 	if resultData.Version > 0 {
 		config.Version = types.Int64Value(resultData.Version)
 		config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", configName, resultData.Version))
+	} else {
+		config.Version = types.Int64Null()
+		config.NameVersion = types.StringNull()
 	}
 
 	// Fetch all versions of this compute config by name
@@ -361,12 +368,11 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		config.Versions = types.ListNull(types.Int64Type)
 	}
 
-	if resultData.CreatedAt != "" {
-		config.CreatedAt = types.StringValue(resultData.CreatedAt)
-	}
-	if resultData.LastModifiedAt != "" {
-		config.LastModifiedAt = types.StringValue(resultData.LastModifiedAt)
-	}
+	// DS-CC-3: explicit stringOrNull instead of leaving the else case to an
+	// implicit zero-value types.String (which happens to equal null today,
+	// but is fragile - not obviously so to a future reader/refactor).
+	config.CreatedAt = stringOrNull(resultData.CreatedAt)
+	config.LastModifiedAt = stringOrNull(resultData.LastModifiedAt)
 
 	if resultData.ProjectID != "" {
 		config.ProjectID = types.StringValue(resultData.ProjectID)
@@ -407,9 +413,8 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	} else {
 		config.MaximumUptimeMinutes = types.Int64Null()
 	}
-	if configData.Region != "" {
-		config.Region = types.StringValue(configData.Region)
-	}
+	// DS-CC-3: explicit stringOrNull, same reasoning as created_at/last_modified_at above.
+	config.Region = stringOrNull(configData.Region)
 
 	eff := resolveEffectiveComputeConfig(configData)
 
@@ -471,9 +476,88 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
 
-// findComputeConfigByName looks for a compute config with the given name using the search API
+// searchClusterComputesPaged pages through POST /ext/v0/cluster_computes/search until every
+// page is exhausted, decoding each page's body with decode. This endpoint's pagination is
+// body-based (ClusterComputesQuery.paging, a PageQuery{count, paging_token}) and its response
+// metadata carries next_paging_token the same way every GET list endpoint's does - just inside
+// the response body instead of being driven by URL query params. Traced against product
+// backend/server/api/base/routers/cluster_computes_router.go (search_cluster_computes) and
+// backend/server/common/models/queries.go (PageQuery, count defaults to 10 if never set - the
+// root cause of DS-CC-1/DS-CC-2's truncation). The shared PaginatedRequest helper only handles
+// GET+query-string pagination, so this stays a local loop rather than a shared helper - a single
+// POST-body-paginated endpoint doesn't justify generalizing that helper's shape.
+func searchClusterComputesPaged[T any](
+	ctx context.Context,
+	client *Client,
+	basePayload map[string]interface{},
+	decode func(body []byte) (items []T, nextToken *string, err error),
+) ([]T, error) {
+	var allItems []T
+	var pagingToken string
+
+	for {
+		payload := make(map[string]interface{}, len(basePayload)+1)
+		for k, v := range basePayload {
+			payload[k] = v
+		}
+		paging := map[string]interface{}{"count": 100}
+		if pagingToken != "" {
+			paging["paging_token"] = pagingToken
+		}
+		payload["paging"] = paging
+
+		body, err := MarshalRequestBody(payload)
+		if err != nil {
+			return nil, err
+		}
+
+		respBody, err := DoRequestRaw(ctx, client, "POST", "/ext/v0/cluster_computes/search", body, http.StatusOK)
+		if err != nil {
+			return nil, fmt.Errorf("search request failed: %w", err)
+		}
+
+		items, nextToken, err := decode(respBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse search response: %w", err)
+		}
+		allItems = append(allItems, items...)
+
+		if nextToken == nil || *nextToken == "" {
+			break
+		}
+		pagingToken = *nextToken
+	}
+
+	return allItems, nil
+}
+
+// computeConfigSearchResult is the shape shared by both search call sites below.
+type computeConfigSearchResult struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	CreatedAt string  `json:"created_at"`
+	Anonymous bool    `json:"anonymous"`
+	Version   float64 `json:"version"`
+}
+
+// decodeComputeConfigSearchPage decodes one page of a cluster_computes/search response.
+func decodeComputeConfigSearchPage(body []byte) ([]computeConfigSearchResult, *string, error) {
+	var resp struct {
+		Results  []computeConfigSearchResult `json:"results"`
+		Metadata struct {
+			NextPagingToken *string `json:"next_paging_token"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, nil, err
+	}
+	return resp.Results, resp.Metadata.NextPagingToken, nil
+}
+
+// findComputeConfigByName looks for a compute config with the given name using the search API,
+// paging through every result (DS-CC-2: the search's default page size is 10, so a name with
+// more than 10 versions/anonymous variants could previously miss the real newest match).
 func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, name string, cloudID string) (string, error) {
-	// Use the search API to find compute configs by name
 	searchPayload := map[string]interface{}{
 		"name": map[string]string{
 			"equals": name,
@@ -486,48 +570,28 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 		searchPayload["cloud_id"] = cloudID
 	}
 
-	searchBody, err := MarshalRequestBody(searchPayload)
+	results, err := searchClusterComputesPaged(ctx, d.client, searchPayload, decodeComputeConfigSearchPage)
 	if err != nil {
 		return "", err
 	}
 
-	type SearchResponse struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-			Anonymous bool   `json:"anonymous"`
-		} `json:"results"`
-	}
-
-	searchResp, err := DoRequestAndParse[SearchResponse](
-		ctx,
-		d.client,
-		"POST",
-		"/ext/v0/cluster_computes/search",
-		searchBody,
-		http.StatusOK,
-	)
-	if err != nil {
-		return "", err
-	}
-
-	if len(searchResp.Results) == 0 {
+	if len(results) == 0 {
 		return "", nil // Not found
 	}
 
-	// If multiple configs exist with the same name, return the most recently created one
+	// The search API already exact-matches name server-side, so every result here is a
+	// genuine match - pick the most recently created one on duplicates.
 	var matchedConfigID string
 	var latestCreatedAt string
 
-	for _, cfg := range searchResp.Results {
+	for _, cfg := range results {
 		if matchedConfigID == "" || cfg.CreatedAt > latestCreatedAt {
 			matchedConfigID = cfg.ID
 			latestCreatedAt = cfg.CreatedAt
 		}
 	}
 
-	WarnIfMultipleMatches(ctx, "compute config", name, len(searchResp.Results), matchedConfigID)
+	WarnIfMultipleMatches(ctx, "compute config", name, len(results), matchedConfigID)
 
 	tflog.Info(ctx, "Found compute config by name", map[string]any{
 		"name":      name,
@@ -537,44 +601,31 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 	return matchedConfigID, nil
 }
 
-// fetchComputeConfigVersions retrieves all version numbers for a compute config by name
+// fetchComputeConfigVersions retrieves all version numbers for a compute config by name.
+//
+// DS-CC-1: the search payload previously sent no version field, which resolves to the
+// documented deprecated-equivalent-to-latest-only behavior (verified against
+// backend/server/api/base/models/cluster_computes.py's ClusterComputesQuery.version field and
+// its validator) - so "all versions" was structurally unable to return more than one. version:
+// -2 is the documented "do not filter by version" sentinel; combined with DS-CC-2's pagination
+// fix, this now genuinely enumerates every version rather than just the latest.
 func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context, name string) ([]int64, error) {
-	// Use the search API to find all versions of this compute config
 	searchPayload := map[string]interface{}{
 		"name": map[string]string{
 			"equals": name,
 		},
 		"include_anonymous": false,
+		"version":           -2,
 	}
 
-	searchBody, err := MarshalRequestBody(searchPayload)
-	if err != nil {
-		return nil, err
-	}
-
-	type SearchResponse struct {
-		Results []struct {
-			ID      string  `json:"id"`
-			Name    string  `json:"name"`
-			Version float64 `json:"version"`
-		} `json:"results"`
-	}
-
-	searchResp, err := DoRequestAndParse[SearchResponse](
-		ctx,
-		d.client,
-		"POST",
-		"/ext/v0/cluster_computes/search",
-		searchBody,
-		http.StatusOK,
-	)
+	results, err := searchClusterComputesPaged(ctx, d.client, searchPayload, decodeComputeConfigSearchPage)
 	if err != nil {
 		return nil, err
 	}
 
 	// Collect unique version numbers and sort them
 	versionSet := make(map[int64]bool)
-	for _, cfg := range searchResp.Results {
+	for _, cfg := range results {
 		versionSet[int64(cfg.Version)] = true
 	}
 
@@ -583,14 +634,7 @@ func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context
 		versions = append(versions, v)
 	}
 
-	// Sort versions in ascending order
-	for i := 0; i < len(versions)-1; i++ {
-		for j := i + 1; j < len(versions); j++ {
-			if versions[i] > versions[j] {
-				versions[i], versions[j] = versions[j], versions[i]
-			}
-		}
-	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i] < versions[j] })
 
 	tflog.Debug(ctx, "Found compute config versions", map[string]any{
 		"name":     name,
