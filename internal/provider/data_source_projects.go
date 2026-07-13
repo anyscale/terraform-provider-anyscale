@@ -72,7 +72,7 @@ func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 	}
 	itemAttributes["cloud_id"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The cloud ID this project belongs to.",
+		MarkdownDescription: "The cloud ID this project belongs to. Null if the project has no associated cloud reported by the API.",
 	}
 
 	resp.Schema = schema.Schema{

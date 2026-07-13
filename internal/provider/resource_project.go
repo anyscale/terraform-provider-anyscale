@@ -92,7 +92,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			// Cloud reference (mutually exclusive)
 			"cloud_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The cloud ID for this project. Either `cloud_id` or `cloud_name` must be specified.",
+				MarkdownDescription: "The cloud ID for this project. Either `cloud_id` or `cloud_name` must be specified. If configured with cloud_id and a later refresh finds the backend reports no associated cloud (an inconsistent state), this reads as null rather than an empty string.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
