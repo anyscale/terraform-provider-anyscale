@@ -2,9 +2,11 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -13,6 +15,25 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// pathFailingRoundTripper simulates a genuine transport-level failure (DNS,
+// connection refused, timeout - anything below the HTTP status-code layer)
+// for one specific path, while delegating every other request to a real
+// http.RoundTripper. httptest.Server can only simulate bad status codes or
+// malformed bodies from within a handler that still completes a real HTTP
+// response; a transport failure has to be injected at the RoundTripper level
+// instead, since by definition no HTTP response is ever received.
+type pathFailingRoundTripper struct {
+	failPath string
+	next     http.RoundTripper
+}
+
+func (rt pathFailingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Path == rt.failPath {
+		return nil, errors.New("simulated transport failure: connection reset by peer")
+	}
+	return rt.next.RoundTrip(req)
+}
 
 // userOrganizationObjectType mirrors the object type Read() builds inline via
 // types.ListValueFrom for the "organizations" attribute.
@@ -347,5 +368,130 @@ func TestUserDataSourceRead_UserGroupIDsPagesBeyondFirstPage(t *testing.T) {
 	}
 	if requestCount != 2 {
 		t.Errorf("expected 2 requests to /api/v2/user_groups (one per page), got %d", requestCount)
+	}
+}
+
+// TestUserDataSourceRead_UserGroupsTransportFailureDegradesGracefully locks in
+// the architect-decided behavior for a user_group_ids fetch failure: ANY
+// failure (transport, bad status, or unmarshal) now degrades to a null list
+// with a warning rather than failing the whole anyscale_user read, since
+// PaginatedRequest bundles all three into a single error path. This is a
+// deliberate broadening from the pre-fix code, which used to hard-fail the
+// entire read via AddError specifically for a transport-level failure (the
+// DoRequest error case), and only soft-degraded for a bad status code or a
+// parse failure - decided 2026-07-13: the old two-tier split was an
+// unintentional artifact of checking err separately from status code, not a
+// deliberate design, and null (could-not-determine) is a more correct
+// degraded value than the old empty list (zero groups) regardless.
+//
+// This specifically exercises the transport-failure branch, which none of
+// the other user_groups tests do (they all get a real HTTP response, good or
+// bad) - a genuine transport failure never produces an HTTP response at all,
+// so it has to be injected via a custom RoundTripper rather than an
+// httptest.Server handler. Proves both halves of the decision: (1) the read
+// as a whole succeeds with no error, and (2) every other field still
+// populates normally - only user_group_ids degrades.
+func TestUserDataSourceRead_UserGroupsTransportFailureDegradesGracefully(t *testing.T) {
+	userInfoJSON := `{
+		"result": {
+			"id": "usr_abc123",
+			"email": "user@example.com",
+			"name": "John Doe",
+			"username": "johndoe",
+			"organization_permission_level": "owner",
+			"organization_ids": ["org_1"],
+			"organizations": [
+				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": "cld_1"}
+			]
+		}
+	}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/api/v2/userinfo":
+			_, _ = fmt.Fprint(w, userInfoJSON)
+		case "/api/v2/clouds":
+			_, _ = fmt.Fprint(w, `{"results": [{"id": "cld_1"}], "metadata": {"next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected request path reaching the real server (user_groups should have failed at the transport layer): %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClientWithToken(server.URL, "test-token")
+	client.HTTPClient = &http.Client{
+		Transport: pathFailingRoundTripper{
+			failPath: "/api/v2/user_groups",
+			next:     http.DefaultTransport,
+		},
+	}
+
+	d := &UserDataSource{client: client}
+	result, diags := runUserDataSourceRead(t, d)
+	if diags.HasError() {
+		t.Fatalf("Read() should succeed overall despite the user_groups transport failure, got error: %v", diags)
+	}
+
+	if !result.UserGroupIDs.IsNull() {
+		t.Errorf("user_group_ids = %#v, want null after a transport failure (degrade-gracefully, not an empty list)", result.UserGroupIDs)
+	}
+
+	// Every other field must still populate normally - only user_group_ids degrades.
+	if got := result.ID.ValueString(); got != "usr_abc123" {
+		t.Errorf("ID = %q, want usr_abc123 (rest of the read must not be affected)", got)
+	}
+	if got := result.Email.ValueString(); got != "user@example.com" {
+		t.Errorf("Email = %q, want user@example.com", got)
+	}
+	var cloudIDs []string
+	if diags := result.CloudIDs.ElementsAs(context.Background(), &cloudIDs, false); diags.HasError() {
+		t.Fatalf("failed to decode cloud_ids: %v", diags)
+	}
+	if len(cloudIDs) != 1 || cloudIDs[0] != "cld_1" {
+		t.Errorf("CloudIDs = %v, want [cld_1]", cloudIDs)
+	}
+}
+
+// TestUserDataSourceRead_EmptyOrganizationsGuard is coverage for DS-USER-4's
+// added empty-organizations guard (adopted from anyscale_organization's
+// identical, already-tested TestFetchCurrentOrganization_EmptyOrganizations
+// in data_source_organization_test.go) - this is the missing sibling test for
+// the same guard's new call site in Read() directly, which had no coverage of
+// its own before this. Confirms the guard actually fires through the real
+// Read() path with the contract's exact anomaly message, not just that the
+// literal string exists somewhere in the source.
+func TestUserDataSourceRead_EmptyOrganizationsGuard(t *testing.T) {
+	userInfoJSON := `{
+		"result": {
+			"id": "usr_abc123",
+			"email": "user@example.com",
+			"name": "John Doe",
+			"username": "johndoe",
+			"organization_permission_level": "owner",
+			"organization_ids": [],
+			"organizations": []
+		}
+	}`
+
+	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse, emptyCloudsResponse)
+	defer server.Close()
+
+	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	_, diags := runUserDataSourceRead(t, d)
+
+	if !diags.HasError() {
+		t.Fatal("expected an error for empty organizations, got none")
+	}
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Detail(), "userinfo returned no organization for the authenticated token") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("diagnostics = %v, want one containing the contract's exact anomaly message", diags)
 	}
 }
