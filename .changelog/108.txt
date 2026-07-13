@@ -1,4 +1,0 @@
-```
-release-note:removed
-provider: the example directories `examples/data-sources/anyscale_global_resource_scheduler`, `examples/data-sources/anyscale_global_resource_schedulers`, and `examples/resources/anyscale_global_resource_scheduler` are deleted. The underlying resource and data sources have been disabled since PR #34 and are not in the compiled provider schema, so these examples errored with "Invalid resource/data source type" on `terraform plan` for anyone regardless of credentials; removing them has no effect on a working configuration.
-```

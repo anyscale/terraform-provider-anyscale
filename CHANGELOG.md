@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-13
+
+### Added
+
+- data-source/anyscale_cloud: adds `is_k8s`, `availability_zones`, `version`, and `external_id` (`external_id` is `null` when not set).
+- data-source/anyscale_clouds: adds `availability_zones`, `version`, and `external_id` (`external_id` is `null` when not set).
+- data-source/anyscale_organization_user: adds `base_role` and `additional_roles`, the current source of role information on the backend; `permission_level` is being deprecated in their favor.
+- data-source/anyscale_organization_users: adds `base_role` and `additional_roles`, matching `anyscale_organization_user`.
+- data-source/anyscale_container_images: adds `image_uri`, available at no extra cost per item since it comes from the same build summary each item already carries.
+- data-source/anyscale_container_images: adds `image_name_contains` and `cloud_id` filter arguments. `image_name_contains` matches the underlying base or BYOD image name, distinct from the existing `name_contains`, which matches the user-given template name.
+- data-source/anyscale_container_image: adds `cloud_id`, `is_default`, `is_experimental`, `last_modified_at`, and `build_error_message`. `build_error_message` is singular-only; it comes from the full per-build lookup that only this data source makes.
+- data-source/anyscale_container_images: adds `cloud_id`, `is_default`, `is_experimental`, and `last_modified_at`.
+
+### Changed
+
+- data-source/anyscale_cloud: the error shown when a by-name lookup fails due to an API error now uses the title "API Request Failed" instead of "Cloud Lookup Failed", matching the wording used elsewhere in the provider; the error detail message is unchanged.
+- data-source/anyscale_organization: the error shown when fetching organization info fails now uses the title "API Request Failed" instead of "Organization Lookup Failed", matching the wording used elsewhere in the provider.
+- data-source/anyscale_organization_user: the error shown when looking up a user fails now uses the title "API Request Failed" instead of "User Lookup Failed", matching the wording used elsewhere in the provider.
+- data-source/anyscale_user: four previously distinct error titles for a failed lookup (a fetch failure, a response-read failure, a bad status code, and a JSON parse failure) now all use the single "API Request Failed" title, matching the wording used elsewhere in the provider.
+- data-source/anyscale_user: a failure to fetch `user_group_ids` (including a genuine network failure, not just a bad response) now leaves it `null` instead of failing the entire read; previously, only a bad response or unparseable data degraded gracefully to an empty list, while a network-level failure failed the whole data source. `user_group_ids` is `null` when it could not be determined, and empty only when the user genuinely belongs to no groups.
+
+### Removed
+
+- provider: the example directories `examples/data-sources/anyscale_global_resource_scheduler`, `examples/data-sources/anyscale_global_resource_schedulers`, and `examples/resources/anyscale_global_resource_scheduler` are deleted. The underlying resource and data sources have been disabled since PR #34 and are not in the compiled provider schema, so these examples errored with "Invalid resource/data source type" on `terraform plan` for anyone regardless of credentials; removing them has no effect on a working configuration.
+
+### Fixed
+
+- data-source/anyscale_clouds: the `name_contains`, `cloud_provider`, and `region` filter arguments were silent no-ops because the backend endpoint ignored all three; `name_contains` is now sent to the API as a substring filter and `cloud_provider`/`region` are now applied as client-side filters, so all three actually narrow the result set.
+- data-source/anyscale_cloud: looking up a cloud by `name` only checked the first page of results, so a valid name could incorrectly resolve to "not found" once an organization has more clouds than fit on one page; the lookup now pages through all results. This also fixes the "multiple clouds found" warning, which previously compared against the total number of clouds fetched instead of the number actually matching the given name.
+- data-source/anyscale_clouds: `status` and `state` now report `null` instead of an empty string when the API returns no value, matching `anyscale_cloud`'s existing behavior.
+- data-source/anyscale_user: the nested `organizations[].default_cloud_id` collapsed a null value to an empty string instead of Terraform `null`; now mapped the same way `anyscale_organization` already does.
+- data-source/anyscale_user: `organization_permission_level` collapsed a null value (no permission level assigned) to an empty string instead of `null`; fixed the same way. Its description also listed the wrong example values (`owner`, `admin`, `member`); the real enum is `owner`/`collaborator`.
+- data-source/anyscale_user: `user_group_ids` only read the first page of `GET /api/v2/user_groups`, silently truncating the list for an organization with more groups than fit on one page; now paginates through all results.
+- data-source/anyscale_organization_user: `name` collapsed a null value to an empty string instead of Terraform `null`; the adjacent `user_id` field already handled this correctly, and `name` now uses the same mapping.
+- data-source/anyscale_organization_users: `name` collapsed a null value to an empty string instead of Terraform `null`, matching the same fix as `anyscale_organization_user`.
+- data-source/anyscale_project: `cloud_id` collapsed a null `parent_cloud_id` to an empty string instead of Terraform `null`; now mapped via the same nullable-pointer pattern used elsewhere in the provider.
+- data-source/anyscale_projects: `cloud_id` collapsed a null `parent_cloud_id` to an empty string instead of Terraform `null`, matching the same fix as `anyscale_project`.
+- resource/anyscale_project: on read, `cloud_id` collapsed a null `parent_cloud_id` to an empty string instead of Terraform `null`. This only affects an already-anomalous case (a `cloud_id`-configured project whose backend cloud association is unexpectedly absent) that cannot be produced through Terraform today; a healthy project's `cloud_id` is unaffected and does not trigger a plan diff or a replacement.
+- data-source/anyscale_container_image: `ray_version` reported `null` for a BYOD (Bring Your Own Docker) image whose Ray version is only available in the build's `byod_ray_version` field; now resolves from `byod_ray_version` when the standard field is absent.
+- data-source/anyscale_container_image: `image_uri` used to depend on a second, per-build API call succeeding; now reads from the same build summary already available on the initial lookup, so it stays populated even when that second call fails.
+- data-source/anyscale_compute_config: `versions` could never return more than the latest version, since the underlying search sent no version filter at all, which the backend treats as latest-only; now sends the documented `-2` sentinel to fetch every version.
+- data-source/anyscale_compute_config: both the by-name lookup and the versions search only read the first page (10 results) of matches, so a name with more than 10 versions or anonymous variants could silently miss the real newest match or the full version history; both now page through every result.
+
 ## [0.6.0] - 2026-07-13
 
 ### New Data Sources
@@ -474,7 +517,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.7.0
 [0.6.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.6.0
 [0.5.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.5.1
 [0.5.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.5.0
