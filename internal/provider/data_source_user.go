@@ -84,16 +84,16 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			},
 			"organization_permission_level": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The permission level of the user within their organization (e.g., owner, admin, member).",
+				MarkdownDescription: "The permission level of the user within their organization (e.g., owner, collaborator).",
 			},
 			"organization_ids": schema.ListAttribute{
 				ElementType:         types.StringType,
 				Computed:            true,
-				MarkdownDescription: "List of organization IDs the user belongs to.",
+				MarkdownDescription: "List of organization IDs the user belongs to. In practice always exactly one element. Mirrors a field the backend has deprecated; prefer `organizations[].id` for new configurations.",
 			},
 			"organizations": schema.ListNestedAttribute{
 				Computed:            true,
-				MarkdownDescription: "List of organizations the user belongs to with detailed information.",
+				MarkdownDescription: "List of organizations the user belongs to, with detailed information. In practice this always contains exactly one entry - an Anyscale API token is scoped to a single organization. See `anyscale_organization` for the direct way to reach it without indexing into this list.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
@@ -110,7 +110,7 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 						},
 						"default_cloud_id": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The default cloud ID for the organization.",
+							MarkdownDescription: "The default cloud ID for the organization. Null if the organization has no default cloud configured.",
 						},
 					},
 				},
@@ -123,7 +123,7 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			"user_group_ids": schema.ListAttribute{
 				ElementType:         types.StringType,
 				Computed:            true,
-				MarkdownDescription: "List of user group IDs the user belongs to. Note: This feature is not fully implemented in the API yet and may return an empty list.",
+				MarkdownDescription: "List of user group IDs the user belongs to. Null if the group list couldn't be determined (a transient failure fetching it, which also emits a warning). Empty if the user genuinely belongs to no groups.",
 			},
 		},
 	}
@@ -289,11 +289,13 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		},
 	)
 	if err != nil {
-		// Kept as a warning-and-empty-list rather than AddAPIError: user_group_ids
+		// Kept as a warning-and-null-list rather than AddAPIError: user_group_ids
 		// remains a light-weight, best-effort field on this data source (unlike
-		// the required organizations/clouds fetches above), consistent with its
-		// pre-existing degrade-gracefully behavior.
-		tflog.Warn(ctx, "Failed to fetch user groups, returning empty list", map[string]any{"error": err.Error()})
+		// the required organizations/clouds fetches above). Degrades the same way
+		// for any failure - transport, status, or parse - rather than only some,
+		// since that three-way split was never a deliberate design (architect
+		// decision, data-source-sync quest).
+		tflog.Warn(ctx, "Failed to fetch user groups, returning null", map[string]any{"error": err.Error()})
 		state.UserGroupIDs = types.ListNull(types.StringType)
 	} else {
 		userGroupIDs := make([]string, len(userGroups))
