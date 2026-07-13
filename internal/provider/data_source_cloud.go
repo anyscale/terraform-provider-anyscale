@@ -59,6 +59,14 @@ type CloudDataSourceModel struct {
 	IsBringYourOwnResource types.Bool   `tfsdk:"is_bring_your_own_resource"`
 	IsPrivateCloud         types.Bool   `tfsdk:"is_private_cloud"`
 	IsPrivateServiceCloud  types.Bool   `tfsdk:"is_private_service_cloud"`
+
+	// DS-CLOUD-4/DS-CLOUD-5: parity fields added to both anyscale_cloud and
+	// anyscale_clouds via cloudSharedAttributes (is_k8s is schema-only shared,
+	// not part of that map - see the Schema function).
+	IsK8s             types.Bool   `tfsdk:"is_k8s"`
+	AvailabilityZones types.List   `tfsdk:"availability_zones"`
+	Version           types.String `tfsdk:"version"`
+	ExternalID        types.String `tfsdk:"external_id"`
 }
 
 // Metadata returns the data source type name.
@@ -99,6 +107,13 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 		Computed:            true,
 		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
 	}
+	// DS-CLOUD-4: parity with the plural's is_k8s. Schema-only shared text (not
+	// hoisted into cloudSharedAttributes, since the plural's own copy is
+	// defined directly on its item attributes too, not through that map).
+	attributes["is_k8s"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this cloud uses Kubernetes.",
+	}
 
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Use this data source to retrieve information about an existing Anyscale Cloud. You can look up a cloud by its ID or name.",
@@ -114,7 +129,7 @@ func (d *CloudDataSource) Configure(ctx context.Context, req datasource.Configur
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Unexpected Data Source Configure Type",
 			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
@@ -135,7 +150,7 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 
 	// Validate that either ID or Name is provided
 	if config.ID.IsNull() && config.Name.IsNull() {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Missing Required Attribute",
 			"Either 'id' or 'name' must be specified to look up a cloud.",
 		)
@@ -156,15 +171,12 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 
 		cloudID, err = d.findCloudByName(ctx, name)
 		if err != nil {
-			resp.Diagnostics.AddError(
-				"Cloud Lookup Failed",
-				fmt.Sprintf("Failed to find cloud with name '%s': %s", name, err.Error()),
-			)
+			AddAPIError(&resp.Diagnostics, fmt.Sprintf("find cloud with name '%s'", name), err)
 			return
 		}
 
 		if cloudID == "" {
-			resp.Diagnostics.AddError(
+			AddConfigError(&resp.Diagnostics,
 				"Cloud Not Found",
 				fmt.Sprintf("No cloud found with name '%s'", name),
 			)
@@ -174,7 +186,7 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 
 	if err := d.readCloudIntoModel(ctx, cloudID, &config); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			resp.Diagnostics.AddError(
+			AddConfigError(&resp.Diagnostics,
 				"Cloud Not Found",
 				fmt.Sprintf("Cloud with ID '%s' not found in Anyscale", cloudID),
 			)
@@ -230,17 +242,10 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	config.CloudProvider = types.StringValue(cloudResp.Result.Provider)
 	config.Region = types.StringValue(cloudResp.Result.Region)
 
-	if cloudResp.Result.Status != "" {
-		config.Status = types.StringValue(cloudResp.Result.Status)
-	} else {
-		config.Status = types.StringNull()
-	}
-
-	if cloudResp.Result.State != "" {
-		config.State = types.StringValue(cloudResp.Result.State)
-	} else {
-		config.State = types.StringNull()
-	}
+	// DS-CLOUD-3: shared with the plural DS's identical guard (stringOrNull) so
+	// the two behave the same way, not just similarly.
+	config.Status = stringOrNull(cloudResp.Result.Status)
+	config.State = stringOrNull(cloudResp.Result.State)
 
 	// Cloud-level boolean settings come straight off the cloud payload.
 	config.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
@@ -259,6 +264,21 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	config.IsBringYourOwnResource = types.BoolValue(cloudResp.Result.IsBringYourOwnResource)
 	config.IsPrivateCloud = types.BoolValue(cloudResp.Result.IsPrivateCloud)
 	config.IsPrivateServiceCloud = types.BoolValue(cloudResp.Result.IsPrivateServiceCloud)
+
+	// DS-CLOUD-4/DS-CLOUD-5 (Phase B parity fields). is_k8s/version are plain
+	// bool/string on the backend Cloud model (always populated, no null case).
+	// external_id is genuinely Optional[str] server-side (validated to start
+	// with "org_" when set) - StringPointerValue so an unset external_id is
+	// Terraform null, never "".
+	config.IsK8s = types.BoolValue(cloudResp.Result.IsK8s)
+	config.Version = types.StringValue(cloudResp.Result.Version)
+	config.ExternalID = types.StringPointerValue(cloudResp.Result.ExternalID)
+
+	azList, azDiags := types.ListValueFrom(ctx, types.StringType, cloudResp.Result.AvailabilityZones)
+	if azDiags.HasError() {
+		return fmt.Errorf("failed to convert availability_zones: %v", azDiags)
+	}
+	config.AvailabilityZones = azList
 
 	// is_empty_cloud and cloud_deployment_id aren't on the cloud payload itself -
 	// derive them from the cloud's resources the same way anyscale_cloud_resource
@@ -280,61 +300,29 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	return nil
 }
 
-// findCloudByName looks for a cloud with the given name
+// findCloudByName looks for a cloud with the given name, across every page of
+// GET /api/v2/clouds rather than just the first (DS-CLOUD-2/X-4: a valid name
+// used to resolve to "not found" once an org's cloud list exceeded one page).
+// On duplicate names, picks the most recently created match (X-2).
 func (d *CloudDataSource) findCloudByName(ctx context.Context, name string) (string, error) {
-	resp, err := d.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", err
-	}
-
-	// Find clouds with matching name
-	// If multiple exist, return the most recently created one
-	var matchedCloudID string
-	var latestCreatedAt string
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == name {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
+	results, err := PaginatedRequest(ctx, d.client, "/api/v2/clouds", nil,
+		func(body []byte) ([]CloudResult, *string, error) {
+			var cloudsResp CloudsListResponse
+			if err := json.Unmarshal(body, &cloudsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
 			}
-		}
+			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
 
-	if matchedCloudID != "" && len(cloudsResp.Results) > 1 {
-		// Log warning if multiple clouds with same name exist
-		tflog.Warn(ctx, "Multiple clouds found with same name, returning most recent", map[string]any{
-			"name":       name,
-			"cloud_id":   matchedCloudID,
-			"created_at": latestCreatedAt,
-		})
-	}
+	matchedCloudID := PickMostRecentMatch(ctx, "cloud", name, results,
+		func(c CloudResult) bool { return c.Name == name },
+		func(c CloudResult) string { return c.ID },
+		func(c CloudResult) string { return c.CreatedAt },
+	)
 
 	return matchedCloudID, nil
 }
