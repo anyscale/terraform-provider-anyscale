@@ -218,6 +218,53 @@ func TestProjectDataSourceRead_NullableFieldsAndDefaultFlag(t *testing.T) {
 	}
 }
 
+// TestProjectDataSourceRead_NullParentCloudID is the DS-PROJ-1 mutation-proof
+// regression guard. ProjectResult.ParentCloudID (models.go) is a plain string,
+// not *string like its Description/CreatorID/LastUsedCloudID siblings, even
+// though the real parent_cloud_id API field is Optional[str] - a JSON null
+// silently decodes to the Go zero value "" before any application code runs,
+// so no nil-guard in Read() could catch this even if one existed. This uses a
+// raw JSON response body (rather than building a ProjectResult literal, which
+// cannot express "null" for a plain string field) to prove it: this currently
+// FAILS - cloud_id comes back "" not null - which is the mutation-proof
+// evidence. Must pass once ParentCloudID is *string + StringPointerValue.
+func TestProjectDataSourceRead_NullParentCloudID(t *testing.T) {
+	const projectID = "prj_no_cloud"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"result": {
+				"id": "` + projectID + `",
+				"name": "no-cloud-project",
+				"parent_cloud_id": null,
+				"created_at": "2024-01-01T00:00:00Z",
+				"is_default": false,
+				"directory_name": "no-cloud-project-dir"
+			}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID+"/collaborators/users":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(ProjectCollaboratorListResponse{Results: []ProjectCollaboratorResult{}})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	d := &ProjectDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runProjectDataSourceRead(t, d, ProjectDataSourceModel{ID: types.StringValue(projectID)})
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+
+	if !result.CloudID.IsNull() {
+		t.Errorf("cloud_id = %#v, want null for a nil parent_cloud_id, got a non-null value (likely \"\")", result.CloudID)
+	}
+}
+
 // TestProjectDataSourceRead_ByName exercises findProjectByName for real,
 // including the multiple-matches-picks-most-recent behavior, which was
 // previously only checked for cloud names (TestProjectCloudNameResolution

@@ -564,6 +564,54 @@ func TestProjectResourceReadProject(t *testing.T) {
 			t.Errorf("collaborator mapping = %+v, want email=user1@example.com permission_level=write identity_id=identity_1 user_id=user_1", got)
 		}
 	})
+
+	// t.Run("cloud_id is null when parent_cloud_id is null") is the resource-side
+	// DS-PROJ-1 mutation-proof regression guard. Same bug as the two data
+	// sources: ProjectResult.ParentCloudID is a plain string, so a nil API
+	// parent_cloud_id silently decodes to "" before readProject ever runs, and
+	// line 676 (model.CloudID = types.StringValue(result.ParentCloudID)) writes
+	// that "" straight into state. The two existing CloudID.IsNull() checks in
+	// this file (the cloud_name subtest above) cover an unrelated case - cloud_id
+	// deliberately left unset when cloud_name drives the config - not a null
+	// parent_cloud_id from the API. Uses a raw JSON body since ParentCloudID's
+	// current type cannot express JSON null in a struct literal fixture. This
+	// currently FAILS (cloud_id comes back "" not null), which is the
+	// mutation-proof evidence. Must pass once ParentCloudID is *string +
+	// StringPointerValue on all three call sites (both data sources and this
+	// resource), which the shared struct's type change forces together.
+	t.Run("cloud_id is null when parent_cloud_id is null", func(t *testing.T) {
+		const noCloudProjectID = "prj_no_cloud"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+noCloudProjectID {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"result": {
+					"id": "` + noCloudProjectID + `",
+					"name": "no-cloud-project",
+					"parent_cloud_id": null,
+					"created_at": "2024-01-01T00:00:00Z",
+					"is_default": false,
+					"directory_name": "no-cloud-project-dir"
+				}}`))
+				return
+			}
+			t.Errorf("unexpected request (no collaborators configured, must not fetch them): %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		// CloudID starts null (e.g. an import), matching the "both null" branch
+		// in readProject's comment that sets cloud_id from the API response.
+		model := &ProjectResourceModel{}
+		if err := r.readProject(context.Background(), noCloudProjectID, model); err != nil {
+			t.Fatalf("readProject returned error: %v", err)
+		}
+
+		if !model.CloudID.IsNull() {
+			t.Errorf("cloud_id = %#v, want null for a nil parent_cloud_id, got a non-null value (likely \"\")", model.CloudID)
+		}
+	})
 }
 
 // TestProjectResourcePermissionLevelValidator replaces the old
