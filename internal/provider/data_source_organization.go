@@ -74,7 +74,7 @@ func (d *OrganizationDataSource) Configure(ctx context.Context, req datasource.C
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Unexpected Data Source Configure Type",
 			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
@@ -88,7 +88,7 @@ func (d *OrganizationDataSource) Configure(ctx context.Context, req datasource.C
 func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	state, err := fetchCurrentOrganization(ctx, d.client)
 	if err != nil {
-		resp.Diagnostics.AddError("Organization Lookup Failed", err.Error())
+		AddAPIError(&resp.Diagnostics, "fetch organization info", err)
 		return
 	}
 

@@ -1,0 +1,24 @@
+```
+release-note:fixed
+data-source/anyscale_container_image: `ray_version` reported `null` for a BYOD (Bring Your Own Docker) image whose Ray version is only available in the build's `byod_ray_version` field; now resolves from `byod_ray_version` when the standard field is absent.
+```
+```
+release-note:fixed
+data-source/anyscale_container_image: `image_uri` used to depend on a second, per-build API call succeeding; now reads from the same build summary already available on the initial lookup, so it stays populated even when that second call fails.
+```
+```
+release-note:added
+data-source/anyscale_container_images: adds `image_uri`, available at no extra cost per item since it comes from the same build summary each item already carries.
+```
+```
+release-note:added
+data-source/anyscale_container_images: adds `image_name_contains` and `cloud_id` filter arguments. `image_name_contains` matches the underlying base or BYOD image name, distinct from the existing `name_contains`, which matches the user-given template name.
+```
+```
+release-note:added
+data-source/anyscale_container_image: adds `cloud_id`, `is_default`, `is_experimental`, `last_modified_at`, and `build_error_message`. `build_error_message` is singular-only; it comes from the full per-build lookup that only this data source makes.
+```
+```
+release-note:added
+data-source/anyscale_container_images: adds `cloud_id`, `is_default`, `is_experimental`, and `last_modified_at`.
+```

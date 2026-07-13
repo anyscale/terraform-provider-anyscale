@@ -1,327 +1,497 @@
 package provider
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestUserDataSourceFieldMapping tests mapping of user info to model
-func TestUserDataSourceFieldMapping(t *testing.T) {
+// pathFailingRoundTripper simulates a genuine transport-level failure (DNS,
+// connection refused, timeout - anything below the HTTP status-code layer)
+// for one specific path, while delegating every other request to a real
+// http.RoundTripper. httptest.Server can only simulate bad status codes or
+// malformed bodies from within a handler that still completes a real HTTP
+// response; a transport failure has to be injected at the RoundTripper level
+// instead, since by definition no HTTP response is ever received.
+type pathFailingRoundTripper struct {
+	failPath string
+	next     http.RoundTripper
+}
+
+func (rt pathFailingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Path == rt.failPath {
+		return nil, errors.New("simulated transport failure: connection reset by peer")
+	}
+	return rt.next.RoundTrip(req)
+}
+
+// userOrganizationObjectType mirrors the object type Read() builds inline via
+// types.ListValueFrom for the "organizations" attribute.
+func userOrganizationObjectType() types.ObjectType {
+	return types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"id":                types.StringType,
+			"name":              types.StringType,
+			"public_identifier": types.StringType,
+			"default_cloud_id":  types.StringType,
+		},
+	}
+}
+
+// runUserDataSourceRead drives UserDataSource's real Read() method end-to-end,
+// same construction pattern as runProjectsDataSourceRead in
+// data_source_projects_test.go. Replaces the old data_source_user_test.go,
+// whose ~13 tests all constructed a UserDataSourceModel/OrganizationModel
+// literal directly and asserted it against itself - none called Read(), none
+// used a mock server, none exercised any real conversion logic, so none of
+// them could ever have caught DS-USER-1/2/3.
+func runUserDataSourceRead(t *testing.T, d *UserDataSource) (UserDataSourceModel, diag.Diagnostics) {
+	t.Helper()
+	ctx := context.Background()
+
+	var schemaResp datasource.SchemaResponse
+	d.Schema(ctx, datasource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+
+	// UserDataSourceModel's list-typed fields are all raw types.List, which need
+	// an explicit, correctly-typed null value before state.Set can reconcile a
+	// zero-value model against the schema (an untyped zero-value types.List
+	// otherwise fails with a "MISSING TYPE" conversion error). This data source
+	// takes no config arguments, so this covers every case.
 	model := UserDataSourceModel{
-		ID:                          types.StringValue("user_abc123"),
-		Email:                       types.StringValue("user@example.com"),
-		Name:                        types.StringValue("John Doe"),
-		Username:                    types.StringValue("johndoe"),
-		OrganizationPermissionLevel: types.StringValue("owner"),
+		OrganizationIDs: types.ListNull(types.StringType),
+		Organizations:   types.ListNull(userOrganizationObjectType()),
+		CloudIDs:        types.ListNull(types.StringType),
+		UserGroupIDs:    types.ListNull(types.StringType),
 	}
 
-	// Verify all fields
-	if model.ID.ValueString() != "user_abc123" {
-		t.Errorf("ID = %v, want 'user_abc123'", model.ID.ValueString())
+	state := tfsdk.State{Schema: schemaResp.Schema}
+	setDiags := state.Set(ctx, &model)
+	if setDiags.HasError() {
+		t.Fatalf("failed to build config fixture: %v", setDiags)
 	}
-	if model.Email.ValueString() != "user@example.com" {
-		t.Errorf("Email = %v, want 'user@example.com'", model.Email.ValueString())
+	config := tfsdk.Config(state)
+
+	readResp := &datasource.ReadResponse{
+		State: tfsdk.State(config),
 	}
-	if model.Name.ValueString() != "John Doe" {
-		t.Errorf("Name = %v, want 'John Doe'", model.Name.ValueString())
+	d.Read(ctx, datasource.ReadRequest{Config: config}, readResp)
+
+	if readResp.Diagnostics.HasError() {
+		return UserDataSourceModel{}, readResp.Diagnostics
 	}
-	if model.Username.ValueString() != "johndoe" {
-		t.Errorf("Username = %v, want 'johndoe'", model.Username.ValueString())
+
+	var result UserDataSourceModel
+	getDiags := readResp.State.Get(ctx, &result)
+	if getDiags.HasError() {
+		t.Fatalf("failed to decode result state: %v", getDiags)
 	}
-	if model.OrganizationPermissionLevel.ValueString() != "owner" {
-		t.Errorf("OrganizationPermissionLevel = %v, want 'owner'", model.OrganizationPermissionLevel.ValueString())
-	}
+	return result, readResp.Diagnostics
 }
 
-// TestUserOrganizationIDs tests handling of organization ID list
-func TestUserOrganizationIDs(t *testing.T) {
-	orgIDs := []string{"org_1", "org_2", "org_3"}
-
-	// Convert to types.List
-	orgIDValues := make([]attr.Value, len(orgIDs))
-	for i, id := range orgIDs {
-		orgIDValues[i] = types.StringValue(id)
-	}
-
-	listValue, diags := types.ListValue(types.StringType, orgIDValues)
-	if diags.HasError() {
-		t.Fatalf("Failed to create list: %v", diags)
-	}
-
-	model := UserDataSourceModel{
-		OrganizationIDs: listValue,
-	}
-
-	// Verify list
-	if model.OrganizationIDs.IsNull() {
-		t.Error("OrganizationIDs should not be null")
-	}
-
-	elements := model.OrganizationIDs.Elements()
-	if len(elements) != 3 {
-		t.Errorf("OrganizationIDs count = %v, want 3", len(elements))
-	}
-}
-
-// TestUserCloudIDs tests handling of cloud ID list
-func TestUserCloudIDs(t *testing.T) {
-	cloudIDs := []string{"cld_1", "cld_2", "cld_3", "cld_4"}
-
-	// Convert to types.List
-	cloudIDValues := make([]attr.Value, len(cloudIDs))
-	for i, id := range cloudIDs {
-		cloudIDValues[i] = types.StringValue(id)
-	}
-
-	listValue, diags := types.ListValue(types.StringType, cloudIDValues)
-	if diags.HasError() {
-		t.Fatalf("Failed to create list: %v", diags)
-	}
-
-	model := UserDataSourceModel{
-		CloudIDs: listValue,
-	}
-
-	// Verify list
-	if model.CloudIDs.IsNull() {
-		t.Error("CloudIDs should not be null")
-	}
-
-	elements := model.CloudIDs.Elements()
-	if len(elements) != 4 {
-		t.Errorf("CloudIDs count = %v, want 4", len(elements))
-	}
-}
-
-// TestUserPermissionLevels tests valid organization permission levels
-func TestUserPermissionLevels(t *testing.T) {
-	validLevels := []string{"owner", "admin", "member"}
-
-	for _, level := range validLevels {
-		t.Run("level_"+level, func(t *testing.T) {
-			model := UserDataSourceModel{
-				OrganizationPermissionLevel: types.StringValue(level),
-			}
-
-			if model.OrganizationPermissionLevel.ValueString() != level {
-				t.Errorf("OrganizationPermissionLevel = %v, want %v",
-					model.OrganizationPermissionLevel.ValueString(), level)
-			}
-		})
-	}
-}
-
-// TestUserGroupIDs tests handling of user group IDs
-func TestUserGroupIDs(t *testing.T) {
-	// User groups might be empty (feature not fully implemented)
-	emptyList, diags := types.ListValue(types.StringType, []attr.Value{})
-	if diags.HasError() {
-		t.Fatalf("Failed to create empty list: %v", diags)
-	}
-
-	model := UserDataSourceModel{
-		UserGroupIDs: emptyList,
-	}
-
-	elements := model.UserGroupIDs.Elements()
-	if len(elements) != 0 {
-		t.Errorf("UserGroupIDs count = %v, want 0 (feature not implemented)", len(elements))
-	}
-}
-
-// TestOrganizationModelMapping tests organization model structure
-func TestOrganizationModelMapping(t *testing.T) {
-	model := OrganizationModel{
-		ID:               types.StringValue("org_abc"),
-		Name:             types.StringValue("Acme Corporation"),
-		PublicIdentifier: types.StringValue("acme-corp"),
-		DefaultCloudID:   types.StringValue("cld_def"),
-	}
-
-	// Verify fields
-	if model.ID.ValueString() != "org_abc" {
-		t.Errorf("ID = %v, want 'org_abc'", model.ID.ValueString())
-	}
-	if model.Name.ValueString() != "Acme Corporation" {
-		t.Errorf("Name = %v, want 'Acme Corporation'", model.Name.ValueString())
-	}
-	if model.PublicIdentifier.ValueString() != "acme-corp" {
-		t.Errorf("PublicIdentifier = %v, want 'acme-corp'", model.PublicIdentifier.ValueString())
-	}
-	if model.DefaultCloudID.ValueString() != "cld_def" {
-		t.Errorf("DefaultCloudID = %v, want 'cld_def'", model.DefaultCloudID.ValueString())
-	}
-}
-
-// TestUserAPIResponseStructure tests expected API response structure
-func TestUserAPIResponseStructure(t *testing.T) {
-	// Simulate API response structure
-	apiResponse := struct {
-		Result struct {
-			ID                          string
-			Email                       string
-			Name                        string
-			Username                    string
-			OrganizationPermissionLevel string
-			OrganizationIDs             []string
-			Organizations               []struct {
-				ID               string
-				Name             string
-				PublicIdentifier string
-				DefaultCloudID   string
-			}
+// userInfoMockServer builds an httptest server that serves the given userinfo
+// and user_groups JSON bodies (both already-JSON-encoded strings) for
+// /api/v2/userinfo, /api/v2/clouds, and /api/v2/user_groups respectively -
+// the three endpoints UserDataSource.Read calls.
+func userInfoMockServer(t *testing.T, userInfoJSON, cloudsJSON, userGroupsJSON string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/api/v2/userinfo":
+			_, _ = fmt.Fprint(w, userInfoJSON)
+		case "/api/v2/clouds":
+			_, _ = fmt.Fprint(w, cloudsJSON)
+		case "/api/v2/user_groups":
+			_, _ = fmt.Fprint(w, userGroupsJSON)
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
 		}
-	}{
-		Result: struct {
-			ID                          string
-			Email                       string
-			Name                        string
-			Username                    string
-			OrganizationPermissionLevel string
-			OrganizationIDs             []string
-			Organizations               []struct {
-				ID               string
-				Name             string
-				PublicIdentifier string
-				DefaultCloudID   string
+	}))
+}
+
+const emptyCloudsResponse = `{"results": [], "metadata": {"next_paging_token": null}}`
+
+// TestUserDataSourceRead_FieldMapping is a real, Read()-driven replacement for
+// the old file's ~6 single-field tautologies (TestUserDataSourceFieldMapping,
+// TestUserOrganizationIDs, TestUserCloudIDs, TestOrganizationModelMapping,
+// TestUserAPIResponseStructure, TestUserMultipleOrganizations): one mock
+// userinfo response, asserting every top-level and nested field actually maps
+// through the real Read() method.
+func TestUserDataSourceRead_FieldMapping(t *testing.T) {
+	userInfoJSON := `{
+		"result": {
+			"id": "usr_abc123",
+			"email": "user@example.com",
+			"name": "John Doe",
+			"username": "johndoe",
+			"organization_permission_level": "owner",
+			"organization_ids": ["org_1", "org_2"],
+			"organizations": [
+				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": "cld_1"},
+				{"id": "org_2", "name": "Org Two", "public_identifier": "org-two", "default_cloud_id": "cld_2"}
+			]
+		}
+	}`
+	cloudsJSON := `{"results": [{"id": "cld_1"}, {"id": "cld_2"}, {"id": "cld_3"}], "metadata": {"next_paging_token": null}}`
+	userGroupsJSON := `{"results": [{"id": "grp_1"}], "metadata": {"next_paging_token": null}}`
+
+	server := userInfoMockServer(t, userInfoJSON, cloudsJSON, userGroupsJSON)
+	defer server.Close()
+
+	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runUserDataSourceRead(t, d)
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+
+	if got := result.ID.ValueString(); got != "usr_abc123" {
+		t.Errorf("ID = %q, want usr_abc123", got)
+	}
+	if got := result.Email.ValueString(); got != "user@example.com" {
+		t.Errorf("Email = %q, want user@example.com", got)
+	}
+	if got := result.Name.ValueString(); got != "John Doe" {
+		t.Errorf("Name = %q, want John Doe", got)
+	}
+	if got := result.Username.ValueString(); got != "johndoe" {
+		t.Errorf("Username = %q, want johndoe", got)
+	}
+	if got := result.OrganizationPermissionLevel.ValueString(); got != "owner" {
+		t.Errorf("OrganizationPermissionLevel = %q, want owner", got)
+	}
+
+	var orgIDs []string
+	if diags := result.OrganizationIDs.ElementsAs(context.Background(), &orgIDs, false); diags.HasError() {
+		t.Fatalf("failed to decode organization_ids: %v", diags)
+	}
+	if len(orgIDs) != 2 || orgIDs[0] != "org_1" || orgIDs[1] != "org_2" {
+		t.Errorf("OrganizationIDs = %v, want [org_1 org_2]", orgIDs)
+	}
+
+	var cloudIDs []string
+	if diags := result.CloudIDs.ElementsAs(context.Background(), &cloudIDs, false); diags.HasError() {
+		t.Fatalf("failed to decode cloud_ids: %v", diags)
+	}
+	if len(cloudIDs) != 3 {
+		t.Errorf("CloudIDs count = %d, want 3", len(cloudIDs))
+	}
+
+	var userGroupIDs []string
+	if diags := result.UserGroupIDs.ElementsAs(context.Background(), &userGroupIDs, false); diags.HasError() {
+		t.Fatalf("failed to decode user_group_ids: %v", diags)
+	}
+	if len(userGroupIDs) != 1 || userGroupIDs[0] != "grp_1" {
+		t.Errorf("UserGroupIDs = %v, want [grp_1]", userGroupIDs)
+	}
+
+	type orgOut struct {
+		ID               types.String `tfsdk:"id"`
+		Name             types.String `tfsdk:"name"`
+		PublicIdentifier types.String `tfsdk:"public_identifier"`
+		DefaultCloudID   types.String `tfsdk:"default_cloud_id"`
+	}
+	var orgs []orgOut
+	if diags := result.Organizations.ElementsAs(context.Background(), &orgs, false); diags.HasError() {
+		t.Fatalf("failed to decode organizations: %v", diags)
+	}
+	if len(orgs) != 2 {
+		t.Fatalf("Organizations count = %d, want 2", len(orgs))
+	}
+	if orgs[0].ID.ValueString() != "org_1" || orgs[0].DefaultCloudID.ValueString() != "cld_1" {
+		t.Errorf("Organizations[0] = %+v, want id=org_1 default_cloud_id=cld_1", orgs[0])
+	}
+	if orgs[1].ID.ValueString() != "org_2" || orgs[1].DefaultCloudID.ValueString() != "cld_2" {
+		t.Errorf("Organizations[1] = %+v, want id=org_2 default_cloud_id=cld_2", orgs[1])
+	}
+}
+
+// TestUserDataSourceRead_NullDefaultCloudID is the DS-USER-1 mutation-proof
+// regression guard. The real /api/v2/userinfo response can and does return
+// default_cloud_id: null for an organization with no default cloud set
+// (confirmed live against the connected test org's own account, not just
+// hypothesized) - Read()'s anonymous response struct types DefaultCloudID as
+// a plain string, so JSON null silently decodes to the Go zero value ""
+// before any application code even runs, and types.StringValue("") is what
+// lands in state. This currently FAILS (state comes back "" not null) - that
+// failure is the mutation-proof evidence. Must pass once DefaultCloudID (both
+// the anonymous struct field and OrganizationModel) is *string +
+// types.StringPointerValue.
+func TestUserDataSourceRead_NullDefaultCloudID(t *testing.T) {
+	userInfoJSON := `{
+		"result": {
+			"id": "usr_abc123",
+			"email": "user@example.com",
+			"name": "John Doe",
+			"username": "johndoe",
+			"organization_permission_level": "owner",
+			"organization_ids": ["org_1"],
+			"organizations": [
+				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": null}
+			]
+		}
+	}`
+
+	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse, emptyCloudsResponse)
+	defer server.Close()
+
+	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runUserDataSourceRead(t, d)
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+
+	type orgOut struct {
+		ID               types.String `tfsdk:"id"`
+		Name             types.String `tfsdk:"name"`
+		PublicIdentifier types.String `tfsdk:"public_identifier"`
+		DefaultCloudID   types.String `tfsdk:"default_cloud_id"`
+	}
+	var orgs []orgOut
+	if diags := result.Organizations.ElementsAs(context.Background(), &orgs, false); diags.HasError() {
+		t.Fatalf("failed to decode organizations: %v", diags)
+	}
+	if len(orgs) != 1 {
+		t.Fatalf("Organizations count = %d, want 1", len(orgs))
+	}
+	if !orgs[0].DefaultCloudID.IsNull() {
+		t.Errorf("organizations[0].default_cloud_id = %#v, want null for a nil API value, got a non-null value (likely \"\")", orgs[0].DefaultCloudID)
+	}
+}
+
+// TestUserDataSourceRead_NullOrganizationPermissionLevel is the DS-USER-2
+// mutation-proof regression guard - same shape as DS-USER-1 above, for the
+// top-level organization_permission_level field (Optional/unassigned upstream
+// -> null). This currently FAILS the same way.
+func TestUserDataSourceRead_NullOrganizationPermissionLevel(t *testing.T) {
+	userInfoJSON := `{
+		"result": {
+			"id": "usr_abc123",
+			"email": "user@example.com",
+			"name": "John Doe",
+			"username": "johndoe",
+			"organization_permission_level": null,
+			"organization_ids": ["org_1"],
+			"organizations": [
+				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": null}
+			]
+		}
+	}`
+
+	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse, emptyCloudsResponse)
+	defer server.Close()
+
+	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runUserDataSourceRead(t, d)
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+
+	if !result.OrganizationPermissionLevel.IsNull() {
+		t.Errorf("organization_permission_level = %#v, want null for a nil API value, got a non-null value (likely \"\")", result.OrganizationPermissionLevel)
+	}
+}
+
+// TestUserDataSourceRead_UserGroupIDsPagesBeyondFirstPage is the DS-USER-3
+// mutation-proof regression guard. Read() fetches /api/v2/user_groups via a
+// single raw DoRequest call rather than PaginatedRequest, and an inline
+// comment in the production code claims (incorrectly - the real endpoint's
+// response does carry a next_paging_token field) that the endpoint is
+// non-paginated. A user group past page 1 is silently dropped. This currently
+// FAILS - the mock's second page is never requested - which is the
+// mutation-proof evidence. Must pass once Read() pages through
+// /api/v2/user_groups via PaginatedRequest.
+func TestUserDataSourceRead_UserGroupIDsPagesBeyondFirstPage(t *testing.T) {
+	userInfoJSON := `{
+		"result": {
+			"id": "usr_abc123",
+			"email": "user@example.com",
+			"name": "John Doe",
+			"username": "johndoe",
+			"organization_permission_level": "owner",
+			"organization_ids": ["org_1"],
+			"organizations": [
+				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": null}
+			]
+		}
+	}`
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/api/v2/userinfo":
+			_, _ = fmt.Fprint(w, userInfoJSON)
+		case "/api/v2/clouds":
+			_, _ = fmt.Fprint(w, emptyCloudsResponse)
+		case "/api/v2/user_groups":
+			requestCount++
+			if requestCount == 1 {
+				_, _ = fmt.Fprint(w, `{"results": [{"id": "grp_1"}], "metadata": {"next_paging_token": "page2"}}`)
+				return
 			}
-		}{
-			ID:                          "user_123",
-			Email:                       "test@example.com",
-			Name:                        "Test User",
-			Username:                    "testuser",
-			OrganizationPermissionLevel: "member",
-			OrganizationIDs:             []string{"org_1", "org_2"},
-			Organizations: []struct {
-				ID               string
-				Name             string
-				PublicIdentifier string
-				DefaultCloudID   string
-			}{
-				{
-					ID:               "org_1",
-					Name:             "Organization 1",
-					PublicIdentifier: "org-1",
-					DefaultCloudID:   "cld_1",
-				},
-				{
-					ID:               "org_2",
-					Name:             "Organization 2",
-					PublicIdentifier: "org-2",
-					DefaultCloudID:   "cld_2",
-				},
-			},
+			_, _ = fmt.Fprint(w, `{"results": [{"id": "grp_2"}], "metadata": {"next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runUserDataSourceRead(t, d)
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+
+	var userGroupIDs []string
+	if diags := result.UserGroupIDs.ElementsAs(context.Background(), &userGroupIDs, false); diags.HasError() {
+		t.Fatalf("failed to decode user_group_ids: %v", diags)
+	}
+	if len(userGroupIDs) != 2 {
+		t.Fatalf("UserGroupIDs = %v, want 2 groups across both pages (grp_1, grp_2)", userGroupIDs)
+	}
+	if requestCount != 2 {
+		t.Errorf("expected 2 requests to /api/v2/user_groups (one per page), got %d", requestCount)
+	}
+}
+
+// TestUserDataSourceRead_UserGroupsTransportFailureDegradesGracefully locks in
+// the architect-decided behavior for a user_group_ids fetch failure: ANY
+// failure (transport, bad status, or unmarshal) now degrades to a null list
+// with a warning rather than failing the whole anyscale_user read, since
+// PaginatedRequest bundles all three into a single error path. This is a
+// deliberate broadening from the pre-fix code, which used to hard-fail the
+// entire read via AddError specifically for a transport-level failure (the
+// DoRequest error case), and only soft-degraded for a bad status code or a
+// parse failure - decided 2026-07-13: the old two-tier split was an
+// unintentional artifact of checking err separately from status code, not a
+// deliberate design, and null (could-not-determine) is a more correct
+// degraded value than the old empty list (zero groups) regardless.
+//
+// This specifically exercises the transport-failure branch, which none of
+// the other user_groups tests do (they all get a real HTTP response, good or
+// bad) - a genuine transport failure never produces an HTTP response at all,
+// so it has to be injected via a custom RoundTripper rather than an
+// httptest.Server handler. Proves both halves of the decision: (1) the read
+// as a whole succeeds with no error, and (2) every other field still
+// populates normally - only user_group_ids degrades.
+func TestUserDataSourceRead_UserGroupsTransportFailureDegradesGracefully(t *testing.T) {
+	userInfoJSON := `{
+		"result": {
+			"id": "usr_abc123",
+			"email": "user@example.com",
+			"name": "John Doe",
+			"username": "johndoe",
+			"organization_permission_level": "owner",
+			"organization_ids": ["org_1"],
+			"organizations": [
+				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": "cld_1"}
+			]
+		}
+	}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/api/v2/userinfo":
+			_, _ = fmt.Fprint(w, userInfoJSON)
+		case "/api/v2/clouds":
+			_, _ = fmt.Fprint(w, `{"results": [{"id": "cld_1"}], "metadata": {"next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected request path reaching the real server (user_groups should have failed at the transport layer): %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClientWithToken(server.URL, "test-token")
+	client.HTTPClient = &http.Client{
+		Transport: pathFailingRoundTripper{
+			failPath: "/api/v2/user_groups",
+			next:     http.DefaultTransport,
 		},
 	}
 
-	// Verify response structure
-	if apiResponse.Result.ID != "user_123" {
-		t.Errorf("ID = %v, want 'user_123'", apiResponse.Result.ID)
-	}
-	if len(apiResponse.Result.OrganizationIDs) != 2 {
-		t.Errorf("OrganizationIDs count = %v, want 2", len(apiResponse.Result.OrganizationIDs))
-	}
-	if len(apiResponse.Result.Organizations) != 2 {
-		t.Errorf("Organizations count = %v, want 2", len(apiResponse.Result.Organizations))
-	}
-}
-
-// TestUserMultipleOrganizations tests handling of users in multiple organizations
-func TestUserMultipleOrganizations(t *testing.T) {
-	// Users can belong to multiple organizations
-	orgIDs := []string{"org_1", "org_2", "org_3"}
-
-	orgIDValues := make([]attr.Value, len(orgIDs))
-	for i, id := range orgIDs {
-		orgIDValues[i] = types.StringValue(id)
-	}
-
-	listValue, diags := types.ListValue(types.StringType, orgIDValues)
+	d := &UserDataSource{client: client}
+	result, diags := runUserDataSourceRead(t, d)
 	if diags.HasError() {
-		t.Fatalf("Failed to create list: %v", diags)
+		t.Fatalf("Read() should succeed overall despite the user_groups transport failure, got error: %v", diags)
 	}
 
-	model := UserDataSourceModel{
-		OrganizationIDs: listValue,
+	if !result.UserGroupIDs.IsNull() {
+		t.Errorf("user_group_ids = %#v, want null after a transport failure (degrade-gracefully, not an empty list)", result.UserGroupIDs)
 	}
 
-	elements := model.OrganizationIDs.Elements()
-	if len(elements) != 3 {
-		t.Errorf("User should be in 3 organizations, got %v", len(elements))
+	// Every other field must still populate normally - only user_group_ids degrades.
+	if got := result.ID.ValueString(); got != "usr_abc123" {
+		t.Errorf("ID = %q, want usr_abc123 (rest of the read must not be affected)", got)
 	}
-}
-
-// TestUserEmptyLists tests handling of empty lists
-func TestUserEmptyLists(t *testing.T) {
-	emptyOrgIDs, _ := types.ListValue(types.StringType, []attr.Value{})
-	emptyCloudIDs, _ := types.ListValue(types.StringType, []attr.Value{})
-	emptyUserGroupIDs, _ := types.ListValue(types.StringType, []attr.Value{})
-
-	model := UserDataSourceModel{
-		OrganizationIDs: emptyOrgIDs,
-		CloudIDs:        emptyCloudIDs,
-		UserGroupIDs:    emptyUserGroupIDs,
+	if got := result.Email.ValueString(); got != "user@example.com" {
+		t.Errorf("Email = %q, want user@example.com", got)
 	}
-
-	// All lists should be empty but not null
-	if model.OrganizationIDs.IsNull() {
-		t.Error("OrganizationIDs should not be null")
+	var cloudIDs []string
+	if diags := result.CloudIDs.ElementsAs(context.Background(), &cloudIDs, false); diags.HasError() {
+		t.Fatalf("failed to decode cloud_ids: %v", diags)
 	}
-	if len(model.OrganizationIDs.Elements()) != 0 {
-		t.Errorf("OrganizationIDs should be empty, got %v elements", len(model.OrganizationIDs.Elements()))
-	}
-
-	if model.CloudIDs.IsNull() {
-		t.Error("CloudIDs should not be null")
-	}
-	if len(model.CloudIDs.Elements()) != 0 {
-		t.Errorf("CloudIDs should be empty, got %v elements", len(model.CloudIDs.Elements()))
+	if len(cloudIDs) != 1 || cloudIDs[0] != "cld_1" {
+		t.Errorf("CloudIDs = %v, want [cld_1]", cloudIDs)
 	}
 }
 
-// TestUserEmailValidation tests email field format
-func TestUserEmailValidation(t *testing.T) {
-	validEmails := []string{
-		"user@example.com",
-		"user.name@example.com",
-		"user+tag@example.co.uk",
-		"user123@sub.example.com",
+// TestUserDataSourceRead_EmptyOrganizationsGuard is coverage for DS-USER-4's
+// added empty-organizations guard (adopted from anyscale_organization's
+// identical, already-tested TestFetchCurrentOrganization_EmptyOrganizations
+// in data_source_organization_test.go) - this is the missing sibling test for
+// the same guard's new call site in Read() directly, which had no coverage of
+// its own before this. Confirms the guard actually fires through the real
+// Read() path with the contract's exact anomaly message, not just that the
+// literal string exists somewhere in the source.
+func TestUserDataSourceRead_EmptyOrganizationsGuard(t *testing.T) {
+	userInfoJSON := `{
+		"result": {
+			"id": "usr_abc123",
+			"email": "user@example.com",
+			"name": "John Doe",
+			"username": "johndoe",
+			"organization_permission_level": "owner",
+			"organization_ids": [],
+			"organizations": []
+		}
+	}`
+
+	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse, emptyCloudsResponse)
+	defer server.Close()
+
+	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	_, diags := runUserDataSourceRead(t, d)
+
+	if !diags.HasError() {
+		t.Fatal("expected an error for empty organizations, got none")
 	}
-
-	for _, email := range validEmails {
-		t.Run("email_"+email, func(t *testing.T) {
-			model := UserDataSourceModel{
-				Email: types.StringValue(email),
-			}
-
-			if model.Email.ValueString() != email {
-				t.Errorf("Email = %v, want %v", model.Email.ValueString(), email)
-			}
-		})
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Detail(), "userinfo returned no organization for the authenticated token") {
+			found = true
+		}
 	}
-}
-
-// TestUserUsernameFormat tests username field
-func TestUserUsernameFormat(t *testing.T) {
-	usernames := []string{
-		"johndoe",
-		"john.doe",
-		"john_doe",
-		"john-doe",
-		"john123",
-	}
-
-	for _, username := range usernames {
-		t.Run("username_"+username, func(t *testing.T) {
-			model := UserDataSourceModel{
-				Username: types.StringValue(username),
-			}
-
-			if model.Username.ValueString() != username {
-				t.Errorf("Username = %v, want %v", model.Username.ValueString(), username)
-			}
-		})
+	if !found {
+		t.Errorf("diagnostics = %v, want one containing the contract's exact anomaly message", diags)
 	}
 }

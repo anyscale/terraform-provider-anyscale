@@ -85,10 +85,12 @@ output "cloud_versions_and_external_ids" {
 Read-Only:
 
 - `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
+- `availability_zones` (List of String) The availability zones considered for this cloud.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
 - `compute_stack` (String) The compute stack (VM or K8S).
 - `created_at` (String) Timestamp when the cloud was created.
 - `creator_id` (String) The ID of the user who created the cloud.
+- `external_id` (String) The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.
 - `id` (String) The unique identifier of the cloud.
 - `is_aggregated_logs_enabled` (Boolean) Whether aggregated log ingestion is enabled for this cloud.
 - `is_aioa` (Boolean) Whether this is an AIOA (Anyscale In Your Own Account) cloud.
@@ -102,3 +104,4 @@ Read-Only:
 - `region` (String) The region where the cloud is deployed.
 - `state` (String) The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).
 - `status` (String) The operational status of the cloud (e.g., ready, pending, failed).
+- `version` (String) The cluster management stack version of the cloud (`v1` or `v2`).

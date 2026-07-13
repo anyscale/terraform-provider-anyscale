@@ -47,6 +47,11 @@ type OrganizationUserModel struct {
 	Email           types.String `tfsdk:"email"`
 	PermissionLevel types.String `tfsdk:"permission_level"`
 	CreatedAt       types.String `tfsdk:"created_at"`
+
+	// DS-OU-2 (Phase B): permission_level above is deprecated backend-side in
+	// favor of these two.
+	BaseRole        types.String `tfsdk:"base_role"`
+	AdditionalRoles types.List   `tfsdk:"additional_roles"`
 }
 
 // Metadata returns the data source type name.
@@ -105,7 +110,7 @@ func (d *OrganizationUsersDataSource) Configure(ctx context.Context, req datasou
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Unexpected Data Source Configure Type",
 			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
@@ -140,30 +145,30 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 	collaborators, err := listAllOrganizationCollaborators(ctx, d.client, extraParams)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch organization users", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", fmt.Sprintf("Failed to fetch organization users: %s", err.Error()))
+		AddAPIError(&resp.Diagnostics, "fetch organization users", err)
 		return
 	}
 
-	// Convert to Terraform model
+	// Convert to Terraform model. DS-OU-1: name is genuinely nullable server-side,
+	// mapped via StringPointerValue matching the adjacent UserID field - a null
+	// name must never collapse to "".
 	users := make([]OrganizationUserModel, len(collaborators))
 	for i, user := range collaborators {
-		userID := types.StringNull()
-		if user.UserID != nil {
-			userID = types.StringValue(*user.UserID)
-		}
-
-		name := ""
-		if user.Name != nil {
-			name = *user.Name
+		additionalRoles, diags := types.ListValueFrom(ctx, types.StringType, user.AdditionalRoles)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
 
 		users[i] = OrganizationUserModel{
 			ID:              types.StringValue(user.ID),
-			UserID:          userID,
-			Name:            types.StringValue(name),
+			UserID:          types.StringPointerValue(user.UserID),
+			Name:            types.StringPointerValue(user.Name),
 			Email:           types.StringValue(user.Email),
 			PermissionLevel: types.StringValue(user.PermissionLevel),
 			CreatedAt:       types.StringValue(user.CreatedAt),
+			BaseRole:        types.StringValue(user.BaseRole),
+			AdditionalRoles: additionalRoles,
 		}
 	}
 
@@ -175,6 +180,8 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 			"email":            types.StringType,
 			"permission_level": types.StringType,
 			"created_at":       types.StringType,
+			"base_role":        types.StringType,
+			"additional_roles": types.ListType{ElemType: types.StringType},
 		},
 	}, users)
 	resp.Diagnostics.Append(diags...)

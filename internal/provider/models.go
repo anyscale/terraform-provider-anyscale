@@ -245,10 +245,13 @@ type ProjectsListResponse struct {
 
 // ProjectResult is the actual project data
 type ProjectResult struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	Description     *string `json:"description"`
-	ParentCloudID   string  `json:"parent_cloud_id"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	// DS-PROJ-1: genuinely Optional[str] server-side; shared by both data
+	// sources and resource_project.go's Read - all three must map it via
+	// StringPointerValue, never collapse a null cloud association to "".
+	ParentCloudID   *string `json:"parent_cloud_id"`
 	CreatorID       *string `json:"creator_id,omitempty"`
 	CreatedAt       string  `json:"created_at"`
 	LastUsedCloudID *string `json:"last_used_cloud_id,omitempty"`
@@ -330,6 +333,13 @@ type OrganizationCollaboratorResult struct {
 	Name            *string `json:"name"`             // Can be null
 	PermissionLevel string  `json:"permission_level"` // "owner" or "collaborator"
 	CreatedAt       string  `json:"created_at"`
+
+	// DS-OU-2: permission_level above is deprecated backend-side in favor of these
+	// two - base_role is a required enum (never null); additional_roles is a
+	// required list (can be empty, never null). Both traced against
+	// product backend/server/api/product/models/organization_collaborators.py.
+	BaseRole        string   `json:"base_role"`
+	AdditionalRoles []string `json:"additional_roles"`
 }
 
 // OrganizationCollaboratorsListResponse represents the response from listing collaborators
@@ -508,6 +518,10 @@ type ApplicationTemplateResult struct {
 	Anonymous      bool             `json:"anonymous"`
 	IsDefault      bool             `json:"is_default"`
 	LatestBuild    *MiniBuildResult `json:"latest_build,omitempty"`
+	// DS-IMG-4: CloudID is genuinely Optional[str] server-side (AppConfig.cloud_id);
+	// IsExperimental is a plain bool with a backend default, never null.
+	CloudID        *string `json:"cloud_id,omitempty"`
+	IsExperimental bool    `json:"is_experimental"`
 }
 
 // IsArchived returns true if the application template has been deleted/archived
@@ -521,6 +535,13 @@ type MiniBuildResult struct {
 	ID       string `json:"id"`
 	Revision int    `json:"revision"`
 	Status   string `json:"status"`
+	// DS-IMG-2: both genuinely Optional[str] server-side (MiniBuild.docker_image_name/
+	// cloud_id) - present on the SAME embedded object both DS already fetch for free,
+	// so the plural gains a per-item image_uri with zero extra calls, and the singular
+	// can populate image_uri without needing the second GET /builds/{id} call (still
+	// made for digest/ray_version/etc, just no longer required for this one field).
+	DockerImageName *string `json:"docker_image_name,omitempty"`
+	CloudID         *string `json:"cloud_id,omitempty"`
 }
 
 // BuildResponse represents a single build from the API. Returned by both

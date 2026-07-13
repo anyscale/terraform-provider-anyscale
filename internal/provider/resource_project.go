@@ -92,7 +92,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			// Cloud reference (mutually exclusive)
 			"cloud_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The cloud ID for this project. Either `cloud_id` or `cloud_name` must be specified.",
+				MarkdownDescription: "The cloud ID for this project. Either `cloud_id` or `cloud_name` must be specified. If configured with cloud_id and a later refresh finds the backend reports no associated cloud (an inconsistent state), this reads as null rather than an empty string.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -672,8 +672,16 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 	// Handle cloud reference based on what user provided:
 	// - If cloud_name was provided: keep it, don't set cloud_id
 	// - If cloud_id was provided OR this is import (both null): set cloud_id from API
+	// DS-PROJ-1: parent_cloud_id is genuinely nullable server-side. Safe here:
+	// a cloud_name-configured project never enters this branch (CloudID stays
+	// null before and after); a healthy cloud_id-configured project has a
+	// stable non-null ParentCloudID every read, so this is a no-op change for
+	// it too. Only the anomalous case (cloud_id configured, backend returns a
+	// null parent_cloud_id) newly reads back null instead of "" - and that
+	// case cannot be constructed through Terraform at all, since
+	// parent_cloud_id is required on create.
 	if model.CloudName.IsNull() {
-		model.CloudID = types.StringValue(result.ParentCloudID)
+		model.CloudID = types.StringPointerValue(result.ParentCloudID)
 	}
 
 	if result.Description != nil {

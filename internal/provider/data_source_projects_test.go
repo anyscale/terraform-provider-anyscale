@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -165,7 +166,7 @@ func TestProjectsDataSourceRead_FieldMapping(t *testing.T) {
 				ID:              "prj_1",
 				Name:            "production",
 				Description:     strPtr("Production project"),
-				ParentCloudID:   "cld_def",
+				ParentCloudID:   strPtr("cld_def"),
 				CreatorID:       strPtr("user_123"),
 				CreatedAt:       "2024-01-01T00:00:00Z",
 				LastUsedCloudID: strPtr("cld_def"),
@@ -178,7 +179,7 @@ func TestProjectsDataSourceRead_FieldMapping(t *testing.T) {
 				// zero-valued/empty string.
 				ID:            "prj_2",
 				Name:          "default",
-				ParentCloudID: "cld_def",
+				ParentCloudID: strPtr("cld_def"),
 				CreatedAt:     "2023-01-01T00:00:00Z",
 				IsDefault:     true,
 				DirectoryName: "default-dir",
@@ -220,6 +221,43 @@ func TestProjectsDataSourceRead_FieldMapping(t *testing.T) {
 	}
 	if !p2.IsDefault.ValueBool() {
 		t.Error("projects[1] is_default = false, want true")
+	}
+}
+
+// TestProjectsDataSourceRead_NullParentCloudID is the DS-PROJ-1 mutation-proof
+// regression guard for the plural data source - same shape as
+// TestProjectDataSourceRead_NullParentCloudID in data_source_project_test.go.
+// Uses a raw JSON body (rather than a ProjectResult struct literal, which
+// cannot express "null" for the plain-string ParentCloudID field as it stands
+// today) to prove a nil parent_cloud_id currently comes back "" not null.
+func TestProjectsDataSourceRead_NullParentCloudID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"results": [
+			{
+				"id": "prj_no_cloud",
+				"name": "no-cloud-project",
+				"parent_cloud_id": null,
+				"created_at": "2024-01-01T00:00:00Z",
+				"is_default": false,
+				"directory_name": "no-cloud-project-dir"
+			}
+		], "metadata": {"next_paging_token": null}}`)
+	}))
+	defer server.Close()
+
+	d := &ProjectsDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runProjectsDataSourceRead(t, d, ProjectsDataSourceModel{})
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+
+	if len(result.Projects) != 1 {
+		t.Fatalf("projects count = %d, want 1", len(result.Projects))
+	}
+	if !result.Projects[0].CloudID.IsNull() {
+		t.Errorf("projects[0].cloud_id = %#v, want null for a nil parent_cloud_id, got a non-null value (likely \"\")", result.Projects[0].CloudID)
 	}
 }
 

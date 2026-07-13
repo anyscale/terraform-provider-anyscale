@@ -1,0 +1,8 @@
+```
+release-note:fixed
+data-source/anyscale_compute_config: `versions` could never return more than the latest version, since the underlying search sent no version filter at all, which the backend treats as latest-only; now sends the documented `-2` sentinel to fetch every version.
+```
+```
+release-note:fixed
+data-source/anyscale_compute_config: both the by-name lookup and the versions search only read the first page (10 results) of matches, so a name with more than 10 versions or anonymous variants could silently miss the real newest match or the full version history; both now page through every result.
+```

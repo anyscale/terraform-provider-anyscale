@@ -55,7 +55,7 @@ output "research_project_ids" {
 
 Read-Only:
 
-- `cloud_id` (String) The cloud ID this project belongs to.
+- `cloud_id` (String) The cloud ID this project belongs to. Null if the project has no associated cloud reported by the API.
 - `created_at` (String) Timestamp when the project was created.
 - `creator_id` (String) The ID of the user who created the project.
 - `description` (String) Description of the project.

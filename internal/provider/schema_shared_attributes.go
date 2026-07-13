@@ -14,8 +14,9 @@ import (
 // enable_lineage_tracking/lineage_tracking_enabled and enable_log_ingestion/
 // is_aggregated_logs_enabled (same backend field, different already-shipped attribute
 // name on each side - unifying would require a breaking rename). Singular-only
-// (is_empty_cloud, cloud_deployment_id) and plural-only (is_k8s) fields have no
-// counterpart to share against.
+// (is_empty_cloud, cloud_deployment_id) fields have no counterpart to share against.
+// is_k8s is identical text on both sides (DS-CLOUD-4) but stays defined directly on each
+// DS's own Schema function rather than hoisted here, matching how the plural already had it.
 func cloudSharedAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"cloud_provider": schema.StringAttribute{
@@ -70,6 +71,21 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			MarkdownDescription: "Whether users are automatically added to this cloud.",
 		},
+		// DS-CLOUD-5 (Phase B): cheap additive parity fields, present on the backend Cloud
+		// model and stable.
+		"availability_zones": schema.ListAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "The availability zones considered for this cloud.",
+		},
+		"version": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The cluster management stack version of the cloud (`v1` or `v2`).",
+		},
+		"external_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.",
+		},
 	}
 }
 
@@ -82,13 +98,15 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 // output). build_id/latest_build_id differ in both name and wording (pre-existing, not a
 // confirmed drift). build_status/latest_build_status are identical text under different
 // already-shipped names - same class as the cloud pair's excluded fields, so it stays local
-// on both sides rather than being unified via a rename. image_uri/ray_version/is_byod/digest
-// (singular-only) and is_archived (plural-only) have no counterpart to share against.
+// on both sides rather than being unified via a rename. ray_version/is_byod/digest
+// (singular-only, since they still depend on the second per-build GET) and is_archived
+// (plural-only) have no counterpart to share against. image_uri (DS-IMG-2) moved into this
+// shared map since it is now identical text on both sides, no longer singular-only.
 func containerImageSharedAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"creator_id": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The ID of the user who created this container image.",
+			MarkdownDescription: "The ID of the user who created this container image. Null if the API does not report a creator for this image.",
 		},
 		"created_at": schema.StringAttribute{
 			Computed:            true,
@@ -96,11 +114,33 @@ func containerImageSharedAttributes() map[string]schema.Attribute {
 		},
 		"revision": schema.Int64Attribute{
 			Computed:            true,
-			MarkdownDescription: "The revision number of the latest build.",
+			MarkdownDescription: "The revision number of the latest build. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.",
 		},
 		"name_version": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
+			MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.",
+		},
+		"image_uri": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The registry image URI (docker image path) of the container image's latest build. Null if the image has no build yet, or if the latest build hasn't produced an image yet (pending, in progress, or failed).",
+		},
+		// DS-IMG-4 (Phase B): template-level fields, present on both the get-by-id
+		// and list responses.
+		"cloud_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The cloud ID this container image is associated with. Null if the image isn't associated with a specific cloud.",
+		},
+		"is_default": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether this is an Anyscale-provided base container image, as opposed to one created by a user in this organization.",
+		},
+		"is_experimental": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether this is an experimental container image.",
+		},
+		"last_modified_at": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Timestamp when the container image was last modified.",
 		},
 	}
 }
@@ -151,11 +191,22 @@ func organizationUserSharedAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"name": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The name of the user.",
+			MarkdownDescription: "The name of the user. Null if the user has no name set.",
 		},
 		"permission_level": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The organization permission level (owner, collaborator, etc.).",
+			MarkdownDescription: "The organization permission level (owner, collaborator, etc.). The backend is moving toward `base_role` and `additional_roles` instead; prefer those for new configurations.",
+		},
+		// DS-OU-2 (Phase B): permission_level above is deprecated backend-side in
+		// favor of these two.
+		"base_role": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The user's base role in the organization (e.g. owner, collaborator). This is the current source of role information on the backend; prefer it over `permission_level`, which the backend is moving away from.",
+		},
+		"additional_roles": schema.ListAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "Additional roles granted to the user beyond their base role, if any. Empty (not null) if the user has none.",
 		},
 		"created_at": schema.StringAttribute{
 			Computed:            true,

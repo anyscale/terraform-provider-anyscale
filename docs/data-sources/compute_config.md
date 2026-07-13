@@ -72,16 +72,16 @@ output "compute_config_zones" {
 
 - `auto_select_worker_config` (Boolean) Whether worker node groups are automatically selected based on workload.
 - `config_id` (String) The version-specific API ID of the compute config. This is the API identifier for the specific version.
-- `created_at` (String) The timestamp when the compute config was created.
+- `created_at` (String) The timestamp when the compute config was created. Null if the API doesn't report a creation timestamp.
 - `enable_cross_zone_scaling` (Boolean) Whether instances can run across multiple availability zones.
 - `head_node` (Attributes) Configuration for the head node of the cluster. (see [below for nested schema](#nestedatt--head_node))
 - `idle_termination_minutes` (Number) Number of minutes after which idle clusters will be terminated. 0 means disabled.
-- `last_modified_at` (String) The timestamp when the compute config was last modified.
+- `last_modified_at` (String) The timestamp when the compute config was last modified. Null if the API doesn't report a last-modified timestamp.
 - `maximum_uptime_minutes` (Number) Maximum uptime in minutes before cluster termination.
-- `name_version` (String) The compute config name and version formatted as `name:version` for use with Anyscale APIs.
+- `name_version` (String) The compute config name and version formatted as `name:version` for use with Anyscale APIs. Null for anonymous compute configs (created without a name).
 - `project_id` (String) The project ID this compute config is associated with.
-- `region` (String) The region to launch clusters in.
-- `version` (Number) The version number of this compute config.
+- `region` (String) The region to launch clusters in. Null if the API doesn't report a region for this compute config.
+- `version` (Number) The version number of this compute config. Null if the API doesn't report a version number.
 - `versions` (List of Number) List of all available version numbers for this compute config, sorted in ascending order.
 - `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. (see [below for nested schema](#nestedatt--worker_nodes))
 - `zones` (List of String) Availability zones considered for this cluster.

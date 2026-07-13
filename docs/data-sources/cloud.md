@@ -70,6 +70,7 @@ output "cloud_external_id" {
 ### Read-Only
 
 - `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
+- `availability_zones` (List of String) The availability zones considered for this cloud.
 - `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
 - `compute_stack` (String) The compute stack (VM or K8S).
@@ -77,12 +78,15 @@ output "cloud_external_id" {
 - `creator_id` (String) The ID of the user who created the cloud.
 - `enable_lineage_tracking` (Boolean) Whether lineage tracking is enabled for this cloud.
 - `enable_log_ingestion` (Boolean) Whether aggregated log ingestion is enabled for this cloud.
+- `external_id` (String) The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.
 - `is_aioa` (Boolean) Whether this is an AIOA (Anyscale In Your Own Account) cloud.
 - `is_bring_your_own_resource` (Boolean) Whether this cloud allows bringing your own resources.
 - `is_default` (Boolean) Whether this is the default cloud for the organization.
 - `is_empty_cloud` (Boolean) Whether this is an empty cloud (created without embedded resource configuration).
+- `is_k8s` (Boolean) Whether this cloud uses Kubernetes.
 - `is_private_cloud` (Boolean) Whether this is a private cloud.
 - `is_private_service_cloud` (Boolean) Whether this is a private service cloud.
 - `region` (String) The region where the cloud is deployed.
 - `state` (String) The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).
 - `status` (String) The operational status of the cloud (e.g., ready, pending, failed).
+- `version` (String) The cluster management stack version of the cloud (`v1` or `v2`).

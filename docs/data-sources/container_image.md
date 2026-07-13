@@ -74,18 +74,23 @@ output "container_image_last_modified_at" {
 
 ### Optional
 
-- `id` (String) The unique identifier of the container image. Either `id` or `name` must be specified.
+- `id` (String) The unique identifier of the container image. Either `id` or `name` must be specified. If both are set, `id` takes precedence.
 - `name` (String) The name of the container image. Either `id` or `name` must be specified.
 
 ### Read-Only
 
-- `build_id` (String) The unique identifier of the latest build for this container image.
-- `build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
+- `build_error_message` (String) The error message from the latest build, if it failed. Null if the build succeeded, is still in progress, or hasn't started yet. Only available on this singular lookup - the plural `anyscale_container_images` data source's lighter per-item response doesn't include build error details without an extra network call per image.
+- `build_id` (String) The unique identifier of the latest build for this container image. Null if no build has been triggered yet.
+- `build_status` (String) The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`). Null if no build has been triggered yet, or if the build's details couldn't be retrieved.
+- `cloud_id` (String) The cloud ID this container image is associated with. Null if the image isn't associated with a specific cloud.
 - `created_at` (String) Timestamp when the container image was created.
-- `creator_id` (String) The ID of the user who created this container image.
-- `digest` (String) The content digest of the built container image (e.g. `sha256:...`).
-- `image_uri` (String) The URI of the container image.
-- `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image.
-- `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
-- `ray_version` (String) The Ray version used in the build.
-- `revision` (Number) The revision number of the latest build.
+- `creator_id` (String) The ID of the user who created this container image. Null if the API does not report a creator for this image.
+- `digest` (String) The content digest of the built container image (e.g. `sha256:...`). Null if the image has no build yet, if the build's details couldn't be retrieved, or if the latest build hasn't produced a digest yet.
+- `image_uri` (String) The registry image URI (docker image path) of the container image's latest build. Null if the image has no build yet, or if the latest build hasn't produced an image yet (pending, in progress, or failed).
+- `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.
+- `is_default` (Boolean) Whether this is an Anyscale-provided base container image, as opposed to one created by a user in this organization.
+- `is_experimental` (Boolean) Whether this is an experimental container image.
+- `last_modified_at` (String) Timestamp when the container image was last modified.
+- `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.
+- `ray_version` (String) The Ray version used in the build. For BYOD images, this resolves from the build's `byod_ray_version` field when the standard field is absent. Null if the image has no build yet, if the build's details couldn't be retrieved, or if the latest build hasn't reported a Ray version yet.
+- `revision` (Number) The revision number of the latest build. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.
