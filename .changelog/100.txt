@@ -1,4 +1,0 @@
-```
-release-note:new-data-source
-data-source/anyscale_organization: Look up the connected Anyscale organization's id, name, public_identifier, and default_cloud_id.
-```
