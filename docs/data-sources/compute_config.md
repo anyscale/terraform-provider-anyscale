@@ -66,7 +66,7 @@ output "compute_config_zones" {
 - `cloud_id` (String) The ID of the Anyscale cloud. Can be used to filter compute configs when looking up by name. Either `cloud_id` or `cloud_name` can be specified.
 - `cloud_name` (String) The name of the Anyscale cloud. Can be used to filter compute configs when looking up by name. Either `cloud_id` or `cloud_name` can be specified. If provided, will be resolved to cloud_id.
 - `id` (String) The unique identifier of the compute config. Either `id` or `name` must be specified.
-- `name` (String) The name of the compute config. Either `id` or `name` must be specified. This field is computed when looking up by ID.
+- `name` (String) The name of the compute config. Either `id` or `name` must be specified. This field is computed when looking up by ID. If multiple compute configs have the same name, the most recently created one will be returned.
 
 ### Read-Only
 

@@ -80,7 +80,7 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 	}
 	attributes["name"] = schema.StringAttribute{
 		Optional:            true,
-		MarkdownDescription: "The name of the container image. Either `id` or `name` must be specified.",
+		MarkdownDescription: "The name of the container image. Either `id` or `name` must be specified. If multiple container images have the same name, the most recently modified one will be returned.",
 	}
 	attributes["build_id"] = schema.StringAttribute{
 		Computed:            true,
@@ -281,12 +281,25 @@ func (d *ContainerImageDataSource) getApplicationTemplateByName(ctx context.Cont
 		return nil, fmt.Errorf("no cluster environment found with name '%s'", name)
 	}
 
-	if len(matches) > 1 {
-		WarnIfMultipleMatches(ctx, "cluster environment", name, len(matches), matches[0].ID)
-	}
+	// matches is already exact-name + non-archived, so the predicate here is a passthrough.
+	// Tiebreak on LastModifiedAt rather than CreatedAt (unlike the other PickMostRecentMatch
+	// call sites): this endpoint's backend default order is last_modified_at DESC
+	// (cluster_environments_dao.go's DEFAULT_ORDER_BY_CLAUSES), so "first match" already
+	// meant "most recently modified" before this helper existed. Keying on CreatedAt here
+	// instead would silently pick a different duplicate whenever a template is modified
+	// after creation (X-2).
+	matchedID := PickMostRecentMatch(ctx, "cluster environment", name, matches,
+		func(t ApplicationTemplateResult) bool { return true },
+		func(t ApplicationTemplateResult) string { return t.ID },
+		func(t ApplicationTemplateResult) string { return t.LastModifiedAt },
+	)
 
-	// Return the first match (or most recent if multiple)
-	return &matches[0], nil
+	for i := range matches {
+		if matches[i].ID == matchedID {
+			return &matches[i], nil
+		}
+	}
+	return nil, fmt.Errorf("internal error: matched cluster environment id %q not found", matchedID)
 }
 
 // filterExactApplicationTemplateMatches narrows a name_contains substring search down to
