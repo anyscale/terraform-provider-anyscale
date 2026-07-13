@@ -66,8 +66,13 @@ func TestAccContainerImagesDataSource_WithBuild(t *testing.T) {
 			{
 				Config: testAccContainerImagesDataSourceWithBuildConfig(imageName),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify the data source returns results (filtered by name)
-					resource.TestCheckResourceAttrSet("data.anyscale_container_images.by_name", "container_images.#"),
+					// DS-IMG-7: pin the exact count, not just non-zero. imageName is a
+					// UniqueName-generated random string, so name_contains matching
+					// exactly one image is the expected outcome if filtering genuinely
+					// narrows; a no-op filter would return every image in the (possibly
+					// long-lived, never-truly-deleted per the file-level comment above)
+					// test org instead of exactly this one.
+					resource.TestCheckResourceAttr("data.anyscale_container_images.by_name", "container_images.#", "1"),
 
 					// Verify the first image has expected fields populated
 					resource.TestCheckResourceAttrSet("data.anyscale_container_images.by_name", "container_images.0.id"),
