@@ -45,7 +45,7 @@ output "project_description_by_id" {
 
 ### Optional
 
-- `cloud_id` (String) The cloud ID this project belongs to. Can be used as a filter when looking up by name.
+- `cloud_id` (String) The cloud ID this project belongs to. Can be used as a filter when looking up by name. Null if the project has no associated cloud reported by the API.
 - `cloud_name` (String) The cloud name this project belongs to. Can be used as a filter when looking up by name. Will be resolved to cloud_id.
 - `id` (String) The unique identifier of the project. Either `id` or `name` must be specified.
 - `name` (String) The name of the project. Either `id` or `name` must be specified.

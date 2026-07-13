@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -80,7 +81,7 @@ func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 	attributes["cloud_id"] = schema.StringAttribute{
 		Optional:            true,
 		Computed:            true,
-		MarkdownDescription: "The cloud ID this project belongs to. Can be used as a filter when looking up by name.",
+		MarkdownDescription: "The cloud ID this project belongs to. Can be used as a filter when looking up by name. Null if the project has no associated cloud reported by the API.",
 	}
 	attributes["cloud_name"] = schema.StringAttribute{
 		Optional:            true,
@@ -210,27 +211,15 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	// Populate config
 	config.ID = types.StringValue(project.ID)
 	config.Name = types.StringValue(project.Name)
-	config.CloudID = types.StringValue(project.ParentCloudID)
+	// DS-PROJ-1: parent_cloud_id is genuinely nullable server-side.
+	config.CloudID = types.StringPointerValue(project.ParentCloudID)
 
-	if project.Description != nil {
-		config.Description = types.StringValue(*project.Description)
-	} else {
-		config.Description = types.StringNull()
-	}
-
-	if project.CreatorID != nil {
-		config.CreatorID = types.StringValue(*project.CreatorID)
-	} else {
-		config.CreatorID = types.StringNull()
-	}
-
+	// X-1: all three are already *string - StringPointerValue directly
+	// instead of a verbose if-nil-else block.
+	config.Description = types.StringPointerValue(project.Description)
+	config.CreatorID = types.StringPointerValue(project.CreatorID)
 	config.CreatedAt = types.StringValue(project.CreatedAt)
-
-	if project.LastUsedCloudID != nil {
-		config.LastUsedCloudID = types.StringValue(*project.LastUsedCloudID)
-	} else {
-		config.LastUsedCloudID = types.StringNull()
-	}
+	config.LastUsedCloudID = types.StringPointerValue(project.LastUsedCloudID)
 
 	config.IsDefault = types.BoolValue(project.IsDefault)
 	config.DirectoryName = types.StringValue(project.DirectoryName)
@@ -294,8 +283,10 @@ func (d *ProjectDataSource) getProject(ctx context.Context, projectID string) (*
 		ctx, d.client, "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil, http.StatusOK,
 	)
 	if err != nil {
-		// Check for 404
-		if err.Error() == "unexpected status 404: {\"detail\":\"Project not found\"}" {
+		// DS-PROJ-2: Contains("404") matches resource_project.go's robust check -
+		// the previous exact-string match on the full detail text would silently
+		// stop detecting not-found if the backend ever reworded that message.
+		if strings.Contains(err.Error(), "404") {
 			return nil, fmt.Errorf("project not found")
 		}
 		return nil, fmt.Errorf("failed to get project: %w", err)

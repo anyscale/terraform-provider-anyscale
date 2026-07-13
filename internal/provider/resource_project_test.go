@@ -81,7 +81,7 @@ func newProjectCreateTestServer(t *testing.T, cloudID, cloudName string) *httpte
 		_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
 			ID:            projectID,
 			Name:          "test-project",
-			ParentCloudID: cloudID,
+			ParentCloudID: strPtr(cloudID),
 			CreatedAt:     "2024-01-01T00:00:00Z",
 			IsDefault:     false,
 			DirectoryName: "test-project-dir",
@@ -216,14 +216,14 @@ func TestProjectResourceCreate_RequestBody(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-				ID: "prj_test", Name: "test-project", ParentCloudID: "cld_123",
+				ID: "prj_test", Name: "test-project", ParentCloudID: strPtr("cld_123"),
 				CreatedAt: "2024-01-01T00:00:00Z", DirectoryName: "test-project-dir",
 			}})
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-			ID: "prj_test", Name: "test-project", ParentCloudID: "cld_123",
+			ID: "prj_test", Name: "test-project", ParentCloudID: strPtr("cld_123"),
 			CreatedAt: "2024-01-01T00:00:00Z", DirectoryName: "test-project-dir",
 		}})
 	}))
@@ -413,7 +413,7 @@ func TestProjectResourceReadProject(t *testing.T) {
 			ID:              projectID,
 			Name:            "test-project",
 			Description:     strPtr("a description"),
-			ParentCloudID:   "cld_789",
+			ParentCloudID:   strPtr("cld_789"),
 			CreatorID:       strPtr("user_789"),
 			CreatedAt:       "2024-01-01T00:00:00Z",
 			LastUsedCloudID: strPtr("cld_789"),
@@ -562,6 +562,54 @@ func TestProjectResourceReadProject(t *testing.T) {
 			got.IdentityID.ValueString() != "identity_1" ||
 			got.UserID.ValueString() != "user_1" {
 			t.Errorf("collaborator mapping = %+v, want email=user1@example.com permission_level=write identity_id=identity_1 user_id=user_1", got)
+		}
+	})
+
+	// t.Run("cloud_id is null when parent_cloud_id is null") is the resource-side
+	// DS-PROJ-1 mutation-proof regression guard. Same bug as the two data
+	// sources: ProjectResult.ParentCloudID is a plain string, so a nil API
+	// parent_cloud_id silently decodes to "" before readProject ever runs, and
+	// line 676 (model.CloudID = types.StringValue(result.ParentCloudID)) writes
+	// that "" straight into state. The two existing CloudID.IsNull() checks in
+	// this file (the cloud_name subtest above) cover an unrelated case - cloud_id
+	// deliberately left unset when cloud_name drives the config - not a null
+	// parent_cloud_id from the API. Uses a raw JSON body since ParentCloudID's
+	// current type cannot express JSON null in a struct literal fixture. This
+	// currently FAILS (cloud_id comes back "" not null), which is the
+	// mutation-proof evidence. Must pass once ParentCloudID is *string +
+	// StringPointerValue on all three call sites (both data sources and this
+	// resource), which the shared struct's type change forces together.
+	t.Run("cloud_id is null when parent_cloud_id is null", func(t *testing.T) {
+		const noCloudProjectID = "prj_no_cloud"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+noCloudProjectID {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"result": {
+					"id": "` + noCloudProjectID + `",
+					"name": "no-cloud-project",
+					"parent_cloud_id": null,
+					"created_at": "2024-01-01T00:00:00Z",
+					"is_default": false,
+					"directory_name": "no-cloud-project-dir"
+				}}`))
+				return
+			}
+			t.Errorf("unexpected request (no collaborators configured, must not fetch them): %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		// CloudID starts null (e.g. an import), matching the "both null" branch
+		// in readProject's comment that sets cloud_id from the API response.
+		model := &ProjectResourceModel{}
+		if err := r.readProject(context.Background(), noCloudProjectID, model); err != nil {
+			t.Fatalf("readProject returned error: %v", err)
+		}
+
+		if !model.CloudID.IsNull() {
+			t.Errorf("cloud_id = %#v, want null for a nil parent_cloud_id, got a non-null value (likely \"\")", model.CloudID)
 		}
 	})
 }
@@ -1132,12 +1180,12 @@ func TestProjectResourceCreate_CollaboratorRetryEngagesEndToEnd(t *testing.T) {
 			// Deliberately no CreatedAt field, matching the real API's actual POST response body.
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-				ID: projectID, Name: "test-project", ParentCloudID: "cld_123", DirectoryName: "test-project-dir",
+				ID: projectID, Name: "test-project", ParentCloudID: strPtr("cld_123"), DirectoryName: "test-project-dir",
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID:
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-				ID: projectID, Name: "test-project", ParentCloudID: "cld_123",
+				ID: projectID, Name: "test-project", ParentCloudID: strPtr("cld_123"),
 				CreatedAt: time.Now().Format(time.RFC3339), DirectoryName: "test-project-dir",
 			}})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/projects/"+projectID+"/collaborators/users/batch_create":
