@@ -48,6 +48,8 @@ You are assisting with development of a Go-based Terraform Provider for managing
   - `internal/provider/data_source_*.go` — each data source in its own file
   - `docs/` — generated docs
   - `examples/` — runnable Terraform configs
+- Prefer the shared request/parse helpers in `internal/provider/api_helpers.go` (e.g. the generic `DoRequestAndParse[T]`) over hand-rolling the request → read → close → status-check → unmarshal sequence. Many call sites already use them; new resources and data sources should too.
+- For a nullable/optional API field mapped to a Computed attribute, parse it into a `*string` and set state via `types.StringPointerValue(...)` so an absent/`null` value becomes Terraform `null`, never `""`. The null-vs-empty-string distinction is a user-facing contract; collapsing it is a bug.
 
 ---
 
@@ -65,6 +67,11 @@ You are assisting with development of a Go-based Terraform Provider for managing
   - `resp.ResourceData`
   - `resp.DataSourceData`
 
+
+### Connection-level identity (singleton data sources)
+Values that are invariant across every resource a given provider/token sees — organization identity, and other connection-level metadata — belong in a dedicated **zero-argument "current X" data source**, NOT mirrored as an attribute on individual resources. Precedents: `anyscale_user` (the authenticated principal) and `anyscale_organization` (the connected org), both sourced from `GET /api/v2/userinfo` and both taking no arguments (no selector, no plural variant). Before adding such a field to a resource, ask whether it is connection-level; if so, surface it through a singleton data source instead.
+
+Cardinality gotcha: `userinfo` types `organizations` as a *list*, but the backend handler always returns exactly one element (the token-scoped org). Trace the real handler/response, not the model's list type, before assuming a field can hold more than one value — the same "trace, don't assume" discipline the `api/v2` section calls for.
 
 ### Error handling
 - Use `resp.Diagnostics.AddError` for configuration/auth issues.
@@ -97,6 +104,7 @@ make lint
 make docs
 # Do not manually edit generated docs under docs/
 ```
+- Schema `MarkdownDescription` strings are the source `tfplugindocs` renders into the registry-published doc pages, so write them to explain non-obvious behavior inline, not just label the field — e.g. *why* a data source takes no arguments, *why* an attribute can be `null`, or what a value is used for. A first-time reader should not have to guess. The `anyscale_organization` data source schema is a good example.
 
 ## Changelog Policy: When to Skip
 
@@ -137,6 +145,10 @@ terraform apply
 	- Unit tests for schema validation and model conversions.
 	- Acceptance tests using resource.
 	- Test.
+
+### Verifying test strength and CI execution
+- **Prove a "mutation-proof" test actually catches its regression.** If a test is meant to guard a specific behavior (e.g. a nullable field mapping to `null` not `""`, or a length guard preventing a panic), do not accept it on code review alone — temporarily introduce the regression, confirm the test FAILS, then revert (byte-diff clean). A test that would still pass against the broken code is not protecting anything.
+- **New acceptance tests must match their CI shard's name regex, or they are silently skipped.** CI runs acceptance tests in two name-sharded jobs (see `.github/workflows/ci.yml`): `acctest-data` selects `^TestAcc[A-Za-z]+DataSource` and `acctest-resource` selects `^TestAcc[A-Za-z]+Resource`. A test whose name does not match its shard's regex neither runs nor fails — it simply never executes. Name new acctests accordingly (e.g. `TestAcc<Thing>DataSource_<Case>`), and confirm they genuinely RUN (not SKIP) by reading the shard's job log, not just trusting the green checkmark.
 
 ### Acceptance Tests
 
