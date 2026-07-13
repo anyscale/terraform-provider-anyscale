@@ -22,3 +22,23 @@ output "cloud_provider_by_id" {
   value       = data.anyscale_cloud.by_id.cloud_provider
   description = "Cloud provider (AWS, GCP, AZURE, GENERIC) when looking up by id"
 }
+
+output "cloud_is_k8s" {
+  value       = data.anyscale_cloud.by_name.is_k8s
+  description = "Whether this cloud uses Kubernetes"
+}
+
+output "cloud_availability_zones" {
+  value       = data.anyscale_cloud.by_name.availability_zones
+  description = "Availability zones considered for this cloud"
+}
+
+output "cloud_version" {
+  value       = data.anyscale_cloud.by_name.version
+  description = "Cluster management stack version (v1 or v2)"
+}
+
+output "cloud_external_id" {
+  value       = data.anyscale_cloud.by_name.external_id
+  description = "External ID for cross-account trust relationships; null if not set"
+}
