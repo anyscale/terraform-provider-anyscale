@@ -208,12 +208,15 @@ func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.
 // across multiple calls" - a real config with more results than one page's
 // count would still silently truncate even with the sentinel fix alone. This
 // mock instead splits the 3 versions across two pages and requires the
-// second request to carry the first response's exact next_paging_token
-// (nested under a paging object, per the real ext/v0 body-based pagination
-// shape traced for this endpoint - paging.count/paging.paging_token in the
-// request body, metadata.next_paging_token in the response body, both
-// distinct from the URL-query-based pagination every other endpoint in this
-// provider uses). Fails against any implementation that fetches only page 1.
+// second request to carry the first response's exact next_paging_token.
+//
+// CC5b: retargeted from asserting a body-nested paging.paging_token (the old
+// ext/v0 shape) to the URL query string, since that's where api/v2's
+// required_pagination_large actually reads it from. Left unretargeted, this
+// would have kept "passing" vacuously - nothing populates that body field
+// anymore, so the old assertion would never fail no matter how broken the new
+// pagination is. See TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody
+// for the dedicated negative-space proof that the body does NOT carry paging.
 func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 	ctx := context.Background()
 	const wantToken = "versions-page-2-token"
@@ -222,12 +225,6 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 	var sawTokenOnSecondRequest string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("failed to parse request body: %v", err)
-		}
-
 		requestCount++
 		w.WriteHeader(http.StatusOK)
 
@@ -242,11 +239,7 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 			return
 		}
 
-		if paging, ok := payload["paging"].(map[string]any); ok {
-			if token, ok := paging["paging_token"].(string); ok {
-				sawTokenOnSecondRequest = token
-			}
-		}
+		sawTokenOnSecondRequest = r.URL.Query().Get("paging_token")
 		_, _ = w.Write([]byte(`{
 			"results": [
 				{"id": "ccfg_v3", "name": "test-config", "version": 3}
@@ -267,7 +260,7 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
 	}
 	if sawTokenOnSecondRequest != wantToken {
-		t.Errorf("second request's paging.paging_token = %q, want %q (the exact token the first response returned)", sawTokenOnSecondRequest, wantToken)
+		t.Errorf("second request's paging_token query param = %q, want %q (the exact token the first response returned)", sawTokenOnSecondRequest, wantToken)
 	}
 
 	want := []int64{1, 2, 3}
@@ -278,5 +271,106 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("fetchComputeConfigVersions()[%d] = %d, want %d", i, got[i], want[i])
 		}
+	}
+}
+
+// TestFindComputeConfigByName_ExactMatchOnPageTwo is CC5b's pagination-proof
+// for findComputeConfigByName (fetchComputeConfigVersions already has one
+// above) - page 1 returns a decoy, page 2 returns the real match, and the
+// second request must carry the first response's exact paging_token as a URL
+// query parameter.
+func TestFindComputeConfigByName_ExactMatchOnPageTwo(t *testing.T) {
+	ctx := context.Background()
+	const wantToken = "byname-page-2-token"
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{
+				"results": [{"id": "ccfg_decoy", "name": "test-config", "created_at": "2024-01-01T00:00:00Z", "anonymous": false}],
+				"metadata": {"next_paging_token": "` + wantToken + `"}
+			}`))
+			return
+		}
+
+		if r.URL.Query().Get("paging_token") != wantToken {
+			t.Errorf("second request's paging_token query param = %q, want %q", r.URL.Query().Get("paging_token"), wantToken)
+		}
+		_, _ = w.Write([]byte(`{
+			"results": [{"id": "ccfg_exact", "name": "test-config", "created_at": "2024-06-01T00:00:00Z", "anonymous": false}],
+			"metadata": {"next_paging_token": null}
+		}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.findComputeConfigByName(ctx, "test-config", "")
+	if err != nil {
+		t.Fatalf("findComputeConfigByName() error = %v", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
+	}
+	// Both results share the name (real backend already exact-matches server-side), so the
+	// tiebreak (most recently created) picks ccfg_exact - proving both pages' results were
+	// actually collected, not just that page 2 was reached.
+	if got != "ccfg_exact" {
+		t.Errorf("findComputeConfigByName() = %q, want %q (both pages' matches must be collected before the tiebreak)", got, "ccfg_exact")
+	}
+}
+
+// TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody is the
+// direct proof for the hazard CC5b exists to prevent: a naive migration could
+// keep nesting paging/paging_token/count inside the JSON body (the ext/v0
+// shape) - it would compile, hit /api/v2/compute_templates/search, get HTTP
+// 200 back, and silently paginate wrong (always page 1's worth of data, no
+// error). A pagination-proof test alone (does the function eventually return
+// the right answer) would not catch this if the mock is lenient about where
+// it reads pagination params from - both tests above use exactly that kind of
+// lenient mock. This test's mock is deliberately strict: it asserts the
+// request body decodes to only the expected filter keys with no "paging" key
+// at all, and separately asserts count/paging_token arrive as URL query
+// params.
+func TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/compute_templates/search" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to parse request body: %v", err)
+		}
+		if _, hasPaging := payload["paging"]; hasPaging {
+			t.Error(`request body contains a "paging" key - pagination must be sent as URL query params on api/v2, not nested in the body`)
+		}
+		if _, hasName := payload["name"]; !hasName {
+			t.Error(`request body missing expected filter key "name"`)
+		}
+
+		if got := r.URL.Query().Get("count"); got != "100" {
+			t.Errorf(`count query param = %q, want "100"`, got)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results": [{"id": "ccfg_1", "name": "test-config"}], "metadata": {"next_paging_token": null}}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithToken(server.URL, "test-token")
+	basePayload := map[string]interface{}{
+		"name": map[string]string{"equals": "test-config"},
+	}
+
+	_, err := searchComputeTemplatesPaged(ctx, client, basePayload, decodeComputeConfigSearchPage)
+	if err != nil {
+		t.Fatalf("searchComputeTemplatesPaged() error = %v", err)
 	}
 }
