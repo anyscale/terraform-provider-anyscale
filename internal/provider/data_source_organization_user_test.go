@@ -123,7 +123,10 @@ func TestOrganizationCollaboratorToUserModel_NullName(t *testing.T) {
 		CreatedAt:       "2024-01-01T00:00:00Z",
 	}
 
-	got := organizationCollaboratorToUserModel(result)
+	got, diags := organizationCollaboratorToUserModel(context.Background(), result)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 
 	if !got.Name.IsNull() {
 		t.Errorf("Name = %#v, want null for a nil API name, got a non-null value (likely \"\")", got.Name)
@@ -144,7 +147,10 @@ func TestOrganizationCollaboratorToUserModel_NonNullName(t *testing.T) {
 		CreatedAt:       "2024-01-01T00:00:00Z",
 	}
 
-	got := organizationCollaboratorToUserModel(result)
+	got, diags := organizationCollaboratorToUserModel(context.Background(), result)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 
 	if got.Name.IsNull() {
 		t.Fatal("Name = null, want the real name to come through")

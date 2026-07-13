@@ -27,6 +27,8 @@ func organizationUserObjectType() types.ObjectType {
 			"email":            types.StringType,
 			"permission_level": types.StringType,
 			"created_at":       types.StringType,
+			"base_role":        types.StringType,
+			"additional_roles": types.ListType{ElemType: types.StringType},
 		},
 	}
 }

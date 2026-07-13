@@ -264,8 +264,10 @@ func TestUserDataSourceRead_NullOrganizationPermissionLevel(t *testing.T) {
 			"name": "John Doe",
 			"username": "johndoe",
 			"organization_permission_level": null,
-			"organization_ids": [],
-			"organizations": []
+			"organization_ids": ["org_1"],
+			"organizations": [
+				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": null}
+			]
 		}
 	}`
 
@@ -300,8 +302,10 @@ func TestUserDataSourceRead_UserGroupIDsPagesBeyondFirstPage(t *testing.T) {
 			"name": "John Doe",
 			"username": "johndoe",
 			"organization_permission_level": "owner",
-			"organization_ids": [],
-			"organizations": []
+			"organization_ids": ["org_1"],
+			"organizations": [
+				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": null}
+			]
 		}
 	}`
 
