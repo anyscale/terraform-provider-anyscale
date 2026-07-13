@@ -1,0 +1,4 @@
+```
+release-note:changed
+data-source/anyscale_compute_config: Search compute configs by name/version via `api/v2/compute_templates/search` instead of the deprecated `ext/v0/cluster_computes/search` endpoint; behavior is unchanged, including still returning archived configs.
+```
