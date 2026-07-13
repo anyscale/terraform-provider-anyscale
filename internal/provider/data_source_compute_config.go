@@ -66,7 +66,7 @@ func (d *ComputeConfigDataSource) Metadata(ctx context.Context, req datasource.M
 // Schema defines the data source schema.
 func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name.",
+		MarkdownDescription: "Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. A few resource-only fields (`min_resources`, `max_resources`, `flags`, `advanced_instance_config`, `cloud_resource`) aren't yet exposed here — see the [Compute Config guide](../guides/compute-config.md).",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
