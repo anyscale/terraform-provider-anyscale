@@ -330,6 +330,13 @@ type OrganizationCollaboratorResult struct {
 	Name            *string `json:"name"`             // Can be null
 	PermissionLevel string  `json:"permission_level"` // "owner" or "collaborator"
 	CreatedAt       string  `json:"created_at"`
+
+	// DS-OU-2: permission_level above is deprecated backend-side in favor of these
+	// two - base_role is a required enum (never null); additional_roles is a
+	// required list (can be empty, never null). Both traced against
+	// product backend/server/api/product/models/organization_collaborators.py.
+	BaseRole        string   `json:"base_role"`
+	AdditionalRoles []string `json:"additional_roles"`
 }
 
 // OrganizationCollaboratorsListResponse represents the response from listing collaborators
