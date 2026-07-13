@@ -167,7 +167,54 @@ output "default_cloud" {
   description = "Default cloud name"
 }
 
-# Example 12: Get current user information
+# Example 12: Look up an existing project by name, scoped to a cloud
+data "anyscale_project" "team_project" {
+  name       = "my-team-project"
+  cloud_name = "production-cloud"
+}
+
+output "project_directory_name" {
+  value       = data.anyscale_project.team_project.directory_name
+  description = "The storage directory name used by this project"
+}
+
+output "project_collaborators" {
+  value       = data.anyscale_project.team_project.collaborators
+  description = "Current collaborators on the project (email + permission_level each)"
+}
+
+# Example 13: Look up an existing project by ID
+data "anyscale_project" "by_id" {
+  id = "prj_abc123xyz"
+}
+
+output "project_by_id_description" {
+  value       = data.anyscale_project.by_id.description
+  description = "The project's description when looking up by ID"
+}
+
+# Example 14: List every non-default project in a cloud
+data "anyscale_projects" "cloud_projects" {
+  cloud_name       = "production-cloud"
+  include_defaults = false
+}
+
+output "cloud_project_ids" {
+  value       = [for p in data.anyscale_projects.cloud_projects.projects : p.id]
+  description = "IDs of every non-default project in the cloud"
+}
+
+# Example 15: Filter projects by a partial name match across all clouds
+data "anyscale_projects" "research" {
+  name_contains = "research"
+}
+
+output "research_project_names" {
+  value       = [for p in data.anyscale_projects.research.projects : p.name]
+  description = "Names of projects whose name contains \"research\""
+}
+
+# Example 16: Get current user information
 data "anyscale_user" "current" {
 }
 
@@ -207,7 +254,27 @@ output "current_user_cloud_count" {
   description = "Number of clouds the current user has access to"
 }
 
-# Example 13: List all users in the organization (BETA - SCIM)
+# Example 17: Get the connected organization's identity - takes no arguments,
+# since an API token is always scoped to exactly one organization. Distinct
+# from anyscale_user.organizations above: that list exists because the
+# underlying API models organization membership as a list, but in practice it
+# always holds exactly one entry (the token's own org). anyscale_organization
+# is the direct, self-documenting way to reach that one organization without
+# indexing into someone else's list.
+data "anyscale_organization" "current" {
+}
+
+output "organization_name" {
+  value       = data.anyscale_organization.current.name
+  description = "The name of the connected organization"
+}
+
+output "organization_default_cloud_id" {
+  value       = data.anyscale_organization.current.default_cloud_id
+  description = "Default cloud ID for the organization; null if none is configured"
+}
+
+# Example 18: List all users in the organization (BETA - SCIM)
 data "anyscale_organization_users" "all" {
 }
 
@@ -225,7 +292,7 @@ output "organization_users_list" {
   description = "List of all organization users"
 }
 
-# Example 14: Look up a specific user by email (BETA - SCIM)
+# Example 19: Look up a specific user by email (BETA - SCIM)
 data "anyscale_organization_user" "specific" {
   email = "admin@example.com"
 }
@@ -235,7 +302,7 @@ output "specific_user_id" {
   description = "The identity ID of the specific user"
 }
 
-# Example 15: Look up a specific user by ID (BETA - SCIM)
+# Example 20: Look up a specific user by ID (BETA - SCIM)
 data "anyscale_organization_user" "by_id" {
   id = "usr_abc123xyz"
 }
@@ -245,7 +312,7 @@ output "user_by_id_email" {
   description = "The email of the user looked up by identity ID"
 }
 
-# Example 16: Look up a specific user by user_id (BETA - SCIM)
+# Example 21: Look up a specific user by user_id (BETA - SCIM)
 data "anyscale_organization_user" "by_user_id" {
   user_id = "usr_xyz789abc"
 }
@@ -255,7 +322,7 @@ output "user_by_user_id_email" {
   description = "The email of the user looked up by user_id"
 }
 
-# Example 17: Filter organization users by email (BETA - SCIM)
+# Example 22: Filter organization users by email (BETA - SCIM)
 data "anyscale_organization_users" "filtered" {
   email = "admin@example.com"
 }
@@ -265,7 +332,7 @@ output "filtered_users_count" {
   description = "Number of users matching the email filter"
 }
 
-# Example 18: Get service accounts only (BETA - SCIM)
+# Example 23: Get service accounts only (BETA - SCIM)
 data "anyscale_organization_users" "service_accounts" {
   is_service_account = true
 }
@@ -275,7 +342,7 @@ output "service_accounts_count" {
   description = "Number of service accounts in the organization"
 }
 
-# Example 28: Look up an existing container image by name
+# Example 24: Look up an existing container image by name
 data "anyscale_container_image" "training" {
   name = "training-image"
 }
@@ -295,7 +362,7 @@ output "training_image_digest" {
   description = "The content digest of the latest build (e.g. sha256:...); null until a build succeeds"
 }
 
-# Example 29: List and filter container images
+# Example 25: List and filter container images
 data "anyscale_container_images" "recent" {
   name_contains    = "training"
   include_archived = false
