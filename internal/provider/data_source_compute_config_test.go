@@ -199,3 +199,84 @@ func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.
 		}
 	}
 }
+
+// TestFetchComputeConfigVersions_FollowsPagingToken is DS-CC-1's other
+// mutation-proof half, flagged by forge while implementing: the test above
+// proves the version=-2 sentinel is sent, but its mock returns every version
+// in a single response with no next_paging_token at all, so it cannot tell
+// apart "fetches everything in one call" from "correctly follows pagination
+// across multiple calls" - a real config with more results than one page's
+// count would still silently truncate even with the sentinel fix alone. This
+// mock instead splits the 3 versions across two pages and requires the
+// second request to carry the first response's exact next_paging_token
+// (nested under a paging object, per the real ext/v0 body-based pagination
+// shape traced for this endpoint - paging.count/paging.paging_token in the
+// request body, metadata.next_paging_token in the response body, both
+// distinct from the URL-query-based pagination every other endpoint in this
+// provider uses). Fails against any implementation that fetches only page 1.
+func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
+	ctx := context.Background()
+	const wantToken = "versions-page-2-token"
+
+	requestCount := 0
+	var sawTokenOnSecondRequest string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to parse request body: %v", err)
+		}
+
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{
+				"results": [
+					{"id": "ccfg_v1", "name": "test-config", "version": 1},
+					{"id": "ccfg_v2", "name": "test-config", "version": 2}
+				],
+				"metadata": {"next_paging_token": "` + wantToken + `"}
+			}`))
+			return
+		}
+
+		if paging, ok := payload["paging"].(map[string]any); ok {
+			if token, ok := paging["paging_token"].(string); ok {
+				sawTokenOnSecondRequest = token
+			}
+		}
+		_, _ = w.Write([]byte(`{
+			"results": [
+				{"id": "ccfg_v3", "name": "test-config", "version": 3}
+			],
+			"metadata": {"next_paging_token": null}
+		}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.fetchComputeConfigVersions(ctx, "test-config")
+	if err != nil {
+		t.Fatalf("fetchComputeConfigVersions() error = %v", err)
+	}
+
+	if requestCount != 2 {
+		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
+	}
+	if sawTokenOnSecondRequest != wantToken {
+		t.Errorf("second request's paging.paging_token = %q, want %q (the exact token the first response returned)", sawTokenOnSecondRequest, wantToken)
+	}
+
+	want := []int64{1, 2, 3}
+	if len(got) != len(want) {
+		t.Fatalf("fetchComputeConfigVersions() = %v, want %v (all 3 versions across both pages)", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fetchComputeConfigVersions()[%d] = %d, want %d", i, got[i], want[i])
+		}
+	}
+}
