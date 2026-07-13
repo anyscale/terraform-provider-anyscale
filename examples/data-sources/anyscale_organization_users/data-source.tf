@@ -25,3 +25,18 @@ output "service_account_emails" {
   value       = [for u in data.anyscale_organization_users.service_accounts.users : u.email]
   description = "Emails of every service account in the organization"
 }
+
+output "users_by_base_role" {
+  value = {
+    for u in data.anyscale_organization_users.humans.users : u.email => u.base_role
+  }
+  description = "Base role for every human user, keyed by email - prefer base_role over permission_level"
+}
+
+output "users_with_additional_roles" {
+  value = [
+    for u in data.anyscale_organization_users.humans.users : u.email
+    if length(u.additional_roles) > 0
+  ]
+  description = "Emails of users who have at least one additional role beyond their base role"
+}

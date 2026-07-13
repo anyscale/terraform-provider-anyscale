@@ -3,12 +3,12 @@
 page_title: "anyscale_compute_config Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name.
+  Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. A few resource-only fields (min_resources, max_resources, flags, advanced_instance_config, cloud_resource) aren't yet exposed here — see the Compute Config guide ../guides/compute-config.md.
 ---
 
 # anyscale_compute_config (Data Source)
 
-Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name.
+Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. A few resource-only fields (`min_resources`, `max_resources`, `flags`, `advanced_instance_config`, `cloud_resource`) aren't yet exposed here — see the [Compute Config guide](../guides/compute-config.md).
 
 ## Example Usage
 

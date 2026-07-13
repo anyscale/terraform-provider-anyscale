@@ -134,3 +134,11 @@ This is intentional, not an inconsistency with the resource's behavior described
 specifically to stop a *resource's* plan from drifting toward values you never configured. A data source
 has no plan to protect — it's a lookup, refreshed in full on every read — so there's nothing to mask
 against, and no reason to hide real values behind a null.
+
+## Cluster-level fields not yet on the data source
+
+`min_resources`, `max_resources`, top-level `flags`, top-level `advanced_instance_config`, and
+`cloud_resource` are resource-only today. This is different from the per-node
+`flags`/`advanced_instance_config` nested inside `head_node`/`worker_nodes` above, which the data
+source already exposes and unmasks fully — only these five cluster-level fields are the gap. Adding
+resource-parity read-back for them is tracked for a future session.

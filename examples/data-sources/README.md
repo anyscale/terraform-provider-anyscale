@@ -60,6 +60,49 @@ locals {
 }
 ```
 
+### `anyscale_project`
+
+Look up an existing Anyscale Project by ID or name.
+
+**Use cases:**
+- Reference an existing project when creating project-scoped resources
+- Get project details (directory name, collaborators) for outputs or validation
+- Look up a project without hardcoding its ID
+
+**Example:**
+```terraform
+data "anyscale_project" "team_project" {
+  name       = "my-team-project"
+  cloud_name = "production-cloud"
+}
+
+output "project_collaborators" {
+  value = data.anyscale_project.team_project.collaborators
+}
+```
+
+### `anyscale_projects`
+
+List and filter Anyscale Projects.
+
+**Use cases:**
+- List every project in a cloud
+- Filter projects by a partial name match
+- Exclude each cloud's auto-created default project from results
+
+**Example:**
+```terraform
+# Every non-default project in a cloud
+data "anyscale_projects" "cloud_projects" {
+  cloud_name       = "production-cloud"
+  include_defaults = false
+}
+
+output "cloud_project_ids" {
+  value = [for p in data.anyscale_projects.cloud_projects.projects : p.id]
+}
+```
+
 ### `anyscale_compute_config`
 
 Look up an existing Anyscale Compute Configuration by ID or name.
@@ -134,6 +177,78 @@ output "recent_container_images" {
       name_version = img.name_version
     }
   ]
+}
+```
+
+### `anyscale_user`
+
+Get the current authenticated user - the identity behind the provider's token. Takes no arguments.
+
+**Use cases:**
+- Look up your own user ID, email, or permission level without hardcoding it
+- List the clouds and organizations your token can access
+
+**Example:**
+```terraform
+data "anyscale_user" "current" {}
+
+output "current_user_email" {
+  value = data.anyscale_user.current.email
+}
+```
+
+### `anyscale_organization`
+
+Get the organization the provider's token is connected to. Takes no arguments - an Anyscale API
+token is always scoped to exactly one organization, so there is never a set to select from.
+
+**Use cases:**
+- Reference the organization's default cloud without hardcoding its ID
+- Look up the organization's name or public identifier for outputs
+
+**Example:**
+```terraform
+data "anyscale_organization" "current" {}
+
+output "organization_default_cloud_id" {
+  value = data.anyscale_organization.current.default_cloud_id
+}
+```
+
+### `anyscale_organization_user` (BETA)
+
+Look up a specific user in the organization by identity ID, user ID, or email.
+
+**Use cases:**
+- Resolve a user's `identity_id` before importing or creating an `anyscale_organization_collaborator`
+- Confirm a user exists in the organization before granting project/cloud access
+
+**Example:**
+```terraform
+data "anyscale_organization_user" "by_email" {
+  email = "user@example.com"
+}
+
+output "user_identity_id" {
+  value = data.anyscale_organization_user.by_email.id
+}
+```
+
+### `anyscale_organization_users` (BETA)
+
+List and filter users in the organization.
+
+**Use cases:**
+- List every human user in the organization (service accounts excluded by default)
+- Filter by a partial email match
+- Include service accounts when needed
+
+**Example:**
+```terraform
+data "anyscale_organization_users" "humans" {}
+
+output "organization_user_emails" {
+  value = [for u in data.anyscale_organization_users.humans.users : u.email]
 }
 ```
 
@@ -251,8 +366,15 @@ resource "anyscale_compute_config" "west_config" {
 
 - [Provider Documentation](../../docs/index.md)
 - [Cloud Data Source](../../docs/data-sources/cloud.md)
+- [Clouds Data Source](../../docs/data-sources/clouds.md)
+- [Project Data Source](../../docs/data-sources/project.md)
+- [Projects Data Source](../../docs/data-sources/projects.md)
 - [Compute Config Data Source](../../docs/data-sources/compute_config.md)
 - [Container Image Data Source](../../docs/data-sources/container_image.md)
 - [Container Images Data Source](../../docs/data-sources/container_images.md)
 - [Container Images guide](../../docs/guides/container-images.md)
+- [User Data Source](../../docs/data-sources/user.md)
+- [Organization Data Source](../../docs/data-sources/organization.md)
+- [Organization User Data Source](../../docs/data-sources/organization_user.md)
+- [Organization Users Data Source](../../docs/data-sources/organization_users.md)
 - [Anyscale Documentation](https://docs.anyscale.com/)

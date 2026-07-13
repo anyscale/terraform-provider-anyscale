@@ -3,12 +3,12 @@
 page_title: "anyscale_organization_users Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  BETA FEATURE: Use this data source to retrieve a list of all users (including service accounts) in your organization. This is useful for SCIM provisioning and user management.
+  BETA FEATURE: Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving id values before importing anyscale_organization_collaborator resources, or filtering users by email or account type.
 ---
 
 # anyscale_organization_users (Data Source)
 
-**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. This is useful for SCIM provisioning and user management.
+**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_collaborator` resources, or filtering users by email or account type.
 
 ## Example Usage
 
@@ -39,6 +39,21 @@ output "engineering_user_emails" {
 output "service_account_emails" {
   value       = [for u in data.anyscale_organization_users.service_accounts.users : u.email]
   description = "Emails of every service account in the organization"
+}
+
+output "users_by_base_role" {
+  value = {
+    for u in data.anyscale_organization_users.humans.users : u.email => u.base_role
+  }
+  description = "Base role for every human user, keyed by email - prefer base_role over permission_level"
+}
+
+output "users_with_additional_roles" {
+  value = [
+    for u in data.anyscale_organization_users.humans.users : u.email
+    if length(u.additional_roles) > 0
+  ]
+  description = "Emails of users who have at least one additional role beyond their base role"
 }
 ```
 

@@ -76,7 +76,7 @@ func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 	attributes["name"] = schema.StringAttribute{
 		Optional:            true,
 		Computed:            true,
-		MarkdownDescription: "The name of the project. Either `id` or `name` must be specified.",
+		MarkdownDescription: "The name of the project. Either `id` or `name` must be specified. If multiple projects have the same name, the most recently created one will be returned.",
 	}
 	attributes["cloud_id"] = schema.StringAttribute{
 		Optional:            true,
