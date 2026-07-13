@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -130,6 +131,71 @@ func TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions(t *testing.T)
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("fetchComputeConfigVersions()[%d] = %d, want %d (must be unique and ascending)", i, got[i], want[i])
+		}
+	}
+}
+
+// TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest is the
+// DS-CC-1 mutation-proof regression guard. The test above proves the
+// sort/dedup logic is correct, but its mock unconditionally returns every row
+// regardless of what request was actually sent - it could not have caught
+// DS-CC-1 because a real backend would never spontaneously return more than
+// the latest version unless the request explicitly asks for all of them.
+//
+// Per the traced backend model (ClusterComputesQuery.version,
+// backend/server/api/base/models/cluster_computes.py:244-271, confirmed
+// independently by both architect and forge): omitting the version field (or
+// sending -1) resolves to latest-version-only; version -2 is the documented
+// "do not filter by version" sentinel needed to enumerate history. This mock
+// simulates that real behavior - it only returns all 3 versions when the
+// request body's version field is exactly -2, and returns just the latest
+// otherwise - so this currently FAILS (only 1 version comes back, since
+// today's search payload has no version field at all) which is the
+// mutation-proof evidence. Must pass once fetchComputeConfigVersions sends
+// version: -2.
+func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to parse request body: %v", err)
+		}
+
+		w.WriteHeader(http.StatusOK)
+
+		version, hasVersion := payload["version"]
+		if hasVersion && version == float64(-2) {
+			_, _ = w.Write([]byte(`{"results": [
+				{"id": "ccfg_v1", "name": "test-config", "version": 1},
+				{"id": "ccfg_v2", "name": "test-config", "version": 2},
+				{"id": "ccfg_v3", "name": "test-config", "version": 3}
+			]}`))
+			return
+		}
+
+		// Real backend behavior: no version field (or -1) means latest-only.
+		_, _ = w.Write([]byte(`{"results": [
+			{"id": "ccfg_v3", "name": "test-config", "version": 3}
+		]}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.fetchComputeConfigVersions(ctx, "test-config")
+	if err != nil {
+		t.Fatalf("fetchComputeConfigVersions() error = %v", err)
+	}
+
+	want := []int64{1, 2, 3}
+	if len(got) != len(want) {
+		t.Fatalf("fetchComputeConfigVersions() = %v, want %v (all 3 historical versions, not just the latest)", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fetchComputeConfigVersions()[%d] = %d, want %d", i, got[i], want[i])
 		}
 	}
 }
