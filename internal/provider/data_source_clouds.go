@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -59,6 +60,11 @@ type CloudSummaryModel struct {
 	AutoAddUser             types.Bool   `tfsdk:"auto_add_user"`
 	LineageTrackingEnabled  types.Bool   `tfsdk:"lineage_tracking_enabled"`
 	IsAggregatedLogsEnabled types.Bool   `tfsdk:"is_aggregated_logs_enabled"`
+
+	// DS-CLOUD-5 (Phase B), via cloudSharedAttributes.
+	AvailabilityZones types.List   `tfsdk:"availability_zones"`
+	Version           types.String `tfsdk:"version"`
+	ExternalID        types.String `tfsdk:"external_id"`
 }
 
 // Metadata returns the data source type name.
@@ -148,19 +154,12 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	// Build query parameters
+	// DS-CLOUD-1: GET /api/v2/clouds only accepts "name" (substring) server-side -
+	// there is no provider or region query param on this endpoint at all, so those
+	// two are applied as client-side post-filters below instead, over every page.
 	params := url.Values{}
-
 	if !config.NameContains.IsNull() {
-		params.Add("name_contains", config.NameContains.ValueString())
-	}
-
-	if !config.CloudProvider.IsNull() {
-		params.Add("provider", config.CloudProvider.ValueString())
-	}
-
-	if !config.Region.IsNull() {
-		params.Add("region", config.Region.ValueString())
+		params.Add("name", config.NameContains.ValueString())
 	}
 
 	tflog.Debug(ctx, "Fetching clouds with filters", map[string]any{
@@ -168,7 +167,7 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	})
 
 	// Fetch clouds
-	clouds, err := d.fetchClouds(ctx, params)
+	clouds, err := d.fetchClouds(ctx, params, config.CloudProvider.ValueString(), config.Region.ValueString())
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "list clouds", err)
 		return
@@ -183,8 +182,11 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
 
-// fetchClouds fetches clouds with the given query parameters, handling pagination if needed.
-func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values) ([]CloudSummaryModel, error) {
+// fetchClouds fetches clouds matching the server-side name substring filter (params), handling
+// pagination, then applies cloudProvider/region as client-side post-filters (DS-CLOUD-1: the
+// backend has no provider/region query params on this endpoint). Either post-filter is skipped
+// when its argument is "".
+func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values, cloudProvider, region string) ([]CloudSummaryModel, error) {
 	// Use PaginatedRequest helper to fetch all clouds
 	cloudResults, err := PaginatedRequest(ctx, d.client, "/api/v2/clouds", params,
 		func(body []byte) ([]CloudResult, *string, error) {
@@ -199,17 +201,38 @@ func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values) (
 		return nil, err
 	}
 
-	// Convert CloudResults to CloudSummaryModels
+	// Convert CloudResults to CloudSummaryModels, applying the provider/region
+	// post-filters as we go. cloud_provider matches case-insensitively (PR #91
+	// fixed the same case-sensitivity trap for addProviderConfig; a user typing
+	// "aws" should match a stored "AWS" here too).
 	allClouds := make([]CloudSummaryModel, 0, len(cloudResults))
 	for _, cloud := range cloudResults {
+		if cloudProvider != "" && !strings.EqualFold(cloud.Provider, cloudProvider) {
+			continue
+		}
+		if region != "" && cloud.Region != region {
+			continue
+		}
+
+		azList, azDiags := types.ListValueFrom(ctx, types.StringType, cloud.AvailabilityZones)
+		if azDiags.HasError() {
+			return nil, fmt.Errorf("failed to convert availability_zones for cloud %s: %v", cloud.ID, azDiags)
+		}
+
 		cloudModel := CloudSummaryModel{
-			ID:                      types.StringValue(cloud.ID),
-			Name:                    types.StringValue(cloud.Name),
-			CloudProvider:           types.StringValue(cloud.Provider),
-			ComputeStack:            types.StringValue(cloud.ComputeStack),
-			Region:                  types.StringValue(cloud.Region),
-			Status:                  types.StringValue(cloud.Status),
-			State:                   types.StringValue(cloud.State),
+			ID:            types.StringValue(cloud.ID),
+			Name:          types.StringValue(cloud.Name),
+			CloudProvider: types.StringValue(cloud.Provider),
+			ComputeStack:  types.StringValue(cloud.ComputeStack),
+			Region:        types.StringValue(cloud.Region),
+			// DS-CLOUD-3: align with the singular's null-guarding. status/state
+			// are non-Optional enum fields on the backend Cloud model today (always
+			// populated, per backend/server/api/base/models/clouds.py), so this
+			// currently never observes a real empty value - kept for defensive
+			// parity with the singular DS's identical guard, and so both DS behave
+			// the same way if that ever changes.
+			Status:                  stringOrNull(cloud.Status),
+			State:                   stringOrNull(cloud.State),
 			CreatedAt:               types.StringValue(cloud.CreatedAt),
 			CreatorID:               types.StringValue(cloud.CreatorID),
 			IsDefault:               types.BoolValue(cloud.IsDefault),
@@ -221,6 +244,9 @@ func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values) (
 			AutoAddUser:             types.BoolValue(cloud.AutoAddUser),
 			LineageTrackingEnabled:  types.BoolValue(cloud.LineageTrackingEnabled),
 			IsAggregatedLogsEnabled: types.BoolValue(cloud.IsAggregatedLogsEnabled),
+			AvailabilityZones:       azList,
+			Version:                 types.StringValue(cloud.Version),
+			ExternalID:              types.StringPointerValue(cloud.ExternalID),
 		}
 		allClouds = append(allClouds, cloudModel)
 	}

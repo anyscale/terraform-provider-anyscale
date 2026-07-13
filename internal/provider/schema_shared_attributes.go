@@ -14,8 +14,9 @@ import (
 // enable_lineage_tracking/lineage_tracking_enabled and enable_log_ingestion/
 // is_aggregated_logs_enabled (same backend field, different already-shipped attribute
 // name on each side - unifying would require a breaking rename). Singular-only
-// (is_empty_cloud, cloud_deployment_id) and plural-only (is_k8s) fields have no
-// counterpart to share against.
+// (is_empty_cloud, cloud_deployment_id) fields have no counterpart to share against.
+// is_k8s is identical text on both sides (DS-CLOUD-4) but stays defined directly on each
+// DS's own Schema function rather than hoisted here, matching how the plural already had it.
 func cloudSharedAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"cloud_provider": schema.StringAttribute{
@@ -69,6 +70,21 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 		"auto_add_user": schema.BoolAttribute{
 			Computed:            true,
 			MarkdownDescription: "Whether users are automatically added to this cloud.",
+		},
+		// DS-CLOUD-5 (Phase B): cheap additive parity fields, present on the backend Cloud
+		// model and stable.
+		"availability_zones": schema.ListAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "The availability zones considered for this cloud.",
+		},
+		"version": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The cluster management stack version of the cloud (`v1` or `v2`).",
+		},
+		"external_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.",
 		},
 	}
 }

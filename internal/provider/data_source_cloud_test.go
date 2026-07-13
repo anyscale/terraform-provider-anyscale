@@ -430,3 +430,45 @@ func TestCloudNullableFields(t *testing.T) {
 		t.Error("CloudDeploymentID should be null")
 	}
 }
+
+// TestFindCloudByName_PagesBeyondFirstPage is the DS-CLOUD-2/X-4 mutation-proof
+// regression guard: findCloudByName reads only page 1 of GET /api/v2/clouds via
+// a raw DoRequest call, with no pagination at all. In an org whose cloud list
+// exceeds one page, a valid name past page 1 resolves to "not found". This
+// currently FAILS - the named cloud sits on page 2 and today's code never asks
+// for it - which is the mutation-proof evidence. Must pass once findCloudByName
+// (or its X-2 shared-helper replacement) pages through PaginatedRequest.
+func TestFindCloudByName_PagesBeyondFirstPage(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+
+		if requestCount == 1 {
+			_, _ = fmt.Fprint(w, `{
+				"results": [{"id": "cld_1", "name": "other-cloud", "created_at": "2024-01-01T00:00:00Z"}],
+				"metadata": {"next_paging_token": "page2"}
+			}`)
+			return
+		}
+
+		_, _ = fmt.Fprint(w, `{
+			"results": [{"id": "cld_2", "name": "target-cloud", "created_at": "2024-01-01T00:00:00Z"}],
+			"metadata": {"next_paging_token": null}
+		}`)
+	}))
+	defer server.Close()
+
+	d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	id, err := d.findCloudByName(context.Background(), "target-cloud")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "cld_2" {
+		t.Errorf("findCloudByName(target-cloud) = %q, want cld_2 (found on page 2)", id)
+	}
+	if requestCount != 2 {
+		t.Errorf("expected 2 requests (one per page), got %d", requestCount)
+	}
+}

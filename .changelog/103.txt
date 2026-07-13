@@ -1,0 +1,24 @@
+```
+release-note:fixed
+data-source/anyscale_clouds: the `name_contains`, `cloud_provider`, and `region` filter arguments were silent no-ops because the backend endpoint ignored all three; `name_contains` is now sent to the API as a substring filter and `cloud_provider`/`region` are now applied as client-side filters, so all three actually narrow the result set.
+```
+```
+release-note:fixed
+data-source/anyscale_cloud: looking up a cloud by `name` only checked the first page of results, so a valid name could incorrectly resolve to "not found" once an organization has more clouds than fit on one page; the lookup now pages through all results. This also fixes the "multiple clouds found" warning, which previously compared against the total number of clouds fetched instead of the number actually matching the given name.
+```
+```
+release-note:fixed
+data-source/anyscale_clouds: `status` and `state` now report `null` instead of an empty string when the API returns no value, matching `anyscale_cloud`'s existing behavior.
+```
+```
+release-note:changed
+data-source/anyscale_cloud: the error shown when a by-name lookup fails due to an API error now uses the title "API Request Failed" instead of "Cloud Lookup Failed", matching the wording used elsewhere in the provider; the error detail message is unchanged.
+```
+```
+release-note:added
+data-source/anyscale_cloud: adds `is_k8s`, `availability_zones`, `version`, and `external_id` (`external_id` is `null` when not set).
+```
+```
+release-note:added
+data-source/anyscale_clouds: adds `availability_zones`, `version`, and `external_id` (`external_id` is `null` when not set).
+```
