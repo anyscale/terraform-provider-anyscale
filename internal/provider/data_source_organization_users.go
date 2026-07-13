@@ -71,7 +71,7 @@ func (d *OrganizationUsersDataSource) Schema(ctx context.Context, req datasource
 	}
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. This is useful for SCIM provisioning and user management.",
+		MarkdownDescription: "**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_collaborator` resources, or filtering users by email or account type.",
 
 		Attributes: map[string]schema.Attribute{
 			"email": schema.StringAttribute{

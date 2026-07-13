@@ -3,12 +3,12 @@
 page_title: "anyscale_organization_users Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  BETA FEATURE: Use this data source to retrieve a list of all users (including service accounts) in your organization. This is useful for SCIM provisioning and user management.
+  BETA FEATURE: Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving id values before importing anyscale_organization_collaborator resources, or filtering users by email or account type.
 ---
 
 # anyscale_organization_users (Data Source)
 
-**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. This is useful for SCIM provisioning and user management.
+**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_collaborator` resources, or filtering users by email or account type.
 
 ## Example Usage
 
