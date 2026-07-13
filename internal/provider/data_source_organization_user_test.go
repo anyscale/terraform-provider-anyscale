@@ -105,6 +105,55 @@ func TestFindUserByEmail_PagesBeyondFirstPageAndSendsFilter(t *testing.T) {
 	}
 }
 
+// TestOrganizationCollaboratorToUserModel_NullName is the DS-OU-1 mutation-proof
+// regression guard for the singular data source. models.go documents the wire
+// field as `Name *string` ("Can be null"), the same nullability the adjacent
+// UserID field already handles correctly, but organizationCollaboratorToUserModel
+// collapses a nil Name into "" instead of Terraform null. This currently FAILS
+// against that code (name comes back "" not null) - that failure is the
+// mutation-proof evidence the null collapse is real. It must pass once the
+// conversion uses types.StringPointerValue for Name.
+func TestOrganizationCollaboratorToUserModel_NullName(t *testing.T) {
+	result := OrganizationCollaboratorResult{
+		ID:              "identity-1",
+		UserID:          nil,
+		Email:           "svc@example.com",
+		Name:            nil,
+		PermissionLevel: "collaborator",
+		CreatedAt:       "2024-01-01T00:00:00Z",
+	}
+
+	got := organizationCollaboratorToUserModel(result)
+
+	if !got.Name.IsNull() {
+		t.Errorf("Name = %#v, want null for a nil API name, got a non-null value (likely \"\")", got.Name)
+	}
+}
+
+// TestOrganizationCollaboratorToUserModel_NonNullName guards the other side of
+// the same fix: a real name must still come through as its exact value, not
+// null, so the DS-OU-1 fix cannot be satisfied by trivially always returning
+// null regardless of input.
+func TestOrganizationCollaboratorToUserModel_NonNullName(t *testing.T) {
+	name := "Ada Lovelace"
+	result := OrganizationCollaboratorResult{
+		ID:              "identity-2",
+		Email:           "ada@example.com",
+		Name:            &name,
+		PermissionLevel: "owner",
+		CreatedAt:       "2024-01-01T00:00:00Z",
+	}
+
+	got := organizationCollaboratorToUserModel(result)
+
+	if got.Name.IsNull() {
+		t.Fatal("Name = null, want the real name to come through")
+	}
+	if got.Name.ValueString() != name {
+		t.Errorf("Name = %q, want %q", got.Name.ValueString(), name)
+	}
+}
+
 // TestOrganizationUsersDataSource_PagesBeyondFirstPage is a regression test
 // for the plural anyscale_organization_users data source, which used to
 // silently truncate its result list at the first page.
