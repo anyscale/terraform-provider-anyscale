@@ -37,9 +37,12 @@ func TestFindUserByID_PagesBeyondFirstPage(t *testing.T) {
 		client: NewClientWithToken(server.URL, "test-token"),
 	}
 
-	user, err := d.findUserByID(context.Background(), "identity-2")
+	user, diags, err := d.findUserByID(context.Background(), "identity-2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
 	}
 	if user == nil {
 		t.Fatal("expected to find user on page 2, got nil")
@@ -84,9 +87,12 @@ func TestFindUserByEmail_PagesBeyondFirstPageAndSendsFilter(t *testing.T) {
 		client: NewClientWithToken(server.URL, "test-token"),
 	}
 
-	user, err := d.findUserByEmail(context.Background(), "target@example.com")
+	user, diags, err := d.findUserByEmail(context.Background(), "target@example.com")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
 	}
 	if user == nil {
 		t.Fatal("expected a case-insensitive match on page 2, got nil")

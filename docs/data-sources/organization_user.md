@@ -46,6 +46,8 @@ output "user_email_by_user_id" {
 
 ### Read-Only
 
+- `additional_roles` (List of String) Additional roles granted to the user beyond their base role, if any. Empty (not null) if the user has none.
+- `base_role` (String) The user's base role in the organization (e.g. owner, collaborator). This is the current source of role information on the backend; prefer it over `permission_level`, which the backend is moving away from.
 - `created_at` (String) The timestamp when the user was added to the organization.
-- `name` (String) The name of the user.
-- `permission_level` (String) The organization permission level (owner, collaborator, etc.).
+- `name` (String) The name of the user. Null if the user has no name set.
+- `permission_level` (String) The organization permission level (owner, collaborator, etc.). The backend is moving toward `base_role` and `additional_roles` instead; prefer those for new configurations.

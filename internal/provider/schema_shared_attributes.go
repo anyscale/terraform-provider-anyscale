@@ -151,11 +151,22 @@ func organizationUserSharedAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"name": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The name of the user.",
+			MarkdownDescription: "The name of the user. Null if the user has no name set.",
 		},
 		"permission_level": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The organization permission level (owner, collaborator, etc.).",
+			MarkdownDescription: "The organization permission level (owner, collaborator, etc.). The backend is moving toward `base_role` and `additional_roles` instead; prefer those for new configurations.",
+		},
+		// DS-OU-2 (Phase B): permission_level above is deprecated backend-side in
+		// favor of these two.
+		"base_role": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The user's base role in the organization (e.g. owner, collaborator). This is the current source of role information on the backend; prefer it over `permission_level`, which the backend is moving away from.",
+		},
+		"additional_roles": schema.ListAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "Additional roles granted to the user beyond their base role, if any. Empty (not null) if the user has none.",
 		},
 		"created_at": schema.StringAttribute{
 			Computed:            true,
