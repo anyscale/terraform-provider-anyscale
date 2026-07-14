@@ -78,6 +78,11 @@ full invite -> wait -> import -> manage lifecycle.
 [`anyscale_organization` data source docs](../../docs/data-sources/organization.md) for why those
 two attributes live there and not on every resource).
 
+`anyscale_projects` filtered to Cloud A will show **2** projects, not 1 — every new cloud gets an
+auto-created `default` project from the backend in addition to `project.a`. Not a bug and not
+something this data source got wrong; if you're counting projects per cloud elsewhere, expect that
+implicit extra one.
+
 `anyscale_services` is unconditional and filters by `anyscale_project.a`'s id — safe even with zero results.
 `anyscale_service` (singular) is **opt-in**: it needs an id or name to look up, and this provider
 has no matching resource to create one with, so a fresh apply sets it to zero instances unless you
@@ -122,6 +127,16 @@ rework, so there's nothing to wire up yet.
 
 ## Known limitations this example runs into
 
+- **A first apply may need one retry for Cloud A's project and default compute config.**
+  `anyscale_project.a` and `anyscale_compute_config.cc_a_default` are both scoped to Cloud A, and
+  if Terraform schedules their creation only moments after Cloud A itself, they can fail with a
+  bare `403 Permission denied` — a backend permission-propagation lag on a freshly-created cloud,
+  not anything wrong with your configuration. Re-running `terraform apply` with no changes
+  resolves it; a second `terraform plan` afterward shows no diff. This isn't specific to
+  `cc_a_default` or `project.a` by name — it's a timing race tied to *how soon* a cloud-scoped
+  resource is created after its parent cloud, so it can in principle land on any resource attached
+  to a just-created cloud, not only the ones named here. If a retry doesn't resolve it, that's a
+  different, more persistent case worth reporting rather than retrying indefinitely.
 - **Replacing the EKS resource can hit a backend `500`.** A destroy-then-recreate of `a_eks` (any
   change to a `RequiresReplace` attribute) can fail on the re-attach step — a known backend issue
   specific to the AWS + split + K8S combination this example uses. Initial creation is unaffected,
