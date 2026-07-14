@@ -1,9 +1,0 @@
-```
-release-note:changed
-data-source/anyscale_container_image: Document that looking up by `name` returns the most recently modified match when multiple container images share a name (no behavior change, docs only - the resolution rule already worked this way).
-```
-
-```
-release-note:changed
-data-source/anyscale_compute_config: Document that looking up by `name` returns the most recently created match when multiple compute configs share a name (no behavior change, docs only - the resolution rule already worked this way).
-```
