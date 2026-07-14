@@ -1319,6 +1319,96 @@ func CreateEphemeralTestProject(t *testing.T) (projectID string, projectName str
 	return createdID, projectName, nil
 }
 
+var (
+	// Cache for a read-only test service ID. There is no anyscale_service
+	// resource in this provider (services are live, ephemeral compute, not
+	// declarative config), so there is no ephemeral-creation equivalent to
+	// CreateEphemeralTestProject above — this always resolves to an
+	// externally-created, real service.
+	cachedTestServiceID string
+	testServiceIDMutex  sync.Mutex
+)
+
+// GetTestServiceID returns a service ID for read-only acceptance tests
+// (anyscale_service / anyscale_services), with priority:
+//  1. ANYSCALE_TEST_SERVICE_ID environment variable (explicit override).
+//  2. Auto-discover: list services, prefer one whose current_state is
+//     RUNNING (stable to assert against), else the first result.
+//
+// Unlike GetTestProjectID/GetTestCloudID, a fresh or minimal test org can
+// plausibly have zero services — there is no equivalent to a project's
+// always-present default project to fall back on. Skips with an actionable
+// message (rather than silently passing with no coverage) when neither the
+// env var nor auto-discovery resolves anything, so a CI org with no service
+// fixture is a visible gap, not a silent one.
+func GetTestServiceID(t *testing.T) string {
+	testServiceIDMutex.Lock()
+	defer testServiceIDMutex.Unlock()
+
+	if cachedTestServiceID != "" {
+		return cachedTestServiceID
+	}
+
+	if envServiceID := os.Getenv("ANYSCALE_TEST_SERVICE_ID"); envServiceID != "" {
+		t.Logf("Using test service ID from ANYSCALE_TEST_SERVICE_ID: %s", envServiceID)
+		cachedTestServiceID = envServiceID
+		return cachedTestServiceID
+	}
+
+	client, err := GetTestClient()
+	if err != nil {
+		t.Skip("No service available - failed to get test client.")
+		return ""
+	}
+
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/services-v2", nil)
+	if err != nil {
+		t.Skip("No service available - failed to list services.")
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		t.Skip("No service available - API error listing services.")
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Skip("No service available - failed to read response.")
+		return ""
+	}
+
+	var servicesResp struct {
+		Results []struct {
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			CurrentState string `json:"current_state"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &servicesResp); err != nil {
+		t.Skip("No service available - failed to parse response.")
+		return ""
+	}
+
+	if len(servicesResp.Results) == 0 {
+		t.Skip("No service available - set ANYSCALE_TEST_SERVICE_ID to a persistent service's ID, or ensure at least one service exists in the test org.")
+		return ""
+	}
+
+	for _, s := range servicesResp.Results {
+		if s.CurrentState == "RUNNING" {
+			t.Logf("Using running service for test: %s (ID: %s)", s.Name, s.ID)
+			cachedTestServiceID = s.ID
+			return cachedTestServiceID
+		}
+	}
+
+	t.Logf("Using first available service for test: %s (ID: %s)", servicesResp.Results[0].Name, servicesResp.Results[0].ID)
+	cachedTestServiceID = servicesResp.Results[0].ID
+	return cachedTestServiceID
+}
+
 // GetTestClient returns an authenticated client for testing
 func GetTestClient() (*provider.Client, error) {
 	// Get API URL from environment or use default

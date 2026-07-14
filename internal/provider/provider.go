@@ -157,6 +157,8 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewOrganizationUsersDataSource,
 		NewProjectDataSource,
 		NewProjectsDataSource,
+		NewServiceDataSource,
+		NewServicesDataSource,
 		NewUserDataSource,
 		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
 		// NewGlobalResourceSchedulerDataSource,
