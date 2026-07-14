@@ -7,7 +7,7 @@
 
 resource "anyscale_container_image_build" "training" {
   name       = "${var.name_prefix}-training-image"
-  project_id = anyscale_project.main.id
+  project_id = anyscale_project.a.id
 
   containerfile = <<-EOT
     FROM anyscale/ray:2.9.0-py310
