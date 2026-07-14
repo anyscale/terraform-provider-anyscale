@@ -1,0 +1,4 @@
+```
+release-note:changed
+data-source/anyscale_compute_config: Look up compute configs by ID via `api/v2/compute_templates` instead of the deprecated `ext/v0/cluster_computes` endpoint; behavior is unchanged.
+```

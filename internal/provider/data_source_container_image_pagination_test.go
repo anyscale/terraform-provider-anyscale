@@ -163,3 +163,55 @@ func TestGetApplicationTemplateByName_NoExactMatchAcrossAllPages(t *testing.T) {
 		t.Fatalf("expected exactly 2 requests (both pages walked before failing), got %d", requestCount)
 	}
 }
+
+// TestGetApplicationTemplateByName_PicksLastModifiedAtWinner is the X-2 guard test for the
+// container_image duplicate-name tiebreak. getApplicationTemplateByName keys
+// PickMostRecentMatch on LastModifiedAt, not CreatedAt like the other three call sites, to
+// preserve the pre-refactor matches[0] behavior (see the comment on that call in
+// data_source_container_image.go). TestContainerImageDataSourceNameResolutionLogic in
+// data_source_container_image_test.go only exercises filterExactApplicationTemplateMatches
+// (the exact-name + non-archived filter), sets no LastModifiedAt, and never calls
+// getApplicationTemplateByName -- so it does not guard which duplicate actually gets
+// selected. This test clones the ExactMatchOnPageTwo harness above specifically so it drives
+// the real selection path, not just the filter.
+//
+// A and B are built so CreatedAt-order and LastModifiedAt-order disagree: A was created
+// later but modified earlier; B was created earlier but modified later. Keying on CreatedAt
+// would pick A; this test asserts B, so it also stands as the pre-flip guard for the
+// approved CreatedAt follow-up (see .crystl/quest/spec.json's by_name_resolution contract).
+func TestGetApplicationTemplateByName_PicksLastModifiedAtWinner(t *testing.T) {
+	const searchName = "tfacc-dup-image"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/application_templates/" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		resp := ApplicationTemplatesListResponse{
+			Results: []ApplicationTemplateResult{
+				// A: created later, modified earlier -- the CreatedAt winner.
+				{ID: "apptemp_a", Name: searchName, CreatorID: "user_1", CreatedAt: "2024-06-01T00:00:00Z", LastModifiedAt: "2024-06-01T00:00:00Z"},
+				// B: created earlier, modified later -- the LastModifiedAt winner.
+				{ID: "apptemp_b", Name: searchName, CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z", LastModifiedAt: "2024-12-01T00:00:00Z"},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	d := &ContainerImageDataSource{client: NewClientWithToken(server.URL, "fake-token-dup-image")}
+
+	template, err := d.getApplicationTemplateByName(context.Background(), searchName)
+	if err != nil {
+		t.Fatalf("getApplicationTemplateByName returned error: %v", err)
+	}
+	if template == nil {
+		t.Fatal("template is nil")
+	}
+	if template.ID != "apptemp_b" {
+		t.Errorf("got template ID %q, want %q (the LastModifiedAt winner, not the CreatedAt winner %q)", template.ID, "apptemp_b", "apptemp_a")
+	}
+}

@@ -253,26 +253,14 @@ func (d *ProjectDataSource) findProjectByName(ctx context.Context, name string, 
 		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
 
-	// Find exact name match
-	var matchedProjectID string
-	var latestCreatedAt string
-	matchCount := 0
-
-	for _, project := range results {
-		if project.Name == name {
-			matchCount++
-			if matchedProjectID == "" || project.CreatedAt > latestCreatedAt {
-				matchedProjectID = project.ID
-				latestCreatedAt = project.CreatedAt
-			}
-		}
-	}
-
+	matchedProjectID := PickMostRecentMatch(ctx, "project", name, results,
+		func(p ProjectResult) bool { return p.Name == name },
+		func(p ProjectResult) string { return p.ID },
+		func(p ProjectResult) string { return p.CreatedAt },
+	)
 	if matchedProjectID == "" {
 		return "", fmt.Errorf("no project found with name '%s'", name)
 	}
-
-	WarnIfMultipleMatches(ctx, "project", name, matchCount, matchedProjectID)
 
 	return matchedProjectID, nil
 }

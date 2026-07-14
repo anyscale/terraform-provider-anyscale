@@ -75,7 +75,7 @@ output "container_image_last_modified_at" {
 ### Optional
 
 - `id` (String) The unique identifier of the container image. Either `id` or `name` must be specified. If both are set, `id` takes precedence.
-- `name` (String) The name of the container image. Either `id` or `name` must be specified.
+- `name` (String) The name of the container image. Either `id` or `name` must be specified. If multiple container images have the same name, the most recently modified one will be returned.
 
 ### Read-Only
 

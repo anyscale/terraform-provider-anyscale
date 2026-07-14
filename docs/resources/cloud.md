@@ -3,12 +3,12 @@
 page_title: "anyscale_cloud Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource).
+  Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same name already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).
 ---
 
 # anyscale_cloud (Resource)
 
-Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource).
+Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).
 
 ## Example Usage
 

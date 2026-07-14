@@ -8,7 +8,137 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// computeConfigDataSourceLookupFixture builds a minimal valid by-id lookup
+// plan: every Object/List-typed attribute must be explicitly typed-null
+// (matching the schema's exact attr types), not left at its Go zero value,
+// or tfsdk.Config.Set rejects it with a Value Conversion Error.
+func computeConfigDataSourceLookupFixture(id string) ComputeConfigDataSourceModel {
+	return ComputeConfigDataSourceModel{
+		ID:          types.StringValue(id),
+		Versions:    types.ListNull(types.Int64Type),
+		Zones:       types.ListNull(types.StringType),
+		HeadNode:    types.ObjectNull(nodeConfigAttrTypes()),
+		WorkerNodes: types.ListNull(types.ObjectType{AttrTypes: workerNodeConfigAttrTypes()}),
+	}
+}
+
+// runComputeConfigDataSourceRead drives ComputeConfigDataSource's real Read()
+// method end-to-end against a model representing the user's config, the same
+// pattern as runContainerImageDataSourceRead/runProjectDataSourceRead.
+func runComputeConfigDataSourceRead(t *testing.T, d *ComputeConfigDataSource, model ComputeConfigDataSourceModel) (ComputeConfigDataSourceModel, diag.Diagnostics) {
+	t.Helper()
+	ctx := context.Background()
+
+	var schemaResp datasource.SchemaResponse
+	d.Schema(ctx, datasource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+
+	state := tfsdk.State{Schema: schemaResp.Schema}
+	setDiags := state.Set(ctx, &model)
+	if setDiags.HasError() {
+		t.Fatalf("failed to build config fixture: %v", setDiags)
+	}
+	config := tfsdk.Config(state)
+
+	readResp := &datasource.ReadResponse{
+		State: tfsdk.State(config),
+	}
+	d.Read(ctx, datasource.ReadRequest{Config: config}, readResp)
+
+	if readResp.Diagnostics.HasError() {
+		return ComputeConfigDataSourceModel{}, readResp.Diagnostics
+	}
+
+	var result ComputeConfigDataSourceModel
+	getDiags := readResp.State.Get(ctx, &result)
+	if getDiags.HasError() {
+		t.Fatalf("failed to decode result state: %v", getDiags)
+	}
+	return result, readResp.Diagnostics
+}
+
+// TestComputeConfigRead_HitsAPIV2Endpoint is the CC5b GET-migration proof:
+// Read()'s by-id lookup must hit api/v2/compute_templates, not the deprecated
+// ext/v0/cluster_computes. The mock's catch-all failure handler on any other
+// path is what makes this load-bearing - it would fail if either the old GET
+// path or the old search path were still hit.
+func TestComputeConfigRead_HitsAPIV2Endpoint(t *testing.T) {
+	const configID = "cpt_abc123"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/compute_templates/"+configID:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"result": {
+				"id": "` + configID + `", "name": "tfacc-cc-v2", "version": 3,
+				"created_at": "2024-01-01T00:00:00Z", "last_modified_at": "2024-01-02T00:00:00Z",
+				"config": {}
+			}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/compute_templates/search":
+			// fetchComputeConfigVersions still runs and errors are only
+			// warned/tolerated, but serve it properly so this test proves a
+			// clean end-to-end Read, not a Read that happens to succeed despite
+			// a swallowed versions-fetch error. CC5b migrated this call from
+			// POST /ext/v0/cluster_computes/search to this endpoint (#113) -
+			// matched on path only (not the count/paging_token query string)
+			// since this test doesn't exercise pagination itself; see
+			// TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody
+			// for the dedicated query-vs-body proof.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"results": [{"id": "` + configID + `", "name": "tfacc-cc-v2", "version": 3}], "metadata": {"next_paging_token": null}}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture(configID))
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if result.ID.ValueString() != configID {
+		t.Errorf("id = %q, want %q", result.ID.ValueString(), configID)
+	}
+	if result.Name.ValueString() != "tfacc-cc-v2" {
+		t.Errorf("name = %q, want %q", result.Name.ValueString(), "tfacc-cc-v2")
+	}
+	if result.Version.ValueInt64() != 3 {
+		t.Errorf("version = %d, want 3", result.Version.ValueInt64())
+	}
+}
+
+// TestComputeConfigRead_NotFoundByID_ProducesAPIError confirms the not-found
+// path still works, unchanged, after the URL migration: only http.StatusOK is
+// accepted (deliberately not widened to also accept http.StatusNotFound - see
+// the comment on the GET call in data_source_compute_config.go), so a real 404
+// fails isStatusExpected and produces a genuine error, not a silently-empty
+// success.
+func TestComputeConfigRead_NotFoundByID_ProducesAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail": "compute template not found"}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	_, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture("cpt_missing"))
+	if !diags.HasError() {
+		t.Fatal("expected an error on a 404, got none")
+	}
+}
 
 // This file previously only "tested" hand-copied re-implementations of the
 // data source's logic (e.g. re-running the same if-statement inline in the
@@ -208,12 +338,15 @@ func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.
 // across multiple calls" - a real config with more results than one page's
 // count would still silently truncate even with the sentinel fix alone. This
 // mock instead splits the 3 versions across two pages and requires the
-// second request to carry the first response's exact next_paging_token
-// (nested under a paging object, per the real ext/v0 body-based pagination
-// shape traced for this endpoint - paging.count/paging.paging_token in the
-// request body, metadata.next_paging_token in the response body, both
-// distinct from the URL-query-based pagination every other endpoint in this
-// provider uses). Fails against any implementation that fetches only page 1.
+// second request to carry the first response's exact next_paging_token.
+//
+// CC5b: retargeted from asserting a body-nested paging.paging_token (the old
+// ext/v0 shape) to the URL query string, since that's where api/v2's
+// required_pagination_large actually reads it from. Left unretargeted, this
+// would have kept "passing" vacuously - nothing populates that body field
+// anymore, so the old assertion would never fail no matter how broken the new
+// pagination is. See TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody
+// for the dedicated negative-space proof that the body does NOT carry paging.
 func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 	ctx := context.Background()
 	const wantToken = "versions-page-2-token"
@@ -222,12 +355,6 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 	var sawTokenOnSecondRequest string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("failed to parse request body: %v", err)
-		}
-
 		requestCount++
 		w.WriteHeader(http.StatusOK)
 
@@ -242,11 +369,7 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 			return
 		}
 
-		if paging, ok := payload["paging"].(map[string]any); ok {
-			if token, ok := paging["paging_token"].(string); ok {
-				sawTokenOnSecondRequest = token
-			}
-		}
+		sawTokenOnSecondRequest = r.URL.Query().Get("paging_token")
 		_, _ = w.Write([]byte(`{
 			"results": [
 				{"id": "ccfg_v3", "name": "test-config", "version": 3}
@@ -267,7 +390,7 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
 	}
 	if sawTokenOnSecondRequest != wantToken {
-		t.Errorf("second request's paging.paging_token = %q, want %q (the exact token the first response returned)", sawTokenOnSecondRequest, wantToken)
+		t.Errorf("second request's paging_token query param = %q, want %q (the exact token the first response returned)", sawTokenOnSecondRequest, wantToken)
 	}
 
 	want := []int64{1, 2, 3}
@@ -278,5 +401,106 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("fetchComputeConfigVersions()[%d] = %d, want %d", i, got[i], want[i])
 		}
+	}
+}
+
+// TestFindComputeConfigByName_ExactMatchOnPageTwo is CC5b's pagination-proof
+// for findComputeConfigByName (fetchComputeConfigVersions already has one
+// above) - page 1 returns a decoy, page 2 returns the real match, and the
+// second request must carry the first response's exact paging_token as a URL
+// query parameter.
+func TestFindComputeConfigByName_ExactMatchOnPageTwo(t *testing.T) {
+	ctx := context.Background()
+	const wantToken = "byname-page-2-token"
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{
+				"results": [{"id": "ccfg_decoy", "name": "test-config", "created_at": "2024-01-01T00:00:00Z", "anonymous": false}],
+				"metadata": {"next_paging_token": "` + wantToken + `"}
+			}`))
+			return
+		}
+
+		if r.URL.Query().Get("paging_token") != wantToken {
+			t.Errorf("second request's paging_token query param = %q, want %q", r.URL.Query().Get("paging_token"), wantToken)
+		}
+		_, _ = w.Write([]byte(`{
+			"results": [{"id": "ccfg_exact", "name": "test-config", "created_at": "2024-06-01T00:00:00Z", "anonymous": false}],
+			"metadata": {"next_paging_token": null}
+		}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.findComputeConfigByName(ctx, "test-config", "")
+	if err != nil {
+		t.Fatalf("findComputeConfigByName() error = %v", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
+	}
+	// Both results share the name (real backend already exact-matches server-side), so the
+	// tiebreak (most recently created) picks ccfg_exact - proving both pages' results were
+	// actually collected, not just that page 2 was reached.
+	if got != "ccfg_exact" {
+		t.Errorf("findComputeConfigByName() = %q, want %q (both pages' matches must be collected before the tiebreak)", got, "ccfg_exact")
+	}
+}
+
+// TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody is the
+// direct proof for the hazard CC5b exists to prevent: a naive migration could
+// keep nesting paging/paging_token/count inside the JSON body (the ext/v0
+// shape) - it would compile, hit /api/v2/compute_templates/search, get HTTP
+// 200 back, and silently paginate wrong (always page 1's worth of data, no
+// error). A pagination-proof test alone (does the function eventually return
+// the right answer) would not catch this if the mock is lenient about where
+// it reads pagination params from - both tests above use exactly that kind of
+// lenient mock. This test's mock is deliberately strict: it asserts the
+// request body decodes to only the expected filter keys with no "paging" key
+// at all, and separately asserts count/paging_token arrive as URL query
+// params.
+func TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/compute_templates/search" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to parse request body: %v", err)
+		}
+		if _, hasPaging := payload["paging"]; hasPaging {
+			t.Error(`request body contains a "paging" key - pagination must be sent as URL query params on api/v2, not nested in the body`)
+		}
+		if _, hasName := payload["name"]; !hasName {
+			t.Error(`request body missing expected filter key "name"`)
+		}
+
+		if got := r.URL.Query().Get("count"); got != "100" {
+			t.Errorf(`count query param = %q, want "100"`, got)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results": [{"id": "ccfg_1", "name": "test-config"}], "metadata": {"next_paging_token": null}}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithToken(server.URL, "test-token")
+	basePayload := map[string]interface{}{
+		"name": map[string]string{"equals": "test-config"},
+	}
+
+	_, err := searchComputeTemplatesPaged(ctx, client, basePayload, decodeComputeConfigSearchPage)
+	if err != nil {
+		t.Fatalf("searchComputeTemplatesPaged() error = %v", err)
 	}
 }

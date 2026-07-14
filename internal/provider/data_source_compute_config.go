@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -79,7 +80,7 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 			"name": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "The name of the compute config. Either `id` or `name` must be specified. This field is computed when looking up by ID.",
+				MarkdownDescription: "The name of the compute config. Either `id` or `name` must be specified. This field is computed when looking up by ID. If multiple compute configs have the same name, the most recently created one will be returned.",
 			},
 
 			// Computed fields
@@ -314,16 +315,23 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 
 	// CC5a: fetch and parse using the same typed structs the resource uses
 	// (computeTemplateResponse/computeTemplate/computeTemplateConfig, see
-	// resource_compute_config.go) instead of hand-parsing a raw
-	// map[string]interface{}. Still calls /ext/v0/cluster_computes -- the
-	// endpoint migration to /api/v2/compute_templates itself is CC5b, gated
-	// and deferred separately; ext/v0 and api/v2 are reshapings of the same
-	// underlying record, so the same JSON field names decode correctly here.
+	// resource_compute_config.go). CC5b: migrated onto api/v2/compute_templates
+	// (the resource already used this endpoint) - api/v2's response is a
+	// verified strict field superset of ext/v0's, same underlying record, so
+	// computeTemplateResponse decodes identically. Deliberately keeps only
+	// http.StatusOK as the accepted status (not adding http.StatusNotFound):
+	// DoRequestAndParse returns a non-nil zero-valued result on a 404 whose
+	// body happens to decode without error (json.Unmarshal doesn't fail on an
+	// unrecognized-shape object), so an "accept 404, check apiResult == nil"
+	// pattern silently fails to detect not-found - confirmed this is actually
+	// broken in resource_compute_config.go's Read/ImportState. Keeping only
+	// StatusOK here means a real 404 fails isStatusExpected and produces a
+	// genuine err != nil, which already flows correctly into AddAPIError below.
 	computeResp, err := DoRequestAndParse[computeTemplateResponse](
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_computes/%s", configID),
+		fmt.Sprintf("/api/v2/compute_templates/%s", configID),
 		nil,
 		http.StatusOK,
 	)
@@ -476,17 +484,21 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
 
-// searchClusterComputesPaged pages through POST /ext/v0/cluster_computes/search until every
-// page is exhausted, decoding each page's body with decode. This endpoint's pagination is
-// body-based (ClusterComputesQuery.paging, a PageQuery{count, paging_token}) and its response
-// metadata carries next_paging_token the same way every GET list endpoint's does - just inside
-// the response body instead of being driven by URL query params. Traced against product
-// backend/server/api/base/routers/cluster_computes_router.go (search_cluster_computes) and
-// backend/server/common/models/queries.go (PageQuery, count defaults to 10 if never set - the
-// root cause of DS-CC-1/DS-CC-2's truncation). The shared PaginatedRequest helper only handles
-// GET+query-string pagination, so this stays a local loop rather than a shared helper - a single
-// POST-body-paginated endpoint doesn't justify generalizing that helper's shape.
-func searchClusterComputesPaged[T any](
+// searchComputeTemplatesPaged pages through POST /api/v2/compute_templates/search until every
+// page is exhausted, decoding each page's body with decode. CC5b: unlike the ext/v0 predecessor
+// this replaces (searchClusterComputesPaged), this endpoint's pagination is split across two
+// transports - the filter fields in basePayload stay a JSON POST body (ComputeTemplateQuery,
+// unchanged in shape/semantics from ext/v0), but count/paging_token are a FastAPI
+// Depends(required_pagination_large) that reads them from the URL QUERY STRING, not the body.
+// Traced against product backend/server/api/product/routers/compute_templates_router.go
+// (search_compute_templates) and backend/server/api/common/models/common_parameters.py
+// (required_pagination_large). Sending paging/paging_token nested in the body here (the old
+// shape) would compile, hit the endpoint, get HTTP 200 back, and silently paginate wrong -
+// always page 1 - since api/v2 simply never reads those two fields out of the body. Kept as a
+// local loop rather than folded into the shared PaginatedRequest helper (GET+query only, and a
+// single POST-body-plus-query-pagination caller doesn't justify generalizing its shape), matching
+// this file's existing precedent for the endpoint it replaces.
+func searchComputeTemplatesPaged[T any](
 	ctx context.Context,
 	client *Client,
 	basePayload map[string]interface{},
@@ -496,22 +508,19 @@ func searchClusterComputesPaged[T any](
 	var pagingToken string
 
 	for {
-		payload := make(map[string]interface{}, len(basePayload)+1)
-		for k, v := range basePayload {
-			payload[k] = v
-		}
-		paging := map[string]interface{}{"count": 100}
-		if pagingToken != "" {
-			paging["paging_token"] = pagingToken
-		}
-		payload["paging"] = paging
-
-		body, err := MarshalRequestBody(payload)
+		body, err := MarshalRequestBody(basePayload)
 		if err != nil {
 			return nil, err
 		}
 
-		respBody, err := DoRequestRaw(ctx, client, "POST", "/ext/v0/cluster_computes/search", body, http.StatusOK)
+		query := url.Values{}
+		query.Set("count", "100")
+		if pagingToken != "" {
+			query.Set("paging_token", pagingToken)
+		}
+		path := fmt.Sprintf("/api/v2/compute_templates/search?%s", query.Encode())
+
+		respBody, err := DoRequestRaw(ctx, client, "POST", path, body, http.StatusOK)
 		if err != nil {
 			return nil, fmt.Errorf("search request failed: %w", err)
 		}
@@ -563,6 +572,12 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 			"equals": name,
 		},
 		"include_anonymous": false,
+		// CC5b: api/v2 defaults to archive_status=NOT_ARCHIVED, which ext/v0 has no equivalent
+		// of and never filtered (its router has a literal "TODO: add an arg to indicate whether
+		// to show unarchived only" still unaddressed) - explicitly request ALL to preserve
+		// today's exact (unfiltered) behavior rather than silently narrowing results. Whether
+		// NOT_ARCHIVED would be a better default going forward is a separate, tracked follow-up.
+		"archive_status": "ALL",
 	}
 
 	// Add cloud_id filter if provided
@@ -570,7 +585,7 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 		searchPayload["cloud_id"] = cloudID
 	}
 
-	results, err := searchClusterComputesPaged(ctx, d.client, searchPayload, decodeComputeConfigSearchPage)
+	results, err := searchComputeTemplatesPaged(ctx, d.client, searchPayload, decodeComputeConfigSearchPage)
 	if err != nil {
 		return "", err
 	}
@@ -616,9 +631,12 @@ func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context
 		},
 		"include_anonymous": false,
 		"version":           -2,
+		// CC5b: see the matching comment in findComputeConfigByName - preserve ext/v0's
+		// never-filtered-by-archive-status behavior explicitly.
+		"archive_status": "ALL",
 	}
 
-	results, err := searchClusterComputesPaged(ctx, d.client, searchPayload, decodeComputeConfigSearchPage)
+	results, err := searchComputeTemplatesPaged(ctx, d.client, searchPayload, decodeComputeConfigSearchPage)
 	if err != nil {
 		return nil, err
 	}
