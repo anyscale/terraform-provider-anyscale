@@ -1,4 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_cloud: Fix the by-name adopt check (used to recover from an interrupted create) to scan every page of existing clouds instead of only the first, and to error - naming the conflicting cloud ids and how to resolve them via `terraform import` - instead of silently adopting an arbitrary one when multiple clouds already share the same name.
-```

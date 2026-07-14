@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-14
+
+### New Data Sources
+
+- data-source/anyscale_service: adds a data source to look up a single Anyscale Service by ID or name.
+- data-source/anyscale_services: adds a data source to list and filter Anyscale Services.
+
+### Changed
+
+- data-source/anyscale_container_image: Document that looking up by `name` returns the most recently modified match when multiple container images share a name (no behavior change, docs only - the resolution rule already worked this way).
+- data-source/anyscale_compute_config: Document that looking up by `name` returns the most recently created match when multiple compute configs share a name (no behavior change, docs only - the resolution rule already worked this way).
+- data-source/anyscale_compute_config: Look up compute configs by ID via `api/v2/compute_templates` instead of the deprecated `ext/v0/cluster_computes` endpoint; behavior is unchanged.
+- data-source/anyscale_compute_config: Search compute configs by name/version via `api/v2/compute_templates/search` instead of the deprecated `ext/v0/cluster_computes/search` endpoint; behavior is unchanged, including still returning archived configs.
+
+### Fixed
+
+- resource/anyscale_cloud: Fix the by-name adopt check (used to recover from an interrupted create) to scan every page of existing clouds instead of only the first, and to error - naming the conflicting cloud ids and how to resolve them via `terraform import` - instead of silently adopting an arbitrary one when multiple clouds already share the same name.
+- resource/anyscale_organization_invitation: Remove the fictional `permission_level` argument from the resource's documentation and examples; it was never a real schema attribute, so copying the previous example verbatim into a real configuration failed `terraform validate` with an unsupported argument error.
+
 ## [0.7.0] - 2026-07-13
 
 ### Added
@@ -517,7 +536,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.8.0
 [0.7.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.7.0
 [0.6.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.6.0
 [0.5.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.5.1
