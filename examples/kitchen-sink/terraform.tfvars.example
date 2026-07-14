@@ -1,0 +1,31 @@
+# Copy this file to terraform.tfvars and fill in your own values:
+#   cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvars is gitignored -- it's the right place for values specific to your own AWS
+# account and Anyscale org, not for secrets (this example doesn't need any beyond your Anyscale
+# token, which comes from ANYSCALE_CLI_TOKEN or ~/.anyscale/credentials.json as usual).
+
+# --- Required: existing AWS infrastructure in your own account ---------------------------------
+aws_region                    = "us-east-2"
+aws_vpc_id                    = "vpc-0343edeee0eab27c3"
+aws_subnet_ids_to_az = {
+  "subnet-086ac7bba68e3c1c3" = "us-east-2a"
+  "subnet-08a309019a027ec72" = "us-east-2b"
+}
+aws_security_group_ids        = ["sg-064dac0ed5cffc779"]
+aws_controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/anyscale-crossacct-role"
+aws_dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/anyscale-cluster-node-role"
+aws_external_id               = "org_abc123-external-id"
+object_storage_bucket_name    = "my-anyscale-bucket"
+
+# --- Required: this WILL send a real email invitation ------------------------------------------
+# Use an address you own or control (e.g. a "+kitchen-sink" alias of your own address) so you can
+# see the invitation land and, if you want to exercise the commented-out
+# anyscale_organization_collaborator block in organization.tf, accept it.
+new_member_email = "you+kitchen-sink@example.com"
+
+# --- Optional -- uncomment to override the defaults shown --------------------------------------
+# name_prefix                 = "kitchen-sink"
+# new_member_permission_level = "collaborator"
+# head_node_instance_type     = "m5.2xlarge"
+# worker_instance_type        = "m5.4xlarge"
+# registry_image_uri          = "docker.io/anyscale/ray:2.9.0-py310"

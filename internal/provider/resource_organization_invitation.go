@@ -291,12 +291,12 @@ func (r *OrganizationInvitationResource) Read(ctx context.Context, req resource.
 }
 
 // Update updates an organization invitation.
-// Note: Invitations cannot be updated - email and permission_level have RequiresReplace.
+// Note: Invitations cannot be updated - email has RequiresReplace and every other attribute is Computed-only.
 func (r *OrganizationInvitationResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	// This should never be called due to RequiresReplace on all mutable fields
 	resp.Diagnostics.AddError(
 		"Update Not Supported",
-		"Organization invitations cannot be updated. Changes to email or permission_level require replacing the invitation.",
+		"Organization invitations cannot be updated. Changing the email requires replacing the invitation.",
 	)
 }
 
