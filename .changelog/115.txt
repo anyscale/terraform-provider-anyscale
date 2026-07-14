@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_organization_invitation: Remove the fictional `permission_level` argument from the resource's documentation and examples; it was never a real schema attribute, so copying the previous example verbatim into a real configuration failed `terraform validate` with an unsupported argument error.
+```

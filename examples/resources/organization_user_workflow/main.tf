@@ -9,10 +9,11 @@ terraform {
   }
 }
 
-# Step 1: Send an invitation to a new user
+# Step 1: Send an invitation to a new user. There's no permission_level argument -- every
+# invitation grants default collaborator access on acceptance; the API has no way to set a
+# different level at invite time. Step 4 below is where a different level actually gets set.
 resource "anyscale_organization_invitation" "new_member" {
-  email            = "newmember@company.com"
-  permission_level = "collaborator"
+  email = "newmember@company.com"
 }
 
 # Output invitation details for manual follow-up
@@ -75,16 +76,17 @@ output "managed_user_permission" {
   description = "Current permission level"
 }
 
-# Example: Manage multiple users at different permission levels
+# Example: Invite multiple users at once. Every invitation still grants only default
+# collaborator access -- if "lead@company.com" should end up as an owner, that happens in step 4
+# (via anyscale_organization_collaborator), after they accept, same as any other promotion.
 resource "anyscale_organization_invitation" "team_members" {
-  for_each = {
-    "dev1@company.com" = "collaborator"
-    "dev2@company.com" = "collaborator"
-    "lead@company.com" = "owner"
-  }
+  for_each = toset([
+    "dev1@company.com",
+    "dev2@company.com",
+    "lead@company.com",
+  ])
 
-  email            = each.key
-  permission_level = each.value
+  email = each.key
 }
 
 # Output the status of all invitations

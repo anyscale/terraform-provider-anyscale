@@ -97,6 +97,27 @@ resource deployment separately.
 
 ### Advanced Examples
 
+#### [kitchen-sink](./kitchen-sink/)
+
+Every resource and data source this provider registers, wired together into one configuration:
+`anyscale_cloud` + `anyscale_cloud_resource` (split pattern), `anyscale_compute_config`,
+`anyscale_container_image_build`, `anyscale_container_image_registry`, `anyscale_project`,
+`anyscale_organization_invitation`, plus all 11 registered data sources reading back what those
+resources just created.
+
+**Use this when**: You want to see the whole provider surface working together, or a
+create-then-read-back pattern for a resource/data-source pair you haven't used yet.
+
+**What it demonstrates**:
+- Every resource and data source type in one coherent, applyable configuration
+- The attribute-reference dependency ordering a data source needs to safely read back a resource
+  created earlier in the same apply, instead of 404ing on a first apply
+- Why `anyscale_organization_collaborator` (import-only) and a real invitation email are called
+  out explicitly rather than silently applied
+
+See the [kitchen-sink README](./kitchen-sink/README.md) for the full breakdown, including what it
+creates in your AWS account and org before you apply it.
+
 #### [multi-resource-cloud-basic](./multi-resource-cloud-basic/)
 
 Example demonstrating multiple resource deployments in a single cloud. Attaches two separate AWS VM
