@@ -74,8 +74,9 @@ resource whose operator hasn't reported in yet — they populate once it has.
 
 A cloud can have more than one `anyscale_cloud_resource` attached to it — for example, to add a
 second AWS region or a second compute stack alongside the one a cloud started with. The
-[`multi-resource-cloud-basic`](../../examples/multi-resource-cloud-basic) example is a complete,
-working two-resource configuration.
+[`kitchen-sink`](../../examples/kitchen-sink) example includes a complete, working two-resource
+configuration: its Cloud A attaches both a VM and a K8S resource to the same cloud, which doubles
+as the mixed-compute-stack case described above.
 
 A few things aren't obvious from the resource's schema alone:
 

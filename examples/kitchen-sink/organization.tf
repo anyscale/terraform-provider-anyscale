@@ -1,7 +1,7 @@
-# --- anyscale_organization_invitation --------------------------------------------------------
-# Applying this sends a REAL email to var.new_member_email. There is no default for that
-# variable specifically so you can't apply this by accident with a placeholder address -- see
-# variables.tf.
+# --- anyscale_organization_invitation (gated) --------------------------------------------------
+# Gated behind var.invite_email, which defaults to "" -- count = 0 means this resource simply
+# doesn't exist until you set it, so a heavy multi-cloud apply never has the side effect of emailing
+# someone by accident. Set invite_email to a real address you own or control to include it.
 #
 # There's no permission_level argument here: every invitation grants default collaborator access
 # on acceptance, full stop -- the invitations API has no way to set a different level up front.
@@ -9,7 +9,9 @@
 # anyscale_organization_collaborator resource -- the only place a permission level can actually be
 # chosen.
 resource "anyscale_organization_invitation" "new_member" {
-  email = var.new_member_email
+  count = var.invite_email != "" ? 1 : 0
+
+  email = var.invite_email
 }
 
 # --- anyscale_organization_collaborator (commented out; import-only) --------------------------
@@ -26,7 +28,7 @@ resource "anyscale_organization_invitation" "new_member" {
 # accepted (see data_sources.tf's organization_user lookup for the pattern) -- or look it up
 # directly:
 #   data "anyscale_organization_user" "new_member" {
-#     email = var.new_member_email
+#     email = var.invite_email
 #   }
 #
 # See examples/resources/organization_user_workflow/main.tf for the full invite -> wait ->

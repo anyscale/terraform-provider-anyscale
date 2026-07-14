@@ -99,37 +99,44 @@ resource deployment separately.
 
 #### [kitchen-sink](./kitchen-sink/)
 
-Every resource and data source this provider registers, wired together into one configuration:
-`anyscale_cloud` + `anyscale_cloud_resource` (split pattern), `anyscale_compute_config`,
-`anyscale_container_image_build`, `anyscale_container_image_registry`, `anyscale_project`,
-`anyscale_organization_invitation`, plus all 11 registered data sources reading back what those
-resources just created.
+Comprehensive, multi-cloud build exercising every resource and data source this provider
+registers — including the multiple-resources-on-one-cloud and mixed VM+K8s coverage that used to
+live in a separate `multi-resource-cloud-basic` example (now superseded and folded in here). Two
+Anyscale Clouds share one AWS VPC and one EKS cluster, built fresh via modules: Cloud A is a
+BYOC/split cloud carrying both a VM `anyscale_cloud_resource` and a K8S (EKS) `anyscale_cloud_resource`;
+Cloud B is a simpler all-in-one VM cloud. Compute configs (including one that targets the EKS
+deployment specifically via `cloud_resource`), container images, and two projects sit on top, and
+all 13 registered data sources — `anyscale_cloud`, `anyscale_clouds`, `anyscale_compute_config`,
+`anyscale_container_image`, `anyscale_container_images`, `anyscale_project`, `anyscale_projects`,
+`anyscale_user`, `anyscale_organization`, `anyscale_organization_user`, `anyscale_organization_users`,
+`anyscale_services`, `anyscale_service` — read back what those resources just created.
 
-**Use this when**: You want to see the whole provider surface working together, or a
-create-then-read-back pattern for a resource/data-source pair you haven't used yet.
+> [!WARNING]
+> Building fresh via modules means this apply creates a real VPC and a real EKS cluster, not just
+> Anyscale-side resources — expect real AWS cost and a noticeably longer apply than the other
+> examples in this directory. See the [kitchen-sink README](./kitchen-sink/README.md) before
+> running it.
+
+**Use this when**: You want to see the whole provider surface working together, mixing a VM and a
+K8s compute stack on one cloud, or a create-then-read-back pattern for a resource/data-source pair
+you haven't used yet.
 
 **What it demonstrates**:
 - Every resource and data source type in one coherent, applyable configuration
+- Multiple `anyscale_cloud_resource` deployments on a single BYOC cloud, mixing VM and K8S compute
+  stacks side by side — see the [Cloud Resources guide](../docs/guides/cloud-resources.md#multiple-resource-deployments-on-one-cloud)
+  for the cardinality rules this relies on
+- `anyscale_compute_config`'s `cloud_resource` attribute targeting a specific deployment within a
+  multi-resource cloud, instead of always landing on the primary
 - The attribute-reference dependency ordering a data source needs to safely read back a resource
   created earlier in the same apply, instead of 404ing on a first apply
-- Why `anyscale_organization_collaborator` (import-only) and a real invitation email are called
-  out explicitly rather than silently applied
+- Why `anyscale_organization_collaborator` (import-only) and `anyscale_service` (no matching
+  resource — services aren't Terraform-created) are called out explicitly rather than silently
+  applied, and why the invitation email and existing-service lookup are both opt-in variables
+  rather than forced on every apply
 
-See the [kitchen-sink README](./kitchen-sink/README.md) for the full breakdown, including what it
-creates in your AWS account and org before you apply it.
-
-#### [multi-resource-cloud-basic](./multi-resource-cloud-basic/)
-
-Example demonstrating multiple resource deployments in a single cloud. Attaches two separate AWS VM
-foundations (distinct VPCs and `common_prefix`es, same region) to one Anyscale Cloud as two
-`anyscale_cloud_resource` blocks.
-
-**Use this when**: You need multiple resource deployments (e.g., multiple regions or compute stacks) in a single Anyscale Cloud.
-
-**What it demonstrates**:
-- Creating a cloud with multiple resource deployments
-- Managing multiple `anyscale_cloud_resource` resources, each with its own explicit, distinct `name`
-- Multi-resource cardinality rules — see the [Cloud Resources guide](../docs/guides/cloud-resources.md#multiple-resource-deployments-on-one-cloud)
+See the [kitchen-sink README](./kitchen-sink/README.md) for the full breakdown, including real
+AWS cost, apply time, and what it creates in your account and org before you apply it.
 
 ### Container Images
 
@@ -268,7 +275,7 @@ All examples require:
 | `gcp-vm` | GCP | VM | All-in-one | Creates via modules |
 | `aws-eks-basic` | AWS | K8S | All-in-one | Creates via modules |
 | `gcp-gke-basic` | GCP | K8S | Split | Uses existing GKE |
-| `multi-resource-cloud-basic` | AWS | VM | Split | Uses existing |
+| `kitchen-sink` | AWS | Mixed (VM + K8S) | Mixed (Split + All-in-one) | Creates via modules |
 
 ## Common Variables
 
