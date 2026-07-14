@@ -255,3 +255,232 @@ func projectSharedAttributes() map[string]schema.Attribute {
 		},
 	}
 }
+
+// serviceStatusChecklistItemAttributes returns the attribute map for one row of a service's
+// per-component status checklist (used for both the `shared` list and each `per_version` group's
+// `items` list within service_status_checklist). Returns a fresh map on every call, since the two
+// call sites below each embed it in a different NestedAttributeObject.
+func serviceStatusChecklistItemAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"kind": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The kind of resource this checklist row represents (e.g. `SERVICE`, `SERVICE_VERSION`, `LOAD_BALANCER`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.",
+		},
+		"label": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "User-facing label for this resource (e.g. `Cluster`, `Load Balancer`).",
+		},
+		"state": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The state of this resource (e.g. `RUNNING`, `UNHEALTHY`, `STARTING`).",
+		},
+		"message": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Reconciler-provided message describing the current state. Empty string, not null, when the backend has no message to report.",
+		},
+		"version_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The service version this item belongs to. Null for items shared across versions (e.g. cloud networking).",
+		},
+		"observed_at": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "When this row's state was last observed by the cluster manager. Null when the snapshot is missing a timestamp (older event).",
+		},
+	}
+}
+
+// serviceVersionAttributes returns the attribute map shared by primary_version and canary_version
+// on both anyscale_service and anyscale_services. Returns a fresh map on every call - each of the
+// (up to 4) call sites across the singular and plural schemas needs its own independent map value,
+// since terraform-plugin-framework attribute maps must not be shared/mutated across attributes.
+//
+// Deliberately excluded: ray_gcs_external_storage_config and tracing_config (niche/advanced
+// per-version configs, documented gap, follow up on demand).
+func serviceVersionAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The unique identifier of this service version.",
+		},
+		"created_at": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Timestamp when this version was created.",
+		},
+		"version": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The version string identifier for this version.",
+		},
+		"current_state": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The current state of this service version (e.g. `RUNNING`, `STARTING`, `UNHEALTHY`).",
+		},
+		"weight": schema.Int64Attribute{
+			Computed:            true,
+			MarkdownDescription: "The configured traffic weight currently stored for this version, 0-100. During rollouts this may be an intermediate desired load-balancer weight rather than the live figure - see `current_weight`.",
+		},
+		"current_weight": schema.Int64Attribute{
+			Computed:            true,
+			MarkdownDescription: "The current percentage of live traffic observed for this version, 0-100. Null if not currently observed.",
+		},
+		"target_weight": schema.Int64Attribute{
+			Computed:            true,
+			MarkdownDescription: "The intended final traffic weight for this version, 0-100, when known. Null otherwise.",
+		},
+		"build_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The ID of the cluster environment build (container image) this version runs.",
+		},
+		"compute_config_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The ID of the compute configuration this version uses.",
+		},
+		"production_job_ids": schema.ListAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "The production job IDs associated with this service version. Empty (not null) if none.",
+		},
+		"connection_ids": schema.ListAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "The connection IDs associated with this service version. Null if the API does not report connections for this version.",
+		},
+		"ray_serve_config": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The Ray Serve config for this version, as a JSON string. This is a dynamic, open-ended structure upstream with no fixed schema in this provider - use `jsondecode()` in HCL to access individual fields, the same convention `anyscale_compute_config`'s `advanced_instance_config`/`flags` use for similarly open-ended config. Always present (required upstream), even when its contents are trivial.",
+		},
+	}
+}
+
+// serviceSharedAttributes returns the anyscale_service / anyscale_services attributes that are
+// identical in name, type, and MarkdownDescription on both sides. Called directly by the singular
+// data source and wrapped inside the plural's per-item NestedObject. See
+// .crystl/quest/CONTRACT_anyscale_service.md for the full field-scope contract this implements.
+//
+// Deliberately excluded from this shared map, defined separately per-DS instead: id/name (singular
+// carries the either-id-or-name selector clause and Optional; plural's per-item versions are
+// Computed-only), project_id/cloud_id (singular is dual-purpose - Optional narrowing filter for
+// the by-name lookup AND Computed, same structural reason as projectSharedAttributes' cloud_id
+// exclusion above; plural's top-level versions are Optional-only filters with no per-item
+// counterpart in this map, while the plural's per-item project_id/cloud_id are plain Computed
+// output defined alongside the rest of that NestedObject).
+//
+// Deliberately excluded from the schema entirely (documented gaps, not silent drops): auth_token
+// (a live bearer credential - a data source's output is always written to Terraform state in
+// plaintext regardless of any Sensitive marking, so this is omitted rather than
+// included-and-marked-Sensitive), versions (deprecated upstream in favor of primary_version/
+// canary_version below), type (list-response-only field; redundant discriminator since this
+// provider's backend only ever deals in V2 services), and a nested creator object (flat creator_id
+// below is kept instead, consistent with this provider's existing choice to defer a nested creator
+// object on anyscale_cloud for the same reason).
+func serviceSharedAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"description": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Description of the service. Null if not set.",
+		},
+		"creator_id": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The ID of the user who created the service.",
+		},
+		"created_at": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Timestamp when the service was created.",
+		},
+		"ended_at": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Timestamp when the service was terminated. Null while the service is active.",
+		},
+		"hostname": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The hostname of the service.",
+		},
+		"base_url": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The base URL of this service.",
+		},
+		"current_state": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.",
+		},
+		"goal_state": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The goal state of this service (`RUNNING` or `TERMINATED`).",
+		},
+		"auto_rollout_enabled": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether this service uses automatic rollout.",
+		},
+		"is_multi_version": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether this service is a multi-version service (multiple active versions with no single canary).",
+		},
+		"error_message": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Error message from processing the most recent API request against this service, if any. Null otherwise.",
+		},
+		"service_observability_urls": schema.SingleNestedAttribute{
+			Computed:            true,
+			MarkdownDescription: "Dashboard URLs for this service. Each URL is null if the backend has none to report (e.g. before the service's first successful deploy).",
+			Attributes: map[string]schema.Attribute{
+				"service_dashboard_url": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "URL to a dashboard with graphs about the entire service.",
+				},
+				"service_dashboard_embedding_url": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "Embeddable variant of `service_dashboard_url`.",
+				},
+				"serve_deployment_dashboard_url": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "URL to a dashboard with graphs about a single deployment or replica of the service.",
+				},
+				"serve_deployment_dashboard_embedding_url": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "Embeddable variant of `serve_deployment_dashboard_url`.",
+				},
+			},
+		},
+		"primary_version": schema.SingleNestedAttribute{
+			Computed:            true,
+			MarkdownDescription: "The primary version of this service. If the service is terminated, this refers to the most recently active version.",
+			Attributes:          serviceVersionAttributes(),
+		},
+		"canary_version": schema.SingleNestedAttribute{
+			Computed:            true,
+			MarkdownDescription: "The canary version of this service. Null unless the service is currently rolling out.",
+			Attributes:          serviceVersionAttributes(),
+		},
+		"service_status_checklist": schema.SingleNestedAttribute{
+			Computed:            true,
+			MarkdownDescription: "Per-component status breakdown derived from the most recent reconciler snapshot. Null for terminated services and during the brief window before the reconciler's first tick on a brand-new service.",
+			Attributes: map[string]schema.Attribute{
+				"shared": schema.ListNestedAttribute{
+					Computed:            true,
+					MarkdownDescription: "Components shared across all versions (load balancer, listener rule, DNS, TLS certificate). Empty (not null) if none.",
+					NestedObject: schema.NestedAttributeObject{
+						Attributes: serviceStatusChecklistItemAttributes(),
+					},
+				},
+				"per_version": schema.ListNestedAttribute{
+					Computed:            true,
+					MarkdownDescription: "Per-version components (cluster, application, target group), one entry per active service version. Empty (not null) if none.",
+					NestedObject: schema.NestedAttributeObject{
+						Attributes: map[string]schema.Attribute{
+							"version_id": schema.StringAttribute{
+								Computed:            true,
+								MarkdownDescription: "The service version these checklist items belong to.",
+							},
+							"items": schema.ListNestedAttribute{
+								Computed:            true,
+								MarkdownDescription: "Per-component statuses for this version. Empty (not null) if none.",
+								NestedObject: schema.NestedAttributeObject{
+									Attributes: serviceStatusChecklistItemAttributes(),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}

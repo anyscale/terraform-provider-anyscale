@@ -1,0 +1,8 @@
+```
+release-note:new-data-source
+data-source/anyscale_service: adds a data source to look up a single Anyscale Service by ID or name.
+```
+```
+release-note:new-data-source
+data-source/anyscale_services: adds a data source to list and filter Anyscale Services.
+```

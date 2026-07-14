@@ -1,5 +1,7 @@
 package provider
 
+import "encoding/json"
+
 // Cloud API Models
 
 // CreateCloudRequest is the request body for creating a cloud
@@ -596,4 +598,123 @@ func (b *BuildResult) ResolvedRayVersion() *string {
 		return b.ByodRayVersion
 	}
 	return b.RayVersion
+}
+
+// Service API Models
+
+// ServiceResponse represents a single service from the Anyscale API (GET /api/v2/services-v2/{id}).
+type ServiceResponse struct {
+	Result ServiceResult `json:"result"`
+}
+
+// ServicesListResponse represents the response from listing services (GET /api/v2/services-v2/).
+//
+// The backend's list item model (DecoratedListServiceAPIModel) is a strict superset of the get
+// item model (DecoratedProductionServiceV2APIModel) - the only extra field is `type`, which this
+// provider deliberately does not expose (redundant discriminator; this router only ever deals in
+// V2 services). So ServiceResult below is shared, unchanged, by both this and ServiceResponse.
+type ServicesListResponse struct {
+	Results  []ServiceResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// ServiceResult is the actual service data, shared by both the singular GET and plural LIST
+// responses (see ServicesListResponse's doc comment for why one struct covers both).
+//
+// Deliberately absent fields, each a documented gap rather than an oversight:
+//   - auth_token: a live bearer credential for calling the deployed service. A Terraform data
+//     source's output is always written to state in plaintext regardless of any Sensitive
+//     marking, so this is excluded entirely rather than included-and-marked-Sensitive - the same
+//     ruling this provider already applies to API keys generally.
+//   - versions: deprecated upstream in favor of primary_version/canary_version.
+//   - type (ServiceType): list-only field; redundant discriminator since this router is V2-only.
+//   - creator (MiniUser object): flat CreatorID is kept instead, consistent with this provider's
+//     existing choice to defer a nested creator object on anyscale_cloud for the same reason
+//     (low value once creator_id is already surfaced).
+type ServiceResult struct {
+	ID                 string  `json:"id"`
+	Name               string  `json:"name"`
+	Description        *string `json:"description"`
+	ProjectID          string  `json:"project_id"`
+	CloudID            string  `json:"cloud_id"`
+	CreatorID          string  `json:"creator_id"`
+	CreatedAt          string  `json:"created_at"`
+	EndedAt            *string `json:"ended_at"`
+	Hostname           string  `json:"hostname"`
+	BaseURL            string  `json:"base_url"`
+	CurrentState       string  `json:"current_state"`
+	GoalState          string  `json:"goal_state"`
+	AutoRolloutEnabled bool    `json:"auto_rollout_enabled"`
+	IsMultiVersion     bool    `json:"is_multi_version"`
+	ErrorMessage       *string `json:"error_message"`
+
+	ServiceObservabilityURLs ServiceObservabilityURLsResult `json:"service_observability_urls"`
+
+	PrimaryVersion ServiceVersionResult  `json:"primary_version"`
+	CanaryVersion  *ServiceVersionResult `json:"canary_version"`
+
+	ServiceStatusChecklist *ServiceStatusChecklistResult `json:"service_status_checklist"`
+}
+
+// ServiceObservabilityURLsResult mirrors the backend's ServiceObservabilityUrls - all 4 fields
+// are genuinely optional server-side (nullable dashboard URLs).
+type ServiceObservabilityURLsResult struct {
+	ServiceDashboardURL                  *string `json:"service_dashboard_url"`
+	ServiceDashboardEmbeddingURL         *string `json:"service_dashboard_embedding_url"`
+	ServeDeploymentDashboardURL          *string `json:"serve_deployment_dashboard_url"`
+	ServeDeploymentDashboardEmbeddingURL *string `json:"serve_deployment_dashboard_embedding_url"`
+}
+
+// ServiceVersionResult mirrors the backend's ProductionServiceV2VersionModel, used for both
+// PrimaryVersion and CanaryVersion. RayServeConfig is required upstream (always present, never
+// JSON null) but kept as json.RawMessage rather than a typed struct or map[string]interface{}:
+// the backend model is `extra=Extra.allow`, a fully open/dynamic blob with no fixed schema, and
+// this is a Computed (read-only) field with no HCL-authoring side, so a plain JSON-text passthrough
+// avoids both an unnecessary typed model and a re-marshal step.
+//
+// Deliberately absent: ray_gcs_external_storage_config, tracing_config - niche/advanced per-version
+// configs, scoped out as a documented gap, follow up on demand.
+type ServiceVersionResult struct {
+	ID               string          `json:"id"`
+	CreatedAt        string          `json:"created_at"`
+	Version          string          `json:"version"`
+	CurrentState     string          `json:"current_state"`
+	Weight           int64           `json:"weight"`
+	CurrentWeight    *int64          `json:"current_weight"`
+	TargetWeight     *int64          `json:"target_weight"`
+	BuildID          string          `json:"build_id"`
+	ComputeConfigID  string          `json:"compute_config_id"`
+	ProductionJobIDs []string        `json:"production_job_ids"`
+	ConnectionIDs    []string        `json:"connection_ids"`
+	RayServeConfig   json.RawMessage `json:"ray_serve_config"`
+}
+
+// ServiceStatusChecklistResult mirrors the backend's ServiceStatusChecklist. Modeled as lists
+// rather than maps upstream (per the backend's own comment) to work around an old
+// openapi-generator recursion limitation - kept as lists here too rather than reshaping into a
+// map, so the provider's shape matches the wire shape exactly.
+type ServiceStatusChecklistResult struct {
+	Shared     []StatusChecklistItemResult `json:"shared"`
+	PerVersion []VersionChecklistResult    `json:"per_version"`
+}
+
+// VersionChecklistResult is the per-version group of checklist items within a
+// ServiceStatusChecklistResult.
+type VersionChecklistResult struct {
+	VersionID string                      `json:"version_id"`
+	Items     []StatusChecklistItemResult `json:"items"`
+}
+
+// StatusChecklistItemResult mirrors the backend's StatusChecklistItem - one row in a service's
+// per-component status breakdown (e.g. "Cluster", "Load Balancer").
+type StatusChecklistItemResult struct {
+	Kind       string  `json:"kind"`
+	Label      string  `json:"label"`
+	State      string  `json:"state"`
+	Message    string  `json:"message"`
+	VersionID  *string `json:"version_id"`
+	ObservedAt *string `json:"observed_at"`
 }
