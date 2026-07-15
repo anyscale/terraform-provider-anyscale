@@ -1,31 +1,56 @@
 # Copy this file to terraform.tfvars and fill in your own values:
 #   cp terraform.tfvars.example terraform.tfvars
-# terraform.tfvars is gitignored -- it's the right place for values specific to your own AWS
-# account and Anyscale org, not for secrets (this example doesn't need any beyond your Anyscale
-# token, which comes from ANYSCALE_CLI_TOKEN or ~/.anyscale/credentials.json as usual).
+# terraform.tfvars is gitignored in this repo -- your values are never committed.
+#
+# This example builds a real VPC, EKS cluster, S3 bucket, and IAM roles via modules, then registers
+# two Anyscale clouds against them. Expect a 15-20+ minute apply and real AWS spend for as long as
+# it stays up -- see README.md before running this.
 
-# --- Required: existing AWS infrastructure in your own account ---------------------------------
-aws_region                    = "us-east-2"
-aws_vpc_id                    = "vpc-0343edeee0eab27c3"
-aws_subnet_ids_to_az = {
-  "subnet-086ac7bba68e3c1c3" = "us-east-2a"
-  "subnet-08a309019a027ec72" = "us-east-2b"
-}
-aws_security_group_ids        = ["sg-064dac0ed5cffc779"]
-aws_controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/anyscale-crossacct-role"
-aws_dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/anyscale-cluster-node-role"
-aws_external_id               = "org_abc123-external-id"
-object_storage_bucket_name    = "my-anyscale-bucket"
+# ---------------------------------------------------------------------------------------------------------------------
+# REQUIRED -- shared identity / naming
+# ---------------------------------------------------------------------------------------------------------------------
 
-# --- Required: this WILL send a real email invitation ------------------------------------------
-# Use an address you own or control (e.g. a "+kitchen-sink" alias of your own address) so you can
-# see the invitation land and, if you want to exercise the commented-out
-# anyscale_organization_collaborator block in organization.tf, accept it.
-new_member_email = "you+kitchen-sink@example.com"
+# Your Anyscale Organization ID (starts with "org_"). Find it at
+# https://console.anyscale.com/ under Organization Settings.
+anyscale_org_id = "org_abc123xyz"
 
-# --- Optional -- uncomment to override the defaults shown --------------------------------------
-# name_prefix                 = "kitchen-sink"
-# new_member_permission_level = "collaborator"
-# head_node_instance_type     = "m5.2xlarge"
-# worker_instance_type        = "m5.4xlarge"
-# registry_image_uri          = "docker.io/anyscale/ray:2.9.0-py310"
+# Free-form string used as the IAM trust policy external ID -- this example derives two distinct
+# values from it internally (one per Anyscale cloud), so you only need to set it once here.
+anyscale_external_id = "my-external-id-12345"
+
+# Comma-delimited IPv4 CIDR ranges allowed to reach the VM legs (opens 443/https and 22/ssh).
+# Replace with your own IP(s)/range(s) -- avoid "0.0.0.0/0" outside of throwaway testing.
+customer_ingress_cidr_ranges = "203.0.113.0/24,198.51.100.42/32"
+
+# ---------------------------------------------------------------------------------------------------------------------
+# OPTIONAL -- defaults shown below match variables.tf; uncomment to override.
+# ---------------------------------------------------------------------------------------------------------------------
+
+# name_prefix = "kitchen-sink"
+# aws_region  = "us-east-2"
+
+# tags = {
+#   Test        = "true"
+#   Environment = "dev"
+#   Example     = "kitchen-sink"
+# }
+
+# anyscale_deploy_env       = "test" # one of: production, development, test
+# anyscale_s3_force_destroy = true
+
+# --- EKS (Cloud A's K8S cloud resource) -------------------------------------------------------
+# eks_cluster_version = "1.36"
+
+# --- Compute configs ----------------------------------------------------------------------------
+# head_node_instance_type = "m5.2xlarge"
+# worker_instance_type    = "m5.4xlarge"
+
+# --- Container images ---------------------------------------------------------------------------
+# registry_image_uri = "docker.io/anyscale/ray:2.9.0-py310"
+
+# --- Organization: sends a REAL email if set -----------------------------------------------------
+# invite_email = "you+kitchen-sink@example.com"
+# new_member_permission_level = "collaborator" # only used once you uncomment the collaborator block
+
+# --- Service data sources: requires an already-running service to be meaningful ------------------
+# existing_service_name = "my-service"
