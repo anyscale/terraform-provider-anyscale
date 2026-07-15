@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-15
+
+### Added
+
+- resource/anyscale_organization_collaborator: Add `base_role` and `additional_roles`, the same current role-model fields already exposed by anyscale_organization_user and anyscale_organization_users, for read-only visibility into a collaborator's full current role picture; `permission_level` remains the only field you set to change it.
+
+### Changed
+
+- resource/anyscale_organization_collaborator: Update failure and removal-failure error messages to show the Anyscale API's own detail text directly instead of a raw status-code wrapper, and add a hint pointing at `anyscale policy set` when the organization manages permissions via directory sync, since this resource cannot manage collaborators there.
+- data-source/anyscale_organization_user: Remove the BETA label now that the role model it exposes is the current source of truth; add a short migration note pointing from `permission_level` to `base_role` and `additional_roles`.
+- data-source/anyscale_organization_users: Same BETA-label removal and migration note as anyscale_organization_user.
+- resource/anyscale_organization_collaborator: Reword the `additional_roles` description to lead with what it actually does, restrict specific permissions the base role would otherwise grant, rather than reading as added capability; matches the wording now used on the data-source side.
+- data-source/anyscale_organization_user: Same `additional_roles` wording correction as the collaborator resource (and anyscale_organization_users, which shares this description).
+- resource/anyscale_organization_invitation: Add a warning clarifying that destroying a pending invitation revokes it, but destroying an already-accepted invitation does not remove the resulting member or revoke their access - use anyscale_organization_collaborator for that (no behavior change, docs only).
+- resource/anyscale_organization_collaborator: Cross-reference the invitation resource's lighter destroy semantics in this resource's own destroy warning, so the asymmetry between the two is clear from either page (no behavior change, docs only).
+- resource/anyscale_organization_invitation: Document that re-inviting an email with a still-pending invitation silently invalidates the old invitation and creates a new one, and that the old invitation's status will read as expired afterward, not as an error (no behavior change, docs only).
+- data-source/anyscale_user: Cross-reference the role-model vocabulary in the `organization_permission_level` description - note that `/api/v2/userinfo` has no equivalent to `base_role`/`additional_roles`, and point to `anyscale_organization_user` for the full role picture of an arbitrary user (no behavior change, docs only).
+
+### Fixed
+
+- data-source/anyscale_organization_user: Fix `additional_roles` reading back empty for every user regardless of their real roles, present since 0.7.0; it now correctly reflects a user's actual additional roles.
+- data-source/anyscale_organization_users: Fix the same always-empty `additional_roles` bug as anyscale_organization_user, present since 0.7.0, using the same corrected read path.
+- resource/anyscale_organization_invitation: Fix `terraform apply` failing with "Provider produced inconsistent result after apply" on any Create where `email` contains an uppercase letter, present since v0.1.0; the configured casing is now preserved in state, and a later edit that only changes casing no longer forces the invitation to be replaced, which would have revoked and resent it.
+- resource/anyscale_organization_invitation: Creating an invitation for an email that is already an organization member now returns a clear, actionable error instead of a raw API error.
+- resource/anyscale_organization_collaborator: Remove the fictional `permission_level` argument from the Create-time guidance error, which incorrectly told users to set it on anyscale_organization_invitation; that resource has never had such an attribute.
+- data-source/anyscale_organization_users: Fix the bundled example crashing on `length(additional_roles)` now that `additional_roles` can be null for a collaborator with no `user_id`; the example now guards for null before checking length.
+
 ## [0.8.0] - 2026-07-14
 
 ### New Data Sources
@@ -536,7 +563,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.9.0
 [0.8.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.8.0
 [0.7.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.7.0
 [0.6.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.6.0
