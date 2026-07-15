@@ -8,6 +8,10 @@ resource "anyscale_cloud" "primary" {
   region         = var.aws_region
   compute_stack  = "VM"
 
+  # enable_system_cluster does not detect drift if toggled outside Terraform - see the schema
+  # description. Left unset here since it is Optional-only; set explicitly to opt in.
+  # enable_system_cluster = true
+
   # AWS Configuration
   aws_config {
     vpc_id           = module.aws_anyscale_v2.anyscale_vpc_id

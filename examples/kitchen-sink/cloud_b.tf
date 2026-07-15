@@ -9,6 +9,10 @@ resource "anyscale_cloud" "b" {
   region         = var.aws_region
   compute_stack  = "VM"
 
+  # enable_system_cluster does not detect drift if toggled outside Terraform - see the schema
+  # description. Set explicitly here to demonstrate real enabling.
+  enable_system_cluster = true
+
   aws_config {
     vpc_id             = module.anyscale_vpc.vpc_id
     subnet_ids_to_az   = module.anyscale_vpc.public_subnet_ids_az_map
