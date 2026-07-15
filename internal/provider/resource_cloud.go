@@ -978,6 +978,29 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	tflog.Info(ctx, "Cloud is ready", map[string]any{"id": cloudID})
 
+	// Step 4: apply the cloud-level boolean toggles the user configured.
+	// These are NOT part of CreateCloudRequest/add_resource - the backend only
+	// exposes them via their own single-field PUT routes (same ones Update
+	// calls) - so without this step, setting any of them in the very first
+	// apply's config would never actually reach the API: the plan would show
+	// the configured value, but the final readCloudState below would then
+	// overwrite it with the backend's untouched default, producing "Provider
+	// produced inconsistent result after apply" on the first apply for any
+	// cloud that sets one of these. A freshly created cloud always starts
+	// with all three false, so comparing plan against that fixed zero-value
+	// baseline (rather than a real prior state, which doesn't exist yet)
+	// reuses the exact same diff-and-call logic Update() already uses and
+	// has already been proven against.
+	zeroValueState := CloudResourceModel{
+		AutoAddUser:           types.BoolValue(false),
+		EnableLineageTracking: types.BoolValue(false),
+		EnableLogIngestion:    types.BoolValue(false),
+	}
+	if err := r.updateMutableFields(ctx, cloudID, plan, zeroValueState); err != nil {
+		resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
+		return
+	}
+
 	// Read back final state
 	if err := r.readCloudState(ctx, cloudID, &plan); err != nil {
 		resp.Diagnostics.AddError("Read Error", err.Error())

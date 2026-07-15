@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_cloud: Fix `auto_add_user`, `enable_lineage_tracking`, and `enable_log_ingestion` being silently ignored when set to `true` in a brand-new cloud's very first apply, since they were previously only ever applied on Update; this could surface as `Provider produced inconsistent result after apply` on Create. All three now apply correctly at Create as well as Update.
+```
