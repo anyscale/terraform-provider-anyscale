@@ -24,7 +24,9 @@ resource "anyscale_cloud" "aws_example" {
   auto_add_user           = false
   enable_lineage_tracking = false
   enable_log_ingestion    = false
-  is_private_cloud        = false
+  # enable_system_cluster does not detect drift if toggled outside Terraform - see the
+  # schema description. Left unset here since it is Optional-only; set explicitly to opt in.
+  is_private_cloud = false
 
   # AWS-specific configuration
   aws_config {
@@ -127,6 +129,7 @@ output "is_empty_cloud" {
 - `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using split pattern (empty cloud + cloud_resource).
 - `enable_lineage_tracking` (Boolean) Whether to enable lineage tracking for this cloud.
 - `enable_log_ingestion` (Boolean) Whether to enable aggregated log ingestion for this cloud.
+- `enable_system_cluster` (Boolean) Whether to enable the system cluster for this cloud (powers task/actor observability dashboards; see `anyscale cloud config update --enable-system-cluster`). Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions. This means Terraform does NOT detect drift on this attribute: if the system cluster is toggled outside of Terraform (e.g. via the console or CLI), this value will keep reflecting whatever was last applied through this resource, not the real current state, until the next explicit change here.
 - `file_storage` (Block, Optional) File storage configuration (EFS, Filestore, etc.). (see [below for nested schema](#nestedblock--file_storage))
 - `gcp_config` (Block, Optional) GCP-specific configuration. Required when cloud_provider is GCP and using all-in-one pattern. (see [below for nested schema](#nestedblock--gcp_config))
 - `is_private_cloud` (Boolean) Whether this is a private cloud (private networking).
