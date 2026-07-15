@@ -36,7 +36,9 @@ output "users_by_base_role" {
 output "users_with_additional_roles" {
   value = [
     for u in data.anyscale_organization_users.humans.users : u.email
-    if length(u.additional_roles) > 0
+    # additional_roles is null (not empty) for a user with no user_id, rather than an
+    # empty list - coalesce it first so this doesn't error out on that case.
+    if length(coalesce(u.additional_roles, [])) > 0
   ]
-  description = "Emails of users who have at least one additional role beyond their base role"
+  description = "Emails of users who have at least one additional restriction role beyond their base role"
 }

@@ -3,12 +3,15 @@
 page_title: "anyscale_organization_user Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  BETA FEATURE: Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.
+  Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.
+  The organization role model is migrating from a single permission_level to base_role plus additional_roles - see those attributes below.
 ---
 
 # anyscale_organization_user (Data Source)
 
-**BETA FEATURE**: Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.
+Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.
+
+The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below.
 
 ## Example Usage
 
@@ -41,7 +44,7 @@ output "user_base_role" {
 
 output "user_additional_roles" {
   value       = data.anyscale_organization_user.by_email.additional_roles
-  description = "Any additional roles granted beyond the base role; empty (not null) if none"
+  description = "Additional restriction roles beyond the base role (e.g. image_reader), if any; empty if none, null only if the provider could not determine it (a user with no user_id)"
 }
 ```
 
@@ -56,7 +59,7 @@ output "user_additional_roles" {
 
 ### Read-Only
 
-- `additional_roles` (List of String) Additional roles granted to the user beyond their base role, if any. Empty (not null) if the user has none.
+- `additional_roles` (List of String) Additional restriction (deny) roles applied on top of the user's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Three states: populated means the user genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a user with no `user_id`. Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.
 - `base_role` (String) The user's base role in the organization (e.g. owner, collaborator). This is the current source of role information on the backend; prefer it over `permission_level`, which the backend is moving away from.
 - `created_at` (String) The timestamp when the user was added to the organization.
 - `name` (String) The name of the user. Null if the user has no name set.

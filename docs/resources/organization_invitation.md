@@ -4,14 +4,20 @@ page_title: "anyscale_organization_invitation Resource - terraform-provider-anys
 subcategory: ""
 description: |-
   Manages an Anyscale Organization Invitation. This resource sends an email invitation to join an organization.
-  Note: Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the anyscale_organization_collaborator resource to manage their permissions.
+  Note: Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the anyscale_organization_collaborator resource to manage their permissions. There is no need to remove this resource once accepted - an accepted invitation is a harmless historical record, its status simply reads as accepted from then on, and leaving it in your configuration has no side effects.
+  ~> Warning: What terraform destroy actually does here depends on whether the invitation was accepted. Destroying a pending invitation genuinely revokes it - it is invalidated immediately, and the recipient can no longer accept it. Destroying an already-accepted invitation has no effect on the resulting member: acceptance created a separate, independent anyscale_organization_collaborator identity, and invalidating the (already-consumed) invitation record does not touch it. To remove an existing member's access, destroy their anyscale_organization_collaborator resource instead - destroying this resource never does that.
+  Duplicate invitations: Inviting an email address that is already an organization member fails with a clear error directing you to the anyscale_organization_collaborator resource instead. Inviting an email address that already has a pending invitation does not fail - it silently invalidates the previous invitation (expiring it immediately) and creates a new one with a new id; a different letter-casing of the same address counts as the same recipient for this purpose. If that previous invitation is tracked elsewhere (a separate resource block, a different Terraform configuration, or state left over from a prior apply), its status will simply read as expired on the next refresh rather than surfacing an error.
 ---
 
 # anyscale_organization_invitation (Resource)
 
 Manages an Anyscale Organization Invitation. This resource sends an email invitation to join an organization.
 
-**Note:** Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the `anyscale_organization_collaborator` resource to manage their permissions.
+**Note:** Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the `anyscale_organization_collaborator` resource to manage their permissions. There is no need to remove this resource once accepted - an accepted invitation is a harmless historical record, its `status` simply reads as `accepted` from then on, and leaving it in your configuration has no side effects.
+
+~> **Warning:** What `terraform destroy` actually does here depends on whether the invitation was accepted. Destroying a **pending** invitation genuinely revokes it - it is invalidated immediately, and the recipient can no longer accept it. Destroying an **already-accepted** invitation has no effect on the resulting member: acceptance created a separate, independent `anyscale_organization_collaborator` identity, and invalidating the (already-consumed) invitation record does not touch it. To remove an existing member's access, destroy their `anyscale_organization_collaborator` resource instead - destroying this resource never does that.
+
+**Duplicate invitations:** Inviting an email address that is already an organization member fails with a clear error directing you to the `anyscale_organization_collaborator` resource instead. Inviting an email address that already has a *pending* invitation does not fail - it silently invalidates the previous invitation (expiring it immediately) and creates a new one with a new `id`; a different letter-casing of the same address counts as the same recipient for this purpose. If that previous invitation is tracked elsewhere (a separate resource block, a different Terraform configuration, or state left over from a prior apply), its `status` will simply read as `expired` on the next refresh rather than surfacing an error.
 
 ## Example Usage
 
@@ -55,7 +61,7 @@ output "second_user_accepted" {
 
 ### Required
 
-- `email` (String) The email address to send the invitation to.
+- `email` (String) The email address to send the invitation to. Stored exactly as configured (the API lower-cases it internally for its own matching, but the casing you type is what's kept in state). Changing to a genuinely different email replaces the invitation; changing only its letter case does not, since the Anyscale API treats those as the same invitation.
 
 ### Read-Only
 
@@ -64,7 +70,7 @@ output "second_user_accepted" {
 - `expires_at` (String) Timestamp when the invitation expires.
 - `id` (String) The unique identifier of the invitation (invitation_id).
 - `organization_id` (String) The organization ID this invitation belongs to.
-- `status` (String) The current status of the invitation. Can be `pending`, `accepted`, or `expired`.
+- `status` (String) The current status of the invitation. Can be `pending`, `accepted`, or `expired`. Computed from `accepted_at` and `expires_at` - note that sending a new invitation to the same email address invalidates this one immediately, which surfaces here as `expired` on the next refresh rather than as an error.
 
 ## Import
 

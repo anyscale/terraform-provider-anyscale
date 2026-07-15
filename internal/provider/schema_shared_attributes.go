@@ -206,7 +206,7 @@ func organizationUserSharedAttributes() map[string]schema.Attribute {
 		"additional_roles": schema.ListAttribute{
 			ElementType:         types.StringType,
 			Computed:            true,
-			MarkdownDescription: "Additional roles granted to the user beyond their base role, if any. Empty (not null) if the user has none.",
+			MarkdownDescription: "Additional restriction (deny) roles applied on top of the user's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Three states: populated means the user genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a user with no `user_id`. Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.",
 		},
 		"created_at": schema.StringAttribute{
 			Computed:            true,

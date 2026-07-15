@@ -26,5 +26,5 @@ output "user_base_role" {
 
 output "user_additional_roles" {
   value       = data.anyscale_organization_user.by_email.additional_roles
-  description = "Any additional roles granted beyond the base role; empty (not null) if none"
+  description = "Additional restriction roles beyond the base role (e.g. image_reader), if any; empty if none, null only if the provider could not determine it (a user with no user_id)"
 }

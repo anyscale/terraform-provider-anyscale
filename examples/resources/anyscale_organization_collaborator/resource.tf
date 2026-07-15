@@ -4,6 +4,11 @@ data "anyscale_organization_user" "existing_user" {
   email = "user@example.com"
 }
 
+output "existing_user_identity_id" {
+  value       = data.anyscale_organization_user.existing_user.id
+  description = "The identity_id to use below with terraform import"
+}
+
 # Then import the collaborator using:
 # terraform import anyscale_organization_collaborator.existing_user <identity_id>
 
@@ -33,4 +38,14 @@ output "user_email" {
 output "user_permission" {
   value       = anyscale_organization_collaborator.existing_user.permission_level
   description = "Current permission level"
+}
+
+output "user_base_role" {
+  value       = anyscale_organization_collaborator.existing_user.base_role
+  description = "The collaborator's base role - always agrees with permission_level, since permission_level is the field you set to change it"
+}
+
+output "user_additional_roles" {
+  value       = anyscale_organization_collaborator.existing_user.additional_roles
+  description = "Additional restriction (deny) roles beyond the base role, if any - read-only, not manageable through Terraform"
 }
