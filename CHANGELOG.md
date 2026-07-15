@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-15
+
+### Added
+
+- resource/anyscale_cloud: Add `enable_system_cluster`, an Optional bool to enable the system cluster for task/actor observability dashboards. Deliberately not Computed - the backend has no side-effect-free way to read back the current state, so this attribute does not detect drift if toggled outside Terraform (documented inline on the attribute).
+
 ## [0.9.1] - 2026-07-15
 
 ### Fixed
@@ -569,7 +575,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.10.0
 [0.9.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.9.1
 [0.9.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.9.0
 [0.8.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.8.0
