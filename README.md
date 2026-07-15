@@ -54,13 +54,16 @@ provider "anyscale" {
   - Compute configurations
   - Container images (build from a Containerfile, or register existing images from a registry)
   - Projects
+  - Organization invitations
+  - Organization collaborators (import-only; manages permissions for existing members)
 - Currently supported data sources:
   - Clouds (single lookup and list/filter)
   - Projects (single lookup and list/filter)
   - Compute configurations
   - Container images (single lookup and list/filter)
+  - Services (single lookup and list/filter)
   - The current authenticated user and their connected organization
-  - Organization users (BETA - single lookup and list/filter)
+  - Organization users (single lookup and list/filter)
 - **Automatic Detection**: Cloud provider and region auto-detected from configuration blocks
 - **Flexible Authentication**: Environment variable, credentials file, or provider configuration
 

@@ -72,8 +72,9 @@ func (d *OrganizationUserDataSource) Schema(ctx context.Context, req datasource.
 	}
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "**BETA FEATURE**: Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.",
-		Attributes:          attributes,
+		MarkdownDescription: "Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.\n\n" +
+			"The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below.",
+		Attributes: attributes,
 	}
 }
 
@@ -163,11 +164,21 @@ func (d *OrganizationUserDataSource) Read(ctx context.Context, req datasource.Re
 // data source's model. DS-OU-1: name is genuinely nullable server-side (see
 // models.go's OrganizationCollaboratorResult.Name) and mapped via
 // StringPointerValue, matching the adjacent UserID field's existing handling
-// - a null name must never collapse to "".
+// - a null name must never collapse to "". u is expected to already be
+// role-hydrated (see hydrateCollaboratorRoles) by the caller.
 func organizationCollaboratorToUserModel(ctx context.Context, u OrganizationCollaboratorResult) (*OrganizationUserDataSourceModel, diag.Diagnostics) {
-	additionalRoles, diags := types.ListValueFrom(ctx, types.StringType, u.AdditionalRoles)
-	if diags.HasError() {
-		return nil, diags
+	// additional_roles tri-state: nil (undetermined, from hydrateCollaboratorRoles)
+	// renders null; a non-nil (possibly empty) slice renders as a real list,
+	// never null, when genuinely queried-and-none.
+	var additionalRoles types.List
+	var diags diag.Diagnostics
+	if u.AdditionalRoles == nil {
+		additionalRoles = types.ListNull(types.StringType)
+	} else {
+		additionalRoles, diags = types.ListValueFrom(ctx, types.StringType, u.AdditionalRoles)
+		if diags.HasError() {
+			return nil, diags
+		}
 	}
 
 	return &OrganizationUserDataSourceModel{
@@ -193,7 +204,7 @@ func (d *OrganizationUserDataSource) findUserByID(ctx context.Context, id string
 
 	for _, u := range users {
 		if u.ID == id {
-			model, diags := organizationCollaboratorToUserModel(ctx, u)
+			model, diags := organizationCollaboratorToUserModel(ctx, hydrateCollaboratorRoles(ctx, d.client, u))
 			return model, diags, nil
 		}
 	}
@@ -212,7 +223,7 @@ func (d *OrganizationUserDataSource) findUserByUserID(ctx context.Context, userI
 
 	for _, u := range users {
 		if u.UserID != nil && *u.UserID == userID {
-			model, diags := organizationCollaboratorToUserModel(ctx, u)
+			model, diags := organizationCollaboratorToUserModel(ctx, hydrateCollaboratorRoles(ctx, d.client, u))
 			return model, diags, nil
 		}
 	}
@@ -233,7 +244,7 @@ func (d *OrganizationUserDataSource) findUserByEmail(ctx context.Context, email 
 
 	for _, u := range users {
 		if strings.EqualFold(u.Email, email) {
-			model, diags := organizationCollaboratorToUserModel(ctx, u)
+			model, diags := organizationCollaboratorToUserModel(ctx, hydrateCollaboratorRoles(ctx, d.client, u))
 			return model, diags, nil
 		}
 	}

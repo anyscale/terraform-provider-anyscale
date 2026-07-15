@@ -37,7 +37,7 @@ output "current_user_cloud_ids" {
 - `id` (String) The unique identifier of the user.
 - `name` (String) The name of the user.
 - `organization_ids` (List of String) List of organization IDs the user belongs to. In practice always exactly one element. Mirrors a field the backend has deprecated; prefer `organizations[].id` for new configurations.
-- `organization_permission_level` (String) The permission level of the user within their organization (e.g., owner, collaborator).
+- `organization_permission_level` (String) The current user's permission level within their organization (`owner` or `collaborator`). This mirrors the same deprecated `permission_level` concept exposed on `anyscale_organization_user`/`anyscale_organization_users`; `/api/v2/userinfo` has no equivalent to those data sources' `base_role`/`additional_roles`. For the full role picture (including any additional roles) of an arbitrary user, look them up with `anyscale_organization_user` instead.
 - `organizations` (Attributes List) List of organizations the user belongs to, with detailed information. In practice this always contains exactly one entry - an Anyscale API token is scoped to a single organization. See `anyscale_organization` for the direct way to reach it without indexing into this list. (see [below for nested schema](#nestedatt--organizations))
 - `user_group_ids` (List of String) List of user group IDs the user belongs to. Null if the group list couldn't be determined (a transient failure fetching it, which also emits a warning). Empty if the user genuinely belongs to no groups.
 - `username` (String) The username of the user.

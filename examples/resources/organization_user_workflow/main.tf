@@ -1,5 +1,11 @@
-# Complete workflow: Invite → Wait → Import → Manage
-# This example shows the full lifecycle of adding and managing organization users
+# Complete workflow: Invite -> Wait -> Import -> Manage
+#
+# This is a walkthrough, not a single-shot apply: steps 2 and 3 depend on a real person
+# accepting an email invitation (seconds to days, and it happens outside Terraform entirely),
+# and anyscale_organization_collaborator only supports import, never direct creation. Both are
+# left commented out below so a fresh copy of this file applies cleanly (it only sends
+# invitations) instead of failing on parts that cannot succeed yet. Uncomment and apply again as
+# you move through each step.
 
 terraform {
   required_providers {
@@ -11,7 +17,7 @@ terraform {
 
 # Step 1: Send an invitation to a new user. There's no permission_level argument -- every
 # invitation grants default collaborator access on acceptance; the API has no way to set a
-# different level at invite time. Step 4 below is where a different level actually gets set.
+# different level at invite time. Step 3 below is where a different level actually gets set.
 resource "anyscale_organization_invitation" "new_member" {
   email = "newmember@company.com"
 }
@@ -32,52 +38,49 @@ output "invitation_expires_at" {
   description = "When this invitation will expire"
 }
 
-# Step 2: After user accepts the invitation, find their identity_id
-# This data source will only succeed after the invitation is accepted
-data "anyscale_organization_user" "accepted_user" {
-  email = "newmember@company.com"
+# Step 2: Once you have confirmed the invitation above was accepted (check invitation_status),
+# find the new member's identity_id. Uncomment and apply again -- applying this any earlier fails
+# with a "User Not Found" error, since the user does not exist as an org member until they accept.
+#
+# data "anyscale_organization_user" "accepted_user" {
+#   email = "newmember@company.com"
+# }
+#
+# output "user_identity_id" {
+#   value       = data.anyscale_organization_user.accepted_user.id
+#   description = "Use this ID to import the collaborator resource in step 3"
+# }
 
-  # Wait for invitation to be accepted
-  depends_on = [anyscale_organization_invitation.new_member]
-}
-
-output "user_identity_id" {
-  value       = data.anyscale_organization_user.accepted_user.id
-  description = "Use this ID to import the collaborator resource"
-}
-
-# Step 3: Import the collaborator resource manually
-# Run this command after the invitation is accepted:
-# terraform import anyscale_organization_collaborator.new_member <identity_id>
-
-resource "anyscale_organization_collaborator" "new_member" {
-  # This resource must be imported - it cannot be created directly
-  # The id field will be populated during import
-  permission_level = "collaborator"
-
-  lifecycle {
-    # Optional: Prevent accidental deletion
-    prevent_destroy = false
-  }
-}
-
-# Step 4: Manage permissions over time
-# You can update the permission_level as needed:
-# - Change from "collaborator" to "owner" to promote
-# - Change from "owner" to "collaborator" to demote
-
-output "managed_user_email" {
-  value       = try(anyscale_organization_collaborator.new_member.email, "not yet imported")
-  description = "Email of the managed collaborator"
-}
-
-output "managed_user_permission" {
-  value       = try(anyscale_organization_collaborator.new_member.permission_level, "not yet imported")
-  description = "Current permission level"
-}
+# Step 3: Manage the accepted member's permissions. anyscale_organization_collaborator has no
+# Create, only Import -- applying it fresh (as opposed to importing it first) always fails with a
+# "Direct Creation Not Supported" error, by design. Once step 2 has given you the identity_id:
+#
+#   terraform import anyscale_organization_collaborator.new_member <identity_id>
+#
+# Then uncomment the block below and apply again to manage their permission_level over time
+# (e.g. change "collaborator" to "owner" to promote, or back to demote):
+#
+# resource "anyscale_organization_collaborator" "new_member" {
+#   permission_level = "collaborator"
+#
+#   lifecycle {
+#     # Optional: Prevent accidental deletion
+#     prevent_destroy = false
+#   }
+# }
+#
+# output "managed_user_email" {
+#   value       = anyscale_organization_collaborator.new_member.email
+#   description = "Email of the managed collaborator"
+# }
+#
+# output "managed_user_permission" {
+#   value       = anyscale_organization_collaborator.new_member.permission_level
+#   description = "Current permission level"
+# }
 
 # Example: Invite multiple users at once. Every invitation still grants only default
-# collaborator access -- if "lead@company.com" should end up as an owner, that happens in step 4
+# collaborator access -- if "lead@company.com" should end up as an owner, that happens in step 3
 # (via anyscale_organization_collaborator), after they accept, same as any other promotion.
 resource "anyscale_organization_invitation" "team_members" {
   for_each = toset([

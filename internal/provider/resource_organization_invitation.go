@@ -60,7 +60,9 @@ func (r *OrganizationInvitationResource) Metadata(ctx context.Context, req resou
 func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages an Anyscale Organization Invitation. This resource sends an email invitation to join an organization.\n\n" +
-			"**Note:** Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the `anyscale_organization_collaborator` resource to manage their permissions.",
+			"**Note:** Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the `anyscale_organization_collaborator` resource to manage their permissions. There is no need to remove this resource once accepted - an accepted invitation is a harmless historical record, its `status` simply reads as `accepted` from then on, and leaving it in your configuration has no side effects.\n\n" +
+			"~> **Warning:** What `terraform destroy` actually does here depends on whether the invitation was accepted. Destroying a **pending** invitation genuinely revokes it - it is invalidated immediately, and the recipient can no longer accept it. Destroying an **already-accepted** invitation has no effect on the resulting member: acceptance created a separate, independent `anyscale_organization_collaborator` identity, and invalidating the (already-consumed) invitation record does not touch it. To remove an existing member's access, destroy their `anyscale_organization_collaborator` resource instead - destroying this resource never does that.\n\n" +
+			"**Duplicate invitations:** Inviting an email address that is already an organization member fails with a clear error directing you to the `anyscale_organization_collaborator` resource instead. Inviting an email address that already has a *pending* invitation does not fail - it silently invalidates the previous invitation (expiring it immediately) and creates a new one with a new `id`; a different letter-casing of the same address counts as the same recipient for this purpose. If that previous invitation is tracked elsewhere (a separate resource block, a different Terraform configuration, or state left over from a prior apply), its `status` will simply read as `expired` on the next refresh rather than surfacing an error.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -73,9 +75,9 @@ func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resourc
 
 			"email": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The email address to send the invitation to.",
+				MarkdownDescription: "The email address to send the invitation to. Stored exactly as configured (the API lower-cases it internally for its own matching, but the casing you type is what's kept in state). Changing to a genuinely different email replaces the invitation; changing only its letter case does not, since the Anyscale API treats those as the same invitation.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					caseInsensitiveEmailPlanModifier{},
 				},
 			},
 
@@ -113,7 +115,7 @@ func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resourc
 
 			"status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The current status of the invitation. Can be `pending`, `accepted`, or `expired`.",
+				MarkdownDescription: "The current status of the invitation. Can be `pending`, `accepted`, or `expired`. Computed from `accepted_at` and `expires_at` - note that sending a new invitation to the same email address invalidates this one immediately, which surfaces here as `expired` on the next refresh rather than as an error.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -177,6 +179,14 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		http.StatusOK, http.StatusCreated,
 	)
 	if err != nil {
+		detail := extractAPIErrorDetail(err)
+		if strings.Contains(detail, "already a member of your organization") {
+			resp.Diagnostics.AddError(
+				"Email Already Belongs to an Organization Member",
+				fmt.Sprintf("%s\n\nLook up their identity_id with the anyscale_organization_user data source and import them as an anyscale_organization_collaborator instead of inviting them again.", detail),
+			)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "create invitation", err)
 		return
 	}
@@ -198,8 +208,14 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	// Update plan with full details
-	plan.Email = types.StringValue(invitation.Email)
+	// Update plan with full details. Email is deliberately NOT overwritten with
+	// invitation.Email here - the backend always lowercases the stored email
+	// regardless of what was sent, and email is Required (not Computed), so
+	// overwriting plan.Email with a differently-cased API echo made Terraform
+	// Core reject the apply outright ("Provider produced inconsistent result
+	// after apply") for any email containing an uppercase character - a Create-
+	// time hard failure present since v0.1.0, not just a later plan diff. The
+	// user's configured casing stays in state instead.
 	plan.OrganizationID = types.StringValue(invitation.OrganizationID)
 	plan.CreatedAt = types.StringValue(invitation.CreatedAt)
 	plan.ExpiresAt = types.StringValue(invitation.ExpiresAt)
@@ -257,8 +273,13 @@ func (r *OrganizationInvitationResource) Read(ctx context.Context, req resource.
 		return
 	}
 
-	// Update state with API data
-	state.Email = types.StringValue(invitation.Email)
+	// Update state with API data. email is deliberately NOT refreshed from
+	// invitation.Email - the backend always returns it lower-cased regardless of
+	// configured casing, and overwriting state here would fight the
+	// caseInsensitiveEmailPlanModifier on next plan and re-surface the same
+	// inconsistent-result failure this fix addresses in Create. email never
+	// changes out from under Read anyway (RequiresReplace-equivalent), so
+	// there's nothing legitimate to refresh.
 	state.OrganizationID = types.StringValue(invitation.OrganizationID)
 	state.CreatedAt = types.StringValue(invitation.CreatedAt)
 	state.ExpiresAt = types.StringValue(invitation.ExpiresAt)
@@ -421,4 +442,41 @@ func getEmailDomain(email string) string {
 		return "@" + parts[1]
 	}
 	return "[unknown]"
+}
+
+// caseInsensitiveEmailPlanModifier suppresses a plan diff (and the replacement
+// this attribute would otherwise trigger) when the only difference between the
+// configured email and the stored value is letter case. The Anyscale API dedups
+// invitations by lower-cased email (contract I2/I-OPEN, traced against
+// organization_invitations_dao.py's create_invitation/find_invitation, both of
+// which normalize through LOWER), so a case-only edit is the same invitation to
+// the backend - forcing a destroy+recreate over it would be a real
+// revoke-then-reinvite access event for no functional change. A genuinely
+// different email still requires replace.
+type caseInsensitiveEmailPlanModifier struct{}
+
+func (m caseInsensitiveEmailPlanModifier) Description(_ context.Context) string {
+	return "Requires replacement for an email change, unless the only difference is letter case."
+}
+
+func (m caseInsensitiveEmailPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m caseInsensitiveEmailPlanModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	// No established prior value to compare: a fresh create, or state not yet
+	// populated (e.g. immediately post-import before the first Read).
+	if req.StateValue.IsNull() || req.PlanValue.IsUnknown() {
+		return
+	}
+	if req.PlanValue.ValueString() == req.StateValue.ValueString() {
+		return
+	}
+	if strings.EqualFold(req.PlanValue.ValueString(), req.StateValue.ValueString()) {
+		// Case-only change - keep the originally-stored casing rather than
+		// forcing a replace.
+		resp.PlanValue = req.StateValue
+		return
+	}
+	resp.RequiresReplace = true
 }

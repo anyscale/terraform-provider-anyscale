@@ -200,6 +200,31 @@ Cleanup:
 - By default, destroy any ephemeral cloud created by tests.
 - If `ANYSCALE_TEST_KEEP=1`, keep the created cloud for debugging and print the cloud ID/name (but never tokens).
 
+### Test user fixtures for the collaborator/invitation real-infra tests
+
+The `anyscale_organization_collaborator` and `anyscale_organization_invitation` resources have
+real-infra acceptance tests that are opt-in via env var (see `resource_organization_collaborator_acc_test.go`
+and `resource_organization_invitation_acc_test.go`) — they are genuinely destructive (collaborator
+delete removes a real org member; a real permission-level change modifies real access) or
+rate-limited (invitations), so they must never run against an arbitrary or shared identity.
+
+Two optional env vars, resolved at runtime, tests skip cleanly if unset:
+- `ANYSCALE_TEST_USER_EMAIL` — an existing, accepted org member dedicated to testing (no clouds
+  assigned; the user surfaces in this repo manage org-level role, not cloud access, so a
+  cloud-less member is the right fixture). Used for collaborator import/read/update real-infra
+  checks and org_user/org_users data source lookups.
+- `ANYSCALE_TEST_INVITE_EMAIL` — a fresh, not-yet-invited address under the same disposable
+  identity, used as the invite target for the invitation lifecycle test (including a mixed-case
+  variant, to exercise the email-casing fix against real infra). Invalidate any invitation these
+  tests create when done.
+
+Same pattern as `ANYSCALE_TEST_CLOUD_NAME` above and deliberate for the same reason: the literal
+email address is never committed to this repo, only referenced by env var name. Resolve it locally
+(or in your own CI secret) from a real, disposable plus-alias under an inbox you control — e.g.
+`you+tfprovidertest@yourdomain.com` — so invitation emails land somewhere real and safe rather than
+a stranger's inbox, and losing the fixture is a non-event. Do not point either var at a real
+colleague's account or any identity you cannot afford to have its role temporarily changed.
+
 ---
 
 ## Quick reference

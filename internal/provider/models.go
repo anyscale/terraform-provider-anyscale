@@ -344,6 +344,16 @@ type OrganizationCollaboratorResult struct {
 	AdditionalRoles []string `json:"additional_roles"`
 }
 
+// OrganizationCollaboratorSingularResponse represents the response from GET
+// /api/v2/organization_collaborators/{user_id} - the only read path that can
+// return a real, non-empty additional_roles (architect ruling 1; the list/GET
+// formatter hardcodes it to an empty slice unconditionally). Keyed by user_id,
+// not identity_id - some collaborators have no user_id and cannot use this path
+// at all; see hydrateCollaboratorRoles's graceful fallback.
+type OrganizationCollaboratorSingularResponse struct {
+	Result OrganizationCollaboratorResult `json:"result"`
+}
+
 // OrganizationCollaboratorsListResponse represents the response from listing collaborators
 type OrganizationCollaboratorsListResponse struct {
 	Results  []OrganizationCollaboratorResult `json:"results"`

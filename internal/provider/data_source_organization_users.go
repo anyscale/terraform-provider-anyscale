@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -76,7 +77,8 @@ func (d *OrganizationUsersDataSource) Schema(ctx context.Context, req datasource
 	}
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_collaborator` resources, or filtering users by email or account type.",
+		MarkdownDescription: "Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_collaborator` resources, or filtering users by email or account type.\n\n" +
+			"The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below.",
 
 		Attributes: map[string]schema.Attribute{
 			"email": schema.StringAttribute{
@@ -152,12 +154,30 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 	// Convert to Terraform model. DS-OU-1: name is genuinely nullable server-side,
 	// mapped via StringPointerValue matching the adjacent UserID field - a null
 	// name must never collapse to "".
+	//
+	// additional_roles is backfilled per result via a supplementary singular GET
+	// (hydrateCollaboratorRoles) - the list endpoint this data source's primary
+	// fetch uses hardcodes it to empty unconditionally (architect ruling 1), and
+	// switching the primary fetch to POST /search to get it in bulk was traced
+	// and rejected: search has no is_service_account filter and only a combined
+	// name_or_email field, so it cannot replace list-and-filter without losing
+	// this data source's existing filters. This is therefore N+1 (one extra
+	// request per result, bounded by page size) - an accepted, deliberate
+	// trade-off for an auditing data source, not an oversight.
 	users := make([]OrganizationUserModel, len(collaborators))
 	for i, user := range collaborators {
-		additionalRoles, diags := types.ListValueFrom(ctx, types.StringType, user.AdditionalRoles)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
+		user = hydrateCollaboratorRoles(ctx, d.client, user)
+
+		var additionalRoles types.List
+		if user.AdditionalRoles == nil {
+			additionalRoles = types.ListNull(types.StringType)
+		} else {
+			var diags diag.Diagnostics
+			additionalRoles, diags = types.ListValueFrom(ctx, types.StringType, user.AdditionalRoles)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
 		}
 
 		users[i] = OrganizationUserModel{

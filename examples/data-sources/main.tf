@@ -274,7 +274,8 @@ output "organization_default_cloud_id" {
   description = "Default cloud ID for the organization; null if none is configured"
 }
 
-# Example 18: List all users in the organization (BETA - SCIM)
+# Example 18: List all users in the organization. Not related to SCIM (this provider has no SCIM
+# integration) - this simply lists organization membership via the API.
 data "anyscale_organization_users" "all" {
 }
 
@@ -287,12 +288,14 @@ output "organization_users_list" {
   value = [for u in data.anyscale_organization_users.all.users : {
     name  = u.name
     email = u.email
-    role  = u.permission_level
+    # base_role is the current source of role information; permission_level is
+    # still available but the backend is moving away from it.
+    base_role = u.base_role
   }]
   description = "List of all organization users"
 }
 
-# Example 19: Look up a specific user by email (BETA - SCIM)
+# Example 19: Look up a specific user by email
 data "anyscale_organization_user" "specific" {
   email = "admin@example.com"
 }
@@ -302,7 +305,7 @@ output "specific_user_id" {
   description = "The identity ID of the specific user"
 }
 
-# Example 20: Look up a specific user by ID (BETA - SCIM)
+# Example 20: Look up a specific user by ID
 data "anyscale_organization_user" "by_id" {
   id = "usr_abc123xyz"
 }
@@ -312,7 +315,7 @@ output "user_by_id_email" {
   description = "The email of the user looked up by identity ID"
 }
 
-# Example 21: Look up a specific user by user_id (BETA - SCIM)
+# Example 21: Look up a specific user by user_id
 data "anyscale_organization_user" "by_user_id" {
   user_id = "usr_xyz789abc"
 }
@@ -322,7 +325,7 @@ output "user_by_user_id_email" {
   description = "The email of the user looked up by user_id"
 }
 
-# Example 22: Filter organization users by email (BETA - SCIM)
+# Example 22: Filter organization users by email
 data "anyscale_organization_users" "filtered" {
   email = "admin@example.com"
 }
@@ -332,7 +335,7 @@ output "filtered_users_count" {
   description = "Number of users matching the email filter"
 }
 
-# Example 23: Get service accounts only (BETA - SCIM)
+# Example 23: Get service accounts only
 data "anyscale_organization_users" "service_accounts" {
   is_service_account = true
 }

@@ -3,12 +3,15 @@
 page_title: "anyscale_organization_users Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  BETA FEATURE: Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving id values before importing anyscale_organization_collaborator resources, or filtering users by email or account type.
+  Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving id values before importing anyscale_organization_collaborator resources, or filtering users by email or account type.
+  The organization role model is migrating from a single permission_level to base_role plus additional_roles - see those attributes below.
 ---
 
 # anyscale_organization_users (Data Source)
 
-**BETA FEATURE**: Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_collaborator` resources, or filtering users by email or account type.
+Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_collaborator` resources, or filtering users by email or account type.
+
+The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below.
 
 ## Example Usage
 
@@ -51,9 +54,11 @@ output "users_by_base_role" {
 output "users_with_additional_roles" {
   value = [
     for u in data.anyscale_organization_users.humans.users : u.email
-    if length(u.additional_roles) > 0
+    # additional_roles is null (not empty) for a user with no user_id, rather than an
+    # empty list - coalesce it first so this doesn't error out on that case.
+    if length(coalesce(u.additional_roles, [])) > 0
   ]
-  description = "Emails of users who have at least one additional role beyond their base role"
+  description = "Emails of users who have at least one additional restriction role beyond their base role"
 }
 ```
 
@@ -75,7 +80,7 @@ output "users_with_additional_roles" {
 
 Read-Only:
 
-- `additional_roles` (List of String) Additional roles granted to the user beyond their base role, if any. Empty (not null) if the user has none.
+- `additional_roles` (List of String) Additional restriction (deny) roles applied on top of the user's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Three states: populated means the user genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a user with no `user_id`. Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.
 - `base_role` (String) The user's base role in the organization (e.g. owner, collaborator). This is the current source of role information on the backend; prefer it over `permission_level`, which the backend is moving away from.
 - `created_at` (String) The timestamp when the user was added to the organization.
 - `email` (String) The email address of the user.
