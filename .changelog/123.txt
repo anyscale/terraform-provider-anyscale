@@ -1,4 +1,0 @@
-```
-release-note:added
-resource/anyscale_cloud: Add `enable_system_cluster`, an Optional bool to enable the system cluster for task/actor observability dashboards. Deliberately not Computed - the backend has no side-effect-free way to read back the current state, so this attribute does not detect drift if toggled outside Terraform (documented inline on the attribute).
-```
