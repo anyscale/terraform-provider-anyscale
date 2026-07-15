@@ -117,7 +117,15 @@ rework, so there's nothing to wire up yet.
    `terraform destroy` between runs or change `name_prefix` to avoid the `409` collision the
    [Cloud Resources guide](../../docs/guides/cloud-resources.md#multiple-resource-deployments-on-one-cloud)
    describes for a duplicate `anyscale_cloud_resource` name on the same cloud.
-6. **Already have your own VPC and EKS cluster?** The module wiring lives entirely in
+6. **Cloud B enables the system cluster (`enable_system_cluster = true`).** This only flips a
+   config flag - it does not by itself provision a running cluster, so there is no leaked
+   infrastructure or ongoing cost from this alone (real compute is created lazily, only if
+   something opens the console's Observability tab for this cloud). The one residual risk: if a
+   cluster is running when you `terraform destroy`, the backend actively terminates it first and
+   waits, but blocks the destroy outright (a loud `409`, not a silent leak) if termination does not
+   finish in time. This is not expected in normal use of this example - noted for completeness, not
+   because it is likely.
+7. **Already have your own VPC and EKS cluster?** The module wiring lives entirely in
    `infra_aws.tf` and `infra_eks.tf`, feeding the `anyscale_*` resources through a small number of
    outputs (VPC/subnet/security-group IDs, IAM role ARNs, the EKS operator identity and zones).
    Swap those two files for variables holding your existing infrastructure's IDs — matching the
