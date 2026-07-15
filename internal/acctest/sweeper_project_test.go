@@ -26,6 +26,31 @@ func init() {
 
 const sweepProjectDefaultMinAge = 2 * time.Hour
 
+// knownPermanentlyStuck403ProjectIDs are project IDs confirmed (see the
+// project-delete-403 investigation notes) to have never received their
+// SpiceDB owner tuple at creation time: DELETE permanently 403s for any
+// caller, including this sweeper, no matter how many times or how long
+// after creation it retries. They are intentionally left alive in the test
+// org for backend investigation (Anyscale backend eng Matt Weber, as of
+// 2026-07-12) and must never be deleted.
+//
+// These IDs - not just the shape "every failure this run was 403" - are
+// what finalizeSweepResult uses to tell "the eternal known specimens,
+// which can legitimately be the ONLY sweep candidates on a quiet day" apart
+// from "something genuinely broke sweeper-wide (e.g. lost delete access)."
+// Prune an entry once backend confirms its tuple was backfilled (delete
+// succeeds again) or the project is gone.
+var knownPermanentlyStuck403ProjectIDs = map[string]bool{
+	"prj_3qdcd9k622abrtbvnrqtd9ifss": true, // tfacc-project-desc-9uc3s9pf
+	"prj_suumi2fbarpw2h25ac5jmyheqd": true, // tfacc-project-desc-f9cymgmb (Matt's specimen)
+}
+
+// isKnownPermanentlyStuckProject reports whether id is one of the tracked
+// permanent-403 specimens above.
+func isKnownPermanentlyStuckProject(id string) bool {
+	return knownPermanentlyStuck403ProjectIDs[id]
+}
+
 type sweepProjectResult struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -63,7 +88,8 @@ func sweepProjects(_ string) error {
 
 	log.Printf("[sweep:anyscale_project] listed %d project(s); min-age=%s", len(projects), minAge)
 
-	var permissionDeniedFailures []string
+	var knownStuckFailures []string
+	var unknownPermissionDeniedFailures []string
 	var otherFailures []string
 	swept := 0
 	for _, p := range projects {
@@ -88,7 +114,7 @@ func sweepProjects(_ string) error {
 		switch {
 		case derr == nil:
 			swept++
-		case isSweepPermissionDenied(derr):
+		case isSweepPermissionDenied(derr) && isKnownPermanentlyStuckProject(p.ID):
 			// A project whose delete-time permission check permanently denies it (the
 			// SpiceDB tuple was never written - see the project-delete-403 investigation
 			// notes) can never be swept by ANY client, including this one: the sweeper's
@@ -96,14 +122,16 @@ func sweepProjects(_ string) error {
 			// expected, already-tracked condition as a job failure would make the daily
 			// sweep permanently red for as long as any such project exists, training
 			// everyone to ignore a job that could otherwise still catch a real regression.
-			permissionDeniedFailures = append(permissionDeniedFailures, fmt.Sprintf("%s (%s): %v", p.ID, p.Name, derr))
+			knownStuckFailures = append(knownStuckFailures, fmt.Sprintf("%s (%s): %v", p.ID, p.Name, derr))
+		case isSweepPermissionDenied(derr):
+			unknownPermissionDeniedFailures = append(unknownPermissionDeniedFailures, fmt.Sprintf("%s (%s): %v", p.ID, p.Name, derr))
 		default:
 			otherFailures = append(otherFailures, fmt.Sprintf("%s (%s): %v", p.ID, p.Name, derr))
 		}
 	}
 
-	log.Printf("[sweep:anyscale_project] swept=%d permission_denied=%d other_failed=%d", swept, len(permissionDeniedFailures), len(otherFailures))
-	return finalizeSweepResult(swept, permissionDeniedFailures, otherFailures)
+	log.Printf("[sweep:anyscale_project] swept=%d known_stuck=%d unknown_permission_denied=%d other_failed=%d", swept, len(knownStuckFailures), len(unknownPermissionDeniedFailures), len(otherFailures))
+	return finalizeSweepResult(swept, knownStuckFailures, unknownPermissionDeniedFailures, otherFailures)
 }
 
 // isSweepPermissionDenied reports whether a sweepDeleteProject error is the known,
@@ -116,29 +144,48 @@ func isSweepPermissionDenied(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "status 403")
 }
 
-// finalizeSweepResult decides the sweep job's overall pass/fail outcome given the
-// two failure buckets isSweepPermissionDenied splits errors into, plus how many
-// deletes actually succeeded. Permission-denied failures are logged loudly (so
-// they stay visible, not silently swallowed) but do NOT fail the job on their
-// own - see isSweepPermissionDenied's doc comment for why a sweeper retry can
-// never succeed on one anyway. Any OTHER failure still fails the job, so a
-// genuinely new/unexpected sweeper problem is never masked by this carve-out.
+// finalizeSweepResult decides the sweep job's overall pass/fail outcome given
+// the three failure buckets sweepProjects splits errors into, plus how many
+// deletes actually succeeded.
 //
-// One guard on top of that: if there were resources to act on but EVERY single
-// delete came back permission-denied and NONE succeeded, that is not "a couple
-// of already-known stuck specimens" - it is the shape of a real, systemic
-// permission regression (e.g. the sweeper's own credentials lost delete access
-// entirely), and gets treated as a job failure too, not a quiet warning.
-func finalizeSweepResult(swept int, permissionDeniedFailures, otherFailures []string) error {
-	if len(permissionDeniedFailures) > 0 {
-		log.Printf("[sweep:anyscale_project] WARNING: %d project(s) could not be swept due to a known, backend-side permanent permission-check issue (not a sweeper bug - see project-delete-403 investigation notes): %s", len(permissionDeniedFailures), strings.Join(permissionDeniedFailures, "; "))
+// knownStuckFailures (permission-denied on an ID in
+// knownPermanentlyStuck403ProjectIDs) are logged loudly - so they stay
+// visible, not silently swallowed - but NEVER fail the job and never count
+// toward the systemic-regression guard below, no matter how many of them
+// there are or whether swept is zero: they are specific, already-identified
+// objects, not a shape that might coincidentally mean something else. See
+// isSweepPermissionDenied's doc comment for why a sweeper retry can never
+// succeed on one anyway.
+//
+// otherFailures (a non-403 error) always fail the job, so a genuinely
+// new/unexpected sweeper problem is never masked.
+//
+// unknownPermissionDeniedFailures (permission-denied on an ID NOT in the
+// known-stuck allowlist) get the "systemic regression" guard: if there were
+// resources to act on but EVERY single delete came back permission-denied
+// on an unrecognized project and NONE succeeded, that is not "a couple of
+// already-known stuck specimens" (those are excluded from this count
+// entirely) - it is the shape of a real, systemic permission regression
+// (e.g. the sweeper's own credentials lost delete access entirely), and
+// fails the job. If at least one delete succeeded, credentials clearly
+// still work, so an unrecognized 403 alongside real successes is logged as
+// a warning instead - it may be a new permanent specimen worth adding to
+// the allowlist, or a slow instance of the transient SpiceDB race - but
+// does not fail the job on its own.
+func finalizeSweepResult(swept int, knownStuckFailures, unknownPermissionDeniedFailures, otherFailures []string) error {
+	if len(knownStuckFailures) > 0 {
+		log.Printf("[sweep:anyscale_project] WARNING: %d project(s) could not be swept due to a known, backend-side permanent permission-check issue (not a sweeper bug - see project-delete-403 investigation notes): %s", len(knownStuckFailures), strings.Join(knownStuckFailures, "; "))
 	}
 	if len(otherFailures) > 0 {
 		return fmt.Errorf("project sweep had %d unexpected failure(s): %s", len(otherFailures), strings.Join(otherFailures, "; "))
 	}
-	if swept == 0 && len(permissionDeniedFailures) > 0 {
-		return fmt.Errorf("project sweep had %d permission-denied failure(s) and ZERO successful deletes - this looks like a systemic permission regression (e.g. lost delete access), not a couple of known-stuck specimens, so treating it as a failure: %s", len(permissionDeniedFailures), strings.Join(permissionDeniedFailures, "; "))
+	if len(unknownPermissionDeniedFailures) == 0 {
+		return nil
 	}
+	if swept == 0 {
+		return fmt.Errorf("project sweep had %d permission-denied failure(s) on project(s) not in the known-stuck allowlist and ZERO successful deletes - this looks like a systemic permission regression (e.g. lost delete access), not the tracked known-stuck specimens, so treating it as a failure: %s", len(unknownPermissionDeniedFailures), strings.Join(unknownPermissionDeniedFailures, "; "))
+	}
+	log.Printf("[sweep:anyscale_project] WARNING: %d project(s) got permission-denied and are NOT in the known-stuck allowlist (possibly a new permanent specimen worth investigating/tracking, or a slow instance of the transient SpiceDB race) - not failing the job since %d other delete(s) succeeded: %s", len(unknownPermissionDeniedFailures), swept, strings.Join(unknownPermissionDeniedFailures, "; "))
 	return nil
 }
 
@@ -218,54 +265,107 @@ func TestIsSweepPermissionDenied(t *testing.T) {
 	}
 }
 
-// TestFinalizeSweepResult is the mutation-proof guard for the actual bug this
-// investigation found in the real daily sweep run (29179390163, 2026-07-12):
-// two projects permanently 403 on delete (their SpiceDB owner tuple was never
-// written - see the project-delete-403 investigation notes), and the sweeper's
-// own DELETE call is denied the identical way, every single day, forever, until
-// backend backfills the tuple. Before this fix, ANY sweep failure (permission-
-// denied or not) failed the whole job - meaning the daily sweep would show
-// FAILED in CI every day for as long as those two projects exist, training
-// everyone to ignore a job that could otherwise still catch a real regression.
+// TestIsKnownPermanentlyStuckProject proves the exact allowlist finalizeSweepResult's
+// systemic-regression guard relies on to tell the two tracked permanent-403
+// specimens apart from any other project ID.
+func TestIsKnownPermanentlyStuckProject(t *testing.T) {
+	for id := range knownPermanentlyStuck403ProjectIDs {
+		if !isKnownPermanentlyStuckProject(id) {
+			t.Errorf("expected tracked specimen %s to be classified as known-stuck", id)
+		}
+	}
+	if isKnownPermanentlyStuckProject("prj_some_unrelated_project_id") {
+		t.Error("expected an ID absent from the allowlist to NOT be classified as known-stuck")
+	}
+	if isKnownPermanentlyStuckProject("") {
+		t.Error("expected an empty ID to NOT be classified as known-stuck")
+	}
+}
+
+// TestFinalizeSweepResult is the mutation-proof guard for two distinct bugs
+// this investigation found in real daily sweep runs, both in
+// internal/acctest/sweeper_project_test.go:
+//
+//  1. Run 29179390163 (2026-07-12): two projects permanently 403 on delete
+//     (their SpiceDB owner tuple was never written - see the
+//     project-delete-403 investigation notes), and the sweeper's own DELETE
+//     call is denied the identical way, every single day, forever, until
+//     backend backfills the tuple. Before the PR #99 fix, ANY sweep failure
+//     (permission-denied or not) failed the whole job.
+//  2. Run 29304949946 (2026-07-14): the PR #99 fix's own "zero swept + all
+//     permission-denied = systemic regression" guard did not distinguish
+//     WHICH projects were permission-denied - so on a quiet day where the
+//     ONLY two sweep candidates happened to be exactly those same two
+//     already-tracked specimens (nothing else left to sweep that run), the
+//     guard misfired and failed the job anyway, even though this is the
+//     textbook expected case, not a regression.
+//
+// Both are exercised below: a request naming ONLY tracked specimen IDs must
+// never fail the job regardless of swept count, while a request naming an
+// unrecognized ID still trips the systemic-regression guard when nothing else
+// succeeded - so a real credentials-loss regression is still caught.
 func TestFinalizeSweepResult(t *testing.T) {
-	t.Run("permission-denied-only failures alongside real successes do not fail the job", func(t *testing.T) {
-		err := finalizeSweepResult(18, []string{"prj_a (proj-a): status 403: Permission denied"}, nil)
+	t.Run("known-stuck failures alongside real successes do not fail the job", func(t *testing.T) {
+		err := finalizeSweepResult(18, []string{"prj_3qdcd9k622abrtbvnrqtd9ifss (tfacc-project-desc-9uc3s9pf): status 403: Permission denied"}, nil, nil)
 		if err != nil {
-			t.Fatalf("expected nil (job should NOT fail on known permission-denied failures when other deletes succeeded), got: %v", err)
+			t.Fatalf("expected nil (job should NOT fail on known-stuck failures when other deletes succeeded), got: %v", err)
+		}
+	})
+
+	t.Run("unknown permission-denied failures alongside real successes do not fail the job", func(t *testing.T) {
+		err := finalizeSweepResult(18, nil, []string{"prj_z (proj-z): status 403: Permission denied"}, nil)
+		if err != nil {
+			t.Fatalf("expected nil (job should NOT fail on a lone unrecognized permission-denied failure when other deletes succeeded), got: %v", err)
 		}
 	})
 
 	t.Run("no failures at all does not fail the job", func(t *testing.T) {
-		if err := finalizeSweepResult(5, nil, nil); err != nil {
+		if err := finalizeSweepResult(5, nil, nil, nil); err != nil {
 			t.Fatalf("expected nil, got: %v", err)
 		}
 	})
 
 	t.Run("nothing to sweep (swept=0, no failures at all) does not fail the job", func(t *testing.T) {
-		if err := finalizeSweepResult(0, nil, nil); err != nil {
+		if err := finalizeSweepResult(0, nil, nil, nil); err != nil {
 			t.Fatalf("expected nil - zero swept with zero failures just means nothing needed sweeping, got: %v", err)
 		}
 	})
 
-	t.Run("any other failure still fails the job, even alongside permission-denied ones", func(t *testing.T) {
+	t.Run("all sweep candidates being known-stuck specimens and zero succeeding does NOT fail the job (run 29304949946, 2026-07-14)", func(t *testing.T) {
+		err := finalizeSweepResult(
+			0,
+			[]string{
+				"prj_3qdcd9k622abrtbvnrqtd9ifss (tfacc-project-desc-9uc3s9pf): status 403: Permission denied",
+				"prj_suumi2fbarpw2h25ac5jmyheqd (tfacc-project-desc-f9cymgmb): status 403: Permission denied",
+			},
+			nil,
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("expected nil - zero swept alongside ONLY known-stuck failures is the fully expected quiet-day shape, not a regression, got: %v", err)
+		}
+	})
+
+	t.Run("any other failure still fails the job, even alongside known-stuck ones", func(t *testing.T) {
 		err := finalizeSweepResult(
 			18,
 			[]string{"prj_a (proj-a): status 403: Permission denied"},
+			nil,
 			[]string{"prj_b (proj-b): status 500: internal server error"},
 		)
 		if err == nil {
-			t.Fatal("expected an error - an unexpected failure must never be silently absorbed by the permission-denied carve-out")
+			t.Fatal("expected an error - an unexpected failure must never be silently absorbed by the known-stuck carve-out")
 		}
 		if !strings.Contains(err.Error(), "1 unexpected failure") || !strings.Contains(err.Error(), "prj_b") {
 			t.Fatalf("expected the error to identify exactly the unexpected (non-403) failure, got: %v", err)
 		}
 		if strings.Contains(err.Error(), "prj_a") {
-			t.Fatalf("expected the permission-denied failure to be excluded from the job-failing error, got: %v", err)
+			t.Fatalf("expected the known-stuck failure to be excluded from the job-failing error, got: %v", err)
 		}
 	})
 
 	t.Run("multiple other failures are all reported", func(t *testing.T) {
-		err := finalizeSweepResult(18, nil, []string{"prj_b: status 500: boom", "prj_c: status 502: boom"})
+		err := finalizeSweepResult(18, nil, nil, []string{"prj_b: status 500: boom", "prj_c: status 502: boom"})
 		if err == nil {
 			t.Fatal("expected an error")
 		}
@@ -274,13 +374,31 @@ func TestFinalizeSweepResult(t *testing.T) {
 		}
 	})
 
-	t.Run("all deletes permission-denied and zero succeeded fails the job (systemic regression shape, not a couple stuck specimens)", func(t *testing.T) {
-		err := finalizeSweepResult(0, []string{"prj_a: status 403: denied", "prj_b: status 403: denied", "prj_c: status 403: denied"}, nil)
+	t.Run("all deletes permission-denied on unrecognized projects and zero succeeded fails the job (systemic regression shape, not known-stuck specimens)", func(t *testing.T) {
+		err := finalizeSweepResult(0, nil, []string{"prj_x: status 403: denied", "prj_y: status 403: denied", "prj_z: status 403: denied"}, nil)
 		if err == nil {
-			t.Fatal("expected an error - 100% permission-denied with zero successes must fail loudly, not be absorbed as 'a couple of known-stuck specimens'")
+			t.Fatal("expected an error - 100% permission-denied on unrecognized projects with zero successes must fail loudly, not be absorbed as 'known-stuck specimens'")
 		}
 		if !strings.Contains(err.Error(), "systemic permission regression") {
 			t.Fatalf("expected the error to name this as a systemic-regression shape, got: %v", err)
+		}
+	})
+
+	t.Run("a mix of known-stuck and unrecognized permission-denied with zero succeeding still fails, naming only the unrecognized ones", func(t *testing.T) {
+		err := finalizeSweepResult(
+			0,
+			[]string{"prj_3qdcd9k622abrtbvnrqtd9ifss (tfacc-project-desc-9uc3s9pf): status 403: Permission denied"},
+			[]string{"prj_z (proj-z): status 403: Permission denied"},
+			nil,
+		)
+		if err == nil {
+			t.Fatal("expected an error - an unrecognized 403 alongside zero successes must still fail even when a known-stuck one is also present")
+		}
+		if !strings.Contains(err.Error(), "systemic permission regression") || !strings.Contains(err.Error(), "prj_z") {
+			t.Fatalf("expected the error to name the systemic-regression shape and the unrecognized project, got: %v", err)
+		}
+		if strings.Contains(err.Error(), "prj_3qdcd9k622abrtbvnrqtd9ifss") {
+			t.Fatalf("expected the known-stuck failure to be excluded from the job-failing error, got: %v", err)
 		}
 	})
 }
