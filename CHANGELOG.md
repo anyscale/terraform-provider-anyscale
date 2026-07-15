@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-07-15
+
+### Fixed
+
+- resource/anyscale_cloud: Fix `auto_add_user`, `enable_lineage_tracking`, and `enable_log_ingestion` being silently ignored when set to `true` in a brand-new cloud's very first apply, since they were previously only ever applied on Update; this could surface as `Provider produced inconsistent result after apply` on Create. All three now apply correctly at Create as well as Update.
+
 ## [0.9.0] - 2026-07-15
 
 ### Added
@@ -563,7 +569,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.9.1
 [0.9.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.9.0
 [0.8.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.8.0
 [0.7.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.7.0
