@@ -103,15 +103,25 @@ func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 	})
 }
 
-// TestAccCloudResource_Azure_NotSupported is a regression test for task a7b8a48d:
-// setting azure_config used to silently no-op (tflog.Warn only), creating an
-// unconfigured cloud with no error. It must now fail clearly at apply instead.
-// The cloud shell from the POST that happens before add_resource is expected:
-// state is persisted before that call specifically so CheckDestroy can clean it up.
-func TestAccCloudResource_Azure_NotSupported(t *testing.T) {
+// TestAccCloudResource_AzureVM_NotSupported is the AKS-era successor to the
+// original task-a7b8a48d regression test (formerly TestAccCloudResource_Azure_NotSupported).
+// Azure itself is now a supported provider (AKS - see the mock-server lifecycle
+// tests in resource_cloud_azure_acc_test.go), so "Azure is not supported" is no
+// longer the right claim; what remains true, and what this test now pins, is
+// narrower: Anyscale does not support Azure VM clouds, only Azure Kubernetes
+// (compute_stack = K8S). That rejection also moved from an apply-time
+// buildProviderConfig error to a plan-time ValidateConfig error
+// (validateAzureK8SOnly) - a real behavior improvement the team flagged during
+// this effort: the old version let a real (broken) cloud shell get created via
+// POST /clouds before failing inside add_resource, which is exactly why the old
+// test needed CheckDestroy to clean up after itself. The new plan-time error
+// means Create() is never reached at all, so nothing is ever created - keeping
+// CheckDestroy here is now a belt-and-suspenders no-op (RootModule().Resources
+// will be empty), not a required cleanup step.
+func TestAccCloudResource_AzureVM_NotSupported(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := UniqueName(t, "cloud-azure-notsup")
+	cloudName := UniqueName(t, "cloud-azurevm-notsup")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -120,7 +130,7 @@ func TestAccCloudResource_Azure_NotSupported(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccCloudResourceAzureConfig(cloudName),
-				ExpectError: regexp.MustCompile("azure clouds are not yet supported"),
+				ExpectError: regexp.MustCompile(`(?s)Azure Requires Kubernetes Compute Stack.*only support compute_stack = "K8S"`),
 			},
 		},
 	})
@@ -182,18 +192,21 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 	// Generate random suffix for IAM roles to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
+	const redisEndpoint = "redis.ray-system.svc.cluster.local:6379"
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix, "anyscale"),
+				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix, "anyscale", redisEndpoint),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "AWS"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "compute_stack", "K8S"),
 					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.redis_endpoint", redisEndpoint),
 					// API validation
 					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
 					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "AWS", "us-east-2"),
@@ -204,12 +217,30 @@ func TestAccCloudResource_AWS_K8S(t *testing.T) {
 					},
 				},
 			},
+			// ImportState testing against REAL infra (not just the mock server):
+			// proves the real add_resource/resources-listing API round-trips
+			// kubernetes_config - including redis_endpoint - through the C3-v2
+			// import-recovery path (requiredImportConfigBlocks), not just that a
+			// mocked response shaped the way we assume it would. Placed before the
+			// namespace-edit step below (still "anyscale", the same default
+			// flattenKubernetesConfig always recovers) so there is no known hazard
+			// to ignore; kubernetes_config is deliberately NOT in
+			// ImportStateVerifyIgnore for that reason.
+			{
+				ResourceName:      "anyscale_cloud.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateVerifyIgnore: []string{
+					"credentials", "is_empty_cloud",
+					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
+				},
+			},
 			// regression test for task 02118d55: this kubernetes_config block is a
 			// duplicate of the one fixed under 861aaf10 on anyscale_cloud_resource and
 			// had the same missing RequiresReplace, so an edit here plans a clean
 			// replace now instead of a diff Update() (partial no-op) used to swallow.
 			{
-				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix, "custom-ns"),
+				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix, "custom-ns", redisEndpoint),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.namespace", "custom-ns"),
 					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
@@ -236,18 +267,21 @@ func TestAccCloudResource_GCP_K8S(t *testing.T) {
 	// Generate random suffix for service accounts to allow parallel test runs
 	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
 
+	const redisEndpoint = "redis.ray-system.svc.cluster.local:6379"
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckCloudDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCloudResourceGCPK8SConfig(cloudName, randSuffix),
+				Config: testAccCloudResourceGCPK8SConfig(cloudName, randSuffix, redisEndpoint),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "GCP"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "compute_stack", "K8S"),
 					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.redis_endpoint", redisEndpoint),
 					// API validation
 					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
 					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "GCP", "us-central1"),
@@ -256,6 +290,18 @@ func TestAccCloudResource_GCP_K8S(t *testing.T) {
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},
+				},
+			},
+			// ImportState testing against REAL infra - see the identical step's
+			// comment in TestAccCloudResource_AWS_K8S above for why
+			// kubernetes_config is deliberately not in the ignore list here.
+			{
+				ResourceName:      "anyscale_cloud.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateVerifyIgnore: []string{
+					"credentials", "is_empty_cloud",
+					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
 				},
 			},
 		},
@@ -451,6 +497,12 @@ resource "anyscale_cloud" "test" {
 `, name)
 }
 
+// testAccCloudResourceAzureConfig is schema-valid against the current
+// azure_config (tenant_id only, per the AKS design) but still exercises the
+// VM-stack rejection path: Azure only supports compute_stack = K8S, so this
+// config is still expected to fail, just with a different error message than
+// before AKS support landed. See TestAccCloudResource_AzureVM_NotSupported's
+// own doc comment for the up-to-date expectation.
 func testAccCloudResourceAzureConfig(name string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
@@ -459,8 +511,7 @@ resource "anyscale_cloud" "test" {
   compute_stack = "VM"
 
   azure_config {
-    subscription_id     = "00000000-0000-0000-0000-000000000000"
-    resource_group_name = "tfacc-notsupported-rg"
+    tenant_id = "00000000-0000-0000-0000-000000000000"
   }
 }
 `, name)
@@ -479,7 +530,7 @@ resource "anyscale_cloud" "test" {
 `, name, gcpConfigBlock("tfacc-gcp-basic", randSuffix))
 }
 
-func testAccCloudResourceAWSK8SConfig(name, randSuffix, namespace string) string {
+func testAccCloudResourceAWSK8SConfig(name, randSuffix, namespace, redisEndpoint string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
   name           = "%s"
@@ -493,10 +544,10 @@ resource "anyscale_cloud" "test" {
     bucket_name = "tfacc-aws-k8s-bucket-%s"
   }
 }
-`, name, k8sConfigBlock(namespace, fmt.Sprintf("arn:aws:iam::123456789012:role/tfacc-aws-k8s-operator-%s", randSuffix), []string{"us-east-2a", "us-east-2b"}), randSuffix)
+`, name, k8sConfigBlock(namespace, fmt.Sprintf("arn:aws:iam::123456789012:role/tfacc-aws-k8s-operator-%s", randSuffix), []string{"us-east-2a", "us-east-2b"}, redisEndpoint), randSuffix)
 }
 
-func testAccCloudResourceGCPK8SConfig(name, randSuffix string) string {
+func testAccCloudResourceGCPK8SConfig(name, randSuffix, redisEndpoint string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
   name           = "%s"
@@ -507,10 +558,23 @@ resource "anyscale_cloud" "test" {
 %s
 
   object_storage {
+    // Deliberately BARE (no gs:// prefix) - this is the realistic example
+    // form (examples/gcp-gke-basic wires the same bare module output) and is
+    // what surfaced BUG A live via ANYSCALE_TEST_REAL_INFRA=1 (2026-07-16):
+    // apply stores this bare value, but import flattens the API's canonical
+    // gs://-prefixed form, and stripBucketPrefix only un-prefixes AWS - so
+    // the two diverged. Per architect's disposition, the fix is a
+    // semantic-equality type/plan-modifier on bucket_name (Forge), NOT
+    // canonicalizing the test to gs://: this bare form must keep working
+    // once that fix lands, since real existing GCP clouds may have been
+    // created with a bare name too, and bucket_name is RequiresReplace -
+    // silently forcing a canonical form would spuriously replace them. Keep
+    // this test bare so it's a genuine regression guard for that fix, not a
+    // way to dodge the bug.
     bucket_name = "tfacc-gcp-k8s-bucket-%s"
   }
 }
-`, name, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}), randSuffix)
+`, name, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}, redisEndpoint), randSuffix)
 }
 
 // TestAccCloudResource_Disappears verifies that an out-of-band cloud deletion

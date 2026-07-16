@@ -599,6 +599,77 @@ func TestExpandObjectStorage(t *testing.T) {
 	}
 }
 
+func TestExpandAzureConfig(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		obj     types.Object
+		want    *AzureConfig
+		wantErr bool
+	}{
+		{
+			name: "tenant_id set",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"tenant_id": types.StringType,
+				},
+				map[string]attr.Value{
+					"tenant_id": types.StringValue("11111111-1111-1111-1111-111111111111"),
+				},
+			),
+			want: &AzureConfig{
+				TenantID: "11111111-1111-1111-1111-111111111111",
+			},
+			wantErr: false,
+		},
+		{
+			name: "tenant_id unset - azure_config is optional per the AKS design",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"tenant_id": types.StringType,
+				},
+				map[string]attr.Value{
+					"tenant_id": types.StringNull(),
+				},
+			),
+			want: &AzureConfig{
+				TenantID: "",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "null object",
+			obj:     types.ObjectNull(map[string]attr.Type{}),
+			want:    nil,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandAzureConfig(ctx, tt.obj)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("expandAzureConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.want == nil && got != nil {
+				t.Errorf("expandAzureConfig() = %v, want nil", got)
+				return
+			}
+			if tt.want != nil {
+				if got == nil {
+					t.Errorf("expandAzureConfig() = nil, want non-nil")
+					return
+				}
+				if got.TenantID != tt.want.TenantID {
+					t.Errorf("expandAzureConfig() TenantID = %v, want %v", got.TenantID, tt.want.TenantID)
+				}
+			}
+		})
+	}
+}
+
 func TestExpandFileStorage(t *testing.T) {
 	ctx := context.Background()
 

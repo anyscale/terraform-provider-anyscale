@@ -57,14 +57,20 @@ func gcpConfigBlock(fullPrefix, randSuffix string) string {
 // already-formatted string - existing call sites mix an AWS IAM role ARN
 // and a GCP service-account email in this same field, so the caller builds
 // whichever one it needs and passes the final string through unchanged.
-func k8sConfigBlock(namespace, identity string, zones []string) string {
+// redisEndpoint is omitted from the block entirely when empty, so existing
+// callers that pass "" render byte-identical HCL to before this field existed.
+func k8sConfigBlock(namespace, identity string, zones []string, redisEndpoint string) string {
 	quoted := make([]string, len(zones))
 	for i, z := range zones {
 		quoted[i] = fmt.Sprintf("%q", z)
 	}
+	redisLine := ""
+	if redisEndpoint != "" {
+		redisLine = fmt.Sprintf("\n    redis_endpoint                  = %q", redisEndpoint)
+	}
 	return fmt.Sprintf(`  kubernetes_config {
     namespace                       = "%s"
     anyscale_operator_iam_identity  = "%s"
-    zones                           = [%s]
-  }`, namespace, identity, strings.Join(quoted, ", "))
+    zones                           = [%s]%s
+  }`, namespace, identity, strings.Join(quoted, ", "), redisLine)
 }

@@ -276,16 +276,22 @@ func TestAccCloudResourceResource_GCP_K8S(t *testing.T) {
 	})
 }
 
-// TestAccCloudResourceResource_Azure_NotSupported is a regression test for task
-// 02118d55: the provider switch in addProviderConfig had no case at all for AZURE
-// (or GENERIC), so it silently fell through with none of the user's intent applied
-// and no error. It must now fail clearly, the same way anyscale_cloud's AZURE case
-// already does (task a7b8a48d). No real infra needed: this fails before the add_resource
-// API call is ever made.
-func TestAccCloudResourceResource_Azure_NotSupported(t *testing.T) {
+// TestAccCloudResourceResource_AzureVM_NotSupported is the AKS-era successor to
+// the original task-02118d55 regression test (formerly
+// TestAccCloudResourceResource_Azure_NotSupported) - see the doc comment on its
+// anyscale_cloud sibling, TestAccCloudResource_AzureVM_NotSupported, for the
+// full context on why "Azure not supported" narrowed to "Azure VM not
+// supported" and moved to a plan-time error. The one thing worth calling out
+// here specifically: this config attaches the rejected Azure/VM
+// anyscale_cloud_resource to an otherwise-valid AWS anyscale_cloud parent, and
+// Terraform's config validation runs across the whole configuration before
+// any apply begins - so the plan-time ValidateConfig failure on the child
+// blocks the parent from being created too, same as before. No real infra
+// touched either way.
+func TestAccCloudResourceResource_AzureVM_NotSupported(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := UniqueName(t, "cloud-res-azure-notsup")
+	cloudName := UniqueName(t, "cloud-res-azurevm-notsup")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -294,7 +300,7 @@ func TestAccCloudResourceResource_Azure_NotSupported(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccCloudResourceResourceAzureConfig(cloudName),
-				ExpectError: regexp.MustCompile("azure clouds are not yet supported"),
+				ExpectError: regexp.MustCompile(`(?s)Azure Requires Kubernetes Compute Stack.*only support compute_stack = "K8S"`),
 			},
 		},
 	})
@@ -671,6 +677,10 @@ resource "anyscale_cloud_resource" "test" {
 %s
 
   object_storage {
+    // Deliberately BARE - see the detailed comment on
+    // testAccCloudResourceGCPK8SConfig in resource_cloud_acc_test.go (BUG A);
+    // this must keep working once Forge's semantic-equality fix lands, not
+    // be dodged by switching to gs://.
     bucket_name = "tfacc-cres-gcp-bucket-%s"
   }
 }
@@ -702,7 +712,7 @@ resource "anyscale_cloud_resource" "test" {
     bucket_name = "tfacc-cres-k8s-bucket-%s"
   }
 }
-`, cloudName, resourceName, k8sConfigBlock(namespace, fmt.Sprintf("arn:aws:iam::123456789012:role/tfacc-cloudres-k8s-operator-%s", randSuffix), []string{"us-east-2a", "us-east-2b"}), randSuffix)
+`, cloudName, resourceName, k8sConfigBlock(namespace, fmt.Sprintf("arn:aws:iam::123456789012:role/tfacc-cloudres-k8s-operator-%s", randSuffix), []string{"us-east-2a", "us-east-2b"}, ""), randSuffix)
 }
 
 func testAccCloudResourceResourceGCPK8SConfig(cloudName, resourceName, randSuffix string) string {
@@ -727,10 +737,14 @@ resource "anyscale_cloud_resource" "test" {
 %s
 
   object_storage {
+    // Deliberately BARE - see the detailed comment on
+    // testAccCloudResourceGCPK8SConfig in resource_cloud_acc_test.go (BUG A);
+    // this must keep working once Forge's semantic-equality fix lands, not
+    // be dodged by switching to gs://.
     bucket_name = "tfacc-cres-gcp-k8s-bucket-%s"
   }
 }
-`, cloudName, resourceName, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-cloudres-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}), randSuffix)
+`, cloudName, resourceName, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-cloudres-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}, ""), randSuffix)
 }
 
 func testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix, mountPath, mountTargetZone string) string {
