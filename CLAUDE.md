@@ -159,6 +159,14 @@ They are found in `internal/acctest`
 make testacc
 ```
 
+**Creating real cloud infrastructure for testing is pre-authorized.** Real EKS and GKE clouds
+(and whatever resources they provision) may be created for acceptance and example testing
+without asking first, as long as everything is torn down within 24 hours of creation. This
+covers both the acceptance tests here and the Makefile scenario targets under
+[Repo-Level Terraform Scenario Tests](#repo-level-terraform-scenario-tests-examples) below.
+Real AKS infrastructure is **not** covered by this authorization yet — hold real Azure test
+creation until told otherwise.
+
 ### Acceptance tests with coverage
 
 ```bash
@@ -275,7 +283,7 @@ make test-gcp-vm-full
 make test-gcp-gke-basic
 ```
 
-These targets run terraform apply and terraform destroy. Ensure your credentials and cloud quotas are in a safe state before running.
+These targets run terraform apply and terraform destroy. Ensure your credentials and cloud quotas are in a safe state before running. Real infrastructure creation for these targets (including `test-aws-eks-basic` and `test-gcp-gke-basic`) is pre-authorized under the same 24-hour teardown condition as [Acceptance Tests](#acceptance-tests) above — see there for the AKS exclusion.
 
 ---
 

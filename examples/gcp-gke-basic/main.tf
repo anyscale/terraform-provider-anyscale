@@ -33,7 +33,15 @@ resource "anyscale_cloud_resource" "primary" {
     zones = module.gke.zones
   }
 
-  # Object Storage (S3) - required for K8S
+  # Object Storage (GCS) - required for K8S. Deliberately uses the module's
+  # bare bucket-name output, not its gs://-prefixed URL output: bucket_name
+  # is scheme-tolerant (a bare name and its gs://-prefixed form are treated
+  # as the same value - see the Cloud Resources guide), so either output
+  # works here. Do not switch this to the gs://-prefixed output - not
+  # because this example exercises the fix (it doesn't: this apply/destroy
+  # scenario never imports, so it can't cover an import round-trip fix -
+  # that regression guard lives in the acctest suite instead), simply
+  # because there's no reason to change a value that already works.
   object_storage {
     bucket_name = module.anyscale_cloudstorage.cloudstorage_bucket_name
     region      = var.google_region

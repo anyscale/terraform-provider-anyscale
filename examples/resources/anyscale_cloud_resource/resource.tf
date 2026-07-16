@@ -50,13 +50,17 @@ resource "anyscale_cloud_resource" "gcp_vm" {
 
 # AWS K8S Cloud Resource with File Storage
 resource "anyscale_cloud_resource" "eks_with_efs" {
-  cloud_id      = "cld_k8s123"
-  name          = "k8s-aws-us-west-2"
-  compute_stack = "K8S"
+  cloud_id       = "cld_k8s123"
+  name           = "k8s-aws-us-west-2"
+  cloud_provider = "AWS" # required here: no aws_config block below to infer it from
+  compute_stack  = "K8S"
 
   kubernetes_config {
     anyscale_operator_iam_identity = "arn:aws:iam::367974485317:role/anyscale-eks-operator"
     zones                          = ["us-west-2a", "us-west-2b"]
+    # Optional: a Redis endpoint reachable from the data plane, used for Ray
+    # GCS fault tolerance. Available on any K8S cloud, not AWS-specific.
+    redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
   }
 
   object_storage {
@@ -78,6 +82,35 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
     # inline volume driver. Both are Kubernetes-only, like this whole block.
     # persistent_volume_claim     = "my-shared-storage-pvc"
     # csi_ephemeral_volume_driver = "csi.example.com"
+  }
+}
+
+# GCP K8S Cloud Resource with a CSI ephemeral inline volume
+resource "anyscale_cloud_resource" "gke_with_csi" {
+  cloud_id       = "cld_k8s456"
+  name           = "k8s-gcp-us-central1"
+  cloud_provider = "GCP" # required here: no gcp_config block below to infer it from
+  compute_stack  = "K8S"
+
+  kubernetes_config {
+    anyscale_operator_iam_identity = "gke-nodes@my-project.iam.gserviceaccount.com"
+    zones                          = ["us-central1-a", "us-central1-b"]
+    redis_endpoint                 = "redis.ray-system.svc.cluster.local:6379"
+  }
+
+  object_storage {
+    # Include the gs:// prefix explicitly for GCP - see the "Cloud Resources"
+    # guide for why.
+    bucket_name = "gs://my-gke-bucket"
+  }
+
+  # A CSI ephemeral inline volume driver, as an alternative to the EFS-style
+  # mount_targets shown on the AWS example above - set only one of
+  # persistent_volume_claim, csi_ephemeral_volume_driver, or mount_targets.
+  file_storage {
+    csi_ephemeral_volume_driver = "csi.example.com"
+
+    # persistent_volume_claim = "my-shared-storage-pvc"
   }
 }
 
