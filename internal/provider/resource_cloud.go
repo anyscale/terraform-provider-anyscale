@@ -224,8 +224,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"enable_system_cluster": schema.BoolAttribute{
 				Optional: true,
 				MarkdownDescription: "Whether to enable the system cluster for this cloud (powers task/actor observability dashboards; see `anyscale cloud config update --enable-system-cluster`). " +
-					"Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions. " +
-					"This means Terraform does NOT detect drift on this attribute: if the system cluster is toggled outside of Terraform (e.g. via the console or CLI), this value will keep reflecting whatever was last applied through this resource, not the real current state, until the next explicit change here.",
+					"Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions.",
 			},
 
 			// ─── Computed Fields ──────────────────────────────────

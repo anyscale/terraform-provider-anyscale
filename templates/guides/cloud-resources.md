@@ -72,9 +72,11 @@ than either an update or an automatic replacement; the provider deliberately doe
 someone's configuration drifted, with no chance to review it first. To rename a cloud, destroy and
 recreate it deliberately.
 
-The other mutable fields on `anyscale_cloud` — `auto_add_user`, `enable_lineage_tracking`, and
-`enable_log_ingestion` — update in place normally; each is backed by its own dedicated API endpoint,
-called only when its value actually changes.
+The other mutable fields on `anyscale_cloud` — `auto_add_user`, `enable_lineage_tracking`,
+`enable_log_ingestion`, and `enable_system_cluster` — update in place normally; each is backed by
+its own dedicated API endpoint, called only when its value actually changes. `enable_system_cluster`
+is Optional-only rather than Optional+Computed like the other three (see its [schema
+description](../resources/cloud.md#schema)) — set it like any other cloud-level boolean.
 
 ## Kubernetes operator status
 
