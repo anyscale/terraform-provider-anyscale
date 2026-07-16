@@ -65,13 +65,17 @@ resource "anyscale_cloud_resource" "gcp_vm" {
 
 # AWS K8S Cloud Resource with File Storage
 resource "anyscale_cloud_resource" "eks_with_efs" {
-  cloud_id      = "cld_k8s123"
-  name          = "k8s-aws-us-west-2"
-  compute_stack = "K8S"
+  cloud_id       = "cld_k8s123"
+  name           = "k8s-aws-us-west-2"
+  cloud_provider = "AWS" # required here: no aws_config block below to infer it from
+  compute_stack  = "K8S"
 
   kubernetes_config {
     anyscale_operator_iam_identity = "arn:aws:iam::367974485317:role/anyscale-eks-operator"
     zones                          = ["us-west-2a", "us-west-2b"]
+    # Optional: a Redis endpoint reachable from the data plane, used for Ray
+    # GCS fault tolerance. Available on any K8S cloud, not AWS-specific.
+    redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
   }
 
   object_storage {
@@ -93,6 +97,35 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
     # inline volume driver. Both are Kubernetes-only, like this whole block.
     # persistent_volume_claim     = "my-shared-storage-pvc"
     # csi_ephemeral_volume_driver = "csi.example.com"
+  }
+}
+
+# GCP K8S Cloud Resource with a CSI ephemeral inline volume
+resource "anyscale_cloud_resource" "gke_with_csi" {
+  cloud_id       = "cld_k8s456"
+  name           = "k8s-gcp-us-central1"
+  cloud_provider = "GCP" # required here: no gcp_config block below to infer it from
+  compute_stack  = "K8S"
+
+  kubernetes_config {
+    anyscale_operator_iam_identity = "gke-nodes@my-project.iam.gserviceaccount.com"
+    zones                          = ["us-central1-a", "us-central1-b"]
+    redis_endpoint                 = "redis.ray-system.svc.cluster.local:6379"
+  }
+
+  object_storage {
+    # Include the gs:// prefix explicitly for GCP - see the "Cloud Resources"
+    # guide for why.
+    bucket_name = "gs://my-gke-bucket"
+  }
+
+  # A CSI ephemeral inline volume driver, as an alternative to the EFS-style
+  # mount_targets shown on the AWS example above - set only one of
+  # persistent_volume_claim, csi_ephemeral_volume_driver, or mount_targets.
+  file_storage {
+    csi_ephemeral_volume_driver = "csi.example.com"
+
+    # persistent_volume_claim = "my-shared-storage-pvc"
   }
 }
 
@@ -156,7 +189,7 @@ Optional:
 - `dataplane_iam_role_arn` (String) IAM role ARN for Anyscale data plane (cluster nodes).
 - `external_id` (String) External ID for IAM role assumption (recommended for security).
 - `memorydb_cluster_arn` (String) MemoryDB cluster ARN.
-- `memorydb_cluster_endpoint` (String) MemoryDB cluster endpoint address.
+- `memorydb_cluster_endpoint` (String) MemoryDB cluster endpoint address. Alternative to `kubernetes_config.redis_endpoint` - both are ways to give Ray GCS fault tolerance a Redis-compatible endpoint; set only one.
 - `memorydb_cluster_name` (String) MemoryDB cluster name for Ray GCS fault tolerance.
 - `security_group_ids` (List of String) List of security group IDs for Anyscale resources.
 - `subnet_ids` (List of String) List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az.
@@ -169,11 +202,11 @@ Optional:
 
 Optional:
 
-- `csi_ephemeral_volume_driver` (String) CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only).
+- `csi_ephemeral_volume_driver` (String) CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only). Mutually exclusive with `persistent_volume_claim` and with the NFS-style `file_storage_id`/`mount_targets` pair - set only one shared-storage mechanism per `file_storage` block.
 - `file_storage_id` (String) The file storage ID (EFS ID, Filestore name, etc.).
 - `mount_path` (String) The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.
-- `mount_targets` (Block List) List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. (see [below for nested schema](#nestedblock--file_storage--mount_targets))
-- `persistent_volume_claim` (String) Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only).
+- `mount_targets` (Block List) List of mount targets with address and optional zone, for an NFS-style shared file system (EFS, Filestore) identified by `file_storage_id`. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` - set only one shared-storage mechanism per `file_storage` block. Changing this list requires replacement; the provider has no in-place update path for it. (see [below for nested schema](#nestedblock--file_storage--mount_targets))
+- `persistent_volume_claim` (String) Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only). Mutually exclusive with `csi_ephemeral_volume_driver` and with the NFS-style `file_storage_id`/`mount_targets` pair - set only one shared-storage mechanism per `file_storage` block.
 
 <a id="nestedblock--file_storage--mount_targets"></a>
 ### Nested Schema for `file_storage.mount_targets`
@@ -194,7 +227,7 @@ Optional:
 - `dataplane_service_account_email` (String) Service account email for Ray cluster nodes.
 - `firewall_policy_names` (List of String) List of firewall policy names.
 - `host_project_id` (String) The host project ID for shared VPCs (optional).
-- `memorystore_endpoint` (String) Memorystore endpoint address.
+- `memorystore_endpoint` (String) Memorystore endpoint address. Alternative to `kubernetes_config.redis_endpoint` - both are ways to give Ray GCS fault tolerance a Redis-compatible endpoint; set only one.
 - `memorystore_instance_name` (String) Memorystore instance name for Ray GCS fault tolerance.
 - `project_id` (String) The GCP project ID.
 - `provider_name` (String) Workload Identity Federation provider name.
@@ -207,13 +240,13 @@ Optional:
 
 Optional:
 
-- `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.
+- `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. (Azure AKS would take a managed identity client ID, but Azure is not currently supported by this provider.)
 - `cluster_name` (String, Deprecated) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
 - `context` (String, Deprecated) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
 - `ingress_host` (String, Deprecated) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.
 - `kubeconfig_path` (String, Deprecated) Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
 - `namespace` (String, Deprecated) The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.
-- `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.
+- `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance. Alternative to AWS's `memorydb_cluster_endpoint` or GCP's `memorystore_endpoint` - set only one Ray GCS fault-tolerance endpoint.
 - `zones` (List of String) List of availability zones for the Kubernetes cluster.
 
 
