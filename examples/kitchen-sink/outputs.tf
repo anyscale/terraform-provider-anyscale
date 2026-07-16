@@ -4,6 +4,16 @@ output "cloud_a_id" {
   description = "ID of Cloud A (BYOC/split pattern, hosting the VM and EKS resources)."
 }
 
+output "cloud_a_name" {
+  value       = anyscale_cloud.a.name
+  description = "Name of Cloud A."
+}
+
+output "cloud_a_is_default" {
+  value       = anyscale_cloud.a.is_default
+  description = "Whether Cloud A is the organization's default cloud. Read-only and managed by Anyscale; reflects whatever the current org default is on each refresh, so this can be false for every cloud you create here."
+}
+
 output "cloud_b_id" {
   value       = anyscale_cloud.b.id
   description = "ID of Cloud B (all-in-one VM pattern)."
