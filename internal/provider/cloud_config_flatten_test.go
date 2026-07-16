@@ -99,6 +99,8 @@ func TestStripBucketPrefix(t *testing.T) {
 		{"AWS bucket with no prefix is unchanged", "AWS", "my-bucket", "my-bucket"},
 		{"lowercase aws still strips", "aws", "s3://my-bucket", "my-bucket"},
 		{"GCP keeps gs:// to match documented prefixed convention", "GCP", "gs://my-bucket", "gs://my-bucket"},
+		{"Azure keeps abfss:// verbatim - never prepended, never stripped", "AZURE", "abfss://container@account.dfs.core.windows.net", "abfss://container@account.dfs.core.windows.net"},
+		{"lowercase azure still passes through unchanged", "azure", "abfss://container@account.dfs.core.windows.net", "abfss://container@account.dfs.core.windows.net"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

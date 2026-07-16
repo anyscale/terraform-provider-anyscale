@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -21,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -28,9 +30,10 @@ import (
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                = &CloudResource{}
-	_ resource.ResourceWithConfigure   = &CloudResource{}
-	_ resource.ResourceWithImportState = &CloudResource{}
+	_ resource.Resource                   = &CloudResource{}
+	_ resource.ResourceWithConfigure      = &CloudResource{}
+	_ resource.ResourceWithImportState    = &CloudResource{}
+	_ resource.ResourceWithValidateConfig = &CloudResource{}
 )
 
 // NewCloudResource returns a new cloud resource.
@@ -73,13 +76,10 @@ type CloudResourceModel struct {
 	CloudDeploymentID types.String `tfsdk:"cloud_deployment_id"`
 }
 
-// AzureConfigModel represents Azure-specific configuration.
+// AzureConfigModel represents Azure-specific configuration. See AzureConfig
+// in models.go for why tenant_id is the only field.
 type AzureConfigModel struct {
-	SubscriptionID    types.String `tfsdk:"subscription_id"`
-	ResourceGroupName types.String `tfsdk:"resource_group_name"`
-	VNetName          types.String `tfsdk:"vnet_name"`
-	SubnetName        types.String `tfsdk:"subnet_name"`
-	ManagedIdentityID types.String `tfsdk:"managed_identity_id"`
+	TenantID types.String `tfsdk:"tenant_id"`
 }
 
 // cloudNameImmutablePlanModifier enforces that a cloud's name cannot change
@@ -151,7 +151,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"cloud_provider": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Cloud provider: AWS, GCP, Azure, or Generic. Auto-detected from aws_config/gcp_config, or defaults to AWS for empty clouds.",
+				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE. Auto-detected from aws_config/gcp_config/azure_config, or defaults to AWS for empty clouds. AWS and GCP support both VM and K8S compute stacks; AZURE supports K8S only (AKS) - Anyscale does not support Azure VM clouds, and setting azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported by this provider.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -165,6 +165,9 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
+				},
+				Validators: []validator.String{
+					stringvalidator.OneOf("VM", "K8S"),
 				},
 			},
 
@@ -324,7 +327,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"memorydb_cluster_endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "MemoryDB cluster endpoint address.",
+						MarkdownDescription: "MemoryDB cluster endpoint address. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -403,7 +406,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"memorystore_endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Memorystore endpoint address.",
+						MarkdownDescription: "Memorystore endpoint address. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -413,39 +416,11 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			// ─── Azure Configuration ──────────────────────────────
 			"azure_config": schema.SingleNestedBlock{
-				MarkdownDescription: "Azure-specific configuration. Required when cloud_provider is Azure.",
+				MarkdownDescription: "Azure-specific configuration. Required when cloud_provider is AZURE. Azure clouds are Kubernetes-only (AKS) - Anyscale does not support Azure VM clouds, so compute_stack must be \"K8S\"; setting azure_config with any other compute_stack is a plan-time error. Unlike aws_config/gcp_config, this has a single field: AKS setup creates no VNet/subnet resources of its own, and real authentication is operator workload-identity federation (see kubernetes_config.anyscale_operator_iam_identity), not network or IAM-role wiring.",
 				Attributes: map[string]schema.Attribute{
-					"subscription_id": schema.StringAttribute{
+					"tenant_id": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The Azure subscription ID.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
-					"resource_group_name": schema.StringAttribute{
-						Optional:            true,
-						MarkdownDescription: "The Azure resource group name.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
-					"vnet_name": schema.StringAttribute{
-						Optional:            true,
-						MarkdownDescription: "The Azure VNet name.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
-					"subnet_name": schema.StringAttribute{
-						Optional:            true,
-						MarkdownDescription: "The Azure subnet name.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
-					"managed_identity_id": schema.StringAttribute{
-						Optional:            true,
-						MarkdownDescription: "The managed identity ID for Anyscale resources.",
+						MarkdownDescription: "The Azure tenant ID (maps to the Anyscale API's AzureConfig.tenant_id, and the CLI's `--azure-tenant-id`).",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -459,7 +434,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Attributes: map[string]schema.Attribute{
 					"anyscale_operator_iam_identity": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.",
+						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -474,9 +449,15 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"redis_endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.",
+						MarkdownDescription: "Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance. Conflicts with `aws_config.memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
+						},
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRoot("aws_config").AtName("memorydb_cluster_endpoint"),
+								path.MatchRoot("gcp_config").AtName("memorystore_endpoint"),
+							),
 						},
 					},
 					"namespace": schema.StringAttribute{
@@ -530,8 +511,9 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Attributes: map[string]schema.Attribute{
 					"bucket_name": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS).",
+						MarkdownDescription: "The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS). A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so importing a cloud whose bucket was written without the prefix does not force replacement.",
 						PlanModifiers: []planmodifier.String{
+							bucketNameSemanticEqualPlanModifier{},
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
@@ -574,22 +556,28 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"persistent_volume_claim": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only).",
+						MarkdownDescription: "Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only). Mutually exclusive with `csi_ephemeral_volume_driver` - the backend rejects both being set.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
+						},
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(path.MatchRoot("file_storage").AtName("csi_ephemeral_volume_driver")),
 						},
 					},
 					"csi_ephemeral_volume_driver": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only).",
+						MarkdownDescription: "CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only). Mutually exclusive with `persistent_volume_claim` - the backend rejects both being set.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
+						},
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(path.MatchRoot("file_storage").AtName("persistent_volume_claim")),
 						},
 					},
 				},
 				Blocks: map[string]schema.Block{
 					"mount_targets": schema.ListNestedBlock{
-						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both.",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.RequiresReplace(),
 						},
@@ -628,6 +616,47 @@ func (r *CloudResource) Configure(ctx context.Context, req resource.ConfigureReq
 	}
 
 	r.client = client
+}
+
+// ValidateConfig rejects, at plan time, any configuration that would
+// otherwise sail through `terraform plan` clean and only fail deep inside
+// buildProviderConfig - by which point Create has already run the POST
+// /api/v2/clouds step and persisted a real (permanently resource-less) cloud
+// to state (K9). It intentionally mirrors buildProviderConfig's own
+// AZURE/GENERIC rejection rather than replacing it: this is a plan-time
+// preview for the common case where the value is already known in the
+// config; buildProviderConfig's runtime check remains the last line of
+// defense for a provider value that's still unknown at plan time (e.g.
+// interpolated from another resource's computed output).
+//
+// Scoped to exactly the configurations that would reach buildProviderConfig:
+// hasEmbeddedResourceConfig must be true (an empty cloud - no aws_config/
+// gcp_config/azure_config/kubernetes_config at all - never calls
+// addCloudResource, so cloud_provider=AZURE/GENERIC on a genuinely empty
+// cloud is harmless and left alone here, matching today's real, working
+// behavior for that pattern).
+func (r *CloudResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data CloudResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !r.hasEmbeddedResourceConfig(&data) {
+		return
+	}
+
+	provider := strings.ToUpper(data.CloudProvider.ValueString())
+	if provider == "" && !data.AzureConfig.IsNull() {
+		provider = "AZURE" // mirrors Create()'s own auto-detect order
+	}
+
+	switch provider {
+	case "AZURE":
+		resp.Diagnostics.Append(validateAzureK8SOnly(ctx, data.ComputeStack.ValueString(), data.ObjectStorage)...)
+	case "GENERIC":
+		resp.Diagnostics.AddAttributeError(path.Root("cloud_provider"), "Generic Clouds Not Yet Supported", genericCloudNotSupportedMessage)
+	}
 }
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -1422,11 +1451,20 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 			}
 		}
 	case "AZURE":
-		if !plan.AzureConfig.IsNull() {
-			var azureModel AzureConfigModel
-			diags := plan.AzureConfig.As(ctx, &azureModel, basetypes.ObjectAsOptions{})
-			if !diags.HasError() && !azureModel.ManagedIdentityID.IsNull() {
-				return azureModel.ManagedIdentityID.ValueString(), false, nil
+		// Azure clouds are Kubernetes-only, so unlike AWS/GCP there is no
+		// azure_config field to derive a credential from (azure_config is
+		// tenant_id only, which isn't a credential) - the POST /api/v2/clouds
+		// credential is largely ceremonial for K8S clouds anyway (real auth
+		// is operator workload-identity federation), so mirror the AWS case
+		// above and derive it from the operator identity, confirmed against
+		// the backend to accept an arbitrary string here (no Azure-specific
+		// credentials parser exists - see clouds_resource.py's
+		// create_cloud_without_permissions, which only special-cases GCP).
+		if !plan.KubernetesConfig.IsNull() {
+			var k8sModel KubernetesConfigModel
+			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
+			if !diags.HasError() && !k8sModel.AnyscaleOperatorIAMIdentity.IsNull() && k8sModel.AnyscaleOperatorIAMIdentity.ValueString() != "" {
+				return k8sModel.AnyscaleOperatorIAMIdentity.ValueString(), false, nil
 			}
 		}
 	}
@@ -1468,7 +1506,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 	}
 
 	// Add provider-specific configuration
-	if err := buildProviderConfig(ctx, &deployReq, provider, computeStack, plan.AWSConfig, plan.GCPConfig, plan.KubernetesConfig, plan.ObjectStorage, plan.FileStorage); err != nil {
+	if err := buildProviderConfig(ctx, &deployReq, provider, computeStack, plan.AWSConfig, plan.GCPConfig, plan.AzureConfig, plan.KubernetesConfig, plan.ObjectStorage, plan.FileStorage); err != nil {
 		return err
 	}
 
@@ -1567,12 +1605,6 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	state.EnableLineageTracking = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
 	state.EnableLogIngestion = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
 
-	// compute_stack on the cloud reflects how the cloud was created (VM vs K8S).
-	// The API may return an empty string for clouds that pre-date the field.
-	if cloudResp.Result.ComputeStack != "" {
-		state.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
-	}
-
 	// If CloudDeploymentID is still unknown/null, set it to null explicitly
 	if state.CloudDeploymentID.IsUnknown() {
 		state.CloudDeploymentID = types.StringNull()
@@ -1594,9 +1626,46 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	// plan-consistency machinery is in the loop at all.
 	resources, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
-		tflog.Warn(ctx, "Failed to list cloud resources; skipping Computed-field backfill this read", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+		tflog.Warn(ctx, "Failed to list cloud resources; skipping Computed-field backfill and compute_stack correction this read", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+		// compute_stack (see below): no resources available to consult this
+		// read, fall back to the cloud-level derived value.
+		if cloudResp.Result.ComputeStack != "" {
+			state.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
+		}
 	} else {
 		r.backfillComputedCloudFields(state, resources)
+
+		// compute_stack: GET /clouds/{id}'s own compute_stack is backend-DERIVED
+		// from whatever resource the backend considers primary, defaulting to VM
+		// if it doesn't recognize one - correct for a cloud actually created VM,
+		// but a real risk for a cold or non-standard import of a K8S cloud
+		// (confirmed: a standard Terraform-created-then-imported K8S cloud
+		// round-trips fine today, because the backend's own derivation agrees
+		// with our default-resource pick in that common case - this is
+		// defense-in-depth for when it doesn't). Source from the SAME
+		// default-resource lookup requiredImportConfigBlocks already trusts as
+		// authoritative for recovering kubernetes_config/object_storage, rather
+		// than re-deriving from the cloud-level field, whenever a default
+		// resource exists. Only fall back to the cloud-level derived value for
+		// a genuinely empty cloud (zero resources - nothing to consult, and the
+		// cloud-level VM default is correct there).
+		defaultResource := findDefaultInCloudResources(resources)
+		// Hardening: if nothing is flagged is_default but there is EXACTLY one
+		// resource, there is no ambiguity to resolve - use it directly. This
+		// guards a cold-imported cloud (e.g. registered via the CLI, never
+		// Terraform-created) whose single resource might not carry the
+		// is_default flag the same way a Terraform-created cloud's does;
+		// without this, such a cloud would silently fall through to the
+		// cloud-level field below and could still reproduce the VM
+		// misclassification this fix exists to prevent.
+		if defaultResource == nil && len(resources) == 1 {
+			defaultResource = &resources[0]
+		}
+		if defaultResource != nil && defaultResource.ComputeStack != "" {
+			state.ComputeStack = types.StringValue(defaultResource.ComputeStack)
+		} else if cloudResp.Result.ComputeStack != "" {
+			state.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
+		}
 	}
 
 	tflog.Info(ctx, "Cloud state read successfully", map[string]any{"id": cloudID, "name": cloudResp.Result.Name})

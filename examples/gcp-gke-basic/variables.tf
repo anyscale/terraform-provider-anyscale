@@ -205,7 +205,7 @@ variable "cloud_name" {
 
     ex:
     ```
-    cloud_name = "my-eks-cloud"
+    cloud_name = "my-gke-cloud"
     ```
   EOT
   type        = string

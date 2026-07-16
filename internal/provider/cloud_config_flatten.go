@@ -96,6 +96,12 @@ func gcpConfigAttrTypes() map[string]attr.Type {
 	}
 }
 
+func azureConfigAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"tenant_id": types.StringType,
+	}
+}
+
 func kubernetesConfigAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"anyscale_operator_iam_identity": types.StringType,
@@ -210,6 +216,13 @@ func flattenGCPConfig(ctx context.Context, cfg *GCPConfig) (types.Object, diag.D
 	return obj, diags
 }
 
+// Note: there is no flattenAzureConfig. azure_config is optional even for
+// K8S (matching aws_config/gcp_config's treatment there), so
+// requiredImportConfigBlocks' required-blocks-only design never recovers it
+// at import - the same reason aws_config/gcp_config have no flatten call
+// site of their own on the K8S branch. azureConfigAttrTypes() is still used
+// directly (e.g. to build a null Object) without needing a flatten function.
+
 // flattenKubernetesConfig populates kubernetes_config from the API's
 // KubernetesConfig. Only anyscale_operator_iam_identity/zones/redis_endpoint
 // are ever sent to or returned by the API (see KubernetesConfig's doc
@@ -250,6 +263,12 @@ func flattenKubernetesConfig(ctx context.Context, cfg *KubernetesConfig) (types.
 // The API always returns it prefixed (add_resource normalizes it that way
 // before sending), so populating the raw API value verbatim for AWS would
 // permanently diff against a bare-written config.
+//
+// Azure is deliberately NOT special-cased here (falls through to the final
+// `return bucketName` below, same as GCP): its bucket is always a full
+// abfss://container@account.dfs.core.windows.net URI - the mirror of
+// buildProviderConfig's AZURE case never prepending a scheme on write - so
+// the round-trip must leave it completely untouched in both directions.
 func stripBucketPrefix(provider, bucketName string) string {
 	if strings.EqualFold(provider, "AWS") {
 		return strings.TrimPrefix(bucketName, "s3://")

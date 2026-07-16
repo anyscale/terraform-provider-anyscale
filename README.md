@@ -147,6 +147,7 @@ See the [`examples/`](examples/) directory for complete, working examples:
 - **GCP VM**: [`examples/gcp-vm-basic/`](examples/gcp-vm-basic/) - Basic GCP VM cloud with compute config examples
 - **AWS EKS**: [`examples/aws-eks-basic/`](examples/aws-eks-basic/) - AWS EKS Kubernetes cloud
 - **GCP GKE**: [`examples/gcp-gke-basic/`](examples/gcp-gke-basic/) - GCP GKE Kubernetes cloud
+- **Azure AKS**: [`examples/azure-aks-basic/`](examples/azure-aks-basic/) - Azure AKS Kubernetes cloud (schema-validated only - see the example's README for status)
 - **Split Deployment**: [`examples/aws-vm-basic-resource/`](examples/aws-vm-basic-resource/) - Empty cloud with separate resource deployment
 - **Kitchen Sink**: [`examples/kitchen-sink/`](examples/kitchen-sink/) - Comprehensive multi-cloud build mixing VM and EKS resources on one cloud, plus every resource and data source this provider registers
 

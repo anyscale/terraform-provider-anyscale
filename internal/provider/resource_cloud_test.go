@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -661,4 +663,169 @@ func TestComputeStackValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReadCloudState_ComputeStackFromDefaultResource is the regression proof
+// for the user-reported import bug: GET /clouds/{id}'s own compute_stack is
+// backend-derived and can disagree with the cloud's actual primary resource
+// (defaulting to VM when the backend doesn't recognize one) - readCloudState
+// must prefer the default resource's own compute_stack, the same source
+// requiredImportConfigBlocks already trusts, falling back to the cloud-level
+// field only when there is no default resource at all.
+func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("cloud-level says VM, default resource says K8S - resource wins", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_test":
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_test", Name: "test-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "VM", // cloud-level derivation disagrees with the real resource below
+				}})
+			case "/api/v2/clouds/cld_test/resources":
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
+					{IsDefault: true, ComputeStack: "K8S", CloudDeploymentID: "dep_1"},
+				}})
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_test", state); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "K8S" {
+			t.Errorf("ComputeStack = %q, want %q (from the default resource, not the cloud-level VM default)", got, "K8S")
+		}
+	})
+
+	t.Run("genuinely empty cloud, zero resources - falls back to cloud-level field", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_empty":
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_empty", Name: "empty-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "VM",
+				}})
+			case "/api/v2/clouds/cld_empty/resources":
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{}})
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_empty", state); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "VM" {
+			t.Errorf("ComputeStack = %q, want %q (no default resource to consult, cloud-level fallback is correct)", got, "VM")
+		}
+	})
+
+	t.Run("resources list call fails - falls back to cloud-level field, does not error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_fail":
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_fail", Name: "fail-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "K8S",
+				}})
+			case "/api/v2/clouds/cld_fail/resources":
+				w.WriteHeader(http.StatusInternalServerError)
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_fail", state); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "K8S" {
+			t.Errorf("ComputeStack = %q, want %q (resources call failed, must still fall back to the cloud-level value)", got, "K8S")
+		}
+	})
+
+	// This is the exact shape architect flagged in re-review: the user's real
+	// repro was a single EKS resource registered via the CLI (never
+	// Terraform-created) then cold-imported. If that resource's is_default
+	// flag is not true - unconfirmed either way against the real backend,
+	// hence hardening rather than assuming - the original fix would silently
+	// fall through to the cloud-level VM default and the user's bug would
+	// persist even with that fix in place.
+	t.Run("single resource, none flagged is_default (cold CLI-created import) - uses the sole resource anyway", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_cli":
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_cli", Name: "cli-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "VM", // cloud-level derivation flips to VM, same as the user's report
+				}})
+			case "/api/v2/clouds/cld_cli/resources":
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
+					{IsDefault: false, ComputeStack: "K8S", CloudDeploymentID: "dep_cli"}, // NOT flagged default
+				}})
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_cli", state); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "K8S" {
+			t.Errorf("ComputeStack = %q, want %q (exactly one resource exists - no ambiguity, must be used regardless of is_default)", got, "K8S")
+		}
+	})
+
+	t.Run("multiple resources, none flagged is_default - genuinely ambiguous, falls back to cloud-level (no guessing)", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_multi":
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_multi", Name: "multi-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "VM",
+				}})
+			case "/api/v2/clouds/cld_multi/resources":
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
+					{IsDefault: false, ComputeStack: "K8S", CloudDeploymentID: "dep_a"},
+					{IsDefault: false, ComputeStack: "VM", CloudDeploymentID: "dep_b"},
+				}})
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_multi", state); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "VM" {
+			t.Errorf("ComputeStack = %q, want %q (genuinely ambiguous with 2+ resources and no default flagged - must not guess which one, cloud-level fallback is correct here)", got, "VM")
+		}
+	})
 }

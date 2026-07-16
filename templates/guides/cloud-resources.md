@@ -15,27 +15,40 @@ behaviors aren't obvious from any single resource's schema table.
 
 ## Supported cloud providers
 
-Only **AWS** and **GCP** are supported today. Setting `cloud_provider = "AZURE"` or
-`cloud_provider = "GENERIC"` fails at apply time with an explicit error (for example, "azure clouds
-are not yet supported by this provider") rather than silently creating a partially-configured cloud.
+**AWS** and **GCP** support both VM and Kubernetes (AKS-equivalent) compute stacks. **Azure**
+supports Kubernetes only — Anyscale does not support Azure VM clouds, so setting
+`cloud_provider = "AZURE"` (directly, via `azure_config`, or via auto-detection) together with any
+`compute_stack` other than `"K8S"` (including the default when `compute_stack` is omitted) fails
+at plan time with an explicit error, before anything reaches the API. `cloud_provider = "GENERIC"`
+is not yet supported by this provider at all, for any compute stack, and fails the same way.
 
-The `anyscale_cloud` resource still declares an `azure_config` block in its schema. It is kept for
-forward compatibility — removing it outright would be a breaking schema change — but it cannot
-currently be applied. Don't configure `azure_config`; use `aws_config` or `gcp_config` instead.
+Unlike `aws_config`/`gcp_config`, `azure_config` takes a single field, `tenant_id`: AKS setup
+creates no VNet/subnet resources of its own, and real authentication is operator
+workload-identity federation (`kubernetes_config.anyscale_operator_iam_identity`, using the
+managed identity's **principal ID**, not its client ID), not network or IAM-role wiring. Azure
+object storage uses its own URI scheme, `abfss://<container>@<account>.dfs.core.windows.net` —
+pass the complete URI in `object_storage.bucket_name` yourself; unlike AWS's `s3://` and GCP's
+`gs://`, this provider does not prepend or strip any scheme for Azure, and a bucket name that
+doesn't already start with `abfss://` fails at plan time.
 
-Kubernetes (`compute_stack = "K8S"`) is supported for both AWS and GCP, via either the **all-in-one
-pattern** (`anyscale_cloud` with an embedded `kubernetes_config` block) or the **split pattern** (an
-empty `anyscale_cloud` plus a separate `anyscale_cloud_resource` with `compute_stack = "K8S"`).
-Previously, a K8S-only configuration was misclassified as an empty cloud and silently never created
-any deployment at all; that's fixed, and the provider now correctly creates and round-trips a K8S
-cloud (no more `compute_stack` flipping from `"K8S"` to `"VM"` on the next read) for both patterns.
+Kubernetes (`compute_stack = "K8S"`) is supported for AWS, GCP, and Azure, via either the
+**all-in-one pattern** (`anyscale_cloud` with an embedded `kubernetes_config` block) or the
+**split pattern** (an empty `anyscale_cloud` plus a separate `anyscale_cloud_resource` with
+`compute_stack = "K8S"`). Previously, a K8S-only configuration was misclassified as an empty cloud
+and silently never created any deployment at all; that's fixed, and the provider now correctly
+creates and round-trips a K8S cloud (no more `compute_stack` flipping from `"K8S"` to `"VM"` on the
+next read) for both patterns.
 
-Precisely what that fix has been validated against, so this claim doesn't overreach: it's confirmed
-against the real Anyscale API, for both patterns, both providers. It has **not** been separately
-confirmed end-to-end against a real EKS/GKE cluster with the Anyscale Operator actually installed and
-running a workload — that's a distinct validation step, still in progress. If you're standing up a new
-EKS/GKE cluster specifically to test this, treat that path as being actively verified rather than
-already a known-good story.
+Precisely what that fix has been validated against, so this claim doesn't overreach: for AWS and
+GCP, it's confirmed against the real Anyscale API, for both patterns, both providers. It has
+**not** been separately confirmed end-to-end against a real EKS/GKE cluster with the Anyscale
+Operator actually installed and running a workload — that's a distinct validation step, still in
+progress. If you're standing up a new EKS/GKE cluster specifically to test this, treat that path
+as being actively verified rather than already a known-good story. **Azure/AKS support is newer
+still and validated only at the schema and mock-server level** — there is no real Azure
+subscription in this provider's test environment, so unlike EKS/GKE, AKS has no real-cluster
+acceptance coverage at all yet. Validate the AKS example against your own Azure subscription
+before relying on it.
 
 One thing to get right in a split deployment regardless: on the parent `anyscale_cloud`, **omit
 `compute_stack` entirely** — an empty cloud derives its compute stack from whichever resource ends up
@@ -180,25 +193,42 @@ Import now recovers config directly, as part of the import step itself — but d
 block(s) that compute stack requires, and nothing else:
 
 - A **VM** cloud/resource recovers `aws_config` (AWS) or `gcp_config` (GCP) — whichever matches its
-  provider.
+  provider. Azure has no VM variant to recover (see [Supported cloud providers](#supported-cloud-providers)
+  above).
 - A **K8S** cloud/resource recovers both `kubernetes_config` and `object_storage` — both are required
-  for K8S regardless of provider.
-- Everything else — `file_storage` always, `object_storage` for VM, `aws_config`/`gcp_config` for K8S —
-  is **never** recovered at import, even if you actually configured it. Add these to your `.tf` after
-  importing if you use them; expect a replace on the next `apply`; there's no supported way around that
-  for an optional block. This is deliberate, not an oversight: recovering an optional block can't
-  distinguish "you didn't configure this" from "recovered at import," and only a required block avoids
-  that ambiguity in the first place.
+  for K8S regardless of provider, Azure included.
+- Everything else — `file_storage` always, `object_storage` for VM, `aws_config`/`gcp_config`/
+  `azure_config` for K8S — is **never** recovered at import, even if you actually configured it. Add
+  these to your `.tf` after importing if you use them; expect a replace on the next `apply`; there's
+  no supported way around that for an optional block. This is deliberate, not an oversight: recovering
+  an optional block can't distinguish "you didn't configure this" from "recovered at import," and only
+  a required block avoids that ambiguity in the first place.
 
 A few more things worth knowing:
 
-- **On GCP, write `bucket_name` with the `gs://` prefix.** This only matters for **K8S** imports, since
-  `object_storage` is only ever recovered for K8S (see above). On read, AWS's `s3://` prefix is
-  stripped, so a bare AWS bucket name round-trips cleanly either way. GCP's `gs://` prefix is not
-  stripped — this matches the schema's own documented convention (`gs://my-bucket for GCS`) but means a
-  bare GCP bucket name in your config will produce a plan diff (and a forced replace, since
-  `bucket_name` is `RequiresReplace`) right after importing a K8S cloud. Write it with the prefix from
-  the start and this never comes up.
+- **On AWS and GCP, `bucket_name` is scheme-tolerant: a bare name and its scheme-prefixed form
+  (`s3://`, `gs://`) count as the same value.** A plan modifier treats a scheme-only difference
+  between your configuration and the recovered state as equal, so it never forces a diff or a
+  replace (`bucket_name` is `RequiresReplace`) — whether right after importing a K8S cloud or on
+  any later plan. This is deliberately NOT achieved by canonicalizing to one form: forcing
+  everyone's bare names to gain a prefix (or vice versa) would spuriously replace existing clouds
+  already written the other way, so both forms simply compare equal instead. **Azure is
+  different**: `abfss://<container>@<account>.dfs.core.windows.net` is a compound URI with no bare
+  equivalent, so there's no scheme-tolerance to speak of there — write the exact URI, since it's
+  the only valid form to begin with (see [Supported cloud providers](#supported-cloud-providers)
+  above).
+- **`compute_stack` is read from the cloud's own attached resource, not just the cloud-level
+  summary field.** `GET /clouds/{id}` includes its own `compute_stack`, but that value is
+  backend-derived from whichever resource the API considers primary, and defaults to `VM` if it
+  doesn't recognize one. Every `anyscale_cloud` and `anyscale_cloud_resource` read now prefers the
+  attached (default) resource's own `compute_stack` - the same resource used to recover
+  `kubernetes_config`/`object_storage` at import - falling back to the cloud-level field only when
+  no resource can be listed at all (a genuinely empty cloud, or a failed API call). A cloud with
+  exactly one resource resolves to that resource even if nothing is explicitly flagged as the
+  default. In the common case (a K8S cloud created and later re-read through Terraform) the two
+  values already agreed, so this is defense-in-depth rather than a behavior change you'd notice day
+  to day - it specifically protects a cold import of a cloud registered outside Terraform (e.g. via
+  the CLI) from ever showing `compute_stack = "VM"` for what is actually a K8S cloud.
 - The five inert `kubernetes_config` fields (see [Deprecated attributes](#deprecated-attributes) above)
   can't be populated from an API that never received them: `namespace` comes back as its documented
   default (`"anyscale"`); `ingress_host`, `cluster_name`, `context`, and `kubeconfig_path` come back

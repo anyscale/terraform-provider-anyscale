@@ -1,0 +1,89 @@
+```
+release-note:breaking-change
+resource/anyscale_cloud: azure_config is reduced from subscription_id, resource_group, vnet_name, subnet_name, and managed_identity_id to a single tenant_id field, matching the real Anyscale API shape (the removed fields never worked - every apply using them errored); if your configuration referenced any of the removed fields, delete them and set tenant_id instead.
+```
+
+```
+release-note:added
+resource/anyscale_cloud: Add support for Azure Kubernetes Service (AKS) clouds (cloud_provider = AZURE with compute_stack = K8S); Azure VM-stack clouds remain unsupported.
+```
+
+```
+release-note:added
+resource/anyscale_cloud_resource: Add azure_config (tenant_id) and support for Azure Kubernetes Service (AKS) clouds via the split deployment pattern; Azure VM-stack remains unsupported and fails at plan time.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: Azure VM-stack (and any invalid Azure config) now fails at plan time with a clear error instead of creating a broken, non-functional cloud object before erroring at apply.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud_resource: Azure VM-stack (and any invalid Azure config) now fails at plan time with a clear error instead of creating a broken, non-functional cloud object before erroring at apply.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: persistent_volume_claim and csi_ephemeral_volume_driver can no longer both be set at once; terraform plan now rejects this combination before apply, matching the backend's own rejection.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud_resource: persistent_volume_claim and csi_ephemeral_volume_driver can no longer both be set at once; terraform plan now rejects this combination before apply, matching the backend's own rejection.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: kubernetes_config.redis_endpoint can no longer conflict with aws_config.memorydb_cluster_endpoint or gcp_config.memorystore_endpoint; terraform plan now rejects this combination before apply.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud_resource: kubernetes_config.redis_endpoint can no longer conflict with aws_config.memorydb_cluster_endpoint or gcp_config.memorystore_endpoint; terraform plan now rejects this combination before apply.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: compute_stack now validates against VM or K8S; an unrecognized value now produces a clear plan-time error instead of silently defaulting to VM.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud_resource: compute_stack now validates against VM or K8S; an unrecognized value now produces a clear plan-time error instead of silently defaulting to VM.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: object_storage.bucket_name no longer produces a spurious plan diff or forces a replacement when the same bucket is referenced with vs. without its provider scheme prefix (s3://, gs://); a bare name and its scheme-prefixed form are now treated as the same bucket. Pre-existing bug, not a regression from this release.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud_resource: object_storage.bucket_name no longer produces a spurious plan diff or forces a replacement when the same bucket is referenced with vs. without its provider scheme prefix (s3://, gs://); a bare name and its scheme-prefixed form are now treated as the same bucket. Pre-existing bug, not a regression from this release.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: importing a Kubernetes-backed cloud now correctly reads compute_stack from the cloud's actual primary resource, instead of a cloud-level derived field that can default to VM on a cold or externally-created import. Pre-existing bug, not a regression from this release.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud_resource: importing a Kubernetes-backed cloud now correctly reads compute_stack from the cloud's actual primary resource, instead of a cloud-level derived field that can default to VM on a cold or externally-created import. Pre-existing bug, not a regression from this release.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud_resource: the registry example for the AWS Kubernetes split pattern was missing cloud_provider and an aws_config block, which the schema requires for K8S; it would have failed at apply. Pre-existing since PR #46, not a regression from this release.
+```
+
+```
+release-note:changed
+resource/anyscale_cloud: Add a GKE (Google Kubernetes Engine) example and bring the AWS EKS example up to parity by demonstrating file_storage and redis_endpoint, neither previously shown despite already being fully supported (no behavior change, docs only).
+```
+
+```
+release-note:changed
+resource/anyscale_cloud_resource: Add a GKE (Google Kubernetes Engine) example, matching the parity work done on anyscale_cloud's registry example (no behavior change, docs only).
+```
