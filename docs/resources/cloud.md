@@ -24,9 +24,8 @@ resource "anyscale_cloud" "aws_example" {
   auto_add_user           = false
   enable_lineage_tracking = false
   enable_log_ingestion    = false
-  # enable_system_cluster does not detect drift if toggled outside Terraform - see the
-  # schema description. Left unset here since it is Optional-only; set explicitly to opt in.
-  is_private_cloud = false
+  enable_system_cluster   = false
+  is_private_cloud        = false
 
   # AWS-specific configuration
   aws_config {
@@ -178,7 +177,7 @@ resource "anyscale_cloud" "aks_example" {
   }
 }
 
-# Empty Cloud (Split Deployment Pattern)
+# Empty Cloud (Multi-Resource Cloud Pattern)
 resource "anyscale_cloud" "empty" {
   name           = "my-empty-cloud"
   cloud_provider = "AWS"
@@ -192,6 +191,16 @@ resource "anyscale_cloud" "empty" {
 output "cloud_id" {
   value       = anyscale_cloud.aws_example.id
   description = "The unique identifier for the cloud"
+}
+
+output "cloud_name" {
+  value       = anyscale_cloud.aws_example.name
+  description = "The name of the cloud"
+}
+
+output "cloud_is_default" {
+  value       = anyscale_cloud.aws_example.is_default
+  description = "Whether this cloud is the organization's default cloud (read-only, managed by Anyscale)"
 }
 
 output "is_empty_cloud" {
@@ -214,10 +223,10 @@ output "is_empty_cloud" {
 - `azure_config` (Block, Optional) Azure-specific configuration. Required when cloud_provider is AZURE. Azure clouds are Kubernetes-only (AKS) - Anyscale does not support Azure VM clouds, so compute_stack must be "K8S"; setting azure_config with any other compute_stack is a plan-time error. Unlike aws_config/gcp_config, this has a single field: AKS setup creates no VNet/subnet resources of its own, and real authentication is operator workload-identity federation (see kubernetes_config.anyscale_operator_iam_identity), not network or IAM-role wiring. (see [below for nested schema](#nestedblock--azure_config))
 - `cloud_provider` (String) Cloud provider: AWS, GCP, or AZURE. Auto-detected from aws_config/gcp_config/azure_config, or defaults to AWS for empty clouds. AWS and GCP support both VM and K8S compute stacks; AZURE supports K8S only (AKS) - Anyscale does not support Azure VM clouds, and setting azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported by this provider.
 - `compute_stack` (String) Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).
-- `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using split pattern (empty cloud + cloud_resource).
+- `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using the multi-resource cloud pattern (empty cloud + cloud_resource).
 - `enable_lineage_tracking` (Boolean) Whether to enable lineage tracking for this cloud.
 - `enable_log_ingestion` (Boolean) Whether to enable aggregated log ingestion for this cloud.
-- `enable_system_cluster` (Boolean) Whether to enable the system cluster for this cloud (powers task/actor observability dashboards; see `anyscale cloud config update --enable-system-cluster`). Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions. This means Terraform does NOT detect drift on this attribute: if the system cluster is toggled outside of Terraform (e.g. via the console or CLI), this value will keep reflecting whatever was last applied through this resource, not the real current state, until the next explicit change here.
+- `enable_system_cluster` (Boolean) Whether to enable the system cluster for this cloud (powers task/actor observability dashboards; see `anyscale cloud config update --enable-system-cluster`). Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions.
 - `file_storage` (Block, Optional) File storage configuration (EFS, Filestore, etc.). (see [below for nested schema](#nestedblock--file_storage))
 - `gcp_config` (Block, Optional) GCP-specific configuration. Required when cloud_provider is GCP and using all-in-one pattern. (see [below for nested schema](#nestedblock--gcp_config))
 - `is_private_cloud` (Boolean) Whether this is a private cloud (private networking).
@@ -229,6 +238,7 @@ output "is_empty_cloud" {
 
 - `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.
 - `id` (String) The unique identifier of the cloud.
+- `is_default` (Boolean) Whether this cloud is the organization's default cloud. Read-only: which cloud is the org default is managed by Anyscale (e.g. via the console or CLI), not by this resource, and there is no API this resource can call to set or change it. Deliberately has no plan modifier, unlike `is_empty_cloud`/`cloud_deployment_id` above: the org default can move to a different cloud out of band at any time, so pinning this to the prior state (via `UseStateForUnknown`) would risk a `Provider produced inconsistent result after apply` error if the default changed between plan and apply. Terraform reflects whichever cloud is the current org default on every refresh, so drift here is expected and simply means the default moved - it is not a bug.
 - `is_empty_cloud` (Boolean) Whether this cloud was created without embedded resource configuration. Use anyscale_cloud_resource to attach resources separately.
 
 <a id="nestedblock--aws_config"></a>

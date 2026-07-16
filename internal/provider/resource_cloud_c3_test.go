@@ -214,7 +214,7 @@ func TestReadCloudState_EmptyCloudStaysEmptyEvenAfterResourceAttached(t *testing
 		w.WriteHeader(http.StatusOK)
 		switch r.URL.Path {
 		case "/api/v2/clouds/cloud-3":
-			_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-3", "name": "split-pattern-cloud", "provider": "AWS", "region": "us-east-2"}}`)
+			_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-3", "name": "multi-resource-cloud", "provider": "AWS", "region": "us-east-2"}}`)
 		case "/api/v2/clouds/cloud-3/resources":
 			// Simulates a anyscale_cloud_resource having been attached AFTER
 			// this cloud was created empty - a real default resource now
@@ -230,8 +230,8 @@ func TestReadCloudState_EmptyCloudStaysEmptyEvenAfterResourceAttached(t *testing
 	defer server.Close()
 
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
-	// IsEmptyCloud is explicitly true - set at Create time for the split
-	// pattern and persisted ever since. This must be sticky.
+	// IsEmptyCloud is explicitly true - set at Create time for the
+	// multi-resource cloud pattern and persisted ever since. This must be sticky.
 	state := &CloudResourceModel{
 		ID:                types.StringValue("cloud-3"),
 		IsEmptyCloud:      types.BoolValue(true),

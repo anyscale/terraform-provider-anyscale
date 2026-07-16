@@ -320,7 +320,7 @@ func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
 			t.Error("wasPlaceholder = false, want true - no config and no explicit credentials means a placeholder is generated")
 		}
 		// Again: the caller's isEmptyCloud=true here means it stays silent
-		// despite wasPlaceholder=true - this is the BYOC/split-pattern case.
+		// despite wasPlaceholder=true - this is the BYOC/multi-resource cloud pattern case.
 	})
 }
 

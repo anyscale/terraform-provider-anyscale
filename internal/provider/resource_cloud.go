@@ -74,6 +74,7 @@ type CloudResourceModel struct {
 	// Computed fields
 	IsEmptyCloud      types.Bool   `tfsdk:"is_empty_cloud"`
 	CloudDeploymentID types.String `tfsdk:"cloud_deployment_id"`
+	IsDefault         types.Bool   `tfsdk:"is_default"`
 }
 
 // AzureConfigModel represents Azure-specific configuration. See AzureConfig
@@ -201,7 +202,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"credentials": schema.StringAttribute{
 				Optional:            true,
 				Sensitive:           true,
-				MarkdownDescription: "Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using split pattern (empty cloud + cloud_resource).",
+				MarkdownDescription: "Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using the multi-resource cloud pattern (empty cloud + cloud_resource).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -224,8 +225,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"enable_system_cluster": schema.BoolAttribute{
 				Optional: true,
 				MarkdownDescription: "Whether to enable the system cluster for this cloud (powers task/actor observability dashboards; see `anyscale cloud config update --enable-system-cluster`). " +
-					"Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions. " +
-					"This means Terraform does NOT detect drift on this attribute: if the system cluster is toggled outside of Terraform (e.g. via the console or CLI), this value will keep reflecting whatever was last applied through this resource, not the real current state, until the next explicit change here.",
+					"Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions.",
 			},
 
 			// ─── Computed Fields ──────────────────────────────────
@@ -244,6 +244,11 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
+			},
+
+			"is_default": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this cloud is the organization's default cloud. Read-only: which cloud is the org default is managed by Anyscale (e.g. via the console or CLI), not by this resource, and there is no API this resource can call to set or change it. Deliberately has no plan modifier, unlike `is_empty_cloud`/`cloud_deployment_id` above: the org default can move to a different cloud out of band at any time, so pinning this to the prior state (via `UseStateForUnknown`) would risk a `Provider produced inconsistent result after apply` error if the default changed between plan and apply. Terraform reflects whichever cloud is the current org default on every refresh, so drift here is expected and simply means the default moved - it is not a bug.",
 			},
 		},
 
@@ -937,6 +942,19 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		plan.CloudDeploymentID = types.StringNull()
 	}
 
+	// Initialize IsDefault to a known placeholder so the intermediate
+	// State.Set below (persisted before any interruptible step) never saves
+	// an unknown value - Terraform errors on that regardless of whether a
+	// later step succeeds. false is just a safe placeholder here, not a
+	// claim about backend behavior (whether a fresh org auto-designates its
+	// first/only cloud as default is unverified) - readCloudState below
+	// always overwrites it from the real API response in both the
+	// empty-cloud and all-in-one paths, so this only matters if a later step
+	// fails and this partial state is what gets left behind.
+	if plan.IsDefault.IsUnknown() {
+		plan.IsDefault = types.BoolValue(false)
+	}
+
 	// compute_stack may still be unknown here (e.g. omitted on an empty cloud).
 	// The create response already reports the backend's resolved value, so use
 	// it directly instead of guessing - the partial state saved below then
@@ -1604,6 +1622,13 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	state.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
 	state.EnableLineageTracking = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
 	state.EnableLogIngestion = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
+
+	// is_default is genuinely mutable out of band (the org default can move to
+	// a different cloud via the console/CLI), so unlike the Computed fields
+	// backfilled below it is set here, unconditionally, on every read - never
+	// pinned or made sticky. See the schema MarkdownDescription for why this
+	// attribute deliberately has no plan modifier.
+	state.IsDefault = types.BoolValue(cloudResp.Result.IsDefault)
 
 	// If CloudDeploymentID is still unknown/null, set it to null explicitly
 	if state.CloudDeploymentID.IsUnknown() {

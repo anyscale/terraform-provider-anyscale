@@ -9,9 +9,8 @@ resource "anyscale_cloud" "aws_example" {
   auto_add_user           = false
   enable_lineage_tracking = false
   enable_log_ingestion    = false
-  # enable_system_cluster does not detect drift if toggled outside Terraform - see the
-  # schema description. Left unset here since it is Optional-only; set explicitly to opt in.
-  is_private_cloud = false
+  enable_system_cluster   = false
+  is_private_cloud        = false
 
   # AWS-specific configuration
   aws_config {
@@ -163,7 +162,7 @@ resource "anyscale_cloud" "aks_example" {
   }
 }
 
-# Empty Cloud (Split Deployment Pattern)
+# Empty Cloud (Multi-Resource Cloud Pattern)
 resource "anyscale_cloud" "empty" {
   name           = "my-empty-cloud"
   cloud_provider = "AWS"
@@ -177,6 +176,16 @@ resource "anyscale_cloud" "empty" {
 output "cloud_id" {
   value       = anyscale_cloud.aws_example.id
   description = "The unique identifier for the cloud"
+}
+
+output "cloud_name" {
+  value       = anyscale_cloud.aws_example.name
+  description = "The name of the cloud"
+}
+
+output "cloud_is_default" {
+  value       = anyscale_cloud.aws_example.is_default
+  description = "Whether this cloud is the organization's default cloud (read-only, managed by Anyscale)"
 }
 
 output "is_empty_cloud" {

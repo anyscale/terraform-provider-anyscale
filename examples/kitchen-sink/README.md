@@ -32,7 +32,7 @@ that path authenticates via in-cluster pod identity, not a cross-account assume-
 
 | Resource | What it does here |
 | --- | --- |
-| `anyscale_cloud` (Cloud A) | Empty cloud, BYOC/split pattern, `compute_stack` omitted on the parent |
+| `anyscale_cloud` (Cloud A) | Empty cloud, BYOC/multi-resource cloud pattern, `compute_stack` omitted on the parent |
 | `anyscale_cloud_resource` (`a_vm`) | A VM compute stack attached to Cloud A, on the shared VPC. Created first, which is what makes it the primary/default deployment — the backend assigns "primary" to whichever resource lands first, it isn't a settable field. |
 | `anyscale_cloud_resource` (`a_eks`) | A K8S (EKS) compute stack attached to the *same* Cloud A, on the *same* shared VPC — this is the multiple-resources-on-one-cloud and mixed-compute-stack coverage in one place. `depends_on` the VM resource so it's created second and never mistaken for the primary. |
 | `anyscale_cloud` (Cloud B) | A second, independent cloud — all-in-one VM pattern (`aws_config` embedded directly), also on the shared VPC |
@@ -147,7 +147,7 @@ rework, so there's nothing to wire up yet.
   different, more persistent case worth reporting rather than retrying indefinitely.
 - **Replacing the EKS resource can hit a backend `500`.** A destroy-then-recreate of `a_eks` (any
   change to a `RequiresReplace` attribute) can fail on the re-attach step — a known backend issue
-  specific to the AWS + split + K8S combination this example uses. Initial creation is unaffected,
+  specific to the AWS + multi-resource + K8S combination this example uses. Initial creation is unaffected,
   and it's under investigation upstream; it is not a bug in this provider. See the
   [Cloud Resources guide](../../docs/guides/cloud-resources.md) for the full note.
 - **This proves attachment and configuration, not a running workload.** `infra_eks.tf`'s node

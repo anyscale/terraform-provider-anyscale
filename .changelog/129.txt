@@ -1,0 +1,14 @@
+```
+release-note:changed
+resource/anyscale_cloud: Add a live `enable_system_cluster` example to the registry docs and the Cloud Resources guide, and simplify its schema description by removing the standalone drift-detection callout - it behaves like any other cloud-level setting (no behavior change, docs only).
+```
+
+```
+release-note:changed
+resource/anyscale_cloud: Rename the "Split Deployment Pattern" naming used across the registry example, the Cloud Resources guide, and the `credentials` schema description to "Multi-Resource Cloud Pattern" for clarity (no behavior change, docs only).
+```
+
+```
+release-note:added
+resource/anyscale_cloud: Add `is_default` (Computed) reporting whether this cloud is the organization's default cloud.
+```

@@ -1,6 +1,6 @@
 # GCP VM Test Scenario
 # Consolidated example with optional Filestore and Memorystore
-# Uses split pattern: empty cloud + cloud_resource
+# Uses multi-resource cloud pattern: empty cloud + cloud_resource
 
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "primary" {

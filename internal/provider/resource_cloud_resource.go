@@ -674,8 +674,8 @@ func (r *CloudResourceResource) Configure(ctx context.Context, req resource.Conf
 	r.client = client
 }
 
-// ValidateConfig is CloudResource.ValidateConfig's counterpart for the split
-// (empty cloud + separately-attached resource) pattern (K9). Unlike
+// ValidateConfig is CloudResource.ValidateConfig's counterpart for the
+// multi-resource cloud (empty cloud + separately-attached resource) pattern (K9). Unlike
 // CloudResource, this resource has no azure_config block and no is-empty
 // escape hatch - Create always resolves a provider and always calls
 // buildProviderConfig unconditionally (see Create below), so the only way to

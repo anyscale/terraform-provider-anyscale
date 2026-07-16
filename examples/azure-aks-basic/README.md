@@ -3,7 +3,7 @@
 Creates a new AKS cluster and registers it with Anyscale as a `K8S` cloud, all in a single
 `terraform apply`, using the **all-in-one pattern** (`anyscale_cloud` with an embedded
 `kubernetes_config`) - the same pattern [`aws-eks-basic`](../aws-eks-basic/) uses, unlike
-[`gcp-gke-basic`](../gcp-gke-basic/)'s split pattern. It provisions the resource group, network,
+[`gcp-gke-basic`](../gcp-gke-basic/)'s multi-resource cloud pattern. It provisions the resource group, network,
 AKS cluster, ADLS Gen2 storage account, and the Anyscale Operator's managed identity, then wires
 the result into one `anyscale_cloud` resource.
 
