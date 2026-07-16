@@ -193,6 +193,16 @@ output "cloud_id" {
   description = "The unique identifier for the cloud"
 }
 
+output "cloud_name" {
+  value       = anyscale_cloud.aws_example.name
+  description = "The name of the cloud"
+}
+
+output "cloud_is_default" {
+  value       = anyscale_cloud.aws_example.is_default
+  description = "Whether this cloud is the organization's default cloud (read-only, managed by Anyscale)"
+}
+
 output "is_empty_cloud" {
   value       = anyscale_cloud.empty.is_empty_cloud
   description = "Whether the cloud is empty (no embedded configuration)"
@@ -228,6 +238,7 @@ output "is_empty_cloud" {
 
 - `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.
 - `id` (String) The unique identifier of the cloud.
+- `is_default` (Boolean) Whether this cloud is the organization's default cloud. Read-only: which cloud is the org default is managed by Anyscale (e.g. via the console or CLI), not by this resource, and there is no API this resource can call to set or change it. Deliberately has no plan modifier, unlike `is_empty_cloud`/`cloud_deployment_id` above: the org default can move to a different cloud out of band at any time, so pinning this to the prior state (via `UseStateForUnknown`) would risk a `Provider produced inconsistent result after apply` error if the default changed between plan and apply. Terraform reflects whichever cloud is the current org default on every refresh, so drift here is expected and simply means the default moved - it is not a bug.
 - `is_empty_cloud` (Boolean) Whether this cloud was created without embedded resource configuration. Use anyscale_cloud_resource to attach resources separately.
 
 <a id="nestedblock--aws_config"></a>

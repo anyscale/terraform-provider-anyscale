@@ -8,6 +8,11 @@ output "cloud_name" {
   value       = anyscale_cloud.primary.name
 }
 
+output "cloud_is_default" {
+  description = "Whether this cloud is the organization's default cloud. Read-only and managed by Anyscale; reflects whatever the current org default is on each refresh."
+  value       = anyscale_cloud.primary.is_default
+}
+
 # Project outputs
 output "basic_project_id" {
   description = "The ID of the basic project"

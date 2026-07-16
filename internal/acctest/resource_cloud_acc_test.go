@@ -308,6 +308,79 @@ func TestAccCloudResource_GCP_K8S(t *testing.T) {
 	})
 }
 
+// TestAccCloudResource_PVCCSIConflict (K10) pins the plan-time rejection of
+// setting both file_storage.persistent_volume_claim and
+// file_storage.csi_ephemeral_volume_driver: the backend accepts only one
+// Kubernetes shared-storage mechanism, and the schema wires a
+// ConflictsWith validator on each side of the pair, not just one direction.
+// Plan-time only (ValidateConfig / schema attribute validators) - no API
+// call is ever made, so no real infra is needed and CheckDestroy here is a
+// belt-and-suspenders no-op, matching TestAccCloudResource_AzureVM_NotSupported.
+func TestAccCloudResource_PVCCSIConflict(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-pvc-csi-conflict")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourcePVCCSIConflictConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)Attribute\s+"file_storage\.csi_ephemeral_volume_driver"\s+cannot\s+be\s+specified\s+when\s+"file_storage\.persistent_volume_claim"\s+is\s+specified`),
+			},
+		},
+	})
+}
+
+// TestAccCloudResource_RedisMemoryDBConflict (K11) pins the plan-time
+// rejection of setting kubernetes_config.redis_endpoint together with
+// aws_config.memorydb_cluster_endpoint - the backend rejects more than one
+// GCS fault-tolerance backing store on the same cloud. The ConflictsWith
+// validator is wired only on redis_endpoint (pointing at both
+// aws_config.memorydb_cluster_endpoint and gcp_config.memorystore_endpoint),
+// not mirrored on the provider-specific side, so this exercises the AWS half
+// of that one-directional pair. Plan-time only, no real infra needed.
+func TestAccCloudResource_RedisMemoryDBConflict(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-redis-memorydb-conflict")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceRedisMemoryDBConflictConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)Attribute\s+"aws_config\.memorydb_cluster_endpoint"\s+cannot\s+be\s+specified\s+when\s+"kubernetes_config\.redis_endpoint"\s+is\s+specified`),
+			},
+		},
+	})
+}
+
+// TestAccCloudResource_InvalidComputeStack (K12) pins the plan-time
+// rejection of any compute_stack value outside the OneOf("VM", "K8S")
+// allow-list. Plan-time only, no real infra needed.
+func TestAccCloudResource_InvalidComputeStack(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-invalid-stack")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceInvalidComputeStackConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)Attribute\s+compute_stack\s+value\s+must\s+be\s+one\s+of:.*got:\s+"INVALID"`),
+			},
+		},
+	})
+}
+
 // Helper function to check if cloud exists in API and fetch its details
 func testAccCheckCloudExistsInAPI(resourceName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -575,6 +648,49 @@ resource "anyscale_cloud" "test" {
   }
 }
 `, name, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}, redisEndpoint), randSuffix)
+}
+
+// testAccCloudResourcePVCCSIConflictConfig is deliberately minimal (just
+// name + the two conflicting file_storage fields): the ConflictsWith
+// validator fires independent of compute_stack or any other field, and
+// keeping this focused mirrors testAccCloudResourceAzureConfig's minimalism
+// for the same class of plan-time-only test.
+func testAccCloudResourcePVCCSIConflictConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name = "%s"
+
+  file_storage {
+    persistent_volume_claim     = "test-pvc"
+    csi_ephemeral_volume_driver = "test.csi.driver"
+  }
+}
+`, name)
+}
+
+func testAccCloudResourceRedisMemoryDBConflictConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name = "%s"
+
+  kubernetes_config {
+    redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
+  }
+
+  aws_config {
+    memorydb_cluster_endpoint = "memorydb.example.com:6379"
+  }
+}
+`, name)
+}
+
+func testAccCloudResourceInvalidComputeStackConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name          = "%s"
+  compute_stack = "INVALID"
+}
+`, name)
 }
 
 // TestAccCloudResource_Disappears verifies that an out-of-band cloud deletion

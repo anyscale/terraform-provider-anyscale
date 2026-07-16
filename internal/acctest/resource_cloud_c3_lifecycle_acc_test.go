@@ -101,9 +101,16 @@ func TestAccCloudResource_Lifecycle_AWS_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudID = "cld_c3_aws_mock"
+	// is_default: true here is the TOP-LEVEL CloudResult.IsDefault (org
+	// default cloud) - a different field from resourcesJSON's per-resource
+	// "is_default" below (CloudDeploymentResult.IsDefault, cold-import
+	// compute_stack disambiguation). true rather than false deliberately: the
+	// schema attribute's zero value is also false, so a regression that never
+	// assigns it at all would still pass a false-in/false-out test and prove
+	// nothing.
 	cloudJSON := fmt.Sprintf(`{
 		"id": %[1]q, "name": "c3-aws-mock", "provider": "AWS", "region": "us-east-2",
-		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
+		"status": "ready", "state": "ACTIVE", "compute_stack": "VM", "is_default": true
 	}`, cloudID)
 	// Realistic hazard shapes: parallel subnet_ids+zones (never subnet_ids_to_az),
 	// bucket_name WITH its s3:// prefix even though the schema stores it bare.
@@ -161,6 +168,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "aws_config.vpc_id", "vpc-real123"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "aws_config.cluster_instance_profile_id", "arn:aws:iam::123456789012:instance-profile/real-cluster-node"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "object_storage.bucket_name", "real-bucket-name"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "is_default", "true"),
 				),
 				// Headline C3 gate: a config populated at create against a
 				// realistically-shaped (hazard-laden) API response must not
