@@ -9,8 +9,8 @@ cluster itself, then wires the result into one `anyscale_cloud` resource with an
 If you already have a running EKS cluster and just want to register it with Anyscale, this
 example will create a second, redundant cluster rather than adopt yours. Neither Kubernetes
 example in this repo supports that today — [gcp-gke-basic](../gcp-gke-basic/) also provisions a
-brand new cluster via modules; it only differs from this example in using the split
-cloud-then-resource pattern instead of all-in-one. Open an issue if a bring-your-own-cluster
+brand new cluster via modules; it only differs from this example in using the multi-resource
+cloud pattern instead of all-in-one. Open an issue if a bring-your-own-cluster
 example would help.
 
 ## What this creates
@@ -309,7 +309,7 @@ Bottlerocket. See "Migrating from AL2023 to Bottlerocket" above.
 
 ## See also
 
-- [gcp-gke-basic](../gcp-gke-basic/) — the split-pattern equivalent for GCP/GKE
+- [gcp-gke-basic](../gcp-gke-basic/) — the multi-resource cloud pattern equivalent for GCP/GKE
 - [Cloud resource documentation](../../docs/resources/cloud.md)
 - [terraform-aws-modules/eks](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) — upstream module docs
 - [Anyscale documentation](https://docs.anyscale.com/)

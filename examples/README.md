@@ -31,14 +31,14 @@ Full AWS VM example with AWS Cloud Foundation modules. Creates both AWS infrastr
 
 #### [aws-vm-basic-resource](./aws-vm-basic-resource/)
 
-AWS VM cloud using the split deployment pattern. Demonstrates creating an empty cloud first, then adding a resource deployment separately.
+AWS VM cloud using the multi-resource cloud pattern. Demonstrates creating an empty cloud first, then adding a resource deployment separately.
 
-**Use this when**: You want to use the split deployment pattern where the cloud and resource deployment are managed separately.
+**Use this when**: You want to use the multi-resource cloud pattern where the cloud and resource deployment are managed separately.
 
 **What it demonstrates**:
 - Creating an empty `anyscale_cloud` resource
 - Adding a resource deployment via `anyscale_cloud_resource`
-- Split deployment pattern workflow
+- Multi-resource cloud pattern workflow
 
 #### [gcp-vm-basic](./gcp-vm-basic/)
 
@@ -84,7 +84,7 @@ second one, this isn't that example yet.
 
 #### [gcp-gke-basic](./gcp-gke-basic/)
 
-GCP GKE (Kubernetes) cloud example, using the split deployment pattern. Creates an empty Anyscale
+GCP GKE (Kubernetes) cloud example, using the multi-resource cloud pattern. Creates an empty Anyscale
 Cloud, then attaches a GCP GKE compute stack via a separate `anyscale_cloud_resource`.
 
 **Use this when**: You want to register a GCP GKE cluster with Anyscale, managing the cloud and its
@@ -103,7 +103,7 @@ Comprehensive, multi-cloud build exercising every resource and data source this 
 registers — including the multiple-resources-on-one-cloud and mixed VM+K8s coverage that used to
 live in a separate `multi-resource-cloud-basic` example (now superseded and folded in here). Two
 Anyscale Clouds share one AWS VPC and one EKS cluster, built fresh via modules: Cloud A is a
-BYOC/split cloud carrying both a VM `anyscale_cloud_resource` and a K8S (EKS) `anyscale_cloud_resource`;
+BYOC/multi-resource cloud carrying both a VM `anyscale_cloud_resource` and a K8S (EKS) `anyscale_cloud_resource`;
 Cloud B is a simpler all-in-one VM cloud. Compute configs (including one that targets the EKS
 deployment specifically via `cloud_resource`), container images, and two projects sit on top, and
 all 13 registered data sources — `anyscale_cloud`, `anyscale_clouds`, `anyscale_compute_config`,
@@ -270,12 +270,12 @@ All examples require:
 |---------|---------------|---------------|---------|------------------------|
 | `aws-vm-basic` | AWS | VM | All-in-one | Uses existing |
 | `aws-vm` | AWS | VM | All-in-one | Creates via modules |
-| `aws-vm-basic-resource` | AWS | VM | Split | Uses existing |
+| `aws-vm-basic-resource` | AWS | VM | Multi-Resource | Uses existing |
 | `gcp-vm-basic` | GCP | VM | All-in-one | Uses existing |
 | `gcp-vm` | GCP | VM | All-in-one | Creates via modules |
 | `aws-eks-basic` | AWS | K8S | All-in-one | Creates via modules |
-| `gcp-gke-basic` | GCP | K8S | Split | Uses existing GKE |
-| `kitchen-sink` | AWS | Mixed (VM + K8S) | Mixed (Split + All-in-one) | Creates via modules |
+| `gcp-gke-basic` | GCP | K8S | Multi-Resource | Uses existing GKE |
+| `kitchen-sink` | AWS | Mixed (VM + K8S) | Mixed (Multi-Resource + All-in-one) | Creates via modules |
 
 ## Common Variables
 

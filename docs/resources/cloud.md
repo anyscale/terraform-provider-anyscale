@@ -177,7 +177,7 @@ resource "anyscale_cloud" "aks_example" {
   }
 }
 
-# Empty Cloud (Split Deployment Pattern)
+# Empty Cloud (Multi-Resource Cloud Pattern)
 resource "anyscale_cloud" "empty" {
   name           = "my-empty-cloud"
   cloud_provider = "AWS"
@@ -213,7 +213,7 @@ output "is_empty_cloud" {
 - `azure_config` (Block, Optional) Azure-specific configuration. Required when cloud_provider is AZURE. Azure clouds are Kubernetes-only (AKS) - Anyscale does not support Azure VM clouds, so compute_stack must be "K8S"; setting azure_config with any other compute_stack is a plan-time error. Unlike aws_config/gcp_config, this has a single field: AKS setup creates no VNet/subnet resources of its own, and real authentication is operator workload-identity federation (see kubernetes_config.anyscale_operator_iam_identity), not network or IAM-role wiring. (see [below for nested schema](#nestedblock--azure_config))
 - `cloud_provider` (String) Cloud provider: AWS, GCP, or AZURE. Auto-detected from aws_config/gcp_config/azure_config, or defaults to AWS for empty clouds. AWS and GCP support both VM and K8S compute stacks; AZURE supports K8S only (AKS) - Anyscale does not support Azure VM clouds, and setting azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported by this provider.
 - `compute_stack` (String) Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).
-- `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using split pattern (empty cloud + cloud_resource).
+- `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using the multi-resource cloud pattern (empty cloud + cloud_resource).
 - `enable_lineage_tracking` (Boolean) Whether to enable lineage tracking for this cloud.
 - `enable_log_ingestion` (Boolean) Whether to enable aggregated log ingestion for this cloud.
 - `enable_system_cluster` (Boolean) Whether to enable the system cluster for this cloud (powers task/actor observability dashboards; see `anyscale cloud config update --enable-system-cluster`). Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions.

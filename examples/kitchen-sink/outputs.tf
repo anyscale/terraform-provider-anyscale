@@ -1,7 +1,7 @@
 # --- Resources -------------------------------------------------------------------------------
 output "cloud_a_id" {
   value       = anyscale_cloud.a.id
-  description = "ID of Cloud A (BYOC/split pattern, hosting the VM and EKS resources)."
+  description = "ID of Cloud A (BYOC/multi-resource cloud pattern, hosting the VM and EKS resources)."
 }
 
 output "cloud_b_id" {

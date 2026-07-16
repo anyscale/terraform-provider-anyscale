@@ -1,7 +1,7 @@
 # GCP GKE Basic Example
 
-Creates a new GKE cluster and registers it with Anyscale as a `K8S` cloud, using the **split
-deployment pattern**: an empty `anyscale_cloud` plus a separate `anyscale_cloud_resource` with
+Creates a new GKE cluster and registers it with Anyscale as a `K8S` cloud, using the
+**multi-resource cloud pattern**: an empty `anyscale_cloud` plus a separate `anyscale_cloud_resource` with
 `compute_stack = "K8S"`. Unlike `gcp-vm-basic`, this example does **not** assume you already have
 infrastructure to point at - it provisions the VPC, GCS bucket, service account, and the GKE
 cluster itself, then wires the result into the `anyscale_cloud_resource`.
@@ -9,7 +9,7 @@ cluster itself, then wires the result into the `anyscale_cloud_resource`.
 If you already have a running GKE cluster and just want to register it with Anyscale, this
 example will create a second, redundant cluster rather than adopt yours. Neither Kubernetes
 example in this repo supports that today - see [aws-eks-basic](../aws-eks-basic/), which only
-differs from this example in using the all-in-one pattern instead of split. Open an issue if a
+differs from this example in using the all-in-one pattern instead of multi-resource. Open an issue if a
 bring-your-own-cluster example would help.
 
 ## What this creates
@@ -102,6 +102,6 @@ make destroy-gcp-gke-basic SUFFIX=dev1
 
 - [aws-eks-basic](../aws-eks-basic/) - the all-in-one pattern equivalent for AWS/EKS
 - [Cloud resource documentation](../../docs/resources/cloud.md)
-- [Cloud Resources guide](../../docs/guides/cloud-resources.md) - cross-cutting behavior, including the split-deployment pattern this example uses
+- [Cloud Resources guide](../../docs/guides/cloud-resources.md) - cross-cutting behavior, including the multi-resource cloud pattern this example uses
 - [terraform-google-modules/kubernetes-engine](https://registry.terraform.io/modules/terraform-google-modules/kubernetes-engine/google/latest) - upstream module docs
 - [Anyscale documentation](https://docs.anyscale.com/)

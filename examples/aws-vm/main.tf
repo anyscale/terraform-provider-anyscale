@@ -1,6 +1,6 @@
 # AWS VM Test Scenario
 # Consolidated example with optional EFS and MemoryDB
-# Uses split pattern: empty cloud + cloud_resource
+# Uses multi-resource cloud pattern: empty cloud + cloud_resource
 
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "primary" {

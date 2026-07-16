@@ -162,7 +162,7 @@ resource "anyscale_cloud" "aks_example" {
   }
 }
 
-# Empty Cloud (Split Deployment Pattern)
+# Empty Cloud (Multi-Resource Cloud Pattern)
 resource "anyscale_cloud" "empty" {
   name           = "my-empty-cloud"
   cloud_provider = "AWS"

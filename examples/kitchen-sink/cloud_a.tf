@@ -1,6 +1,6 @@
-# Cloud A: BYOC/split pattern, hosting TWO cloud resources on the shared VPC -- a VM leg and an EKS
+# Cloud A: BYOC/multi-resource cloud pattern, hosting TWO cloud resources on the shared VPC -- a VM leg and an EKS
 # (K8S) leg. This is what actually satisfies "mix a VM cloud and a K8s cloud, same provider is fine."
-# Only a BYOC/split cloud accepts a second anyscale_cloud_resource at all; an Anyscale-managed
+# Only a BYOC/multi-resource cloud accepts a second anyscale_cloud_resource at all; an Anyscale-managed
 # all-in-one cloud rejects one with a 400. See docs/guides/cloud-resources.md's "Multiple resource
 # deployments on one cloud" section for the cardinality rules this file follows.
 
@@ -9,7 +9,7 @@ resource "anyscale_cloud" "a" {
   cloud_provider = "AWS"
   region         = var.aws_region
 
-  # compute_stack intentionally OMITTED: an empty/split cloud derives its compute stack from
+  # compute_stack intentionally OMITTED: an empty/multi-resource cloud derives its compute stack from
   # whichever resource(s) end up attached to it. Setting it explicitly here would produce a plan
   # inconsistency the moment a_vm/a_eks below report their own (different) values back.
 }

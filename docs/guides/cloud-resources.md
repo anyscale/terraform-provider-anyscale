@@ -33,7 +33,7 @@ doesn't already start with `abfss://` fails at plan time.
 
 Kubernetes (`compute_stack = "K8S"`) is supported for AWS, GCP, and Azure, via either the
 **all-in-one pattern** (`anyscale_cloud` with an embedded `kubernetes_config` block) or the
-**split pattern** (an empty `anyscale_cloud` plus a separate `anyscale_cloud_resource` with
+**multi-resource cloud pattern** (an empty `anyscale_cloud` plus a separate `anyscale_cloud_resource` with
 `compute_stack = "K8S"`). Previously, a K8S-only configuration was misclassified as an empty cloud
 and silently never created any deployment at all; that's fixed, and the provider now correctly
 creates and round-trips a K8S cloud (no more `compute_stack` flipping from `"K8S"` to `"VM"` on the
@@ -50,12 +50,12 @@ subscription in this provider's test environment, so unlike EKS/GKE, AKS has no 
 acceptance coverage at all yet. Validate the AKS example against your own Azure subscription
 before relying on it.
 
-One thing to get right in a split deployment regardless: on the parent `anyscale_cloud`, **omit
+One thing to get right in a multi-resource cloud deployment regardless: on the parent `anyscale_cloud`, **omit
 `compute_stack` entirely** — an empty cloud derives its compute stack from whichever resource ends up
 attached to it, and setting `compute_stack` explicitly on the parent produces an inconsistency. Set
 `compute_stack` on the `anyscale_cloud_resource` only.
 
-**Known limitation (AWS split pattern only):** replacing an AWS K8S `anyscale_cloud_resource` — a
+**Known limitation (AWS multi-resource cloud pattern only):** replacing an AWS K8S `anyscale_cloud_resource` — a
 destroy-then-recreate triggered by changing any `RequiresReplace` attribute — can hit a backend `500`
 on the re-attach step. Initial creation is unaffected, and GCP is unaffected either way; this is a
 backend issue under investigation, not something this provider can currently retry around.
@@ -236,10 +236,10 @@ A few more things worth knowing:
   default (`"anyscale"`); `ingress_host`, `cluster_name`, `context`, and `kubeconfig_path` come back
   null regardless of what your configuration says. They have no effect either way, so this doesn't
   produce a plan diff on those specific fields — just don't expect them to round-trip.
-- Importing an `anyscale_cloud` that was originally created empty (the split pattern) but already has a
+- Importing an `anyscale_cloud` that was originally created empty (the multi-resource cloud pattern) but already has a
   resource attached looks, from the API, identical to one created all-in-one — both simply have a
   default resource present. Importing in that situation recovers the resource's required block(s) into
-  the *cloud's* own configuration, as if it were all-in-one. If you're recovering a split deployment,
+  the *cloud's* own configuration, as if it were all-in-one. If you're recovering a multi-resource cloud deployment,
   import the `anyscale_cloud_resource` itself as well to get resource-level configuration into the
   right place.
 
