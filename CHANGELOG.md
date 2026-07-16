@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-07-16
+
+### Added
+
+- resource/anyscale_cloud: Add `is_default` (Computed) reporting whether this cloud is the organization's default cloud.
+
+### Changed
+
+- resource/anyscale_cloud: Add a live `enable_system_cluster` example to the registry docs and the Cloud Resources guide, and simplify its schema description by removing the standalone drift-detection callout - it behaves like any other cloud-level setting (no behavior change, docs only).
+- resource/anyscale_cloud: Rename the "Split Deployment Pattern" naming used across the registry example, the Cloud Resources guide, and the `credentials` schema description to "Multi-Resource Cloud Pattern" for clarity (no behavior change, docs only).
+
 ## [0.11.0] - 2026-07-16
 
 ### Breaking Changes
@@ -607,7 +618,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.12.0
 [0.11.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.11.0
 [0.10.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.10.0
 [0.9.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.9.1
