@@ -946,12 +946,12 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// Initialize IsDefault to a known placeholder so the intermediate
 	// State.Set below (persisted before any interruptible step) never saves
 	// an unknown value - Terraform errors on that regardless of whether a
-	// later step succeeds. A freshly created cloud is never the org default
-	// (that's an existing, pre-designated cloud), so false is the correct
-	// value here, not just a placeholder - but readCloudState below still
-	// overwrites it from the real API response in both the empty-cloud and
-	// all-in-one paths, so this only matters if a later step fails and this
-	// partial state is what gets left behind.
+	// later step succeeds. false is just a safe placeholder here, not a
+	// claim about backend behavior (whether a fresh org auto-designates its
+	// first/only cloud as default is unverified) - readCloudState below
+	// always overwrites it from the real API response in both the
+	// empty-cloud and all-in-one paths, so this only matters if a later step
+	// fails and this partial state is what gets left behind.
 	if plan.IsDefault.IsUnknown() {
 		plan.IsDefault = types.BoolValue(false)
 	}
