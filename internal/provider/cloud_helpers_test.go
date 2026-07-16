@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -301,6 +302,17 @@ func testGCPConfigObj(projectID string) types.Object {
 	)
 }
 
+func testAzureConfigObj(tenantID string) types.Object {
+	return types.ObjectValueMust(
+		map[string]attr.Type{
+			"tenant_id": types.StringType,
+		},
+		map[string]attr.Value{
+			"tenant_id": types.StringValue(tenantID),
+		},
+	)
+}
+
 func testKubernetesConfigObj(operatorIdentity string) types.Object {
 	return types.ObjectValueMust(
 		map[string]attr.Type{
@@ -380,7 +392,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("AWS VM: aws_config required, populates AWSConfig", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-aws-vm"), nullObj(), nullObj(), nullObj(), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-aws-vm"), nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -395,7 +407,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("AWS VM: missing aws_config errors with canonical wording", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
 		wantErr := "aws_config is required when cloud_provider is AWS and compute_stack is VM"
 		if err == nil || err.Error() != wantErr {
 			t.Errorf("error = %v, want %q", err, wantErr)
@@ -404,7 +416,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("AWS VM: optional object_storage and file_storage populate with s3 prefix", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-1"), nullObj(), nullObj(), testObjectStorageObj("my-bucket"), testFileStorageObj("fs-1"))
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-1"), nullObj(), nullObj(), nullObj(), testObjectStorageObj("my-bucket"), testFileStorageObj("fs-1"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -418,7 +430,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("AWS VM: bucket_name already s3-prefixed is not double-prefixed", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-1"), nullObj(), nullObj(), testObjectStorageObj("s3://already-prefixed"), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", testAWSConfigObj("vpc-1"), nullObj(), nullObj(), nullObj(), testObjectStorageObj("s3://already-prefixed"), nullObj())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -429,7 +441,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("AWS K8S: kubernetes_config and object_storage required, aws_config optional", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), testKubernetesConfigObj("arn:aws:iam::123:role/operator"), testObjectStorageObj("k8s-bucket"), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), nullObj(), testKubernetesConfigObj("arn:aws:iam::123:role/operator"), testObjectStorageObj("k8s-bucket"), nullObj())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -446,7 +458,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("AWS K8S: missing kubernetes_config errors", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), nullObj(), testObjectStorageObj("b"), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), nullObj(), nullObj(), testObjectStorageObj("b"), nullObj())
 		wantErr := "kubernetes_config is required when cloud_provider is AWS and compute_stack is K8S"
 		if err == nil || err.Error() != wantErr {
 			t.Errorf("error = %v, want %q", err, wantErr)
@@ -455,7 +467,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("AWS K8S: missing object_storage errors", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), testKubernetesConfigObj("arn:aws:iam::123:role/operator"), nullObj(), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), nullObj(), testKubernetesConfigObj("arn:aws:iam::123:role/operator"), nullObj(), nullObj())
 		wantErr := "object_storage is required when cloud_provider is AWS and compute_stack is K8S"
 		if err == nil || err.Error() != wantErr {
 			t.Errorf("error = %v, want %q", err, wantErr)
@@ -464,7 +476,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("AWS K8S: empty anyscale_operator_iam_identity errors", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), testKubernetesConfigObjMissingIdentity(), testObjectStorageObj("b"), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "AWS", "K8S", nullObj(), nullObj(), nullObj(), testKubernetesConfigObjMissingIdentity(), testObjectStorageObj("b"), nullObj())
 		wantErr := "kubernetes_config.anyscale_operator_iam_identity is required for AWS K8S clouds"
 		if err == nil || err.Error() != wantErr {
 			t.Errorf("error = %v, want %q", err, wantErr)
@@ -473,7 +485,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("GCP VM: gcp_config required, populates GCPConfig with gs prefix", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "GCP", "VM", nullObj(), testGCPConfigObj("my-gcp-project"), nullObj(), testObjectStorageObj("gcp-bucket"), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "GCP", "VM", nullObj(), testGCPConfigObj("my-gcp-project"), nullObj(), nullObj(), testObjectStorageObj("gcp-bucket"), nullObj())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -487,7 +499,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("GCP VM: missing gcp_config errors with canonical wording", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "GCP", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "GCP", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
 		wantErr := "gcp_config is required when cloud_provider is GCP and compute_stack is VM"
 		if err == nil || err.Error() != wantErr {
 			t.Errorf("error = %v, want %q", err, wantErr)
@@ -496,7 +508,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("GCP K8S: kubernetes_config and object_storage required, gcp_config optional", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "GCP", "K8S", nullObj(), nullObj(), testKubernetesConfigObj("operator@my-project.iam.gserviceaccount.com"), testObjectStorageObj("k8s-gcp-bucket"), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "GCP", "K8S", nullObj(), nullObj(), nullObj(), testKubernetesConfigObj("operator@my-project.iam.gserviceaccount.com"), testObjectStorageObj("k8s-gcp-bucket"), nullObj())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -511,7 +523,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 	t.Run("lowercase and mixed-case provider still match (case-normalization)", func(t *testing.T) {
 		for _, p := range []string{"aws", "Aws", "AWS"} {
 			deployReq := &CloudDeploymentRequest{}
-			err := buildProviderConfig(ctx, deployReq, p, "VM", testAWSConfigObj("vpc-case"), nullObj(), nullObj(), nullObj(), nullObj())
+			err := buildProviderConfig(ctx, deployReq, p, "VM", testAWSConfigObj("vpc-case"), nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
 			if err != nil {
 				t.Errorf("provider %q: unexpected error: %v", p, err)
 			}
@@ -521,10 +533,69 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 		}
 	})
 
-	t.Run("AZURE returns the detailed not-supported error", func(t *testing.T) {
+	t.Run("AZURE VM errors - Anyscale does not support Azure VM clouds", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AZURE", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
-		wantErr := "azure clouds are not yet supported by this provider; azure_config cannot be applied"
+		err := buildProviderConfig(ctx, deployReq, "AZURE", "VM", nullObj(), nullObj(), testAzureConfigObj("11111111-1111-1111-1111-111111111111"), nullObj(), nullObj(), nullObj())
+		wantErr := "azure clouds only support compute_stack = \"K8S\" - Anyscale does not support Azure VM clouds"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("AZURE K8S: kubernetes_config and object_storage required, azure_config optional, no bucket scheme prepended", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		bucket := "abfss://container@account.dfs.core.windows.net"
+		err := buildProviderConfig(ctx, deployReq, "AZURE", "K8S", nullObj(), nullObj(), testAzureConfigObj("11111111-1111-1111-1111-111111111111"), testKubernetesConfigObj("00000000-0000-0000-0000-000000000000"), testObjectStorageObj(bucket), nullObj())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deployReq.KubernetesConfig == nil || deployReq.KubernetesConfig.AnyscaleOperatorIAMIdentity != "00000000-0000-0000-0000-000000000000" {
+			t.Errorf("KubernetesConfig not populated correctly, got %+v", deployReq.KubernetesConfig)
+		}
+		if deployReq.ObjectStorage == nil || deployReq.ObjectStorage.BucketName != bucket {
+			t.Errorf("ObjectStorage bucket was mangled - Azure must be passed through verbatim, got %+v", deployReq.ObjectStorage)
+		}
+		if deployReq.AzureConfig == nil || deployReq.AzureConfig.TenantID != "11111111-1111-1111-1111-111111111111" {
+			t.Errorf("AzureConfig not populated correctly, got %+v", deployReq.AzureConfig)
+		}
+		if deployReq.AWSConfig != nil || deployReq.GCPConfig != nil {
+			t.Errorf("only Azure fields should be populated, got AWSConfig=%+v GCPConfig=%+v", deployReq.AWSConfig, deployReq.GCPConfig)
+		}
+	})
+
+	t.Run("AZURE K8S: azure_config is optional, omitting it leaves AzureConfig nil", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AZURE", "K8S", nullObj(), nullObj(), nullObj(), testKubernetesConfigObj("00000000-0000-0000-0000-000000000000"), testObjectStorageObj("abfss://container@account.dfs.core.windows.net"), nullObj())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deployReq.AzureConfig != nil {
+			t.Errorf("azure_config was not provided, AzureConfig should stay nil, got %+v", deployReq.AzureConfig)
+		}
+	})
+
+	t.Run("AZURE K8S: missing kubernetes_config errors", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AZURE", "K8S", nullObj(), nullObj(), nullObj(), nullObj(), testObjectStorageObj("abfss://container@account.dfs.core.windows.net"), nullObj())
+		wantErr := "kubernetes_config is required when cloud_provider is AZURE"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("AZURE K8S: missing object_storage errors", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AZURE", "K8S", nullObj(), nullObj(), nullObj(), testKubernetesConfigObj("00000000-0000-0000-0000-000000000000"), nullObj(), nullObj())
+		wantErr := "object_storage is required when cloud_provider is AZURE"
+		if err == nil || err.Error() != wantErr {
+			t.Errorf("error = %v, want %q", err, wantErr)
+		}
+	})
+
+	t.Run("AZURE K8S: empty anyscale_operator_iam_identity errors", func(t *testing.T) {
+		deployReq := &CloudDeploymentRequest{}
+		err := buildProviderConfig(ctx, deployReq, "AZURE", "K8S", nullObj(), nullObj(), nullObj(), testKubernetesConfigObjMissingIdentity(), testObjectStorageObj("abfss://container@account.dfs.core.windows.net"), nullObj())
+		wantErr := "kubernetes_config.anyscale_operator_iam_identity is required for AZURE K8S clouds"
 		if err == nil || err.Error() != wantErr {
 			t.Errorf("error = %v, want %q", err, wantErr)
 		}
@@ -532,7 +603,7 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 
 	t.Run("GENERIC returns the not-supported error", func(t *testing.T) {
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "GENERIC", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "GENERIC", "VM", nullObj(), nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
 		wantErr := "generic clouds are not yet supported by this provider"
 		if err == nil || err.Error() != wantErr {
 			t.Errorf("error = %v, want %q", err, wantErr)
@@ -547,9 +618,90 @@ func TestBuildProviderConfig_RequiredCombos(t *testing.T) {
 			map[string]attr.Value{"vpc_id": types.StringValue("vpc-1")},
 		)
 		deployReq := &CloudDeploymentRequest{}
-		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", malformed, nullObj(), nullObj(), nullObj(), nullObj())
+		err := buildProviderConfig(ctx, deployReq, "AWS", "VM", malformed, nullObj(), nullObj(), nullObj(), nullObj(), nullObj())
 		if err == nil || !strings.Contains(err.Error(), "failed to expand aws_config") {
 			t.Errorf("error = %v, want it wrapped with 'failed to expand aws_config'", err)
 		}
 	})
+}
+
+// TestBucketNameSemanticEqualPlanModifier is the regression proof for the
+// object_storage.bucket_name import round-trip bug found during the real GKE
+// acceptance run: a GCP cloud whose bucket was written bare ("my-bucket")
+// diverged from the API's canonical gs://-prefixed form the moment it was
+// imported, forcing a spurious RequiresReplace since bucket_name is
+// Optional (not Computed) and stripBucketPrefix never un-prefixes GCP.
+func TestBucketNameSemanticEqualPlanModifier(t *testing.T) {
+	ctx := context.Background()
+	m := bucketNameSemanticEqualPlanModifier{}
+
+	runModifier := func(stateValue, planValue types.String) types.String {
+		req := planmodifier.StringRequest{
+			StateValue: stateValue,
+			PlanValue:  planValue,
+		}
+		resp := &planmodifier.StringResponse{PlanValue: planValue}
+		m.PlanModifyString(ctx, req, resp)
+		return resp.PlanValue
+	}
+
+	t.Run("bare state, gs:// config - same GCP bucket - keeps state (no replace)", func(t *testing.T) {
+		got := runModifier(types.StringValue("my-bucket"), types.StringValue("gs://my-bucket"))
+		if !got.Equal(types.StringValue("my-bucket")) {
+			t.Errorf("PlanValue = %v, want unchanged state value %q", got, "my-bucket")
+		}
+	})
+
+	t.Run("gs:// state, bare config - same GCP bucket - keeps state (no replace)", func(t *testing.T) {
+		got := runModifier(types.StringValue("gs://my-bucket"), types.StringValue("my-bucket"))
+		if !got.Equal(types.StringValue("gs://my-bucket")) {
+			t.Errorf("PlanValue = %v, want unchanged state value %q", got, "gs://my-bucket")
+		}
+	})
+
+	t.Run("bare state, s3:// config - same AWS bucket - keeps state (no replace)", func(t *testing.T) {
+		got := runModifier(types.StringValue("my-bucket"), types.StringValue("s3://my-bucket"))
+		if !got.Equal(types.StringValue("my-bucket")) {
+			t.Errorf("PlanValue = %v, want unchanged state value %q", got, "my-bucket")
+		}
+	})
+
+	t.Run("genuinely different bucket names - does not mask a real change", func(t *testing.T) {
+		got := runModifier(types.StringValue("my-bucket"), types.StringValue("gs://a-totally-different-bucket"))
+		if !got.Equal(types.StringValue("gs://a-totally-different-bucket")) {
+			t.Errorf("PlanValue = %v, want the new planned value %q (a real change must still show)", got, "gs://a-totally-different-bucket")
+		}
+	})
+
+	t.Run("identical values - no-op, still equal", func(t *testing.T) {
+		got := runModifier(types.StringValue("gs://my-bucket"), types.StringValue("gs://my-bucket"))
+		if !got.Equal(types.StringValue("gs://my-bucket")) {
+			t.Errorf("PlanValue = %v, want %q", got, "gs://my-bucket")
+		}
+	})
+
+	t.Run("null/unknown state or plan - no-op, does not panic", func(t *testing.T) {
+		got := runModifier(types.StringNull(), types.StringValue("gs://my-bucket"))
+		if !got.Equal(types.StringValue("gs://my-bucket")) {
+			t.Errorf("PlanValue = %v, want the plan value unchanged when state is null", got)
+		}
+		got = runModifier(types.StringValue("my-bucket"), types.StringUnknown())
+		if !got.Equal(types.StringUnknown()) {
+			t.Errorf("PlanValue = %v, want unknown preserved", got)
+		}
+	})
+}
+
+func TestStripAnyBucketSchemePrefix(t *testing.T) {
+	cases := map[string]string{
+		"my-bucket":                        "my-bucket",
+		"gs://my-bucket":                   "my-bucket",
+		"s3://my-bucket":                   "my-bucket",
+		"abfss://c@a.dfs.core.windows.net": "abfss://c@a.dfs.core.windows.net", // Azure: no bare form, left untouched
+	}
+	for input, want := range cases {
+		if got := stripAnyBucketSchemePrefix(input); got != want {
+			t.Errorf("stripAnyBucketSchemePrefix(%q) = %q, want %q", input, got, want)
+		}
+	}
 }

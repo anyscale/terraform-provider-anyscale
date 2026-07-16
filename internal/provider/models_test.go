@@ -251,14 +251,11 @@ func TestGCPConfigJSON(t *testing.T) {
 	}
 }
 
-// TestAzureConfigJSON tests Azure config JSON marshaling
+// TestAzureConfigJSON tests Azure config JSON marshaling. tenant_id is the
+// only field the Anyscale API accepts here - see AzureConfig's doc comment.
 func TestAzureConfigJSON(t *testing.T) {
 	config := AzureConfig{
-		SubscriptionID:    "sub-123",
-		ResourceGroupName: "my-rg",
-		VNetName:          "my-vnet",
-		SubnetName:        "my-subnet",
-		ManagedIdentityID: "mi-123",
+		TenantID: "11111111-1111-1111-1111-111111111111",
 	}
 
 	data, err := json.Marshal(config)
@@ -266,16 +263,17 @@ func TestAzureConfigJSON(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
+	if !strings.Contains(string(data), `"tenant_id":"11111111-1111-1111-1111-111111111111"`) {
+		t.Errorf("marshaled JSON = %s, want it to contain tenant_id", data)
+	}
+
 	var decoded AzureConfig
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if decoded.SubscriptionID != config.SubscriptionID {
-		t.Errorf("SubscriptionID = %q, want %q", decoded.SubscriptionID, config.SubscriptionID)
-	}
-	if decoded.ResourceGroupName != config.ResourceGroupName {
-		t.Errorf("ResourceGroupName = %q, want %q", decoded.ResourceGroupName, config.ResourceGroupName)
+	if decoded.TenantID != config.TenantID {
+		t.Errorf("TenantID = %q, want %q", decoded.TenantID, config.TenantID)
 	}
 }
 

@@ -134,13 +134,19 @@ type GCPConfig struct {
 	MemorystoreEndpoint         string   `json:"memorystore_endpoint,omitempty"`
 }
 
-// AzureConfig represents Azure-specific cloud configuration
+// AzureConfig represents Azure-specific cloud configuration. tenant_id is the
+// ONLY field the Anyscale API accepts here (confirmed against
+// backend/server/api/base/models/cloud_deployment.py's AzureConfig model) -
+// Azure clouds are Kubernetes-only; there is no VM-shaped Azure config the
+// way AWSConfig/GCPConfig carry VPC/subnet/IAM details, because AKS setup
+// creates no VNet/subnet resources of its own and real auth is operator
+// workload-identity federation, not this field. A prior version of this
+// struct declared subscription_id/resource_group_name/vnet_name/subnet_name/
+// managed_identity_id, none of which exist in the real request/response
+// contract; every attempt to apply it hard-errored before ever reaching the
+// API, so removing them is not a functional break for any real user.
 type AzureConfig struct {
-	SubscriptionID    string `json:"subscription_id"`
-	ResourceGroupName string `json:"resource_group_name"`
-	VNetName          string `json:"vnet_name"`
-	SubnetName        string `json:"subnet_name"`
-	ManagedIdentityID string `json:"managed_identity_id"`
+	TenantID string `json:"tenant_id,omitempty"`
 }
 
 // KubernetesConfig represents Kubernetes-specific cloud configuration for API requests.

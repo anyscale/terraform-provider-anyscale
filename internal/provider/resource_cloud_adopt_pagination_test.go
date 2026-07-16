@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -253,16 +252,10 @@ func TestCreate_MultipleExistingCloudsProducesResourceLevelDiagnostic(t *testing
 
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 	plan := CloudResourceModel{
-		Name:      types.StringValue(name),
-		AWSConfig: types.ObjectNull(awsConfigAttrTypes()),
-		GCPConfig: types.ObjectNull(gcpConfigAttrTypes()),
-		AzureConfig: types.ObjectNull(map[string]attr.Type{
-			"subscription_id":     types.StringType,
-			"resource_group_name": types.StringType,
-			"vnet_name":           types.StringType,
-			"subnet_name":         types.StringType,
-			"managed_identity_id": types.StringType,
-		}),
+		Name:             types.StringValue(name),
+		AWSConfig:        types.ObjectNull(awsConfigAttrTypes()),
+		GCPConfig:        types.ObjectNull(gcpConfigAttrTypes()),
+		AzureConfig:      types.ObjectNull(azureConfigAttrTypes()),
 		KubernetesConfig: types.ObjectNull(kubernetesConfigAttrTypes()),
 		ObjectStorage:    types.ObjectNull(objectStorageAttrTypes()),
 		FileStorage:      types.ObjectNull(fileStorageAttrTypes()),
