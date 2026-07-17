@@ -1,8 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_cloud: `file_storage.mount_path` now produces a clear plan-time error when set on AWS or Kubernetes PVC/CSI storage, where the value was always silently ignored; it remains accepted on GCP and Azure/Generic.
-```
-```
-release-note:fixed
-resource/anyscale_cloud_resource: `file_storage.mount_path` now produces a clear plan-time error when set on AWS or Kubernetes PVC/CSI storage, where the value was always silently ignored; it remains accepted on GCP and Azure/Generic.
-```
