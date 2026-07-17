@@ -95,7 +95,7 @@ make destroy-gcp-gke-basic SUFFIX=dev1
 |--------|-------------|
 | `cloud_id` | ID of the created Anyscale cloud |
 | `cloud_name` | Name of the created Anyscale cloud |
-| `cloud_deployment_id` | Pass this to the Anyscale Operator during installation |
+| `cloud_resource_id` | Pass this to the Anyscale Operator during installation |
 | `anyscale_operator_service_account_email` | Email of the GKE node service account bound to the in-cluster Anyscale Operator identity |
 
 ## See also
