@@ -43,6 +43,9 @@ coverage.html
 **/*.tfstate
 **/*.tfstate.*
 
+# Scratch prototyping scaffolds (throwaway, never meant to be committed)
+.native-b-scratch/
+
 # Sensitive variable files
 **/terraform.tfvars
 **/*.auto.tfvars
