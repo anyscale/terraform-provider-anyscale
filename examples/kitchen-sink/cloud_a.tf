@@ -51,7 +51,9 @@ resource "anyscale_cloud_resource" "a_eks" {
   compute_stack  = "K8S"
 
   kubernetes_config {
-    anyscale_operator_iam_identity = module.eks.eks_managed_node_groups["default"].iam_role_arn
+    # NOT the node group's own role (see anyscale_operator_iam.tf) -- that role can't be assumed by
+    # the Operator pod via EKS Pod Identity.
+    anyscale_operator_iam_identity = aws_iam_role.anyscale_operator.arn
     zones                          = module.anyscale_vpc.availability_zones
   }
 
