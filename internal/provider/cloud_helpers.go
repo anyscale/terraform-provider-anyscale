@@ -30,9 +30,11 @@ const kubernetesConfigInertFieldDeprecationMessage = "not sent to the Anyscale A
 // cloud_resource_id and no longer populates it. Both resources now have
 // their own populated cloud_resource_id, so this wording is safe to share
 // between them. The anyscale_cloud DATA SOURCE deliberately does NOT use
-// this constant: it has no cloud_resource_id attribute of its own today
-// (no data source does), so it carries its own, differently-worded
-// DeprecationMessage instead - see data_source_cloud.go.
+// this constant, even though it now has its own cloud_resource_id
+// attribute too (see data_source_cloud.go): the constant's wording ("use
+// this resource's own cloud_resource_id instead") is written for the two
+// RESOURCES, and a data source should not phrase itself as a resource. It
+// carries its own, separately-worded DeprecationMessage instead.
 const cloudDeploymentIDDeprecationMessage = "Deprecated by the Anyscale API; the backend no longer populates this field. Will be removed in a future major release - use this resource's own `cloud_resource_id` instead."
 
 // azureCloudNotSupportedMessage and genericCloudNotSupportedMessage are the
