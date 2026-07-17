@@ -53,9 +53,9 @@ func (p *AnyscaleProvider) Schema(ctx context.Context, req provider.SchemaReques
 				Description: "The Anyscale API URL. Can also be set via ANYSCALE_API_URL, ANYSCALE_API_HOST, or ANYSCALE_HOST environment variables (checked in that order). Defaults to https://console.anyscale.com",
 			},
 			"token": schema.StringAttribute{
-				Optional:    true,
-				Sensitive:   true,
-				Description: "The Anyscale API token. Can also be set via ANYSCALE_CLI_TOKEN environment variable or read from ~/.anyscale/credentials.json.",
+				Optional:            true,
+				Sensitive:           true,
+				MarkdownDescription: "The Anyscale API token. Can also be set via ANYSCALE_CLI_TOKEN environment variable or read from ~/.anyscale/credentials.json. See the [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate one.",
 			},
 		},
 	}

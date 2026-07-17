@@ -104,7 +104,8 @@ validated, not arbitrary keys.
 
 Import takes the version-specific `config_id` (for example `cpt_abc123`), not `name` — find it via the
 `anyscale_compute_config` data source's `config_id` attribute, or `anyscale compute-config get <name>`
-in the CLI. Importing a `config_id` that's already archived fails immediately with a clear error,
+in the CLI (see the [Anyscale compute-config CLI documentation](https://docs.anyscale.com/reference/cli/compute-config#compute-config-cli)).
+Importing a `config_id` that's already archived fails immediately with a clear error,
 rather than importing a resource that the next refresh would just remove again.
 
 After import, `id`, `name`, `version`, `instance_type`, and a few other node fields are recovered

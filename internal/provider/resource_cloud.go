@@ -255,7 +255,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 		Blocks: map[string]schema.Block{
 			// ─── AWS Configuration ────────────────────────────────
 			"aws_config": schema.SingleNestedBlock{
-				MarkdownDescription: "AWS-specific configuration. Required when cloud_provider is AWS and using all-in-one pattern.",
+				MarkdownDescription: "AWS-specific configuration. Required when cloud_provider is AWS and using all-in-one pattern. See the [Anyscale AWS cloud configuration documentation](https://docs.anyscale.com/clouds/aws/configure) for the full set of resources Anyscale expects (VPC, subnets, IAM roles, security groups) and how they map to the fields below.",
 				Attributes: map[string]schema.Attribute{
 					"vpc_id": schema.StringAttribute{
 						Optional:            true,
@@ -290,14 +290,14 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"controlplane_iam_role_arn": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "IAM role ARN for Anyscale control plane (cross-account access).",
+						MarkdownDescription: "IAM role ARN for Anyscale control plane (cross-account access). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
 					"dataplane_iam_role_arn": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "IAM role ARN for Anyscale data plane (cluster nodes).",
+						MarkdownDescription: "IAM role ARN for Anyscale data plane (cluster nodes). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -318,21 +318,21 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"memorydb_cluster_name": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "MemoryDB cluster name for Ray GCS fault tolerance.",
+						MarkdownDescription: "MemoryDB cluster name for Ray GCS fault tolerance. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
 					"memorydb_cluster_arn": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "MemoryDB cluster ARN.",
+						MarkdownDescription: "MemoryDB cluster ARN. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
 					"memorydb_cluster_endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "MemoryDB cluster endpoint address. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.",
+						MarkdownDescription: "MemoryDB cluster endpoint address. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements, including the expected endpoint format.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -342,7 +342,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			// ─── GCP Configuration ────────────────────────────────
 			"gcp_config": schema.SingleNestedBlock{
-				MarkdownDescription: "GCP-specific configuration. Required when cloud_provider is GCP and using all-in-one pattern.",
+				MarkdownDescription: "GCP-specific configuration. Required when cloud_provider is GCP and using all-in-one pattern. See the [Anyscale GCP cloud configuration documentation](https://docs.anyscale.com/clouds/gcp/configure) for the full set of resources Anyscale expects (VPC, subnets, service accounts, firewall policies) and how they map to the fields below.",
 				Attributes: map[string]schema.Attribute{
 					"project_id": schema.StringAttribute{
 						Optional:            true,
@@ -382,14 +382,14 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"controlplane_service_account_email": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Service account email for Anyscale control plane (cross-project access).",
+						MarkdownDescription: "Service account email for Anyscale control plane (cross-project access). See the [Anyscale Google Cloud IAM documentation](https://docs.anyscale.com/iam/google-cloud) for the roles this service account needs.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
 					"dataplane_service_account_email": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Service account email for Ray cluster nodes (data plane).",
+						MarkdownDescription: "Service account email for Ray cluster nodes (data plane). See the [Anyscale Google Cloud IAM documentation](https://docs.anyscale.com/iam/google-cloud) for the roles this service account needs.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -435,11 +435,11 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			// ─── Kubernetes Configuration ─────────────────────────
 			"kubernetes_config": schema.SingleNestedBlock{
-				MarkdownDescription: "Kubernetes-specific configuration. Required when compute_stack is K8S.",
+				MarkdownDescription: "Kubernetes-specific configuration. Required when compute_stack is K8S. See the [Anyscale Kubernetes documentation](https://docs.anyscale.com/clouds/kubernetes) for cluster requirements and how these fields map to the Anyscale Operator installation.",
 				Attributes: map[string]schema.Attribute{
 					"anyscale_operator_iam_identity": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).",
+						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)). For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -512,7 +512,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			// ─── Object Storage ───────────────────────────────────
 			"object_storage": schema.SingleNestedBlock{
-				MarkdownDescription: "Object storage configuration (S3, GCS, Azure Blob, or S3-compatible).",
+				MarkdownDescription: "Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP.",
 				Attributes: map[string]schema.Attribute{
 					"bucket_name": schema.StringAttribute{
 						Optional:            true,
@@ -541,7 +541,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			// ─── File Storage ─────────────────────────────────────
 			"file_storage": schema.SingleNestedBlock{
-				MarkdownDescription: "File storage configuration (EFS, Filestore, etc.).",
+				MarkdownDescription: "File storage configuration (EFS, Filestore, etc.). See the [Anyscale shared storage documentation](https://docs.anyscale.com/storage/shared) for how this is used across a cluster.",
 				Attributes: map[string]schema.Attribute{
 					"file_storage_id": schema.StringAttribute{
 						Optional:            true,

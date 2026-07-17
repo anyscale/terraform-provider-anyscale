@@ -86,7 +86,7 @@ func validateAzureK8SOnly(ctx context.Context, computeStack string, objectStorag
 		diags.AddAttributeError(
 			path.Root("object_storage").AtName("bucket_name"),
 			"Azure Object Storage Requires abfss:// URI",
-			fmt.Sprintf("azure object storage must be a full abfss:// URI (e.g. abfss://<container>@<account>.dfs.core.windows.net); got %q. Unlike AWS/GCP, this provider does not auto-prepend a scheme for Azure - pass the complete URI the same way you would to `anyscale cloud register --cloud-storage-bucket-name`.", bucket),
+			fmt.Sprintf("azure object storage must be a full abfss:// URI (e.g. abfss://<container>@<account>.dfs.core.windows.net); got %q. Unlike AWS/GCP, this provider does not auto-prepend a scheme for Azure - pass the complete URI the same way you would to `anyscale cloud register --cloud-storage-bucket-name`. See https://docs.anyscale.com/reference/cli/cloud#cloud-cli for details.", bucket),
 		)
 	}
 
