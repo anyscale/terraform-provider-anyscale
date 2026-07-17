@@ -24,13 +24,16 @@ import (
 // CLOUD-SYNC-DESIGN.md C5).
 const kubernetesConfigInertFieldDeprecationMessage = "not sent to the Anyscale API; has no effect. Will be removed in a future major release - remove from your configuration."
 
-// cloudDeploymentIDDeprecationMessage is shared by anyscale_cloud,
-// anyscale_cloud_resource, and the anyscale_cloud data source's
-// cloud_deployment_id attributes: the Anyscale API marks the underlying field
-// deprecated in favor of cloud_resource_id and no longer populates it. Named
-// explicitly rather than assuming a sibling cloud_resource_id attribute,
-// since only anyscale_cloud_resource actually has one.
-const cloudDeploymentIDDeprecationMessage = "Deprecated by the Anyscale API; the backend no longer populates this field. Will be removed in a future major release - use `anyscale_cloud_resource`'s `cloud_resource_id` instead."
+// cloudDeploymentIDDeprecationMessage is shared by the anyscale_cloud and
+// anyscale_cloud_resource RESOURCES' cloud_deployment_id attributes: the
+// Anyscale API marks the underlying field deprecated in favor of
+// cloud_resource_id and no longer populates it. Both resources now have
+// their own populated cloud_resource_id, so this wording is safe to share
+// between them. The anyscale_cloud DATA SOURCE deliberately does NOT use
+// this constant: it has no cloud_resource_id attribute of its own today
+// (no data source does), so it carries its own, differently-worded
+// DeprecationMessage instead - see data_source_cloud.go.
+const cloudDeploymentIDDeprecationMessage = "Deprecated by the Anyscale API; the backend no longer populates this field. Will be removed in a future major release - use this resource's own `cloud_resource_id` instead."
 
 // azureCloudNotSupportedMessage and genericCloudNotSupportedMessage are the
 // single source of truth for the AZURE/GENERIC rejection, shared between each

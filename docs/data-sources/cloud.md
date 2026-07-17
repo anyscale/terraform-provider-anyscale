@@ -71,7 +71,7 @@ output "cloud_external_id" {
 
 - `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
 - `availability_zones` (List of String) The availability zones considered for this cloud.
-- `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.
+- `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. Deprecated and always null: the Anyscale API no longer populates this field. Unlike the `anyscale_cloud` and `anyscale_cloud_resource` resources, this data source does not currently expose a populated `cloud_resource_id` equivalent - if you need the populated identifier (e.g. to pass to the Anyscale operator during installation for a K8S cloud), read `cloud_resource_id` from whichever resource manages this cloud instead.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
 - `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale for this cloud's default resource - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud. Null for a genuinely empty cloud (no resources attached yet).
 - `compute_stack` (String) The compute stack (VM or K8S).

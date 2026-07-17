@@ -94,8 +94,8 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 	}
 	attributes["cloud_deployment_id"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.",
-		DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
+		MarkdownDescription: "The cloud deployment ID. Deprecated and always null: the Anyscale API no longer populates this field. Unlike the `anyscale_cloud` and `anyscale_cloud_resource` resources, this data source does not currently expose a populated `cloud_resource_id` equivalent - if you need the populated identifier (e.g. to pass to the Anyscale operator during installation for a K8S cloud), read `cloud_resource_id` from whichever resource manages this cloud instead.",
+		DeprecationMessage:  "Deprecated by the Anyscale API; the backend no longer populates this field. Will be removed in a future major release - this data source has no populated equivalent today; read `cloud_resource_id` from the managing resource instead.",
 	}
 	attributes["cloud_resource_id"] = schema.StringAttribute{
 		Computed:            true,
