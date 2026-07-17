@@ -224,7 +224,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			"enable_system_cluster": schema.BoolAttribute{
 				Optional: true,
-				MarkdownDescription: "Whether to enable the system cluster for this cloud (powers task/actor observability dashboards; see `anyscale cloud config update --enable-system-cluster`). " +
+				MarkdownDescription: "Whether to enable the system cluster for this cloud, which powers the task and actor observability dashboards. See the [Anyscale System Cluster documentation](https://docs.anyscale.com/clouds/system-cluster) for what it provisions and how it behaves (e.g. the default 8-hour auto-termination when nobody is viewing a dashboard, and that enabling it turns on both the task and actor dashboards together); the same setting is also reachable via `anyscale cloud config update --enable-system-cluster` or the console's Clouds > Settings > Observability page. Only the cloud's primary `anyscale_cloud_resource` ever gets a working system cluster - a secondary resource attached to the same cloud does not. " +
 					"Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions.",
 			},
 
@@ -239,7 +239,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			"cloud_deployment_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.",
+				MarkdownDescription: "The cloud deployment ID. Deprecated and always null: the Anyscale API no longer populates this field. On the multi-resource cloud pattern, use `anyscale_cloud_resource`'s `cloud_resource_id` instead - that field is populated, and is what you pass to the Anyscale operator during installation for a K8S cloud. The all-in-one pattern (this resource with an embedded `kubernetes_config`, no separate `anyscale_cloud_resource`) has no equivalent populated attribute today.",
 				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),

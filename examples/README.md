@@ -268,13 +268,13 @@ All examples require:
 
 | Example | Cloud Provider | Compute Stack | Pattern | Infrastructure Creation |
 |---------|---------------|---------------|---------|------------------------|
-| `aws-vm-basic` | AWS | VM | All-in-one | Uses existing |
+| `aws-vm-basic` | AWS | VM | All-in-one | Creates via modules |
 | `aws-vm` | AWS | VM | All-in-one | Creates via modules |
-| `aws-vm-basic-resource` | AWS | VM | Multi-Resource | Uses existing |
-| `gcp-vm-basic` | GCP | VM | All-in-one | Uses existing |
+| `aws-vm-basic-resource` | AWS | VM | Multi-Resource | Creates via modules |
+| `gcp-vm-basic` | GCP | VM | All-in-one | Creates via modules |
 | `gcp-vm` | GCP | VM | All-in-one | Creates via modules |
 | `aws-eks-basic` | AWS | K8S | All-in-one | Creates via modules |
-| `gcp-gke-basic` | GCP | K8S | Multi-Resource | Uses existing GKE |
+| `gcp-gke-basic` | GCP | K8S | Multi-Resource | Creates via modules |
 | `kitchen-sink` | AWS | Mixed (VM + K8S) | Mixed (Multi-Resource + All-in-one) | Creates via modules |
 
 ## Common Variables
