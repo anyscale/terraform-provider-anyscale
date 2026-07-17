@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-07-17
+
+### Changed
+
+- resource/anyscale_cloud: Fix a dead documentation link on `enable_system_cluster` and a self-contradictory `cloud_deployment_id` description; link AWS/GCP configuration, IAM, service account, storage, and Kubernetes schema descriptions to real Anyscale documentation instead of bare CLI references.
+- resource/anyscale_cloud_resource: Link AWS/GCP configuration, IAM, service account, storage, and Kubernetes schema descriptions to real Anyscale documentation instead of bare CLI references.
+- resource/anyscale_organization_collaborator: Link the directory-sync error guidance to the Anyscale policy CLI documentation.
+- provider: Link the `token` attribute and Authentication guide section to the Anyscale API keys documentation.
+- resource/anyscale_cloud: Add usage-contract facts to schema descriptions - `external_id`'s required format, MemoryDB/Memorystore TLS requirements and endpoint formats, `subnet_names`'s single-subnet requirement, `file_storage`'s fallback behavior when omitted, and `security_group_ids`'s minimum required rules - plus short notes on `is_private_cloud`'s networking implications and `region`'s China/GovCloud exclusion.
+- resource/anyscale_cloud_resource: Add the same usage-contract facts as `anyscale_cloud` to matching schema descriptions (`external_id` format, MemoryDB/Memorystore TLS requirements, `subnet_names` cardinality, `file_storage` fallback behavior, `security_group_ids` requirements, `is_private`/`region` notes).
+
+### Fixed
+
+- resource/anyscale_cloud: `file_storage.mount_path` now produces a clear plan-time error when set on AWS or Kubernetes PVC/CSI storage, where the value was always silently ignored; it remains accepted on GCP and Azure/Generic.
+- resource/anyscale_cloud_resource: `file_storage.mount_path` now produces a clear plan-time error when set on AWS or Kubernetes PVC/CSI storage, where the value was always silently ignored; it remains accepted on GCP and Azure/Generic.
+- resource/anyscale_cloud: `subnet_names` (GCP) and `subnet_ids`/`subnet_ids_to_az` (AWS) now produce a clear plan-time error when set on Kubernetes compute; previously these were silently mishandled - corrupting the cluster's networking (`subnet_names`, `subnet_ids_to_az`) or surfacing a confusing zone-count error (`subnet_ids`) - rather than being clearly rejected.
+- resource/anyscale_cloud_resource: `subnet_names` (GCP) and `subnet_ids`/`subnet_ids_to_az` (AWS) now produce a clear plan-time error when set on Kubernetes compute; previously these were silently mishandled - corrupting the cluster's networking (`subnet_names`, `subnet_ids_to_az`) or surfacing a confusing zone-count error (`subnet_ids`) - rather than being clearly rejected.
+
 ## [0.12.0] - 2026-07-16
 
 ### Added
@@ -618,7 +636,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.12.1
 [0.12.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.12.0
 [0.11.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.11.0
 [0.10.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.10.0
