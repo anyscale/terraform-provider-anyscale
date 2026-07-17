@@ -319,7 +319,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"subnet_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az.",
+						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.RequiresReplace(),
 						},
@@ -327,7 +327,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"subnet_ids_to_az": schema.MapAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids.",
+						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).",
 						PlanModifiers: []planmodifier.Map{
 							mapplanmodifier.RequiresReplace(),
 						},
@@ -427,7 +427,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"subnet_names": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "List of subnet names within the VPC for Anyscale resources. Anyscale currently requires exactly one subnet to launch instances, even though this is modeled as a list.",
+						MarkdownDescription: "List of subnet names within the VPC for Anyscale resources. VM compute only - GKE networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this field unconditionally after the Kubernetes zone list is written, discarding it). Genuinely supports more than one subnet on VM compute - Anyscale spreads instances across whichever are configured, this is not a modeling mismatch.",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.RequiresReplace(),
 						},
@@ -729,6 +729,24 @@ func (r *CloudResourceResource) ValidateConfig(ctx context.Context, req resource
 		resp.Diagnostics.Append(fsDiags...)
 		if !fsDiags.HasError() {
 			resp.Diagnostics.Append(validateMountPathSupported(provider, &fsModel)...)
+		}
+	}
+
+	if !data.GCPConfig.IsNull() && !data.GCPConfig.IsUnknown() {
+		var gcpModel GCPConfigModel
+		gcpDiags := data.GCPConfig.As(ctx, &gcpModel, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(gcpDiags...)
+		if !gcpDiags.HasError() {
+			resp.Diagnostics.Append(validateSubnetNamesSupported(data.ComputeStack.ValueString(), &gcpModel)...)
+		}
+	}
+
+	if !data.AWSConfig.IsNull() && !data.AWSConfig.IsUnknown() {
+		var awsModel AWSConfigModel
+		awsDiags := data.AWSConfig.As(ctx, &awsModel, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(awsDiags...)
+		if !awsDiags.HasError() {
+			resp.Diagnostics.Append(validateSubnetIDsSupported(data.ComputeStack.ValueString(), &awsModel)...)
 		}
 	}
 }

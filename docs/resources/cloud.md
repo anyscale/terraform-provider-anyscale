@@ -253,8 +253,8 @@ Optional:
 - `memorydb_cluster_endpoint` (String) MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS - use a `rediss://` prefix when connecting. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.
 - `memorydb_cluster_name` (String) MemoryDB cluster name for Ray GCS fault tolerance. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.
 - `security_group_ids` (List of String) List of security group IDs for Anyscale resources. Missing the required rules causes the cluster to fail silently rather than erroring at plan or apply time - Anyscale needs at minimum an inbound rule for port 443 and a self-referencing rule allowing all traffic.
-- `subnet_ids` (List of String) List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az.
-- `subnet_ids_to_az` (Map of String) Map of subnet ID to availability zone (e.g., {"subnet-123": "us-east-2a"}). Preferred over subnet_ids.
+- `subnet_ids` (List of String) List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.
+- `subnet_ids_to_az` (Map of String) Map of subnet ID to availability zone (e.g., {"subnet-123": "us-east-2a"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).
 - `vpc_id` (String) The VPC ID where Anyscale resources will be deployed.
 
 
@@ -300,7 +300,7 @@ Optional:
 - `memorystore_instance_name` (String) Memorystore instance name for Ray GCS fault tolerance.
 - `project_id` (String) The GCP project ID.
 - `provider_name` (String) Workload Identity Federation provider name (e.g., projects/123456789/locations/global/workloadIdentityPools/anyscale-pool/providers/anyscale-provider).
-- `subnet_names` (List of String) List of subnet names within the VPC for Anyscale resources. Anyscale currently requires exactly one subnet to launch instances, even though this is modeled as a list.
+- `subnet_names` (List of String) List of subnet names within the VPC for Anyscale resources. VM compute only - GKE networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this field unconditionally after the Kubernetes zone list is written, discarding it). Genuinely supports more than one subnet on VM compute - Anyscale spreads instances across whichever are configured, this is not a modeling mismatch.
 - `vpc_name` (String) The VPC network name.
 
 

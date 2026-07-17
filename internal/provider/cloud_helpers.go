@@ -132,6 +132,100 @@ func validateMountPathSupported(provider string, fileStorage *FileStorageModel) 
 	return diags
 }
 
+// rejectFieldOnK8S is the shared mechanics behind
+// validateSubnetNamesSupported (GCP) and validateSubnetIDsSupported (AWS):
+// both provider branches share the same underlying bug (a subnet-list
+// conversion block gated only on the field being non-empty, not on
+// compute_stack, that reassigns the same NetworkInfo the Kubernetes branch
+// already wrote from kubernetes_config.zones - confirmed independently for
+// both providers, cloud_deployment_model.go:44 then :162 for AWS or :215 for
+// GCP). Deliberately takes the full title/message rather than assembling one
+// from a field name: AWS's actual behavior is NOT symmetric with GCP (see
+// validateSubnetIDsSupported), so a shared templated message would either
+// overclaim or underclaim depending on which AWS attribute was set - only
+// the "is this set, and is compute_stack K8S" condition and the
+// AddAttributeError mechanics are genuinely shared.
+func rejectFieldOnK8S(computeStack string, isFieldSet bool, attrPath path.Path, title, message string) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if !isFieldSet || computeStack != "K8S" {
+		return diags
+	}
+	diags.AddAttributeError(attrPath, title, message)
+	return diags
+}
+
+// validateSubnetNamesSupported rejects gcp_config.subnet_names when
+// compute_stack is K8S. subnet_names is a VM-compute concept - the backend's
+// GCP-provider conversion branch that applies it is gated only on the field
+// being non-empty, not on compute_stack, so it runs unconditionally after the
+// K8S branch already wrote NetworkInfo from kubernetes_config.zones in the
+// same function. This is a confirmed, real overwrite (traced precisely, not
+// inferred, independently re-verified by architect): the K8S-derived zone
+// list is discarded and replaced with every zone in the region, each
+// carrying the configured subnet id even though GKE never claimed those
+// extra zones or that subnet - a genuine corruption of the cloud's
+// registered networking, not a benign no-op. GKE networking comes entirely
+// from kubernetes_config.zones; subnet_names has no role there. GCP VM
+// clouds are unaffected and genuinely support multiple subnets - see
+// subnet-names-gcp-supports-multiple-no-cardinality-validator for why a
+// cardinality check on VM would be wrong.
+func validateSubnetNamesSupported(computeStack string, gcpConfig *GCPConfigModel) diag.Diagnostics {
+	if gcpConfig == nil {
+		return nil
+	}
+
+	subnetNamesSet := !gcpConfig.SubnetNames.IsNull() && !gcpConfig.SubnetNames.IsUnknown() && len(gcpConfig.SubnetNames.Elements()) > 0
+	return rejectFieldOnK8S(computeStack, subnetNamesSet,
+		path.Root("gcp_config").AtName("subnet_names"),
+		"subnet_names Not Supported On Kubernetes Compute",
+		"subnet_names is a VM-compute concept - GKE networking comes entirely from kubernetes_config.zones. Setting subnet_names on a Kubernetes cloud does not just have no effect, it silently corrupts the registered networking: the backend discards the real zones and replaces them with every zone in the region, each carrying this subnet id (confirmed by tracing the actual conversion code, which applies subnet_names unconditionally after the Kubernetes zone list is written). Remove subnet_names for Kubernetes compute; it has no role there.",
+	)
+}
+
+// validateSubnetIDsSupported rejects aws_config.subnet_ids and
+// subnet_ids_to_az when compute_stack is K8S. Unlike the GCP case, this is
+// NOT symmetric - traced precisely rather than assumed from the GCP shape.
+// The AWS-provider conversion block shares the identical unguarded-clobber
+// mechanism (same function, same NetworkInfo field, no compute_stack check),
+// but only reaches it if a pre-existing, unrelated length guard passes
+// (len(SubnetIds) == len(Zones)), and whether that guard passes depends on
+// which of the two Terraform attributes was used, not on compute_stack:
+//   - subnet_ids_to_az (map form) builds SubnetIDs and Zones together in
+//     this provider's own expand code, always equal length, so it passes the
+//     guard and reaches the real clobber - same corruption as GCP.
+//   - subnet_ids (plain list form) never gets a matching Zones value from
+//     this provider's expand code (or from the CLI's register command, or
+//     from the backend's own VM-only auto-derivation), so it trips the
+//     length guard first and produces a confusing, unrelated backend error
+//     ("subnet IDs do not match zones") instead of ever reaching the write.
+//
+// Rejecting both anyway, not just the one that reaches the Go-level clobber:
+// the user-facing mistake (AWS subnet config on a stack that does not use
+// it) is identical either way, and the plain-list form falling through to a
+// different confusing error today is an accident of this provider's own
+// expand code, not a designed safeguard worth preserving.
+func validateSubnetIDsSupported(computeStack string, awsConfig *AWSConfigModel) diag.Diagnostics {
+	if awsConfig == nil {
+		return nil
+	}
+
+	subnetIDsSet := !awsConfig.SubnetIDs.IsNull() && !awsConfig.SubnetIDs.IsUnknown() && len(awsConfig.SubnetIDs.Elements()) > 0
+	subnetIDsToAZSet := !awsConfig.SubnetIDsToAZ.IsNull() && !awsConfig.SubnetIDsToAZ.IsUnknown() && len(awsConfig.SubnetIDsToAZ.Elements()) > 0
+	if !subnetIDsSet && !subnetIDsToAZSet {
+		return nil
+	}
+
+	attr := "subnet_ids"
+	if subnetIDsToAZSet {
+		attr = "subnet_ids_to_az"
+	}
+	return rejectFieldOnK8S(computeStack, true,
+		path.Root("aws_config").AtName(attr),
+		fmt.Sprintf("%s Not Supported On Kubernetes Compute", attr),
+		fmt.Sprintf("%s is a VM-compute concept - EKS networking comes entirely from kubernetes_config.zones. Setting it on a Kubernetes cloud does not do what you expect: depending on which subnet attribute is used it either silently corrupts the registered networking (subnet_ids_to_az) or triggers an unrelated backend error about subnet and zone counts not matching (subnet_ids) - confirmed by tracing the actual conversion code either way. Remove %s for Kubernetes compute; it has no role there.", attr, attr),
+	)
+}
+
 // ResolveCloudNameToID converts a cloud name to a cloud ID by querying the Anyscale API.
 // If multiple clouds have the same name, it returns the most recently created one.
 //

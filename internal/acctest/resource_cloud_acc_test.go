@@ -532,6 +532,135 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
+// TestAccCloudResource_SubnetNamesK8SRejected pins the plan-time rejection of
+// gcp_config.subnet_names when compute_stack is K8S: the backend's
+// conversion code applies subnet_names unconditionally after the Kubernetes
+// zone list is written to the same NetworkInfo field, genuinely corrupting
+// it (confirmed by tracing the real code, independently re-verified by
+// architect), not just leaving it a no-op. Plan-time only, no real infra
+// needed.
+func TestAccCloudResource_SubnetNamesK8SRejected(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-subnetnames-k8s")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceSubnetNamesK8SConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)subnet_names\s+Not\s+Supported\s+On\s+Kubernetes\s+Compute`),
+			},
+		},
+	})
+}
+
+// TestAccCloudResource_SubnetNamesVMMultipleAllowed is the negative
+// counterpart: GCP VM compute with MORE THAN ONE subnet_name must still plan
+// clean - this is the multi-subnet case that
+// subnet-names-gcp-supports-multiple-no-cardinality-validator confirmed is a
+// real, intentional, tested backend feature, not something to reject. Runs
+// against a mock server (no real infra) since proving no misfire needs a
+// real Create through the framework's own validator dispatch, the same
+// reasoning as TestAccCloudResource_MountPathPVCDefaultNoMisfire.
+func TestAccCloudResource_SubnetNamesVMMultipleAllowed(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const cloudID = "cld_subnetnames_vm_multi_mock"
+	cloudJSON := fmt.Sprintf(`{
+		"id": %[1]q, "name": "subnetnames-vm-multi", "provider": "GCP", "region": "us-central1",
+		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
+	}`, cloudID)
+	resourcesJSON := `[{
+		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"compute_stack": "VM", "region": "us-central1"
+	}]`
+
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	config := testAccProviderBlock(server.URL) + `
+resource "anyscale_cloud" "test" {
+  name           = "subnetnames-vm-multi"
+  cloud_provider = "GCP"
+  compute_stack  = "VM"
+  region         = "us-central1"
+
+  gcp_config {
+    project_id    = "my-gcp-project"
+    vpc_name      = "anyscale-vpc"
+    subnet_names  = ["anyscale-subnet-1", "anyscale-subnet-2"]
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "gcp_config.subnet_names.#", "2"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "gcp_config.subnet_names.0", "anyscale-subnet-1"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "gcp_config.subnet_names.1", "anyscale-subnet-2"),
+				),
+				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
+// TestAccCloudResource_SubnetIDsK8SRejected pins the plan-time rejection of
+// aws_config.subnet_ids when compute_stack is K8S, the plain-list form. Not
+// symmetric with the GCP case at the backend level (this form trips a
+// pre-existing length guard rather than reaching the actual clobber - see
+// validateSubnetIDsSupported), but the ValidateConfig check pre-empts both
+// AWS forms with the same clear plan-time error rather than letting either
+// fall through to a different backend symptom. Plan-time only, no real
+// infra needed.
+func TestAccCloudResource_SubnetIDsK8SRejected(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-subnetids-k8s")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceSubnetIDsK8SConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)subnet_ids\s+Not\s+Supported\s+On\s+Kubernetes\s+Compute`),
+			},
+		},
+	})
+}
+
+// TestAccCloudResource_SubnetIDsToAZK8SRejected pins the plan-time rejection
+// of aws_config.subnet_ids_to_az when compute_stack is K8S, the map form -
+// the one that actually reaches the Go-level clobber (unlike subnet_ids,
+// see validateSubnetIDsSupported). Separate test from the plain-list form
+// since they are genuinely different attributes with different backend
+// failure modes if not caught here; both must be independently pinned.
+// Plan-time only, no real infra needed.
+func TestAccCloudResource_SubnetIDsToAZK8SRejected(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-subnetidstoaz-k8s")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceSubnetIDsToAZK8SConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)subnet_ids_to_az\s+Not\s+Supported\s+On\s+Kubernetes\s+Compute`),
+			},
+		},
+	})
+}
+
 // Helper function to check if cloud exists in API and fetch its details
 func testAccCheckCloudExistsInAPI(resourceName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -877,6 +1006,58 @@ resource "anyscale_cloud" "test" {
   file_storage {
     mount_path              = "/mnt/cluster_storage"
     persistent_volume_claim = "test-pvc"
+  }
+}
+`, name)
+}
+
+// testAccCloudResourceSubnetNamesK8SConfig is deliberately minimal (just
+// name + compute_stack + gcp_config.subnet_names): the K8S check keys off
+// the explicit compute_stack attribute alone, independent of cloud_provider
+// or any other gcp_config field, matching how hasEmbeddedResourceConfig
+// already treats gcp_config presence as enough to avoid the
+// genuinely-empty-cloud early return.
+func testAccCloudResourceSubnetNamesK8SConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name          = "%s"
+  compute_stack = "K8S"
+
+  gcp_config {
+    subnet_names = ["anyscale-subnet-1"]
+  }
+}
+`, name)
+}
+
+// testAccCloudResourceSubnetIDsK8SConfig mirrors
+// testAccCloudResourceSubnetNamesK8SConfig's minimalism, plain-list form.
+func testAccCloudResourceSubnetIDsK8SConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name          = "%s"
+  compute_stack = "K8S"
+
+  aws_config {
+    subnet_ids = ["subnet-0abc123def456789"]
+  }
+}
+`, name)
+}
+
+// testAccCloudResourceSubnetIDsToAZK8SConfig mirrors
+// testAccCloudResourceSubnetNamesK8SConfig's minimalism, map form - the one
+// that actually reaches the Go-level clobber per validateSubnetIDsSupported.
+func testAccCloudResourceSubnetIDsToAZK8SConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name          = "%s"
+  compute_stack = "K8S"
+
+  aws_config {
+    subnet_ids_to_az = {
+      "subnet-0abc123def456789" = "us-east-2a"
+    }
   }
 }
 `, name)
