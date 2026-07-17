@@ -1,0 +1,16 @@
+```
+release-note:changed
+resource/anyscale_cloud: Fix a dead documentation link on `enable_system_cluster` and a self-contradictory `cloud_deployment_id` description; link AWS/GCP configuration, IAM, service account, storage, and Kubernetes schema descriptions to real Anyscale documentation instead of bare CLI references.
+```
+```
+release-note:changed
+resource/anyscale_cloud_resource: Link AWS/GCP configuration, IAM, service account, storage, and Kubernetes schema descriptions to real Anyscale documentation instead of bare CLI references.
+```
+```
+release-note:changed
+resource/anyscale_organization_collaborator: Link the directory-sync error guidance to the Anyscale policy CLI documentation.
+```
+```
+release-note:changed
+provider: Link the `token` attribute and Authentication guide section to the Anyscale API keys documentation.
+```
