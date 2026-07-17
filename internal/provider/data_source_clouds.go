@@ -100,7 +100,7 @@ func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 	}
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information.",
+		MarkdownDescription: "Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information. Per-cloud resource identifiers (`cloud_resource_id` and `cloud_deployment_id`) are deliberately omitted here to avoid an extra API call per cloud in the list - use the `anyscale_cloud` data source or the `anyscale_cloud`/`anyscale_cloud_resource` resources to look those up.",
 
 		Attributes: map[string]schema.Attribute{
 			"name_contains": schema.StringAttribute{
