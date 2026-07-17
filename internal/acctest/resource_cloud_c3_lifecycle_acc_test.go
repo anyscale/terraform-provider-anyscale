@@ -659,3 +659,182 @@ resource "anyscale_cloud" "test" {
 		},
 	})
 }
+
+// newC3MockCloudServerWithResourceID is a variant of newC3MockCloudServer
+// that ALSO returns cloud_resource_id from add_resource, using the same
+// literal id the caller has already baked into resourcesJSON's default
+// entry. Deliberately a SEPARATE function rather than adding this field to
+// the shared newC3MockCloudServer: that helper's add_resource response is a
+// fixed literal shared by every other test in this file, and none of their
+// resourcesJSON strings set cloud_resource_id - adding it only on the
+// add_resource side there would make Create() capture a real id while the
+// very next refresh (reading the unchanged resourcesJSON) finds none and
+// backfills "", flipping the value and tripping "Provider produced
+// inconsistent result after apply" on every other lifecycle test in this
+// file, not just adding a new safe field. Isolating the change here keeps
+// every other test's mock byte-for-byte unchanged.
+func newC3MockCloudServerWithResourceID(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloudResourceID string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/v2/clouds", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		switch r.Method {
+		case http.MethodPost:
+			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
+		case http.MethodGet:
+			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected method %s on /api/v2/clouds", r.Method)
+		}
+	})
+
+	mux.HandleFunc("/api/v2/clouds/"+cloudID, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected method %s on /api/v2/clouds/%s", r.Method, cloudID)
+		}
+	})
+
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/resources", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"results": %s, "metadata": {"total": 1, "next_paging_token": null}}`, resourcesJSON)
+	})
+
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": %q}}`, cloudResourceID)
+	})
+
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestAccCloudResource_CloudResourceIDPopulated_MockServer proves the new
+// cloud_resource_id attribute's full lifecycle (CLOUD-RESOURCE-ID-SPEC.md
+// T1/T2): populated and matching immediately after create; a second,
+// independent plan against already-applied state reproduces the identical
+// value (Create's add_resource capture and Read's resources-list backfill
+// genuinely agree, not just a one-time coincidence); and import populates it
+// from a cold start with no prior state to fall back on. Mutation-tested
+// (removed backfillComputedCloudFields' CloudResourceID assignment): the
+// create and second-plan steps both still passed - a normal refresh/plan
+// cycle has an already-populated prior state to preserve even when Read
+// stops re-deriving the value - and ONLY the import step failed, since
+// import starts from a genuinely blank model with nothing to fall back on.
+// That is real, not a gap: it is exactly backfillComputedCloudFields's own
+// path that import depends on (see resource_cloud.go's ImportState/readCloudState
+// trace), so import is where removing it is actually observable. The mock
+// deliberately returns the SAME literal id from both add_resource and the
+// resources-list default entry - see newC3MockCloudServerWithResourceID's
+// doc comment for why a mismatch there would falsely fail this test via an
+// inconsistent-result error rather than reflect a real regression.
+func TestAccCloudResource_CloudResourceIDPopulated_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const cloudID = "cld_c3_resourceid_mock"
+	const wantResourceID = "cldrsrc_mock_resourceid_9f3a"
+	cloudJSON := fmt.Sprintf(`{
+		"id": %[1]q, "name": "c3-resourceid-mock", "provider": "AWS", "region": "us-east-2",
+		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
+	}`, cloudID)
+	resourcesJSON := fmt.Sprintf(`[{
+		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"cloud_resource_id": %[1]q,
+		"compute_stack": "VM", "region": "us-east-2",
+		"aws_config": {
+			"vpc_id": "vpc-real123",
+			"subnet_ids": ["subnet-real1", "subnet-real2"],
+			"zones": ["us-east-2a", "us-east-2b"],
+			"security_group_ids": ["sg-real1"],
+			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/real-crossaccount",
+			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/real-cluster-node",
+			"external_id": "real-external-id"
+		},
+		"object_storage": {"bucket_name": "s3://real-bucket-name"}
+	}]`, wantResourceID)
+
+	server := newC3MockCloudServerWithResourceID(t, cloudID, cloudJSON, resourcesJSON, wantResourceID)
+	config := testAccProviderBlock(server.URL) + `
+resource "anyscale_cloud" "test" {
+  name           = "c3-resourceid-mock"
+  cloud_provider = "AWS"
+  compute_stack  = "VM"
+  region         = "us-east-2"
+
+  aws_config {
+    vpc_id       = "vpc-real123"
+    subnet_ids_to_az = {
+      "subnet-real1" = "us-east-2a"
+      "subnet-real2" = "us-east-2b"
+    }
+    security_group_ids        = ["sg-real1"]
+    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/real-crossaccount"
+    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/real-cluster-node"
+    external_id               = "real-external-id"
+  }
+
+  object_storage {
+    bucket_name = "real-bucket-name"
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_resource_id", wantResourceID),
+				),
+				ExpectNonEmptyPlan: false,
+			},
+			{
+				// A second, independent plan against the same config and
+				// already-applied state: proves a fresh Read()/backfill call
+				// reproduces the SAME value Create() captured, not a
+				// different or drifted one - i.e. Create's add_resource
+				// capture and Read's resources-list backfill genuinely
+				// agree, not just that the single post-apply consistency
+				// check above happened to pass. NOT a proof that
+				// UseStateForUnknown itself is present: mutation-tested this
+				// specifically (removed the plan modifier, left backfill
+				// intact) and this step still passed, because nothing else
+				// in the config changes here, so the framework has no
+				// "known after apply" pressure to relieve regardless of the
+				// modifier. UseStateForUnknown's actual failure mode (a
+				// spurious diff on an otherwise-idle plan) is a MUCH more
+				// commonly-relied-upon proof shape elsewhere in this file
+				// (e.g. is_default's own comment on why IT has no modifier);
+				// isolating it here would need a second, unrelated config
+				// change forcing a real plan alongside this attribute, which
+				// this test does not attempt - see the test's own doc
+				// comment.
+				Config:             config,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+			{
+				ResourceName:      "anyscale_cloud.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateVerifyIgnore: []string{
+					"credentials", "is_empty_cloud",
+					"object_storage", // optional for VM; not recovered at import by design (C3-v2)
+				},
+			},
+		},
+	})
+}

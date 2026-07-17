@@ -247,7 +247,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			// ─── Computed Fields ──────────────────────────────────
 			"cloud_resource_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale.",
+				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this resource deployment was registered - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). `anyscale_cloud`'s own `cloud_resource_id` attribute exposes the same populated identifier for the all-in-one pattern. Stable for the life of this resource deployment - it does not move out of band between applies.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},

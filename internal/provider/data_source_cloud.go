@@ -43,6 +43,7 @@ type CloudDataSourceModel struct {
 	State                 types.String `tfsdk:"state"`
 	IsEmptyCloud          types.Bool   `tfsdk:"is_empty_cloud"`
 	CloudDeploymentID     types.String `tfsdk:"cloud_deployment_id"`
+	CloudResourceID       types.String `tfsdk:"cloud_resource_id"`
 	AutoAddUser           types.Bool   `tfsdk:"auto_add_user"`
 	EnableLineageTracking types.Bool   `tfsdk:"enable_lineage_tracking"`
 	EnableLogIngestion    types.Bool   `tfsdk:"enable_log_ingestion"`
@@ -93,8 +94,12 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 	}
 	attributes["cloud_deployment_id"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation. The Anyscale API no longer populates this field; use `anyscale_cloud_resource`'s `cloud_resource_id` instead.",
-		DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
+		MarkdownDescription: "The cloud deployment ID. Deprecated and always null: the Anyscale API no longer populates this field. Use this data source's own `cloud_resource_id` attribute instead, which carries the populated identifier (e.g. to pass to the Anyscale operator during installation for a K8S cloud).",
+		DeprecationMessage:  "Deprecated by the Anyscale API; the backend no longer populates this field. Will be removed in a future major release - use this data source's own `cloud_resource_id` instead.",
+	}
+	attributes["cloud_resource_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique cloud resource ID assigned by Anyscale for this cloud's default resource - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud. Null for a genuinely empty cloud (no resources attached yet).",
 	}
 	// C7: same backend field as the plural's lineage_tracking_enabled/is_aggregated_logs_enabled,
 	// kept under these names since renaming a shipped attribute is breaking. See
@@ -292,9 +297,11 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	config.IsEmptyCloud = types.BoolValue(len(resources) == 0)
 
 	if defaultResource := findDefaultInCloudResources(resources); defaultResource != nil {
-		config.CloudDeploymentID = types.StringValue(defaultResource.CloudDeploymentID)
+		config.CloudDeploymentID = stringOrNull(defaultResource.CloudDeploymentID)
+		config.CloudResourceID = types.StringValue(defaultResource.CloudResourceID)
 	} else {
 		config.CloudDeploymentID = types.StringNull()
+		config.CloudResourceID = types.StringNull()
 	}
 
 	return nil

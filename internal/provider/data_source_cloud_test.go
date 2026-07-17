@@ -108,6 +108,9 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 		if !config.CloudDeploymentID.IsNull() {
 			t.Errorf("CloudDeploymentID = %v, want null (no default resource)", config.CloudDeploymentID)
 		}
+		if !config.CloudResourceID.IsNull() {
+			t.Errorf("CloudResourceID = %v, want null (no default resource)", config.CloudResourceID)
+		}
 	})
 }
 
@@ -162,6 +165,43 @@ func TestReadCloudIntoModel_C2ParityFieldsMapFromResponse(t *testing.T) {
 		if !got.ValueBool() {
 			t.Errorf("%s = false, want true (from response)", name)
 		}
+	}
+}
+
+// TestReadCloudIntoModel_CloudDeploymentIDEmptyStringBecomesNull is a
+// regression test for a null-vs-empty-string bug: a cloud's default resource
+// can have cloud_deployment_id left as "" by the backend (the deprecated
+// field is no longer populated), which must surface as Terraform null, not
+// "". cloud_resource_id on the same resource is real and must still come
+// through as its actual value.
+func TestReadCloudIntoModel_CloudDeploymentIDEmptyStringBecomesNull(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/api/v2/clouds/cloud-4":
+			_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-4", "name": "c", "provider": "AWS", "region": "us-east-1"}}`)
+		case "/api/v2/clouds/cloud-4/resources":
+			_, _ = fmt.Fprint(w, `{
+				"results": [{"name": "default-resource", "cloud_deployment_id": "", "cloud_resource_id": "cldrsrc_abc", "is_default": true}],
+				"metadata": {"total": 1, "next_paging_token": null}
+			}`)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	var config CloudDataSourceModel
+	if err := d.readCloudIntoModel(context.Background(), "cloud-4", &config); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !config.CloudDeploymentID.IsNull() {
+		t.Errorf("CloudDeploymentID = %v, want null (backend left cloud_deployment_id as an empty string)", config.CloudDeploymentID)
+	}
+	if config.CloudResourceID.IsNull() || config.CloudResourceID.ValueString() != "cldrsrc_abc" {
+		t.Errorf("CloudResourceID = %v, want \"cldrsrc_abc\"", config.CloudResourceID)
 	}
 }
 
