@@ -166,7 +166,7 @@ output "eks_operator_reported_at" {
 - `gcp_config` (Block, Optional) GCP-specific configuration. See the [Anyscale GCP cloud configuration documentation](https://docs.anyscale.com/clouds/gcp/configure) for the full set of resources Anyscale expects (VPC, subnets, service accounts, firewall policies) and how they map to the fields below. (see [below for nested schema](#nestedblock--gcp_config))
 - `is_private` (Boolean) Whether this is a private resource (private networking).
 - `kubernetes_config` (Block, Optional) Kubernetes-specific configuration. Required when compute_stack is K8S. See the [Anyscale Kubernetes documentation](https://docs.anyscale.com/clouds/kubernetes) for cluster requirements and how these fields map to the Anyscale Operator installation. (see [below for nested schema](#nestedblock--kubernetes_config))
-- `object_storage` (Block, Optional) Object storage configuration (S3, GCS). See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP. (see [below for nested schema](#nestedblock--object_storage))
+- `object_storage` (Block, Optional) Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP, [Azure Blob/ADLS](https://docs.anyscale.com/clouds/azure/storage) for Azure. (see [below for nested schema](#nestedblock--object_storage))
 - `region` (String) The region for this cloud resource. Inferred from the cloud/provider configuration when not specified.
 
 ### Read-Only

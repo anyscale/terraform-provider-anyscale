@@ -564,7 +564,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			// ─── Object Storage ───────────────────────────────────
 			"object_storage": schema.SingleNestedBlock{
-				MarkdownDescription: "Object storage configuration (S3, GCS). See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP.",
+				MarkdownDescription: "Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP, [Azure Blob/ADLS](https://docs.anyscale.com/clouds/azure/storage) for Azure.",
 				Attributes: map[string]schema.Attribute{
 					"bucket_name": schema.StringAttribute{
 						Optional:            true,
