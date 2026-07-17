@@ -140,7 +140,7 @@ before pointing this example at a bucket that will hold real data you care about
 |--------|-------------|
 | `cloud_id` | ID of the created Anyscale cloud |
 | `cloud_name` | Name of the created Anyscale cloud |
-| `cloud_deployment_id` | Pass this to the Anyscale Operator during installation |
+| `cloud_resource_id` | Pass this to the Anyscale Operator during installation |
 | `eks_cluster_name` | Name of the EKS cluster |
 
 ## Upgrading from the v20 module (existing forks/copies of this example)
