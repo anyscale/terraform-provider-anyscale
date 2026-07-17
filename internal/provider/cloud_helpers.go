@@ -93,6 +93,45 @@ func validateAzureK8SOnly(ctx context.Context, computeStack string, objectStorag
 	return diags
 }
 
+// validateMountPathSupported rejects file_storage.mount_path on AWS, where
+// the backend genuinely has no field to store it, confirmed by live-infra
+// readback (see MOUNT-PATH-BUG-TRACE.md): AWSNFSResources has only
+// efs_id/mount_target_ip, no path field - a live apply-then-readback showed
+// the value silently discarded. GCP Filestore (root_dir) and Azure/Generic
+// (their own NfsMountPath) both have a real field and are left alone here.
+//
+// The Kubernetes-native shared-storage mechanism
+// (persistent_volume_claim/csi_ephemeral_volume_driver - also a path-less
+// proto) is deliberately NOT checked here: the schema's own bidirectional
+// stringvalidator.ConflictsWith already rejects mount_path alongside those
+// two fields, so a second check here would just double the error for the
+// same problem. Keying the AWS check off which fields are actually set (not
+// off compute_stack) means a K8S cloud using mount_targets (not
+// persistent_volume_claim/csi_ephemeral_volume_driver) still resolves to the
+// provider's own real NFS field where one exists (GCP root_dir, Azure/Generic
+// NfsMountPath).
+func validateMountPathSupported(provider string, fileStorage *FileStorageModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if fileStorage == nil {
+		return diags
+	}
+
+	mountPathSet := !fileStorage.MountPath.IsNull() && !fileStorage.MountPath.IsUnknown() && fileStorage.MountPath.ValueString() != ""
+	if !mountPathSet {
+		return diags
+	}
+
+	if provider == "AWS" {
+		diags.AddAttributeError(
+			path.Root("file_storage").AtName("mount_path"),
+			"mount_path Not Supported On AWS",
+			"mount_path is a GCP Filestore / Azure NFS concept - AWS EFS-backed clouds have no backend field to store it, so the value is silently ignored rather than erroring (confirmed via a live create against the real API: the configured value never reaches the stored cloud). This is not a rejection of a valid setting, it is catching a config value that would otherwise silently do nothing. Remove mount_path; use mount_targets to specify EFS mount target addresses instead.",
+		)
+	}
+
+	return diags
+}
+
 // ResolveCloudNameToID converts a cloud name to a cloud ID by querying the Anyscale API.
 // If multiple clouds have the same name, it returns the most recently created one.
 //
