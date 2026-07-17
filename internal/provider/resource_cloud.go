@@ -75,6 +75,7 @@ type CloudResourceModel struct {
 	IsEmptyCloud      types.Bool   `tfsdk:"is_empty_cloud"`
 	CloudDeploymentID types.String `tfsdk:"cloud_deployment_id"`
 	IsDefault         types.Bool   `tfsdk:"is_default"`
+	CloudResourceID   types.String `tfsdk:"cloud_resource_id"`
 }
 
 // AzureConfigModel represents Azure-specific configuration. See AzureConfig
@@ -239,7 +240,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 			"cloud_deployment_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID. Deprecated and always null: the Anyscale API no longer populates this field. On the multi-resource cloud pattern, use `anyscale_cloud_resource`'s `cloud_resource_id` instead - that field is populated, and is what you pass to the Anyscale operator during installation for a K8S cloud. The all-in-one pattern (this resource with an embedded `kubernetes_config`, no separate `anyscale_cloud_resource`) has no equivalent populated attribute today.",
+				MarkdownDescription: "The cloud deployment ID. Deprecated and always null: the Anyscale API no longer populates this field. Use this resource's own `cloud_resource_id` instead - that field is populated, and is what you pass to the Anyscale operator during installation for a K8S cloud. The multi-resource cloud pattern's `anyscale_cloud_resource` exposes the same populated identifier as its own `cloud_resource_id`.",
 				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -249,6 +250,14 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"is_default": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether this cloud is the organization's default cloud. Read-only: which cloud is the org default is managed by Anyscale (e.g. via the console or CLI), not by this resource, and there is no API this resource can call to set or change it. Deliberately has no plan modifier, unlike `is_empty_cloud`/`cloud_deployment_id` above: the org default can move to a different cloud out of band at any time, so pinning this to the prior state (via `UseStateForUnknown`) would risk a `Provider produced inconsistent result after apply` error if the default changed between plan and apply. Terraform reflects whichever cloud is the current org default on every refresh, so drift here is expected and simply means the default moved - it is not a bug.",
+			},
+
+			"cloud_resource_id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this cloud's default resource was registered - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). Populated on both this all-in-one pattern and the multi-resource `anyscale_cloud_resource` pattern. Stable for the life of the cloud - unlike `is_default` above, it does not move out of band, so the provider pins it to the prior state between applies.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 
@@ -992,6 +1001,15 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		plan.CloudDeploymentID = types.StringNull()
 	}
 
+	// Initialize CloudResourceID to known null the same way: a genuinely empty
+	// cloud never calls addCloudResource below and has no resource yet, so
+	// null is correct there; for the all-in-one path, addCloudResource
+	// overwrites this with the real id once add_resource succeeds. Needed so
+	// the early State.Set immediately below never persists an unknown value.
+	if plan.CloudResourceID.IsUnknown() {
+		plan.CloudResourceID = types.StringNull()
+	}
+
 	// Initialize IsDefault to a known placeholder so the intermediate
 	// State.Set below (persisted before any interruptible step) never saves
 	// an unknown value - Terraform errors on that regardless of whether a
@@ -1617,13 +1635,17 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		return fmt.Errorf("failed to add cloud resource: %s - %s", deployResp.Status, string(deployBody))
 	}
 
-	// Parse response to get cloud_deployment_id
+	// Parse response to get cloud_deployment_id and cloud_resource_id
 	var deployResult CloudDeploymentResponse
 	if err := json.Unmarshal(deployBody, &deployResult); err != nil {
 		tflog.Warn(ctx, "Failed to parse add_resource response", map[string]any{"error": err.Error()})
-	} else if deployResult.Result.CloudDeploymentID != "" {
-		plan.CloudDeploymentID = types.StringValue(deployResult.Result.CloudDeploymentID)
-		tflog.Info(ctx, "Cloud deployment ID assigned", map[string]any{"deployment_id": deployResult.Result.CloudDeploymentID})
+	} else {
+		plan.CloudResourceID = types.StringValue(deployResult.Result.CloudResourceID)
+
+		if deployResult.Result.CloudDeploymentID != "" {
+			plan.CloudDeploymentID = types.StringValue(deployResult.Result.CloudDeploymentID)
+			tflog.Info(ctx, "Cloud deployment ID assigned", map[string]any{"deployment_id": deployResult.Result.CloudDeploymentID})
+		}
 	}
 
 	tflog.Info(ctx, "Cloud resource added successfully", map[string]any{"cloud_id": cloudID})
@@ -1747,11 +1769,11 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	return nil
 }
 
-// backfillComputedCloudFields fills in is_empty_cloud and cloud_deployment_id
-// from the cloud's resources. Both are Computed, so the provider may set them
-// at any time without risking a plan-consistency error - unlike the
-// non-Computed config blocks (see C3-v2; this function deliberately does not
-// touch them).
+// backfillComputedCloudFields fills in is_empty_cloud, cloud_deployment_id,
+// and cloud_resource_id from the cloud's resources. All three are Computed,
+// so the provider may set them at any time without risking a
+// plan-consistency error - unlike the non-Computed config blocks (see
+// C3-v2; this function deliberately does not touch them).
 //
 // is_empty_cloud is sticky: it's derived from "zero resources attached" only
 // while still null/unknown (a fresh import never ran Create, so it starts
@@ -1772,4 +1794,9 @@ func (r *CloudResource) backfillComputedCloudFields(state *CloudResourceModel, r
 	if state.CloudDeploymentID.IsNull() && defaultResource.CloudDeploymentID != "" {
 		state.CloudDeploymentID = types.StringValue(defaultResource.CloudDeploymentID)
 	}
+
+	// cloud_resource_id is stable and confirmed non-empty on any real default
+	// resource (see the schema description) - set unconditionally, same as
+	// resource_cloud_resource.go's own Read path, no IsNull/empty guard needed.
+	state.CloudResourceID = types.StringValue(defaultResource.CloudResourceID)
 }
