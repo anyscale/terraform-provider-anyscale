@@ -297,7 +297,7 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	config.IsEmptyCloud = types.BoolValue(len(resources) == 0)
 
 	if defaultResource := findDefaultInCloudResources(resources); defaultResource != nil {
-		config.CloudDeploymentID = types.StringValue(defaultResource.CloudDeploymentID)
+		config.CloudDeploymentID = stringOrNull(defaultResource.CloudDeploymentID)
 		config.CloudResourceID = types.StringValue(defaultResource.CloudResourceID)
 	} else {
 		config.CloudDeploymentID = types.StringNull()
