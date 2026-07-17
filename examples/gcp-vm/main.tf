@@ -32,7 +32,9 @@ resource "anyscale_cloud_resource" "primary" {
     project_id    = module.google_anyscale_v2.project_id
     provider_name = module.google_anyscale_v2.iam_workload_identity_provider_name
     vpc_name      = module.google_anyscale_v2.vpc_name
-    subnet_names  = [module.google_anyscale_v2.public_subnet_name]
+    # subnet_names is VM-only - rejected at plan time on K8S, so this drops
+    # automatically if compute_stack is switched to K8S above.
+    subnet_names = var.compute_stack == "VM" ? [module.google_anyscale_v2.public_subnet_name] : null
 
     controlplane_service_account_email = module.google_anyscale_v2.iam_anyscale_access_service_acct_email
     dataplane_service_account_email    = module.google_anyscale_v2.iam_anyscale_cluster_node_service_acct_email

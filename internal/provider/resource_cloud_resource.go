@@ -319,7 +319,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"subnet_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than risking a confusing subnet-and-zone-count mismatch error or, depending on how it is combined with subnet_ids_to_az, silently corrupting the registered networking.",
+						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.RequiresReplace(),
 						},
