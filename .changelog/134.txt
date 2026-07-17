@@ -1,8 +1,8 @@
 ```
 release-note:fixed
-resource/anyscale_cloud: `subnet_names` (GCP) and `subnet_ids`/`subnet_ids_to_az` (AWS) now produce a plan-time error when set on Kubernetes compute; previously they silently overwrote the Kubernetes cluster's real networking instead of erroring.
+resource/anyscale_cloud: `subnet_names` (GCP) and `subnet_ids`/`subnet_ids_to_az` (AWS) now produce a clear plan-time error when set on Kubernetes compute; previously these were silently mishandled - corrupting the cluster's networking (`subnet_names`, `subnet_ids_to_az`) or surfacing a confusing zone-count error (`subnet_ids`) - rather than being clearly rejected.
 ```
 ```
 release-note:fixed
-resource/anyscale_cloud_resource: `subnet_names` (GCP) and `subnet_ids`/`subnet_ids_to_az` (AWS) now produce a plan-time error when set on Kubernetes compute; previously they silently overwrote the Kubernetes cluster's real networking instead of erroring.
+resource/anyscale_cloud_resource: `subnet_names` (GCP) and `subnet_ids`/`subnet_ids_to_az` (AWS) now produce a clear plan-time error when set on Kubernetes compute; previously these were silently mishandled - corrupting the cluster's networking (`subnet_names`, `subnet_ids_to_az`) or surfacing a confusing zone-count error (`subnet_ids`) - rather than being clearly rejected.
 ```
