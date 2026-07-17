@@ -70,7 +70,6 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
 
   file_storage {
     file_storage_id = "fs-0abc123def456789"
-    mount_path      = "/mnt/cluster_storage"
 
     mount_targets {
       address = "fs-0abc123def456789.efs.us-west-2.amazonaws.com"

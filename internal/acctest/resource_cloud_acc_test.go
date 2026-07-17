@@ -381,6 +381,157 @@ func TestAccCloudResource_InvalidComputeStack(t *testing.T) {
 	})
 }
 
+// TestAccCloudResource_MountPathAWSRejected pins the plan-time rejection of
+// file_storage.mount_path when cloud_provider is AWS: the backend's
+// AWSNFSResources proto has no field for it (confirmed live, see
+// MOUNT-PATH-BUG-TRACE.md), so a configured value would silently do nothing
+// rather than error - this ValidateConfig check catches it instead. Keys off
+// the explicit cloud_provider attribute (not aws_config presence), so an
+// AWS+K8S cloud that omits aws_config entirely is still caught. Plan-time
+// only, no real infra needed.
+func TestAccCloudResource_MountPathAWSRejected(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-mountpath-aws")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceMountPathAWSConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)mount_path\s+Not\s+Supported\s+On\s+AWS`),
+			},
+		},
+	})
+}
+
+// TestAccCloudResource_MountPathAWSInferredRejected is a regression guard for
+// a real bug found during review: ValidateConfig's provider-inference
+// fallback only covered an omitted cloud_provider alongside azure_config,
+// not aws_config/gcp_config, so a config that relies purely on aws_config
+// presence (no explicit cloud_provider = "AWS") resolved provider to an
+// empty string and silently skipped the AWS mount_path check entirely -
+// exactly the configs most likely to hit the underlying bug. Fixed by
+// mirroring Create's full auto-detect order (AWS, then GCP, then Azure).
+// This test pins that fix: aws_config present, cloud_provider OMITTED
+// (inferred), mount_path set - must still be rejected. If the auto-detect
+// order ever drifts, this is the test that goes red. Plan-time only, no
+// real infra needed.
+func TestAccCloudResource_MountPathAWSInferredRejected(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-mountpath-aws-inferred")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceMountPathAWSInferredConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)mount_path\s+Not\s+Supported\s+On\s+AWS`),
+			},
+		},
+	})
+}
+
+// TestAccCloudResource_MountPathPVCConflict pins the plan-time rejection of
+// setting file_storage.mount_path together with persistent_volume_claim: the
+// Kubernetes-native shared-storage mechanism (K8SSharedStorageResources) has
+// no path-shaped field either, confirmed by the backend mapping trace, so
+// mount_path would silently do nothing there too. Plan-time only, no real
+// infra needed.
+func TestAccCloudResource_MountPathPVCConflict(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	cloudName := UniqueName(t, "cloud-mountpath-pvc-conflict")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccCloudResourceMountPathPVCConflictConfig(cloudName),
+				ExpectError: regexp.MustCompile(`(?s)Attribute\s+"file_storage\.mount_path"\s+cannot\s+be\s+specified\s+when\s+"file_storage\.persistent_volume_claim"\s+is\s+specified`),
+			},
+		},
+	})
+}
+
+// TestAccCloudResource_MountPathPVCDefaultNoMisfire is the negative
+// counterpart to TestAccCloudResource_MountPathPVCConflict: a config that
+// sets persistent_volume_claim and leaves mount_path OMITTED (relying on the
+// schema's own Computed+Default) must NOT trip the new ConflictsWith - the
+// validator must fire only on the user's raw config (which schema
+// Validators evaluate directly, before Default is applied), not on the
+// resolved plan value. Needs a real Create to prove this (ConflictsWith is
+// framework-internal machinery, not something a plain Go unit test can
+// exercise), so this runs against a mock server rather than real infra -
+// see newC3MockCloudServer/testAccProviderBlock in
+// resource_cloud_c3_lifecycle_acc_test.go.
+func TestAccCloudResource_MountPathPVCDefaultNoMisfire(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const cloudID = "cld_mountpath_pvc_nomisfire_mock"
+	cloudJSON := fmt.Sprintf(`{
+		"id": %[1]q, "name": "mountpath-pvc-nomisfire", "provider": "GCP", "region": "us-central1",
+		"status": "ready", "state": "ACTIVE", "compute_stack": "K8S"
+	}`, cloudID)
+	resourcesJSON := `[{
+		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"compute_stack": "K8S", "region": "us-central1",
+		"kubernetes_config": {
+			"anyscale_operator_iam_identity": "tfacc-gke-operator@my-gcp-project.iam.gserviceaccount.com",
+			"zones": ["us-central1-a", "us-central1-b"]
+		},
+		"object_storage": {"bucket_name": "tfacc-mountpath-nomisfire-bucket"}
+	}]`
+
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	config := testAccProviderBlock(server.URL) + `
+resource "anyscale_cloud" "test" {
+  name           = "mountpath-pvc-nomisfire"
+  cloud_provider = "GCP"
+  compute_stack  = "K8S"
+  region         = "us-central1"
+
+  kubernetes_config {
+    anyscale_operator_iam_identity = "tfacc-gke-operator@my-gcp-project.iam.gserviceaccount.com"
+    zones                          = ["us-central1-a", "us-central1-b"]
+  }
+
+  object_storage {
+    bucket_name = "tfacc-mountpath-nomisfire-bucket"
+  }
+
+  file_storage {
+    persistent_volume_claim = "ray-shared-pvc"
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.persistent_volume_claim", "ray-shared-pvc"),
+					// The schema default still applies normally - proves the new
+					// ConflictsWith evaluated the raw (mount_path-omitted) config,
+					// not the post-default plan value, exactly as architect's
+					// review required.
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.mount_path", "/mnt/shared"),
+				),
+				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
 // Helper function to check if cloud exists in API and fetch its details
 func testAccCheckCloudExistsInAPI(resourceName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -663,6 +814,69 @@ resource "anyscale_cloud" "test" {
   file_storage {
     persistent_volume_claim     = "test-pvc"
     csi_ephemeral_volume_driver = "test.csi.driver"
+  }
+}
+`, name)
+}
+
+// testAccCloudResourceMountPathAWSConfig is deliberately minimal (just name +
+// cloud_provider + mount_path): the AWS ValidateConfig check keys off the
+// explicit cloud_provider string alone, independent of aws_config presence -
+// deliberately an AWS+K8S(EKS) shape with aws_config entirely absent (an
+// empty kubernetes_config block is enough to satisfy
+// hasEmbeddedResourceConfig so ValidateConfig does not return early on the
+// "genuinely empty cloud" path), confirming the check keys off the explicit
+// cloud_provider attribute rather than aws_config presence, matching the
+// AWS+K8S(EKS) case confirmed by the backend mapping trace.
+func testAccCloudResourceMountPathAWSConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name           = "%s"
+  cloud_provider = "AWS"
+  compute_stack  = "K8S"
+
+  kubernetes_config {}
+
+  file_storage {
+    mount_path = "/mnt/cluster_storage"
+  }
+}
+`, name)
+}
+
+// testAccCloudResourceMountPathAWSInferredConfig deliberately OMITS
+// cloud_provider - aws_config's presence alone must be enough for
+// ValidateConfig's auto-detect fallback to resolve provider to AWS and fire
+// the mount_path rejection, the same way Create's own auto-detect already
+// does. This is the config that exposed the real provider-inference gap
+// found in review.
+func testAccCloudResourceMountPathAWSInferredConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name = "%s"
+
+  aws_config {}
+
+  file_storage {
+    mount_path = "/mnt/cluster_storage"
+  }
+}
+`, name)
+}
+
+// testAccCloudResourceMountPathPVCConflictConfig mirrors
+// testAccCloudResourcePVCCSIConflictConfig's minimalism: the ConflictsWith
+// between mount_path and persistent_volume_claim fires independent of
+// cloud_provider or compute_stack (the Kubernetes-native storage mechanism
+// has no path field regardless of provider), so no other config is needed.
+func testAccCloudResourceMountPathPVCConflictConfig(name string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name = "%s"
+
+  file_storage {
+    mount_path              = "/mnt/cluster_storage"
+    persistent_volume_claim = "test-pvc"
   }
 }
 `, name)

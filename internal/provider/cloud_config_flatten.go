@@ -296,51 +296,6 @@ func flattenObjectStorage(cfg *ObjectStorage, provider string) (types.Object, di
 	return obj, diags
 }
 
-// flattenFileStorage populates file_storage from the API's FileStorage.
-// mount_path falls back to the schema's own documented default ("/mnt/shared")
-// only if the API genuinely returns none - unlike kubernetes_config's inert
-// fields, file_storage.mount_path IS sent to and read back from the API, so
-// this reflects a real value whenever the API has one.
-func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	if cfg == nil {
-		return types.ObjectNull(fileStorageAttrTypes()), diags
-	}
-
-	mountPath := cfg.MountPath
-	if mountPath == "" {
-		mountPath = "/mnt/shared"
-	}
-
-	mountTargets := types.ListNull(types.ObjectType{AttrTypes: mountTargetAttrTypes()})
-	if len(cfg.MountTargets) > 0 {
-		targetValues := make([]attr.Value, 0, len(cfg.MountTargets))
-		for _, mt := range cfg.MountTargets {
-			targetObj, d := types.ObjectValue(mountTargetAttrTypes(), map[string]attr.Value{
-				"address": stringOrNull(mt.Address),
-				"zone":    stringOrNull(mt.Zone),
-			})
-			diags.Append(d...)
-			targetValues = append(targetValues, targetObj)
-		}
-		listVal, d := types.ListValue(types.ObjectType{AttrTypes: mountTargetAttrTypes()}, targetValues)
-		diags.Append(d...)
-		mountTargets = listVal
-	}
-
-	attrs := map[string]attr.Value{
-		"file_storage_id":             stringOrNull(cfg.FileStorageID),
-		"mount_path":                  types.StringValue(mountPath),
-		"persistent_volume_claim":     stringOrNull(cfg.PersistentVolumeClaim),
-		"csi_ephemeral_volume_driver": stringOrNull(cfg.CSIEphemeralVolumeDriver),
-		"mount_targets":               mountTargets,
-	}
-
-	obj, d := types.ObjectValue(fileStorageAttrTypes(), attrs)
-	diags.Append(d...)
-	return obj, diags
-}
-
 // requiredImportConfigBlocks decides which config block(s) a valid
 // anyscale_cloud or anyscale_cloud_resource config MUST have, based on
 // compute stack and provider, and flattens them from the given resource's

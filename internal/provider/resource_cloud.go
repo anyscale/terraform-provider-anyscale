@@ -554,29 +554,41 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Optional:            true,
 						Computed:            true,
 						Default:             stringdefault.StaticString("/mnt/shared"),
-						MarkdownDescription: "The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The mount path for the file storage. Only meaningful for GCP Filestore and Azure/Generic NFS-backed clouds - AWS EFS-backed clouds have no backend field for it, and the value is rejected at plan time if set there (see the provider's own validation error for details). Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms, which have no mount_path field on the backend either) - at most one of mount_path / persistent_volume_claim / csi_ephemeral_volume_driver may be set. Changing this requires replacement; the provider has no in-place update path for it.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
+						},
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRoot("file_storage").AtName("persistent_volume_claim"),
+								path.MatchRoot("file_storage").AtName("csi_ephemeral_volume_driver"),
+							),
 						},
 					},
 					"persistent_volume_claim": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only). Mutually exclusive with `csi_ephemeral_volume_driver` - the backend rejects both being set.",
+						MarkdownDescription: "Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only). Mutually exclusive with `csi_ephemeral_volume_driver` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
 						Validators: []validator.String{
-							stringvalidator.ConflictsWith(path.MatchRoot("file_storage").AtName("csi_ephemeral_volume_driver")),
+							stringvalidator.ConflictsWith(
+								path.MatchRoot("file_storage").AtName("csi_ephemeral_volume_driver"),
+								path.MatchRoot("file_storage").AtName("mount_path"),
+							),
 						},
 					},
 					"csi_ephemeral_volume_driver": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only). Mutually exclusive with `persistent_volume_claim` - the backend rejects both being set.",
+						MarkdownDescription: "CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only). Mutually exclusive with `persistent_volume_claim` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
 						Validators: []validator.String{
-							stringvalidator.ConflictsWith(path.MatchRoot("file_storage").AtName("persistent_volume_claim")),
+							stringvalidator.ConflictsWith(
+								path.MatchRoot("file_storage").AtName("persistent_volume_claim"),
+								path.MatchRoot("file_storage").AtName("mount_path"),
+							),
 						},
 					},
 				},
@@ -652,8 +664,19 @@ func (r *CloudResource) ValidateConfig(ctx context.Context, req resource.Validat
 	}
 
 	provider := strings.ToUpper(data.CloudProvider.ValueString())
-	if provider == "" && !data.AzureConfig.IsNull() {
-		provider = "AZURE" // mirrors Create()'s own auto-detect order
+	if provider == "" {
+		// mirrors Create()'s own auto-detect order (AWS, then GCP, then
+		// Azure) - needed so the AWS mount_path check below fires even when
+		// a user relies on aws_config presence alone, without also setting
+		// cloud_provider explicitly.
+		switch {
+		case !data.AWSConfig.IsNull():
+			provider = "AWS"
+		case !data.GCPConfig.IsNull():
+			provider = "GCP"
+		case !data.AzureConfig.IsNull():
+			provider = "AZURE"
+		}
 	}
 
 	switch provider {
@@ -661,6 +684,15 @@ func (r *CloudResource) ValidateConfig(ctx context.Context, req resource.Validat
 		resp.Diagnostics.Append(validateAzureK8SOnly(ctx, data.ComputeStack.ValueString(), data.ObjectStorage)...)
 	case "GENERIC":
 		resp.Diagnostics.AddAttributeError(path.Root("cloud_provider"), "Generic Clouds Not Yet Supported", genericCloudNotSupportedMessage)
+	}
+
+	if !data.FileStorage.IsNull() && !data.FileStorage.IsUnknown() {
+		var fsModel FileStorageModel
+		fsDiags := data.FileStorage.As(ctx, &fsModel, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(fsDiags...)
+		if !fsDiags.HasError() {
+			resp.Diagnostics.Append(validateMountPathSupported(provider, &fsModel)...)
+		}
 	}
 }
 

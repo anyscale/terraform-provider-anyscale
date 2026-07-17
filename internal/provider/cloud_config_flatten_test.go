@@ -179,34 +179,6 @@ func TestFlattenKubernetesConfig_OnlyAPIBackedFieldsPopulateNamespaceGetsDefault
 	}
 }
 
-func TestFlattenFileStorage_MountPathFallsBackOnlyWhenAPIOmitsIt(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("API-provided mount_path is preserved verbatim", func(t *testing.T) {
-		obj, diags := flattenFileStorage(ctx, &FileStorage{FileStorageID: "fs-1", MountPath: "/custom/path"})
-		if diags.HasError() {
-			t.Fatalf("unexpected error: %v", diags)
-		}
-		var model FileStorageModel
-		obj.As(ctx, &model, basetypes.ObjectAsOptions{})
-		if model.MountPath.ValueString() != "/custom/path" {
-			t.Errorf("MountPath = %v, want /custom/path (must not be overwritten by the default)", model.MountPath.ValueString())
-		}
-	})
-
-	t.Run("empty API mount_path falls back to the schema default", func(t *testing.T) {
-		obj, diags := flattenFileStorage(ctx, &FileStorage{FileStorageID: "fs-1"})
-		if diags.HasError() {
-			t.Fatalf("unexpected error: %v", diags)
-		}
-		var model FileStorageModel
-		obj.As(ctx, &model, basetypes.ObjectAsOptions{})
-		if model.MountPath.ValueString() != "/mnt/shared" {
-			t.Errorf("MountPath = %v, want /mnt/shared (schema default)", model.MountPath.ValueString())
-		}
-	})
-}
-
 // TestFlattenAWSConfig_ClusterInstanceProfileID is a regression test for C6:
 // aws_config.cluster_instance_profile_id must round-trip through import like
 // every other optional AWSConfig field.
@@ -237,27 +209,4 @@ func TestFlattenAWSConfig_ClusterInstanceProfileID(t *testing.T) {
 			t.Errorf("ClusterInstanceProfileID = %v, want null", model.ClusterInstanceProfileID)
 		}
 	})
-}
-
-// TestFlattenFileStorage_PVCAndCSIDriver is a regression test for C6:
-// file_storage.persistent_volume_claim and .csi_ephemeral_volume_driver must
-// round-trip like every other optional FileStorage field.
-func TestFlattenFileStorage_PVCAndCSIDriver(t *testing.T) {
-	ctx := context.Background()
-	obj, diags := flattenFileStorage(ctx, &FileStorage{
-		FileStorageID:            "fs-1",
-		PersistentVolumeClaim:    "ray-shared-pvc",
-		CSIEphemeralVolumeDriver: "ephemeral.csi.example.com",
-	})
-	if diags.HasError() {
-		t.Fatalf("unexpected error: %v", diags)
-	}
-	var model FileStorageModel
-	obj.As(ctx, &model, basetypes.ObjectAsOptions{})
-	if model.PersistentVolumeClaim.ValueString() != "ray-shared-pvc" {
-		t.Errorf("PersistentVolumeClaim = %v, want ray-shared-pvc", model.PersistentVolumeClaim.ValueString())
-	}
-	if model.CSIEphemeralVolumeDriver.ValueString() != "ephemeral.csi.example.com" {
-		t.Errorf("CSIEphemeralVolumeDriver = %v, want ephemeral.csi.example.com", model.CSIEphemeralVolumeDriver.ValueString())
-	}
 }
