@@ -1,0 +1,8 @@
+```
+release-note:changed
+resource/anyscale_cloud: Add usage-contract facts to schema descriptions - `external_id`'s required format, MemoryDB/Memorystore TLS requirements and endpoint formats, `subnet_names`'s single-subnet requirement, `file_storage`'s fallback behavior when omitted, and `security_group_ids`'s minimum required rules - plus short notes on `is_private_cloud`'s networking implications and `region`'s China/GovCloud exclusion.
+```
+```
+release-note:changed
+resource/anyscale_cloud_resource: Add the same usage-contract facts as `anyscale_cloud` to matching schema descriptions (`external_id` format, MemoryDB/Memorystore TLS requirements, `subnet_names` cardinality, `file_storage` fallback behavior, `security_group_ids` requirements, `is_private`/`region` notes).
+```

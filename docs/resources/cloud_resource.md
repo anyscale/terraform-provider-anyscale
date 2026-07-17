@@ -162,12 +162,12 @@ output "eks_operator_reported_at" {
 - `cloud_name` (String) The cloud name to attach this resource to. Either `cloud_id` or `cloud_name` can be specified. If provided, will be resolved to cloud_id.
 - `cloud_provider` (String) Cloud provider: AWS, GCP, or AZURE. Required for K8S compute_stack when aws_config/gcp_config/azure_config is not provided. Inferred from aws_config/gcp_config/azure_config if not specified. AWS and GCP support both VM and K8S compute stacks; AZURE supports K8S only (AKS) - Anyscale does not support Azure VM clouds, and setting azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported by this provider.
 - `compute_stack` (String) Compute stack type: VM or K8S. When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).
-- `file_storage` (Block, Optional) File storage configuration (EFS, Filestore, etc.). See the [Anyscale shared storage documentation](https://docs.anyscale.com/storage/shared) for how this is used across a cluster. (see [below for nested schema](#nestedblock--file_storage))
+- `file_storage` (Block, Optional) File storage configuration (EFS, Filestore, etc.). If omitted, Anyscale falls back to using the object storage bucket for shared storage. On GCP, Filestore is optional and not created by default, and must be in the same region as the cloud's VPC when used. See the [Anyscale shared storage documentation](https://docs.anyscale.com/storage/shared) for how this is used across a cluster. (see [below for nested schema](#nestedblock--file_storage))
 - `gcp_config` (Block, Optional) GCP-specific configuration. See the [Anyscale GCP cloud configuration documentation](https://docs.anyscale.com/clouds/gcp/configure) for the full set of resources Anyscale expects (VPC, subnets, service accounts, firewall policies) and how they map to the fields below. (see [below for nested schema](#nestedblock--gcp_config))
-- `is_private` (Boolean) Whether this is a private resource (private networking).
+- `is_private` (Boolean) Whether this is a private resource. Implies customer-managed networking paths (e.g. VPN, PrivateLink) between users, clusters, and the control plane - a real infrastructure commitment, not just a network visibility flag.
 - `kubernetes_config` (Block, Optional) Kubernetes-specific configuration. Required when compute_stack is K8S. See the [Anyscale Kubernetes documentation](https://docs.anyscale.com/clouds/kubernetes) for cluster requirements and how these fields map to the Anyscale Operator installation. (see [below for nested schema](#nestedblock--kubernetes_config))
 - `object_storage` (Block, Optional) Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP, [Azure Blob/ADLS](https://docs.anyscale.com/clouds/azure/storage) for Azure. (see [below for nested schema](#nestedblock--object_storage))
-- `region` (String) The region for this cloud resource. Inferred from the cloud/provider configuration when not specified.
+- `region` (String) The region for this cloud resource. Inferred from the cloud/provider configuration when not specified. For AWS, Anyscale does not support the China or GovCloud partitions.
 
 ### Read-Only
 
@@ -188,11 +188,11 @@ Optional:
 - `cluster_instance_profile_id` (String) IAM instance profile ARN attached to Ray cluster nodes. Defaults to the instance profile with the same name as `dataplane_iam_role_arn` when unset - set this explicitly only if your IAM tooling generates a profile name that differs from the role name.
 - `controlplane_iam_role_arn` (String) IAM role ARN for Anyscale control plane (cross-account access). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.
 - `dataplane_iam_role_arn` (String) IAM role ARN for Anyscale data plane (cluster nodes). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.
-- `external_id` (String) External ID for IAM role assumption (recommended for security).
+- `external_id` (String) External ID for IAM role assumption (recommended for security). Anyscale's external IDs follow a fixed format: the organization ID, a hyphen, then a random string (e.g. `org_1234567890abcdef-1234567890abcdef`). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.
 - `memorydb_cluster_arn` (String) MemoryDB cluster ARN. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.
-- `memorydb_cluster_endpoint` (String) MemoryDB cluster endpoint address. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements, including the expected endpoint format.
+- `memorydb_cluster_endpoint` (String) MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS - use a `rediss://` prefix when connecting. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.
 - `memorydb_cluster_name` (String) MemoryDB cluster name for Ray GCS fault tolerance. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.
-- `security_group_ids` (List of String) List of security group IDs for Anyscale resources.
+- `security_group_ids` (List of String) List of security group IDs for Anyscale resources. Missing the required rules causes the cluster to fail silently rather than erroring at plan or apply time - Anyscale needs at minimum an inbound rule for port 443 and a self-referencing rule allowing all traffic.
 - `subnet_ids` (List of String) List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az.
 - `subnet_ids_to_az` (Map of String) Map of subnet ID to availability zone (e.g., {"subnet-123": "us-east-2a"}). Preferred over subnet_ids.
 - `vpc_id` (String) The VPC ID where Anyscale resources will be deployed.
@@ -236,11 +236,11 @@ Optional:
 - `dataplane_service_account_email` (String) Service account email for Ray cluster nodes. See the [Anyscale Google Cloud IAM documentation](https://docs.anyscale.com/iam/google-cloud) for the roles this service account needs.
 - `firewall_policy_names` (List of String) List of firewall policy names.
 - `host_project_id` (String) The host project ID for shared VPCs (optional).
-- `memorystore_endpoint` (String) Memorystore endpoint address. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.
+- `memorystore_endpoint` (String) Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.
 - `memorystore_instance_name` (String) Memorystore instance name for Ray GCS fault tolerance.
 - `project_id` (String) The GCP project ID.
 - `provider_name` (String) Workload Identity Federation provider name.
-- `subnet_names` (List of String) List of subnet names within the VPC for Anyscale resources.
+- `subnet_names` (List of String) List of subnet names within the VPC for Anyscale resources. Anyscale currently requires exactly one subnet to launch instances, even though this is modeled as a list.
 - `vpc_name` (String) The VPC network name.
 
 
