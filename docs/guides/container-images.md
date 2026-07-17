@@ -37,10 +37,11 @@ when your image already exists elsewhere and you just need Anyscale to know abou
 ## `name_version` is the identifier to hand to Anyscale tooling
 
 Both resources and both data sources expose a Computed `name_version` attribute, formatted as
-`name:revision`. This — not `image_uri`, and not `id` — is the handle designed for `anyscale job
-submit`, `anyscale service deploy`, and the Anyscale SDK: it pins a workload to the exact revision you
-built or registered, the same way `anyscale_compute_config`'s own `name_version` pins a workload to an
-exact compute config version.
+`name:revision`. This — not `image_uri`, and not `id` — is the handle designed for
+[`anyscale job submit`](https://docs.anyscale.com/reference/cli/job#job-cli),
+[`anyscale service deploy`](https://docs.anyscale.com/reference/cli/service#service-cli), and the
+Anyscale SDK: it pins a workload to the exact revision you built or registered, the same way
+`anyscale_compute_config`'s own `name_version` pins a workload to an exact compute config version.
 
 `image_uri` is still useful on its own terms — it's the raw, pullable reference (what you'd hand to
 `docker pull`) — but prefer `name_version` when submitting jobs or services. See the

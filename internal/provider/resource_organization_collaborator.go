@@ -75,7 +75,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 			"2. SCIM provisioning\n\n" +
 			"Once a user exists in the organization, import them using `terraform import` to manage their permissions.\n\n" +
 			"**Example Import:**\n```\nterraform import anyscale_organization_collaborator.user <identity_id>\n```\n\n" +
-			"**Directory-synced organizations:** If your organization manages permissions via directory sync (the Policy API), this resource cannot manage collaborators at all - any `terraform apply` against it fails, and the error points you to the `anyscale policy set` command instead.",
+			"**Directory-synced organizations:** If your organization manages permissions via directory sync (the Policy API), this resource cannot manage collaborators at all - any `terraform apply` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -575,7 +575,7 @@ func collaboratorErrorDiagnosticDetail(err error) string {
 	detail := extractAPIErrorDetail(err)
 
 	if strings.Contains(detail, "Policy API") {
-		return fmt.Sprintf("%s\n\nThis organization's collaborator permissions are managed outside Terraform. Use 'anyscale policy set' to manage this collaborator instead of this resource.", detail)
+		return fmt.Sprintf("%s\n\nThis organization's collaborator permissions are managed outside Terraform. Use 'anyscale policy set' to manage this collaborator instead of this resource. See https://docs.anyscale.com/reference/cli/policy#policy-cli for details.", detail)
 	}
 
 	return detail

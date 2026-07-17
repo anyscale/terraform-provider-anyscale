@@ -48,6 +48,7 @@ The provider resolves an API token in the following order:
 2. The `ANYSCALE_CLI_TOKEN` environment variable.
 3. `~/.anyscale/credentials.json` (the same file the Anyscale CLI writes on `anyscale login`).
 
-The first one found wins; later methods are only checked if earlier ones are unset.
+The first one found wins; later methods are only checked if earlier ones are unset. See the
+[Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate a token.
 
 {{ .SchemaMarkdown | trimspace }}

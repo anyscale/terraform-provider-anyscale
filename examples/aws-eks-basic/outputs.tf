@@ -9,7 +9,7 @@ output "cloud_name" {
 }
 
 output "cloud_deployment_id" {
-  description = "The cloud deployment ID. Pass this to the Anyscale operator during installation."
+  description = "The cloud deployment ID - deprecated by the Anyscale API and always null on this all-in-one pattern (there is no separate anyscale_cloud_resource here to read cloud_resource_id from instead)."
   value       = anyscale_cloud.primary.cloud_deployment_id
 }
 

@@ -34,7 +34,9 @@ doesn't already start with `abfss://` fails at plan time.
 Kubernetes (`compute_stack = "K8S"`) is supported for AWS, GCP, and Azure, via either the
 **all-in-one pattern** (`anyscale_cloud` with an embedded `kubernetes_config` block) or the
 **multi-resource cloud pattern** (an empty `anyscale_cloud` plus a separate `anyscale_cloud_resource` with
-`compute_stack = "K8S"`). Previously, a K8S-only configuration was misclassified as an empty cloud
+`compute_stack = "K8S"`). See the [Anyscale Kubernetes documentation](https://docs.anyscale.com/clouds/kubernetes)
+for cluster requirements and how `kubernetes_config`'s fields map to the Anyscale Operator installation.
+Previously, a K8S-only configuration was misclassified as an empty cloud
 and silently never created any deployment at all; that's fixed, and the provider now correctly
 creates and round-trips a K8S cloud (no more `compute_stack` flipping from `"K8S"` to `"VM"` on the
 next read) for both patterns.
