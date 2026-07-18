@@ -318,6 +318,45 @@ func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
 		}
 	})
 
+	t.Run("K8S compute_stack on GCP: derived from kubernetes_config as valid JSON, not a placeholder", func(t *testing.T) {
+		// Real backend trace (architect, clouds_resource.py): GCP is the ONE
+		// provider that actually parses this field - json.loads(cloud.credentials)
+		// then reads provider_id/project_id/service_account_email out of it. A
+		// bare string (the AWS/Azure K8S fallback shape) fails that parse and
+		// breaks GCP+K8S cloud creation outright - this test exists because an
+		// earlier version of this fix got that wrong (mirrored AWS's bare-string
+		// return for GCP too) and native-B only ever exercised AWS EKS, not GKE,
+		// so the bug went unexercised until this test.
+		k8sObj, diags := flattenKubernetesConfig(ctx, &KubernetesConfig{AnyscaleOperatorIAMIdentity: "gke-operator@my-project.iam.gserviceaccount.com"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test kubernetes_config: %v", diags)
+		}
+		plan := &CloudResourceModel{
+			Credentials:      types.StringNull(),
+			GCPConfig:        types.ObjectNull(gcpConfigAttrTypes()),
+			KubernetesConfig: k8sObj,
+		}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "GCP", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - a credential was derivable from kubernetes_config")
+		}
+		var parsed map[string]string
+		if err := json.Unmarshal([]byte(creds), &parsed); err != nil {
+			t.Fatalf("creds is not valid JSON (this is exactly what breaks GCP+K8S cloud creation): %v\ncreds = %q", err, creds)
+		}
+		for _, key := range []string{"provider_id", "project_id", "service_account_email"} {
+			if parsed[key] == "" {
+				t.Errorf("parsed[%q] is empty, want a non-empty placeholder/derived value", key)
+			}
+		}
+		if parsed["service_account_email"] != "gke-operator@my-project.iam.gserviceaccount.com" {
+			t.Errorf("service_account_email = %q, want the operator identity from kubernetes_config", parsed["service_account_email"])
+		}
+	})
+
 	t.Run("all-in-one with config present but no derivable role: placeholder AND suspicious", func(t *testing.T) {
 		// aws_config is present (all-in-one, not empty cloud) but its
 		// controlplane_iam_role_arn was left unset - exactly the
