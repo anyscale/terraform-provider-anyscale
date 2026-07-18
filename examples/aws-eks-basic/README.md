@@ -338,10 +338,11 @@ you about this — check `kubectl get nodes` and `kubectl get pods -n kube-syste
 against a current AWS provider. See "Upgrading from the v20 module" above.
 
 **`kubernetes_config.anyscale_operator_iam_identity` is null or empty in the plan** — this reads
-`module.eks.eks_managed_node_groups["default"].iam_role_arn`, which only resolves once the
-`default` node group's IAM role exists in state. If you're applying with `-target` or the
-apply partially failed, make sure the `default` node group applied successfully before this
-value is expected to be populated.
+`aws_iam_role.anyscale_operator.arn` (defined in `anyscale_operator_iam.tf`), which only
+resolves once that role exists in state. If you're applying with `-target` or the apply
+partially failed, make sure `aws_iam_role.anyscale_operator` and its
+`aws_eks_pod_identity_association` applied successfully before this value is expected to be
+populated.
 
 **`InsufficientInstanceCapacity` or vCPU limit errors on GPU node groups** — most AWS accounts
 start with a very low (often zero) service quota for `g4dn`/`g5`/`p4d`/`p5` instance families.
