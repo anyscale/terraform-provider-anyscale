@@ -243,9 +243,9 @@ the one change here that a `terraform plan` cannot catch for you:
   *does* use `block_device_mappings` today, but for an unrelated, later reason: the switch to
   Bottlerocket node groups. See "Migrating from AL2023 to Bottlerocket" below — don't confuse the
   two changes, they happened for different reasons at different times.
-- Everything else this example touches is unchanged, including the operator IAM identity
-  wiring (`module.eks.eks_managed_node_groups["default"].iam_role_arn` in `main.tf`) and every
-  output — no changes needed there even though several were renamed elsewhere in v21.
+- Everything else this example touches is unchanged by this module-version bump, including
+  every output — no changes needed there even though several attribute names were renamed
+  elsewhere in v21.
 
 Two v21 default changes are worth knowing about even though this example doesn't set either
 variable explicitly:
@@ -265,7 +265,9 @@ variable explicitly:
   cluster-autoscaler or the AWS Load Balancer Controller onto this cluster afterwards, give it
   an EKS Pod Identity association instead of relying on IMDS-inherited node-role credentials —
   otherwise the pod won't be able to reach the policy at all. The Anyscale Operator itself is
-  unaffected either way, since it already uses Pod Identity.
+  unaffected by this hop-limit change either way, since it authenticates via its own dedicated
+  IAM role and `aws_eks_pod_identity_association` (see `anyscale_operator_iam.tf`), never
+  through IMDS-inherited node-role credentials.
 
 ## Migrating from AL2023 to Bottlerocket
 
@@ -338,10 +340,9 @@ you about this — check `kubectl get nodes` and `kubectl get pods -n kube-syste
 against a current AWS provider. See "Upgrading from the v20 module" above.
 
 **`kubernetes_config.anyscale_operator_iam_identity` is null or empty in the plan** — this reads
-`aws_iam_role.anyscale_operator.arn` (defined in `anyscale_operator_iam.tf`), which only
-resolves once that role exists in state. If you're applying with `-target` or the apply
-partially failed, make sure `aws_iam_role.anyscale_operator` and its
-`aws_eks_pod_identity_association` applied successfully before this value is expected to be
+`aws_iam_role.anyscale_operator.arn` (see `anyscale_operator_iam.tf`), which only resolves once
+that role exists in state. If you're applying with `-target` or the apply partially failed, make
+sure `aws_iam_role.anyscale_operator` applied successfully before this value is expected to be
 populated.
 
 **`InsufficientInstanceCapacity` or vCPU limit errors on GPU node groups** — most AWS accounts
