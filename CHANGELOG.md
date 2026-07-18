@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-07-18
+
+### Breaking Changes
+
+- resource/anyscale_cloud: `cloud_deployment_id` is removed - the Anyscale API stopped populating it, and `cloud_resource_id` (added in the previous release) is its full replacement; to migrate, replace any reference to `cloud_deployment_id` in your configuration or outputs with `cloud_resource_id` and re-run `terraform plan`.
+- resource/anyscale_cloud_resource: `cloud_deployment_id` is removed for the same reason as `anyscale_cloud`; to migrate, replace any reference to it with the already-existing `cloud_resource_id` attribute and re-run `terraform plan`.
+- data-source/anyscale_cloud: `cloud_deployment_id` is removed for the same reason as the `anyscale_cloud` resource; to migrate, replace any reference to it with the already-existing `cloud_resource_id` attribute and re-run `terraform plan`.
+
+### Added
+
+- resource/anyscale_cloud: Add a `cloud_resource_id` attribute exposing the populated identifier for the cloud's default resource - the value `cloud_deployment_id` was originally meant to carry before the API stopped populating it. This is what you pass to the Anyscale operator during installation for a K8S cloud.
+- data-source/anyscale_cloud: Add the same `cloud_resource_id` attribute as the `anyscale_cloud` resource (not added to the plural `anyscale_clouds` data source, to avoid an extra API call per cloud in the result list).
+
+### Changed
+
+- resource/anyscale_cloud: Document a known limitation on GCP where `file_storage.mount_path` is silently overwritten by the backend with the auto-discovered Filestore share name when `mount_targets` is not also set; because `file_storage` is deliberately not refreshed from the API on read, Terraform state keeps showing the originally configured value indefinitely after the backend overwrites it, and `terraform plan` will not surface the drift (no behavior change, docs only).
+- resource/anyscale_cloud_resource: Document the same GCP `file_storage.mount_path` known limitation as `anyscale_cloud` (no behavior change, docs only).
+- provider: Fix two stray README references to the old "Split Deployment" pattern name, now "Multi-Resource Cloud Pattern" everywhere else (no behavior change, docs only).
+- data-source/anyscale_clouds: Update the description noting `cloud_resource_id` is omitted from this list data source, since the sibling `cloud_deployment_id` it used to be mentioned alongside is now removed entirely (no behavior change, docs only).
+
+### Fixed
+
+- data-source/anyscale_cloud: Fix `cloud_deployment_id` surfacing as an empty string instead of `null` when the cloud's default resource has no deployment ID (the common case, since the field is deprecated and no longer populated by the API).
+- resource/anyscale_cloud: Document the IAM trust policy `anyscale_operator_iam_identity` requires on AWS EKS - the role must trust `pods.eks.amazonaws.com` via an `aws_eks_pod_identity_association`; a node group's own IAM role will not work, since node roles trust `ec2.amazonaws.com` instead, and this cannot be validated at `terraform plan` because the provider has no visibility into a role's trust policy.
+- resource/anyscale_cloud_resource: Document the same AWS EKS IAM trust policy requirement for `anyscale_operator_iam_identity` as `anyscale_cloud`.
+
 ## [0.12.1] - 2026-07-17
 
 ### Changed
@@ -636,7 +662,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.0
 [0.12.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.12.1
 [0.12.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.12.0
 [0.11.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.11.0
