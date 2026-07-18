@@ -33,7 +33,11 @@ locals {
   # pull. Required one-time prerequisite instead of a silent workaround:
   #   helm pull oci://docker.io/envoyproxy/gateway-helm --version 1.8.2 -d ${path.module}/.charts
   envoy_gateway_chart_version = "1.8.2"
-  envoy_gateway_chart_path    = "${path.module}/.charts/gateway-helm-v${local.envoy_gateway_chart_version}.tgz"
+  # Confirmed live (2026-07-18): `helm pull` names the file after Chart.yaml's own version field,
+  # which this chart does NOT prefix with "v" - the OCI tag is "v1.8.2" but the packaged file is
+  # gateway-helm-1.8.2.tgz. Do not add a "v" here; a mismatch means a user who runs the exact
+  # documented remediation command still fails the precondition, forever, on the same file.
+  envoy_gateway_chart_path = "${path.module}/.charts/gateway-helm-${local.envoy_gateway_chart_version}.tgz"
 }
 
 resource "helm_release" "envoy_gateway" {

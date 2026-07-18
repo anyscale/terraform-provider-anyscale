@@ -363,7 +363,8 @@ Bottlerocket. See "Migrating from AL2023 to Bottlerocket" above.
 **Second apply fails on a Helm/OCI error instead of the chart-missing message** — you already ran
 `helm pull` but pointed it at the wrong directory, or pulled a different chart version than
 `1.8.2`. `gateway_operator.tf`'s `local.envoy_gateway_chart_path` expects exactly
-`.charts/gateway-helm-v1.8.2.tgz` under this example's directory.
+`.charts/gateway-helm-1.8.2.tgz` under this example's directory — no `v` prefix, even though the
+OCI tag you pulled was `v1.8.2`; that's just what `helm pull` names the file.
 
 **Gateway never reaches `Programmed`, or the load balancer stays `<pending>`** — confirm you
 didn't change the EnvoyProxy's Service annotations away from
