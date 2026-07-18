@@ -162,7 +162,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"compute_stack": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).",
+				MarkdownDescription: "Compute stack type: VM or K8S. Required when using embedded config (aws_config, gcp_config, or kubernetes_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -469,7 +469,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Computed:            true,
 						Default:             stringdefault.StaticString("anyscale"),
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads. Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -477,7 +477,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"ingress_host": schema.StringAttribute{
 						Optional:            true,
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -485,7 +485,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"cluster_name": schema.StringAttribute{
 						Optional:            true,
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -493,7 +493,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"context": schema.StringAttribute{
 						Optional:            true,
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -501,7 +501,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"kubeconfig_path": schema.StringAttribute{
 						Optional:            true,
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -1049,7 +1049,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	if computeStack == "" {
 		resp.Diagnostics.AddError(
 			"Missing Required Field",
-			"compute_stack is required when using embedded config (aws_config/gcp_config)",
+			"compute_stack is required when using embedded config (aws_config, gcp_config, or kubernetes_config)",
 		)
 		return
 	}

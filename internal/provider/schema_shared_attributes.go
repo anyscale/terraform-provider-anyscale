@@ -195,13 +195,13 @@ func organizationUserSharedAttributes() map[string]schema.Attribute {
 		},
 		"permission_level": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The organization permission level (owner, collaborator, etc.). The backend is moving toward `base_role` and `additional_roles` instead; prefer those for new configurations.",
+			MarkdownDescription: "The organization permission level (`owner` or `collaborator`), deprecated in favor of `base_role` plus `additional_roles`; prefer those for new configurations.",
 		},
 		// DS-OU-2 (Phase B): permission_level above is deprecated backend-side in
 		// favor of these two.
 		"base_role": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The user's base role in the organization (e.g. owner, collaborator). This is the current source of role information on the backend; prefer it over `permission_level`, which the backend is moving away from.",
+			MarkdownDescription: "The user's base role in the organization (`owner` or `collaborator`). `permission_level` is deprecated in favor of this attribute plus `additional_roles`; prefer these for new configurations.",
 		},
 		"additional_roles": schema.ListAttribute{
 			ElementType:         types.StringType,
@@ -247,7 +247,7 @@ func projectSharedAttributes() map[string]schema.Attribute {
 		},
 		"is_default": schema.BoolAttribute{
 			Computed:            true,
-			MarkdownDescription: "Whether this is the default project for the organization.",
+			MarkdownDescription: "Whether this is the default project for its cloud. Anyscale creates one default project per cloud, not one per organization.",
 		},
 		"directory_name": schema.StringAttribute{
 			Computed:            true,

@@ -128,7 +128,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 
 			"base_role": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The collaborator's base role in the organization (`owner` or `collaborator`). This is the backend's current source of role information; `permission_level` above remains the field you set to change it, and the two always agree since the backend derives `permission_level` from `base_role` on every read.",
+				MarkdownDescription: "The collaborator's base role in the organization (`owner` or `collaborator`). `permission_level` above remains the field you set to change it; the two always agree since the backend derives `base_role` from `permission_level` on every read (not the reverse).",
 				// Deliberately no UseStateForUnknown: base_role is derived from
 				// the same underlying role permission_level writes, so it
 				// legitimately changes whenever permission_level does. Freezing

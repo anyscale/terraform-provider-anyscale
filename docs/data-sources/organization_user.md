@@ -60,7 +60,7 @@ output "user_additional_roles" {
 ### Read-Only
 
 - `additional_roles` (List of String) Additional restriction (deny) roles applied on top of the user's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Three states: populated means the user genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a user with no `user_id`. Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.
-- `base_role` (String) The user's base role in the organization (e.g. owner, collaborator). This is the current source of role information on the backend; prefer it over `permission_level`, which the backend is moving away from.
+- `base_role` (String) The user's base role in the organization (`owner` or `collaborator`). `permission_level` is deprecated in favor of this attribute plus `additional_roles`; prefer these for new configurations.
 - `created_at` (String) The timestamp when the user was added to the organization.
 - `name` (String) The name of the user. Null if the user has no name set.
-- `permission_level` (String) The organization permission level (owner, collaborator, etc.). The backend is moving toward `base_role` and `additional_roles` instead; prefer those for new configurations.
+- `permission_level` (String) The organization permission level (`owner` or `collaborator`), deprecated in favor of `base_role` plus `additional_roles`; prefer those for new configurations.

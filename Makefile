@@ -139,6 +139,32 @@ vet: ## Run go vet
 	@echo "==> Running go vet..."
 	$(GO) vet ./...
 
+.PHONY: validate-examples
+validate-examples: ## Validate every examples/ dir: terraform fmt, tflint, and terraform validate where runnable
+	@echo "==> Checking terraform fmt across examples/..."
+	@terraform fmt -check -recursive -diff examples/
+	@echo "==> Running tflint (repo config) across every examples/ subdirectory with .tf files..."
+	@fail=0; \
+	for d in $$(find examples -name "*.tf" -exec dirname {} \; | sort -u); do \
+		out=$$(cd "$$d" && tflint --config="$(CURDIR)/.tflint.hcl" 2>&1); \
+		if [ -n "$$out" ]; then echo "--- tflint: $$d ---"; echo "$$out"; fail=1; fi; \
+	done; \
+	echo "==> Running terraform init + validate on complete runnable examples (no credentials needed, no apply)..."; \
+	for d in $$(find examples -maxdepth 1 -mindepth 1 -type d); do \
+		if grep -lq required_providers "$$d"/*.tf 2>/dev/null; then \
+			out=$$( (cd "$$d" && rm -rf .terraform .terraform.lock.hcl && terraform init -backend=false && terraform validate -no-color) 2>&1 ); \
+			rc=$$?; \
+			(cd "$$d" && rm -rf .terraform .terraform.lock.hcl); \
+			if [ $$rc -ne 0 ]; then \
+				echo "--- FAILED: $$d ---"; echo "$$out" | tail -20; fail=1; \
+			else \
+				echo "OK: $$d"; \
+			fi; \
+		fi; \
+	done; \
+	if [ $$fail -ne 0 ]; then echo "==> validate-examples FAILED - see output above"; exit 1; fi; \
+	echo "==> validate-examples: all checks passed"
+
 # ============================================================================
 # DEPENDENCIES
 # ============================================================================

@@ -24,10 +24,10 @@ bring-your-own-cluster example would help.
   Identity binding to the in-cluster `anyscale-operator` Kubernetes service account in the
   `anyscale_k8s_namespace` namespace
 - A GKE cluster ([`terraform-google-modules/kubernetes-engine`](https://registry.terraform.io/modules/terraform-google-modules/kubernetes-engine/google/latest)
-  v34) with four node pools: `default-node-pool` (small on-demand pool for cluster
+  v34) with five node pools by default: `default-node-pool` (small on-demand pool for cluster
   components - CoreDNS, the Anyscale Operator), `ondemand-cpu` / `spot-cpu` (general-purpose CPU
   capacity for Ray workloads), and one `ondemand-gpu-<type>` / `spot-gpu-<type>` pair per entry in
-  `gpu_instance_configs` (a single `T4` pair by default)
+  `gpu_instance_configs` (a single `T4` pair by default - more entries mean more pool pairs)
 - An `anyscale_cloud` (empty) plus an `anyscale_cloud_resource` with `compute_stack = "K8S"`,
   pointing its `kubernetes_config` at the GKE node service account email and available zones
 

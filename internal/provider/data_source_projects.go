@@ -81,7 +81,7 @@ func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 		Attributes: map[string]schema.Attribute{
 			"name_contains": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Filter projects by partial name match.",
+				MarkdownDescription: "Filter projects by partial, case-insensitive name match.",
 			},
 			"creator_id": schema.StringAttribute{
 				Optional:            true,

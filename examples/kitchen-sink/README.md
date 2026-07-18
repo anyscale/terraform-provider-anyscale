@@ -52,7 +52,7 @@ no "adopt" on a collision).
 Every one of these lists `worker_nodes` explicitly — omitting it launches zero workers rather than
 falling back to a sane default; see the [Compute Config guide](../../docs/guides/compute-config.md).
 
-**Container images, projects, and org resources (6 applied automatically):**
+**Container images, projects, and org resources (4 applied automatically, 2 shown but not applied by default):**
 
 | Resource | What it does here |
 | --- | --- |
