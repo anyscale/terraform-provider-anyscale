@@ -108,9 +108,6 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 		if !config.CloudResourceID.IsNull() {
 			t.Errorf("CloudResourceID = %v, want null (no default resource)", config.CloudResourceID)
 		}
-		if !config.CloudResourceID.IsNull() {
-			t.Errorf("CloudResourceID = %v, want null (no default resource)", config.CloudResourceID)
-		}
 	})
 }
 
