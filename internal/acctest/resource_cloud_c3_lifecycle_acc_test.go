@@ -710,6 +710,9 @@ func newC3MockCloudServerWithResourceID(t *testing.T, cloudID, cloudJSON, resour
 
 	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+		// cloud_deployment_id is intentional here, not leftover: the real backend still
+		// sends it alongside cloud_resource_id (removal is provider-side only), so this
+		// mock stays realistic by including it - implicitly proving the provider ignores it.
 		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": %q}}`, cloudResourceID)
 	})
 
@@ -751,6 +754,8 @@ func TestAccCloudResource_CloudResourceIDPopulated_MockServer(t *testing.T) {
 		"id": %[1]q, "name": "c3-resourceid-mock", "provider": "AWS", "region": "us-east-2",
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
 	}`, cloudID)
+	// cloud_deployment_id below is intentional (see the add_resource mock comment above),
+	// not leftover from the removal.
 	resourcesJSON := fmt.Sprintf(`[{
 		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
 		"cloud_resource_id": %[1]q,
