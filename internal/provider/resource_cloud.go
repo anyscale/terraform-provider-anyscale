@@ -1498,6 +1498,20 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 				return awsConfig.AnyscaleIAMRoleID, false, nil
 			}
 		}
+		// K8S compute_stack on AWS has no aws_config at all (by design - see the
+		// AZURE case below, which this mirrors): fall back to the operator
+		// identity before falling through to a placeholder. Without this, every
+		// correctly-configured all-in-one AWS+K8S cloud hit the placeholder path
+		// and fired a "set aws_config.controlplane_iam_role_arn" warning that
+		// does not apply to K8S clouds at all - confirmed live during native-B's
+		// EKS validation.
+		if !plan.KubernetesConfig.IsNull() {
+			var k8sModel KubernetesConfigModel
+			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
+			if !diags.HasError() && !k8sModel.AnyscaleOperatorIAMIdentity.IsNull() && k8sModel.AnyscaleOperatorIAMIdentity.ValueString() != "" {
+				return k8sModel.AnyscaleOperatorIAMIdentity.ValueString(), false, nil
+			}
+		}
 	case "GCP":
 		if !plan.GCPConfig.IsNull() {
 			gcpConfig, err := expandGCPConfig(ctx, plan.GCPConfig)
@@ -1519,6 +1533,15 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 					return "", false, fmt.Errorf("failed to marshal GCP credentials: %w", err)
 				}
 				return string(credsJSON), false, nil
+			}
+		}
+		// Same K8S-on-GCP fallback as the AWS case above (gcp_config is absent
+		// by design for a K8S compute_stack).
+		if !plan.KubernetesConfig.IsNull() {
+			var k8sModel KubernetesConfigModel
+			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
+			if !diags.HasError() && !k8sModel.AnyscaleOperatorIAMIdentity.IsNull() && k8sModel.AnyscaleOperatorIAMIdentity.ValueString() != "" {
+				return k8sModel.AnyscaleOperatorIAMIdentity.ValueString(), false, nil
 			}
 		}
 	case "AZURE":

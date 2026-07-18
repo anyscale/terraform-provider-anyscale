@@ -289,6 +289,35 @@ func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
 		}
 	})
 
+	t.Run("K8S compute_stack on AWS: derived from kubernetes_config, not a placeholder", func(t *testing.T) {
+		// aws_config is genuinely absent here - not "present but empty" - since a
+		// K8S-on-AWS all-in-one cloud has no aws_config block at all, only
+		// kubernetes_config. Before this fix, getOrGenerateCredentials had no AWS
+		// case for this and fell straight through to the placeholder branch,
+		// firing a "set aws_config.controlplane_iam_role_arn" warning that does
+		// not apply to K8S clouds - confirmed live during native-B's real EKS
+		// validation (aws-eks-basic, compute_stack = K8S).
+		k8sObj, diags := flattenKubernetesConfig(ctx, &KubernetesConfig{AnyscaleOperatorIAMIdentity: "arn:aws:iam::123:role/eks-operator"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test kubernetes_config: %v", diags)
+		}
+		plan := &CloudResourceModel{
+			Credentials:      types.StringNull(),
+			AWSConfig:        types.ObjectNull(awsConfigAttrTypes()),
+			KubernetesConfig: k8sObj,
+		}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - a credential was derivable from kubernetes_config")
+		}
+		if creds != "arn:aws:iam::123:role/eks-operator" {
+			t.Errorf("creds = %v, want the operator identity from kubernetes_config", creds)
+		}
+	})
+
 	t.Run("all-in-one with config present but no derivable role: placeholder AND suspicious", func(t *testing.T) {
 		// aws_config is present (all-in-one, not empty cloud) but its
 		// controlplane_iam_role_arn was left unset - exactly the
