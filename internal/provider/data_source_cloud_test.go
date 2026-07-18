@@ -13,11 +13,11 @@ import (
 // TestReadCloudIntoModel_MapsFromResponseNotConstant is a regression test for
 // change C1: data_source_cloud.go used to hardcode auto_add_user,
 // enable_lineage_tracking, enable_log_ingestion, is_empty_cloud to false and
-// cloud_deployment_id to null, regardless of what the API returned. Each case
+// cloud_resource_id to null, regardless of what the API returned. Each case
 // below sets the mocked API to the OPPOSITE of the old hardcoded value, so
 // this test fails against the pre-fix implementation.
 func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
-	t.Run("cloud with resources: booleans true, deployment ID from default resource", func(t *testing.T) {
+	t.Run("cloud with resources: booleans true, resource ID from default resource", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			switch r.URL.Path {
@@ -37,7 +37,7 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 				}`)
 			case "/api/v2/clouds/cloud-1/resources":
 				_, _ = fmt.Fprint(w, `{
-					"results": [{"name": "default-resource", "cloud_deployment_id": "cd-42", "is_default": true}],
+					"results": [{"name": "default-resource", "cloud_resource_id": "cr-42", "is_default": true}],
 					"metadata": {"total": 1, "next_paging_token": null}
 				}`)
 			default:
@@ -64,12 +64,12 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 		if config.IsEmptyCloud.ValueBool() {
 			t.Error("IsEmptyCloud = true, want false (cloud has a resource)")
 		}
-		if config.CloudDeploymentID.IsNull() || config.CloudDeploymentID.ValueString() != "cd-42" {
-			t.Errorf("CloudDeploymentID = %v, want \"cd-42\"", config.CloudDeploymentID)
+		if config.CloudResourceID.IsNull() || config.CloudResourceID.ValueString() != "cr-42" {
+			t.Errorf("CloudResourceID = %v, want \"cr-42\"", config.CloudResourceID)
 		}
 	})
 
-	t.Run("cloud with no resources: booleans false, is_empty_cloud true, deployment ID null", func(t *testing.T) {
+	t.Run("cloud with no resources: booleans false, is_empty_cloud true, resource ID null", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			switch r.URL.Path {
@@ -105,8 +105,8 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 		if !config.IsEmptyCloud.ValueBool() {
 			t.Error("IsEmptyCloud = false, want true (cloud has zero resources)")
 		}
-		if !config.CloudDeploymentID.IsNull() {
-			t.Errorf("CloudDeploymentID = %v, want null (no default resource)", config.CloudDeploymentID)
+		if !config.CloudResourceID.IsNull() {
+			t.Errorf("CloudResourceID = %v, want null (no default resource)", config.CloudResourceID)
 		}
 		if !config.CloudResourceID.IsNull() {
 			t.Errorf("CloudResourceID = %v, want null (no default resource)", config.CloudResourceID)
@@ -168,43 +168,6 @@ func TestReadCloudIntoModel_C2ParityFieldsMapFromResponse(t *testing.T) {
 	}
 }
 
-// TestReadCloudIntoModel_CloudDeploymentIDEmptyStringBecomesNull is a
-// regression test for a null-vs-empty-string bug: a cloud's default resource
-// can have cloud_deployment_id left as "" by the backend (the deprecated
-// field is no longer populated), which must surface as Terraform null, not
-// "". cloud_resource_id on the same resource is real and must still come
-// through as its actual value.
-func TestReadCloudIntoModel_CloudDeploymentIDEmptyStringBecomesNull(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		switch r.URL.Path {
-		case "/api/v2/clouds/cloud-4":
-			_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-4", "name": "c", "provider": "AWS", "region": "us-east-1"}}`)
-		case "/api/v2/clouds/cloud-4/resources":
-			_, _ = fmt.Fprint(w, `{
-				"results": [{"name": "default-resource", "cloud_deployment_id": "", "cloud_resource_id": "cldrsrc_abc", "is_default": true}],
-				"metadata": {"total": 1, "next_paging_token": null}
-			}`)
-		default:
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
-	var config CloudDataSourceModel
-	if err := d.readCloudIntoModel(context.Background(), "cloud-4", &config); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !config.CloudDeploymentID.IsNull() {
-		t.Errorf("CloudDeploymentID = %v, want null (backend left cloud_deployment_id as an empty string)", config.CloudDeploymentID)
-	}
-	if config.CloudResourceID.IsNull() || config.CloudResourceID.ValueString() != "cldrsrc_abc" {
-		t.Errorf("CloudResourceID = %v, want \"cldrsrc_abc\"", config.CloudResourceID)
-	}
-}
-
 // TestCloudDataSource_LookupByIDAndByName_ReturnIdenticalValues proves that
 // the by-id and by-name lookup paths converge on readCloudIntoModel and so
 // return the same values for the same underlying cloud - both must reflect
@@ -218,7 +181,7 @@ func TestCloudDataSource_LookupByIDAndByName_ReturnIdenticalValues(t *testing.T)
 		case "/api/v2/clouds/cloud-3":
 			_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-3", "name": "by-name-target", "provider": "GCP", "region": "us-central1", "auto_add_user": true, "lineage_tracking_enabled": true, "is_aggregated_logs_enabled": true}}`)
 		case "/api/v2/clouds/cloud-3/resources":
-			_, _ = fmt.Fprint(w, `{"results": [{"name": "r", "cloud_deployment_id": "cd-99", "is_default": true}], "metadata": {"total": 1, "next_paging_token": null}}`)
+			_, _ = fmt.Fprint(w, `{"results": [{"name": "r", "cloud_resource_id": "cr-99", "is_default": true}], "metadata": {"total": 1, "next_paging_token": null}}`)
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -244,8 +207,8 @@ func TestCloudDataSource_LookupByIDAndByName_ReturnIdenticalValues(t *testing.T)
 	if byID.AutoAddUser.ValueBool() != byName.AutoAddUser.ValueBool() {
 		t.Errorf("AutoAddUser mismatch: by-id=%v by-name=%v", byID.AutoAddUser.ValueBool(), byName.AutoAddUser.ValueBool())
 	}
-	if byID.CloudDeploymentID.ValueString() != byName.CloudDeploymentID.ValueString() {
-		t.Errorf("CloudDeploymentID mismatch: by-id=%v by-name=%v", byID.CloudDeploymentID, byName.CloudDeploymentID)
+	if byID.CloudResourceID.ValueString() != byName.CloudResourceID.ValueString() {
+		t.Errorf("CloudResourceID mismatch: by-id=%v by-name=%v", byID.CloudResourceID, byName.CloudResourceID)
 	}
 	if byID.IsEmptyCloud.ValueBool() != byName.IsEmptyCloud.ValueBool() {
 		t.Errorf("IsEmptyCloud mismatch: by-id=%v by-name=%v", byID.IsEmptyCloud.ValueBool(), byName.IsEmptyCloud.ValueBool())
@@ -457,17 +420,13 @@ func TestCloudStateMapping(t *testing.T) {
 // TestCloudNullableFields tests handling of optional/nullable fields
 func TestCloudNullableFields(t *testing.T) {
 	model := CloudDataSourceModel{
-		ID:                types.StringValue("cld_123"),
-		Name:              types.StringValue("test-cloud"),
-		Status:            types.StringNull(), // Status might not be present
-		CloudDeploymentID: types.StringNull(), // Deployment ID might not be present
+		ID:     types.StringValue("cld_123"),
+		Name:   types.StringValue("test-cloud"),
+		Status: types.StringNull(), // Status might not be present
 	}
 
 	if !model.Status.IsNull() {
 		t.Error("Status should be null")
-	}
-	if !model.CloudDeploymentID.IsNull() {
-		t.Error("CloudDeploymentID should be null")
 	}
 }
 

@@ -392,7 +392,6 @@ func TestCloudDeploymentsResponseJSON(t *testing.T) {
 		"results": [
 			{
 				"cloud_resource_id": "cr-1",
-				"cloud_deployment_id": "cd-1",
 				"name": "deployment-1",
 				"provider": "AWS",
 				"compute_stack": "VM",

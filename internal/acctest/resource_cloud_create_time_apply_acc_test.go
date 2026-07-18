@@ -90,7 +90,7 @@ func newMockCloudCreateTimeServer(t *testing.T) (*httptest.Server, *mockCloudCre
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{
 			"results": [{
-				"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_createtime_mock",
+				"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_createtime_mock",
 				"compute_stack": "VM", "region": "us-east-2",
 				"aws_config": {
 					"vpc_id": "vpc-realct123",
@@ -109,7 +109,7 @@ func newMockCloudCreateTimeServer(t *testing.T) (*httptest.Server, *mockCloudCre
 
 	mux.HandleFunc("/api/v2/clouds/"+s.cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{"result": {"cloud_deployment_id": "cldrsrc_createtime_mock"}}`)
+		_, _ = fmt.Fprint(w, `{"result": {"cloud_resource_id": "cldrsrc_createtime_mock"}}`)
 	})
 
 	mux.HandleFunc("/api/v2/clouds/"+s.cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {

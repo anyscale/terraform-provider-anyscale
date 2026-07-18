@@ -70,9 +70,11 @@ func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON string
 
 	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		// add_resource's own response is only used for its cloud_deployment_id;
-		// the resources listing above is what config-block population reads.
-		_, _ = fmt.Fprint(w, `{"result": {"cloud_deployment_id": "cldrsrc_mock_default"}}`)
+		// add_resource's own response is only used for its cloud_resource_id;
+		// the resources listing above is what config-block population reads,
+		// and its own cloud_resource_id overwrites this one before Create's
+		// final State.Set (see readCloudState -> backfillComputedCloudFields).
+		_, _ = fmt.Fprint(w, `{"result": {"cloud_resource_id": "cldrsrc_mock_default"}}`)
 	})
 
 	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +119,7 @@ func TestAccCloudResource_Lifecycle_AWS_MockServer(t *testing.T) {
 	// cluster_instance_profile_id (C6) is included to prove it round-trips
 	// through the same import-only recovery path as the pre-existing fields.
 	resourcesJSON := `[{
-		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
 		"compute_stack": "VM", "region": "us-east-2",
 		"aws_config": {
 			"vpc_id": "vpc-real123",
@@ -199,7 +201,7 @@ func TestAccCloudResource_Lifecycle_GCP_MockServer(t *testing.T) {
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
 	}`, cloudID)
 	resourcesJSON := `[{
-		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
 		"compute_stack": "VM", "region": "us-central1",
 		"gcp_config": {
 			"project_id": "real-gcp-project",
@@ -329,7 +331,7 @@ func TestAccCloudResource_Lifecycle_K8S_MockServer(t *testing.T) {
 	// too (not added to the ignore list) - that is real round-trip proof,
 	// not just a create-time echo.
 	resourcesJSON := `[{
-		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
 		"compute_stack": "K8S", "region": "us-east-2",
 		"kubernetes_config": {
 			"anyscale_operator_iam_identity": "arn:aws:iam::123456789012:role/real-k8s-operator",
@@ -374,7 +376,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "object_storage.bucket_name", "real-k8s-bucket"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.persistent_volume_claim", "real-pvc-name"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.redis_endpoint", "redis.ray-system.svc.cluster.local:6379"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_deployment_id", "cldrsrc_mock_default"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_resource_id", "cldrsrc_mock_default"),
 				),
 				ExpectNonEmptyPlan: false,
 			},
@@ -421,7 +423,7 @@ func TestAccCloudResource_Lifecycle_GCP_K8S_MockServer(t *testing.T) {
 		"status": "ready", "state": "ACTIVE", "compute_stack": "K8S"
 	}`, cloudID)
 	resourcesJSON := `[{
-		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
 		"compute_stack": "K8S", "region": "us-central1",
 		"kubernetes_config": {
 			"anyscale_operator_iam_identity": "real-gke-operator@real-gcp-project.iam.gserviceaccount.com",
@@ -466,7 +468,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "object_storage.bucket_name", "gs://real-gke-bucket"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.csi_ephemeral_volume_driver", "ephemeral.csi.example.com"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.redis_endpoint", "redis.ray-system.svc.cluster.local:6379"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_deployment_id", "cldrsrc_mock_default"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_resource_id", "cldrsrc_mock_default"),
 				),
 				ExpectNonEmptyPlan: false,
 			},
@@ -527,7 +529,7 @@ func coldImportComputeStackMockServer(t *testing.T, cloudID string, isDefault bo
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
 	}`, cloudID)
 	resourcesJSON := fmt.Sprintf(`[{
-		"name": "default", "is_default": %[1]t, "cloud_deployment_id": "cldrsrc_cold_import",
+		"name": "default", "is_default": %[1]t, "cloud_resource_id": "cldrsrc_cold_import",
 		"compute_stack": "K8S", "region": "us-east-2",
 		"kubernetes_config": {
 			"anyscale_operator_iam_identity": "arn:aws:iam::123456789012:role/cold-import-operator",

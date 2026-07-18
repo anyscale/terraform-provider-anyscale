@@ -170,7 +170,6 @@ output "eks_operator_reported_at" {
 
 ### Read-Only
 
-- `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. The Anyscale API no longer populates this field; use `cloud_resource_id` instead.
 - `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale when this resource deployment was registered - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). `anyscale_cloud`'s own `cloud_resource_id` attribute exposes the same populated identifier for the all-in-one pattern. Stable for the life of this resource deployment - it does not move out of band between applies.
 - `id` (String) Composite identifier in format cloud_id:name
 - `is_default` (Boolean) Whether this is the default resource for the cloud.

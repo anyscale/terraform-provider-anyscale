@@ -42,7 +42,7 @@ func TestAccCloudResource_Lifecycle_AzureK8S_MockServer(t *testing.T) {
 	// cloud_config_flatten.go for why config blocks are never re-derived
 	// outside of ImportState).
 	resourcesJSON := fmt.Sprintf(`[{
-		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
 		"compute_stack": "K8S", "region": "eastus",
 		"kubernetes_config": {
 			"anyscale_operator_iam_identity": "11111111-2222-3333-4444-555555555555",
@@ -87,7 +87,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "object_storage.bucket_name", bucket),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "azure_config.tenant_id", "66666666-7777-8888-9999-aaaaaaaaaaaa"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.redis_endpoint", "redis.ray-system.svc.cluster.local:6379"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_deployment_id", "cldrsrc_mock_default"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_resource_id", "cldrsrc_mock_default"),
 				),
 				// Headline gate, same as the AWS/GCP K8S lifecycle tests: a
 				// config populated at create against a realistically-shaped

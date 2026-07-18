@@ -3,12 +3,12 @@
 page_title: "anyscale_clouds Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information. Per-cloud resource identifiers (cloud_resource_id and cloud_deployment_id) are deliberately omitted here to avoid an extra API call per cloud in the list - use the anyscale_cloud data source or the anyscale_cloud/anyscale_cloud_resource resources to look those up.
+  Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information. The per-cloud cloud_resource_id is deliberately omitted here to avoid an extra API call per cloud in the list - use the anyscale_cloud data source or the anyscale_cloud/anyscale_cloud_resource resources to look it up.
 ---
 
 # anyscale_clouds (Data Source)
 
-Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information. Per-cloud resource identifiers (`cloud_resource_id` and `cloud_deployment_id`) are deliberately omitted here to avoid an extra API call per cloud in the list - use the `anyscale_cloud` data source or the `anyscale_cloud`/`anyscale_cloud_resource` resources to look those up.
+Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information. The per-cloud `cloud_resource_id` is deliberately omitted here to avoid an extra API call per cloud in the list - use the `anyscale_cloud` data source or the `anyscale_cloud`/`anyscale_cloud_resource` resources to look it up.
 
 ## Example Usage
 

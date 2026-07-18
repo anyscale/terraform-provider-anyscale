@@ -22,14 +22,14 @@ func TestReadCloudResource_PagesBeyondFirstPage(t *testing.T) {
 
 		if requestCount == 1 {
 			_, _ = fmt.Fprint(w, `{
-				"results": [{"name": "resource-1", "cloud_resource_id": "cr-1", "cloud_deployment_id": "cd-1", "compute_stack": "VM", "region": "us-east-2", "is_default": true}],
+				"results": [{"name": "resource-1", "cloud_resource_id": "cr-1", "compute_stack": "VM", "region": "us-east-2", "is_default": true}],
 				"metadata": {"total": 2, "next_paging_token": "page2"}
 			}`)
 			return
 		}
 
 		_, _ = fmt.Fprint(w, `{
-			"results": [{"name": "resource-2", "cloud_resource_id": "cr-2", "cloud_deployment_id": "cd-2", "compute_stack": "VM", "region": "us-east-2", "is_default": false}],
+			"results": [{"name": "resource-2", "cloud_resource_id": "cr-2", "compute_stack": "VM", "region": "us-east-2", "is_default": false}],
 			"metadata": {"total": 2, "next_paging_token": null}
 		}`)
 	}))

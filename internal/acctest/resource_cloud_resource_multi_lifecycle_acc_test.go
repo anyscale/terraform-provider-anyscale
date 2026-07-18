@@ -119,13 +119,12 @@ import (
 // multiResourceMockEntry is one backend cloud_resource record tracked by the
 // mock across the lifetime of a single test.
 type multiResourceMockEntry struct {
-	Name              string
-	Provider          string
-	ComputeStack      string
-	Region            string
-	NetworkingMode    string
-	CloudResourceID   string
-	CloudDeploymentID string
+	Name            string
+	Provider        string
+	ComputeStack    string
+	Region          string
+	NetworkingMode  string
+	CloudResourceID string
 }
 
 // multiResourceMockServer is a CREATE-ONLY, in-memory fake of one cloud's
@@ -226,13 +225,12 @@ func newMultiResourceMockServer(t *testing.T, cloudID string) (*httptest.Server,
 
 		m.nextSeq++
 		m.byName[name] = &multiResourceMockEntry{
-			Name:              name,
-			Provider:          req.Provider,
-			ComputeStack:      req.ComputeStack,
-			Region:            req.Region,
-			NetworkingMode:    req.NetworkingMode,
-			CloudResourceID:   fmt.Sprintf("cr_mock_%d", m.nextSeq),
-			CloudDeploymentID: fmt.Sprintf("cd_mock_%d", m.nextSeq),
+			Name:            name,
+			Provider:        req.Provider,
+			ComputeStack:    req.ComputeStack,
+			Region:          req.Region,
+			NetworkingMode:  req.NetworkingMode,
+			CloudResourceID: fmt.Sprintf("cr_mock_%d", m.nextSeq),
 		}
 		m.order = append(m.order, name)
 
@@ -296,14 +294,13 @@ func (m *multiResourceMockServer) generateNameLocked(computeStack, provider, reg
 func (m *multiResourceMockServer) renderLocked(name string) map[string]any {
 	e := m.byName[name]
 	return map[string]any{
-		"cloud_resource_id":   e.CloudResourceID,
-		"cloud_deployment_id": e.CloudDeploymentID,
-		"name":                e.Name,
-		"provider":            e.Provider,
-		"compute_stack":       e.ComputeStack,
-		"region":              e.Region,
-		"networking_mode":     e.NetworkingMode,
-		"is_default":          len(m.order) > 0 && m.order[0] == name,
+		"cloud_resource_id": e.CloudResourceID,
+		"name":              e.Name,
+		"provider":          e.Provider,
+		"compute_stack":     e.ComputeStack,
+		"region":            e.Region,
+		"networking_mode":   e.NetworkingMode,
+		"is_default":        len(m.order) > 0 && m.order[0] == name,
 	}
 }
 

@@ -42,7 +42,6 @@ type CloudDataSourceModel struct {
 	Status                types.String `tfsdk:"status"`
 	State                 types.String `tfsdk:"state"`
 	IsEmptyCloud          types.Bool   `tfsdk:"is_empty_cloud"`
-	CloudDeploymentID     types.String `tfsdk:"cloud_deployment_id"`
 	CloudResourceID       types.String `tfsdk:"cloud_resource_id"`
 	AutoAddUser           types.Bool   `tfsdk:"auto_add_user"`
 	EnableLineageTracking types.Bool   `tfsdk:"enable_lineage_tracking"`
@@ -92,14 +91,9 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 		Computed:            true,
 		MarkdownDescription: "Whether this is an empty cloud (created without embedded resource configuration).",
 	}
-	attributes["cloud_deployment_id"] = schema.StringAttribute{
-		Computed:            true,
-		MarkdownDescription: "The cloud deployment ID. Deprecated and always null: the Anyscale API no longer populates this field. Use this data source's own `cloud_resource_id` attribute instead, which carries the populated identifier (e.g. to pass to the Anyscale operator during installation for a K8S cloud).",
-		DeprecationMessage:  "Deprecated by the Anyscale API; the backend no longer populates this field. Will be removed in a future major release - use this data source's own `cloud_resource_id` instead.",
-	}
 	attributes["cloud_resource_id"] = schema.StringAttribute{
 		Computed:            true,
-		MarkdownDescription: "The unique cloud resource ID assigned by Anyscale for this cloud's default resource - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud. Null for a genuinely empty cloud (no resources attached yet).",
+		MarkdownDescription: "The unique cloud resource ID assigned by Anyscale for this cloud's default resource. This is what you pass to the Anyscale operator during installation for a K8S cloud. Null for a genuinely empty cloud (no resources attached yet).",
 	}
 	// C7: same backend field as the plural's lineage_tracking_enabled/is_aggregated_logs_enabled,
 	// kept under these names since renaming a shipped attribute is breaking. See
@@ -214,7 +208,7 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 
 // readCloudIntoModel fetches a cloud by ID and populates every computed field
 // on the model from the live API response - no field is left at a hardcoded
-// placeholder. is_empty_cloud and cloud_deployment_id require a second call
+// placeholder. is_empty_cloud and cloud_resource_id require a second call
 // (the cloud payload itself doesn't carry them) using the same resource-listing
 // semantics anyscale_cloud_resource relies on.
 func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string, config *CloudDataSourceModel) error {
@@ -285,10 +279,10 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	}
 	config.AvailabilityZones = azList
 
-	// is_empty_cloud and cloud_deployment_id aren't on the cloud payload itself -
+	// is_empty_cloud and cloud_resource_id aren't on the cloud payload itself -
 	// derive them from the cloud's resources the same way anyscale_cloud_resource
 	// does: no resources attached at all means the empty-cloud pattern is in
-	// effect; the default/primary resource (if any) carries the deployment ID.
+	// effect; the default/primary resource (if any) carries the resource ID.
 	resources, err := listCloudResources(ctx, d.client, cloudID)
 	if err != nil {
 		return fmt.Errorf("failed to list cloud resources: %w", err)
@@ -297,10 +291,8 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	config.IsEmptyCloud = types.BoolValue(len(resources) == 0)
 
 	if defaultResource := findDefaultInCloudResources(resources); defaultResource != nil {
-		config.CloudDeploymentID = stringOrNull(defaultResource.CloudDeploymentID)
 		config.CloudResourceID = types.StringValue(defaultResource.CloudResourceID)
 	} else {
-		config.CloudDeploymentID = types.StringNull()
 		config.CloudResourceID = types.StringNull()
 	}
 

@@ -686,7 +686,7 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 				}})
 			case "/api/v2/clouds/cld_test/resources":
 				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
-					{IsDefault: true, ComputeStack: "K8S", CloudDeploymentID: "dep_1"},
+					{IsDefault: true, ComputeStack: "K8S"},
 				}})
 			default:
 				t.Errorf("unexpected request: %s", r.URL.Path)
@@ -779,7 +779,7 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 				}})
 			case "/api/v2/clouds/cld_cli/resources":
 				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
-					{IsDefault: false, ComputeStack: "K8S", CloudDeploymentID: "dep_cli"}, // NOT flagged default
+					{IsDefault: false, ComputeStack: "K8S"}, // NOT flagged default
 				}})
 			default:
 				t.Errorf("unexpected request: %s", r.URL.Path)
@@ -809,8 +809,8 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 				}})
 			case "/api/v2/clouds/cld_multi/resources":
 				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
-					{IsDefault: false, ComputeStack: "K8S", CloudDeploymentID: "dep_a"},
-					{IsDefault: false, ComputeStack: "VM", CloudDeploymentID: "dep_b"},
+					{IsDefault: false, ComputeStack: "K8S"},
+					{IsDefault: false, ComputeStack: "VM"},
 				}})
 			default:
 				t.Errorf("unexpected request: %s", r.URL.Path)
