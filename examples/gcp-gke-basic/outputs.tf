@@ -13,7 +13,7 @@ output "cloud_name" {
   value       = anyscale_cloud.primary.name
 }
 
-output "cloud_deployment_id" {
-  description = "The cloud deployment ID. Pass this to the Anyscale operator during installation."
-  value       = anyscale_cloud_resource.primary.cloud_deployment_id
+output "cloud_resource_id" {
+  description = "The cloud resource ID. Pass this to the Anyscale operator during installation."
+  value       = anyscale_cloud_resource.primary.cloud_resource_id
 }

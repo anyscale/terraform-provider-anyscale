@@ -173,7 +173,6 @@ type CloudDeploymentResponse struct {
 // CloudDeploymentResult is the actual deployment data
 type CloudDeploymentResult struct {
 	CloudResourceID         string                 `json:"cloud_resource_id"`
-	CloudDeploymentID       string                 `json:"cloud_deployment_id"`
 	Name                    string                 `json:"name"`
 	Provider                string                 `json:"provider"`
 	ComputeStack            string                 `json:"compute_stack"`

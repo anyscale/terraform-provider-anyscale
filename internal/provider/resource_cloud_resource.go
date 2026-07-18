@@ -77,13 +77,12 @@ type CloudResourceResourceModel struct {
 	FileStorage   types.Object `tfsdk:"file_storage"`
 
 	// Computed fields
-	CloudResourceID   types.String `tfsdk:"cloud_resource_id"`
-	CloudDeploymentID types.String `tfsdk:"cloud_deployment_id"`
-	Status            types.String `tfsdk:"status"`
-	OperatorStatus    types.String `tfsdk:"operator_status"`
-	OperatorVersion   types.String `tfsdk:"operator_version"`
-	ReportedAt        types.String `tfsdk:"reported_at"`
-	IsDefault         types.Bool   `tfsdk:"is_default"`
+	CloudResourceID types.String `tfsdk:"cloud_resource_id"`
+	Status          types.String `tfsdk:"status"`
+	OperatorStatus  types.String `tfsdk:"operator_status"`
+	OperatorVersion types.String `tfsdk:"operator_version"`
+	ReportedAt      types.String `tfsdk:"reported_at"`
+	IsDefault       types.Bool   `tfsdk:"is_default"`
 
 	// Internal
 	ID types.String `tfsdk:"id"`
@@ -247,16 +246,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 			// ─── Computed Fields ──────────────────────────────────
 			"cloud_resource_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this resource deployment was registered - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). `anyscale_cloud`'s own `cloud_resource_id` attribute exposes the same populated identifier for the all-in-one pattern. Stable for the life of this resource deployment - it does not move out of band between applies.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-
-			"cloud_deployment_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID. The Anyscale API no longer populates this field; use `cloud_resource_id` instead.",
-				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
+				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this resource deployment was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). `anyscale_cloud`'s own `cloud_resource_id` attribute exposes the same populated identifier for the all-in-one pattern. Stable for the life of this resource deployment - it does not move out of band between applies.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -491,7 +481,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Attributes: map[string]schema.Attribute{
 					"anyscale_operator_iam_identity": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)). For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).",
+						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator via an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)) - a node group's IAM role will NOT work here, since node roles trust `ec2.amazonaws.com` instead; the provider cannot see a role's trust policy, so getting this wrong fails the operator's own authentication at runtime, not at `terraform plan`. For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -872,7 +862,6 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	plan.ID = types.StringValue(fmt.Sprintf("%s:%s", cloudID, resourceName))
 	plan.Name = types.StringValue(resourceName)
 	plan.CloudResourceID = types.StringValue(deployResp.Result.CloudResourceID)
-	plan.CloudDeploymentID = types.StringValue(deployResp.Result.CloudDeploymentID)
 
 	// Initialize Status to known null - will be updated by readCloudResource if available
 	if plan.Status.IsUnknown() {
@@ -1129,7 +1118,6 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 	state.CloudID = types.StringValue(cloudID)
 	state.Name = types.StringValue(foundResource.Name)
 	state.CloudResourceID = types.StringValue(foundResource.CloudResourceID)
-	state.CloudDeploymentID = types.StringValue(foundResource.CloudDeploymentID)
 	state.ComputeStack = types.StringValue(foundResource.ComputeStack)
 	state.Region = types.StringValue(foundResource.Region)
 	state.IsDefault = types.BoolValue(foundResource.IsDefault)

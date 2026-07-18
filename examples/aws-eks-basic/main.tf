@@ -18,8 +18,10 @@ resource "anyscale_cloud" "primary" {
 
   # Kubernetes Configuration (required for K8S compute_stack)
   kubernetes_config {
-    # IAM role ARN for the Anyscale operator running in EKS (required)
-    anyscale_operator_iam_identity = module.eks.eks_managed_node_groups["default"].iam_role_arn
+    # IAM role ARN for the Anyscale operator running in EKS (required). NOT the node group's own
+    # role (see anyscale_operator_iam.tf) -- that role can't be assumed by the Operator pod via EKS
+    # Pod Identity.
+    anyscale_operator_iam_identity = aws_iam_role.anyscale_operator.arn
 
     # Availability zones for the K8s cluster
     zones = module.anyscale_vpc.availability_zones

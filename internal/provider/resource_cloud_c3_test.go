@@ -45,7 +45,7 @@ func newImportStateResponse(t *testing.T, r resource.ResourceWithImportState) *r
 // result after apply" error - not a harmless enhancement. Under C3-v2:
 //   - readCloudState/readCloudResource NEVER touch config blocks, in any
 //     state (null or populated). They still backfill the Computed fields
-//     (is_empty_cloud, cloud_deployment_id).
+//     (is_empty_cloud, cloud_resource_id).
 //   - ImportState is the ONLY place that recovers config blocks from the
 //     API, and only the compute-stack-REQUIRED ones.
 
@@ -173,7 +173,7 @@ func TestReadCloudState_ComputedFieldsStillBackfillOnImport(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-2", "name": "imported", "provider": "AWS", "region": "us-east-2"}}`)
 		case "/api/v2/clouds/cloud-2/resources":
 			_, _ = fmt.Fprint(w, `{
-				"results": [{"name": "default", "is_default": true, "cloud_deployment_id": "cd-1", "aws_config": {"vpc_id": "vpc-real"}}],
+				"results": [{"name": "default", "is_default": true, "cloud_resource_id": "cr-1", "aws_config": {"vpc_id": "vpc-real"}}],
 				"metadata": {"total": 1, "next_paging_token": null}
 			}`)
 		default:
@@ -186,10 +186,10 @@ func TestReadCloudState_ComputedFieldsStillBackfillOnImport(t *testing.T) {
 	// A fresh terraform import only ever sets id via ImportState - the
 	// Computed fields start null/unknown, same as before C3-v2.
 	state := &CloudResourceModel{
-		ID:                types.StringValue("cloud-2"),
-		IsEmptyCloud:      types.BoolNull(),
-		CloudDeploymentID: types.StringNull(),
-		AWSConfig:         types.ObjectNull(awsConfigAttrTypes()),
+		ID:              types.StringValue("cloud-2"),
+		IsEmptyCloud:    types.BoolNull(),
+		CloudResourceID: types.StringNull(),
+		AWSConfig:       types.ObjectNull(awsConfigAttrTypes()),
 	}
 
 	if err := r.readCloudState(context.Background(), "cloud-2", state); err != nil {
@@ -199,8 +199,8 @@ func TestReadCloudState_ComputedFieldsStillBackfillOnImport(t *testing.T) {
 	if state.IsEmptyCloud.IsNull() || state.IsEmptyCloud.ValueBool() {
 		t.Errorf("IsEmptyCloud = %v, want false (a default resource exists)", state.IsEmptyCloud)
 	}
-	if state.CloudDeploymentID.ValueString() != "cd-1" {
-		t.Errorf("CloudDeploymentID = %v, want cd-1", state.CloudDeploymentID)
+	if state.CloudResourceID.ValueString() != "cr-1" {
+		t.Errorf("CloudResourceID = %v, want cr-1", state.CloudResourceID)
 	}
 	// The Computed fields backfill, but config blocks still do not - that's
 	// ImportState's job now, tested separately below.
@@ -220,7 +220,7 @@ func TestReadCloudState_EmptyCloudStaysEmptyEvenAfterResourceAttached(t *testing
 			// this cloud was created empty - a real default resource now
 			// exists server-side.
 			_, _ = fmt.Fprint(w, `{
-				"results": [{"name": "attached-later", "is_default": true, "cloud_deployment_id": "cd-later"}],
+				"results": [{"name": "attached-later", "is_default": true, "cloud_resource_id": "cr-later"}],
 				"metadata": {"total": 1, "next_paging_token": null}
 			}`)
 		default:
@@ -233,10 +233,10 @@ func TestReadCloudState_EmptyCloudStaysEmptyEvenAfterResourceAttached(t *testing
 	// IsEmptyCloud is explicitly true - set at Create time for the
 	// multi-resource cloud pattern and persisted ever since. This must be sticky.
 	state := &CloudResourceModel{
-		ID:                types.StringValue("cloud-3"),
-		IsEmptyCloud:      types.BoolValue(true),
-		CloudDeploymentID: types.StringNull(),
-		CloudProvider:     types.StringValue("AWS"),
+		ID:              types.StringValue("cloud-3"),
+		IsEmptyCloud:    types.BoolValue(true),
+		CloudResourceID: types.StringNull(),
+		CloudProvider:   types.StringValue("AWS"),
 	}
 
 	if err := r.readCloudState(context.Background(), "cloud-3", state); err != nil {
@@ -246,8 +246,8 @@ func TestReadCloudState_EmptyCloudStaysEmptyEvenAfterResourceAttached(t *testing
 	if !state.IsEmptyCloud.ValueBool() {
 		t.Error("IsEmptyCloud flipped to false - sticky guard failed, a live empty cloud would be corrupted")
 	}
-	if !state.CloudDeploymentID.IsNull() {
-		t.Errorf("CloudDeploymentID = %v, want still null - the empty-cloud gate blocks backfilling this too, consistent with never touching a known-empty cloud's state", state.CloudDeploymentID)
+	if !state.CloudResourceID.IsNull() {
+		t.Errorf("CloudResourceID = %v, want still null - the empty-cloud gate blocks backfilling this too, consistent with never touching a known-empty cloud's state", state.CloudResourceID)
 	}
 }
 
@@ -285,7 +285,7 @@ func TestReadCloudResource_NeverTouchesAlreadyPopulatedConfigBlock(t *testing.T)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{
-			"results": [{"name": "r1", "cloud_deployment_id": "cd-1", "is_default": true, "compute_stack": "VM", "region": "us-east-1", "aws_config": {"vpc_id": "vpc-FROM-API-SHOULD-NOT-APPEAR"}}],
+			"results": [{"name": "r1", "is_default": true, "compute_stack": "VM", "region": "us-east-1", "aws_config": {"vpc_id": "vpc-FROM-API-SHOULD-NOT-APPEAR"}}],
 			"metadata": {"total": 1, "next_paging_token": null}
 		}`)
 	}))
@@ -308,7 +308,7 @@ func TestReadCloudResource_NeverInjectsIntoNullConfigBlock(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{
-			"results": [{"name": "r1", "cloud_deployment_id": "cd-1", "is_default": true, "compute_stack": "VM", "region": "us-east-1", "provider": "GCP", "gcp_config": {"project_id": "proj-MUST-NOT-BE-INJECTED"}}],
+			"results": [{"name": "r1", "is_default": true, "compute_stack": "VM", "region": "us-east-1", "provider": "GCP", "gcp_config": {"project_id": "proj-MUST-NOT-BE-INJECTED"}}],
 			"metadata": {"total": 1, "next_paging_token": null}
 		}`)
 	}))

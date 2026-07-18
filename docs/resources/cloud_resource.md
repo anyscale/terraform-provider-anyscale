@@ -170,8 +170,7 @@ output "eks_operator_reported_at" {
 
 ### Read-Only
 
-- `cloud_deployment_id` (String, Deprecated) The cloud deployment ID. The Anyscale API no longer populates this field; use `cloud_resource_id` instead.
-- `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale when this resource deployment was registered - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). `anyscale_cloud`'s own `cloud_resource_id` attribute exposes the same populated identifier for the all-in-one pattern. Stable for the life of this resource deployment - it does not move out of band between applies.
+- `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale when this resource deployment was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). `anyscale_cloud`'s own `cloud_resource_id` attribute exposes the same populated identifier for the all-in-one pattern. Stable for the life of this resource deployment - it does not move out of band between applies.
 - `id` (String) Composite identifier in format cloud_id:name
 - `is_default` (Boolean) Whether this is the default resource for the cloud.
 - `operator_status` (String) The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM). Same underlying value as `status`.
@@ -248,7 +247,7 @@ Optional:
 
 Optional:
 
-- `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)). For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).
+- `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator via an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)) - a node group's IAM role will NOT work here, since node roles trust `ec2.amazonaws.com` instead; the provider cannot see a role's trust policy, so getting this wrong fails the operator's own authentication at runtime, not at `terraform plan`. For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).
 - `cluster_name` (String, Deprecated) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
 - `context` (String, Deprecated) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
 - `ingress_host` (String, Deprecated) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.

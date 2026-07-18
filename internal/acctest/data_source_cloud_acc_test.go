@@ -86,7 +86,7 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 // TestAccCloudDataSource_MatchesResourceState is an acceptance-level regression
 // test for change C1: data_source_cloud.go used to hardcode auto_add_user,
 // enable_lineage_tracking, enable_log_ingestion, is_empty_cloud to false and
-// cloud_deployment_id to null regardless of the real cloud. Unit tests can prove
+// cloud_resource_id to null regardless of the real cloud. Unit tests can prove
 // the mapping function is correct in isolation, but only a real resource+data
 // source pair proves the data source's Read genuinely converges with the
 // resource's own state over the real API - which is the actual acceptance
@@ -145,13 +145,13 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "enable_lineage_tracking", "anyscale_cloud.test", "enable_lineage_tracking"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "enable_log_ingestion", "anyscale_cloud.test", "enable_log_ingestion"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "is_empty_cloud", "anyscale_cloud.test", "is_empty_cloud"),
-					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "cloud_deployment_id", "anyscale_cloud.test", "cloud_deployment_id"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "cloud_resource_id", "anyscale_cloud.test", "cloud_resource_id"),
 					// By-name data source converges with resource state for all 5 fields.
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "auto_add_user", "anyscale_cloud.test", "auto_add_user"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "enable_lineage_tracking", "anyscale_cloud.test", "enable_lineage_tracking"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "enable_log_ingestion", "anyscale_cloud.test", "enable_log_ingestion"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "is_empty_cloud", "anyscale_cloud.test", "is_empty_cloud"),
-					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "cloud_deployment_id", "anyscale_cloud.test", "cloud_deployment_id"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "cloud_resource_id", "anyscale_cloud.test", "cloud_resource_id"),
 				),
 			},
 		},

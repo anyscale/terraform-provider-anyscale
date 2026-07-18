@@ -81,7 +81,7 @@ func newMockCloudSystemClusterServer(t *testing.T) (*httptest.Server, *mockCloud
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{
 			"results": [{
-				"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_syscluster_mock",
+				"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_syscluster_mock",
 				"compute_stack": "VM", "region": "us-east-2",
 				"aws_config": {
 					"vpc_id": "vpc-syscluster123",
@@ -100,7 +100,7 @@ func newMockCloudSystemClusterServer(t *testing.T) (*httptest.Server, *mockCloud
 
 	mux.HandleFunc("/api/v2/clouds/"+s.cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{"result": {"cloud_deployment_id": "cldrsrc_syscluster_mock"}}`)
+		_, _ = fmt.Fprint(w, `{"result": {"cloud_resource_id": "cldrsrc_syscluster_mock"}}`)
 	})
 
 	mux.HandleFunc("/api/v2/clouds/"+s.cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {

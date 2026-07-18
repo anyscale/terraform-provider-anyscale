@@ -72,10 +72,9 @@ type CloudResourceModel struct {
 	FileStorage   types.Object `tfsdk:"file_storage"`
 
 	// Computed fields
-	IsEmptyCloud      types.Bool   `tfsdk:"is_empty_cloud"`
-	CloudDeploymentID types.String `tfsdk:"cloud_deployment_id"`
-	IsDefault         types.Bool   `tfsdk:"is_default"`
-	CloudResourceID   types.String `tfsdk:"cloud_resource_id"`
+	IsEmptyCloud    types.Bool   `tfsdk:"is_empty_cloud"`
+	IsDefault       types.Bool   `tfsdk:"is_default"`
+	CloudResourceID types.String `tfsdk:"cloud_resource_id"`
 }
 
 // AzureConfigModel represents Azure-specific configuration. See AzureConfig
@@ -238,23 +237,14 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				},
 			},
 
-			"cloud_deployment_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID. Deprecated and always null: the Anyscale API no longer populates this field. Use this resource's own `cloud_resource_id` instead - that field is populated, and is what you pass to the Anyscale operator during installation for a K8S cloud. The multi-resource cloud pattern's `anyscale_cloud_resource` exposes the same populated identifier as its own `cloud_resource_id`.",
-				DeprecationMessage:  cloudDeploymentIDDeprecationMessage,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-
 			"is_default": schema.BoolAttribute{
 				Computed:            true,
-				MarkdownDescription: "Whether this cloud is the organization's default cloud. Read-only: which cloud is the org default is managed by Anyscale (e.g. via the console or CLI), not by this resource, and there is no API this resource can call to set or change it. Deliberately has no plan modifier, unlike `is_empty_cloud`/`cloud_deployment_id` above: the org default can move to a different cloud out of band at any time, so pinning this to the prior state (via `UseStateForUnknown`) would risk a `Provider produced inconsistent result after apply` error if the default changed between plan and apply. Terraform reflects whichever cloud is the current org default on every refresh, so drift here is expected and simply means the default moved - it is not a bug.",
+				MarkdownDescription: "Whether this cloud is the organization's default cloud. Read-only: which cloud is the org default is managed by Anyscale (e.g. via the console or CLI), not by this resource, and there is no API this resource can call to set or change it. Deliberately has no plan modifier, unlike `is_empty_cloud`/`cloud_resource_id` above: the org default can move to a different cloud out of band at any time, so pinning this to the prior state (via `UseStateForUnknown`) would risk a `Provider produced inconsistent result after apply` error if the default changed between plan and apply. Terraform reflects whichever cloud is the current org default on every refresh, so drift here is expected and simply means the default moved - it is not a bug.",
 			},
 
 			"cloud_resource_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this cloud's default resource was registered - the populated identifier that `cloud_deployment_id` was originally meant to be. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). Populated on both this all-in-one pattern and the multi-resource `anyscale_cloud_resource` pattern. Stable for the life of the cloud - unlike `is_default` above, it does not move out of band, so the provider pins it to the prior state between applies.",
+				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this cloud's default resource was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). Populated on both this all-in-one pattern and the multi-resource `anyscale_cloud_resource` pattern. Stable for the life of the cloud - unlike `is_default` above, it does not move out of band, so the provider pins it to the prior state between applies.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -448,7 +438,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Attributes: map[string]schema.Attribute{
 					"anyscale_operator_iam_identity": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)). For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).",
+						MarkdownDescription: "The IAM identity for the Anyscale operator. For AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator via an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)) - a node group's IAM role will NOT work here, since node roles trust `ec2.amazonaws.com` instead; the provider cannot see a role's trust policy, so getting this wrong fails the operator's own authentication at runtime, not at `terraform plan`. For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -995,11 +985,6 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	cloudID := cloudResp.Result.ID
 	plan.ID = types.StringValue(cloudID)
 	plan.IsEmptyCloud = types.BoolValue(isEmptyCloud)
-
-	// Initialize CloudDeploymentID to known null - will be updated by addCloudResource if deployment succeeds
-	if plan.CloudDeploymentID.IsUnknown() {
-		plan.CloudDeploymentID = types.StringNull()
-	}
 
 	// Initialize CloudResourceID to known null the same way: a genuinely empty
 	// cloud never calls addCloudResource below and has no resource yet, so
@@ -1635,17 +1620,12 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		return fmt.Errorf("failed to add cloud resource: %s - %s", deployResp.Status, string(deployBody))
 	}
 
-	// Parse response to get cloud_deployment_id and cloud_resource_id
+	// Parse response to get cloud_resource_id
 	var deployResult CloudDeploymentResponse
 	if err := json.Unmarshal(deployBody, &deployResult); err != nil {
 		tflog.Warn(ctx, "Failed to parse add_resource response", map[string]any{"error": err.Error()})
 	} else {
 		plan.CloudResourceID = types.StringValue(deployResult.Result.CloudResourceID)
-
-		if deployResult.Result.CloudDeploymentID != "" {
-			plan.CloudDeploymentID = types.StringValue(deployResult.Result.CloudDeploymentID)
-			tflog.Info(ctx, "Cloud deployment ID assigned", map[string]any{"deployment_id": deployResult.Result.CloudDeploymentID})
-		}
 	}
 
 	tflog.Info(ctx, "Cloud resource added successfully", map[string]any{"cloud_id": cloudID})
@@ -1702,13 +1682,8 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	// attribute deliberately has no plan modifier.
 	state.IsDefault = types.BoolValue(cloudResp.Result.IsDefault)
 
-	// If CloudDeploymentID is still unknown/null, set it to null explicitly
-	if state.CloudDeploymentID.IsUnknown() {
-		state.CloudDeploymentID = types.StringNull()
-	}
-
-	// C3 v2: backfill ONLY the two Computed fields (is_empty_cloud,
-	// cloud_deployment_id) from the cloud's resources. Config blocks
+	// C3 v2: backfill ONLY the Computed fields (is_empty_cloud,
+	// cloud_resource_id) from the cloud's resources. Config blocks
 	// (aws_config/gcp_config/kubernetes_config/object_storage/file_storage)
 	// are NOT Computed, so they may only ever equal what Create/Update saw in
 	// the plan - populating them here, in the shared Create/Read path, is
@@ -1769,8 +1744,8 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	return nil
 }
 
-// backfillComputedCloudFields fills in is_empty_cloud, cloud_deployment_id,
-// and cloud_resource_id from the cloud's resources. All three are Computed,
+// backfillComputedCloudFields fills in is_empty_cloud and cloud_resource_id
+// from the cloud's resources. Both are Computed,
 // so the provider may set them at any time without risking a
 // plan-consistency error - unlike the non-Computed config blocks (see
 // C3-v2; this function deliberately does not touch them).
@@ -1789,10 +1764,6 @@ func (r *CloudResource) backfillComputedCloudFields(state *CloudResourceModel, r
 	defaultResource := findDefaultInCloudResources(resources)
 	if defaultResource == nil {
 		return
-	}
-
-	if state.CloudDeploymentID.IsNull() && defaultResource.CloudDeploymentID != "" {
-		state.CloudDeploymentID = types.StringValue(defaultResource.CloudDeploymentID)
 	}
 
 	// cloud_resource_id is stable and confirmed non-empty on any real default

@@ -481,7 +481,7 @@ func TestAccCloudResource_MountPathPVCDefaultNoMisfire(t *testing.T) {
 		"status": "ready", "state": "ACTIVE", "compute_stack": "K8S"
 	}`, cloudID)
 	resourcesJSON := `[{
-		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
 		"compute_stack": "K8S", "region": "us-central1",
 		"kubernetes_config": {
 			"anyscale_operator_iam_identity": "tfacc-gke-operator@my-gcp-project.iam.gserviceaccount.com",
@@ -574,7 +574,7 @@ func TestAccCloudResource_SubnetNamesVMMultipleAllowed(t *testing.T) {
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
 	}`, cloudID)
 	resourcesJSON := `[{
-		"name": "default", "is_default": true, "cloud_deployment_id": "cldrsrc_mock_default",
+		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
 		"compute_stack": "VM", "region": "us-central1"
 	}]`
 

@@ -1,0 +1,24 @@
+```
+release-note:breaking-change
+resource/anyscale_cloud: `cloud_deployment_id` is removed - the Anyscale API stopped populating it, and `cloud_resource_id` (added in the previous release) is its full replacement; to migrate, replace any reference to `cloud_deployment_id` in your configuration or outputs with `cloud_resource_id` and re-run `terraform plan`.
+```
+```
+release-note:breaking-change
+resource/anyscale_cloud_resource: `cloud_deployment_id` is removed for the same reason as `anyscale_cloud`; to migrate, replace any reference to it with the already-existing `cloud_resource_id` attribute and re-run `terraform plan`.
+```
+```
+release-note:breaking-change
+data-source/anyscale_cloud: `cloud_deployment_id` is removed for the same reason as the `anyscale_cloud` resource; to migrate, replace any reference to it with the already-existing `cloud_resource_id` attribute and re-run `terraform plan`.
+```
+```
+release-note:changed
+data-source/anyscale_clouds: Update the description noting `cloud_resource_id` is omitted from this list data source, since the sibling `cloud_deployment_id` it used to be mentioned alongside is now removed entirely (no behavior change, docs only).
+```
+```
+release-note:fixed
+resource/anyscale_cloud: Document the IAM trust policy `anyscale_operator_iam_identity` requires on AWS EKS - the role must trust `pods.eks.amazonaws.com` via an `aws_eks_pod_identity_association`; a node group's own IAM role will not work, since node roles trust `ec2.amazonaws.com` instead, and this cannot be validated at `terraform plan` because the provider has no visibility into a role's trust policy.
+```
+```
+release-note:fixed
+resource/anyscale_cloud_resource: Document the same AWS EKS IAM trust policy requirement for `anyscale_operator_iam_identity` as `anyscale_cloud`.
+```

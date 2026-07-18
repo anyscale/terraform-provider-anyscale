@@ -478,13 +478,9 @@ func testAccCheckCloudResourceAttributes(resourceName, expectedName, expectedCom
 			return fmt.Errorf("compute_stack mismatch: expected %s, got %s", expectedComputeStack, foundDeployment.ComputeStack)
 		}
 
-		// Verify resource ID fields are set
+		// Verify resource ID field is set
 		if foundDeployment.CloudResourceID == "" {
 			return fmt.Errorf("cloud_resource_id is empty in API response")
-		}
-
-		if foundDeployment.CloudDeploymentID == "" {
-			return fmt.Errorf("cloud_deployment_id is empty in API response")
 		}
 
 		return nil
