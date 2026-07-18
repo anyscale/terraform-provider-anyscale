@@ -1,0 +1,4 @@
+```
+release-note:fixed
+provider: correct several misleading attribute descriptions in the published docs - the deprecated kubernetes_config fields (namespace, ingress_host, cluster_name, context, kubeconfig_path) are now documented as inert (no effect), and the compute_config data source no longer claims flags/advanced_instance_config are unexposed (they are, per node).
+```
