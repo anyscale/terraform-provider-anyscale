@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.2] - 2026-07-19
+
+### Added
+
+- provider: Add a "Create a VM Cloud" getting-started guide — a narrated walkthrough building up the `aws-vm-basic` all-in-one AWS VM cloud example (which gains a companion README) (no behavior change, docs only).
+- provider: Add a "Create a Kubernetes Cloud" getting-started guide — the AWS EKS walkthrough, including EKS Pod Identity, the Anyscale Operator, and the two-apply Envoy Gateway install (no behavior change, docs only).
+- provider: Add a "Kitchen Sink" tour guide covering the full `examples/kitchen-sink` configuration — every resource and data source the provider registers (no behavior change, docs only).
+
+### Changed
+
+- provider: Rename the cloud-resources guide's "Deprecated attributes" heading to "Deprecated and removed attributes" and add a subsection documenting v0.13.0's removal of `cloud_deployment_id` (in favor of `cloud_resource_id`), which the guide never covered (no behavior change, docs only).
+- provider: Fix the cloud-resources guide's `is_k8s` section to say the attribute is on both the singular `anyscale_cloud` and plural `anyscale_clouds` data sources, not just the plural one (no behavior change, docs only).
+- provider: Update the cloud-resources guide's EKS/GKE validation hedge to reflect that AWS EKS is now validated end-to-end for the fully-native Anyscale Operator install path (`examples/aws-eks-basic`, from native-B); GKE's equivalent Operator-install validation is still outstanding (no behavior change, docs only).
+- provider: Correct the cloud-resources guide's "Placeholder Credentials Generated" warning claim: it now fires only for all-in-one VM clouds with underivable credentials, not universally for all-in-one clouds, since Kubernetes clouds derive a real credential from the operator identity (no behavior change, docs only).
+- resource/anyscale_compute_config: Add a Compute Config guide cross-reference to the resource description, document that `enable_cross_zone_scaling` and `auto_select_worker_config` default to `false`, and tidy `min_resources`/`max_resources` and node-attribute wording.
+- data-source/anyscale_compute_config: Update the nested `cloud_deployment.id` description to "The target cloud resource's ID" to match v0.13.0 terminology.
+- resource/anyscale_container_image_build: Document that changing `name` or `project_id` replaces the resource (both are RequiresReplace).
+- resource/anyscale_container_image_registry: Document that the resource is fully immutable — every configurable attribute requires replacement.
+- provider: Correct the compute-config guide's write-only claim — only the top-level `flags`/`advanced_instance_config` are write-only; the per-node ones (nested in `head_node`/`worker_nodes`) are masked and read back from the API when set, like the other per-node fields (no behavior change, docs only).
+- provider: Group the four cross-cutting reference guides (cloud-resources, compute-config, container-images, project) under a new "Behavior & Limitations" subcategory, distinct from the "Getting Started" walkthrough guides (no behavior change, docs only).
+
 ## [0.13.1] - 2026-07-19
 
 ### Changed
@@ -681,7 +702,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.13.2...HEAD
+[0.13.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.2
 [0.13.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.1
 [0.13.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.0
 [0.12.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.12.1
