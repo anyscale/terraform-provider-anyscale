@@ -1,3 +1,0 @@
-```release-note:security
-provider: Bump golang.org/x/crypto to v0.54.0, resolving 13 open Dependabot alerts (7 critical) against the indirect dependency.
-```
