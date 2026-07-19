@@ -209,6 +209,8 @@ intend to keep, so an accidental `destroy` can't silently drop stored data.
 - [`examples/aws-vm-basic`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/aws-vm-basic) -
   the complete, runnable version of this walkthrough, including additional compute config and
   project variations
+- [Create a Kubernetes cloud](./create-a-kubernetes-cloud.md) - the Kubernetes/EKS equivalent of
+  this same walkthrough, a bigger lift since it also installs the Anyscale Operator
 - [Cloud Resources guide](./cloud-resources.md) - provider support matrix, naming differences
   between resources and data sources, and known limitations
 - [Compute Config guide](./compute-config.md) - versioning model and write-only fields
