@@ -115,6 +115,14 @@ The `changelog-gate` CI check accepts EITHER a `.changelog/<PR#>.txt` fragment O
 
 If you are unsure whether a change is user-facing, add a fragment — it is the safe default.
 
+## Deprecation Policy: Migration Guides
+
+Whenever a change deprecates or removes a user-facing attribute, resource, or data source, **ask
+the user** whether it warrants a migration guide before writing one unprompted. Do not assume a
+migration guide is needed just because a breaking change shipped — the `cloud_deployment_id` →
+`cloud_resource_id` removal (v0.13.0) intentionally skipped one, since the provider had no
+production users yet to migrate. That call belongs to the user each time, not a default.
+
 ## Terraform Local Testing (dev_overrides)
 
 This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provider binary.
