@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_cloud: Fix a misleading credentials warning (e.g. "set aws_config.controlplane_iam_role_arn") that fired on every correctly-configured Kubernetes-compute cloud, which has no `aws_config`/`gcp_config` at all by design; Kubernetes clouds now derive a credentials placeholder from `kubernetes_config.anyscale_operator_iam_identity` instead. On GCP this also fixes a real functional bug, not just the warning: the previous placeholder was not valid JSON, which made all-in-one GCP+Kubernetes cloud creation fail outright against the Anyscale API.
+```
