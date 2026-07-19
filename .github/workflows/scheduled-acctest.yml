@@ -1,0 +1,94 @@
+name: Scheduled Acceptance Tests
+
+# Compensating control for ci.yml's docs-only acctest skip (see that
+# workflow's "Detect docs-only diff" step): real-infra acceptance-test
+# coverage would otherwise depend entirely on a code-touching PR happening to
+# land. Docs-only PRs are common here (#143/#145/#146/#147/#148 landed in a
+# row with no intervening code change), so this runs the full acctest-data +
+# acctest-resource suites daily regardless of what merged, bounding the
+# window for an undetected real-infra regression to about 24h even during a
+# docs-only streak.
+#
+# This does NOT cover regressions in the example snippet files themselves --
+# acctest never reads examples/ -- that surface is covered unconditionally on
+# every PR by lint-and-unit's "Generate Docs" / "Validate Examples" steps in
+# ci.yml instead, which the docs-only skip does not gate.
+on:
+  schedule:
+    # Daily, off-peak and off the :00 mark (avoids the top-of-hour scheduling
+    # stampede on GitHub-hosted runners -- see registry-smoke-test.yml's cron
+    # comment for the same reasoning). Runs after sweep.yml's 03:00 UTC sweep
+    # (and its 60m job timeout) has certainly finished, so a leaked-resource
+    # cleanup pass never overlaps a live acctest run against the same test
+    # org -- belt-and-suspenders on top of the sweeper's own
+    # ANYSCALE_SWEEP_MIN_AGE guard (default 2h), which already protects
+    # against this on its own.
+    - cron: "24 4 * * *"
+  workflow_dispatch: # also runnable manually -- e.g. to confirm this
+    # workflow works at all before trusting the cron, or to get same-day
+    # signal after landing a fix.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-acctest-${{ github.ref }}
+  # false, unlike most other concurrency blocks in this repo: these steps
+  # create real cloud infra, and a hard-cancelled mid-test run does not get a
+  # chance to run its own cleanup/CheckDestroy. A second dispatch queues
+  # behind the running one instead of killing it.
+  cancel-in-progress: false
+
+jobs:
+  scheduled-acctest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.25"
+
+      - name: Setup Terraform
+        # Keep this version in sync with ci.yml's Setup Terraform step -- that
+        # workflow's comment explains why 1.15.7 specifically is required and
+        # confirms it's verified compatible with acctest-data/acctest-resource.
+        # sweep.yml pins an older 1.9.8 for a different, non-acctest code path
+        # (sweeper only, no real plan/apply) -- do not copy that pin here.
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.15.7"
+          terraform_wrapper: false
+
+      # Both steps below are intentional duplicates of ci.yml's "Acceptance
+      # Tests - Data Sources" / "Acceptance Tests - Resources" steps (minus
+      # the matrix/Dependabot conditionals, which don't apply to a scheduled
+      # run). Deliberately NOT factored into a shared reusable (workflow_call)
+      # workflow: the required-status-check context strings
+      # "ci (acctest-data)"/"ci (acctest-resource)" only exist because ci.yml
+      # runs these as one matrixed job named `ci` -- splitting that job to
+      # share logic here would change those context names and break branch
+      # protection until manually reconfigured. If the go test invocation
+      # (flags, timeout, filter regex) changes in one file, mirror it in the
+      # other by hand.
+      - name: Acceptance Tests - Data Sources
+        env:
+          ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+          ANYSCALE_TEST_CREATE_CLOUD: 1
+        run: |
+          set -o pipefail
+          TF_ACC=1 go test ./internal/acctest/ -v -timeout 60m -parallel 4 -run '^TestAcc[A-Za-z]+DataSource' 2>&1 | tee /tmp/acctest.log
+          .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Data Sources"
+
+      - name: Acceptance Tests - Resources
+        env:
+          ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
+          ANYSCALE_TEST_CREATE_CLOUD: 1
+        run: |
+          set -o pipefail
+          TF_ACC=1 go test ./internal/acctest/ -v -timeout 90m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' 2>&1 | tee /tmp/acctest.log
+          .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Resources"
+          .github/scripts/summarize-compute-config-coverage.sh /tmp/acctest.log "Acceptance Tests - Resources"
