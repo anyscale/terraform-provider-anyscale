@@ -1498,6 +1498,20 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 				return awsConfig.AnyscaleIAMRoleID, false, nil
 			}
 		}
+		// K8S compute_stack on AWS has no aws_config at all (by design - see the
+		// AZURE case below, which this mirrors): fall back to the operator
+		// identity before falling through to a placeholder. Without this, every
+		// correctly-configured all-in-one AWS+K8S cloud hit the placeholder path
+		// and fired a "set aws_config.controlplane_iam_role_arn" warning that
+		// does not apply to K8S clouds at all - confirmed live during native-B's
+		// EKS validation.
+		if !plan.KubernetesConfig.IsNull() {
+			var k8sModel KubernetesConfigModel
+			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
+			if !diags.HasError() && !k8sModel.AnyscaleOperatorIAMIdentity.IsNull() && k8sModel.AnyscaleOperatorIAMIdentity.ValueString() != "" {
+				return k8sModel.AnyscaleOperatorIAMIdentity.ValueString(), false, nil
+			}
+		}
 	case "GCP":
 		if !plan.GCPConfig.IsNull() {
 			gcpConfig, err := expandGCPConfig(ctx, plan.GCPConfig)
@@ -1517,6 +1531,37 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 				credsJSON, err := json.Marshal(gcpCreds)
 				if err != nil {
 					return "", false, fmt.Errorf("failed to marshal GCP credentials: %w", err)
+				}
+				return string(credsJSON), false, nil
+			}
+		}
+		// K8S-on-GCP fallback (gcp_config is absent by design for a K8S
+		// compute_stack) - NOT a bare string like the AWS/Azure cases: traced
+		// against the real backend (clouds_resource.py's
+		// create_cloud_without_permissions), GCP is the one provider that
+		// actually parses this field - json.loads(cloud.credentials), then
+		// reads provider_id/project_id/service_account_email out of it. A bare
+		// operator-identity string fails that parse and breaks GCP+K8S cloud
+		// creation outright (confirmed by architect's backend trace; this
+		// AWS-mirroring form was wrong before it ever shipped). The VALUES are
+		// still ceremonial for K8S (real auth is the operator's own identity),
+		// but the FORM must be valid JSON - same shape as the placeholder
+		// below, with the operator identity in service_account_email since
+		// that's exactly what this field means on GCP (see the schema
+		// description). provider_id/project_id have no equivalent in
+		// kubernetes_config, so they stay placeholder-style.
+		if !plan.KubernetesConfig.IsNull() {
+			var k8sModel KubernetesConfigModel
+			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
+			if !diags.HasError() && !k8sModel.AnyscaleOperatorIAMIdentity.IsNull() && k8sModel.AnyscaleOperatorIAMIdentity.ValueString() != "" {
+				gcpCreds := map[string]string{
+					"provider_id":           "projects/000000000000/locations/global/workloadIdentityPools/k8s-operator/providers/k8s-operator",
+					"project_id":            "k8s-operator-identity",
+					"service_account_email": k8sModel.AnyscaleOperatorIAMIdentity.ValueString(),
+				}
+				credsJSON, err := json.Marshal(gcpCreds)
+				if err != nil {
+					return "", false, fmt.Errorf("failed to marshal GCP K8S credentials: %w", err)
 				}
 				return string(credsJSON), false, nil
 			}

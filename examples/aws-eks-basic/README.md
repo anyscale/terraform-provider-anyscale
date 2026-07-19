@@ -38,6 +38,10 @@ example would help.
     `ondemand_gpu_<type>` / `spot_gpu_<type>` (one pair of node groups per entry in
     `gpu_instance_types`, generated automatically)
 - An `anyscale_cloud` resource with `compute_stack = "K8S"`, pointing its `kubernetes_config` at the EKS cluster's operator IAM identity and availability zones
+- [Envoy Gateway](https://gateway.envoyproxy.io/) and the Anyscale Operator itself, installed via
+  Terraform (`helm_release`/`kubernetes_manifest`) rather than left as a manual post-apply step —
+  see "Running the example" below for the two-apply flow this requires and "Known limitation"
+  for a required one-time Helm chart prerequisite
 
 For capacity-reserved GPU capacity (ODCR), see the [targeted ODCR
 pattern](https://aws-ia.github.io/terraform-aws-eks-blueprints/patterns/machine-learning/targeted-odcr/)
@@ -87,13 +91,57 @@ here. Those exist to build an AWS IAM trust policy for VM clouds; K8S clouds aut
 through the Anyscale Operator's IAM identity instead, which this example wires up for you via
 `kubernetes_config.anyscale_operator_iam_identity`.
 
+**Known limitation: Envoy Gateway chart pull.** This example installs [Envoy
+Gateway](https://gateway.envoyproxy.io/) via Terraform's `helm_release` resource, but the
+`terraform-provider-helm` v2.17.0 cannot pull Envoy Gateway's chart directly from its OCI
+registry — it fails with `insufficient_scope: authorization failed`, even though the chart is
+public and the standalone `helm` CLI pulls it fine on the same host. This is a real bug in the
+provider's own OCI client (see
+[hashicorp/terraform-provider-helm#1397](https://github.com/hashicorp/terraform-provider-helm/issues/1397)
+for the same class of issue against a different registry), not something this example's
+configuration can route around — there's no credential to configure for an anonymous public
+pull. Work around it with one manual pre-step, once per chart version:
+
+```bash
+helm pull oci://docker.io/envoyproxy/gateway-helm --version 1.8.2 -d examples/aws-eks-basic/.charts
+```
+
+If you skip this, `terraform plan`/`apply` fails fast with a clear message telling you to run
+the command above, rather than a cryptic OCI error partway through applying.
+
+(Pinned to `1.8.2`, the latest stable at time of writing — newer than the `v1.7.0` [Anyscale's own
+Gateway setup guide](https://docs.anyscale.com/clouds/kubernetes/gateway-envoy) references, since
+that guide predates this chart version. Re-verify against Envoy Gateway's own [release
+notes](https://github.com/envoyproxy/gateway/releases) before bumping it here.)
+
 ## Running the example
+
+Bringing this example up to a fully workload-capable cloud is **two `terraform apply`s**, not
+one. This is a deliberate, loudly-documented two-phase design, not a silent "just run it twice"
+gotcha: `kubernetes_manifest` resolves the target Kubernetes CRD against the *live cluster* at
+**plan time**, so a single apply can't both install Envoy Gateway's CRDs and create a Gateway
+object that depends on them — the CRD isn't registered yet when the same apply's plan step needs
+to resolve it. This is a documented limitation of the Kubernetes provider itself (see
+`gateway_operator.tf`), not a bug in this example.
 
 ```bash
 cd examples/aws-eks-basic
+
+# One-time prerequisite - see "Known limitation" above.
+helm pull oci://docker.io/envoyproxy/gateway-helm --version 1.8.2 -d .charts
+
 terraform init
+
+# First apply: creates the EKS cluster, registers the Anyscale cloud, and
+# installs Envoy Gateway's CRDs + controller. install_gateway_resources stays
+# at its default (false).
 terraform plan
 terraform apply
+
+# Second apply: flip install_gateway_resources to true (in terraform.tfvars,
+# or -var install_gateway_resources=true) to create the Gateway objects and
+# install the Anyscale Operator, now that the CRDs exist.
+terraform apply -var install_gateway_resources=true
 ```
 
 Or use the repo's Makefile wrapper, which runs apply and destroy with a unique `cloud_name`
@@ -103,11 +151,12 @@ suffix and a cleanup trap so a failed apply doesn't leak resources:
 make test-aws-eks-basic
 ```
 
-Expect the full apply (cluster + all node groups) to take **15-25 minutes**, and plan on
-roughly **112 resources** being created. Real AWS costs apply for as long as resources stay up:
-the EKS control plane bills hourly, and the `default` node group runs 2x `t3.medium` on demand
-out of the box. The CPU and GPU node groups all default to `desired_size = 0`, so you won't pay
-for that capacity until something scales them up.
+Expect the full first apply (cluster + all node groups + Envoy Gateway) to take **15-25
+minutes**, and plan on roughly **112 resources** being created; the second apply (Gateway objects
++ Operator) is fast, typically under a minute. Real AWS costs apply for as long as resources stay
+up: the EKS control plane bills hourly, and the `default` node group runs 2x `t3.medium` on
+demand out of the box. The CPU and GPU node groups all default to `desired_size = 0`, so you
+won't pay for that capacity until something scales them up.
 
 If you only need one half of the cycle (for example, debugging a failed apply without
 re-destroying working resources), use the paired targets directly with a shared `SUFFIX`:
@@ -130,6 +179,7 @@ make destroy-aws-eks-basic SUFFIX=dev1
 | `enable_efs` | Create a shared EFS filesystem | `false` |
 | `cloud_name` | Name of the Anyscale cloud to create | `tf-aws-eks-test` |
 | `anyscale_s3_force_destroy` | Allow `terraform destroy` to delete a non-empty S3 bucket | `true` |
+| `install_gateway_resources` | Set `true` on a **second** `terraform apply` to install the Gateway + Anyscale Operator. See "Running the example" below | `false` |
 
 `anyscale_s3_force_destroy` defaults to `true` here for test convenience — flip it to `false`
 before pointing this example at a bucket that will hold real data you care about.
@@ -140,8 +190,9 @@ before pointing this example at a bucket that will hold real data you care about
 |--------|-------------|
 | `cloud_id` | ID of the created Anyscale cloud |
 | `cloud_name` | Name of the created Anyscale cloud |
-| `cloud_resource_id` | Pass this to the Anyscale Operator during installation |
+| `cloud_resource_id` | The registered cloud's resource ID (wired automatically into the Operator's helm values — see "Running the example") |
 | `eks_cluster_name` | Name of the EKS cluster |
+| `gateway_address` | The Envoy Gateway's external load balancer address. Null until the second apply (`install_gateway_resources = true`) has run |
 
 ## Upgrading from the v20 module (existing forks/copies of this example)
 
@@ -192,9 +243,9 @@ the one change here that a `terraform plan` cannot catch for you:
   *does* use `block_device_mappings` today, but for an unrelated, later reason: the switch to
   Bottlerocket node groups. See "Migrating from AL2023 to Bottlerocket" below — don't confuse the
   two changes, they happened for different reasons at different times.
-- Everything else this example touches is unchanged, including the operator IAM identity
-  wiring (`module.eks.eks_managed_node_groups["default"].iam_role_arn` in `main.tf`) and every
-  output — no changes needed there even though several were renamed elsewhere in v21.
+- Everything else this example touches is unchanged by this module-version bump, including
+  every output — no changes needed there even though several attribute names were renamed
+  elsewhere in v21.
 
 Two v21 default changes are worth knowing about even though this example doesn't set either
 variable explicitly:
@@ -214,7 +265,9 @@ variable explicitly:
   cluster-autoscaler or the AWS Load Balancer Controller onto this cluster afterwards, give it
   an EKS Pod Identity association instead of relying on IMDS-inherited node-role credentials —
   otherwise the pod won't be able to reach the policy at all. The Anyscale Operator itself is
-  unaffected either way, since it already uses Pod Identity.
+  unaffected by this hop-limit change either way, since it authenticates via its own dedicated
+  IAM role and `aws_eks_pod_identity_association` (see `anyscale_operator_iam.tf`), never
+  through IMDS-inherited node-role credentials.
 
 ## Migrating from AL2023 to Bottlerocket
 
@@ -287,10 +340,10 @@ you about this — check `kubectl get nodes` and `kubectl get pods -n kube-syste
 against a current AWS provider. See "Upgrading from the v20 module" above.
 
 **`kubernetes_config.anyscale_operator_iam_identity` is null or empty in the plan** — this reads
-`module.eks.eks_managed_node_groups["default"].iam_role_arn`, which only resolves once the
-`default` node group's IAM role exists in state. If you're applying with `-target` or the
-apply partially failed, make sure the `default` node group applied successfully before this
-value is expected to be populated.
+`aws_iam_role.anyscale_operator.arn` (see `anyscale_operator_iam.tf`), which only resolves once
+that role exists in state. If you're applying with `-target` or the apply partially failed, make
+sure `aws_iam_role.anyscale_operator` applied successfully before this value is expected to be
+populated.
 
 **`InsufficientInstanceCapacity` or vCPU limit errors on GPU node groups** — most AWS accounts
 start with a very low (often zero) service quota for `g4dn`/`g5`/`p4d`/`p5` instance families.
@@ -307,9 +360,28 @@ Bottlerocket. See "Migrating from AL2023 to Bottlerocket" above.
 `anyscale_s3_force_destroy`; a non-empty bucket with `force_destroy = false` will fail
 `terraform destroy` rather than silently delete your data.
 
+**Second apply fails on a Helm/OCI error instead of the chart-missing message** — you already ran
+`helm pull` but pointed it at the wrong directory, or pulled a different chart version than
+`1.8.2`. `gateway_operator.tf`'s `local.envoy_gateway_chart_path` expects exactly
+`.charts/gateway-helm-1.8.2.tgz` under this example's directory — no `v` prefix, even though the
+OCI tag you pulled was `v1.8.2`; that's just what `helm pull` names the file.
+
+**Gateway never reaches `Programmed`, or the load balancer stays `<pending>`** — confirm you
+didn't change the EnvoyProxy's Service annotations away from
+`service.beta.kubernetes.io/aws-load-balancer-type: nlb`. The AWS Load Balancer Controller value,
+`external`, is deliberately not used here — this example doesn't install that controller, so
+`external` leaves the Service with no address, forever, with no error.
+
+**HTTPS listener stuck at `ResolvedRefs: False` after the Operator installs** — the Operator
+creates a TLS Secret named after the cloud's resource ID with underscores swapped for dashes
+(`anyscale-<dashed-id>-certificate`); the Gateway's `certificateRefs` must reference that same
+dashed form, not the raw underscored `cloud_resource_id`. Both forms are load-bearing in
+different places — see the comments in `gateway_operator.tf`.
+
 ## See also
 
 - [gcp-gke-basic](../gcp-gke-basic/) — the multi-resource cloud pattern equivalent for GCP/GKE
 - [Cloud resource documentation](../../docs/resources/cloud.md)
 - [terraform-aws-modules/eks](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) — upstream module docs
+- [Anyscale Gateway (Envoy) setup](https://docs.anyscale.com/clouds/kubernetes/gateway-envoy) — the manual/CLI equivalent of what this example automates
 - [Anyscale documentation](https://docs.anyscale.com/)
