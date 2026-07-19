@@ -11,6 +11,9 @@ This guide covers cross-cutting behavior for [`anyscale_compute_config`](../reso
 (resource) and [`anyscale_compute_config`](../data-sources/compute_config.md) (data source). It exists
 because several of these behaviors aren't obvious from either schema table alone.
 
+For a compute config created as part of a full setup, see the [Create a VM
+Cloud](./create-a-vm-cloud.md) getting-started walkthrough.
+
 ## Versioning model
 
 Anyscale compute configs are versioned, not mutated in place. A few attributes carry the identity

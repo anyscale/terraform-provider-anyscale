@@ -14,6 +14,9 @@ This guide covers cross-cutting behavior for the Container Image surface of the 
 [`anyscale_container_images`](../data-sources/container_images.md) (data sources). It exists because
 several of these behaviors aren't obvious from any single schema table.
 
+For both resources wired into a complete configuration, see the [Kitchen Sink
+tour](./kitchen-sink-tour.md).
+
 ## Two ways to get an image: build vs. register
 
 `anyscale_container_image_build` and `anyscale_container_image_registry` solve the same underlying
