@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-07-19
+
+### Changed
+
+- resource/anyscale_project: Document that `cloud_id` stays `null` in state when the project is configured via `cloud_name` - unlike the `anyscale_project` data source, the resolved cloud ID is used once to create the project and never written back to `cloud_id` (no behavior change, docs only).
+- data-source/anyscale_projects: Document that `name_contains` matches case-insensitively (no behavior change, docs only).
+- data-source/anyscale_organization_user: Reword the deprecated `permission_level` and its replacement `base_role` to state the deprecation directly ("deprecated in favor of") rather than the prior forward-looking "backend is moving toward/away from" hedge (no behavior change, docs only).
+- data-source/anyscale_organization_users: Same `permission_level`/`base_role` wording clarification as the `anyscale_organization_user` data source (no behavior change, docs only).
+- resource/anyscale_cloud: The "compute_stack is required when using embedded config" error and its schema description now correctly list `kubernetes_config` alongside `aws_config`/`gcp_config` as a valid embedded config that satisfies the requirement (no validation logic change - `kubernetes_config` was already accepted, the message just didn't say so).
+
+### Fixed
+
+- resource/anyscale_cloud: Fix a misleading credentials warning (e.g. "set aws_config.controlplane_iam_role_arn") that fired on every correctly-configured Kubernetes-compute cloud, which has no `aws_config`/`gcp_config` at all by design; Kubernetes clouds now derive a credentials placeholder from `kubernetes_config.anyscale_operator_iam_identity` instead. On GCP this also fixes a real functional bug, not just the warning: the previous placeholder was not valid JSON, which made all-in-one GCP+Kubernetes cloud creation fail outright against the Anyscale API.
+- provider: correct several misleading attribute descriptions in the published docs - the deprecated kubernetes_config fields (namespace, ingress_host, cluster_name, context, kubeconfig_path) are now documented as inert (no effect), and the compute_config data source no longer claims flags/advanced_instance_config are unexposed (they are, per node).
+- resource/anyscale_organization_collaborator: `base_role`'s description had the derivation direction backwards - it now correctly says the backend derives `base_role` from `permission_level` on every read, not the reverse.
+- resource/anyscale_project: `is_default`'s description incorrectly said "the default project for the organization"; Anyscale creates one default project per cloud, not per organization - corrected.
+- data-source/anyscale_project: `is_default`'s description incorrectly said "the default project for the organization"; Anyscale creates one default project per cloud, not per organization - corrected, same fix as the `anyscale_project` resource.
+- data-source/anyscale_projects: Same `is_default` per-cloud-not-per-organization fix as the `anyscale_project` data source and resource.
+
 ## [0.13.0] - 2026-07-18
 
 ### Breaking Changes
@@ -662,7 +681,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.1
 [0.13.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.0
 [0.12.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.12.1
 [0.12.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.12.0
