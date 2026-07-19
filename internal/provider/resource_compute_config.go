@@ -170,7 +170,7 @@ func (r *ComputeConfigResource) Metadata(ctx context.Context, req resource.Metad
 
 func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages an Anyscale compute configuration for Ray clusters.",
+		MarkdownDescription: "Manages an Anyscale compute configuration for Ray clusters. See the [Compute Config guide](../guides/compute-config.md) for the versioning model, write-only fields, and other cross-cutting behavior not obvious from the schema alone.",
 		// Version 1: physical_resources was renamed to required_resources (head_node and
 		// worker_nodes) to match the field the Anyscale API actually accepts. See UpgradeState.
 		Version: 1,
@@ -227,21 +227,21 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 			"min_resources": schema.MapAttribute{
 				ElementType:         types.Float64Type,
 				Optional:            true,
-				Description:         "Total minimum logical resources across all nodes in the cluster (e.g., {\"CPU\": 4, \"GPU\": 1})",
-				MarkdownDescription: "Total minimum logical resources across all nodes in the cluster (e.g., `{\"CPU\": 4, \"GPU\": 1}`)",
+				Description:         "Total minimum logical resources across all nodes in the cluster (e.g., {\"CPU\": 4, \"GPU\": 1}).",
+				MarkdownDescription: "Total minimum logical resources across all nodes in the cluster (e.g., `{\"CPU\": 4, \"GPU\": 1}`).",
 			},
 			"max_resources": schema.MapAttribute{
 				ElementType:         types.Float64Type,
 				Optional:            true,
-				Description:         "Total maximum logical resources across all nodes in the cluster (e.g., {\"CPU\": 100, \"GPU\": 8})",
-				MarkdownDescription: "Total maximum logical resources across all nodes in the cluster (e.g., `{\"CPU\": 100, \"GPU\": 8}`)",
+				Description:         "Total maximum logical resources across all nodes in the cluster (e.g., {\"CPU\": 100, \"GPU\": 8}).",
+				MarkdownDescription: "Total maximum logical resources across all nodes in the cluster (e.g., `{\"CPU\": 100, \"GPU\": 8}`).",
 			},
 			"enable_cross_zone_scaling": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				Description:         "Allow instances in the cluster to be run across multiple zones. Recommended for production services.",
-				MarkdownDescription: "Allow instances in the cluster to be run across multiple zones. Recommended for production services.",
+				Description:         "Allow instances in the cluster to be run across multiple zones. Defaults to false. Recommended for production services.",
+				MarkdownDescription: "Allow instances in the cluster to be run across multiple zones. Defaults to `false`. Recommended for production services.",
 			},
 			"idle_termination_minutes": schema.Int64Attribute{
 				Optional: true,
@@ -286,8 +286,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				Description:         "If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from worker_nodes. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into worker_nodes in Terraform state.",
-				MarkdownDescription: "If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from `worker_nodes`. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into `worker_nodes` in Terraform state.",
+				Description:         "Defaults to false. If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from worker_nodes. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into worker_nodes in Terraform state.",
+				MarkdownDescription: "Defaults to `false`. If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from `worker_nodes`. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into `worker_nodes` in Terraform state.",
 			},
 			"flags": schema.DynamicAttribute{
 				Optional:            true,
@@ -347,8 +347,8 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 		},
 		"required_resources": schema.SingleNestedAttribute{
 			Optional:            true,
-			Description:         "Explicit hardware requirements for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources.",
-			MarkdownDescription: "Explicit hardware requirements for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources.",
+			Description:         "Explicit hardware requirements for custom instance types (free pod shapes).",
+			MarkdownDescription: "Explicit hardware requirements for custom instance types (free pod shapes).",
 			Attributes: map[string]schema.Attribute{
 				"cpu": schema.Int64Attribute{
 					Optional:            true,
@@ -395,13 +395,13 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 		},
 		"advanced_instance_config": schema.StringAttribute{
 			Optional:            true,
-			Description:         "Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use jsonencode() for HCL objects.",
-			MarkdownDescription: "Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects.",
+			Description:         "Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use jsonencode() for HCL objects. Unlike the top-level advanced_instance_config, this can't be a native/dynamic value: it's also used inside the worker_nodes list, and Terraform doesn't support a dynamic type nested inside a list.",
+			MarkdownDescription: "Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `advanced_instance_config`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.",
 		},
 		"flags": schema.StringAttribute{
 			Optional:            true,
-			Description:         "Node-level flags specifying advanced or experimental options as a JSON string. Use jsonencode() for HCL objects.",
-			MarkdownDescription: "Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.",
+			Description:         "Node-level flags specifying advanced or experimental options as a JSON string. Use jsonencode() for HCL objects. Unlike the top-level flags, this can't be a native/dynamic value: it's also used inside the worker_nodes list, and Terraform doesn't support a dynamic type nested inside a list.",
+			MarkdownDescription: "Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.",
 		},
 		"cloud_deployment": schema.SingleNestedAttribute{
 			Optional:            true,
@@ -425,8 +425,8 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 				},
 				"id": schema.StringAttribute{
 					Optional:            true,
-					Description:         "Cloud deployment ID from cloud setup.",
-					MarkdownDescription: "Cloud deployment ID from cloud setup.",
+					Description:         "The target cloud resource's ID. Unlike the top-level cloud_resource attribute (which takes a name), this is matched by ID.",
+					MarkdownDescription: "The target cloud resource's ID. Unlike the top-level `cloud_resource` attribute (which takes a name), this is matched by ID.",
 				},
 			},
 		},
@@ -441,8 +441,8 @@ func workerNodeConfigAttributes() map[string]schema.Attribute {
 	attrs["name"] = schema.StringAttribute{
 		Optional:            true,
 		Computed:            true,
-		Description:         "Unique name of this worker group. Defaults to a human-friendly representation of the instance type.",
-		MarkdownDescription: "Unique name of this worker group. Defaults to a human-friendly representation of the instance type.",
+		Description:         "Unique name of this worker group. Defaults to the worker's instance_type when not set.",
+		MarkdownDescription: "Unique name of this worker group. Defaults to the worker's `instance_type` when not set.",
 		PlanModifiers: []planmodifier.String{
 			// UseNonNullStateForUnknown, not UseStateForUnknown: name is an
 			// attribute nested inside a list element (worker_nodes), and a

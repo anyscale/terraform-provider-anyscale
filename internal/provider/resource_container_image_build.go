@@ -90,7 +90,7 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			// User-provided attributes
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name for the container image (cluster environment).",
+				MarkdownDescription: "The name for the container image (cluster environment). Changing this replaces the resource.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -111,7 +111,7 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			},
 			"project_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The ID of the project to associate this container image with.",
+				MarkdownDescription: "The ID of the project to associate this container image with. Changing this replaces the resource.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
