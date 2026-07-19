@@ -192,6 +192,9 @@ resource "anyscale_project" "default" {
 }
 ```
 
+Once you're sharing a project with a team rather than working solo, see the [Project
+guide](./project.md) for the collaborator access model and permission levels.
+
 ## Cleaning up
 
 ```bash
