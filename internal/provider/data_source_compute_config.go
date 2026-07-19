@@ -213,7 +213,7 @@ func dataSourceNodeAttributes() map[string]schema.Attribute {
 				"provider":     schema.StringAttribute{Computed: true, MarkdownDescription: "Cloud provider name, e.g., `aws` or `gcp`."},
 				"region":       schema.StringAttribute{Computed: true, MarkdownDescription: "Cloud provider region, e.g., `us-west-2`."},
 				"machine_pool": schema.StringAttribute{Computed: true, MarkdownDescription: "Machine pool name."},
-				"id":           schema.StringAttribute{Computed: true, MarkdownDescription: "Cloud deployment ID from cloud setup."},
+				"id":           schema.StringAttribute{Computed: true, MarkdownDescription: "The target cloud resource's ID."},
 			},
 		},
 	}

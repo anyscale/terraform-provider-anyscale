@@ -104,7 +104,7 @@ Read-Only:
 
 Read-Only:
 
-- `id` (String) Cloud deployment ID from cloud setup.
+- `id` (String) The target cloud resource's ID.
 - `machine_pool` (String) Machine pool name.
 - `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
 - `region` (String) Cloud provider region, e.g., `us-west-2`.
@@ -147,7 +147,7 @@ Read-Only:
 
 Read-Only:
 
-- `id` (String) Cloud deployment ID from cloud setup.
+- `id` (String) The target cloud resource's ID.
 - `machine_pool` (String) Machine pool name.
 - `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
 - `region` (String) Cloud provider region, e.g., `us-west-2`.
