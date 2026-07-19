@@ -95,6 +95,26 @@ resource deployment separately.
 - Attaching a K8S `anyscale_cloud_resource` with an embedded `kubernetes_config`
 - Object storage configuration
 
+#### [azure-aks-basic](./azure-aks-basic/)
+
+Azure AKS (Kubernetes) cloud example, using the all-in-one deployment pattern (the same pattern
+`aws-eks-basic` uses). Creates a resource group, network, AKS cluster, ADLS Gen2 storage account,
+and the Anyscale Operator's managed identity, then registers the result in one `anyscale_cloud`
+resource.
+
+**Use this when**: You want Terraform to stand up a new AKS cluster and register it with Anyscale
+in one apply.
+
+**What it demonstrates**:
+- Creating an AKS cluster and its supporting Azure infrastructure via modules
+- Creating an `anyscale_cloud` resource with K8S compute stack and an embedded `kubernetes_config`
+- ADLS Gen2 object storage configuration
+
+> [!NOTE]
+> Schema- and `terraform validate`-checked, but not yet applied against a real AKS cluster (no
+> Azure subscription in this provider's test environment) — see the
+> [example README](./azure-aks-basic/README.md) before relying on it.
+
 ### Advanced Examples
 
 #### [kitchen-sink](./kitchen-sink/)
@@ -166,11 +186,12 @@ Examples demonstrating how to use Anyscale data sources to look up existing reso
 **Use this when**: You need to reference existing Anyscale resources (clouds, compute configs, projects) in your Terraform configuration.
 
 **What it demonstrates**:
-- Using `anyscale_cloud` data source
-- Using `anyscale_clouds` data source
+- Using `anyscale_cloud` and `anyscale_clouds` data sources
 - Using `anyscale_compute_config` data source
 - Using `anyscale_container_image` and `anyscale_container_images` data sources
 - Using `anyscale_project` and `anyscale_projects` data sources
+- Using `anyscale_organization`, `anyscale_organization_user`, and `anyscale_organization_users` data sources
+- Using `anyscale_user` data source
 
 See the [data-sources README](./data-sources/README.md) for detailed documentation.
 
@@ -205,6 +226,34 @@ Minimal example showing just the `anyscale_container_image_build` resource confi
 Minimal example showing just the `anyscale_container_image_registry` resource configuration.
 
 **Use this when**: You want a simple, focused example of registering an existing container image.
+
+#### [resources/anyscale_project](./resources/anyscale_project/)
+
+Minimal example showing just the `anyscale_project` resource configuration.
+
+**Use this when**: You want a simple, focused example of the `anyscale_project` resource.
+
+#### [resources/anyscale_organization_collaborator](./resources/anyscale_organization_collaborator/)
+
+Minimal example showing the `anyscale_organization_collaborator` resource — import-only, since
+collaborators can't be created directly through the API.
+
+**Use this when**: You want to manage an existing org member's role through Terraform.
+
+#### [resources/anyscale_organization_invitation](./resources/anyscale_organization_invitation/)
+
+Minimal example showing just the `anyscale_organization_invitation` resource configuration.
+
+**Use this when**: You want to invite a new member to your Anyscale organization via Terraform.
+
+#### [resources/organization_user_workflow](./resources/organization_user_workflow/)
+
+A walkthrough (not a single-shot apply) chaining invite → wait for acceptance → import → manage,
+since `anyscale_organization_collaborator` only supports import and the wait between invite and
+acceptance happens outside Terraform entirely.
+
+**Use this when**: You want to see how the invitation and collaborator resources fit together
+across the full member-onboarding lifecycle, not just in isolation.
 
 ### Provider Configuration
 
@@ -275,6 +324,7 @@ All examples require:
 | `gcp-vm` | GCP | VM | All-in-one | Creates via modules |
 | `aws-eks-basic` | AWS | K8S | All-in-one | Creates via modules |
 | `gcp-gke-basic` | GCP | K8S | Multi-Resource | Creates via modules |
+| `azure-aks-basic` | Azure | K8S | All-in-one | Creates via modules |
 | `kitchen-sink` | AWS | Mixed (VM + K8S) | Mixed (Multi-Resource + All-in-one) | Creates via modules |
 
 ## Common Variables

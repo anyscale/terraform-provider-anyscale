@@ -512,7 +512,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Computed:            true,
 						Default:             stringdefault.StaticString("anyscale"),
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads. Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -520,7 +520,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"ingress_host": schema.StringAttribute{
 						Optional:            true,
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -528,7 +528,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"cluster_name": schema.StringAttribute{
 						Optional:            true,
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -536,7 +536,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"context": schema.StringAttribute{
 						Optional:            true,
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -544,7 +544,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"kubeconfig_path": schema.StringAttribute{
 						Optional:            true,
 						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},

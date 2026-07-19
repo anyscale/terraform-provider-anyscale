@@ -31,6 +31,7 @@ import (
 var _ resource.Resource = &ComputeConfigResource{}
 var _ resource.ResourceWithImportState = &ComputeConfigResource{}
 
+// NewComputeConfigResource returns a new compute config resource.
 func NewComputeConfigResource() resource.Resource {
 	return &ComputeConfigResource{}
 }
@@ -203,8 +204,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 			"cloud_id": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				Description:         "The ID of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time (see Update), since this resource cannot detect that change from a cloud_name lookup at plan time without a network call.",
-				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time (see Update), since this resource cannot detect that change from a `cloud_name` lookup at plan time without a network call.",
+				Description:         "The ID of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time, since this resource cannot detect that change from a cloud_name lookup at plan time without a network call.",
+				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time, since this resource cannot detect that change from a `cloud_name` lookup at plan time without a network call.",
 			},
 			"cloud_name": schema.StringAttribute{
 				Optional:            true,

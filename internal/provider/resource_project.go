@@ -99,7 +99,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			},
 			"cloud_name": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The cloud name for this project. Either `cloud_id` or `cloud_name` must be specified. Will be resolved to cloud_id.",
+				MarkdownDescription: "The cloud name for this project. Either `cloud_id` or `cloud_name` must be specified. Resolved to a cloud ID once, to create the project; unlike the `anyscale_project` data source, that resolved ID is never written back to the `cloud_id` attribute, which stays null in state when the project is configured via `cloud_name`.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -158,7 +158,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			},
 			"is_default": schema.BoolAttribute{
 				Computed:            true,
-				MarkdownDescription: "Whether this is the default project for the organization.",
+				MarkdownDescription: "Whether this is the default project for its cloud. Anyscale creates one default project per cloud, not one per organization.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
@@ -190,11 +190,11 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 						},
 						"identity_id": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The identity ID of the collaborator (computed).",
+							MarkdownDescription: "The identity ID of the collaborator.",
 						},
 						"user_id": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The user ID of the collaborator (computed).",
+							MarkdownDescription: "The user ID of the collaborator.",
 						},
 					},
 				},

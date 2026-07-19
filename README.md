@@ -49,7 +49,7 @@ provider "anyscale" {
 ## Current Beta Capabilities
 
 - Currently supported resources:
-  - Anyscale Clouds with self contained deployment pattern
+  - Anyscale Clouds with the all-in-one deployment pattern (embedded resource configuration)
   - Cloud resource deployments with the multi-resource cloud pattern
   - Compute configurations
   - Container images (build from a Containerfile, or register existing images from a registry)

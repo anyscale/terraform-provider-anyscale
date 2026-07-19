@@ -44,7 +44,7 @@ output "research_project_ids" {
 - `cloud_name` (String) Filter projects by cloud name. Will be resolved to cloud_id.
 - `creator_id` (String) Filter projects by creator ID.
 - `include_defaults` (Boolean) Whether to include default projects in results. Defaults to true.
-- `name_contains` (String) Filter projects by partial name match.
+- `name_contains` (String) Filter projects by partial, case-insensitive name match.
 
 ### Read-Only
 
@@ -61,6 +61,6 @@ Read-Only:
 - `description` (String) Description of the project.
 - `directory_name` (String) The directory name used for this project's storage.
 - `id` (String) The unique identifier of the project.
-- `is_default` (Boolean) Whether this is the default project for the organization.
+- `is_default` (Boolean) Whether this is the default project for its cloud. Anyscale creates one default project per cloud, not one per organization.
 - `last_used_cloud_id` (String) The ID of the cloud last used by this project.
 - `name` (String) The name of the project.

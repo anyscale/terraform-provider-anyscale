@@ -248,11 +248,11 @@ Optional:
 Optional:
 
 - `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator via an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)) - a node group's IAM role will NOT work here, since node roles trust `ec2.amazonaws.com` instead; the provider cannot see a role's trust policy, so getting this wrong fails the operator's own authentication at runtime, not at `terraform plan`. For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).
-- `cluster_name` (String, Deprecated) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
-- `context` (String, Deprecated) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
-- `ingress_host` (String, Deprecated) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.
-- `kubeconfig_path` (String, Deprecated) Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
-- `namespace` (String, Deprecated) The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.
+- `cluster_name` (String, Deprecated) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
+- `context` (String, Deprecated) Kubeconfig context to use (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
+- `ingress_host` (String, Deprecated) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
+- `kubeconfig_path` (String, Deprecated) Path to kubeconfig file (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
+- `namespace` (String, Deprecated) The Kubernetes namespace for Anyscale workloads. Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
 - `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance. Conflicts with `aws_config.memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.
 - `zones` (List of String) List of availability zones for the Kubernetes cluster.
 

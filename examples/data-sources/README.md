@@ -252,6 +252,53 @@ output "organization_user_emails" {
 }
 ```
 
+### `anyscale_service`
+
+Look up an existing Anyscale Service by ID or name. There is no matching `anyscale_service`
+resource - a service's underlying compute is live, ephemeral infrastructure rather than
+declarative config, so this data source is read-only by design, not as a current gap.
+
+**Use cases:**
+- Get a running service's `current_state`, `base_url`, or rollout status for outputs or validation
+- Read the primary version's Ray Serve config back with `jsondecode()`
+- Look up a service without hardcoding its ID
+
+**Example:**
+```terraform
+data "anyscale_service" "production" {
+  name       = "my-service"
+  project_id = "prj_abc123" # only required if the name isn't unique org-wide
+}
+
+output "service_state" {
+  value = data.anyscale_service.production.current_state
+}
+```
+
+### `anyscale_services`
+
+List and filter Anyscale Services.
+
+**Use cases:**
+- List every service in a project
+- Filter by a partial name match, optionally narrowed to a cloud by name
+- Spot every non-running, non-terminated service across a project in one pass, without looking
+  each one up individually
+
+**Example:**
+```terraform
+data "anyscale_services" "in_project" {
+  project_id = "prj_abc123"
+}
+
+output "unhealthy_service_names" {
+  value = [
+    for s in data.anyscale_services.in_project.services : s.name
+    if s.current_state != "RUNNING" && s.current_state != "TERMINATED"
+  ]
+}
+```
+
 ## Running the Examples
 
 1. **Set up authentication:**
@@ -283,6 +330,10 @@ output "organization_user_emails" {
 - **Anonymous configs** - Compute configs created without a name can only be looked up by ID
 - **Container image name lookups** - Same rule as clouds: if multiple non-archived images share a
   name, the most recently created one is returned, and Terraform logs a warning when this happens
+- **Service name lookups are the one exception** - `anyscale_service` names are unique only within
+  a project, not organization-wide. An ambiguous name lookup fails with an error asking you to set
+  `project_id` (and/or `cloud_id`) to disambiguate, instead of silently returning the most recently
+  created match the way every other by-name lookup above does
 
 ## Common Patterns
 
@@ -362,6 +413,11 @@ resource "anyscale_compute_config" "west_config" {
 - Anonymous configs can only be looked up by ID
 - Check spelling and casing of the name
 
+**"No service found" / "found N services named ..."**
+- Verify the service name or ID is correct, and that it's running in an org your token can reach
+- If the error asks you to disambiguate, set `project_id` (and/or `cloud_id`) - unlike the other
+  by-name lookups above, this one errors on a duplicate name instead of guessing the most recent
+
 ## See Also
 
 - [Provider Documentation](../../docs/index.md)
@@ -377,4 +433,6 @@ resource "anyscale_compute_config" "west_config" {
 - [Organization Data Source](../../docs/data-sources/organization.md)
 - [Organization User Data Source](../../docs/data-sources/organization_user.md)
 - [Organization Users Data Source](../../docs/data-sources/organization_users.md)
+- [Service Data Source](../../docs/data-sources/service.md)
+- [Services Data Source](../../docs/data-sources/services.md)
 - [Anyscale Documentation](https://docs.anyscale.com/)

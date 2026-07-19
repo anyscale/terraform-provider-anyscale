@@ -57,7 +57,7 @@ output "project_description_by_id" {
 - `creator_id` (String) The ID of the user who created the project.
 - `description` (String) Description of the project.
 - `directory_name` (String) The directory name used for this project's storage.
-- `is_default` (Boolean) Whether this is the default project for the organization.
+- `is_default` (Boolean) Whether this is the default project for its cloud. Anyscale creates one default project per cloud, not one per organization.
 - `last_used_cloud_id` (String) The ID of the cloud last used by this project.
 
 <a id="nestedatt--collaborators"></a>
