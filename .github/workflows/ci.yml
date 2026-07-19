@@ -8,6 +8,17 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read # needed by dorny/paths-filter (docs-only acctest skip)
+
+# Cancel a stale in-progress run when a newer commit supersedes it (a PR gets
+# a follow-up push, or a second merge lands on main before the first run
+# finishes) -- same pattern release-preflight.yml already uses. A cancelled
+# real-infra acctest run can leave a resource behind mid-creation; sweep.yml's
+# daily sweeper (gated by ANYSCALE_SWEEP_MIN_AGE) already exists to catch
+# exactly that class of leak, so this is an accepted tradeoff, not a new risk.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ci:
