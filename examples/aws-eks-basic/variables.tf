@@ -161,3 +161,30 @@ variable "anyscale_s3_force_destroy" {
   type        = bool
   default     = true
 }
+
+variable "install_gateway_resources" {
+  description = <<-EOT
+    (Optional) Set to true on a SECOND `terraform apply` to create the Gateway API objects and
+    install the Anyscale Operator. Must stay false on the first apply: the Envoy Gateway CRDs
+    these objects depend on do not exist yet on a from-scratch cluster, and Terraform resolves
+    `kubernetes_manifest` schemas against the live cluster at PLAN time (not apply time) - so a
+    fresh cluster's first plan would fail outright if this were true from the start. This is a
+    real, documented upstream limitation of the Kubernetes provider
+    (hashicorp/terraform-provider-kubernetes issues #2597, #2334, #1367), not a workaround for a
+    bug in this example. See gateway_operator.tf for the full design and README.md for the
+    complete two-apply walkthrough.
+
+    ex:
+    ```
+    # First apply: leave this false (the default) to create the EKS cluster,
+    # register the Anyscale cloud, and install Envoy Gateway's CRDs+controller.
+    install_gateway_resources = false
+
+    # Second apply: flip to true to create the Gateway objects and the
+    # Anyscale Operator, now that the CRDs exist.
+    install_gateway_resources = true
+    ```
+  EOT
+  type        = bool
+  default     = false
+}
