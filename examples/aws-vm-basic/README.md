@@ -126,6 +126,7 @@ re-applying against an existing `anyscale_cloud_id` rather than starting fresh.
 
 ## See also
 
+- [Create a VM cloud guide](../../docs/guides/create-a-vm-cloud.md) - a narrated, step-by-step walkthrough of this same example
 - [gcp-vm-basic](../gcp-vm-basic/) - the equivalent all-in-one VM pattern on GCP
 - [aws-eks-basic](../aws-eks-basic/) - the Kubernetes equivalent on AWS
 - [Cloud resource documentation](../../docs/resources/cloud.md)

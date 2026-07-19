@@ -1,5 +1,11 @@
 ```release-note:added
-provider: Add a "Create a VM Cloud" getting-started guide — a narrated, step-by-step walkthrough building up the `aws-vm-basic` all-in-one AWS VM cloud pattern (no behavior change, docs only).
+provider: Add a "Create a VM Cloud" getting-started guide — a narrated walkthrough building up the `aws-vm-basic` all-in-one AWS VM cloud example (which gains a companion README) (no behavior change, docs only).
+```
+```release-note:added
+provider: Add a "Create a Kubernetes Cloud" getting-started guide — the AWS EKS walkthrough, including EKS Pod Identity, the Anyscale Operator, and the two-apply Envoy Gateway install (no behavior change, docs only).
+```
+```release-note:added
+provider: Add a "Kitchen Sink" tour guide covering the full `examples/kitchen-sink` configuration — every resource and data source the provider registers (no behavior change, docs only).
 ```
 ```release-note:changed
 provider: Correct the compute-config guide's write-only claim — only the top-level `flags`/`advanced_instance_config` are write-only; the per-node ones (nested in `head_node`/`worker_nodes`) are masked and read back from the API when set, like the other per-node fields (no behavior change, docs only).
