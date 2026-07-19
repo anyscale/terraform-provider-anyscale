@@ -105,6 +105,12 @@ jobs:
         if: matrix.shard == 'lint-and-unit'
         run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest
 
+      - name: Install TFLint
+        if: matrix.shard == 'lint-and-unit'
+        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
+        with:
+          tflint_version: v0.64.0
+
       - name: Format
         if: matrix.shard == 'lint-and-unit'
         run: |
@@ -121,12 +127,29 @@ jobs:
           make docs
           git diff --exit-code || (echo "Docs are out of date. Run 'make docs' locally." && exit 1)
 
+      - name: Validate Docs
+        # Distinct from Generate Docs above: that step proves docs/ is
+        # regenerated and non-stale relative to templates+schema; this runs
+        # `tfplugindocs validate` (via `make docs-validate`), a separate
+        # tfplugindocs subcommand that checks doc structure/consistency
+        # (e.g. every resource/data source has a page). Neither subsumes the
+        # other.
+        if: matrix.shard == 'lint-and-unit'
+        run: make docs-validate
+
       - name: Test
         if: matrix.shard == 'lint-and-unit'
         run: make test
 
       - name: Validate Examples
         if: matrix.shard == 'lint-and-unit'
+        # The actual fmt / tflint / init+validate work lives in `make
+        # validate-examples` so local and CI runs share one implementation
+        # (this step used to hand-roll its own init+validate loop, which
+        # never ran terraform fmt or tflint at all and selected directories
+        # by `[ -f versions.tf ]`, silently skipping examples/data-sources/
+        # whose required_providers block lives in main.tf instead).
+        #
         # This step runs `terraform init` while dev_overrides is active for the
         # anyscale provider, which CLAUDE.md's local-dev guidance says to avoid
         # ("provider is not in the public registry"). That guidance is about
@@ -156,17 +179,7 @@ jobs:
           }
           RC
           export TF_CLI_CONFIG_FILE="$cli_config"
-          status=0
-          for dir in examples/*/; do
-            [ -f "${dir}versions.tf" ] || continue
-            echo "==> terraform init + validate: ${dir}"
-            if ! (cd "$dir" && terraform init -backend=false -input=false -no-color \
-                && terraform validate -no-color); then
-              echo "::error::terraform validate failed for ${dir}"
-              status=1
-            fi
-          done
-          exit "$status"
+          make validate-examples
 
       - name: Acceptance Tests - Data Sources
         # Skipped on Dependabot PRs: GitHub withholds Actions secrets from
