@@ -211,6 +211,8 @@ intend to keep, so an accidental `destroy` can't silently drop stored data.
   project variations
 - [Create a Kubernetes cloud](./create-a-kubernetes-cloud.md) - the Kubernetes/EKS equivalent of
   this same walkthrough, a bigger lift since it also installs the Anyscale Operator
+- [Kitchen Sink tour](./kitchen-sink-tour.md) - once the basics feel comfortable, a tour of every
+  resource and data source this provider registers, composed together
 - [Cloud Resources guide](./cloud-resources.md) - provider support matrix, naming differences
   between resources and data sources, and known limitations
 - [Compute Config guide](./compute-config.md) - versioning model and write-only fields
