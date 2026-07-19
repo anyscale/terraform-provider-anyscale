@@ -140,7 +140,9 @@ vet: ## Run go vet
 	$(GO) vet ./...
 
 .PHONY: validate-examples
-validate-examples: ## Validate every examples/ dir: terraform fmt, tflint, and terraform validate where runnable
+# validate-examples depends on `build` so the named provider binary exists for dev_overrides to
+# load; the terraform validate stage needs dev_overrides active (see CLAUDE.md local dev workflow).
+validate-examples: build ## Validate every examples/ dir: terraform fmt, tflint, and terraform validate where runnable
 	@echo "==> Checking terraform fmt across examples/..."
 	@terraform fmt -check -recursive -diff examples/
 	@echo "==> Running tflint (repo config) across every examples/ subdirectory with .tf files..."
