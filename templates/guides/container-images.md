@@ -7,12 +7,16 @@ description: |-
 
 # Container Images: Build vs. Register, Identity, and Lifecycle
 
-This guide covers cross-cutting behavior for the Container Image surface of the provider:
+The Container Image surface of the provider spans
 [`anyscale_container_image_build`](../resources/container_image_build.md) and
 [`anyscale_container_image_registry`](../resources/container_image_registry.md) (resources), and
 [`anyscale_container_image`](../data-sources/container_image.md) and
-[`anyscale_container_images`](../data-sources/container_images.md) (data sources). It exists because
-several of these behaviors aren't obvious from any single schema table.
+[`anyscale_container_images`](../data-sources/container_images.md) (data sources). This guide covers
+what you need to use them correctly: choosing build vs. register for how you obtain an image, reading
+the `name_version`, `digest`, `id`, and `build_id` identifiers each exposes (and what `build_status`
+means), and the lifecycle behavior that doesn't match a typical Terraform resource — in-place updates
+vs. full replacement, a default Ray version when none is set, and a `destroy` that archives rather than
+removes.
 
 For both resources wired into a complete configuration, see the [Kitchen Sink
 tour](./kitchen-sink-tour.md).

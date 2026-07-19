@@ -7,10 +7,13 @@ description: |-
 
 # Project: Collaborator Access and Permission Levels
 
-This guide covers cross-cutting behavior for [`anyscale_project`](../resources/project.md)
-(resource), and the [`anyscale_project`](../data-sources/project.md) and
-[`anyscale_projects`](../data-sources/projects.md) data sources. It exists because these behaviors
-aren't obvious from any single schema table alone.
+This guide explains how collaborator access and permission levels behave for
+[`anyscale_project`](../resources/project.md) (resource), and the
+[`anyscale_project`](../data-sources/project.md) and
+[`anyscale_projects`](../data-sources/projects.md) data sources. It covers what `terraform
+import` recovers that ordinary use does not, how to move a `permission_level` of `writer` to the
+valid `write` value, and the brief retry delay you may see on `destroy` or when adding a
+`collaborator` shortly after `apply`.
 
 ## Importing an existing project
 

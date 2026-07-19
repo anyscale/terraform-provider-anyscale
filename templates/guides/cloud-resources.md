@@ -7,11 +7,13 @@ description: |-
 
 # Cloud Resources: Provider Support, Naming, and Known Limitations
 
-This guide covers cross-cutting behavior for the Cloud surface of the provider:
+This guide explains how the Cloud surface of the provider —
 [`anyscale_cloud`](../resources/cloud.md) and [`anyscale_cloud_resource`](../resources/cloud_resource.md)
 (resources), and [`anyscale_cloud`](../data-sources/cloud.md) and
-[`anyscale_clouds`](../data-sources/clouds.md) (data sources). It exists because several of these
-behaviors aren't obvious from any single resource's schema table.
+[`anyscale_clouds`](../data-sources/clouds.md) (data sources) — behaves in practice: which cloud
+providers and compute stacks are supported and how their configuration differs, how to rename,
+delete, import, and attach multiple resources to a cloud, which attributes are deprecated,
+removed, or not yet supported, and where naming diverges between a resource and its data source.
 
 New to Anyscale clouds? For a step-by-step walkthrough that stands up a working AWS VM cloud from
 scratch, start with the [Create a VM Cloud](./create-a-vm-cloud.md) guide; this page is the
