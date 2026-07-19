@@ -42,11 +42,18 @@ creates and round-trips a K8S cloud (no more `compute_stack` flipping from `"K8S
 next read) for both patterns.
 
 Precisely what that fix has been validated against, so this claim doesn't overreach: for AWS and
-GCP, it's confirmed against the real Anyscale API, for both patterns, both providers. It has
-**not** been separately confirmed end-to-end against a real EKS/GKE cluster with the Anyscale
-Operator actually installed and running a workload — that's a distinct validation step, still in
-progress. If you're standing up a new EKS/GKE cluster specifically to test this, treat that path
-as being actively verified rather than already a known-good story. **Azure/AKS support is newer
+GCP, it's confirmed against the real Anyscale API, for both patterns, both providers. For AWS
+specifically, the fully-native Operator install path goes further: the
+[`aws-eks-basic`](../../examples/aws-eks-basic) example (Envoy Gateway plus the Anyscale Operator,
+via a two-phase `terraform apply`) has been confirmed end-to-end against a real EKS cluster — both
+Gateway listeners reaching `Programmed`/`Accepted`/`ResolvedRefs: True`, the Operator pod running
+`2/2` with zero restarts, a second `terraform plan` after the full apply reporting zero diff (real
+convergence, not just a clean first apply), and `terraform destroy` tearing down cleanly with no
+leaked load balancer (checked against the live AWS API, not just Terraform's own report). GKE has
+**not** had the equivalent install-path validation yet — only cloud creation itself is confirmed
+against the real API, as above. If you're standing up a new GKE cluster specifically to test the
+Operator install, treat that path as still being actively verified rather than already a known-good
+story. **Azure/AKS support is newer
 still and validated only at the schema and mock-server level** — there is no real Azure
 subscription in this provider's test environment, so unlike EKS/GKE, AKS has no real-cluster
 acceptance coverage at all yet. Validate the AKS example against your own Azure subscription
@@ -144,7 +151,27 @@ These are intentional (renaming any of them would be a breaking change), not som
   whole; `is_private` on the `anyscale_cloud_resource` resource refers to that specific resource
   deployment. They are distinct attributes on distinct objects, not a typo.
 
-## Deprecated attributes
+## Deprecated and removed attributes
+
+### Removed: `cloud_deployment_id`
+
+As of v0.13.0, `cloud_deployment_id` is gone — not deprecated, fully removed — from `anyscale_cloud`,
+`anyscale_cloud_resource`, and the singular `anyscale_cloud` data source: the attribute, its schema
+entry, and the backing model field no longer exist on any of the three. `cloud_resource_id` — already
+present on all three surfaces by the time of this removal (`anyscale_cloud_resource` has had it since
+long before v0.13.0; `anyscale_cloud` and its data source gained it earlier in the same v0.13.0 release)
+— is the one-for-one replacement, carrying the same populated identifier `cloud_deployment_id` was
+originally meant to expose. To migrate: replace every `cloud_deployment_id` reference in your
+configuration or outputs with `cloud_resource_id`, and re-run `terraform plan` to confirm there's no
+remaining diff.
+
+The plural `anyscale_clouds` data source deliberately has **neither** attribute, before or after this
+removal: populating `cloud_resource_id` per list item would cost an extra API call per cloud in the
+result, which this data source intentionally avoids. Look up a specific cloud's `cloud_resource_id`
+through the singular `anyscale_cloud` data source or either Cloud resource instead. See also [Naming
+differences between resources and data sources](#naming-differences-between-resources-and-data-sources)
+above for other cases where the singular and plural data sources deliberately don't expose identical
+attributes.
 
 ### Kubernetes configuration fields with no effect
 
@@ -157,11 +184,13 @@ release, with migration guidance at that time — remove them from your configur
 waiting. Only `anyscale_operator_iam_identity`, `zones`, and `redis_endpoint` in `kubernetes_config`
 actually reach the API today.
 
-### `is_k8s` on the `anyscale_clouds` data source
+### `is_k8s` on the `anyscale_cloud` and `anyscale_clouds` data sources
 
-`is_k8s` is superseded by `compute_stack` (`"VM"` or `"K8S"`), which is exposed everywhere `is_k8s` is
-and carries the same information plus room to grow (e.g. a future compute stack type wouldn't fit a
-boolean). Prefer `compute_stack == "K8S"` in new configurations.
+`is_k8s` is present on both the singular `anyscale_cloud` data source and the plural `anyscale_clouds`
+data source — but not on either Cloud resource (`anyscale_cloud` or `anyscale_cloud_resource`). Wherever
+it's exposed, `is_k8s` is superseded by `compute_stack` (`"VM"` or `"K8S"`), which is exposed everywhere
+`is_k8s` is and carries the same information plus room to grow (e.g. a future compute stack type
+wouldn't fit a boolean). Prefer `compute_stack == "K8S"` in new configurations.
 
 ## Credentials handling
 
@@ -171,13 +200,21 @@ Treat the value itself (an AWS IAM role ARN, or a JSON blob for GCP) as sensitiv
 the provider marks the attribute `Sensitive` in state, but redaction is only as good as how you source
 the value into your configuration.
 
-If you don't set `credentials` and the provider can't derive one from `aws_config`/`gcp_config` either
-(most commonly: you set the config block but left out the actual role or service-account field), it
-generates a placeholder so `apply` can still succeed — but the resulting cloud won't be able to
-provision any real infrastructure. For an all-in-one cloud, the provider now warns
-("Placeholder Credentials Generated") when this happens, so it isn't silent. This case doesn't warn for
-the empty-cloud pattern, since a placeholder there is the expected, intentional starting point — real
-credentials arrive later with whatever `anyscale_cloud_resource` gets attached.
+If you don't set `credentials` explicitly, the provider derives one: from `aws_config`/`gcp_config` for
+a VM cloud, or from `kubernetes_config.anyscale_operator_iam_identity` for a Kubernetes cloud on AWS,
+GCP, or Azure alike. The Kubernetes derivation is ceremonial — real authentication is the operator's
+own workload identity, not this field — but it's a real, valid credential, not a placeholder. Only when
+derivation itself comes up empty (most commonly: a VM cloud's config block is present but left out the
+actual role or service-account field, or a Kubernetes cloud omits `anyscale_operator_iam_identity`
+entirely) does the provider fall back to generating a placeholder so `apply` can still succeed — the
+resulting cloud won't be able to provision any real infrastructure. For an all-in-one cloud that hits
+this fallback, the provider warns ("Placeholder Credentials Generated") so it isn't silent — in
+practice, an all-in-one Kubernetes cloud only reaches this if it omits `anyscale_operator_iam_identity`
+(needed for the Operator to authenticate at all, so a well-formed configuration always sets it); the
+common case is a VM cloud with underivable credentials, not "any all-in-one cloud" unconditionally.
+This case doesn't warn for the empty-cloud pattern, since a placeholder there is the expected,
+intentional starting point — real credentials arrive later with whatever `anyscale_cloud_resource` gets
+attached.
 
 ## Deleting a cloud
 
@@ -233,7 +270,7 @@ A few more things worth knowing:
   values already agreed, so this is defense-in-depth rather than a behavior change you'd notice day
   to day - it specifically protects a cold import of a cloud registered outside Terraform (e.g. via
   the CLI) from ever showing `compute_stack = "VM"` for what is actually a K8S cloud.
-- The five inert `kubernetes_config` fields (see [Deprecated attributes](#deprecated-attributes) above)
+- The five inert `kubernetes_config` fields (see [Deprecated and removed attributes](#deprecated-and-removed-attributes) above)
   can't be populated from an API that never received them: `namespace` comes back as its documented
   default (`"anyscale"`); `ingress_host`, `cluster_name`, `context`, and `kubeconfig_path` come back
   null regardless of what your configuration says. They have no effect either way, so this doesn't
