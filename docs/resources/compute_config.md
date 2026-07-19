@@ -3,12 +3,12 @@
 page_title: "anyscale_compute_config Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an Anyscale compute configuration for Ray clusters.
+  Manages an Anyscale compute configuration for Ray clusters. See the Compute Config guide ../guides/compute-config.md for the versioning model, write-only fields, and other cross-cutting behavior not obvious from the schema alone.
 ---
 
 # anyscale_compute_config (Resource)
 
-Manages an Anyscale compute configuration for Ray clusters.
+Manages an Anyscale compute configuration for Ray clusters. See the [Compute Config guide](../guides/compute-config.md) for the versioning model, write-only fields, and other cross-cutting behavior not obvious from the schema alone.
 
 ## Example Usage
 
@@ -107,16 +107,16 @@ output "compute_config_id" {
 ### Optional
 
 - `advanced_instance_config` (Dynamic) Advanced instance configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.
-- `auto_select_worker_config` (Boolean) If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from `worker_nodes`. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into `worker_nodes` in Terraform state.
+- `auto_select_worker_config` (Boolean) Defaults to `false`. If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from `worker_nodes`. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into `worker_nodes` in Terraform state.
 - `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time, since this resource cannot detect that change from a `cloud_name` lookup at plan time without a network call.
 - `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`.
 - `cloud_resource` (String) The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.
-- `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Recommended for production services.
+- `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Defaults to `false`. Recommended for production services.
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
 - `idle_termination_minutes` (Number) Number of minutes after which idle clusters using this compute config will be terminated. `0` disables idle termination. Defaults to the backend's own default (120) when unset.
-- `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`)
+- `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`).
 - `maximum_uptime_minutes` (Number) Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum.
-- `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`)
+- `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`).
 - `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. If not provided, the cluster has no worker nodes (head node only). See `auto_select_worker_config` for a way to request an organization-managed worker pool instead of listing worker node types explicitly here. (see [below for nested schema](#nestedatt--worker_nodes))
 - `zones` (List of String) Availability zones to consider for this cluster. Defaults to all zones in the cloud's region.
 
@@ -138,11 +138,11 @@ Required:
 
 Optional:
 
-- `advanced_instance_config` (String) Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects.
+- `advanced_instance_config` (String) Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `advanced_instance_config`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
 - `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--head_node--cloud_deployment))
-- `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.
+- `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
 - `labels` (Map of String) Labels to associate the node with for scheduling purposes.
-- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--head_node--required_resources))
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--head_node--required_resources))
 - `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.
 
 <a id="nestedatt--head_node--cloud_deployment"></a>
@@ -150,7 +150,7 @@ Optional:
 
 Optional:
 
-- `id` (String) Cloud deployment ID from cloud setup.
+- `id` (String) The target cloud resource's ID. Unlike the top-level `cloud_resource` attribute (which takes a name), this is matched by ID.
 - `machine_pool` (String) Machine pool name.
 - `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
 - `region` (String) Cloud provider region, e.g., `us-west-2`.
@@ -180,15 +180,15 @@ Required:
 
 Optional:
 
-- `advanced_instance_config` (String) Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects.
+- `advanced_instance_config` (String) Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `advanced_instance_config`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
 - `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--worker_nodes--cloud_deployment))
-- `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects.
+- `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
 - `labels` (Map of String) Labels to associate the node with for scheduling purposes.
 - `market_type` (String) The type of instances to use: `ON_DEMAND` (standard pricing), `SPOT` (discounted, interruptible), or `PREFER_SPOT` (prefer spot with on-demand fallback).
 - `max_nodes` (Number) Maximum number of nodes of this type that can be running in the cluster.
 - `min_nodes` (Number) Minimum number of nodes of this type that will be kept running in the cluster.
-- `name` (String) Unique name of this worker group. Defaults to a human-friendly representation of the instance type.
-- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). Explicitly defines CPU, memory, and GPU resources. (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
+- `name` (String) Unique name of this worker group. Defaults to the worker's `instance_type` when not set.
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
 - `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.
 
 <a id="nestedatt--worker_nodes--cloud_deployment"></a>
@@ -196,7 +196,7 @@ Optional:
 
 Optional:
 
-- `id` (String) Cloud deployment ID from cloud setup.
+- `id` (String) The target cloud resource's ID. Unlike the top-level `cloud_resource` attribute (which takes a name), this is matched by ID.
 - `machine_pool` (String) Machine pool name.
 - `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
 - `region` (String) Cloud provider region, e.g., `us-west-2`.

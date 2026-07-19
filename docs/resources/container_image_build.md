@@ -58,14 +58,14 @@ output "build_image_digest" {
 
 ### Required
 
-- `name` (String) The name for the container image (cluster environment).
+- `name` (String) The name for the container image (cluster environment). Changing this replaces the resource.
 
 ### Optional
 
 - `build_timeout` (String) Maximum time to wait for the build to complete (e.g., `30m`, `1h`). Defaults to `30m`.
 - `containerfile` (String) The content of the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile_path`. Updating this value triggers a new build revision.
 - `containerfile_path` (String) Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`. Updating this value triggers a new build revision.
-- `project_id` (String) The ID of the project to associate this container image with.
+- `project_id` (String) The ID of the project to associate this container image with. Changing this replaces the resource.
 
 ### Read-Only
 

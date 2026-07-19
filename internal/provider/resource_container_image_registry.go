@@ -77,7 +77,7 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 	resp.Schema = schema.Schema{
 		Version: 1,
 
-		MarkdownDescription: `Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads.
+		MarkdownDescription: `Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Every configurable attribute requires replacing the resource; there is no in-place update.
 
 ~> **Note:** When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting ` + "`include_archived = true`" + ` on the ` + "`anyscale_container_images`" + ` data source.`,
 
