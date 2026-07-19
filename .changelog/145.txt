@@ -1,0 +1,16 @@
+```
+release-note:changed
+provider: Rename the cloud-resources guide's "Deprecated attributes" heading to "Deprecated and removed attributes" and add a subsection documenting v0.13.0's removal of `cloud_deployment_id` (in favor of `cloud_resource_id`), which the guide never covered (no behavior change, docs only).
+```
+```
+release-note:changed
+provider: Fix the cloud-resources guide's `is_k8s` section to say the attribute is on both the singular `anyscale_cloud` and plural `anyscale_clouds` data sources, not just the plural one (no behavior change, docs only).
+```
+```
+release-note:changed
+provider: Update the cloud-resources guide's EKS/GKE validation hedge to reflect that AWS EKS is now validated end-to-end for the fully-native Anyscale Operator install path (`examples/aws-eks-basic`, from native-B); GKE's equivalent Operator-install validation is still outstanding (no behavior change, docs only).
+```
+```
+release-note:changed
+provider: Correct the cloud-resources guide's "Placeholder Credentials Generated" warning claim: it now fires only for all-in-one VM clouds with underivable credentials, not universally for all-in-one clouds, since Kubernetes clouds derive a real credential from the operator identity (no behavior change, docs only).
+```
