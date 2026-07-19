@@ -1,6 +1,6 @@
 ---
 page_title: "Container Images: Build vs. Register, Identity, and Lifecycle"
-subcategory: ""
+subcategory: "Behavior & Limitations"
 description: |-
   Build vs. register workflows, the name_version identifier, digest-based pinning, id semantics, and lifecycle behavior for the Container Image resources and data sources that aren't obvious from the schema tables alone.
 ---
@@ -13,6 +13,9 @@ This guide covers cross-cutting behavior for the Container Image surface of the 
 [`anyscale_container_image`](../data-sources/container_image.md) and
 [`anyscale_container_images`](../data-sources/container_images.md) (data sources). It exists because
 several of these behaviors aren't obvious from any single schema table.
+
+For both resources wired into a complete configuration, see the [Kitchen Sink
+tour](./kitchen-sink-tour.md).
 
 ## Two ways to get an image: build vs. register
 

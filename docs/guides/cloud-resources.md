@@ -1,6 +1,6 @@
 ---
 page_title: "Cloud Resources: Provider Support, Naming, and Known Limitations"
-subcategory: ""
+subcategory: "Behavior & Limitations"
 description: |-
   Cloud provider support, naming differences between the Cloud resources and data sources, and known limitations.
 ---
@@ -12,6 +12,10 @@ This guide covers cross-cutting behavior for the Cloud surface of the provider:
 (resources), and [`anyscale_cloud`](../data-sources/cloud.md) and
 [`anyscale_clouds`](../data-sources/clouds.md) (data sources). It exists because several of these
 behaviors aren't obvious from any single resource's schema table.
+
+New to Anyscale clouds? For a step-by-step walkthrough that stands up a working AWS VM cloud from
+scratch, start with the [Create a VM Cloud](./create-a-vm-cloud.md) guide; this page is the
+behavior-and-limitations reference to reach for once you know the shape and need the specifics.
 
 ## Supported cloud providers
 

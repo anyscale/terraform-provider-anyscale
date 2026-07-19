@@ -380,6 +380,7 @@ different places — see the comments in `gateway_operator.tf`.
 
 ## See also
 
+- [Create a Kubernetes cloud guide](../../docs/guides/create-a-kubernetes-cloud.md) — a narrated, step-by-step walkthrough of this same example
 - [gcp-gke-basic](../gcp-gke-basic/) — the multi-resource cloud pattern equivalent for GCP/GKE
 - [Cloud resource documentation](../../docs/resources/cloud.md)
 - [terraform-aws-modules/eks](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) — upstream module docs

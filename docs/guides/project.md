@@ -1,6 +1,6 @@
 ---
 page_title: "Project: Collaborator Access and Permission Levels"
-subcategory: ""
+subcategory: "Behavior & Limitations"
 description: |-
   Collaborator access model and upgrading permission_level from a prior release, for the Project resource and data sources that aren't obvious from the schema tables alone.
 ---

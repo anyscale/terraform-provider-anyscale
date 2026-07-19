@@ -8,15 +8,22 @@ This directory contains example configurations demonstrating how to use the Anys
 
 #### [aws-vm-basic](./aws-vm-basic/)
 
-Basic AWS VM cloud example using the all-in-one deployment pattern. Creates an Anyscale Cloud with AWS VM compute stack using existing AWS infrastructure.
+Minimal AWS VM cloud example using the all-in-one deployment pattern. Provisions a *new* VPC,
+security group, S3 bucket, and IAM roles via Anyscale's cloud foundation module, then registers
+the result as an Anyscale Cloud with AWS VM compute stack - no EFS, no MemoryDB, the smallest
+working setup. (It does not attach to infrastructure you already have; see `aws-vm` for the
+fuller variant with EFS and MemoryDB enabled.)
 
-**Use this when**: You want to register an AWS VM cloud with Anyscale using existing VPC, subnets, security groups, and IAM roles.
+**Use this when**: You want the fastest path to a working AWS VM cloud and don't need shared
+filesystem (EFS) or a managed Redis (MemoryDB), or you just want the smallest example to read
+first.
 
 **What it demonstrates**:
 - Creating an `anyscale_cloud` resource with AWS VM configuration
-- Using existing AWS infrastructure (VPC, subnets, security groups, IAM roles)
+- Provisioning fresh AWS infrastructure (VPC, subnets, security group, IAM roles) via Anyscale's
+  cloud foundation module
 - Object storage configuration
-- Compute config creation
+- Compute config and project creation
 
 #### [aws-vm](./aws-vm/)
 

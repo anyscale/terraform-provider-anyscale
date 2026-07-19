@@ -183,6 +183,7 @@ terraform apply
 
 ## See also
 
+- [Kitchen Sink tour guide](../../docs/guides/kitchen-sink-tour.md) — a curated tour of this example, condensed from this README
 - [Cloud Resources guide](../../docs/guides/cloud-resources.md)
 - [Compute Config guide](../../docs/guides/compute-config.md)
 - [Container Images guide](../../docs/guides/container-images.md)
