@@ -1,6 +1,6 @@
 ---
 page_title: "Container Images: Build vs. Register, Identity, and Lifecycle"
-subcategory: ""
+subcategory: "Behavior & Limitations"
 description: |-
   Build vs. register workflows, the name_version identifier, digest-based pinning, id semantics, and lifecycle behavior for the Container Image resources and data sources that aren't obvious from the schema tables alone.
 ---

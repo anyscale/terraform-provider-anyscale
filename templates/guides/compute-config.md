@@ -1,6 +1,6 @@
 ---
 page_title: "Compute Config: Versioning, Identity, and Write-Only Fields"
-subcategory: ""
+subcategory: "Behavior & Limitations"
 description: |-
   Versioning model, identity attributes, and write-only fields for the Compute Config resource and data source that aren't obvious from the schema table alone.
 ---
@@ -77,28 +77,35 @@ and it's easy to reach for the wrong one:
 
 They aren't interchangeable, and setting one doesn't imply anything about the other.
 
-## `flags` and `advanced_instance_config` are write-only
+## `flags` and `advanced_instance_config`: write-only at the top level, masked per-node
 
-Both `flags` (cluster-level) and `advanced_instance_config` (the top-level attribute, and the
-equivalent per-node attribute on `head_node`/`worker_nodes`) are write-only from Terraform's
-perspective: the provider sends whatever you configure, but never reads either back from the API into
-state. Your configuration remains the sole source of truth for these fields specifically.
+`flags` and `advanced_instance_config` each appear in two places, and Terraform tracks the two
+placements differently — this split is the part that isn't obvious from the schema:
 
-Practically, this means:
+- **Top-level `flags` and `advanced_instance_config` (cluster-level) are write-only.** The provider
+  sends whatever you configure but never reads either back from the API on refresh, so your
+  configuration is the sole source of truth for them. `terraform plan` will never show drift in the
+  top-level pair — not if the value changes outside Terraform (through the Anyscale CLI or web
+  console), and not if the API's own normalized representation differs from what you wrote (for
+  example, omitted-versus-null array handling). This is deliberate — it avoids a perpetual diff from a
+  value the API is free to re-represent differently than you wrote it — not an oversight.
+- **The per-node `flags` and `advanced_instance_config`, nested inside `head_node` and each
+  `worker_nodes` entry, are not write-only.** They are *masked*, exactly like the other per-node
+  fields (`resources`, `required_resources`, `labels`, `cloud_deployment`): the provider keeps them
+  null in state while you leave them unset, but reads the API's value back once you set them — so a
+  per-node value you configure participates in ordinary drift detection, and can show a diff if the
+  API normalizes it differently than you wrote. Import is the one case where the per-node pair behaves
+  differently from those other four masked fields; see [Importing an existing compute
+  config](#importing-an-existing-compute-config) below.
 
-- `terraform plan` will never show drift in `flags` or `advanced_instance_config`, even if the value
-  changes outside Terraform (through the Anyscale CLI or web console), or if the API's own normalized
-  representation differs from what you wrote (for example, omitted-versus-null array handling).
-- Every other resource attribute that can drift — `resources`, `min_resources`, `max_resources`,
-  `enable_cross_zone_scaling`, `auto_select_worker_config` — does not have this limitation and
-  participates in normal drift detection.
+The top-level `flags`/`advanced_instance_config` pair is the only write-only exception in the schema:
+every other attribute — including the per-node pair above, plus `min_resources`, `max_resources`,
+`enable_cross_zone_scaling`, and `auto_select_worker_config` — participates in normal drift detection.
 
-This is deliberate, to avoid a perpetual diff from a value the API is free to re-represent differently
-than you wrote it, not an oversight. It also means neither is truly free-form: `advanced_instance_config`
-is validated server-side against something close to the real cloud provider's instance-launch request
-shape, and `flags` only accepts a fixed, specific set of recognized key names — an arbitrary custom key
-is rejected outright, not passed through silently. Supply values shaped the way each is actually
-validated, not arbitrary keys.
+Neither field is truly free-form: `advanced_instance_config` is validated server-side against something
+close to the real cloud provider's instance-launch request shape, and `flags` only accepts a fixed,
+specific set of recognized key names — an arbitrary custom key is rejected outright, not passed through
+silently. Supply values shaped the way each is actually validated, not arbitrary keys.
 
 ## Importing an existing compute config
 
@@ -113,12 +120,14 @@ directly from that version. Two different things happen to the *rest* of `head_n
 and it's worth knowing which is which:
 
 - **`flags` and `advanced_instance_config` — top-level, and the same two nested inside `head_node` and
-  every `worker_nodes` entry — are recovered from the API and populated into state.** This is the one
-  place these write-only fields (see above) are ever read back at all, specifically because import is
-  the only moment there's no prior configuration to preserve, so there's nothing ambiguous about
-  populating them from what's actually there. A matching configuration plans clean right after import;
-  omitting one of these that the backend actually has shows an honest diff wanting to remove it, instead
-  of silently dropping it on some later, unrelated apply.
+  every `worker_nodes` entry — are recovered from the API and populated into state.** For the
+  write-only top-level pair, import is the one place they're ever read back at all; for the per-node
+  pair, it's the one case that sets them apart from the other masked per-node fields below, which
+  import leaves null. Either way, import is the only moment there's no prior configuration to preserve,
+  so there's nothing ambiguous about populating them from what's actually there. A matching
+  configuration plans clean right after import; omitting one of these that the backend actually has
+  shows an honest diff wanting to remove it, instead of silently dropping it on some later, unrelated
+  apply.
 - **`resources`, `required_resources`, `labels`, and `cloud_deployment` are not recovered — they're left
   null**, the same way they'd read as unconfigured on an ordinary refresh. If the compute config you're
   importing sets any of these, add them to your `.tf` yourself; until you do, they'll plan as unset
