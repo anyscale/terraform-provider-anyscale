@@ -2,3 +2,39 @@
 release-note:fixed
 provider: correct several misleading attribute descriptions in the published docs - the deprecated kubernetes_config fields (namespace, ingress_host, cluster_name, context, kubeconfig_path) are now documented as inert (no effect), and the compute_config data source no longer claims flags/advanced_instance_config are unexposed (they are, per node).
 ```
+```
+release-note:fixed
+resource/anyscale_organization_collaborator: `base_role`'s description had the derivation direction backwards - it now correctly says the backend derives `base_role` from `permission_level` on every read, not the reverse.
+```
+```
+release-note:fixed
+resource/anyscale_project: `is_default`'s description incorrectly said "the default project for the organization"; Anyscale creates one default project per cloud, not per organization - corrected.
+```
+```
+release-note:changed
+resource/anyscale_project: Document that `cloud_id` stays `null` in state when the project is configured via `cloud_name` - unlike the `anyscale_project` data source, the resolved cloud ID is used once to create the project and never written back to `cloud_id` (no behavior change, docs only).
+```
+```
+release-note:changed
+data-source/anyscale_projects: Document that `name_contains` matches case-insensitively (no behavior change, docs only).
+```
+```
+release-note:fixed
+data-source/anyscale_project: `is_default`'s description incorrectly said "the default project for the organization"; Anyscale creates one default project per cloud, not per organization - corrected, same fix as the `anyscale_project` resource.
+```
+```
+release-note:fixed
+data-source/anyscale_projects: Same `is_default` per-cloud-not-per-organization fix as the `anyscale_project` data source and resource.
+```
+```
+release-note:changed
+data-source/anyscale_organization_user: Reword the deprecated `permission_level` and its replacement `base_role` to state the deprecation directly ("deprecated in favor of") rather than the prior forward-looking "backend is moving toward/away from" hedge (no behavior change, docs only).
+```
+```
+release-note:changed
+data-source/anyscale_organization_users: Same `permission_level`/`base_role` wording clarification as the `anyscale_organization_user` data source (no behavior change, docs only).
+```
+```
+release-note:changed
+resource/anyscale_cloud: The "compute_stack is required when using embedded config" error and its schema description now correctly list `kubernetes_config` alongside `aws_config`/`gcp_config` as a valid embedded config that satisfies the requirement (no validation logic change - `kubernetes_config` was already accepted, the message just didn't say so).
+```
