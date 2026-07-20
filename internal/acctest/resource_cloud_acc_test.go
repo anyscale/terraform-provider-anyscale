@@ -490,7 +490,7 @@ func TestAccCloudResource_MountPathPVCDefaultNoMisfire(t *testing.T) {
 		"object_storage": {"bucket_name": "tfacc-mountpath-nomisfire-bucket"}
 	}]`
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
   name           = "mountpath-pvc-nomisfire"
@@ -578,7 +578,7 @@ func TestAccCloudResource_SubnetNamesVMMultipleAllowed(t *testing.T) {
 		"compute_stack": "VM", "region": "us-central1"
 	}]`
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
   name           = "subnetnames-vm-multi"
@@ -775,55 +775,11 @@ func testAccCheckCloudAttributes(resourceName, expectedName, expectedProvider, e
 	}
 }
 
-// testAccCheckCloudDestroy verifies that clouds created by tests are properly destroyed.
-// This function is called automatically by the test framework after all test steps complete.
-func testAccCheckCloudDestroy(s *terraform.State) error {
-	client, err := GetTestClient()
-	if err != nil {
-		return fmt.Errorf("failed to get test client: %w", err)
-	}
-
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "anyscale_cloud" {
-			continue
-		}
-
-		cloudID := rs.Primary.ID
-		if cloudID == "" {
-			continue
-		}
-
-		if err := verifyCloudDestroyed(client, cloudID); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// verifyCloudDestroyed returns nil if the cloud is gone (404) and an error
-// for any state that prevents proving destruction (200, 5xx, transport error, etc.).
-func verifyCloudDestroyed(client *provider.Client, cloudID string) error {
-	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
-	if err != nil {
-		return fmt.Errorf("verify destroy of cloud %s: %w", cloudID, err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			log.Printf("[WARN] Failed to close response body: %v", closeErr)
-		}
-	}()
-
-	switch resp.StatusCode {
-	case http.StatusNotFound:
-		return nil
-	case http.StatusOK:
-		return fmt.Errorf("cloud %s still exists after destroy", cloudID)
-	default:
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("cannot verify destroy of cloud %s: API returned status %d: %s", cloudID, resp.StatusCode, truncateBody(string(body), 256))
-	}
-}
+// testAccCheckCloudDestroy verifies that clouds created by tests are properly
+// destroyed. Shares the same poll-for-async-delete behavior every other
+// resource's CheckDestroy gets from NewAPIDestroyCheck, instead of the
+// one-shot GET this used to hand-roll.
+var testAccCheckCloudDestroy = NewAPIDestroyCheck("anyscale_cloud", "/api/v2/clouds/%s")
 
 // Configuration templates
 

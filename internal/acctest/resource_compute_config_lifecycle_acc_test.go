@@ -293,7 +293,7 @@ resource "anyscale_compute_config" "test" {
 					// restoreMapKeyCasing must repair the server's lowercased
 					// key back to the user's configured casing.
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.0.resources.CPU", "2"),
-					testAccCaptureComputeConfigID("anyscale_compute_config.test", &firstConfigID),
+					CaptureResourceAttr("anyscale_compute_config.test", "config_id", &firstConfigID),
 				),
 				// Headline gate: a config populated at create from a
 				// realistically-normalized (not echoed) API response must not

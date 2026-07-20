@@ -27,8 +27,6 @@ func init() {
 	})
 }
 
-const sweepProjectDefaultMinAge = 2 * time.Hour
-
 // knownPermanentlyStuck403ProjectIDs are project IDs confirmed (see the
 // project-delete-403 investigation notes) to have never received their
 // SpiceDB owner tuple at creation time: DELETE permanently 403s for any
@@ -77,7 +75,7 @@ func sweepProjects(_ string) error {
 		return nil
 	}
 
-	minAge, err := resolveSweepMinAge(sweepProjectDefaultMinAge)
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
 	if err != nil {
 		return err
 	}
@@ -428,13 +426,4 @@ func sweepDeleteProject(ctx context.Context, client *provider.Client, p sweepPro
 		log.Printf("[sweep:anyscale_project] DELETE FAILED %s (%s): status=%d body=%s", p.ID, p.Name, resp.StatusCode, truncateBody(string(body), 256))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, truncateBody(string(body), 256))
 	}
-}
-
-func hasAnyPrefix(s string, prefixes []string) bool {
-	for _, p := range prefixes {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return false
 }

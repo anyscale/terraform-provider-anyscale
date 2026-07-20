@@ -507,33 +507,30 @@ func testAccCloudResourceImportStateIdFunc(resourceName string) resource.ImportS
 }
 
 // testAccCheckCloudResourceDestroy verifies that clouds and cloud resources created by tests
-// are properly destroyed. This checks both anyscale_cloud and anyscale_cloud_resource.
+// are properly destroyed. This checks both anyscale_cloud (delegating to the shared
+// testAccCheckCloudDestroy, so it gets the same poll-for-async-delete behavior every other
+// resource's CheckDestroy gets) and anyscale_cloud_resource.
 func testAccCheckCloudResourceDestroy(s *terraform.State) error {
+	if err := testAccCheckCloudDestroy(s); err != nil {
+		return err
+	}
+
 	client, err := GetTestClient()
 	if err != nil {
 		return fmt.Errorf("failed to get test client: %w", err)
 	}
 
 	for _, rs := range s.RootModule().Resources {
-		switch rs.Type {
-		case "anyscale_cloud":
-			cloudID := rs.Primary.ID
-			if cloudID == "" {
-				continue
-			}
-			if err := verifyCloudDestroyed(client, cloudID); err != nil {
-				return err
-			}
-
-		case "anyscale_cloud_resource":
-			cloudID := rs.Primary.Attributes["cloud_id"]
-			resourceName := rs.Primary.Attributes["name"]
-			if cloudID == "" || resourceName == "" {
-				continue
-			}
-			if err := verifyCloudResourceDestroyed(client, cloudID, resourceName); err != nil {
-				return err
-			}
+		if rs.Type != "anyscale_cloud_resource" {
+			continue
+		}
+		cloudID := rs.Primary.Attributes["cloud_id"]
+		resourceName := rs.Primary.Attributes["name"]
+		if cloudID == "" || resourceName == "" {
+			continue
+		}
+		if err := verifyCloudResourceDestroyed(client, cloudID, resourceName); err != nil {
+			return err
 		}
 	}
 
