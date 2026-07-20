@@ -149,7 +149,7 @@ output "service_live_ray_serve_config" {
 
 - `auto_rollout_enabled` (Boolean) Whether this service uses automatic rollout.
 - `base_url` (String) The base URL of this service.
-- `canary_version` (Attributes) The canary version of this service. Null unless the service is currently rolling out. (see [below for nested schema](#nestedatt--canary_version))
+- `canary_version` (Attributes) The canary version of this service - a point-in-time snapshot of an in-progress rollout, present only while one is active and null once the service settles. Because it disappears predictably as soon as the rollout completes, treat it as observational (e.g. for dashboards or monitoring) rather than wiring it as a stable input elsewhere - anything that depends on it will see it go null on its own, with no configuration change on your end. (see [below for nested schema](#nestedatt--canary_version))
 - `cloud_id` (String) The ID of the cloud this service runs in, derived from `compute_config_id`. Exposed for parity with the `anyscale_service`/`anyscale_services` data sources.
 - `created_at` (String) Timestamp when the service was created.
 - `creator_id` (String) The ID of the user who created the service.

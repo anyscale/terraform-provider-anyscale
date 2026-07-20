@@ -328,7 +328,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 			},
 			"canary_version": schema.SingleNestedAttribute{
 				Computed:            true,
-				MarkdownDescription: "The canary version of this service. Null unless the service is currently rolling out.",
+				MarkdownDescription: "The canary version of this service - a point-in-time snapshot of an in-progress rollout, present only while one is active and null once the service settles. Because it disappears predictably as soon as the rollout completes, treat it as observational (e.g. for dashboards or monitoring) rather than wiring it as a stable input elsewhere - anything that depends on it will see it go null on its own, with no configuration change on your end.",
 				Attributes:          serviceVersionResourceAttributes(),
 			},
 			"service_status_checklist": schema.SingleNestedAttribute{
