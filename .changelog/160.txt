@@ -1,0 +1,8 @@
+```
+release-note:fixed
+data-source/anyscale_service: Fix a crash when reading a service whose `service_observability_urls` or `primary_version` is null on the wire (e.g. a transitional or unhealthy service) - these now render as Terraform `null` instead of erroring.
+```
+```
+release-note:fixed
+data-source/anyscale_services: Fix the same `service_observability_urls`/`primary_version` null-handling crash as `anyscale_service`.
+```

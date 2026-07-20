@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 // runServicesDataSourceRead drives ServicesDataSource's real Read() method end-to-end, the same
@@ -81,8 +82,12 @@ func TestServicesDataSourceRead_Basic(t *testing.T) {
 		t.Errorf("unexpected service IDs: %q, %q", result.Services[0].ID.ValueString(), result.Services[1].ID.ValueString())
 	}
 	// Full detail, same as the singular DS - not trimmed.
-	if result.Services[0].PrimaryVersion.ID.ValueString() != "ver_primary" {
-		t.Errorf("services[0].primary_version.id = %q, want ver_primary", result.Services[0].PrimaryVersion.ID.ValueString())
+	var primaryVersion ServiceVersionModel
+	if d := result.Services[0].PrimaryVersion.As(context.Background(), &primaryVersion, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("failed to decode services[0].primary_version: %v", d)
+	}
+	if primaryVersion.ID.ValueString() != "ver_primary" {
+		t.Errorf("services[0].primary_version.id = %q, want ver_primary", primaryVersion.ID.ValueString())
 	}
 	if result.Services[0].CanaryVersion == nil {
 		t.Error("services[0].canary_version is nil, want present per the fixture")
