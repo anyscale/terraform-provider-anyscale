@@ -1241,18 +1241,33 @@ func GetTestProjectID(t *testing.T) string {
 	return cachedTestProjectID
 }
 
-// CreateEphemeralTestProject creates a minimal disposable project under a
-// resolved test cloud, named with the "tfacc-" prefix so the existing project
-// sweeper cleans it up if test cleanup is interrupted. Tests that mutate or
-// replace project-scoped state should use this instead of GetTestProjectID,
-// so they never touch a shared/real project.
+// CreateEphemeralTestProject creates a minimal disposable project under the package-wide
+// resolved test cloud (GetTestCloudID), named with the "tfacc-" prefix so the existing project
+// sweeper cleans it up if test cleanup is interrupted. Tests that mutate or replace project-scoped
+// state should use this instead of GetTestProjectID, so they never touch a shared/real project.
+//
+// Do NOT reach for this when your test has ALSO independently resolved its own cloud via
+// GetAllVMClouds/a specific selection - GetTestCloudID's resolution can legitimately land on a
+// DIFFERENT cloud than the one your test picked, which reproduces the exact real-infra failure
+// this helper's sibling, CreateEphemeralTestProjectForCloud, exists to prevent: the backend
+// enforces that a project's parent_cloud_id must match whatever cloud a cluster is provisioned
+// on (confirmed via a real 403, 2026-07-20 - see check_cloud_id_of_project_and_cluster_match in
+// the backend reference), and a mismatch surfaces as an opaque UNHEALTHY, not a clear plan-time
+// error. If your test already has a concrete cloud.ID in hand, use
+// CreateEphemeralTestProjectForCloud(t, cloud.ID) instead so the project can never diverge from
+// the cloud your compute_config/service actually targets.
 func CreateEphemeralTestProject(t *testing.T) (projectID string, projectName string, err error) {
+	return CreateEphemeralTestProjectForCloud(t, GetTestCloudID(t))
+}
+
+// CreateEphemeralTestProjectForCloud is CreateEphemeralTestProject, parameterized by an explicit
+// cloud ID instead of independently re-resolving one - see CreateEphemeralTestProject's doc for
+// why this distinction matters for any test that already selected its own cloud.
+func CreateEphemeralTestProjectForCloud(t *testing.T, parentCloudID string) (projectID string, projectName string, err error) {
 	client, err := GetTestClient()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get test client: %w", err)
 	}
-
-	parentCloudID := GetTestCloudID(t)
 
 	projectName = UniqueName(t, "project")
 	t.Logf("Creating ephemeral test project: %s (parent cloud: %s)", projectName, parentCloudID)

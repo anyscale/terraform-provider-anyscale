@@ -16,7 +16,10 @@ import (
 func init() {
 	resource.AddTestSweepers("anyscale_compute_config", &resource.Sweeper{
 		Name: "anyscale_compute_config",
-		F:    sweepComputeConfigs,
+		// A leaked anyscale_service holds a compute_config_id open, so it must sweep before the
+		// compute config it references - see sweeper_service_test.go.
+		Dependencies: []string{"anyscale_service"},
+		F:            sweepComputeConfigs,
 	})
 }
 

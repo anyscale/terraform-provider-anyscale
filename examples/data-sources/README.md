@@ -254,9 +254,11 @@ output "organization_user_emails" {
 
 ### `anyscale_service`
 
-Look up an existing Anyscale Service by ID or name. There is no matching `anyscale_service`
-resource - a service's underlying compute is live, ephemeral infrastructure rather than
-declarative config, so this data source is read-only by design, not as a current gap.
+Look up an existing Anyscale Service by ID or name - one deployed by the `anyscale_service`
+resource (see `examples/resources/anyscale_service/`), or by some other means (e.g. the Anyscale
+CLI or console). To create a service or roll out new versions from Terraform, use the
+`anyscale_service` resource instead; this data source stays read-only, for lookups that shouldn't
+take over a service's lifecycle.
 
 **Use cases:**
 - Get a running service's `current_state`, `base_url`, or rollout status for outputs or validation

@@ -138,10 +138,10 @@ variable "new_member_permission_level" {
 variable "existing_service_name" {
   description = <<-EOT
     Name of an already-running Anyscale service to read back via the singular anyscale_service data
-    source. Left empty by default (no anyscale_service resource exists for this example to create
-    one for you) -- the singular lookup is skipped entirely until you point this at a real service.
-    anyscale_services (the plural, filtered list) always runs regardless, since an empty result is
-    still a meaningful, assertable state.
+    source. Left empty by default -- the singular lookup is skipped entirely until you point this
+    at a real service (e.g. one deployed with the anyscale_service resource, or any pre-existing
+    service). anyscale_services (the plural, filtered list) always runs regardless, since an empty
+    result is still a meaningful, assertable state.
   EOT
   type        = string
   default     = ""
