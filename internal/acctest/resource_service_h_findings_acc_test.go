@@ -82,7 +82,7 @@ func oneTagBody(key, value string) string {
 // serviceFindingsCurrentState reports "TERMINATED" once terminated is set, else "RUNNING" - used
 // by every test below's GET handler so the resource.Test-automatic end-of-test destroy's
 // wait-for-TERMINATED loop resolves on its first or second poll instead of hanging for the real
-// rollout_timeout default (30m) against a mock that never reflects termination.
+// rollout_timeout default (45m) against a mock that never reflects termination.
 func serviceFindingsCurrentState(terminated *int32) string {
 	if atomic.LoadInt32(terminated) == 1 {
 		return "TERMINATED"
@@ -138,7 +138,7 @@ func TestAccServiceResource_PlainCreateSucceeds(t *testing.T) {
 		// Every test's TestCase issues a REAL destroy automatically at the end, which waits for
 		// current_state==TERMINATED before the DELETE call - so GET must reflect termination
 		// once this fires, or that wait polls a state that can never arrive and hangs for the
-		// real rollout_timeout default (30m), blowing well past this test's own timeout.
+		// real rollout_timeout default (45m), blowing well past this test's own timeout.
 		atomic.StoreInt32(&terminated, 1)
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": {}}`)
@@ -204,7 +204,7 @@ func TestAccServiceResource_DeleteAlreadyGone(t *testing.T) {
 				// GET's point of view too - consistent with the already-gone scenario, and
 				// critically, this makes a regression (falling through to the wait) fail FAST
 				// (getServiceByID errors on the first poll, since GET only accepts 200) rather
-				// than hang for the real rollout_timeout default (30m) waiting on a state that
+				// than hang for the real rollout_timeout default (45m) waiting on a state that
 				// can never arrive, which would otherwise blow well past this test's own timeout
 				// instead of failing informatively.
 				atomic.AddInt32(&getsAfterTerminate, 1)
