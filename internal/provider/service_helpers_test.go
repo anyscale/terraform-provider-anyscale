@@ -92,6 +92,104 @@ func TestEvaluateServiceState(t *testing.T) {
 	}
 }
 
+// realCapturedClusterFailureMessage is the verbatim backend message from a real, manually
+// diagnosed UNHEALTHY service (see the fixture-cloud identity investigation this session) - the
+// exact text a real user would need to see to self-diagnose, rather than resorting to a manual
+// API call the way this session had to.
+const realCapturedClusterFailureMessage = "Failed to create a cluster because the user who " +
+	"created it has either been removed from the organization or has had their permissions " +
+	"revoked. Resume the schedule to continue."
+
+// TestEvaluateServiceState_ChecklistFallback proves the service_status_checklist fallback added
+// after this session's real diagnosis: the backend can leave the top-level error_message null
+// while the actual, actionable cause lives only in a checklist item. The fixture below is the
+// REAL captured shape (not a synthetic guess) from that diagnosis - two RUNNING shared items with
+// messages, an UNHEALTHY CLUSTER item with the real message, an UNHEALTHY APPLICATION item with
+// an EMPTY message, and a STARTING TARGET_NODE_GROUP item that also carries a message. That one
+// fixture exercises all three skip conditions the extraction must get right, simultaneously:
+// RUNNING (not an error state) must be skipped even with a message; STARTING (not an error
+// state) must be skipped even with a message; an error-state item with an EMPTY message must be
+// skipped. Only the CLUSTER item satisfies both conditions (error state AND non-empty message)
+// and must be the one that surfaces.
+func TestEvaluateServiceState_ChecklistFallback(t *testing.T) {
+	realChecklist := &ServiceStatusChecklistResult{
+		Shared: []StatusChecklistItemResult{
+			{Kind: "LB_RESOURCES", Label: "Load Balancer resources", State: "RUNNING",
+				Message: "Load balancer has been initialized and is ready for use by downstream services"},
+			{Kind: "DNS", Label: "DNS record", State: "RUNNING", Message: "DNS is ready"},
+		},
+		PerVersion: []VersionChecklistResult{
+			{
+				VersionID: "srv_hzeqeiivlp9h3g9wiq6tzz9tu4",
+				Items: []StatusChecklistItemResult{
+					{Kind: "CLUSTER", Label: "Cluster", State: "UNHEALTHY", Message: realCapturedClusterFailureMessage},
+					{Kind: "APPLICATION", Label: "Application", State: "UNHEALTHY", Message: ""},
+					{Kind: "TARGET_NODE_GROUP", Label: "Load Balancer Target Node Group", State: "STARTING",
+						Message: "Health-checking for new service version"},
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		name               string
+		checklist          *ServiceStatusChecklistResult
+		wantErrContains    string
+		wantErrNotContains []string
+	}{
+		{
+			name:            "real capture: surfaces only CLUSTER's message",
+			checklist:       realChecklist,
+			wantErrContains: "CLUSTER: " + realCapturedClusterFailureMessage,
+			wantErrNotContains: []string{
+				"LB_RESOURCES", "DNS", "TARGET_NODE_GROUP", "APPLICATION:",
+			},
+		},
+		{
+			name:            "nil checklist falls back to the bare state message, no panic",
+			checklist:       nil,
+			wantErrContains: "service entered UNHEALTHY state",
+		},
+		{
+			name: "checklist with no qualifying items falls back to the bare state message",
+			checklist: &ServiceStatusChecklistResult{
+				Shared: []StatusChecklistItemResult{
+					{Kind: "DNS", State: "RUNNING", Message: "DNS is ready"},
+				},
+			},
+			wantErrContains: "service entered UNHEALTHY state",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &ServiceResult{
+				ID:                     "svc_test",
+				CurrentState:           "UNHEALTHY",
+				ErrorMessage:           nil, // top-level empty - the fallback's whole reason to exist
+				ServiceStatusChecklist: tc.checklist,
+			}
+
+			done, err := evaluateServiceState(service, serviceStateRunning)
+
+			if !done {
+				t.Fatalf("done = false, want true (terminal error bucket)")
+			}
+			if err == nil {
+				t.Fatalf("err = nil, want an error containing %q", tc.wantErrContains)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContains) {
+				t.Errorf("err = %q, want it to contain %q", err.Error(), tc.wantErrContains)
+			}
+			for _, notWant := range tc.wantErrNotContains {
+				if strings.Contains(err.Error(), notWant) {
+					t.Errorf("err = %q, must NOT contain %q (that item should have been skipped)", err.Error(), notWant)
+				}
+			}
+		})
+	}
+}
+
 // serviceStatePollTestServer serves GET /api/v2/services-v2/{id} with a scripted sequence of
 // current_state values: states[0] on the first request, states[1] on the second, and so on;
 // once the sequence is exhausted, it keeps repeating the last entry. Models a real rollout's
