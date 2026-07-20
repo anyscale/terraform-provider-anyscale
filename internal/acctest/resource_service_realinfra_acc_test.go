@@ -181,3 +181,154 @@ resource "anyscale_service" "test" {
 		// asserts GET /api/v2/services-v2/{id} returns 404, not just that Destroy() returned nil.
 	})
 }
+
+// TestAccServiceResource_RealInfra_InPlaceRollout is the IN_PLACE-strategy companion to
+// TestAccServiceResource_RealInfra's rollout step above, which exercises the default ROLLOUT
+// strategy (new cluster, traffic shift). Requested directly by the user: both the in_place and
+// the standard rollout upgrade paths must be covered in acctest AND real E2E, not just one of the
+// two. The mock suite's TestAccServiceResource_InPlaceUpdateConverges already proves the
+// provider's own polling/state handling for IN_PLACE in isolation; only real infra can prove the
+// backend actually honors IN_PLACE end to end - upgrading the SAME running cluster rather than
+// starting a new one - which is the thing a mock, by definition, cannot observe.
+func TestAccServiceResource_RealInfra_InPlaceRollout(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
+	t.Parallel()
+
+	vmClouds := GetAllVMClouds(t)
+	if len(vmClouds) == 0 {
+		t.Skip("No VM cloud available for real-infra service testing")
+	}
+	cloud := vmClouds[0]
+	instanceTypes := cloud.InstanceTypes()
+	if !instanceTypes.IsValid() {
+		t.Skip("No valid instance types on the resolved cloud")
+	}
+
+	projectID := GetTestProjectID(t)
+	computeConfigName := UniqueName(t, "cc-for-service-ip")
+	serviceName := UniqueName(t, "service-realinfra-ip")
+
+	config := fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = %[1]q
+  cloud_id = %[2]q
+  head_node = {
+    instance_type = %[3]q
+  }
+}
+
+resource "anyscale_service" "test" {
+  name              = %[4]q
+  project_id        = %[5]q
+  build_id          = "anyscaleray2561-slim-py312-cu129"
+  compute_config_id = anyscale_compute_config.test.config_id
+  rollout_strategy  = "IN_PLACE"
+  rollout_timeout   = "20m"
+
+  ray_serve_config = {
+    applications = [
+      {
+        import_path = "main:app"
+        runtime_env = {
+          working_dir = "https://github.com/anyscale/first-service/archive/refs/heads/main.zip"
+        }
+      }
+    ]
+  }
+
+  tags = {
+    purpose = "tfacc-real-infra-gate-inplace"
+  }
+}
+`, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID)
+
+	// updatedConfig changes ONLY ray_serve_config - the one field IN_PLACE permits (enforced at
+	// plan time by ModifyPlan; see TestAccServiceResource_InPlaceRejectsBuildIDChange for the
+	// negative case). Must upgrade the SAME cluster - same id, not a replace - and reach RUNNING
+	// again.
+	updatedConfig := fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name     = %[1]q
+  cloud_id = %[2]q
+  head_node = {
+    instance_type = %[3]q
+  }
+}
+
+resource "anyscale_service" "test" {
+  name              = %[4]q
+  project_id        = %[5]q
+  build_id          = "anyscaleray2561-slim-py312-cu129"
+  compute_config_id = anyscale_compute_config.test.config_id
+  rollout_strategy  = "IN_PLACE"
+  rollout_timeout   = "20m"
+
+  ray_serve_config = {
+    applications = [
+      {
+        import_path = "main:app"
+        runtime_env = {
+          working_dir = "https://github.com/anyscale/first-service/archive/refs/heads/main.zip"
+          env_vars = {
+            TFACC_ROLLOUT_MARKER = "v2-inplace"
+          }
+        }
+      }
+    ]
+  }
+
+  tags = {
+    purpose = "tfacc-real-infra-gate-inplace"
+  }
+}
+`, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID)
+
+	var serviceIDAfterCreate string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             NewAPIDestroyCheck("anyscale_service", "/api/v2/services-v2/%s"),
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_service.test", "id"),
+					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
+					resource.TestCheckResourceAttr("anyscale_service.test", "rollout_strategy", "IN_PLACE"),
+					CaptureResourceAttr("anyscale_service.test", "id", &serviceIDAfterCreate),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+			{
+				Config: updatedConfig,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
+					resource.TestCheckResourceAttr("anyscale_service.test", "rollout_strategy", "IN_PLACE"),
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources["anyscale_service.test"]
+						if !ok {
+							return fmt.Errorf("resource not found: anyscale_service.test")
+						}
+						if got := rs.Primary.Attributes["id"]; got != serviceIDAfterCreate {
+							return fmt.Errorf("id changed from %q to %q after an IN_PLACE ray_serve_config-only change - "+
+								"IN_PLACE must upgrade the same cluster, not replace it",
+								serviceIDAfterCreate, got)
+						}
+						return nil
+					},
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
