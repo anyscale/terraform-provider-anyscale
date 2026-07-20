@@ -3,9 +3,39 @@ package provider
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// serviceObservabilityURLsAttrTypes mirrors ServiceObservabilityURLsModel's shape for use with
+// types.ObjectValueFrom. Shared by anyscale_service/anyscale_services (this file) and the
+// anyscale_service resource (resource_service.go) - one canonical definition, since attr.Type
+// (a model-level concept) is identical across the resource/datasource schema packages, unlike
+// schema.Attribute itself which is not.
+var serviceObservabilityURLsAttrTypes = map[string]attr.Type{
+	"service_dashboard_url":                    types.StringType,
+	"service_dashboard_embedding_url":          types.StringType,
+	"serve_deployment_dashboard_url":           types.StringType,
+	"serve_deployment_dashboard_embedding_url": types.StringType,
+}
+
+// serviceVersionAttrTypes mirrors ServiceVersionModel's shape (primary_version/canary_version),
+// for the same reason and shared the same way as serviceObservabilityURLsAttrTypes above.
+var serviceVersionAttrTypes = map[string]attr.Type{
+	"id":                 types.StringType,
+	"created_at":         types.StringType,
+	"version":            types.StringType,
+	"current_state":      types.StringType,
+	"weight":             types.Int64Type,
+	"current_weight":     types.Int64Type,
+	"target_weight":      types.Int64Type,
+	"build_id":           types.StringType,
+	"compute_config_id":  types.StringType,
+	"production_job_ids": types.ListType{ElemType: types.StringType},
+	"connection_ids":     types.ListType{ElemType: types.StringType},
+	"ray_serve_config":   types.StringType,
+}
 
 // populateServiceDataSourceModel maps a ServiceResult into the singular anyscale_service data
 // source's model. Shared with the plural anyscale_services data source via
@@ -31,11 +61,19 @@ func populateServiceDataSourceModel(ctx context.Context, m *ServiceDataSourceMod
 	m.IsMultiVersion = types.BoolValue(s.IsMultiVersion)
 	m.ErrorMessage = types.StringPointerValue(s.ErrorMessage)
 
-	m.ServiceObservabilityURLs = serviceObservabilityURLsToModel(s.ServiceObservabilityURLs)
+	obsURLsObj, obsDiags := serviceObservabilityURLsToObject(ctx, s.ServiceObservabilityURLs)
+	diags.Append(obsDiags...)
+	m.ServiceObservabilityURLs = obsURLsObj
 
-	primaryVersion, vDiags := serviceVersionResultToModel(ctx, s.PrimaryVersion)
-	diags.Append(vDiags...)
-	m.PrimaryVersion = primaryVersion
+	if s.PrimaryVersion != nil {
+		primaryVersion, vDiags := serviceVersionResultToModel(ctx, *s.PrimaryVersion)
+		diags.Append(vDiags...)
+		primaryObj, pObjDiags := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, primaryVersion)
+		diags.Append(pObjDiags...)
+		m.PrimaryVersion = primaryObj
+	} else {
+		m.PrimaryVersion = types.ObjectNull(serviceVersionAttrTypes)
+	}
 
 	if s.CanaryVersion != nil {
 		canaryVersion, cDiags := serviceVersionResultToModel(ctx, *s.CanaryVersion)
@@ -50,8 +88,21 @@ func populateServiceDataSourceModel(ctx context.Context, m *ServiceDataSourceMod
 	return diags
 }
 
+// serviceObservabilityURLsToObject converts a possibly-nil ServiceObservabilityURLsResult into a
+// types.Object, using serviceObservabilityURLsAttrTypes as its shape. Both callers (this data
+// source, anyscale_service resource) use this so a null service_observability_urls is rendered
+// identically wherever it appears.
+func serviceObservabilityURLsToObject(ctx context.Context, u *ServiceObservabilityURLsResult) (types.Object, diag.Diagnostics) {
+	if u == nil {
+		return types.ObjectNull(serviceObservabilityURLsAttrTypes), nil
+	}
+	model := serviceObservabilityURLsToModel(*u)
+	return types.ObjectValueFrom(ctx, serviceObservabilityURLsAttrTypes, model)
+}
+
 // serviceObservabilityURLsToModel maps a ServiceObservabilityURLsResult to its tfsdk model. All
-// 4 fields are genuinely optional server-side (nullable dashboard URLs), never the object itself.
+// 4 fields are genuinely optional server-side (nullable dashboard URLs), independent of whether
+// the containing object itself is present (see serviceObservabilityURLsToObject for that).
 func serviceObservabilityURLsToModel(u ServiceObservabilityURLsResult) ServiceObservabilityURLsModel {
 	return ServiceObservabilityURLsModel{
 		ServiceDashboardURL:                  types.StringPointerValue(u.ServiceDashboardURL),

@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 // diagsContainDetailSubstring checks whether any diagnostic's Detail contains the given substring.
@@ -31,13 +32,17 @@ func runServiceDataSourceRead(t *testing.T, d *ServiceDataSource, model ServiceD
 	t.Helper()
 	ctx := context.Background()
 
-	// primary_version.production_job_ids/connection_ids are types.List, whose Go zero value
-	// carries no element-type information (unlike types.String's zero value, or a plain []T
-	// slice field, both of which the framework can marshal fine as an initial config fixture).
-	// None of this helper's callers pre-populate primary_version themselves - it is Computed-only
-	// output Read() fills in - so it's always safe to default it to a properly-typed null here.
-	model.PrimaryVersion.ProductionJobIDs = types.ListNull(types.StringType)
-	model.PrimaryVersion.ConnectionIDs = types.ListNull(types.StringType)
+	// primary_version and service_observability_urls are types.Object, whose Go zero value
+	// carries no attribute-type information (unlike types.String's zero value, which the
+	// framework can marshal fine as an initial config fixture). None of this helper's callers
+	// pre-populate these themselves - they are Computed-only output Read() fills in - so it's
+	// always safe to default them to a properly-typed null here.
+	if model.PrimaryVersion.IsNull() || model.PrimaryVersion.IsUnknown() {
+		model.PrimaryVersion = types.ObjectNull(serviceVersionAttrTypes)
+	}
+	if model.ServiceObservabilityURLs.IsNull() || model.ServiceObservabilityURLs.IsUnknown() {
+		model.ServiceObservabilityURLs = types.ObjectNull(serviceObservabilityURLsAttrTypes)
+	}
 
 	var schemaResp datasource.SchemaResponse
 	d.Schema(ctx, datasource.SchemaRequest{}, &schemaResp)
@@ -197,31 +202,39 @@ func TestServiceDataSourceRead_ByID(t *testing.T) {
 	}
 
 	// service_observability_urls
-	if result.ServiceObservabilityURLs.ServiceDashboardURL.ValueString() != "https://dash/service" {
-		t.Errorf("service_dashboard_url = %q", result.ServiceObservabilityURLs.ServiceDashboardURL.ValueString())
+	var obsURLs ServiceObservabilityURLsModel
+	if d := result.ServiceObservabilityURLs.As(context.Background(), &obsURLs, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("failed to decode service_observability_urls: %v", d)
 	}
-	if result.ServiceObservabilityURLs.ServeDeploymentDashboardEmbeddingURL.ValueString() != "https://dash/deployment/embed" {
-		t.Errorf("serve_deployment_dashboard_embedding_url = %q", result.ServiceObservabilityURLs.ServeDeploymentDashboardEmbeddingURL.ValueString())
+	if obsURLs.ServiceDashboardURL.ValueString() != "https://dash/service" {
+		t.Errorf("service_dashboard_url = %q", obsURLs.ServiceDashboardURL.ValueString())
+	}
+	if obsURLs.ServeDeploymentDashboardEmbeddingURL.ValueString() != "https://dash/deployment/embed" {
+		t.Errorf("serve_deployment_dashboard_embedding_url = %q", obsURLs.ServeDeploymentDashboardEmbeddingURL.ValueString())
 	}
 
 	// primary_version
-	if result.PrimaryVersion.ID.ValueString() != "ver_primary" {
-		t.Errorf("primary_version.id = %q", result.PrimaryVersion.ID.ValueString())
+	var primaryVersion ServiceVersionModel
+	if d := result.PrimaryVersion.As(context.Background(), &primaryVersion, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("failed to decode primary_version: %v", d)
 	}
-	if result.PrimaryVersion.Weight.ValueInt64() != 100 {
-		t.Errorf("primary_version.weight = %d, want 100", result.PrimaryVersion.Weight.ValueInt64())
+	if primaryVersion.ID.ValueString() != "ver_primary" {
+		t.Errorf("primary_version.id = %q", primaryVersion.ID.ValueString())
 	}
-	if result.PrimaryVersion.CurrentWeight.ValueInt64() != 100 {
-		t.Errorf("primary_version.current_weight = %d, want 100", result.PrimaryVersion.CurrentWeight.ValueInt64())
+	if primaryVersion.Weight.ValueInt64() != 100 {
+		t.Errorf("primary_version.weight = %d, want 100", primaryVersion.Weight.ValueInt64())
+	}
+	if primaryVersion.CurrentWeight.ValueInt64() != 100 {
+		t.Errorf("primary_version.current_weight = %d, want 100", primaryVersion.CurrentWeight.ValueInt64())
 	}
 	var jobIDs []string
-	if d := result.PrimaryVersion.ProductionJobIDs.ElementsAs(context.Background(), &jobIDs, false); d.HasError() {
+	if d := primaryVersion.ProductionJobIDs.ElementsAs(context.Background(), &jobIDs, false); d.HasError() {
 		t.Fatalf("failed to decode production_job_ids: %v", d)
 	}
 	if len(jobIDs) != 2 || jobIDs[0] != "job_1" || jobIDs[1] != "job_2" {
 		t.Errorf("primary_version.production_job_ids = %v, want [job_1 job_2]", jobIDs)
 	}
-	if result.PrimaryVersion.RayServeConfig.ValueString() == "" {
+	if primaryVersion.RayServeConfig.ValueString() == "" {
 		t.Error("primary_version.ray_serve_config is empty, want the raw JSON blob")
 	}
 
@@ -282,6 +295,11 @@ func TestServiceDataSourceRead_EnumWireValues(t *testing.T) {
 		t.Fatalf("unexpected error: %v", diags)
 	}
 
+	var primaryVersion ServiceVersionModel
+	if d := result.PrimaryVersion.As(context.Background(), &primaryVersion, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("failed to decode primary_version: %v", d)
+	}
+
 	cases := []struct {
 		name string
 		got  string
@@ -289,7 +307,7 @@ func TestServiceDataSourceRead_EnumWireValues(t *testing.T) {
 	}{
 		{"current_state", result.CurrentState.ValueString(), "RUNNING"},
 		{"goal_state", result.GoalState.ValueString(), "RUNNING"},
-		{"primary_version.current_state", result.PrimaryVersion.CurrentState.ValueString(), "RUNNING"},
+		{"primary_version.current_state", primaryVersion.CurrentState.ValueString(), "RUNNING"},
 		{"canary_version.current_state", result.CanaryVersion.CurrentState.ValueString(), "STARTING"},
 		{"service_status_checklist.shared[0].kind", result.ServiceStatusChecklist.Shared[0].Kind.ValueString(), "LOAD_BALANCER"},
 		{"service_status_checklist.shared[0].state", result.ServiceStatusChecklist.Shared[0].State.ValueString(), "RUNNING"},
@@ -376,21 +394,29 @@ func TestServiceDataSourceRead_NullableFields(t *testing.T) {
 	if !result.ErrorMessage.IsNull() {
 		t.Errorf("error_message should be null, got %q", result.ErrorMessage.ValueString())
 	}
-	if !result.ServiceObservabilityURLs.ServiceDashboardURL.IsNull() {
-		t.Errorf("service_dashboard_url should be null, got %q", result.ServiceObservabilityURLs.ServiceDashboardURL.ValueString())
+	var obsURLsNullable ServiceObservabilityURLsModel
+	if d := result.ServiceObservabilityURLs.As(context.Background(), &obsURLsNullable, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("failed to decode service_observability_urls: %v", d)
 	}
-	if !result.PrimaryVersion.CurrentWeight.IsNull() {
-		t.Errorf("primary_version.current_weight should be null, got %v", result.PrimaryVersion.CurrentWeight)
+	if !obsURLsNullable.ServiceDashboardURL.IsNull() {
+		t.Errorf("service_dashboard_url should be null, got %q", obsURLsNullable.ServiceDashboardURL.ValueString())
 	}
-	if !result.PrimaryVersion.TargetWeight.IsNull() {
-		t.Errorf("primary_version.target_weight should be null, got %v", result.PrimaryVersion.TargetWeight)
+	var primaryVersionNullable ServiceVersionModel
+	if d := result.PrimaryVersion.As(context.Background(), &primaryVersionNullable, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("failed to decode primary_version: %v", d)
 	}
-	if !result.PrimaryVersion.ConnectionIDs.IsNull() {
-		t.Errorf("primary_version.connection_ids should be null, got %#v", result.PrimaryVersion.ConnectionIDs)
+	if !primaryVersionNullable.CurrentWeight.IsNull() {
+		t.Errorf("primary_version.current_weight should be null, got %v", primaryVersionNullable.CurrentWeight)
+	}
+	if !primaryVersionNullable.TargetWeight.IsNull() {
+		t.Errorf("primary_version.target_weight should be null, got %v", primaryVersionNullable.TargetWeight)
+	}
+	if !primaryVersionNullable.ConnectionIDs.IsNull() {
+		t.Errorf("primary_version.connection_ids should be null, got %#v", primaryVersionNullable.ConnectionIDs)
 	}
 	// ray_serve_config is required upstream (AC-5) - even an empty object must round-trip as a
 	// non-null string, never collapse to Terraform null the way the other Optional fields above do.
-	if result.PrimaryVersion.RayServeConfig.IsNull() {
+	if primaryVersionNullable.RayServeConfig.IsNull() {
 		t.Error("primary_version.ray_serve_config should never be null (required upstream), got null")
 	}
 	if result.CanaryVersion != nil {
@@ -560,5 +586,127 @@ func TestServiceDataSourceRead_HitsServicesV2Endpoint(t *testing.T) {
 	want := "/api/v2/services-v2/" + serviceID
 	if gotPath != want {
 		t.Errorf("request path = %q, want %q (services-v2, not services)", gotPath, want)
+	}
+}
+
+// TestServiceDataSourceRead_TransitionalNulls is the decisive, race-free proof for the DS
+// null-crash (architect's ruling): a data source must not crash on a null it can receive,
+// independent of whether that null is common (steady-state) or rare (a transitional read) -
+// provenance only affects changelog framing, not whether this must be fixed. Confirmed via a
+// real CI acceptance-test crash (TestAccServiceDataSource_ByID, "Path: service_observability_urls",
+// "Received null value") that both service_observability_urls and primary_version can be wire
+// null - mirrors a service still STARTING, before any version has ever gone healthy or any
+// dashboard URLs have been assigned. Deliberately built from a mock, not a real-infra run: real
+// infra cannot deterministically hold a service in this exact transient window long enough to
+// prove a fix, which is exactly why this crash slipped through undetected since PR 116.
+func TestServiceDataSourceRead_TransitionalNulls(t *testing.T) {
+	const serviceID = "service2_transitional"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result": {
+			"id": "` + serviceID + `",
+			"name": "still-starting",
+			"description": null,
+			"project_id": "prj_123",
+			"cloud_id": "cld_456",
+			"creator_id": "user_789",
+			"created_at": "2024-01-01T00:00:00Z",
+			"ended_at": null,
+			"hostname": "still-starting.example.com",
+			"base_url": "https://still-starting.example.com",
+			"current_state": "STARTING",
+			"goal_state": "RUNNING",
+			"auto_rollout_enabled": true,
+			"is_multi_version": false,
+			"error_message": null,
+			"service_observability_urls": null,
+			"primary_version": null,
+			"canary_version": null,
+			"service_status_checklist": null
+		}}`))
+	}))
+	defer server.Close()
+
+	d := &ServiceDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runServiceDataSourceRead(t, d, ServiceDataSourceModel{ID: types.StringValue(serviceID)})
+	if diags.HasError() {
+		t.Fatalf("BUG REPRODUCED: reading a service with service_observability_urls/primary_version null crashed: %v", diags)
+	}
+
+	if result.Name.ValueString() != "still-starting" {
+		t.Errorf("name = %q, want still-starting", result.Name.ValueString())
+	}
+	if !result.ServiceObservabilityURLs.IsNull() {
+		t.Errorf("service_observability_urls should decode as a null object, got %#v", result.ServiceObservabilityURLs)
+	}
+	if !result.PrimaryVersion.IsNull() {
+		t.Errorf("primary_version should decode as a null object, got %#v", result.PrimaryVersion)
+	}
+}
+
+// TestServiceDataSourceRead_ObservabilityURLsPresentWithNullSubfields covers the second shape
+// shipwright found on the real leaked service that caused the CI crash (service2_s9uqm8dx13usk34zbqdw4pzeix):
+// service_observability_urls present as an OBJECT with all 4 dashboard-URL sub-fields null, rather
+// than the whole key being null (TestServiceDataSourceRead_TransitionalNulls above). Per
+// architect's trace, this shape was never the crash itself - the 4 leaf fields were already
+// nullable strings before this fix - so this is a no-regression confirmation, not a
+// crashes-today/passes-after mutation-proof case. Included because the real service's response
+// evolved from whole-null (the confirmed crash, while still unhealthy/starting) to this
+// present-with-null-subfields shape moments later, so both are real states worth covering.
+func TestServiceDataSourceRead_ObservabilityURLsPresentWithNullSubfields(t *testing.T) {
+	const serviceID = "service2_present_null_subfields"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result": {
+			"id": "` + serviceID + `",
+			"name": "unhealthy-no-dashboards",
+			"description": null,
+			"project_id": "prj_123",
+			"cloud_id": "cld_456",
+			"creator_id": "user_789",
+			"created_at": "2024-01-01T00:00:00Z",
+			"ended_at": null,
+			"hostname": "unhealthy-no-dashboards.example.com",
+			"base_url": "https://unhealthy-no-dashboards.example.com",
+			"current_state": "UNHEALTHY",
+			"goal_state": "RUNNING",
+			"auto_rollout_enabled": true,
+			"is_multi_version": false,
+			"error_message": null,
+			"service_observability_urls": {
+				"service_dashboard_url": null,
+				"service_dashboard_embedding_url": null,
+				"serve_deployment_dashboard_url": null,
+				"serve_deployment_dashboard_embedding_url": null
+			},
+			"primary_version": null,
+			"canary_version": null,
+			"service_status_checklist": null
+		}}`))
+	}))
+	defer server.Close()
+
+	d := &ServiceDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runServiceDataSourceRead(t, d, ServiceDataSourceModel{ID: types.StringValue(serviceID)})
+	if diags.HasError() {
+		t.Fatalf("reading a service with an object-present-but-all-subfields-null service_observability_urls crashed: %v", diags)
+	}
+
+	if result.ServiceObservabilityURLs.IsNull() {
+		t.Error("service_observability_urls should decode as a present (non-null) object, since the key itself was a present object on the wire")
+	}
+	var obsURLs ServiceObservabilityURLsModel
+	if d := result.ServiceObservabilityURLs.As(context.Background(), &obsURLs, basetypes.ObjectAsOptions{}); d.HasError() {
+		t.Fatalf("failed to decode service_observability_urls: %v", d)
+	}
+	if !obsURLs.ServiceDashboardURL.IsNull() {
+		t.Errorf("service_observability_urls.service_dashboard_url should be null, got %#v", obsURLs.ServiceDashboardURL)
+	}
+	if !obsURLs.ServeDeploymentDashboardEmbeddingURL.IsNull() {
+		t.Errorf("service_observability_urls.serve_deployment_dashboard_embedding_url should be null, got %#v", obsURLs.ServeDeploymentDashboardEmbeddingURL)
 	}
 }
