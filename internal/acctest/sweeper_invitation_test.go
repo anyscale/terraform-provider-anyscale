@@ -29,8 +29,6 @@ func init() {
 // invitations are addressed by email, not resource name.
 const sweepInvitationEmailPrefix = "tfacc-invite-"
 
-const sweepInvitationDefaultMinAge = 2 * time.Hour
-
 type sweepInvitationResult struct {
 	ID        string `json:"id"`
 	Email     string `json:"email"`
@@ -51,7 +49,7 @@ func sweepInvitations(_ string) error {
 		return nil
 	}
 
-	minAge, err := resolveSweepMinAge(sweepInvitationDefaultMinAge)
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
 	if err != nil {
 		return err
 	}

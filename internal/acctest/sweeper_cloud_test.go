@@ -13,15 +13,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-var sweepableCloudPrefixes = []string{
-	"tfacc-",
-	"tf-test-",
-	"tfprovider-",
-	"tfacc-ephemeral-",
-}
-
-const defaultSweepMinAge = 2 * time.Hour
-
 func init() {
 	resource.AddTestSweepers("anyscale_cloud", &resource.Sweeper{
 		Name:         "anyscale_cloud",
@@ -31,8 +22,9 @@ func init() {
 }
 
 // sweepClouds deletes test clouds whose names start with one of the sweepable
-// prefixes ("tfacc-", "tf-test-", "tfprovider-", "tfacc-ephemeral-") and whose
-// age exceeds the minimum threshold (default 2h, override via
+// prefixes (sweepableResourcePrefixes: "tfacc-", "tf-test-", "tfprovider-" -
+// this also covers ephemeral clouds, named "tfacc-ephemeral-<nanos>") and
+// whose age exceeds the minimum threshold (default 2h, override via
 // ANYSCALE_SWEEP_MIN_AGE using time.ParseDuration syntax). The age threshold
 // avoids racing live tests; the prefix filter ensures we never touch
 // production clouds.
@@ -87,7 +79,7 @@ func sweepClouds(region string) error {
 			log.Printf("[sweepClouds] KEEP %s (%s): protected static test fixture", cloud.Name, cloud.ID)
 			continue
 		}
-		if !hasAnyPrefix(cloud.Name, sweepableCloudPrefixes) {
+		if !hasAnyPrefix(cloud.Name, sweepableResourcePrefixes) {
 			continue
 		}
 
@@ -131,11 +123,4 @@ func sweepClouds(region string) error {
 		return fmt.Errorf("sweepClouds: %d failure(s): %s", len(failures), strings.Join(failures, "; "))
 	}
 	return nil
-}
-
-func truncateBody(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "...(truncated)"
 }

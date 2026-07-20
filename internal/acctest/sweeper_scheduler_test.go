@@ -20,8 +20,6 @@ func init() {
 	})
 }
 
-const sweepSchedulerDefaultMinAge = 2 * time.Hour
-
 // sweepSchedulerResult mirrors only the fields the sweeper needs. The list API
 // response model doesn't expose a created_at; we read it opportunistically in
 // case the upstream schema is extended, but we don't depend on it.
@@ -44,7 +42,7 @@ func sweepSchedulers(_ string) error {
 		return nil
 	}
 
-	minAge, err := resolveSweepMinAge(sweepSchedulerDefaultMinAge)
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
 	if err != nil {
 		return err
 	}

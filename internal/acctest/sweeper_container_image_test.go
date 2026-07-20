@@ -34,8 +34,6 @@ func init() {
 	})
 }
 
-const sweepContainerImageDefaultMinAge = 2 * time.Hour
-
 func sweepContainerImages(_ string) error {
 	client, err := GetTestClient()
 	if err != nil {
@@ -43,7 +41,7 @@ func sweepContainerImages(_ string) error {
 		return nil
 	}
 
-	minAge, err := resolveSweepMinAge(sweepContainerImageDefaultMinAge)
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
 	if err != nil {
 		return err
 	}

@@ -275,7 +275,7 @@ func TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires(t *testing.
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
 	}`, cloudID)
 	resourcesJSON := `[]`
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 
 	// aws_config is present (so isEmptyCloud is false) but deliberately
 	// omits controlplane_iam_role_arn/dataplane_iam_role_arn - the fields
