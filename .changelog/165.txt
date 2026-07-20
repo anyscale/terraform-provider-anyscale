@@ -1,0 +1,4 @@
+```
+release-note:changed
+provider: Add the `anyscale_service` resource to README's list of currently supported resources - it shipped in v0.14.0 but was missing from that list (no behavior change, docs only).
+```
