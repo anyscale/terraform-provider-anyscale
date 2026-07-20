@@ -1,0 +1,4 @@
+```
+release-note:added
+resource/anyscale_service: Add plan-time validation that `project_id` and `compute_config_id` target the same cloud - a mismatch previously surfaced as an opaque `UNHEALTHY` service state at apply time instead of a clear error.
+```
