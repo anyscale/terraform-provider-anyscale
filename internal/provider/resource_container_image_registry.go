@@ -374,11 +374,7 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	plan.IsBYOD = types.BoolValue(result.IsBYOD)
 	plan.Revision = types.Int64Value(int64(result.Revision))
 
-	if result.Digest != nil {
-		plan.Digest = types.StringValue(*result.Digest)
-	} else {
-		plan.Digest = types.StringNull()
-	}
+	plan.Digest = types.StringPointerValue(result.Digest)
 
 	// ray_version is Optional+Computed and RequiresReplace (immutable): only fill it
 	// from the API's resolved value when the user omitted it from config (plan.RayVersion
@@ -492,11 +488,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	state.IsBYOD = types.BoolValue(result.IsBYOD)
 	state.Revision = types.Int64Value(int64(result.Revision))
 
-	if result.Digest != nil {
-		state.Digest = types.StringValue(*result.Digest)
-	} else {
-		state.Digest = types.StringNull()
-	}
+	state.Digest = types.StringPointerValue(result.Digest)
 
 	// image_uri is Required in the schema, so the user always supplied a value
 	// that the API now echoes back as docker_image_name. Refresh from the API
@@ -553,48 +545,7 @@ func (r *ContainerImageRegistryResource) Delete(ctx context.Context, req resourc
 
 	clusterEnvID := state.ID.ValueString()
 
-	tflog.Info(ctx, "Archiving cluster environment for container image", map[string]any{
-		"cluster_environment_id": clusterEnvID,
-	})
-
-	// Archive the cluster environment
-	// Note: The /ext/v0/cluster_environments/ endpoint do not have DELETE, so we use POST /api/v2/application_templates/{id}/archive
-	_, err := DoRequestRaw(
-		ctx,
-		r.client,
-		"POST",
-		fmt.Sprintf("/api/v2/application_templates/%s/archive", clusterEnvID),
-		nil,
-		http.StatusOK,
-		http.StatusNoContent,
-		http.StatusNotFound,
-		http.StatusBadRequest,
-	)
-	if err != nil {
-		// Check if already archived/deleted
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			tflog.Info(ctx, "Cluster environment already archived or deleted", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-			})
-			return
-		}
-
-		// Check if this is a default cluster environment that cannot be archived
-		// This happens when using Anyscale's official images (e.g., anyscale/ray:*)
-		if strings.Contains(err.Error(), "Cannot archive a default cluster environment") {
-			tflog.Info(ctx, "Cluster environment is a default environment and cannot be archived (this is expected for Anyscale-provided images)", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-			})
-			return
-		}
-
-		AddAPIError(&resp.Diagnostics, "archive cluster environment", err)
-		return
-	}
-
-	tflog.Info(ctx, "Cluster environment archived successfully", map[string]any{
-		"cluster_environment_id": clusterEnvID,
-	})
+	archiveClusterEnvironment(ctx, r.client, clusterEnvID, &resp.Diagnostics)
 }
 
 // ImportState imports the resource into Terraform state.

@@ -99,19 +99,16 @@ type CloudDeploymentModel struct {
 	ID          types.String `tfsdk:"id"`
 }
 
-// WorkerNodeConfigModel extends NodeConfigModel with worker-specific fields.
+// WorkerNodeConfigModel extends NodeConfigModel with worker-specific fields. Embeds
+// NodeConfigModel rather than repeating its fields - terraform-plugin-framework's reflection
+// promotes tfsdk-tagged fields from a value-embedded struct the same as if they were declared
+// directly here (embedding by pointer is the only unsupported form).
 type WorkerNodeConfigModel struct {
-	Name                   types.String `tfsdk:"name"`
-	MinNodes               types.Int64  `tfsdk:"min_nodes"`
-	MaxNodes               types.Int64  `tfsdk:"max_nodes"`
-	MarketType             types.String `tfsdk:"market_type"`
-	InstanceType           types.String `tfsdk:"instance_type"`
-	Resources              types.Map    `tfsdk:"resources"`
-	RequiredResources      types.Object `tfsdk:"required_resources"`
-	Labels                 types.Map    `tfsdk:"labels"`
-	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string
-	Flags                  types.String `tfsdk:"flags"`                    // JSON string
-	CloudDeployment        types.Object `tfsdk:"cloud_deployment"`
+	Name       types.String `tfsdk:"name"`
+	MinNodes   types.Int64  `tfsdk:"min_nodes"`
+	MaxNodes   types.Int64  `tfsdk:"max_nodes"`
+	MarketType types.String `tfsdk:"market_type"`
+	NodeConfigModel
 }
 
 type computeTemplateRequest struct {
@@ -1857,19 +1854,12 @@ func nodeConfigAttrTypes() map[string]attr.Type {
 // workerNodeConfigAttrTypes returns the attr.Type shape matching
 // WorkerNodeConfigModel: nodeConfigAttrTypes plus the worker-specific fields.
 func workerNodeConfigAttrTypes() map[string]attr.Type {
-	return map[string]attr.Type{
-		"name":                     types.StringType,
-		"min_nodes":                types.Int64Type,
-		"max_nodes":                types.Int64Type,
-		"market_type":              types.StringType,
-		"instance_type":            types.StringType,
-		"resources":                types.MapType{ElemType: types.Float64Type},
-		"required_resources":       requiredResourcesObjectType(),
-		"labels":                   types.MapType{ElemType: types.StringType},
-		"advanced_instance_config": types.StringType,
-		"flags":                    types.StringType,
-		"cloud_deployment":         cloudDeploymentObjectType(),
-	}
+	attrs := nodeConfigAttrTypes()
+	attrs["name"] = types.StringType
+	attrs["min_nodes"] = types.Int64Type
+	attrs["max_nodes"] = types.Int64Type
+	attrs["market_type"] = types.StringType
+	return attrs
 }
 
 // apiResourcesToTerraformMap converts API resources to Terraform Map of Float64

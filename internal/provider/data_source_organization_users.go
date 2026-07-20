@@ -8,7 +8,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -168,16 +167,10 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 	for i, user := range collaborators {
 		user = hydrateCollaboratorRoles(ctx, d.client, user)
 
-		var additionalRoles types.List
-		if user.AdditionalRoles == nil {
-			additionalRoles = types.ListNull(types.StringType)
-		} else {
-			var diags diag.Diagnostics
-			additionalRoles, diags = types.ListValueFrom(ctx, types.StringType, user.AdditionalRoles)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
+		additionalRoles, diags := additionalRolesToList(ctx, user.AdditionalRoles)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
 
 		users[i] = OrganizationUserModel{

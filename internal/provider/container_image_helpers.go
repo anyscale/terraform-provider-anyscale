@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -105,4 +106,55 @@ func AddDigestNotSettledWarning(diags *diag.Diagnostics, buildID string) {
 			buildID, digestSettlePollTimeout,
 		),
 	)
+}
+
+// archiveClusterEnvironment archives (the closest analogue to delete - the underlying
+// /ext/v0/cluster_environments/ endpoint has no DELETE) a cluster environment on Destroy.
+// Shared by resource_container_image_build.go and resource_container_image_registry.go, whose
+// Delete methods both back the same cluster-environment resource and so must tolerate the same
+// two already-gone states: a 404/not-found (already archived or deleted) and the
+// cannot-archive-a-default-environment error (Anyscale-provided images, e.g. anyscale/ray:*).
+// Both are treated as success rather than surfaced as errors, since the desired end state -
+// no live cluster environment for Terraform to manage - already holds.
+func archiveClusterEnvironment(ctx context.Context, client *Client, clusterEnvID string, diags *diag.Diagnostics) {
+	tflog.Info(ctx, "Archiving cluster environment", map[string]any{
+		"cluster_environment_id": clusterEnvID,
+	})
+
+	_, err := DoRequestRaw(
+		ctx,
+		client,
+		"POST",
+		fmt.Sprintf("/api/v2/application_templates/%s/archive", clusterEnvID),
+		nil,
+		http.StatusOK,
+		http.StatusNoContent,
+		http.StatusNotFound,
+		http.StatusBadRequest,
+	)
+	if err != nil {
+		// Check if already archived/deleted
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			tflog.Info(ctx, "Cluster environment already archived or deleted", map[string]any{
+				"cluster_environment_id": clusterEnvID,
+			})
+			return
+		}
+
+		// Check if this is a default cluster environment that cannot be archived
+		// This happens when using Anyscale's official images (e.g., anyscale/ray:*)
+		if strings.Contains(err.Error(), "Cannot archive a default cluster environment") {
+			tflog.Info(ctx, "Cluster environment is a default environment and cannot be archived (this is expected for Anyscale-provided images)", map[string]any{
+				"cluster_environment_id": clusterEnvID,
+			})
+			return
+		}
+
+		AddAPIError(diags, "archive cluster environment", err)
+		return
+	}
+
+	tflog.Info(ctx, "Cluster environment archived successfully", map[string]any{
+		"cluster_environment_id": clusterEnvID,
+	})
 }

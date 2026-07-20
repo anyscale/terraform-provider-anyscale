@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
 
 // TestFindUserByID_PagesBeyondFirstPage is a regression test for task
-// a41c8e2d: findUserByID (and findUserByUserID/findUserByEmail, which share
-// the same listAllOrganizationCollaborators helper) used to only look at the
+// a41c8e2d: findUser's by-ID/by-user-ID/by-email callers, which share the
+// same listAllOrganizationCollaborators helper, used to only look at the
 // first page, silently returning "not found" for a user past it.
 func TestFindUserByID_PagesBeyondFirstPage(t *testing.T) {
 	requestCount := 0
@@ -37,7 +39,7 @@ func TestFindUserByID_PagesBeyondFirstPage(t *testing.T) {
 		client: NewClientWithToken(server.URL, "test-token"),
 	}
 
-	user, diags, err := d.findUserByID(context.Background(), "identity-2")
+	user, diags, err := d.findUser(context.Background(), nil, func(u OrganizationCollaboratorResult) bool { return u.ID == "identity-2" })
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,7 +89,10 @@ func TestFindUserByEmail_PagesBeyondFirstPageAndSendsFilter(t *testing.T) {
 		client: NewClientWithToken(server.URL, "test-token"),
 	}
 
-	user, diags, err := d.findUserByEmail(context.Background(), "target@example.com")
+	const targetEmail = "target@example.com"
+	user, diags, err := d.findUser(context.Background(), url.Values{"email": []string{targetEmail}}, func(u OrganizationCollaboratorResult) bool {
+		return strings.EqualFold(u.Email, targetEmail)
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
