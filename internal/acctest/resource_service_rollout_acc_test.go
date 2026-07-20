@@ -1,7 +1,9 @@
 package acctest
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // serviceRolloutJSON is like serviceFindingsJSON but also varies the primary_version's id/version
@@ -442,4 +445,124 @@ resource "anyscale_service" "test" {
 		t.Errorf("apply was called %d time(s), want exactly 1 (create only) - the IN_PLACE+build_id "+
 			"combination must be rejected at plan time, before any second apply is attempted", got)
 	}
+}
+
+// TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout CI-proves Option 2 (user-
+// ratified): a config that sets rollout_strategy = "IN_PLACE" from the very first apply must
+// create successfully - the resource transparently sends a standard deploy on the wire (the
+// backend rejects IN_PLACE outright on a genuine create), while STATE keeps the user's real
+// IN_PLACE value unchanged, so the config never needs to be edited between create and a later
+// update. This assertion previously only existed in TestAccServiceResource_RealInfra_InPlaceRollout,
+// which SKIPs in every normal CI run (no real-infra env set there) - so Option 2's create-path
+// change was landing without CI coverage. Captures the actual CREATE apply request body to prove
+// the wire value, not just the end state, which alone wouldn't distinguish "sent IN_PLACE and the
+// backend silently accepted it" from "transparently forced to ROLLOUT on the wire".
+func TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const serviceID = "svc_create_inplace_transparent"
+	var capturedApplyBody atomic.Value // string: the JSON body of the (one expected) apply call
+	var mu sync.Mutex
+	terminated := false
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/services-v2/apply", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedApplyBody.Store(string(body))
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": `+serviceRolloutJSON(serviceID, "create-inplace-transparent",
+			"prj_findings", "STARTING", "svcver_v1", "v1")+`}`)
+	})
+	mux.HandleFunc("/api/v2/services-v2", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		isTerminated := terminated
+		mu.Unlock()
+		// Same terminated-flag pattern as the H-series tests: without it, the framework's own
+		// automatic end-of-test destroy (terminate -> wait for TERMINATED) polls forever against
+		// a GET that always says RUNNING.
+		state := "RUNNING"
+		if isTerminated {
+			state = "TERMINATED"
+		}
+		serveServiceGetOrDelete(t, w, r, serviceRolloutJSON(serviceID, "create-inplace-transparent",
+			"prj_findings", state, "svcver_v1", "v1"))
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		terminated = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": {}}`)
+	})
+	mux.HandleFunc("/api/v2/tags/resource", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, emptyTagsBody)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	// config sets rollout_strategy = IN_PLACE on the very first apply - the exact shape the
+	// backend used to 404 on before Option 2, and the shape a real user would reasonably write
+	// once, expecting it to stay unchanged across every future update.
+	config := testAccProviderBlock(server.URL) + `
+resource "anyscale_service" "test" {
+  name              = "create-inplace-transparent"
+  project_id        = "prj_findings"
+  build_id          = "bld_findings"
+  compute_config_id = "cpt_findings"
+  rollout_strategy  = "IN_PLACE"
+  ray_serve_config = {
+    applications = [
+      {
+        import_path = "main:app"
+      }
+    ]
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
+					// STATE keeps the user's real configured value - no drift, no forced edit.
+					resource.TestCheckResourceAttr("anyscale_service.test", "rollout_strategy", "IN_PLACE"),
+					func(*terraform.State) error {
+						raw, ok := capturedApplyBody.Load().(string)
+						if !ok || raw == "" {
+							return fmt.Errorf("apply was never called")
+						}
+						var sent struct {
+							RolloutStrategy string `json:"rollout_strategy"`
+						}
+						if err := json.Unmarshal([]byte(raw), &sent); err != nil {
+							return fmt.Errorf("parse captured apply body: %w", err)
+						}
+						// The WIRE request for a create must never carry the user's IN_PLACE
+						// value through - that is exactly the shape that used to 404. It must
+						// be the transparent standard-deploy value instead.
+						if sent.RolloutStrategy == "IN_PLACE" {
+							return fmt.Errorf("apply request sent rollout_strategy=IN_PLACE on a CREATE - "+
+								"Option 2 requires the create apply to transparently force a standard "+
+								"deploy regardless of the configured strategy; captured body: %s", raw)
+						}
+						if sent.RolloutStrategy != "ROLLOUT" {
+							return fmt.Errorf("apply request sent rollout_strategy=%q on a CREATE, want %q; captured body: %s",
+								sent.RolloutStrategy, "ROLLOUT", raw)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
 }
