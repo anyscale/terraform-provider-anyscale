@@ -105,33 +105,16 @@ type ServiceResourceModel struct {
 	ServiceStatusChecklist   types.Object `tfsdk:"service_status_checklist"`
 }
 
-// Attr-type maps mirroring the wire shape of the four nested Computed objects above -
+// Attr-type maps mirroring the wire shape of the nested Computed objects above -
 // service_status_checklist_item's shape is shared by both the "shared" and "items" (within
 // per_version) lists, matching serviceStatusChecklistItemResourceAttributes(). Kept in sync by
 // hand with serviceVersionResourceAttributes()/serviceStatusChecklistItemResourceAttributes()
 // (the schema.Attribute definitions) since attr.Type and schema.Attribute are different framework
 // types with no automatic conversion between them.
-var serviceObservabilityURLsAttrTypes = map[string]attr.Type{
-	"service_dashboard_url":                    types.StringType,
-	"service_dashboard_embedding_url":          types.StringType,
-	"serve_deployment_dashboard_url":           types.StringType,
-	"serve_deployment_dashboard_embedding_url": types.StringType,
-}
-
-var serviceVersionAttrTypes = map[string]attr.Type{
-	"id":                 types.StringType,
-	"created_at":         types.StringType,
-	"version":            types.StringType,
-	"current_state":      types.StringType,
-	"weight":             types.Int64Type,
-	"current_weight":     types.Int64Type,
-	"target_weight":      types.Int64Type,
-	"build_id":           types.StringType,
-	"compute_config_id":  types.StringType,
-	"production_job_ids": types.ListType{ElemType: types.StringType},
-	"connection_ids":     types.ListType{ElemType: types.StringType},
-	"ray_serve_config":   types.StringType,
-}
+//
+// serviceObservabilityURLsAttrTypes and serviceVersionAttrTypes live in service_conversion.go
+// instead of here - both are shared with the anyscale_service/anyscale_services data sources
+// (one canonical definition each), unlike the two maps below, which only this resource needs.
 
 var serviceStatusChecklistItemAttrTypes = map[string]attr.Type{
 	"kind":        types.StringType,
@@ -694,8 +677,15 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	//   - rollout_timeout: purely local to this provider, never sent to or read from the API.
 	state.Name = types.StringValue(service.Name)
 	state.Description = types.StringPointerValue(service.Description)
-	state.BuildID = types.StringValue(service.PrimaryVersion.BuildID)
-	state.ComputeConfigID = types.StringValue(service.PrimaryVersion.ComputeConfigID)
+	// primary_version can be transiently wire-null (a service still STARTING, before any version
+	// has ever gone healthy - see populateServiceResourceModelComputed). build_id/compute_config_id
+	// are Required, so there is no null to fall back to here - leave the prior state value alone
+	// rather than overwrite it with a wrong placeholder; the next Read once primary_version is
+	// populated will refresh it for real.
+	if service.PrimaryVersion != nil {
+		state.BuildID = types.StringValue(service.PrimaryVersion.BuildID)
+		state.ComputeConfigID = types.StringValue(service.PrimaryVersion.ComputeConfigID)
+	}
 	// H3 (contract section H): project_id must be refreshed here even though it is
 	// RequiresReplace and Create/Update already set it - ImportState seeds only id and
 	// ray_serve_config, so without this the post-import Read would leave project_id null.
@@ -914,6 +904,16 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 	service, err := getServiceByID(ctx, r.client, req.ID)
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "read service for import", err)
+		return
+	}
+
+	// primary_version can be transiently wire-null on a service still STARTING, before any
+	// version has ever gone healthy - there is no config to seed ray_serve_config from yet in
+	// that window. A clear, actionable error beats a nil-pointer panic or a silently-wrong seed.
+	if service.PrimaryVersion == nil {
+		AddConfigError(&resp.Diagnostics, "Service Has No Version Yet",
+			fmt.Sprintf("Service %s has no primary_version yet (it is likely still starting up for the first time). "+
+				"Wait for it to finish deploying and try the import again.", req.ID))
 		return
 	}
 
@@ -1284,16 +1284,23 @@ func populateServiceResourceModelComputed(ctx context.Context, m *ServiceResourc
 	m.AutoRolloutEnabled = types.BoolValue(s.AutoRolloutEnabled)
 	m.ErrorMessage = types.StringPointerValue(s.ErrorMessage)
 
-	obsURLs := serviceObservabilityURLsToModel(s.ServiceObservabilityURLs)
-	obsURLsObj, obsDiags := types.ObjectValueFrom(ctx, serviceObservabilityURLsAttrTypes, obsURLs)
+	obsURLsObj, obsDiags := serviceObservabilityURLsToObject(ctx, s.ServiceObservabilityURLs)
 	diags.Append(obsDiags...)
 	m.ServiceObservabilityURLs = obsURLsObj
 
-	primaryVersion, vDiags := serviceVersionResultToModel(ctx, s.PrimaryVersion)
-	diags.Append(vDiags...)
-	primaryObj, pObjDiags := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, primaryVersion)
-	diags.Append(pObjDiags...)
-	m.PrimaryVersion = primaryObj
+	// primary_version can be genuinely wire-null (a service still STARTING, before any version
+	// has ever gone healthy - confirmed via a real CI acceptance-test crash, see models.go's
+	// ServiceResult.PrimaryVersion doc comment). types.Object represents that null cleanly; do
+	// NOT synthesize a fake empty-string version instead.
+	if s.PrimaryVersion != nil {
+		primaryVersion, vDiags := serviceVersionResultToModel(ctx, *s.PrimaryVersion)
+		diags.Append(vDiags...)
+		primaryObj, pObjDiags := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, primaryVersion)
+		diags.Append(pObjDiags...)
+		m.PrimaryVersion = primaryObj
+	} else {
+		m.PrimaryVersion = types.ObjectNull(serviceVersionAttrTypes)
+	}
 
 	if s.CanaryVersion != nil {
 		canaryVersion, cDiags := serviceVersionResultToModel(ctx, *s.CanaryVersion)

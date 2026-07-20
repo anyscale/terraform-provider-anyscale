@@ -68,9 +68,11 @@ type ServiceSummaryModel struct {
 	IsMultiVersion     types.Bool   `tfsdk:"is_multi_version"`
 	ErrorMessage       types.String `tfsdk:"error_message"`
 
-	ServiceObservabilityURLs ServiceObservabilityURLsModel `tfsdk:"service_observability_urls"`
+	// types.Object, not the plain ServiceObservabilityURLsModel/ServiceVersionModel structs -
+	// see the singular data source's identical fields for why.
+	ServiceObservabilityURLs types.Object `tfsdk:"service_observability_urls"`
 
-	PrimaryVersion ServiceVersionModel  `tfsdk:"primary_version"`
+	PrimaryVersion types.Object         `tfsdk:"primary_version"`
 	CanaryVersion  *ServiceVersionModel `tfsdk:"canary_version"`
 
 	ServiceStatusChecklist *ServiceStatusChecklistModel `tfsdk:"service_status_checklist"`
@@ -248,28 +250,37 @@ func serviceResultToSummaryModel(ctx context.Context, s ServiceResult) (ServiceS
 	var diags diag.Diagnostics
 
 	model := ServiceSummaryModel{
-		ID:                       types.StringValue(s.ID),
-		Name:                     types.StringValue(s.Name),
-		ProjectID:                types.StringValue(s.ProjectID),
-		CloudID:                  types.StringValue(s.CloudID),
-		Description:              types.StringPointerValue(s.Description),
-		CreatorID:                types.StringValue(s.CreatorID),
-		CreatedAt:                types.StringValue(s.CreatedAt),
-		EndedAt:                  types.StringPointerValue(s.EndedAt),
-		Hostname:                 types.StringValue(s.Hostname),
-		BaseURL:                  types.StringValue(s.BaseURL),
-		CurrentState:             types.StringValue(s.CurrentState),
-		GoalState:                types.StringValue(s.GoalState),
-		AutoRolloutEnabled:       types.BoolValue(s.AutoRolloutEnabled),
-		IsMultiVersion:           types.BoolValue(s.IsMultiVersion),
-		ErrorMessage:             types.StringPointerValue(s.ErrorMessage),
-		ServiceObservabilityURLs: serviceObservabilityURLsToModel(s.ServiceObservabilityURLs),
-		ServiceStatusChecklist:   serviceStatusChecklistToModel(s.ServiceStatusChecklist),
+		ID:                     types.StringValue(s.ID),
+		Name:                   types.StringValue(s.Name),
+		ProjectID:              types.StringValue(s.ProjectID),
+		CloudID:                types.StringValue(s.CloudID),
+		Description:            types.StringPointerValue(s.Description),
+		CreatorID:              types.StringValue(s.CreatorID),
+		CreatedAt:              types.StringValue(s.CreatedAt),
+		EndedAt:                types.StringPointerValue(s.EndedAt),
+		Hostname:               types.StringValue(s.Hostname),
+		BaseURL:                types.StringValue(s.BaseURL),
+		CurrentState:           types.StringValue(s.CurrentState),
+		GoalState:              types.StringValue(s.GoalState),
+		AutoRolloutEnabled:     types.BoolValue(s.AutoRolloutEnabled),
+		IsMultiVersion:         types.BoolValue(s.IsMultiVersion),
+		ErrorMessage:           types.StringPointerValue(s.ErrorMessage),
+		ServiceStatusChecklist: serviceStatusChecklistToModel(s.ServiceStatusChecklist),
 	}
 
-	primaryVersion, vDiags := serviceVersionResultToModel(ctx, s.PrimaryVersion)
-	diags.Append(vDiags...)
-	model.PrimaryVersion = primaryVersion
+	obsURLsObj, obsDiags := serviceObservabilityURLsToObject(ctx, s.ServiceObservabilityURLs)
+	diags.Append(obsDiags...)
+	model.ServiceObservabilityURLs = obsURLsObj
+
+	if s.PrimaryVersion != nil {
+		primaryVersion, vDiags := serviceVersionResultToModel(ctx, *s.PrimaryVersion)
+		diags.Append(vDiags...)
+		primaryObj, pObjDiags := types.ObjectValueFrom(ctx, serviceVersionAttrTypes, primaryVersion)
+		diags.Append(pObjDiags...)
+		model.PrimaryVersion = primaryObj
+	} else {
+		model.PrimaryVersion = types.ObjectNull(serviceVersionAttrTypes)
+	}
 
 	if s.CanaryVersion != nil {
 		canaryVersion, cDiags := serviceVersionResultToModel(ctx, *s.CanaryVersion)

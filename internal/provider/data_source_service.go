@@ -55,9 +55,14 @@ type ServiceDataSourceModel struct {
 	IsMultiVersion     types.Bool   `tfsdk:"is_multi_version"`
 	ErrorMessage       types.String `tfsdk:"error_message"`
 
-	ServiceObservabilityURLs ServiceObservabilityURLsModel `tfsdk:"service_observability_urls"`
+	// types.Object, not the plain ServiceObservabilityURLsModel/ServiceVersionModel structs: a
+	// bare struct can only represent a fully-known object. CONFIRMED via a real CI acceptance
+	// test crash (TestAccServiceDataSource_ByID, "Path: service_observability_urls", "Received
+	// null value") - a data source must not crash on a null it can receive, independent of how
+	// commonly that null occurs (architect's ruling).
+	ServiceObservabilityURLs types.Object `tfsdk:"service_observability_urls"`
 
-	PrimaryVersion ServiceVersionModel  `tfsdk:"primary_version"`
+	PrimaryVersion types.Object         `tfsdk:"primary_version"`
 	CanaryVersion  *ServiceVersionModel `tfsdk:"canary_version"`
 
 	ServiceStatusChecklist *ServiceStatusChecklistModel `tfsdk:"service_status_checklist"`
@@ -143,7 +148,7 @@ func (d *ServiceDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 	}
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Fetches details about an Anyscale Service by ID or name. Use this data source to look up a service - one deployed by the `anyscale_service` resource, or one deployed and managed some other way (e.g. the Anyscale CLI or console) - without taking over its lifecycle. To create a service or roll out new versions from Terraform, use the `anyscale_service` resource instead; this data source stays read-only.",
+		MarkdownDescription: "Fetches details about an Anyscale Service by ID or name. A Service is a persistent, user-managed deployment; this is a read-only data source - the provider has no matching `anyscale_service` resource, since a service's underlying compute is live, ephemeral infrastructure rather than declarative config.",
 		Attributes:          attributes,
 	}
 }
