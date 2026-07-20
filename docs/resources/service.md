@@ -65,7 +65,10 @@ resource "anyscale_service" "example" {
   # traffic, converge to 100%). IN_PLACE upgrades the existing cluster instead (faster), but the
   # backend then only permits ray_serve_config to change - a plan changing build_id,
   # compute_config_id, or connection_ids together with rollout_strategy = "IN_PLACE" is rejected
-  # at plan time rather than left to fail during apply.
+  # at plan time rather than left to fail during apply. Safe to set IN_PLACE here from the very
+  # first apply if that is your steady state - the initial create always performs a standard
+  # deploy regardless of this value (the backend has no existing version to upgrade in place
+  # yet), so the config stays stable across create and every later update.
   rollout_strategy  = "ROLLOUT"
   max_surge_percent = 25 # paces the rollout only - it still converges to 100%, never holds at a canary percent
   rollout_timeout   = "30m"

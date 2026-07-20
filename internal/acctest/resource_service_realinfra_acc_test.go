@@ -190,6 +190,16 @@ resource "anyscale_service" "test" {
 // provider's own polling/state handling for IN_PLACE in isolation; only real infra can prove the
 // backend actually honors IN_PLACE end to end - upgrading the SAME running cluster rather than
 // starting a new one - which is the thing a mock, by definition, cannot observe.
+//
+// rollout_strategy = "IN_PLACE" is set from the very first apply and left unchanged across both
+// steps - this is the confirmed, ratified UX (Option 2, user-confirmed): the backend rejects
+// IN_PLACE outright on a genuine create (a first real-infra run of this test with the initial
+// config setting IN_PLACE 404'd: "service does not exist"), so the resource's Create transparently
+// forces a standard deploy on the wire regardless of the configured strategy, while state still
+// stores the user's real IN_PLACE value unchanged (rollout_strategy is never part of the read
+// model, so this causes no drift). This test proves that contract end to end against real infra:
+// the user never has to edit rollout_strategy between create and update, and the Step 2 update
+// still performs a genuine in-place upgrade (same id, not a replace).
 func TestAccServiceResource_RealInfra_InPlaceRollout(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	SkipIfNoRealInfra(t)
@@ -243,10 +253,10 @@ resource "anyscale_service" "test" {
 }
 `, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID)
 
-	// updatedConfig changes ONLY ray_serve_config - the one field IN_PLACE permits (enforced at
-	// plan time by ModifyPlan; see TestAccServiceResource_InPlaceRejectsBuildIDChange for the
-	// negative case). Must upgrade the SAME cluster - same id, not a replace - and reach RUNNING
-	// again.
+	// updatedConfig switches to rollout_strategy = IN_PLACE AND changes ray_serve_config in the
+	// same apply - the one field IN_PLACE permits changing (enforced at plan time by ModifyPlan;
+	// see TestAccServiceResource_InPlaceRejectsBuildIDChange for the negative case). Must upgrade
+	// the SAME cluster - same id, not a replace - and reach RUNNING again.
 	updatedConfig := fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name     = %[1]q
