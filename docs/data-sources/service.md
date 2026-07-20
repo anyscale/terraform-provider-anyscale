@@ -3,12 +3,12 @@
 page_title: "anyscale_service Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Fetches details about an Anyscale Service by ID or name. A Service is a persistent, user-managed deployment; this is a read-only data source - the provider has no matching anyscale_service resource, since a service's underlying compute is live, ephemeral infrastructure rather than declarative config.
+  Fetches details about an Anyscale Service by ID or name. Use this data source to look up a service - one deployed by the anyscale_service resource, or one deployed and managed some other way (e.g. the Anyscale CLI or console) - without taking over its lifecycle. To create a service or roll out new versions from Terraform, use the anyscale_service resource instead; this data source stays read-only.
 ---
 
 # anyscale_service (Data Source)
 
-Fetches details about an Anyscale Service by ID or name. A Service is a persistent, user-managed deployment; this is a read-only data source - the provider has no matching `anyscale_service` resource, since a service's underlying compute is live, ephemeral infrastructure rather than declarative config.
+Fetches details about an Anyscale Service by ID or name. Use this data source to look up a service - one deployed by the `anyscale_service` resource, or one deployed and managed some other way (e.g. the Anyscale CLI or console) - without taking over its lifecycle. To create a service or roll out new versions from Terraform, use the `anyscale_service` resource instead; this data source stays read-only.
 
 ## Example Usage
 
