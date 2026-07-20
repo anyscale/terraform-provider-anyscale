@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -343,5 +345,101 @@ resource "anyscale_service" "test" {
 	if got != 2 {
 		t.Errorf("apply was called %d time(s), want exactly 2 (one per step) - an IN_PLACE "+
 			"ray_serve_config change must still trigger a real second apply", got)
+	}
+}
+
+// TestAccServiceResource_InPlaceRejectsBuildIDChange is the NEGATIVE case architect specified
+// alongside the two positive upgrade scenarios: rollout_strategy = "IN_PLACE" permits changing
+// ONLY ray_serve_config (contract §4/§6, ModifyPlan). Changing build_id (or compute_config_id/
+// connection_ids - same guard, one representative field here) together with IN_PLACE must be
+// REJECTED AT PLAN TIME by ModifyPlan's invariant check, not left to fail opaquely at apply -
+// this is plan-time-only, no real infra and no second apply needed, since ModifyPlan runs before
+// Update() ever executes.
+func TestAccServiceResource_InPlaceRejectsBuildIDChange(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const serviceID = "svc_inplace_reject"
+	var applyCallCount int32
+	var terminated int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/services-v2/apply", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&applyCallCount, 1)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": `+serviceFindingsJSON(serviceID, "inplace-reject", "prj_inplace_reject", "RUNNING")+`}`)
+	})
+	mux.HandleFunc("/api/v2/services-v2", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID, func(w http.ResponseWriter, r *http.Request) {
+		serveServiceGetOrDelete(t, w, r, serviceFindingsJSON(serviceID, "inplace-reject", "prj_inplace_reject", serviceFindingsCurrentState(&terminated)))
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
+		atomic.StoreInt32(&terminated, 1)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": {}}`)
+	})
+	mux.HandleFunc("/api/v2/tags/resource", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, emptyTagsBody)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	baseConfig := testAccProviderBlock(server.URL) + `
+resource "anyscale_service" "test" {
+  name              = "inplace-reject"
+  project_id        = "prj_inplace_reject"
+  build_id          = "bld_findings"
+  compute_config_id = "cpt_findings"
+  ray_serve_config = {
+    applications = [
+      {
+        import_path = "main:app"
+      }
+    ]
+  }
+}
+`
+	// invalidConfig pairs rollout_strategy = IN_PLACE with a build_id change - exactly the
+	// combination the ModifyPlan invariant must reject before any apply is attempted.
+	invalidConfig := testAccProviderBlock(server.URL) + `
+resource "anyscale_service" "test" {
+  name              = "inplace-reject"
+  project_id        = "prj_inplace_reject"
+  build_id          = "bld_findings_v2"
+  compute_config_id = "cpt_findings"
+  rollout_strategy  = "IN_PLACE"
+  ray_serve_config = {
+    applications = [
+      {
+        import_path = "main:app"
+      }
+    ]
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: baseConfig,
+				Check:  resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
+			},
+			{
+				Config:      invalidConfig,
+				ExpectError: regexp.MustCompile(`(?s)Invalid Change Under IN_PLACE Rollout Strategy.*build_id`),
+			},
+		},
+	})
+
+	// Only the first (create) apply should ever have fired - the rejected plan must never reach
+	// Update()/a second PUT /apply at all.
+	if got := atomic.LoadInt32(&applyCallCount); got != 1 {
+		t.Errorf("apply was called %d time(s), want exactly 1 (create only) - the IN_PLACE+build_id "+
+			"combination must be rejected at plan time, before any second apply is attempted", got)
 	}
 }
