@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.4] - 2026-07-20
+
+### Changed
+
+- provider: Reword the cloud-resources guide's opening paragraph to lead with what it covers (provider/compute-stack support, cloud lifecycle, deprecated attributes, naming differences) instead of explaining why the guide exists (no behavior change, docs only).
+- provider: Reword the compute-config guide's opening paragraph to lead with what it covers (the versioning/identity model, rename-vs-replace behavior, write-only fields, import/data-source recovery) instead of explaining why the guide exists (no behavior change, docs only).
+- provider: Reword the container-images guide's opening paragraph to lead with what it covers (build vs. register, image identifiers, lifecycle behavior) instead of explaining why the guide exists (no behavior change, docs only).
+- provider: Reword the project guide's opening paragraph to lead with what it covers (collaborator import recovery, the permission_level upgrade, destroy/collaborator-add timing) instead of explaining why the guide exists (no behavior change, docs only).
+
 ## [0.13.3] - 2026-07-19
 
 ### Security
@@ -708,7 +717,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.13.4...HEAD
+[0.13.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.4
 [0.13.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.3
 [0.13.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.2
 [0.13.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.1
