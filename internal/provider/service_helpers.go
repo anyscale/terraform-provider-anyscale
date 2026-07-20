@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -59,10 +60,45 @@ func evaluateServiceState(service *ServiceResult, target string) (done bool, err
 		if service.ErrorMessage != nil && *service.ErrorMessage != "" {
 			return true, fmt.Errorf("service entered %s state: %s", service.CurrentState, *service.ErrorMessage)
 		}
+		if detail := serviceChecklistFailureDetail(service.ServiceStatusChecklist); detail != "" {
+			return true, fmt.Errorf("service entered %s state: %s", service.CurrentState, detail)
+		}
 		return true, fmt.Errorf("service entered %s state", service.CurrentState)
 	default:
 		return false, nil
 	}
+}
+
+// serviceChecklistFailureDetail scans a service's status checklist for per-component failure
+// messages, for use only as a fallback when the service's own top-level error_message is empty -
+// confirmed via a real crash-diagnosis session that the backend can leave error_message null
+// while the actual cause (e.g. "the user who created it has been removed from the organization")
+// exists only on a specific checklist item, which previously left the wait error generic and
+// undiagnosable without a manual API call. Scans both the Shared list and every PerVersion
+// group's items, reusing serviceErrorStates since checklist items share the same state
+// vocabulary as the top-level service (RUNNING/UNHEALTHY/STARTING/etc). Skips items whose
+// message is empty (e.g. a downstream APPLICATION failure with nothing to say beyond "unhealthy")
+// so only components that actually explain themselves get surfaced. checklist may be nil (the
+// same nullable shape fixed for the data sources) - nil-safe, returns "" rather than panicking.
+func serviceChecklistFailureDetail(checklist *ServiceStatusChecklistResult) string {
+	if checklist == nil {
+		return ""
+	}
+
+	var details []string
+	collect := func(items []StatusChecklistItemResult) {
+		for _, item := range items {
+			if serviceErrorStates[item.State] && item.Message != "" {
+				details = append(details, fmt.Sprintf("%s: %s", item.Kind, item.Message))
+			}
+		}
+	}
+	collect(checklist.Shared)
+	for _, group := range checklist.PerVersion {
+		collect(group.Items)
+	}
+
+	return strings.Join(details, "; ")
 }
 
 // waitForServiceState polls GET /{id} until the service's current_state reaches target, a
