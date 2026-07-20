@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     anyscale = {
-      source = "registry.terraform.io/anyscale/anyscale"
+      source = "anyscale/anyscale"
     }
   }
 }

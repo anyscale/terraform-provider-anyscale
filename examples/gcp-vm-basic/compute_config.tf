@@ -183,7 +183,7 @@ resource "anyscale_compute_config" "simple" {
 # resource "anyscale_compute_config" "custom_instance" {
 #   name       = "${var.cloud_name}-custom-compute"
 #   cloud_id   = anyscale_cloud.primary.id
-#   project_id = var.anyscale_project_id
+#   # project_id is optional - omit to use organization default
 #
 #   head_node = {
 #     instance_type = "custom"
@@ -221,7 +221,7 @@ resource "anyscale_compute_config" "simple" {
 # resource "anyscale_compute_config" "tpu" {
 #   name       = "${var.cloud_name}-tpu-compute"
 #   cloud_id   = anyscale_cloud.primary.id
-#   project_id = var.anyscale_project_id
+#   # project_id is optional - omit to use organization default
 #
 #   head_node = {
 #     instance_type = "n2-standard-8"

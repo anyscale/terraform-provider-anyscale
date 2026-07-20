@@ -58,12 +58,12 @@ convergence, not just a clean first apply), and `terraform destroy` tearing down
 leaked load balancer (checked against the live AWS API, not just Terraform's own report). GKE has
 **not** had the equivalent install-path validation yet — only cloud creation itself is confirmed
 against the real API, as above. If you're standing up a new GKE cluster specifically to test the
-Operator install, treat that path as still being actively verified rather than already a known-good
-story. **Azure/AKS support is newer
+Operator install (see [`gcp-gke-basic`](../../examples/gcp-gke-basic)), treat that path as still
+being actively verified rather than already a known-good story. **Azure/AKS support is newer
 still and validated only at the schema and mock-server level** — there is no real Azure
 subscription in this provider's test environment, so unlike EKS/GKE, AKS has no real-cluster
-acceptance coverage at all yet. Validate the AKS example against your own Azure subscription
-before relying on it.
+acceptance coverage at all yet. Validate the [`azure-aks-basic`](../../examples/azure-aks-basic)
+example against your own Azure subscription before relying on it.
 
 One thing to get right in a multi-resource cloud deployment regardless: on the parent `anyscale_cloud`, **omit
 `compute_stack` entirely** — an empty cloud derives its compute stack from whichever resource ends up
