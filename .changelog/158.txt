@@ -1,4 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_compute_config: Fix `advanced_instance_config` fields shaped as a list of objects (e.g. `BlockDeviceMappings`) silently sending `null` instead of their configured value, due to a missing case for Terraform's tuple type in the shared Dynamic-value wire conversion.
-```

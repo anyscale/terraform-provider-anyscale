@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-07-20
+
+### New Resources
+
+- resource/anyscale_service: Add the `anyscale_service` resource to deploy an Anyscale Service and roll out new versions declaratively - a change to `ray_serve_config`, `build_id`, `compute_config_id`, or other version-defining fields rolls a new version out automatically; `terraform destroy` terminates the service and removes it.
+
+### Added
+
+- resource/anyscale_service: Add plan-time validation that `project_id` and `compute_config_id` target the same cloud - a mismatch previously surfaced as an opaque `UNHEALTHY` service state at apply time instead of a clear error.
+
+### Changed
+
+- resource/anyscale_service: Raise the default rollout_timeout from 30m to 45m to better match real-world rollout durations observed in E2E testing.
+
+### Fixed
+
+- resource/anyscale_compute_config: Fix `advanced_instance_config` fields shaped as a list of objects (e.g. `BlockDeviceMappings`) silently sending `null` instead of their configured value, due to a missing case for Terraform's tuple type in the shared Dynamic-value wire conversion.
+- data-source/anyscale_service: Fix a crash when reading a service whose `service_observability_urls` or `primary_version` is null on the wire (e.g. a transitional or unhealthy service) - these now render as Terraform `null` instead of erroring.
+- data-source/anyscale_services: Fix the same `service_observability_urls`/`primary_version` null-handling crash as `anyscale_service`.
+
 ## [0.13.4] - 2026-07-20
 
 ### Changed
@@ -717,7 +737,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.13.4...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.14.0
 [0.13.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.4
 [0.13.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.3
 [0.13.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.2
