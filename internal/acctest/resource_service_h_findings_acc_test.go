@@ -37,6 +37,28 @@ func serviceFindingsJSON(id, name, projectID, currentState string) string {
 	}`, id, name, projectID, currentState)
 }
 
+// testAccServiceRayServeConfigHCL is a realistic, non-empty ray_serve_config - a list containing
+// one application object with a nested runtime_env object - deliberately NOT an empty list.
+// applications=[] types as an empty types.List and would never have exercised the real bug found
+// during the real-infra pass (contract §P1): HCL infers a list of OBJECTS as types.Tuple, not
+// types.List, and convertAttrValueToInterface had no types.Tuple case, so a real
+// ray_serve_config.applications always silently became JSON null. The isolated unit tests in
+// framework_helpers_test.go are the load-bearing regression guard for that bug (they exercise the
+// conversion function directly, no HCL/mock server needed) - this shared HCL fragment is
+// defense-in-depth so the acctest layer exercises the same Tuple path end-to-end too.
+const testAccServiceRayServeConfigHCL = `
+  ray_serve_config = {
+    applications = [
+      {
+        import_path = "main:app"
+        runtime_env = {
+          working_dir = "https://github.com/anyscale/first-service/archive/refs/heads/main.zip"
+        }
+      }
+    ]
+  }
+`
+
 func testAccServiceFindingsConfig(serverURL, name, projectID string) string {
 	return testAccProviderBlock(serverURL) + fmt.Sprintf(`
 resource "anyscale_service" "test" {
@@ -44,11 +66,9 @@ resource "anyscale_service" "test" {
   project_id        = %[2]q
   build_id          = "bld_findings"
   compute_config_id = "cpt_findings"
-  ray_serve_config = {
-    applications = []
-  }
+%[3]s
 }
-`, name, projectID)
+`, name, projectID, testAccServiceRayServeConfigHCL)
 }
 
 // emptyTagsBody / oneTagBody are the two GET /api/v2/tags/resource response shapes the H4 test
@@ -277,18 +297,16 @@ func TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges(t *testing.T)
 	defer server.Close()
 
 	baseConfig := testAccServiceFindingsConfig(server.URL, "h2-timeout-only", "prj_h2")
-	timeoutOnlyConfig := testAccProviderBlock(server.URL) + `
+	timeoutOnlyConfig := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_service" "test" {
   name              = "h2-timeout-only"
   project_id        = "prj_h2"
   build_id          = "bld_findings"
   compute_config_id = "cpt_findings"
-  ray_serve_config = {
-    applications = []
-  }
+%[1]s
   rollout_timeout = "45m"
 }
-`
+`, testAccServiceRayServeConfigHCL)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -434,20 +452,18 @@ func TestAccServiceResource_TagsFullRemovalDetected(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	config := testAccProviderBlock(server.URL) + `
+	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_service" "test" {
   name              = "h4-tags-removed"
   project_id        = "prj_h4"
   build_id          = "bld_findings"
   compute_config_id = "cpt_findings"
-  ray_serve_config = {
-    applications = []
-  }
+%[1]s
   tags = {
     a = "1"
   }
 }
-`
+`, testAccServiceRayServeConfigHCL)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -520,18 +536,16 @@ func TestAccServiceResource_CreateWaitTimeoutPreservesID(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	config := testAccProviderBlock(server.URL) + `
+	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_service" "test" {
   name              = "g2-orphan-prevention"
   project_id        = "prj_g2"
   build_id          = "bld_findings"
   compute_config_id = "cpt_findings"
-  ray_serve_config = {
-    applications = []
-  }
+%[1]s
   rollout_timeout = "2s"
 }
-`
+`, testAccServiceRayServeConfigHCL)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
