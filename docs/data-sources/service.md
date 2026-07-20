@@ -92,8 +92,8 @@ output "service_by_name_id" {
 - `goal_state` (String) The goal state of this service (`RUNNING` or `TERMINATED`).
 - `hostname` (String) The hostname of the service.
 - `is_multi_version` (Boolean) Whether this service is a multi-version service (multiple active versions with no single canary).
-- `primary_version` (Attributes) The primary version of this service. If the service is terminated, this refers to the most recently active version. (see [below for nested schema](#nestedatt--primary_version))
-- `service_observability_urls` (Attributes) Dashboard URLs for this service. Each URL is null if the backend has none to report (e.g. before the service's first successful deploy). (see [below for nested schema](#nestedatt--service_observability_urls))
+- `primary_version` (Attributes) The primary version of this service. If the service is terminated, this refers to the most recently active version. Can be null if the backend has not returned one yet. (see [below for nested schema](#nestedatt--primary_version))
+- `service_observability_urls` (Attributes) Dashboard URLs for this service. The whole block is null while a service is still being processed (a confirmed real transitional state, e.g. a not-yet-healthy service that has not finished its first reconcile). Once present, each individual URL is separately null if the backend has none to report for it (e.g. before the service's first successful deploy). (see [below for nested schema](#nestedatt--service_observability_urls))
 - `service_status_checklist` (Attributes) Per-component status breakdown derived from the most recent reconciler snapshot. Null for terminated services and during the brief window before the reconciler's first tick on a brand-new service. (see [below for nested schema](#nestedatt--service_status_checklist))
 
 <a id="nestedatt--canary_version"></a>
