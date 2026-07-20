@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-07-20
+
+### Changed
+
+- provider: Add the `anyscale_service` resource to README's list of currently supported resources - it shipped in v0.14.0 but was missing from that list (no behavior change, docs only).
+- provider: Correct several examples and guides that still claimed no `anyscale_service` resource exists (the kitchen-sink example and guide, its README, and the top-level examples README) - the resource shipped in v0.14.0; these were documentation-only oversights, not a provider behavior change.
+- provider: Fix a round of documentation and example accuracy issues found in a broader sweep: incorrect claims that some examples assume pre-existing cloud infrastructure (none do - every example provisions its own from scratch), a stale BETA label on two data-source examples, a README usage snippet pinned to an unresolvable provider version, a wrong-cloud copy-pasted header comment in `gcp-gke-basic`, undefined-variable references in two commented-out example blocks, inconsistent placeholder values, and a missing `gcp-vm-basic` README. No behavior change, docs and examples only.
+
+### Fixed
+
+- provider: Fix the `organization_user_workflow` example (`examples/resources/organization_user_workflow`) sending real invitation emails to a live, non-reserved domain (`company.com`) instead of the documentation-reserved `example.com` used everywhere else in this repo.
+
 ## [0.14.0] - 2026-07-20
 
 ### New Resources
@@ -737,7 +749,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.14.1
 [0.14.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.14.0
 [0.13.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.4
 [0.13.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.3
