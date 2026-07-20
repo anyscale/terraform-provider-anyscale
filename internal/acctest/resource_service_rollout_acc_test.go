@@ -195,3 +195,153 @@ resource "anyscale_service" "test" {
 			"field change must trigger a real second apply", got)
 	}
 }
+
+// TestAccServiceResource_InPlaceUpdateConverges is the IN_PLACE-strategy counterpart to
+// TestAccServiceResource_UpdateRedeploysAndConverges - the user asked for BOTH upgrade strategies
+// covered, not just the ROLLOUT default. Structurally identical (a version-defining
+// ray_serve_config change must trigger a real second apply and converge to RUNNING with a new
+// primary_version), but transitions through UPDATING (the IN_PLACE-specific continue-state, per
+// contract §5b) rather than ROLLING_OUT, and sets rollout_strategy = "IN_PLACE" explicitly on the
+// update step - only ray_serve_config differs between the two configs, honoring the ModifyPlan
+// invariant that IN_PLACE permits changing only that field.
+func TestAccServiceResource_InPlaceUpdateConverges(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const serviceID = "svc_inplace_converge"
+	const transitionalWindow = 3 * time.Second
+
+	var mu sync.Mutex
+	applyCallCount := 0
+	lastApplyAt := time.Time{}
+	terminated := false
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/services-v2/apply", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		applyCallCount++
+		n := applyCallCount
+		lastApplyAt = time.Now()
+		mu.Unlock()
+
+		versionID, version := "svcver_v1", "v1"
+		state := "STARTING"
+		if n >= 2 {
+			versionID, version = "svcver_v2", "v2"
+			state = "UPDATING"
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": `+serviceRolloutJSON(serviceID, "inplace-converge", "prj_inplace", state, versionID, version)+`}`)
+	})
+	mux.HandleFunc("/api/v2/services-v2", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n := applyCallCount
+		withinWindow := n > 0 && time.Since(lastApplyAt) < transitionalWindow
+		isTerminated := terminated
+		mu.Unlock()
+
+		versionID, version := "svcver_v1", "v1"
+		if n >= 2 {
+			versionID, version = "svcver_v2", "v2"
+		}
+
+		state := "RUNNING"
+		switch {
+		case isTerminated:
+			state = "TERMINATED"
+		case withinWindow:
+			if n == 1 {
+				state = "STARTING"
+			} else {
+				state = "UPDATING"
+			}
+		}
+
+		serveServiceGetOrDelete(t, w, r, serviceRolloutJSON(serviceID, "inplace-converge", "prj_inplace", state, versionID, version))
+	})
+	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		terminated = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"result": {}}`)
+	})
+	mux.HandleFunc("/api/v2/tags/resource", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, emptyTagsBody)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	baseConfig := testAccProviderBlock(server.URL) + `
+resource "anyscale_service" "test" {
+  name              = "inplace-converge"
+  project_id        = "prj_inplace"
+  build_id          = "bld_findings"
+  compute_config_id = "cpt_findings"
+  ray_serve_config = {
+    applications = [
+      {
+        import_path = "main:app"
+      }
+    ]
+  }
+}
+`
+	// updatedConfig sets rollout_strategy = IN_PLACE and changes ONLY ray_serve_config - the one
+	// field IN_PLACE permits changing (contract §4/ModifyPlan); build_id/compute_config_id/
+	// connection_ids stay untouched on purpose.
+	updatedConfig := testAccProviderBlock(server.URL) + `
+resource "anyscale_service" "test" {
+  name              = "inplace-converge"
+  project_id        = "prj_inplace"
+  build_id          = "bld_findings"
+  compute_config_id = "cpt_findings"
+  rollout_strategy  = "IN_PLACE"
+  ray_serve_config = {
+    applications = [
+      {
+        import_path = "main:app_v2"
+      }
+    ]
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: baseConfig,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
+					resource.TestCheckResourceAttr("anyscale_service.test", "primary_version.version", "v1"),
+				),
+			},
+			{
+				Config: updatedConfig,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
+					resource.TestCheckResourceAttr("anyscale_service.test", "primary_version.version", "v2"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+
+	mu.Lock()
+	got := applyCallCount
+	mu.Unlock()
+	if got != 2 {
+		t.Errorf("apply was called %d time(s), want exactly 2 (one per step) - an IN_PLACE "+
+			"ray_serve_config change must still trigger a real second apply", got)
+	}
+}
