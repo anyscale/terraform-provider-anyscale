@@ -7,9 +7,13 @@ description: |-
 
 # Compute Config: Versioning, Identity, and Write-Only Fields
 
-This guide covers cross-cutting behavior for [`anyscale_compute_config`](../resources/compute_config.md)
-(resource) and [`anyscale_compute_config`](../data-sources/compute_config.md) (data source). It exists
-because several of these behaviors aren't obvious from either schema table alone.
+This guide covers how [`anyscale_compute_config`](../resources/compute_config.md) (resource) and
+[`anyscale_compute_config`](../data-sources/compute_config.md) (data source) actually behave: how
+the versioning model separates a stable identity (`id`, `name`) from an advancing version
+(`config_id`, `version`, `name_version`), why renaming a compute config and changing its cloud are
+handled differently, the difference between `resources` and `required_resources`, which fields are
+write-only at the top level but readable per node, and what import and the data source do and don't
+recover.
 
 For a compute config created as part of a full setup, see the [Create a VM
 Cloud](./create-a-vm-cloud.md) getting-started walkthrough.
