@@ -255,7 +255,7 @@ terraform apply -var install_gateway_resources=true
 terraform destroy
 ```
 
-## Next steps
+## See also
 
 - The full [`examples/aws-eks-basic`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/aws-eks-basic)
   README covers everything this guide intentionally skipped: the complete variable/output

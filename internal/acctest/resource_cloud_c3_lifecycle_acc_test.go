@@ -32,8 +32,14 @@ import (
 // newC3MockCloudServer serves a single fixed cloud consistently across every
 // step of a resource.Test lifecycle (create, refresh, import, destroy).
 // cloudJSON is the `result` body for GET/POST /clouds; resourcesJSON is the
-// `results` array body for GET /clouds/{id}/resources.
-func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON string) *httptest.Server {
+// `results` array body for GET /clouds/{id}/resources. cloudResourceID is the
+// id add_resource returns for cloud_resource_id - almost every caller passes
+// the same literal "cldrsrc_mock_default" also baked into resourcesJSON's
+// default entry (its value gets overwritten by the resources-list entry
+// before Create's final State.Set anyway, see readCloudState ->
+// backfillComputedCloudFields), but a caller proving the cloud_resource_id
+// attribute's own lifecycle needs a distinct, assertable value here.
+func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloudResourceID string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
@@ -74,7 +80,10 @@ func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON string
 		// the resources listing above is what config-block population reads,
 		// and its own cloud_resource_id overwrites this one before Create's
 		// final State.Set (see readCloudState -> backfillComputedCloudFields).
-		_, _ = fmt.Fprint(w, `{"result": {"cloud_resource_id": "cldrsrc_mock_default"}}`)
+		// cloud_deployment_id is included alongside it because the real
+		// backend still sends both (removal is provider-side only) - keeping
+		// it here implicitly proves the provider ignores it.
+		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": %q}}`, cloudResourceID)
 	})
 
 	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {
@@ -85,15 +94,6 @@ func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON string
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server
-}
-
-func testAccProviderBlock(serverURL string) string {
-	return fmt.Sprintf(`
-provider "anyscale" {
-  api_url = %[1]q
-  token   = "mock-token"
-}
-`, serverURL)
 }
 
 // TestAccCloudResource_Lifecycle_AWS_MockServer proves C3's headline gates for the AWS
@@ -134,7 +134,7 @@ func TestAccCloudResource_Lifecycle_AWS_MockServer(t *testing.T) {
 		"object_storage": {"bucket_name": "s3://real-bucket-name"}
 	}]`
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
   name           = "c3-aws-mock"
@@ -213,7 +213,7 @@ func TestAccCloudResource_Lifecycle_GCP_MockServer(t *testing.T) {
 		"object_storage": {"bucket_name": "gs://real-gcs-bucket"}
 	}]`
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
   name           = "c3-gcp-mock"
@@ -280,7 +280,7 @@ func TestAccCloudResource_K8S_NoRegion_ClearError(t *testing.T) {
 	}`, cloudID)
 	resourcesJSON := `[]`
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
   name           = "c13-noregion-mock"
@@ -342,7 +342,7 @@ func TestAccCloudResource_Lifecycle_K8S_MockServer(t *testing.T) {
 		"file_storage": {"persistent_volume_claim": "real-pvc-name"}
 	}]`
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
   name           = "c3-k8s-mock"
@@ -434,7 +434,7 @@ func TestAccCloudResource_Lifecycle_GCP_K8S_MockServer(t *testing.T) {
 		"file_storage": {"csi_ephemeral_volume_driver": "ephemeral.csi.example.com"}
 	}]`
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
   name           = "c3-gcp-k8s-mock"
@@ -662,70 +662,6 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// newC3MockCloudServerWithResourceID is a variant of newC3MockCloudServer
-// that ALSO returns cloud_resource_id from add_resource, using the same
-// literal id the caller has already baked into resourcesJSON's default
-// entry. Deliberately a SEPARATE function rather than adding this field to
-// the shared newC3MockCloudServer: that helper's add_resource response is a
-// fixed literal shared by every other test in this file, and none of their
-// resourcesJSON strings set cloud_resource_id - adding it only on the
-// add_resource side there would make Create() capture a real id while the
-// very next refresh (reading the unchanged resourcesJSON) finds none and
-// backfills "", flipping the value and tripping "Provider produced
-// inconsistent result after apply" on every other lifecycle test in this
-// file, not just adding a new safe field. Isolating the change here keeps
-// every other test's mock byte-for-byte unchanged.
-func newC3MockCloudServerWithResourceID(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloudResourceID string) *httptest.Server {
-	t.Helper()
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/api/v2/clouds", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		switch r.Method {
-		case http.MethodPost:
-			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
-		case http.MethodGet:
-			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
-		default:
-			t.Errorf("unexpected method %s on /api/v2/clouds", r.Method)
-		}
-	})
-
-	mux.HandleFunc("/api/v2/clouds/"+cloudID, func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
-		case http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Errorf("unexpected method %s on /api/v2/clouds/%s", r.Method, cloudID)
-		}
-	})
-
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/resources", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, `{"results": %s, "metadata": {"total": 1, "next_paging_token": null}}`, resourcesJSON)
-	})
-
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		// cloud_deployment_id is intentional here, not leftover: the real backend still
-		// sends it alongside cloud_resource_id (removal is provider-side only), so this
-		// mock stays realistic by including it - implicitly proving the provider ignores it.
-		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": %q}}`, cloudResourceID)
-	})
-
-	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
-	})
-
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
-}
-
 // TestAccCloudResource_CloudResourceIDPopulated_MockServer proves the new
 // cloud_resource_id attribute's full lifecycle (CLOUD-RESOURCE-ID-SPEC.md
 // T1/T2): populated and matching immediately after create; a second,
@@ -742,9 +678,9 @@ func newC3MockCloudServerWithResourceID(t *testing.T, cloudID, cloudJSON, resour
 // path that import depends on (see resource_cloud.go's ImportState/readCloudState
 // trace), so import is where removing it is actually observable. The mock
 // deliberately returns the SAME literal id from both add_resource and the
-// resources-list default entry - see newC3MockCloudServerWithResourceID's
-// doc comment for why a mismatch there would falsely fail this test via an
-// inconsistent-result error rather than reflect a real regression.
+// resources-list default entry - see newC3MockCloudServer's doc comment for
+// why a mismatch there would falsely fail this test via an inconsistent-result
+// error rather than reflect a real regression.
 func TestAccCloudResource_CloudResourceIDPopulated_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -772,7 +708,7 @@ func TestAccCloudResource_CloudResourceIDPopulated_MockServer(t *testing.T) {
 		"object_storage": {"bucket_name": "s3://real-bucket-name"}
 	}]`, wantResourceID)
 
-	server := newC3MockCloudServerWithResourceID(t, cloudID, cloudJSON, resourcesJSON, wantResourceID)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, wantResourceID)
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
   name           = "c3-resourceid-mock"

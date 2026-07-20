@@ -3,6 +3,7 @@ package acctest
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,11 +26,29 @@ func isSweepDryRun() bool {
 }
 
 // sweepableResourcePrefixes are the only name prefixes any sweeper will ever
-// delete - a safety invariant shared across resource types (compute_config,
-// container_image, project, global_resource_scheduler). anyscale_cloud's own
-// sweeper additionally sweeps "tfacc-ephemeral-", so it keeps its own,
-// separate prefix list rather than sharing this one.
+// delete - a safety invariant shared across every resource type (cloud,
+// compute_config, container_image, project, global_resource_scheduler, ...).
+// Ephemeral clouds are named "tfacc-ephemeral-<nanos>" (see
+// createEphemeralTestCloud), which already starts with "tfacc-", so no
+// resource type needs a separate prefix list of its own.
 var sweepableResourcePrefixes = []string{"tfacc-", "tf-test-", "tfprovider-"}
+
+// hasAnyPrefix reports whether s starts with any of prefixes. Shared by every
+// sweeper's name-matching guard.
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultSweepMinAge is the default minimum resource age every sweeper
+// requires before it will delete a match, fed through resolveSweepMinAge
+// below (overridable via ANYSCALE_SWEEP_MIN_AGE). Shared by every sweeper -
+// there is no actual per-resource-type variation today.
+const defaultSweepMinAge = 2 * time.Hour
 
 // resolveSweepMinAge returns defaultMinAge, or the ANYSCALE_SWEEP_MIN_AGE
 // override if set (time.ParseDuration syntax). Every sweeper uses this same

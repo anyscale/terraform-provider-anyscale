@@ -110,11 +110,11 @@ themselves, so the ongoing cost here is the VPC/NAT/S3 infrastructure itself, no
 ## Troubleshooting
 
 **`terraform apply` fails validating the AWS provider version, or a module argument it doesn't
-recognize** - this example intentionally uses the cloud foundation module's `latest` version
-(see the `tflint-ignore: terraform_module_pinned_source` comment in `aws_anyscale.tf`) rather than
-pinning it, so a new module release could occasionally introduce a breaking argument change before
-this example catches up. Run `terraform init -upgrade` if you suspect a stale cached version, and
-open an issue if the module's current release has genuinely diverged from what this example expects.
+recognize** - the `module.aws_anyscale_v2` block in `aws_anyscale.tf` has no version constraint, so
+it intentionally floats to the cloud foundation module's latest release rather than pinning it, and
+a new module release could occasionally introduce a breaking argument change before this example
+catches up. Run `terraform init -upgrade` if you suspect a stale cached version, and open an issue
+if the module's current release has genuinely diverged from what this example expects.
 
 **`anyscale_org_id` validation error** - the value must start with `org_`. Use the
 `anyscale_organization` data source shown under Prerequisites above instead of guessing or

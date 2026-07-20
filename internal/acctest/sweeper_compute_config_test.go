@@ -23,8 +23,6 @@ func init() {
 	})
 }
 
-const sweepComputeConfigDefaultMinAge = 2 * time.Hour
-
 type sweepComputeConfigResult struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -46,7 +44,7 @@ func sweepComputeConfigs(_ string) error {
 		return nil
 	}
 
-	minAge, err := resolveSweepMinAge(sweepComputeConfigDefaultMinAge)
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
 	if err != nil {
 		return err
 	}

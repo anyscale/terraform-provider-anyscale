@@ -4,8 +4,9 @@
 # module.anyscale_iam_roles_a below for why. infra_eks.tf builds the EKS cluster inside this same
 # VPC. If you'd rather point this example at AWS infrastructure you already have instead of building
 # it fresh, these two files (infra_aws.tf/infra_eks.tf) are the only ones to swap out -- replace the
-# module.* references below with variables for your existing VPC/subnet/IAM/S3 IDs, the same way
-# examples/aws-vm-basic-resource does it.
+# module.* references below with data sources or variables for your existing VPC/subnet/IAM/S3 IDs
+# (no worked example of that swap exists in this repo yet -- every example here, including
+# examples/aws-vm-basic-resource, builds this infrastructure fresh via modules too).
 
 data "aws_caller_identity" "current" {}
 

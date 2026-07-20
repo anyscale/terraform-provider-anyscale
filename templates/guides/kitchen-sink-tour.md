@@ -2,23 +2,25 @@
 page_title: "Kitchen Sink: A Tour of the Full Provider Surface"
 subcategory: "Getting Started"
 description: |-
-  A curated tour of the kitchen-sink example - every resource and data source this provider registers, wired together, with the non-obvious Terraform patterns it exists to demonstrate.
+  A curated tour of the kitchen-sink example - every resource and data source this provider registers (with one deliberate exception), wired together, with the non-obvious Terraform patterns it exists to demonstrate.
 ---
 
 # Kitchen sink: a tour of the full provider surface
 
 [`examples/kitchen-sink`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/kitchen-sink)
-is every resource and data source this provider registers, wired together into one configuration.
+is every resource and data source this provider registers, wired together into one configuration -
+with one deliberate exception: the `anyscale_service` resource (see below).
 It's not a getting-started example - if you haven't yet, read [Create a VM
 cloud](./create-a-vm-cloud.md) or [Create a Kubernetes cloud](./create-a-kubernetes-cloud.md)
 first. This guide is a tour of what kitchen-sink demonstrates and why, for when you're ready to see
 how the pieces compose - not a step-by-step walkthrough of its own.
 
-**Read this before applying it, not after:** unlike every `-basic` example, kitchen-sink builds a
-real VPC, S3 bucket, and EKS cluster from scratch - the same shared infrastructure pattern as
-[aws-eks-basic](./create-a-kubernetes-cloud.md), just with two Anyscale Clouds and three cloud
-resource deployments layered on top of it. Expect a 15-20+ minute apply, real ongoing AWS spend for
-as long as it stays up, and note that this example - unlike the `-basic` examples - has no
+**Read this before applying it, not after:** like every scenario example in this directory,
+kitchen-sink builds its own infrastructure from scratch rather than assuming you already have some
+to point at - but it does more of it than any single `-basic` example: a shared VPC, S3 bucket, and
+EKS cluster, via the same modules [aws-eks-basic](./create-a-kubernetes-cloud.md) uses, feeding two
+Anyscale Clouds and three cloud resource deployments. Expect a 15-20+ minute apply, real ongoing AWS
+spend for as long as it stays up, and note that this example - unlike the `-basic` examples - has no
 `make test-kitchen-sink` wrapper or automatic destroy-on-failure trap. You track and tear down your
 own state here.
 
@@ -121,10 +123,10 @@ away from a 404.
 - **All 13 data sources** the provider registers, in one file - including the two zero-argument
   connection-level singletons, `anyscale_user` and `anyscale_organization`, which have no
   dependency on anything else in the config and are always safe to read.
-- **Two resources are opt-in, off by default**: `anyscale_organization_invitation` (set
-  `invite_email` to actually send one) and the singular `anyscale_service` data source lookup (set
-  `existing_service_name` to a real service). A fresh `terraform apply` with neither set creates
-  zero instances of either - safe by default, not a placeholder you need to delete.
+- **Two pieces of this config are opt-in, off by default**: the `anyscale_organization_invitation`
+  resource (set `invite_email` to actually send one) and the singular `anyscale_service` data source
+  lookup (set `existing_service_name` to a real service). A fresh `terraform apply` with neither set
+  creates zero instances of either - safe by default, not a placeholder you need to delete.
 
 ## Known limitations worth knowing before you extend this
 

@@ -21,8 +21,8 @@ resource "anyscale_cloud" "aws_example" {
       "subnet-06a825a292bd4d476" = "us-east-2c"
     }
     security_group_ids        = ["sg-064dac0ed5cffc779"]
-    controlplane_iam_role_arn = "arn:aws:iam::367974485317:role/anyscale-crossacct-role"
-    dataplane_iam_role_arn    = "arn:aws:iam::367974485317:role/anyscale-cluster-node-role"
+    controlplane_iam_role_arn = "arn:aws:iam::xxx:role/anyscale-crossacct-role"
+    dataplane_iam_role_arn    = "arn:aws:iam::xxx:role/anyscale-cluster-node-role"
     external_id               = "org_abc123-external-id"
   }
 
@@ -64,7 +64,7 @@ resource "anyscale_cloud" "eks_example" {
   compute_stack  = "K8S"
 
   kubernetes_config {
-    anyscale_operator_iam_identity = "arn:aws:iam::367974485317:role/anyscale-eks-operator-role"
+    anyscale_operator_iam_identity = "arn:aws:iam::xxx:role/anyscale-eks-operator-role"
     zones                          = ["us-west-2a", "us-west-2b"]
     # Optional: a Redis endpoint reachable from the data plane, used for Ray
     # GCS fault tolerance. Available on any K8S cloud, not AWS-specific.

@@ -52,7 +52,7 @@ func TestAccCloudResource_Lifecycle_AzureK8S_MockServer(t *testing.T) {
 		"object_storage": {"bucket_name": %[1]q}
 	}]`, bucket)
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON)
+	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mock_default")
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
   name           = "c3-azure-k8s-mock"

@@ -56,7 +56,7 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
   compute_stack  = "K8S"
 
   kubernetes_config {
-    anyscale_operator_iam_identity = "arn:aws:iam::367974485317:role/anyscale-eks-operator"
+    anyscale_operator_iam_identity = "arn:aws:iam::xxx:role/anyscale-eks-operator"
     zones                          = ["us-west-2a", "us-west-2b"]
     # Optional: a Redis endpoint reachable from the data plane, used for Ray
     # GCS fault tolerance. Available on any K8S cloud, not AWS-specific.

@@ -215,7 +215,7 @@ output "organization_default_cloud_id" {
 }
 ```
 
-### `anyscale_organization_user` (BETA)
+### `anyscale_organization_user`
 
 Look up a specific user in the organization by identity ID, user ID, or email.
 
@@ -234,7 +234,7 @@ output "user_identity_id" {
 }
 ```
 
-### `anyscale_organization_users` (BETA)
+### `anyscale_organization_users`
 
 List and filter users in the organization.
 

@@ -437,7 +437,7 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name_version", configName+":1"),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 					// Capture initial config_id for comparison
-					testAccCaptureComputeConfigID("anyscale_compute_config.test", &initialConfigID),
+					CaptureResourceAttr("anyscale_compute_config.test", "config_id", &initialConfigID),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
@@ -470,19 +470,6 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 			},
 		},
 	})
-}
-
-// testAccCaptureComputeConfigID captures the config_id for later comparison
-func testAccCaptureComputeConfigID(resourceName string, configID *string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("not found: %s", resourceName)
-		}
-
-		*configID = rs.Primary.Attributes["config_id"]
-		return nil
-	}
 }
 
 // testAccCheckComputeConfigIDChanged verifies that config_id has changed from the initial value
@@ -849,7 +836,7 @@ func TestAccComputeConfigResource_RenameForcesReplace(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "name", originalName),
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
-					testAccCaptureComputeConfigID("anyscale_compute_config.test", &originalConfigID),
+					CaptureResourceAttr("anyscale_compute_config.test", "config_id", &originalConfigID),
 				),
 			},
 			{

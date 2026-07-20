@@ -51,7 +51,9 @@ AWS VM cloud using the multi-resource cloud pattern. Demonstrates creating an em
 
 Basic GCP VM cloud example. Creates an Anyscale Cloud with GCP VM compute stack.
 
-**Use this when**: You want to register a GCP VM cloud with Anyscale using existing GCP infrastructure.
+**Use this when**: You want the fastest path to a working GCP VM cloud, provisioned from scratch via
+Anyscale's cloud foundation module, and don't need Filestore or Memorystore - or you just want the
+smallest GCP example to read first.
 
 **What it demonstrates**:
 - Creating an `anyscale_cloud` resource with GCP VM configuration
@@ -157,10 +159,10 @@ you haven't used yet.
   multi-resource cloud, instead of always landing on the primary
 - The attribute-reference dependency ordering a data source needs to safely read back a resource
   created earlier in the same apply, instead of 404ing on a first apply
-- Why `anyscale_organization_collaborator` (import-only) and `anyscale_service` (no matching
-  resource — services aren't Terraform-created) are called out explicitly rather than silently
-  applied, and why the invitation email and existing-service lookup are both opt-in variables
-  rather than forced on every apply
+- Why `anyscale_organization_collaborator` (import-only) and the `anyscale_service` resource
+  (deliberately not declared here - see the kitchen-sink README) are called out explicitly rather
+  than silently applied, and why the invitation email and existing-service lookup are both opt-in
+  variables rather than forced on every apply
 
 See the [kitchen-sink README](./kitchen-sink/README.md) for the full breakdown, including real
 AWS cost, apply time, and what it creates in your account and org before you apply it.
@@ -325,10 +327,10 @@ All examples require:
 | Example | Cloud Provider | Compute Stack | Pattern | Infrastructure Creation |
 |---------|---------------|---------------|---------|------------------------|
 | `aws-vm-basic` | AWS | VM | All-in-one | Creates via modules |
-| `aws-vm` | AWS | VM | All-in-one | Creates via modules |
+| `aws-vm` | AWS | VM | Multi-Resource | Creates via modules |
 | `aws-vm-basic-resource` | AWS | VM | Multi-Resource | Creates via modules |
 | `gcp-vm-basic` | GCP | VM | All-in-one | Creates via modules |
-| `gcp-vm` | GCP | VM | All-in-one | Creates via modules |
+| `gcp-vm` | GCP | VM | Multi-Resource | Creates via modules |
 | `aws-eks-basic` | AWS | K8S | All-in-one | Creates via modules |
 | `gcp-gke-basic` | GCP | K8S | Multi-Resource | Creates via modules |
 | `azure-aks-basic` | Azure | K8S | All-in-one | Creates via modules |
@@ -343,7 +345,7 @@ Most examples use these common variables:
 | `cloud_name` | Name for the Anyscale Cloud | `"my-terraform-cloud"` |
 | `anyscale_org_id` | Your Anyscale org ID | `"org_abc123xyz"` |
 | `anyscale_external_id` | External ID for IAM | `"my-external-id-12345"` |
-| `region` | Cloud provider region | `"us-east-2"` (AWS) or `"us-central1"` (GCP) |
+| `aws_region` / `gcp_region` / `google_region` / `azure_location` | Cloud provider region (the variable name differs by example - check that example's `variables.tf`) | `"us-east-2"` (AWS) or `"us-central1"` (GCP) |
 
 ## Support
 

@@ -24,8 +24,6 @@ func init() {
 	})
 }
 
-const sweepServiceDefaultMinAge = 2 * time.Hour
-
 // sweepServiceMaxTerminateWait/sweepServiceTerminatePollTick bound the sweeper's own
 // terminate-then-wait loop: DELETE /{id} 400s unless current_state is already TERMINATED (traced
 // via contract §H1/the resource's own Delete), so a bare terminate-then-immediate-delete would
@@ -63,7 +61,7 @@ func sweepServices(_ string) error {
 		return nil
 	}
 
-	minAge, err := resolveSweepMinAge(sweepServiceDefaultMinAge)
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
 	if err != nil {
 		return err
 	}

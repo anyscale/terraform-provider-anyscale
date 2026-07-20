@@ -1,11 +1,11 @@
 # ---------------------------------------------------------------------------------------------------------------------
 # Example Anyscale K8s Resources - Public Networking
-#   This template creates EKS resources for Anyscale + Anyscale Cloud
+#   This template creates GKE resources for Anyscale + Anyscale Cloud
 #   It creates:
 #     - VPC
-#     - EFS (optional)
-#     - S3 Bucket
-#     - IAM policies
+#     - Filestore (optional)
+#     - GCS Bucket
+#     - Service accounts
 # ---------------------------------------------------------------------------------------------------------------------
 
 
