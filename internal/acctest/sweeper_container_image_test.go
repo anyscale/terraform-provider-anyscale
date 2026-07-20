@@ -20,7 +20,13 @@ func init() {
 	// happy when callers ask for one resource by name.
 	resource.AddTestSweepers("anyscale_container_image_build", &resource.Sweeper{
 		Name: "anyscale_container_image_build",
-		F:    sweepContainerImages,
+		// A leaked anyscale_service holds a build_id open, so it must sweep first - see
+		// sweeper_service_test.go. Belt-and-suspenders here specifically: this sweeper only
+		// archives (no permanent delete API exists for builds), so it does not actually have a
+		// hard in-use delete-ordering constraint the way project/compute_config do, but the edge
+		// costs nothing and keeps the graph consistent if that ever changes.
+		Dependencies: []string{"anyscale_service"},
+		F:            sweepContainerImages,
 	})
 	resource.AddTestSweepers("anyscale_container_image_registry", &resource.Sweeper{
 		Name: "anyscale_container_image_registry",

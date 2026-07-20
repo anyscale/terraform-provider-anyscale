@@ -20,7 +20,10 @@ import (
 func init() {
 	resource.AddTestSweepers("anyscale_project", &resource.Sweeper{
 		Name: "anyscale_project",
-		F:    sweepProjects,
+		// A leaked anyscale_service holds a project_id open, so it must sweep before the
+		// project it lives in - see sweeper_service_test.go.
+		Dependencies: []string{"anyscale_service"},
+		F:            sweepProjects,
 	})
 }
 
