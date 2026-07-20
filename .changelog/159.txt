@@ -1,4 +1,0 @@
-```
-release-note:new-resource
-resource/anyscale_service: Add the `anyscale_service` resource to deploy an Anyscale Service and roll out new versions declaratively - a change to `ray_serve_config`, `build_id`, `compute_config_id`, or other version-defining fields rolls a new version out automatically; `terraform destroy` terminates the service and removes it.
-```

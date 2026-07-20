@@ -1,4 +1,0 @@
-```
-release-note:changed
-resource/anyscale_service: Raise the default rollout_timeout from 30m to 45m to better match real-world rollout durations observed in E2E testing.
-```
