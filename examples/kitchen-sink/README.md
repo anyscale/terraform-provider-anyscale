@@ -1,7 +1,8 @@
 # Kitchen Sink Example
 
 Every resource and data source this provider registers, wired together into one comprehensive,
-multi-cloud configuration. This absorbs what used to be a separate `multi-resource-cloud-basic`
+multi-cloud configuration - with one deliberate exception: the `anyscale_service` resource (see
+below). This absorbs what used to be a separate `multi-resource-cloud-basic`
 example (multiple resource deployments on one cloud) as one piece of a larger build, so it is now
 the single place to see the whole provider surface working together. Use the other, smaller
 examples in this directory for a focused look at any one piece.
@@ -84,9 +85,11 @@ something this data source got wrong; if you're counting projects per cloud else
 implicit extra one.
 
 `anyscale_services` is unconditional and filters by `anyscale_project.a`'s id — safe even with zero results.
-`anyscale_service` (singular) is **opt-in**: it needs an id or name to look up, and this provider
-has no matching resource to create one with, so a fresh apply sets it to zero instances unless you
-set `var.existing_service_name` to a real, pre-existing service in your org.
+`anyscale_service` (singular) is **opt-in**: it needs an id or name to look up, and this example
+deliberately doesn't declare a live `anyscale_service` resource to satisfy that (see
+[`examples/resources/anyscale_service`](../resources/anyscale_service/) for a worked resource
+example), so a fresh apply sets it to zero instances unless you set `var.existing_service_name` to
+a real, pre-existing service in your org.
 
 Global Resource Scheduler (machine pools) resources/data sources are not included — they're
 currently disabled in the provider (`internal/provider/provider.go`), pending a backend API
@@ -94,10 +97,12 @@ rework, so there's nothing to wire up yet.
 
 ## Before you apply
 
-1. **Real AWS cost and apply time.** Unlike every "-basic" example in this directory, this one
-   does not assume existing infrastructure — it builds a VPC and an EKS cluster for you via
-   modules, the same way [aws-eks-basic](../aws-eks-basic/) does. Budget real time (EKS cluster
-   creation alone is commonly 15-20+ minutes) and real AWS spend for as long as you leave it up.
+1. **Real AWS cost and apply time.** Like every scenario example in this directory, this one builds
+   its own infrastructure from scratch rather than assuming you already have some to point at — but
+   it does more of it than any single "-basic" example: a shared VPC plus both a VM leg and an EKS
+   cluster for Cloud A, and a second VM leg for Cloud B, all via the same modules
+   [aws-eks-basic](../aws-eks-basic/) uses. Budget real time (EKS cluster creation alone is commonly
+   15-20+ minutes) and real AWS spend for as long as you leave it up.
    **Unlike [aws-eks-basic](../aws-eks-basic/), this example has no `make test-kitchen-sink`
    wrapper and no exit-trap destroy** — running it is a plain `terraform apply`/`terraform
    destroy` by hand, and this repo's sweeper only ever reaches Anyscale-side resources, never into
@@ -128,10 +133,11 @@ rework, so there's nothing to wire up yet.
 7. **Already have your own VPC and EKS cluster?** The module wiring lives entirely in
    `infra_aws.tf` and `infra_eks.tf`, feeding the `anyscale_*` resources through a small number of
    outputs (VPC/subnet/security-group IDs, IAM role ARNs, the EKS operator identity and zones).
-   Swap those two files for variables holding your existing infrastructure's IDs — matching the
-   pattern [aws-vm-basic](../aws-vm-basic/) and [gcp-gke-basic](../gcp-gke-basic/) already use — and
-   the rest of the configuration is unaffected. This is a structural note, not a second maintained
-   code path: the files in this repo build fresh.
+   Swap those two files for variables holding your existing infrastructure's IDs and the rest of
+   the configuration is unaffected — though no example in this repo demonstrates that swap today
+   (every example here, including [aws-vm-basic](../aws-vm-basic/) and
+   [gcp-gke-basic](../gcp-gke-basic/), builds its infrastructure fresh via modules). This is a
+   structural note, not a second maintained code path.
 
 ## Known limitations this example runs into
 

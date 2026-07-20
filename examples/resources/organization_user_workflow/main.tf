@@ -19,7 +19,7 @@ terraform {
 # invitation grants default collaborator access on acceptance; the API has no way to set a
 # different level at invite time. Step 3 below is where a different level actually gets set.
 resource "anyscale_organization_invitation" "new_member" {
-  email = "newmember@company.com"
+  email = "newmember@example.com"
 }
 
 # Output invitation details for manual follow-up
@@ -43,7 +43,7 @@ output "invitation_expires_at" {
 # with a "User Not Found" error, since the user does not exist as an org member until they accept.
 #
 # data "anyscale_organization_user" "accepted_user" {
-#   email = "newmember@company.com"
+#   email = "newmember@example.com"
 # }
 #
 # output "user_identity_id" {
@@ -80,13 +80,13 @@ output "invitation_expires_at" {
 # }
 
 # Example: Invite multiple users at once. Every invitation still grants only default
-# collaborator access -- if "lead@company.com" should end up as an owner, that happens in step 3
+# collaborator access -- if "lead@example.com" should end up as an owner, that happens in step 3
 # (via anyscale_organization_collaborator), after they accept, same as any other promotion.
 resource "anyscale_organization_invitation" "team_members" {
   for_each = toset([
-    "dev1@company.com",
-    "dev2@company.com",
-    "lead@company.com",
+    "dev1@example.com",
+    "dev2@example.com",
+    "lead@example.com",
   ])
 
   email = each.key

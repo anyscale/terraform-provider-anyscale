@@ -127,7 +127,7 @@ output "ds_organization_user_count" {
 
 output "ds_services_in_project_a_count" {
   value       = length(data.anyscale_services.in_project_a.services)
-  description = "Number of services in project A. Expected to be 0 unless you've separately deployed a Ray Serve service there -- this provider has no service RESOURCE to create one."
+  description = "Number of services in project A. Expected to be 0 unless you've separately deployed a Ray Serve service there -- this example deliberately doesn't declare an anyscale_service resource (see examples/resources/anyscale_service for one)."
 }
 
 output "ds_existing_service_state" {

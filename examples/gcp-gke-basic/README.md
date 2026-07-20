@@ -2,9 +2,9 @@
 
 Creates a new GKE cluster and registers it with Anyscale as a `K8S` cloud, using the
 **multi-resource cloud pattern**: an empty `anyscale_cloud` plus a separate `anyscale_cloud_resource` with
-`compute_stack = "K8S"`. Unlike `gcp-vm-basic`, this example does **not** assume you already have
-infrastructure to point at - it provisions the VPC, GCS bucket, service account, and the GKE
-cluster itself, then wires the result into the `anyscale_cloud_resource`.
+`compute_stack = "K8S"`. Like every other scenario example in this directory (including `gcp-vm-basic`),
+it provisions its own infrastructure from scratch - the VPC, GCS bucket, service account, and the GKE
+cluster itself - then wires the result into the `anyscale_cloud_resource`.
 
 If you already have a running GKE cluster and just want to register it with Anyscale, this
 example will create a second, redundant cluster rather than adopt yours. Neither Kubernetes

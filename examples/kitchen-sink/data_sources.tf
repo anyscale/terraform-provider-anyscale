@@ -72,9 +72,11 @@ data "anyscale_organization_user" "self" {
 data "anyscale_organization_users" "all" {}
 
 # --- anyscale_services + anyscale_service ---------------------------------------------------------
-# anyscale_services (plural) runs unconditionally: no anyscale_service RESOURCE exists in this
-# provider (services aren't Terraform-created), so an empty result is expected and still a
-# meaningful, assertable state -- it needs no external fixture to be safe to include by default.
+# anyscale_services (plural) runs unconditionally: this example deliberately does not declare an
+# anyscale_service resource (deploying one needs a real container image build and a running Ray
+# Serve app, more moving parts than this already-large example needs), so an empty result is
+# expected and still a meaningful, assertable state -- it needs no external fixture to be safe to
+# include by default. See examples/resources/anyscale_service for a worked resource example.
 data "anyscale_services" "in_project_a" {
   project_id = anyscale_project.a.id
 }
