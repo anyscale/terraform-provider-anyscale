@@ -180,8 +180,9 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 				MarkdownDescription: "The ID of the container image build (cluster environment build) this service runs, e.g. from `anyscale_container_image_build`. Changing this rolls out a new service version; it is not a replace.",
 			},
 			"compute_config_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The ID of the compute config this service uses, e.g. from `anyscale_compute_config`. Pins the cloud the service runs in - there is no separate top-level `cloud_id` argument because it is fully determined by this value. Changing this rolls out a new service version; it is not a replace.",
+				Required: true,
+				MarkdownDescription: "The ID of the compute config this service uses, e.g. from `anyscale_compute_config`. Pins the cloud the service runs in - there is no separate top-level `cloud_id` argument because it is fully determined by this value. Changing this rolls out a new service version; it is not a replace. " +
+					"See `project_id` for the plan-time check that catches a mismatch between this value's cloud and an explicitly-set `project_id`'s cloud.",
 			},
 
 			// ─── Optional service-level inputs ───
@@ -193,7 +194,8 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 				Optional: true,
 				Computed: true,
 				MarkdownDescription: "The ID of the project this service starts clusters in. If omitted, the backend resolves your organization's default project for the compute config's cloud - that resolved value is written back here, so leaving this unset does not produce a diff on later plans. " +
-					"Immutable: the backend has no move-project endpoint, so changing this (including changing which project an omitted value would resolve to, e.g. by changing `compute_config_id` to a different cloud) replaces the resource.",
+					"Immutable: the backend has no move-project endpoint, so changing this (including changing which project an omitted value would resolve to, e.g. by changing `compute_config_id` to a different cloud) replaces the resource. " +
+					"When explicitly set, its own cloud must match `compute_config_id`'s cloud - a plan-time check catches a mismatch here (naming both cloud IDs and a remedy) rather than letting the backend reject the cluster after apply.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
