@@ -80,7 +80,12 @@ resource "anyscale_service" "test" {
   project_id        = %[5]q
   build_id          = "anyscaleray2561-slim-py312-cu129"
   compute_config_id = anyscale_compute_config.test.config_id
-  rollout_timeout   = "20m"
+  // 60m, not the original 20m: a real ROLLOUT genuinely needs more than 20 minutes to finish
+  // (new-cluster spinup + canary traffic shift) - confirmed via a real run that passed in ~26.5
+  // minutes at this exact 60m value. The original 20m was simply too tight for this test, not
+  // evidence of a hang, a capacity ceiling, or a provider defect - the wait predicate
+  // (evaluateServiceState, gating on service.CurrentState) is correct; it just needed more time.
+  rollout_timeout   = "60m"
 
   ray_serve_config = {
     applications = [
@@ -116,7 +121,12 @@ resource "anyscale_service" "test" {
   project_id        = %[5]q
   build_id          = "anyscaleray2561-slim-py312-cu129"
   compute_config_id = anyscale_compute_config.test.config_id
-  rollout_timeout   = "20m"
+  // 60m, not the original 20m: a real ROLLOUT genuinely needs more than 20 minutes to finish
+  // (new-cluster spinup + canary traffic shift) - confirmed via a real run that passed in ~26.5
+  // minutes at this exact 60m value. The original 20m was simply too tight for this test, not
+  // evidence of a hang, a capacity ceiling, or a provider defect - the wait predicate
+  // (evaluateServiceState, gating on service.CurrentState) is correct; it just needed more time.
+  rollout_timeout   = "60m"
 
   ray_serve_config = {
     applications = [
