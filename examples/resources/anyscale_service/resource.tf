@@ -10,8 +10,13 @@ resource "anyscale_service" "example" {
   description = "Serves the fraud-detection model"
   project_id  = "prj_abc123" # optional - omit to use your org's default project
 
-  build_id          = "cenv_abc123" # from anyscale_container_image_build, or an existing build
-  compute_config_id = "cpt_abc123"  # from anyscale_compute_config; also determines the cloud
+  build_id = "cenv_abc123" # from anyscale_container_image_build, or an existing build
+
+  # from anyscale_compute_config - use its config_id output, NOT id. id is the stable
+  # name (unchanged across versions); config_id is the version-specific API id this
+  # field actually needs. Easy to get backwards since it is not obvious from the name
+  # alone - anyscale_compute_config.example.config_id, not .example.id.
+  compute_config_id = "cpt_abc123" # also determines the cloud
 
   ray_serve_config = {
     applications = [
@@ -54,8 +59,9 @@ resource "anyscale_service" "example" {
 # sensible defaults (project_id resolves to your org's default project for the compute config's
 # cloud; rollout_strategy defaults to ROLLOUT; rollout_timeout defaults to 30m).
 resource "anyscale_service" "minimal" {
-  name              = "minimal-service"
-  build_id          = "cenv_def456"
+  name     = "minimal-service"
+  build_id = "cenv_def456"
+  # anyscale_compute_config's config_id output, not its id output - see the note above.
   compute_config_id = "cpt_def456"
 
   ray_serve_config = {
