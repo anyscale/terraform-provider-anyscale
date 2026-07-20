@@ -55,9 +55,14 @@ type ServiceDataSourceModel struct {
 	IsMultiVersion     types.Bool   `tfsdk:"is_multi_version"`
 	ErrorMessage       types.String `tfsdk:"error_message"`
 
-	ServiceObservabilityURLs ServiceObservabilityURLsModel `tfsdk:"service_observability_urls"`
+	// types.Object, not the plain ServiceObservabilityURLsModel/ServiceVersionModel structs: a
+	// bare struct can only represent a fully-known object. CONFIRMED via a real CI acceptance
+	// test crash (TestAccServiceDataSource_ByID, "Path: service_observability_urls", "Received
+	// null value") - a data source must not crash on a null it can receive, independent of how
+	// commonly that null occurs (architect's ruling).
+	ServiceObservabilityURLs types.Object `tfsdk:"service_observability_urls"`
 
-	PrimaryVersion ServiceVersionModel  `tfsdk:"primary_version"`
+	PrimaryVersion types.Object         `tfsdk:"primary_version"`
 	CanaryVersion  *ServiceVersionModel `tfsdk:"canary_version"`
 
 	ServiceStatusChecklist *ServiceStatusChecklistModel `tfsdk:"service_status_checklist"`

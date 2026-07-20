@@ -666,9 +666,18 @@ type ServiceResult struct {
 	IsMultiVersion     bool    `json:"is_multi_version"`
 	ErrorMessage       *string `json:"error_message"`
 
-	ServiceObservabilityURLs ServiceObservabilityURLsResult `json:"service_observability_urls"`
+	// ServiceObservabilityURLs and PrimaryVersion are pointers, not value structs, despite
+	// nominally being "always present" per the backend model: CONFIRMED via a real CI
+	// acceptance-test run against a real service (TestAccServiceDataSource_ByID, "Path:
+	// service_observability_urls", "Received null value") - not a theoretical concern, not a
+	// race with a concurrent test. A value struct cannot represent that absence at all (JSON
+	// null silently decodes to a zero-value struct with empty-string fields, which is wrong
+	// data, not just a missing-null-handling crash) - a pointer makes the absence explicit and
+	// checkable, matching CanaryVersion/ServiceStatusChecklist's already-correct pattern for
+	// their own nullability.
+	ServiceObservabilityURLs *ServiceObservabilityURLsResult `json:"service_observability_urls"`
 
-	PrimaryVersion ServiceVersionResult  `json:"primary_version"`
+	PrimaryVersion *ServiceVersionResult `json:"primary_version"`
 	CanaryVersion  *ServiceVersionResult `json:"canary_version"`
 
 	ServiceStatusChecklist *ServiceStatusChecklistResult `json:"service_status_checklist"`
