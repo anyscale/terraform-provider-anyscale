@@ -419,8 +419,9 @@ func serviceSharedAttributes() map[string]schema.Attribute {
 			MarkdownDescription: "Error message from processing the most recent API request against this service, if any. Null otherwise.",
 		},
 		"service_observability_urls": schema.SingleNestedAttribute{
-			Computed:            true,
-			MarkdownDescription: "Dashboard URLs for this service. Each URL is null if the backend has none to report (e.g. before the service's first successful deploy).",
+			Computed: true,
+			MarkdownDescription: "Dashboard URLs for this service. The whole block is null while a service is still being processed (a confirmed real transitional state, e.g. a not-yet-healthy service that has not finished its first reconcile). " +
+				"Once present, each individual URL is separately null if the backend has none to report for it (e.g. before the service's first successful deploy).",
 			Attributes: map[string]schema.Attribute{
 				"service_dashboard_url": schema.StringAttribute{
 					Computed:            true,
@@ -442,7 +443,7 @@ func serviceSharedAttributes() map[string]schema.Attribute {
 		},
 		"primary_version": schema.SingleNestedAttribute{
 			Computed:            true,
-			MarkdownDescription: "The primary version of this service. If the service is terminated, this refers to the most recently active version.",
+			MarkdownDescription: "The primary version of this service. If the service is terminated, this refers to the most recently active version. Can be null if the backend has not returned one yet.",
 			Attributes:          serviceVersionAttributes(),
 		},
 		"canary_version": schema.SingleNestedAttribute{
