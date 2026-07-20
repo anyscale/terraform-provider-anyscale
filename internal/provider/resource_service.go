@@ -210,7 +210,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString(serviceRolloutStrategyRollout),
-				MarkdownDescription: "Either `ROLLOUT` (default) or `IN_PLACE`. `ROLLOUT` deploys the new version on a newly started cluster and shifts traffic over, then converges to RUNNING. `IN_PLACE` upgrades the existing cluster in place - faster, but the backend permits changing only `ray_serve_config` under it; changing `build_id`, `compute_config_id`, or `connection_ids` in the same apply as `rollout_strategy = \"IN_PLACE\"` is rejected at plan time (see this resource's plan-time validation) rather than left to fail opaquely at apply. " +
+				MarkdownDescription: "Either `ROLLOUT` (default) or `IN_PLACE`. Controls how UPDATES roll in a new version - the initial create always performs a standard deploy, since there is no existing version yet to upgrade in place (the backend rejects `IN_PLACE` outright on a fresh create), so this attribute can be set from the start and left unchanged across create and every later update. `ROLLOUT` deploys the new version on a newly started cluster and shifts traffic over, then converges to RUNNING. `IN_PLACE` upgrades the existing cluster in place - faster, but the backend permits changing only `ray_serve_config` under it; changing `build_id`, `compute_config_id`, or `connection_ids` in the same apply as `rollout_strategy = \"IN_PLACE\"` is rejected at plan time (see this resource's plan-time validation) rather than left to fail opaquely at apply. " +
 					"Not readable back from the API, so - like `tags` - drift on this attribute is never detected; it is a pure rollout directive re-sent on every apply.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(serviceRolloutStrategyRollout, serviceRolloutStrategyInPlace),
@@ -571,7 +571,19 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	applyBody, err := buildApplyServiceRequest(ctx, &plan)
+	// rollout_strategy governs how UPDATES roll in a new version - the initial create has no
+	// existing cluster to upgrade in place, and the backend rejects IN_PLACE on create outright
+	// (confirmed via a real 404: "service does not exist"). Rather than reject that at plan time
+	// (which would force editing rollout_strategy between the create and the first update - a
+	// non-idiomatic, non-declarative config edit), the initial apply always requests a standard
+	// deploy regardless of what's configured; state still stores the user's real plan value
+	// (including IN_PLACE) unchanged, since rollout_strategy is never part of the server's read
+	// model (see Read's comment above) - so a config that already sets IN_PLACE from the start
+	// stays stable across create and every later update.
+	createRequestPlan := plan
+	createRequestPlan.RolloutStrategy = types.StringValue(serviceRolloutStrategyRollout)
+
+	applyBody, err := buildApplyServiceRequest(ctx, &createRequestPlan)
 	if err != nil {
 		AddConfigError(&resp.Diagnostics, "Invalid Service Configuration", err.Error())
 		return
