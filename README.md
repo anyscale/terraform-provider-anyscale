@@ -53,6 +53,7 @@ provider "anyscale" {
   - Cloud resource deployments with the multi-resource cloud pattern
   - Compute configurations
   - Container images (build from a Containerfile, or register existing images from a registry)
+  - Services (deploy Ray Serve applications and roll out new versions)
   - Projects
   - Organization invitations
   - Organization collaborators (import-only; manages permissions for existing members)
