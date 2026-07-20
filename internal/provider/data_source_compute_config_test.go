@@ -499,7 +499,7 @@ func TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody(t *testing.
 		"name": map[string]string{"equals": "test-config"},
 	}
 
-	_, err := searchComputeTemplatesPaged(ctx, client, basePayload, decodeComputeConfigSearchPage)
+	_, err := searchComputeTemplatesPaged(ctx, client, basePayload)
 	if err != nil {
 		t.Fatalf("searchComputeTemplatesPaged() error = %v", err)
 	}

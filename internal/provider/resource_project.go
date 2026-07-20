@@ -684,25 +684,10 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 		model.CloudID = types.StringPointerValue(result.ParentCloudID)
 	}
 
-	if result.Description != nil {
-		model.Description = types.StringValue(*result.Description)
-	} else {
-		model.Description = types.StringNull()
-	}
-
-	if result.CreatorID != nil {
-		model.CreatorID = types.StringValue(*result.CreatorID)
-	} else {
-		model.CreatorID = types.StringNull()
-	}
-
+	model.Description = types.StringPointerValue(result.Description)
+	model.CreatorID = types.StringPointerValue(result.CreatorID)
 	model.CreatedAt = types.StringValue(result.CreatedAt)
-
-	if result.LastUsedCloudID != nil {
-		model.LastUsedCloudID = types.StringValue(*result.LastUsedCloudID)
-	} else {
-		model.LastUsedCloudID = types.StringNull()
-	}
+	model.LastUsedCloudID = types.StringPointerValue(result.LastUsedCloudID)
 
 	model.IsDefault = types.BoolValue(result.IsDefault)
 	model.DirectoryName = types.StringValue(result.DirectoryName)

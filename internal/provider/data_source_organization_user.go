@@ -123,13 +123,22 @@ func (d *OrganizationUserDataSource) Read(ctx context.Context, req datasource.Re
 
 	if !config.ID.IsNull() {
 		// Look up by identity ID
-		user, lookupDiags, err = d.findUserByID(ctx, config.ID.ValueString())
+		id := config.ID.ValueString()
+		user, lookupDiags, err = d.findUser(ctx, nil, func(u OrganizationCollaboratorResult) bool { return u.ID == id })
 	} else if !config.UserID.IsNull() {
 		// Look up by user ID
-		user, lookupDiags, err = d.findUserByUserID(ctx, config.UserID.ValueString())
+		userID := config.UserID.ValueString()
+		user, lookupDiags, err = d.findUser(ctx, nil, func(u OrganizationCollaboratorResult) bool {
+			return u.UserID != nil && *u.UserID == userID
+		})
 	} else if !config.Email.IsNull() {
-		// Look up by email
-		user, lookupDiags, err = d.findUserByEmail(ctx, config.Email.ValueString())
+		// Look up by email. The email query param narrows results server-side, but pagination is
+		// still applied in case that filter is not a strict exact match, rather than only ever
+		// inspecting its first page.
+		email := config.Email.ValueString()
+		user, lookupDiags, err = d.findUser(ctx, url.Values{"email": []string{email}}, func(u OrganizationCollaboratorResult) bool {
+			return strings.EqualFold(u.Email, email)
+		})
 	} else {
 		AddConfigError(&resp.Diagnostics,
 			"Missing Required Attribute",
@@ -167,18 +176,9 @@ func (d *OrganizationUserDataSource) Read(ctx context.Context, req datasource.Re
 // - a null name must never collapse to "". u is expected to already be
 // role-hydrated (see hydrateCollaboratorRoles) by the caller.
 func organizationCollaboratorToUserModel(ctx context.Context, u OrganizationCollaboratorResult) (*OrganizationUserDataSourceModel, diag.Diagnostics) {
-	// additional_roles tri-state: nil (undetermined, from hydrateCollaboratorRoles)
-	// renders null; a non-nil (possibly empty) slice renders as a real list,
-	// never null, when genuinely queried-and-none.
-	var additionalRoles types.List
-	var diags diag.Diagnostics
-	if u.AdditionalRoles == nil {
-		additionalRoles = types.ListNull(types.StringType)
-	} else {
-		additionalRoles, diags = types.ListValueFrom(ctx, types.StringType, u.AdditionalRoles)
-		if diags.HasError() {
-			return nil, diags
-		}
+	additionalRoles, diags := additionalRolesToList(ctx, u.AdditionalRoles)
+	if diags.HasError() {
+		return nil, diags
 	}
 
 	return &OrganizationUserDataSourceModel{
@@ -193,57 +193,19 @@ func organizationCollaboratorToUserModel(ctx context.Context, u OrganizationColl
 	}, diags
 }
 
-// findUserByID looks up a user by their identity ID, paging through the full
-// collaborator list rather than only the first page.
-func (d *OrganizationUserDataSource) findUserByID(ctx context.Context, id string) (*OrganizationUserDataSourceModel, diag.Diagnostics, error) {
-	users, err := listAllOrganizationCollaborators(ctx, d.client, nil)
+// findUser looks up a user among all organization collaborators satisfying match, paging
+// through the full list (optionally narrowed server-side via queryParams) rather than only
+// inspecting the first page. Shared by Read's three lookup modes (by identity ID, by user ID,
+// by email), which differ only in how they filter the request and match a candidate.
+func (d *OrganizationUserDataSource) findUser(ctx context.Context, queryParams url.Values, match func(OrganizationCollaboratorResult) bool) (*OrganizationUserDataSourceModel, diag.Diagnostics, error) {
+	users, err := listAllOrganizationCollaborators(ctx, d.client, queryParams)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch organization users", map[string]any{"error": err.Error()})
 		return nil, nil, fmt.Errorf("failed to fetch organization users: %w", err)
 	}
 
 	for _, u := range users {
-		if u.ID == id {
-			model, diags := organizationCollaboratorToUserModel(ctx, hydrateCollaboratorRoles(ctx, d.client, u))
-			return model, diags, nil
-		}
-	}
-
-	return nil, nil, nil
-}
-
-// findUserByUserID looks up a user by their user ID, paging through the full
-// collaborator list rather than only the first page.
-func (d *OrganizationUserDataSource) findUserByUserID(ctx context.Context, userID string) (*OrganizationUserDataSourceModel, diag.Diagnostics, error) {
-	users, err := listAllOrganizationCollaborators(ctx, d.client, nil)
-	if err != nil {
-		tflog.Error(ctx, "Failed to fetch organization users", map[string]any{"error": err.Error()})
-		return nil, nil, fmt.Errorf("failed to fetch organization users: %w", err)
-	}
-
-	for _, u := range users {
-		if u.UserID != nil && *u.UserID == userID {
-			model, diags := organizationCollaboratorToUserModel(ctx, hydrateCollaboratorRoles(ctx, d.client, u))
-			return model, diags, nil
-		}
-	}
-
-	return nil, nil, nil
-}
-
-// findUserByEmail looks up a user by their email address. The email query
-// param narrows results server-side, but pagination is still applied in case
-// that filter is not a strict exact match, rather than only ever inspecting
-// its first page.
-func (d *OrganizationUserDataSource) findUserByEmail(ctx context.Context, email string) (*OrganizationUserDataSourceModel, diag.Diagnostics, error) {
-	users, err := listAllOrganizationCollaborators(ctx, d.client, url.Values{"email": []string{email}})
-	if err != nil {
-		tflog.Error(ctx, "Failed to fetch organization users", map[string]any{"error": err.Error()})
-		return nil, nil, fmt.Errorf("failed to fetch organization users: %w", err)
-	}
-
-	for _, u := range users {
-		if strings.EqualFold(u.Email, email) {
+		if match(u) {
 			model, diags := organizationCollaboratorToUserModel(ctx, hydrateCollaboratorRoles(ctx, d.client, u))
 			return model, diags, nil
 		}

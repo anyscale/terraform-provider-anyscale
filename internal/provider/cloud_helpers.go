@@ -249,28 +249,16 @@ func ResolveCloudNameToID(ctx context.Context, client *Client, cloudName string)
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
 
-	// Find matching cloud(s)
-	var matchedCloudID string
-	var latestCreatedAt string
-	matchCount := 0
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			matchCount++
-			// Select the most recently created cloud
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
-			}
-		}
-	}
+	// Find matching cloud(s), picking the most recently created on a name collision
+	matchedCloudID := PickMostRecentMatch(ctx, "cloud", cloudName, cloudsResp.Results,
+		func(c CloudResult) bool { return c.Name == cloudName },
+		func(c CloudResult) string { return c.ID },
+		func(c CloudResult) string { return c.CreatedAt },
+	)
 
 	if matchedCloudID == "" {
 		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
 	}
-
-	// Warn if multiple clouds have the same name
-	WarnIfMultipleMatches(ctx, "cloud", cloudName, matchCount, matchedCloudID)
 
 	tflog.Info(ctx, "Resolved cloud name to ID", map[string]any{
 		"cloud_name": cloudName,
@@ -278,6 +266,26 @@ func ResolveCloudNameToID(ctx context.Context, client *Client, cloudName string)
 	})
 
 	return matchedCloudID, nil
+}
+
+// resolveCloudIDFilter resolves a data source's cloud_id/cloud_name filter pair down to a single
+// cloud_id, shared by every data source that offers both (project(s), service(s)). If cloudName
+// is null, cloudID's own value is returned unchanged. On resolution failure it adds an error
+// diagnostic itself and returns ok=false; callers should return immediately in that case.
+func resolveCloudIDFilter(ctx context.Context, client *Client, cloudID, cloudName types.String, diags *diag.Diagnostics) (resolvedCloudID string, ok bool) {
+	if cloudName.IsNull() {
+		return cloudID.ValueString(), true
+	}
+
+	name := cloudName.ValueString()
+	tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": name})
+
+	resolvedID, err := ResolveCloudNameToID(ctx, client, name)
+	if err != nil {
+		AddAPIError(diags, "resolve cloud name", err)
+		return "", false
+	}
+	return resolvedID, true
 }
 
 // listCloudResources pages through every cloud resource (deployment) attached

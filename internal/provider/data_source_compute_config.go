@@ -497,14 +497,15 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 // always page 1 - since api/v2 simply never reads those two fields out of the body. Kept as a
 // local loop rather than folded into the shared PaginatedRequest helper (GET+query only, and a
 // single POST-body-plus-query-pagination caller doesn't justify generalizing its shape), matching
-// this file's existing precedent for the endpoint it replaces.
-func searchComputeTemplatesPaged[T any](
+// this file's existing precedent for the endpoint it replaces. Not generic over the decoded type:
+// every caller in this file searches compute_templates and decodes via decodeComputeConfigSearchPage,
+// so a type parameter here would only ever be instantiated one way.
+func searchComputeTemplatesPaged(
 	ctx context.Context,
 	client *Client,
 	basePayload map[string]interface{},
-	decode func(body []byte) (items []T, nextToken *string, err error),
-) ([]T, error) {
-	var allItems []T
+) ([]computeConfigSearchResult, error) {
+	var allItems []computeConfigSearchResult
 	var pagingToken string
 
 	for {
@@ -525,7 +526,7 @@ func searchComputeTemplatesPaged[T any](
 			return nil, fmt.Errorf("search request failed: %w", err)
 		}
 
-		items, nextToken, err := decode(respBody)
+		items, nextToken, err := decodeComputeConfigSearchPage(respBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse search response: %w", err)
 		}
@@ -585,7 +586,7 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 		searchPayload["cloud_id"] = cloudID
 	}
 
-	results, err := searchComputeTemplatesPaged(ctx, d.client, searchPayload, decodeComputeConfigSearchPage)
+	results, err := searchComputeTemplatesPaged(ctx, d.client, searchPayload)
 	if err != nil {
 		return "", err
 	}
@@ -596,17 +597,11 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 
 	// The search API already exact-matches name server-side, so every result here is a
 	// genuine match - pick the most recently created one on duplicates.
-	var matchedConfigID string
-	var latestCreatedAt string
-
-	for _, cfg := range results {
-		if matchedConfigID == "" || cfg.CreatedAt > latestCreatedAt {
-			matchedConfigID = cfg.ID
-			latestCreatedAt = cfg.CreatedAt
-		}
-	}
-
-	WarnIfMultipleMatches(ctx, "compute config", name, len(results), matchedConfigID)
+	matchedConfigID := PickMostRecentMatch(ctx, "compute config", name, results,
+		func(cfg computeConfigSearchResult) bool { return true },
+		func(cfg computeConfigSearchResult) string { return cfg.ID },
+		func(cfg computeConfigSearchResult) string { return cfg.CreatedAt },
+	)
 
 	tflog.Info(ctx, "Found compute config by name", map[string]any{
 		"name":      name,
@@ -636,7 +631,7 @@ func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context
 		"archive_status": "ALL",
 	}
 
-	results, err := searchComputeTemplatesPaged(ctx, d.client, searchPayload, decodeComputeConfigSearchPage)
+	results, err := searchComputeTemplatesPaged(ctx, d.client, searchPayload)
 	if err != nil {
 		return nil, err
 	}
