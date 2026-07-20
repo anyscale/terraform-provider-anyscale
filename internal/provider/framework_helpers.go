@@ -205,6 +205,24 @@ func convertAttrValueToInterface(val attr.Value) interface{} {
 			}
 			return result
 		}
+	case types.Tuple:
+		// HCL infers a list of object literals inside a Dynamic-typed attribute as a Tuple, not
+		// a List - Terraform's dynamic type system uses Tuple whenever elements could in
+		// principle have different shapes, which every object literal list does. Without this
+		// case, a real ray_serve_config's `applications` (always a list of objects) fell through
+		// to the nil default below, silently sending the backend `"applications": null` instead
+		// of the real list - confirmed as a real P1 via a real-infra apply (the mock suite never
+		// caught it because every mock config used an empty list, which types as List, not
+		// Tuple). Converts identically to the List case; Tuple otherwise behaves the same for
+		// this JSON-conversion purpose.
+		if !v.IsNull() && !v.IsUnknown() {
+			elements := v.Elements()
+			result := make([]interface{}, 0, len(elements))
+			for _, elem := range elements {
+				result = append(result, convertAttrValueToInterface(elem))
+			}
+			return result
+		}
 	case types.Map:
 		if !v.IsNull() && !v.IsUnknown() {
 			elements := v.Elements()
