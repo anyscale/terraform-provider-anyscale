@@ -7,12 +7,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// TestAccServiceDataSource_ByID looks up a real, pre-existing service by ID. There is no
-// anyscale_service resource in this provider (services are live, ephemeral compute, not
-// declarative config - see .crystl/quest/CONTRACT_anyscale_service.md), so unlike most other
-// acctests, this cannot create its own fixture: GetTestServiceID resolves an externally-created
-// service via ANYSCALE_TEST_SERVICE_ID or auto-discovery, and skips cleanly (not silently) if the
-// test org has none.
+// TestAccServiceDataSource_ByID looks up a real, pre-existing service by ID. Unlike most other
+// acctests, this cannot create its own fixture: there is no CreateEphemeralTestService, so
+// GetTestServiceID resolves an externally-created service via ANYSCALE_TEST_SERVICE_ID or
+// auto-discovery, and skips cleanly (not silently) if the test org has none.
 func TestAccServiceDataSource_ByID(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)

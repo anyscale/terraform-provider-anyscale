@@ -265,9 +265,11 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 	// Find matching cloud(s) - if multiple exist, use the most recent
 	var matchedCloudID string
 	var latestCreatedAt string
+	matchCount := 0
 
 	for _, cloud := range cloudsResp.Results {
 		if cloud.Name == cloudName {
+			matchCount++
 			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
 				matchedCloudID = cloud.ID
 				latestCreatedAt = cloud.CreatedAt
@@ -279,12 +281,6 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
 	}
 
-	matchCount := 0
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			matchCount++
-		}
-	}
 	if matchCount > 1 {
 		t.Logf("Warning: Multiple clouds (%d) found with name '%s', using most recent: %s", matchCount, cloudName, matchedCloudID)
 	}
@@ -813,14 +809,6 @@ func GetConfiguredCloud(t *testing.T) CloudInfo {
 	return CloudInfo{}
 }
 
-// GetConfiguredCloudID returns a cloud ID that has cloud resources configured.
-// This is required for tests that attach machine pools or need a fully configured cloud.
-// Falls back to any cloud if no fully configured clouds exist.
-func GetConfiguredCloudID(t *testing.T) string {
-	cloud := GetConfiguredCloud(t)
-	return cloud.ID
-}
-
 // GetAllConfiguredClouds returns all clouds that have cloud resources configured.
 // This is useful for running tests across multiple cloud types (AWS VM, GCP VM, AWS K8S, etc.).
 // Returns an empty slice if no clouds are available.
@@ -1152,117 +1140,15 @@ func ResolveK8sInstanceType(t *testing.T, cloudID string) string {
 	return smallestName
 }
 
-var (
-	// Cache for a read-only test project ID. Only for tests that merely read
-	// a project (e.g. data source lookups) — never for tests that create,
-	// update, or replace project-scoped state, since this may resolve to a
-	// shared, real project. Those should call CreateEphemeralTestProject instead.
-	cachedTestProjectID string
-	testProjectIDMutex  sync.Mutex
-)
-
-// GetTestProjectID returns a project ID for READ-ONLY acceptance tests, with
-// priority:
-//  1. ANYSCALE_TEST_PROJECT_ID environment variable (explicit override)
-//  2. Auto-discover: list projects, prefer the org's default project (always
-//     present, stable across runs), else the first result.
-//
-// Do not use this for tests that mutate or replace state scoped to the
-// project itself — this may resolve to a shared, real project. Call
-// CreateEphemeralTestProject instead so the test never touches one it does
-// not own.
-func GetTestProjectID(t *testing.T) string {
-	testProjectIDMutex.Lock()
-	defer testProjectIDMutex.Unlock()
-
-	if cachedTestProjectID != "" {
-		return cachedTestProjectID
-	}
-
-	if envProjectID := os.Getenv("ANYSCALE_TEST_PROJECT_ID"); envProjectID != "" {
-		t.Logf("Using test project ID from ANYSCALE_TEST_PROJECT_ID: %s", envProjectID)
-		cachedTestProjectID = envProjectID
-		return cachedTestProjectID
-	}
-
-	client, err := GetTestClient()
-	if err != nil {
-		t.Skip("No project available - failed to get test client.")
-		return ""
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/projects", nil)
-	if err != nil {
-		t.Skip("No project available - failed to list projects.")
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		t.Skip("No project available - API error listing projects.")
-		return ""
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Skip("No project available - failed to read response.")
-		return ""
-	}
-
-	var projectsResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			IsDefault bool   `json:"is_default"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &projectsResp); err != nil {
-		t.Skip("No project available - failed to parse response.")
-		return ""
-	}
-
-	if len(projectsResp.Results) == 0 {
-		t.Skip("No project available - no projects found in the account.")
-		return ""
-	}
-
-	// Prefer the default project: always present, stable across runs, so
-	// repeated test invocations resolve to the same read target.
-	for _, p := range projectsResp.Results {
-		if p.IsDefault {
-			t.Logf("Using default project for test: %s (ID: %s)", p.Name, p.ID)
-			cachedTestProjectID = p.ID
-			return cachedTestProjectID
-		}
-	}
-
-	t.Logf("Using first available project for test: %s (ID: %s)", projectsResp.Results[0].Name, projectsResp.Results[0].ID)
-	cachedTestProjectID = projectsResp.Results[0].ID
-	return cachedTestProjectID
-}
-
-// CreateEphemeralTestProject creates a minimal disposable project under the package-wide
-// resolved test cloud (GetTestCloudID), named with the "tfacc-" prefix so the existing project
-// sweeper cleans it up if test cleanup is interrupted. Tests that mutate or replace project-scoped
-// state should use this instead of GetTestProjectID, so they never touch a shared/real project.
-//
-// Do NOT reach for this when your test has ALSO independently resolved its own cloud via
-// GetAllVMClouds/a specific selection - GetTestCloudID's resolution can legitimately land on a
-// DIFFERENT cloud than the one your test picked, which reproduces the exact real-infra failure
-// this helper's sibling, CreateEphemeralTestProjectForCloud, exists to prevent: the backend
-// enforces that a project's parent_cloud_id must match whatever cloud a cluster is provisioned
-// on (confirmed via a real 403, 2026-07-20 - see check_cloud_id_of_project_and_cluster_match in
-// the backend reference), and a mismatch surfaces as an opaque UNHEALTHY, not a clear plan-time
-// error. If your test already has a concrete cloud.ID in hand, use
-// CreateEphemeralTestProjectForCloud(t, cloud.ID) instead so the project can never diverge from
-// the cloud your compute_config/service actually targets.
-func CreateEphemeralTestProject(t *testing.T) (projectID string, projectName string, err error) {
-	return CreateEphemeralTestProjectForCloud(t, GetTestCloudID(t))
-}
-
-// CreateEphemeralTestProjectForCloud is CreateEphemeralTestProject, parameterized by an explicit
-// cloud ID instead of independently re-resolving one - see CreateEphemeralTestProject's doc for
-// why this distinction matters for any test that already selected its own cloud.
+// CreateEphemeralTestProjectForCloud creates a minimal disposable project under parentCloudID,
+// named with the "tfacc-" prefix so the existing project sweeper cleans it up if test cleanup is
+// interrupted. Always pass the specific cloud.ID your test already resolved (e.g. via
+// GetTestCloudID/GetAllVMClouds) rather than independently re-resolving one - the backend enforces
+// that a project's parent_cloud_id must match whatever cloud a cluster is provisioned on
+// (confirmed via a real 403, 2026-07-20 - see check_cloud_id_of_project_and_cluster_match in the
+// backend reference), and a mismatch surfaces as an opaque UNHEALTHY, not a clear plan-time error.
+// Passing a cloud ID resolved separately from the one your compute_config/service actually targets
+// reproduces that exact failure.
 func CreateEphemeralTestProjectForCloud(t *testing.T, parentCloudID string) (projectID string, projectName string, err error) {
 	client, err := GetTestClient()
 	if err != nil {
@@ -1335,11 +1221,9 @@ func CreateEphemeralTestProjectForCloud(t *testing.T, parentCloudID string) (pro
 }
 
 var (
-	// Cache for a read-only test service ID. There is no anyscale_service
-	// resource in this provider (services are live, ephemeral compute, not
-	// declarative config), so there is no ephemeral-creation equivalent to
-	// CreateEphemeralTestProject above — this always resolves to an
-	// externally-created, real service.
+	// Cache for a read-only test service ID. Unlike GetTestCloudID and the
+	// project helpers above, there is no CreateEphemeralTestService - this
+	// always resolves to an externally-created, real service.
 	cachedTestServiceID string
 	testServiceIDMutex  sync.Mutex
 )
@@ -1599,14 +1483,6 @@ func NewAPIDestroyCheck(resourceType, getPathFmt string) resource.TestCheckFunc 
 	return newAPIDestroyCheckImpl(resourceType, "", getPathFmt, "")
 }
 
-// NewAPIDestroyCheckByAttr is like NewAPIDestroyCheck but pulls the resource
-// ID from rs.Primary.Attributes[attrName] instead of rs.Primary.ID. Used when
-// the API-side identifier is exposed as a non-ID attribute (e.g. compute
-// config's version-specific config_id).
-func NewAPIDestroyCheckByAttr(resourceType, attrName, getPathFmt string) resource.TestCheckFunc {
-	return newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, "")
-}
-
 // NewAPIArchivedDestroyCheck is the variant for resources that the API cannot
 // permanently delete — container images, cluster environments. It verifies
 // that the resource still exists but its archived field is truthy.
@@ -1667,7 +1543,7 @@ func NewAPIArchivedDestroyCheckForID(resourceType string, id *string, getPathFmt
 			}
 			if resp.StatusCode != 200 {
 				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): unexpected status %d checking %s: %s",
-					resourceType, resp.StatusCode, *id, body[:min(len(body), 256)])
+					resourceType, resp.StatusCode, *id, truncateBody(string(body), 256))
 			}
 
 			archived, perr := extractArchivedValue(body, archivedJSONPath)
@@ -1828,6 +1704,30 @@ func extractArchivedValue(body []byte, jsonPath string) (bool, error) {
 	default:
 		return false, nil
 	}
+}
+
+// truncateBody caps s at max characters, appending a marker if it was cut, so
+// a raw HTTP error body embedded in a log line or wrapped error doesn't dump
+// megabytes of unrelated payload. Shared by every sweeper and CheckDestroy
+// helper that surfaces a raw response body.
+func truncateBody(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
+}
+
+// testAccProviderBlock returns a provider "anyscale" block pointed at an
+// httptest mock server instead of the real Anyscale API, for acceptance
+// tests that prove framework-level behavior (plan-emptiness, import,
+// lifecycle) against a controlled response shape rather than real infra.
+func testAccProviderBlock(serverURL string) string {
+	return fmt.Sprintf(`
+provider "anyscale" {
+  api_url = %[1]q
+  token   = "mock-token"
+}
+`, serverURL)
 }
 
 // UniqueName returns a deterministic-prefixed but per-invocation-unique
