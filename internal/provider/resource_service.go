@@ -34,7 +34,7 @@ const (
 	serviceRolloutStrategyInPlace = "IN_PLACE"
 )
 
-const defaultServiceRolloutTimeout = "30m"
+const defaultServiceRolloutTimeout = "45m"
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
@@ -235,7 +235,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(defaultServiceRolloutTimeout),
-				MarkdownDescription: "Maximum time to wait for a create or update rollout to reach `RUNNING`, or for destroy to wait for termination to reach `TERMINATED` before deleting (e.g. `30m`, `1h`). Defaults to `30m`.",
+				MarkdownDescription: "Maximum time to wait for a create or update rollout to reach `RUNNING`, or for destroy to wait for termination to reach `TERMINATED` before deleting (e.g. `30m`, `1h`). Defaults to `45m` - a standard `ROLLOUT` genuinely takes tens of minutes on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), so this default is sized with real-world headroom, not just the minimum a bare test app needs.",
 			},
 
 			// ─── Computed outputs (reused from the anyscale_service data source's model - see
