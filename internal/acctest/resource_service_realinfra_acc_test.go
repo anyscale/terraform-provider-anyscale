@@ -50,7 +50,19 @@ func TestAccServiceResource_RealInfra(t *testing.T) {
 		t.Skip("No valid instance types on the resolved cloud")
 	}
 
-	projectID := GetTestProjectID(t)
+	// CreateEphemeralTestProjectForCloud, NOT GetTestProjectID: the org-wide "default" project
+	// auto-discovered by GetTestProjectID can legitimately be homed on a DIFFERENT cloud than the
+	// one resolved above, and the backend enforces that a project's parent_cloud_id must match
+	// the compute_config's cloud_id (confirmed via a real 403 during this test's own diagnosis,
+	// 2026-07-20 - see check_cloud_id_of_project_and_cluster_match in the backend reference). A
+	// mismatch surfaces as an opaque UNHEALTHY at apply time, not a clear error - exactly what
+	// made this test's rollout step look like a capacity/health problem before the real cause was
+	// traced. Scoping the project to this test's own cloud.ID prevents that class of failure
+	// outright, rather than relying on the org's default project happening to line up.
+	projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloud.ID)
+	if err != nil {
+		t.Fatalf("failed to create ephemeral test project scoped to cloud %s: %v", cloud.ID, err)
+	}
 	computeConfigName := UniqueName(t, "cc-for-service")
 	serviceName := UniqueName(t, "service-realinfra")
 
@@ -215,7 +227,13 @@ func TestAccServiceResource_RealInfra_InPlaceRollout(t *testing.T) {
 		t.Skip("No valid instance types on the resolved cloud")
 	}
 
-	projectID := GetTestProjectID(t)
+	// CreateEphemeralTestProjectForCloud, NOT GetTestProjectID - see the identical comment on
+	// TestAccServiceResource_RealInfra above for why (a real, confirmed cross-cloud project/cloud
+	// mismatch this session, not a hypothetical).
+	projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloud.ID)
+	if err != nil {
+		t.Fatalf("failed to create ephemeral test project scoped to cloud %s: %v", cloud.ID, err)
+	}
 	computeConfigName := UniqueName(t, "cc-for-service-ip")
 	serviceName := UniqueName(t, "service-realinfra-ip")
 
