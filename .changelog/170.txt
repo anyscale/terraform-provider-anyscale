@@ -1,0 +1,4 @@
+```
+release-note:changed
+provider: Rename the `gcp-gke-basic` example's `google_region` variable to `gcp_region`, matching the naming already used by its `gcp-vm`/`gcp-vm-basic` siblings. No behavior change, docs and examples only.
+```
