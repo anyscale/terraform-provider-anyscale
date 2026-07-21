@@ -90,6 +90,8 @@ themselves, so the ongoing cost here is the VPC/NAT/S3 infrastructure itself, no
 | `anyscale_external_id` | External ID for the IAM trust policy - your own choice of string | *(required, no default)* |
 | `cloud_name` | Name of the Anyscale cloud to create | `tf-aws-basic-test` |
 | `anyscale_cloud_id` | Existing Anyscale cloud ID, if re-running against one already created | `null` |
+| `is_private_cloud` | Whether this is a private cloud | `false` |
+| `auto_add_user` | Whether to automatically add users | `false` |
 | `anyscale_deploy_env` | Deployment environment tag (`production`, `test`, or `development`) | `test` |
 | `common_prefix` | Prefix for AWS resource names; must be unique per scenario/run | `as-aws-basic-` |
 | `anyscale_s3_force_destroy` | Allow `terraform destroy` to remove a non-empty S3 bucket | `true` |

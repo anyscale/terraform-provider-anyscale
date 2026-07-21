@@ -119,6 +119,9 @@ resource "anyscale_cloud" "primary" {
   region         = "us-west-2"
   compute_stack  = "VM"
 
+  is_private_cloud = false
+  auto_add_user    = false
+
   aws_config {
     vpc_id           = module.aws_anyscale_v2.anyscale_vpc_id
     subnet_ids_to_az = module.aws_anyscale_v2.anyscale_vpc_public_subnet_ids_az_map
@@ -141,6 +144,10 @@ This is the resource that actually calls the Anyscale API. Everything in `aws_co
 `object_storage` is a direct reference to an output from the module in Step 2 - by this point
 you're just wiring the AWS infrastructure you already provisioned into Anyscale's view of it, not
 creating anything new on the AWS side.
+
+`is_private_cloud` and `auto_add_user` both default to `false` on their own - they're `Optional`
+with a `Computed` default - so setting them explicitly here doesn't change the outcome; they're
+shown because the full example wires them from variables.
 
 ## Step 4: Apply
 
