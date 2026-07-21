@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"strings"
 	"time"
 
@@ -109,29 +110,50 @@ func sweepComputeConfigs(_ string) error {
 
 func searchComputeConfigsByContains(ctx context.Context, client *provider.Client, contains string) ([]sweepComputeConfigResult, error) {
 	var all []sweepComputeConfigResult
-	var pagingToken *string
+	var pagingToken string
 
 	for {
-		// The search endpoint returns every version of a compute config as a
-		// distinct row, so we must paginate even within a single prefix query.
-		// archive_status is not a field the backend accepts (confirmed against
-		// product's ClusterComputesQuery model: the field was removed, not
-		// renamed; base/routers/cluster_computes_router.py's /search endpoint
-		// has no archived-filter arg at all yet). Sending it 422s the whole
-		// request. Sweep candidates are filtered by name prefix + age instead,
-		// so losing server-side archive filtering just means a few more
-		// already-archived rows pass through sweepArchiveComputeConfig, which
-		// already treats re-archiving as a success (200/202/204/404).
+		// CC5b tail: migrated from /ext/v0/cluster_computes/search to
+		// /api/v2/compute_templates/search, mirroring the identical pattern
+		// already proven by the data source's searchComputeTemplatesPaged
+		// (data_source_compute_config.go). Two landmines here, both traced
+		// against the read-only product reference, not assumed:
+		//
+		// 1. Pagination moves from the request BODY to the URL QUERY STRING.
+		// api/v2's search endpoint reads count/paging_token via
+		// Depends(required_pagination_large), which are plain FastAPI
+		// function params sourced from the query string, not the
+		// ComputeTemplateQuery body model. The old ext/v0 shape nested them
+		// under a "paging" body key; api/v2 simply never reads that key, so
+		// leaving it in the body would compile, get a 200 back, and silently
+		// paginate wrong (always page 1) -- a silent-truncation failure mode
+		// that could miss leaked test clouds/configs.
+		//
+		// 2. ComputeTemplateQuery.version defaults to latest-version-only
+		// (its own docstring: "Setting version to None is equivalent to
+		// setting version to -1"), the opposite of the old ext/v0 default
+		// this sweeper relied on returning every version of a name as a
+		// distinct row. Architect's sharpening: the real risk isn't just
+		// which row gates the sweep timer -- a leaked config whose NEWEST
+		// version was created recently would be judged too-young and KEPT
+		// even when older versions are well past the cutoff, so a config
+		// with recent churn could evade the sweeper entirely. version: -2 is
+		// the documented "do not filter by version" sentinel (same one
+		// fetchComputeConfigVersions already uses) and restores the current,
+		// safer, enumerate-every-version behavior.
+		//
+		// archive_status: "ALL" is also now sent explicitly. api/v2 defaults
+		// this to NOT_ARCHIVED (ext/v0 has no equivalent and never filtered),
+		// so omitting it would silently narrow results to unarchived rows
+		// only. Already-archived rows passing through here are harmless --
+		// sweepArchiveComputeConfig treats re-archiving as success
+		// (200/202/204/404) -- so ALL preserves today's exact behavior
+		// rather than narrowing it.
 		payload := map[string]interface{}{
 			"name":              map[string]string{"contains": contains},
 			"include_anonymous": false,
-			"paging":            map[string]interface{}{"count": 100},
-		}
-		if pagingToken != nil && *pagingToken != "" {
-			payload["paging"] = map[string]interface{}{
-				"count":        100,
-				"paging_token": *pagingToken,
-			}
+			"archive_status":    "ALL",
+			"version":           -2,
 		}
 
 		body, err := json.Marshal(payload)
@@ -139,7 +161,14 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 			return nil, fmt.Errorf("marshal compute config search payload: %w", err)
 		}
 
-		resp, err := client.DoRequest(ctx, "POST", "/ext/v0/cluster_computes/search", strings.NewReader(string(body)))
+		query := url.Values{}
+		query.Set("count", "100")
+		if pagingToken != "" {
+			query.Set("paging_token", pagingToken)
+		}
+		path := fmt.Sprintf("/api/v2/compute_templates/search?%s", query.Encode())
+
+		resp, err := client.DoRequest(ctx, "POST", path, strings.NewReader(string(body)))
 		if err != nil {
 			return nil, fmt.Errorf("search compute configs: %w", err)
 		}
@@ -161,7 +190,7 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 		if page.Metadata.NextPagingToken == nil || *page.Metadata.NextPagingToken == "" {
 			break
 		}
-		pagingToken = page.Metadata.NextPagingToken
+		pagingToken = *page.Metadata.NextPagingToken
 	}
 
 	return all, nil

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.2] - 2026-07-21
+
+### Fixed
+
+- resource/anyscale_cloud: importing an existing cloud now recovers `object_storage` for VM clouds and `file_storage` for every compute stack from the backend, instead of leaving them null; a configuration that already matches the live cloud now plans cleanly instead of forcing a destroy-and-recreate, though a cloud imported with auto-provisioned storage not declared in configuration now shows a one-time reconcile diff on the next plan instead of silence.
+- resource/anyscale_cloud: fix a K8S cloud import incorrectly showing a region diff when the backend auto-fills a bucket's region to match the cloud's own region; a configuration that never set a region now plans cleanly instead of showing a spurious change.
+- resource/anyscale_cloud_resource: importing an existing cloud resource now recovers `object_storage` for VM clouds and `file_storage` for every compute stack from the backend, instead of leaving them null; a configuration that already matches the live cloud resource now plans cleanly instead of forcing a destroy-and-recreate, though a cloud resource imported with auto-provisioned storage not declared in configuration now shows a one-time reconcile diff on the next plan instead of silence.
+- resource/anyscale_cloud_resource: fix a K8S cloud resource import incorrectly showing a region diff when the backend auto-fills a bucket region to match the resource's own region; a configuration that never set a region now plans cleanly instead of showing a spurious change.
+
 ## [0.15.1] - 2026-07-21
 
 ### Changed
@@ -769,7 +778,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.2
 [0.15.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.1
 [0.15.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.0
 [0.14.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.14.1
