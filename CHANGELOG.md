@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-07-21
+
+### Changed
+
+- provider: Correct the Project guide's Known limitation section, which still described the pre-PR174 60-second delete-retry ceiling instead of the current 90 seconds (no behavior change, docs only).
+
 ## [0.15.0] - 2026-07-21
 
 ### Added
@@ -763,7 +769,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.1
 [0.15.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.0
 [0.14.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.14.1
 [0.14.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.14.0
