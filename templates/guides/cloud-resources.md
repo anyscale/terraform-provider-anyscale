@@ -346,7 +346,7 @@ A few more things worth knowing:
   effort.
 - `is_bring_your_own_resource` and `is_aioa` can be read via either the
   singular `anyscale_cloud` data source or the plural `anyscale_clouds` data source, but cannot be set
-  — there's no supported way to create a cloud with any of the three from this provider today.
+  — there's no supported way to create a cloud with either from this provider today.
 - The Kubernetes Anyscale Operator's individual named health checks (`check_results` in the API's
   `operator_status_details`) aren't surfaced as their own attribute yet — see
   [Kubernetes operator status](#kubernetes-operator-status) above for what is.
