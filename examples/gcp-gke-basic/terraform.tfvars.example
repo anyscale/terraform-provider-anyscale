@@ -1,6 +1,6 @@
 # Base variables for the gcp-gke-basic example.
 #
-# google_region and google_project_id have no default and must be supplied -
+# gcp_region and google_project_id have no default and must be supplied -
 # copy this file to terraform.tfvars (already gitignored) and fill in your
 # own project, or pass -var-file=terraform.tfvars.example directly:
 #
@@ -10,5 +10,5 @@
 # be set here. See gpu_instance_configs in variables.tf if you want GPU node
 # pools beyond the default single T4 entry.
 
-google_region     = "us-central1"
+gcp_region        = "us-central1"
 google_project_id = "my-project-id"

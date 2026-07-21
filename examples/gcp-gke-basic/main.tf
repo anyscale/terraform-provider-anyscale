@@ -20,7 +20,7 @@ resource "anyscale_cloud_resource" "primary" {
   name = var.cloud_name
 
   cloud_id       = anyscale_cloud.primary.id
-  region         = var.google_region
+  region         = var.gcp_region
   compute_stack  = "K8S"
   cloud_provider = "GCP"
 
@@ -44,6 +44,6 @@ resource "anyscale_cloud_resource" "primary" {
   # because there's no reason to change a value that already works.
   object_storage {
     bucket_name = module.anyscale_cloudstorage.cloudstorage_bucket_name
-    region      = var.google_region
+    region      = var.gcp_region
   }
 }

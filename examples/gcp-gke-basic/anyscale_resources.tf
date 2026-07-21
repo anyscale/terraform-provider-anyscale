@@ -39,7 +39,7 @@ module "anyscale_cloudstorage" {
 # Get available zones in the region
 data "google_compute_zones" "available" {
   project = var.google_project_id
-  region  = var.google_region
+  region  = var.gcp_region
   status  = "UP"
 }
 
