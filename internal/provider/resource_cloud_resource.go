@@ -237,7 +237,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether this is a private resource. Implies customer-managed networking paths (e.g. VPN, PrivateLink) between users, clusters, and the control plane - a real infrastructure commitment, not just a network visibility flag.",
+				MarkdownDescription: "Whether to register this specific resource deployment as private - the same concept as `is_private_cloud` on the `anyscale_cloud` resource (see its schema description for the full explanation of what \"private\" does and does not mean), scoped to this one resource rather than the cloud as a whole. This is a self-asserted flag: setting `true` does not itself verify, configure, or provision any VPN or PrivateLink connectivity - arranging that separately remains your own responsibility. Changing this value after creation requires replacement.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.RequiresReplace(),
 				},
