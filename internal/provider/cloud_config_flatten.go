@@ -278,16 +278,34 @@ func stripBucketPrefix(provider, bucketName string) string {
 
 // flattenObjectStorage populates object_storage from the API's ObjectStorage.
 // provider decides whether bucket_name is unprefixed to match how a user
-// would naturally write it (see stripBucketPrefix).
-func flattenObjectStorage(cfg *ObjectStorage, provider string) (types.Object, diag.Diagnostics) {
+// would naturally write it (see stripBucketPrefix). cloudRegion is the
+// resource's own region (CloudDeploymentResult.Region).
+//
+// L1: the backend defaults an unset bucket region to the cloud's own region
+// and returns that derived value indistinguishably from a genuinely
+// user-configured one - confirmed against a real customer report where the
+// config set only bucket_name. object_storage.region is Optional and
+// RequiresReplace, not Computed, so writing that derived value into state
+// at import would force a replace against a config that never set region -
+// the same destroy-and-recreate this whole fix exists to remove, just
+// relocated to a different attribute. Recover region ONLY when it genuinely
+// differs from cloudRegion, matching the schema's own documented meaning
+// ("the bucket region, if different from cloud region"); a user who set a
+// real, different region still round-trips it.
+func flattenObjectStorage(cfg *ObjectStorage, provider, cloudRegion string) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if cfg == nil {
 		return types.ObjectNull(objectStorageAttrTypes()), diags
 	}
 
+	region := cfg.Region
+	if region != nil && *region == cloudRegion {
+		region = nil
+	}
+
 	attrs := map[string]attr.Value{
 		"bucket_name": stringOrNull(stripBucketPrefix(provider, cfg.BucketName)),
-		"region":      stringPtrOrNull(cfg.Region),
+		"region":      stringPtrOrNull(region),
 		"endpoint":    stringPtrOrNull(cfg.Endpoint),
 	}
 
@@ -296,21 +314,110 @@ func flattenObjectStorage(cfg *ObjectStorage, provider string) (types.Object, di
 	return obj, diags
 }
 
-// requiredImportConfigBlocks decides which config block(s) a valid
-// anyscale_cloud or anyscale_cloud_resource config MUST have, based on
-// compute stack and provider, and flattens them from the given resource's
-// API data. Returns an empty map if there's nothing to recover (nil
-// resource, e.g. a genuinely empty cloud) - never an error on its own.
+// fileStorageDefaultMountPath is file_storage.mount_path's schema Default
+// (stringdefault.StaticString in resource_cloud.go/resource_cloud_resource.go)
+// and also what flattenFileStorage resolves to for a provider with no real
+// backend field for it (see flattenFileStorage) - one constant so the two
+// can never drift apart.
+const fileStorageDefaultMountPath = "/mnt/shared"
+
+// flattenFileStorage populates file_storage from the API's FileStorage.
 //
-// Deliberately required-blocks-only (see C3-v2): VM gets aws_config OR
-// gcp_config (by provider); K8S gets kubernetes_config AND object_storage
-// (both required for K8S regardless of provider). Optional/auxiliary blocks
-// - file_storage anywhere, object_storage for VM, aws_config/gcp_config for
-// K8S - are never included here. Recovering one of those would reintroduce
-// the exact ambiguity this design avoids: a later Read has no way to tell
-// "recovered at import" apart from "genuinely absent", but for a
-// compute-stack-required block that distinction never arises, since a valid
-// config could never have left it unset in the first place.
+// L2: mount_path is Optional+Computed with a static Default, unlike CC12's
+// purely-Optional ambiguous fields (compute_config_helpers.go's
+// nullAmbiguousImportFields) - nulling it here is NOT the safe move the way
+// it is for a plain Optional field. ImportStateVerify runs directly against
+// whatever this function writes, with no intervening plan (Defaults are a
+// PlanResourceChange-only mechanism - terraform-plugin-framework's
+// TransformDefaults, internal/fwschemadata/data_default.go - never invoked
+// by ImportResourceState or ReadResource), so a null written here would
+// still read back as null immediately after import, not as "/mnt/shared" -
+// a real mismatch against the freshly-created state a customer's own
+// ImportStateVerify would catch. AWS has no backend field for mount_path at
+// all (validateMountPathSupported rejects a user ever setting one), so the
+// API value is empty - resolve straight to fileStorageDefaultMountPath
+// there, the same value a config that never sets it would already show.
+// GCP/Azure/Generic DO carry a real value - recover it verbatim, or a later
+// plan diffs against backend-only drift. Net rule, same one architect
+// stated for the contract: recover mount_path only when the API actually
+// returns a non-empty value, else resolve to the default directly.
+//
+// mount_targets/persistent_volume_claim/csi_ephemeral_volume_driver have no
+// Default and no AWS-specific quirk - recover exactly what the API carries,
+// nil-safe, same discipline as every other flatten* function in this file.
+func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if cfg == nil {
+		return types.ObjectNull(fileStorageAttrTypes()), diags
+	}
+
+	mountPath := types.StringValue(fileStorageDefaultMountPath)
+	if cfg.MountPath != "" {
+		mountPath = types.StringValue(cfg.MountPath)
+	}
+
+	mountTargets := types.ListNull(types.ObjectType{AttrTypes: mountTargetAttrTypes()})
+	if len(cfg.MountTargets) > 0 {
+		targetValues := make([]attr.Value, 0, len(cfg.MountTargets))
+		for _, mt := range cfg.MountTargets {
+			targetObj, d := types.ObjectValue(mountTargetAttrTypes(), map[string]attr.Value{
+				"address": stringOrNull(mt.Address),
+				"zone":    stringOrNull(mt.Zone),
+			})
+			diags.Append(d...)
+			targetValues = append(targetValues, targetObj)
+		}
+		listVal, d := types.ListValue(types.ObjectType{AttrTypes: mountTargetAttrTypes()}, targetValues)
+		diags.Append(d...)
+		mountTargets = listVal
+	}
+
+	attrs := map[string]attr.Value{
+		"file_storage_id":             stringOrNull(cfg.FileStorageID),
+		"mount_path":                  mountPath,
+		"persistent_volume_claim":     stringOrNull(cfg.PersistentVolumeClaim),
+		"csi_ephemeral_volume_driver": stringOrNull(cfg.CSIEphemeralVolumeDriver),
+		"mount_targets":               mountTargets,
+	}
+
+	obj, d := types.ObjectValue(fileStorageAttrTypes(), attrs)
+	diags.Append(d...)
+	return obj, diags
+}
+
+// requiredImportConfigBlocks recovers every config block ImportState can
+// safely populate for a valid anyscale_cloud or anyscale_cloud_resource
+// config, based on compute stack and provider, flattened from the given
+// resource's API data. Returns an empty map if there's nothing to recover
+// (nil resource, e.g. a genuinely empty cloud) - never an error on its own.
+//
+// Provider config is still compute-stack-gated (see C3-v2): VM gets
+// aws_config OR gcp_config; K8S gets kubernetes_config. Recovering the
+// OTHER provider's block (e.g. aws_config on a K8S cloud, where it's
+// optional) would reintroduce the ambiguity C3-v2 was written to avoid: a
+// later Read has no way to tell "recovered at import" apart from
+// "genuinely absent" for an optional block, but for a compute-stack-
+// required block that distinction never arises, since a valid config could
+// never have left it unset in the first place.
+//
+// object_storage and file_storage are recovered on EVERY compute stack now,
+// whenever the API actually returns data for them - this is the fix for a
+// real customer report (AWS VM cloud, object_storage/file_storage
+// configured, import forced a destroy-and-recreate because both are
+// ForceNew and neither was recovered for VM). This does NOT reopen C3-v2's
+// ambiguity concern the way recovering aws_config on K8S would: both
+// flatten functions already return ObjectNull for a nil cfg, so a live
+// resource that genuinely has no storage configured still comes back null,
+// matching an omitted block exactly - the only residual risk is the
+// opposite direction (a cloud whose storage was auto-provisioned and never
+// declared in .tf now sees a one-time reconcile diff instead of silence),
+// which is a plan diff to review, not a destructive replace, and is called
+// out explicitly in the changelog/docs for this fix rather than buried.
+// object_storage additionally guards against the backend's region auto-fill
+// (see flattenObjectStorage's own doc, L1) and file_storage's mount_path
+// against collapsing the schema's Computed default (see flattenFileStorage,
+// L2) - both are real, verified landmines a naive "recover whatever the API
+// returns" change would have hit.
 //
 // Shared by both resources' ImportState: the decision (which block, from
 // which struct field) is identical, only the surrounding API calls to reach
@@ -330,27 +437,33 @@ func requiredImportConfigBlocks(ctx context.Context, provider string, defaultRes
 			diags.Append(d...)
 			blocks["kubernetes_config"] = obj
 		}
-		if defaultResource.ObjectStorage != nil {
-			obj, d := flattenObjectStorage(defaultResource.ObjectStorage, provider)
-			diags.Append(d...)
-			blocks["object_storage"] = obj
+	} else {
+		switch strings.ToUpper(provider) {
+		case "AWS":
+			if defaultResource.AWSConfig != nil {
+				obj, d := flattenAWSConfig(ctx, defaultResource.AWSConfig)
+				diags.Append(d...)
+				blocks["aws_config"] = obj
+			}
+		case "GCP":
+			if defaultResource.GCPConfig != nil {
+				obj, d := flattenGCPConfig(ctx, defaultResource.GCPConfig)
+				diags.Append(d...)
+				blocks["gcp_config"] = obj
+			}
 		}
-		return blocks, diags
 	}
 
-	switch strings.ToUpper(provider) {
-	case "AWS":
-		if defaultResource.AWSConfig != nil {
-			obj, d := flattenAWSConfig(ctx, defaultResource.AWSConfig)
-			diags.Append(d...)
-			blocks["aws_config"] = obj
-		}
-	case "GCP":
-		if defaultResource.GCPConfig != nil {
-			obj, d := flattenGCPConfig(ctx, defaultResource.GCPConfig)
-			diags.Append(d...)
-			blocks["gcp_config"] = obj
-		}
+	if defaultResource.ObjectStorage != nil {
+		obj, d := flattenObjectStorage(defaultResource.ObjectStorage, provider, defaultResource.Region)
+		diags.Append(d...)
+		blocks["object_storage"] = obj
 	}
+	if defaultResource.FileStorage != nil {
+		obj, d := flattenFileStorage(ctx, defaultResource.FileStorage)
+		diags.Append(d...)
+		blocks["file_storage"] = obj
+	}
+
 	return blocks, diags
 }

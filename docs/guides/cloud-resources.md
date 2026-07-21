@@ -236,27 +236,47 @@ there's nothing new for an already-populated state to notice.
 Plain `terraform import` on `anyscale_cloud` or `anyscale_cloud_resource` used to leave every config
 block null (import only ever set `id`), which meant the next `plan` saw your `.tf` configuration as a
 brand new addition to a `RequiresReplace` attribute and forced a destructive replace of a live cloud.
-Import now recovers config directly, as part of the import step itself — but deliberately only the
-block(s) that compute stack requires, and nothing else:
+Import now also recovers `object_storage` and `file_storage` directly from the live resource, in
+addition to the block(s) the compute stack requires:
 
 - A **VM** cloud/resource recovers `aws_config` (AWS) or `gcp_config` (GCP) — whichever matches its
-  provider. Azure has no VM variant to recover (see [Supported cloud providers](#supported-cloud-providers)
+  provider — plus `object_storage` and `file_storage` whenever the live resource actually has them.
+  Azure has no VM variant to recover (see [Supported cloud providers](#supported-cloud-providers)
   above).
-- A **K8S** cloud/resource recovers both `kubernetes_config` and `object_storage` — both are required
-  for K8S regardless of provider, Azure included.
-- Everything else — `file_storage` always, `object_storage` for VM, `aws_config`/`gcp_config`/
-  `azure_config` for K8S — is **never** recovered at import, even if you actually configured it. Add
-  these to your `.tf` after importing if you use them; expect a replace on the next `apply`; there's
-  no supported way around that for an optional block. This is deliberate, not an oversight: recovering
-  an optional block can't distinguish "you didn't configure this" from "recovered at import," and only
-  a required block avoids that ambiguity in the first place.
+- A **K8S** cloud/resource recovers `kubernetes_config` and `object_storage` — both are required for
+  K8S regardless of provider, Azure included, so both have always been recovered — plus `file_storage`
+  whenever the live resource actually has it, which is new.
+- `aws_config`, `gcp_config`, and `azure_config` are still **never** recovered for a K8S cloud/resource,
+  even if you actually configured one: K8S doesn't require a provider-specific block the way VM does,
+  and unlike `object_storage`/`file_storage` these remain out of scope for import recovery. Add these
+  to your `.tf` after importing if you use them; expect a replace on the next `apply`; there's no
+  supported way around that for these specific blocks.
+
+This is not purely new coverage: recovering `object_storage` through one shared code path for both
+compute stacks also fixes a pre-existing bug in **K8S** import specifically. The backend fills in a
+bucket's region to match the cloud's own region even when you never configured one, and previously
+that backend-filled value was recovered verbatim — so a `.tf` that correctly left `region` unset still
+saw a spurious diff after importing a K8S cloud. Import now recovers `region` only when it genuinely
+differs from the cloud's own region, for both compute stacks, so a K8S import that matches your `.tf`
+plans cleanly too.
+
+One tradeoff worth knowing: at import time the provider can't see your `.tf`, only the live cloud, so
+`object_storage` and `file_storage` recover whatever genuinely exists on the backend regardless of what
+your configuration declares. If a cloud's storage was auto-provisioned (or configured outside
+Terraform) and was never written into your `.tf`, importing it now surfaces a one-time reconcile diff
+on the very next `plan` — where before, that same gap stayed silent because these blocks were never
+recovered at all. This is the intended tradeoff: a reviewable diff is safer than the destructive
+replace this fix exists to prevent. It also only ever affects a fresh `terraform import` from here
+forward — none of this runs outside `ImportState`, so an already-imported, already-applied cloud's
+state (K8S included, even one already carrying the incorrect region described above) is completely
+untouched by upgrading the provider.
 
 A few more things worth knowing:
 
 - **On AWS and GCP, `bucket_name` is scheme-tolerant: a bare name and its scheme-prefixed form
   (`s3://`, `gs://`) count as the same value.** A plan modifier treats a scheme-only difference
   between your configuration and the recovered state as equal, so it never forces a diff or a
-  replace (`bucket_name` is `RequiresReplace`) — whether right after importing a K8S cloud or on
+  replace (`bucket_name` is `RequiresReplace`) — whether right after importing a cloud or on
   any later plan. This is deliberately NOT achieved by canonicalizing to one form: forcing
   everyone's bare names to gain a prefix (or vice versa) would spuriously replace existing clouds
   already written the other way, so both forms simply compare equal instead. **Azure is
@@ -264,6 +284,20 @@ A few more things worth knowing:
   equivalent, so there's no scheme-tolerance to speak of there — write the exact URI, since it's
   the only valid form to begin with (see [Supported cloud providers](#supported-cloud-providers)
   above).
+- **`file_storage.mount_path` only recovers a real value on GCP, Azure, and Generic.** AWS has no
+  backend field for it at all, so the `/mnt/shared` you see there is always the schema default, never
+  something recovered from the API — import leaves it to that default, exactly as before. GCP,
+  Azure, and Generic do store a real value, so import recovers whatever the backend actually holds —
+  import reflects that reality rather than resetting to a default it would otherwise conflict with.
+  On GCP specifically, if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share
+  name and silently overwrites whatever `mount_path` you configured (see the `mount_path` attribute
+  reference for the full mechanics); import now recovers whatever value that auto-discovery already
+  produced. One consequence worth knowing: if you're importing such a cloud and your `.tf` leaves
+  `mount_path` unset (relying on the `/mnt/shared` default), import instead recovers the real
+  auto-discovered value, so your next `plan` shows a one-time reconcile diff on `mount_path` rather
+  than silently defaulting to a path the backend isn't actually using. This is strictly better than
+  before this fix, when `file_storage` wasn't recovered at import at all; it's a one-time consequence
+  of the pre-existing GCP auto-discovery behavior, not a new limitation of its own.
 - **`compute_stack` is read from the cloud's own attached resource, not just the cloud-level
   summary field.** `GET /clouds/{id}` includes its own `compute_stack`, but that value is
   backend-derived from whichever resource the API considers primary, and defaults to `VM` if it
@@ -283,8 +317,9 @@ A few more things worth knowing:
   produce a plan diff on those specific fields — just don't expect them to round-trip.
 - Importing an `anyscale_cloud` that was originally created empty (the multi-resource cloud pattern) but already has a
   resource attached looks, from the API, identical to one created all-in-one — both simply have a
-  default resource present. Importing in that situation recovers the resource's required block(s) into
-  the *cloud's* own configuration, as if it were all-in-one. If you're recovering a multi-resource cloud deployment,
+  default resource present. Importing in that situation recovers the resource's config - the required
+  provider block plus `object_storage`/`file_storage` whenever present - into the *cloud's* own
+  configuration, as if it were all-in-one. If you're recovering a multi-resource cloud deployment,
   import the `anyscale_cloud_resource` itself as well to get resource-level configuration into the
   right place.
 
