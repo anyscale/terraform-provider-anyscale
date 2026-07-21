@@ -54,6 +54,19 @@ type ComputeConfigDataSourceModel struct {
 	CreatedAt              types.String `tfsdk:"created_at"`
 	LastModifiedAt         types.String `tfsdk:"last_modified_at"`
 
+	// DS-CC-7: cluster-level fields that were resource-only until now (see
+	// the "Known limitations" section this closes in the Compute Config
+	// guide). CloudResource/MinResources/MaxResources are genuinely Computed
+	// (freshly resolved every Read, same as the resource); Flags and
+	// AdvancedInstanceConfig instead follow the resource's ImportState
+	// recovery path, since a data source has no prior config to echo the
+	// way the resource's ordinary Read does for these two - see Read below.
+	CloudResource          types.String  `tfsdk:"cloud_resource"`
+	MinResources           types.Map     `tfsdk:"min_resources"`
+	MaxResources           types.Map     `tfsdk:"max_resources"`
+	Flags                  types.Dynamic `tfsdk:"flags"`
+	AdvancedInstanceConfig types.Dynamic `tfsdk:"advanced_instance_config"`
+
 	// CC6: node topology parity with the resource. Same underlying shape
 	// (NodeConfigModel / WorkerNodeConfigModel), all Computed-only here.
 	Zones       types.List   `tfsdk:"zones"`
@@ -69,7 +82,7 @@ func (d *ComputeConfigDataSource) Metadata(ctx context.Context, req datasource.M
 // Schema defines the data source schema.
 func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. A few resource-only top-level fields aren't yet exposed here: `min_resources`, `max_resources`, `cloud_resource`, and the compute-config-level `flags` and `advanced_instance_config` (the per-node `flags` and `advanced_instance_config` under `head_node`/`worker_nodes` are exposed) — see the [Compute Config guide](../guides/compute-config.md).",
+		MarkdownDescription: "Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. See the [Compute Config guide](../guides/compute-config.md) for the versioning model and other cross-cutting behavior not obvious from the schema alone.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -93,6 +106,10 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 				Optional:            true,
 				Computed:            true,
 				MarkdownDescription: "The name of the Anyscale cloud. Can be used to filter compute configs when looking up by name. Either `cloud_id` or `cloud_name` can be specified. If provided, will be resolved to cloud_id.",
+			},
+			"cloud_resource": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The name of the cloud resource this compute config targets, matching the resource's `cloud_resource` attribute. Null if the compute config targets the cloud's primary resource rather than a specific named one - the API never backfills this to the primary resource's name, so null is the only value a primary-resource compute config ever reports here.",
 			},
 			"config_id": schema.StringAttribute{
 				Computed:            true,
@@ -119,6 +136,10 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 				Computed:            true,
 				MarkdownDescription: "Maximum uptime in minutes before cluster termination.",
 			},
+			"advanced_instance_config": schema.DynamicAttribute{
+				Computed:            true,
+				MarkdownDescription: "Cluster-level advanced instance configuration passed through to the cloud provider, matching the resource's top-level `advanced_instance_config` attribute. Distinct from the per-node `advanced_instance_config` under `head_node`/`worker_nodes` above, which is a JSON string rather than a structured value. Null if the compute config sets none.",
+			},
 			"enable_cross_zone_scaling": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether instances can run across multiple availability zones.",
@@ -126,6 +147,10 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 			"auto_select_worker_config": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether worker node groups are automatically selected based on workload.",
+			},
+			"flags": schema.DynamicAttribute{
+				Computed:            true,
+				MarkdownDescription: "Cluster-level advanced flags, matching the resource's top-level `flags` attribute. Excludes the entries that surface as their own attributes here (`min_resources`, `max_resources`, `enable_cross_zone_scaling`). Distinct from the per-node `flags` under `head_node`/`worker_nodes` above, which is a JSON string rather than a structured value. Null if the compute config sets no other flags.",
 			},
 			"project_id": schema.StringAttribute{
 				Computed:            true,
@@ -147,6 +172,16 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 				ElementType:         types.StringType,
 				Computed:            true,
 				MarkdownDescription: "Availability zones considered for this cluster.",
+			},
+			"min_resources": schema.MapAttribute{
+				ElementType:         types.Float64Type,
+				Computed:            true,
+				MarkdownDescription: "Total minimum logical resources across all nodes in the cluster, matching the resource's `min_resources` attribute. Null if unset.",
+			},
+			"max_resources": schema.MapAttribute{
+				ElementType:         types.Float64Type,
+				Computed:            true,
+				MarkdownDescription: "Total maximum logical resources across all nodes in the cluster, matching the resource's `max_resources` attribute. Null if unset.",
 			},
 			"head_node": schema.SingleNestedAttribute{
 				Computed:            true,
@@ -433,6 +468,45 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		}
 	}
 	config.AutoSelectWorkerConfig = types.BoolValue(eff.AutoSelect)
+
+	// DS-CC-7: cluster-level field parity with the resource (min_resources,
+	// max_resources, cloud_resource, top-level flags/advanced_instance_config
+	// - see the Compute Config guide's former "Known limitations" section,
+	// which this closes). cloud_resource/min_resources/max_resources are
+	// genuinely Computed, resolved fresh every Read exactly like
+	// enable_cross_zone_scaling above. flags/advanced_instance_config
+	// instead adapt the resource's ImportState recovery path (see
+	// resource_compute_config.go, tagged CC12/CC15), not its ordinary Read:
+	// the resource's Read intentionally never reads these two back from the
+	// API (they are config-echo fields there), but a data source has no
+	// config to echo, so recovering them straight from the API - with no
+	// prior-state masking, same as import - is the only option that makes
+	// sense here.
+	config.CloudResource = stringOrNull(eff.CloudDeployment)
+
+	minResourcesRaw, _ := eff.Flags["min_resources"].(map[string]interface{})
+	minResourcesMap, minResourcesDiags := InterfaceMapToFloat64(ctx, minResourcesRaw)
+	resp.Diagnostics.Append(minResourcesDiags...)
+	config.MinResources = minResourcesMap
+
+	maxResourcesRaw, _ := eff.Flags["max_resources"].(map[string]interface{})
+	maxResourcesMap, maxResourcesDiags := InterfaceMapToFloat64(ctx, maxResourcesRaw)
+	resp.Diagnostics.Append(maxResourcesDiags...)
+	config.MaxResources = maxResourcesMap
+
+	flagsDynamic, err := InterfaceToDynamic(ctx, userFlagsFrom(eff.Flags))
+	if err != nil {
+		AddConfigError(&resp.Diagnostics, "Failed to Convert Flags", err.Error())
+		return
+	}
+	config.Flags = flagsDynamic
+
+	advancedInstanceConfigDynamic, err := InterfaceToDynamic(ctx, eff.AdvancedConfig)
+	if err != nil {
+		AddConfigError(&resp.Diagnostics, "Failed to Convert Advanced Instance Config", err.Error())
+		return
+	}
+	config.AdvancedInstanceConfig = advancedInstanceConfigDynamic
 
 	// CC6: node topology parity with the resource. A data source has no
 	// prior state to mask Computed sub-attributes against (there is nothing
