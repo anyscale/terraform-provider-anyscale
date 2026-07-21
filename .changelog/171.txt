@@ -1,0 +1,12 @@
+```
+release-note:changed
+provider: Add a "Create a GCP VM Cloud" getting-started guide, the GCP counterpart to the existing (AWS-only) "Create a VM Cloud" guide, with a reciprocal cross-link between the two.
+```
+```
+release-note:changed
+provider: Add missing example READMEs for `examples/aws-vm`, `examples/gcp-vm`, and `examples/aws-vm-basic-resource`.
+```
+```
+release-note:changed
+provider: Label the timing-retry limitation in the Project guide and the data-source-gap limitation in the Compute Config guide under a consistent "Known limitation(s)" heading, and add a cross-link from the Project guide back to the Create a VM Cloud guide.
+```
