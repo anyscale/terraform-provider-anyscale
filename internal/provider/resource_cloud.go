@@ -186,7 +186,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether this is a private cloud. Implies customer-managed networking paths (e.g. VPN, PrivateLink) between users, clusters, and the control plane - a real infrastructure commitment, not just a network visibility flag.",
+				MarkdownDescription: "Whether to register this cloud as private - the Terraform equivalent of the Anyscale CLI's `anyscale cloud register --private-network` flag, which places Ray clusters in private subnets. This is a self-asserted flag, not a verified connectivity check: the value you set here is sent to the API as-is, and neither the provider nor the Anyscale backend validates, configures, or provisions any VPN or PrivateLink connectivity because of it. Setting `true` without real private connectivity already in place will not fail at plan or apply time - it only means private clusters may end up unreachable, which is your own responsibility to arrange separately, not something this attribute gates. Changing this value after creation requires replacement: the backend itself has no route to update an existing cloud's `is_private_cloud`, so there's no in-place alternative to fall back on.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.RequiresReplace(),
 				},
@@ -931,12 +931,28 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		)
 	}
 
-	// Step 1: Create the cloud with minimal required fields
+	// Step 1: Create the cloud with minimal required fields.
+	//
+	// is_private_cloud is set here rather than via a post-create
+	// reconciliation step (contrast Step 4 below): the backend has no update
+	// route for it, so this call is the only chance.
 	createReq := CreateCloudRequest{
-		Name:        name,
-		Provider:    provider,
-		Region:      region,
-		Credentials: credentials,
+		Name:           name,
+		Provider:       provider,
+		Region:         region,
+		Credentials:    credentials,
+		IsPrivateCloud: plan.IsPrivateCloud.ValueBool(),
+	}
+
+	// is_private_service_cloud mirrors is_private_cloud, but ONLY for GCP -
+	// exactly matching the CLI, where register_gcp_cloud always sends both
+	// (even when false) and register_aws_cloud/register_azure_or_generic_cloud
+	// never reference the field at all. Left nil (omitted from the request)
+	// for every other provider so is_private_cloud is the only signal there,
+	// not just a value fix - matching field-for-field, not just behaviorally.
+	if strings.ToUpper(provider) == "GCP" {
+		isPrivateServiceCloud := plan.IsPrivateCloud.ValueBool()
+		createReq.IsPrivateServiceCloud = &isPrivateServiceCloud
 	}
 
 	jsonData, err := json.Marshal(createReq)

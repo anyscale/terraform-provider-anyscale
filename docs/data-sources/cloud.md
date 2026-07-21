@@ -84,7 +84,7 @@ output "cloud_external_id" {
 - `is_default` (Boolean) Whether this is the default cloud for the organization.
 - `is_empty_cloud` (Boolean) Whether this is an empty cloud (created without embedded resource configuration).
 - `is_k8s` (Boolean) Whether this cloud uses Kubernetes.
-- `is_private_cloud` (Boolean) Whether this is a private cloud.
+- `is_private_cloud` (Boolean) Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.
 - `is_private_service_cloud` (Boolean) Whether this is a private service cloud.
 - `region` (String) The region where the cloud is deployed.
 - `state` (String) The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).

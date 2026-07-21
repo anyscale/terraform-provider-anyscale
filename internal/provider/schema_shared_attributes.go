@@ -61,7 +61,7 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 		},
 		"is_private_cloud": schema.BoolAttribute{
 			Computed:            true,
-			MarkdownDescription: "Whether this is a private cloud.",
+			MarkdownDescription: "Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.",
 		},
 		"is_private_service_cloud": schema.BoolAttribute{
 			Computed:            true,

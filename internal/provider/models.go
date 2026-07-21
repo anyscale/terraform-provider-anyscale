@@ -10,6 +10,21 @@ type CreateCloudRequest struct {
 	Provider    string `json:"provider,omitempty"`
 	Region      string `json:"region,omitempty"`
 	Credentials string `json:"credentials,omitempty"`
+
+	// IsPrivateCloud must be set here: the backend has no route to change it
+	// after creation (update_cloud_sql_alchemy takes no such parameter), so
+	// this POST is the only place it can ever be set - never omitempty,
+	// matching the CLI's WriteCloud, which always sends it explicitly rather
+	// than relying on the server-side false default.
+	IsPrivateCloud bool `json:"is_private_cloud"`
+
+	// IsPrivateServiceCloud mirrors the CLI exactly: register_gcp_cloud
+	// always sends it (true or false); register_aws_cloud and
+	// register_azure_or_generic_cloud never reference it at all. A pointer
+	// with omitempty is required to express that distinction on the wire -
+	// a plain bool would either drop an explicit GCP "false" or leak a
+	// spurious value into every non-GCP request.
+	IsPrivateServiceCloud *bool `json:"is_private_service_cloud,omitempty"`
 }
 
 // CloudResponse represents a cloud in the Anyscale API

@@ -155,7 +155,12 @@ These are intentional (renaming any of them would be a breaking change), not som
   `anyscale_cloud` data source; `is_aggregated_logs_enabled` on the plural `anyscale_clouds` data source.
 - **Private networking**: `is_private_cloud` on the `anyscale_cloud` resource refers to the cloud as a
   whole; `is_private` on the `anyscale_cloud_resource` resource refers to that specific resource
-  deployment. They are distinct attributes on distinct objects, not a typo.
+  deployment. They are distinct attributes on distinct objects, not a typo. Both are self-asserted
+  flags: setting either to `true` does not configure, verify, or provision any VPN or PrivateLink
+  connectivity — arranging that remains your own responsibility, not something either attribute gates.
+  Prior to v0.15.3, setting `is_private_cloud` on an all-in-one `anyscale_cloud` never actually reached
+  the API, so a real cloud got created and the very next apply failed with a generic "Provider produced
+  inconsistent result after apply" error; that's fixed, and the value now round-trips correctly.
 
 ## Deprecated and removed attributes
 
@@ -339,9 +344,9 @@ A few more things worth knowing:
   supporting it as a normal `Optional`/`Computed` attribute would need new plumbing for something that
   could only ever be set once and never changed in place — deferred as low-value for the scope of this
   effort.
-- `is_private_service_cloud`, `is_bring_your_own_resource`, and `is_aioa` can be read via either the
+- `is_bring_your_own_resource` and `is_aioa` can be read via either the
   singular `anyscale_cloud` data source or the plural `anyscale_clouds` data source, but cannot be set
-  — there's no supported way to create a cloud with any of the three from this provider today.
+  — there's no supported way to create a cloud with either from this provider today.
 - The Kubernetes Anyscale Operator's individual named health checks (`check_results` in the API's
   `operator_status_details`) aren't surfaced as their own attribute yet — see
   [Kubernetes operator status](#kubernetes-operator-status) above for what is.
