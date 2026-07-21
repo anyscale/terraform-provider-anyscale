@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: Add is_private_cloud and auto_add_user to the Create a VM Cloud guide Step 3 example and explain their defaults, matching the GCP counterpart guide, no behavior change, docs only.
-```
