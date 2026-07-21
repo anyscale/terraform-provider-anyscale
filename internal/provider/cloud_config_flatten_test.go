@@ -117,7 +117,7 @@ func TestFlattenObjectStorage_ProviderAwarePrefix(t *testing.T) {
 
 	t.Run("AWS: API's prefixed value flattens to bare, matching the documented convention", func(t *testing.T) {
 		region := "us-east-1"
-		obj, diags := flattenObjectStorage(&ObjectStorage{BucketName: "s3://my-bucket", Region: &region}, "AWS")
+		obj, diags := flattenObjectStorage(&ObjectStorage{BucketName: "s3://my-bucket", Region: &region}, "AWS", "us-west-2")
 		if diags.HasError() {
 			t.Fatalf("unexpected error: %v", diags)
 		}
@@ -129,7 +129,7 @@ func TestFlattenObjectStorage_ProviderAwarePrefix(t *testing.T) {
 	})
 
 	t.Run("GCP: API's prefixed value is left as-is, matching the documented convention", func(t *testing.T) {
-		obj, diags := flattenObjectStorage(&ObjectStorage{BucketName: "gs://my-bucket"}, "GCP")
+		obj, diags := flattenObjectStorage(&ObjectStorage{BucketName: "gs://my-bucket"}, "GCP", "us-central1")
 		if diags.HasError() {
 			t.Fatalf("unexpected error: %v", diags)
 		}

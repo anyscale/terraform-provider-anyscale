@@ -47,7 +47,13 @@ func newImportStateResponse(t *testing.T, r resource.ResourceWithImportState) *r
 //     state (null or populated). They still backfill the Computed fields
 //     (is_empty_cloud, cloud_resource_id).
 //   - ImportState is the ONLY place that recovers config blocks from the
-//     API, and only the compute-stack-REQUIRED ones.
+//     API. Provider config (aws_config/gcp_config/kubernetes_config) stays
+//     compute-stack-REQUIRED-only. object_storage/file_storage are recovered
+//     on every compute stack, whenever the API actually has the data (see
+//     requiredImportConfigBlocks' doc in cloud_config_flatten.go for why
+//     that widening doesn't reopen the ambiguity this file's name-checks
+//     were written to catch) - closing a real customer-reported
+//     destroy-and-recreate for storage configured on a VM cloud.
 
 // buildAWSConfigState is a small builder for a fully-populated aws_config
 // Object, standing in for "what Create() would have written into state".
@@ -331,14 +337,15 @@ func TestReadCloudResource_NeverInjectsIntoNullConfigBlock(t *testing.T) {
 
 // --- ImportState: the ONLY place config blocks are recovered, required-only ---
 
-func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockOnly(t *testing.T) {
+func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("AWS: aws_config recovered, object_storage/file_storage are not (optional for VM)", func(t *testing.T) {
+	t.Run("AWS: aws_config, object_storage, and file_storage are all recovered", func(t *testing.T) {
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack:  "VM",
+			Region:        "us-east-1",
 			AWSConfig:     &AWSConfig{VPCID: "vpc-real"},
-			ObjectStorage: &ObjectStorage{BucketName: "s3://real-bucket"},
+			ObjectStorage: &ObjectStorage{BucketName: "s3://real-bucket", Region: strPtr("us-west-2")},
 			FileStorage:   &FileStorage{FileStorageID: "fs-real"},
 		}
 
@@ -350,11 +357,11 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockOnly(t *testing.T) {
 		if _, ok := blocks["aws_config"]; !ok {
 			t.Fatal("aws_config missing - destructive-import bug not fixed for VM/AWS")
 		}
-		if _, ok := blocks["object_storage"]; ok {
-			t.Error("object_storage present - it's optional for VM and must not be recovered at import")
+		if _, ok := blocks["object_storage"]; !ok {
+			t.Error("object_storage missing - customer-reported bug: optional storage must now be recovered for VM too")
 		}
-		if _, ok := blocks["file_storage"]; ok {
-			t.Error("file_storage present - it's optional everywhere and must not be recovered at import")
+		if _, ok := blocks["file_storage"]; !ok {
+			t.Error("file_storage missing - customer-reported bug: file_storage must now be recovered on every stack")
 		}
 		if _, ok := blocks["gcp_config"]; ok {
 			t.Error("gcp_config present on an AWS cloud")
@@ -365,12 +372,68 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockOnly(t *testing.T) {
 		if awsModel.VPCID.ValueString() != "vpc-real" {
 			t.Errorf("aws_config.VPCID = %v, want vpc-real", awsModel.VPCID.ValueString())
 		}
+
+		var osModel ObjectStorageModel
+		blocks["object_storage"].As(ctx, &osModel, basetypes.ObjectAsOptions{})
+		if osModel.BucketName.ValueString() != "real-bucket" {
+			t.Errorf("object_storage.BucketName = %v, want real-bucket", osModel.BucketName.ValueString())
+		}
+		if osModel.Region.ValueString() != "us-west-2" {
+			t.Errorf("object_storage.Region = %v, want us-west-2 - genuinely differs from the cloud region and must round-trip", osModel.Region.ValueString())
+		}
+
+		var fsModel FileStorageModel
+		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
+		if fsModel.FileStorageID.ValueString() != "fs-real" {
+			t.Errorf("file_storage.FileStorageID = %v, want fs-real", fsModel.FileStorageID.ValueString())
+		}
 	})
 
-	t.Run("GCP: gcp_config recovered, aws_config is not", func(t *testing.T) {
+	t.Run("AWS: object_storage.region equal to the cloud region is masked (L1)", func(t *testing.T) {
+		defaultResource := &CloudDeploymentResult{
+			ComputeStack:  "VM",
+			Region:        "us-east-2",
+			AWSConfig:     &AWSConfig{VPCID: "vpc-real"},
+			ObjectStorage: &ObjectStorage{BucketName: "my-bucket", Region: strPtr("us-east-2")},
+		}
+
+		blocks, diags := requiredImportConfigBlocks(ctx, "AWS", defaultResource)
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+
+		var osModel ObjectStorageModel
+		blocks["object_storage"].As(ctx, &osModel, basetypes.ObjectAsOptions{})
+		if !osModel.Region.IsNull() {
+			t.Errorf("object_storage.Region = %v, want null - the backend's region auto-fill must not force a replace against a config that never set region (L1)", osModel.Region.ValueString())
+		}
+	})
+
+	t.Run("AWS: file_storage.mount_path empty from the API resolves to the schema default (L2)", func(t *testing.T) {
+		defaultResource := &CloudDeploymentResult{
+			ComputeStack: "VM",
+			AWSConfig:    &AWSConfig{VPCID: "vpc-real"},
+			// MountPath left at its zero value, matching what the real AWS API returns.
+			FileStorage: &FileStorage{FileStorageID: "fs-real"},
+		}
+
+		blocks, diags := requiredImportConfigBlocks(ctx, "AWS", defaultResource)
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+
+		var fsModel FileStorageModel
+		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
+		if fsModel.MountPath.ValueString() != fileStorageDefaultMountPath {
+			t.Errorf("file_storage.MountPath = %q, want %q - AWS has no real backend field, so this must resolve to the schema default rather than collapse to empty (L2)", fsModel.MountPath.ValueString(), fileStorageDefaultMountPath)
+		}
+	})
+
+	t.Run("GCP: gcp_config recovered, aws_config is not, and a real mount_path round-trips", func(t *testing.T) {
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack: "VM",
 			GCPConfig:    &GCPConfig{ProjectID: "proj-real"},
+			FileStorage:  &FileStorage{FileStorageID: "fs-real", MountPath: "/mnt/gcp-real"},
 		}
 
 		blocks, diags := requiredImportConfigBlocks(ctx, "GCP", defaultResource)
@@ -384,10 +447,16 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockOnly(t *testing.T) {
 		if _, ok := blocks["aws_config"]; ok {
 			t.Error("aws_config present on a GCP cloud")
 		}
+
+		var fsModel FileStorageModel
+		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
+		if fsModel.MountPath.ValueString() != "/mnt/gcp-real" {
+			t.Errorf("file_storage.MountPath = %q, want /mnt/gcp-real - GCP has a real backend field and must round-trip it verbatim (L2)", fsModel.MountPath.ValueString())
+		}
 	})
 }
 
-func TestRequiredImportConfigBlocks_K8SPopulatesKubernetesConfigAndObjectStorageOnly(t *testing.T) {
+func TestRequiredImportConfigBlocks_K8SPopulatesKubernetesConfigObjectStorageAndFileStorage(t *testing.T) {
 	ctx := context.Background()
 	defaultResource := &CloudDeploymentResult{
 		ComputeStack:     "K8S",
@@ -397,7 +466,7 @@ func TestRequiredImportConfigBlocks_K8SPopulatesKubernetesConfigAndObjectStorage
 		// K8S: aws_config is OPTIONAL - present here to prove it's still not
 		// recovered even when the API happens to have one.
 		AWSConfig:   &AWSConfig{VPCID: "vpc-optional-for-k8s"},
-		FileStorage: &FileStorage{FileStorageID: "fs-optional"},
+		FileStorage: &FileStorage{PersistentVolumeClaim: "pvc-k8s-real"},
 	}
 
 	blocks, diags := requiredImportConfigBlocks(ctx, "AWS", defaultResource)
@@ -414,11 +483,17 @@ func TestRequiredImportConfigBlocks_K8SPopulatesKubernetesConfigAndObjectStorage
 	if _, ok := blocks["aws_config"]; ok {
 		t.Error("aws_config present - optional for K8S, must not be recovered even though the API had one")
 	}
-	if _, ok := blocks["file_storage"]; ok {
-		t.Error("file_storage present - optional everywhere, must not be recovered")
+	if _, ok := blocks["file_storage"]; !ok {
+		t.Error("file_storage missing - customer-reported bug: file_storage must now be recovered on every stack, including K8S")
 	}
-	if len(blocks) != 2 {
-		t.Errorf("blocks = %v, want exactly kubernetes_config + object_storage", blocks)
+	if len(blocks) != 3 {
+		t.Errorf("blocks = %v, want exactly kubernetes_config + object_storage + file_storage", blocks)
+	}
+
+	var fsModel FileStorageModel
+	blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
+	if fsModel.PersistentVolumeClaim.ValueString() != "pvc-k8s-real" {
+		t.Errorf("file_storage.PersistentVolumeClaim = %v, want pvc-k8s-real", fsModel.PersistentVolumeClaim.ValueString())
 	}
 }
 
@@ -485,18 +560,19 @@ func TestCloudImportState_RecoversRequiredBlockEndToEnd(t *testing.T) {
 // TestCloudResourceImportState_RecoversRequiredBlockEndToEnd is the
 // anyscale_cloud_resource equivalent of the above: id:name -> parse -> list
 // resources -> find by name -> SetAttribute, proving the full wiring for a
-// K8S resource (kubernetes_config + object_storage recovered, file_storage
-// and the optional aws_config are not, even though the mock includes both).
+// K8S resource (kubernetes_config, object_storage, and file_storage are all
+// recovered; the optional aws_config is not, even though the mock includes
+// one).
 func TestCloudResourceImportState_RecoversRequiredBlockEndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{
 			"results": [{
-				"name": "k8s-resource", "is_default": true, "compute_stack": "K8S", "provider": "AWS",
+				"name": "k8s-resource", "is_default": true, "compute_stack": "K8S", "provider": "AWS", "region": "us-east-1",
 				"kubernetes_config": {"anyscale_operator_iam_identity": "arn:aws:iam::1:role/op"},
 				"object_storage": {"bucket_name": "s3://k8s-recovered-bucket"},
 				"aws_config": {"vpc_id": "vpc-optional-must-not-be-recovered"},
-				"file_storage": {"file_storage_id": "fs-optional-must-not-be-recovered"}
+				"file_storage": {"persistent_volume_claim": "pvc-k8s-recovered"}
 			}],
 			"metadata": {"total": 1, "next_paging_token": null}
 		}`)
@@ -528,7 +604,7 @@ func TestCloudResourceImportState_RecoversRequiredBlockEndToEnd(t *testing.T) {
 	if !state.AWSConfig.IsNull() {
 		t.Error("AWSConfig is populated after ImportState - optional for K8S, must not be recovered even though the mock had one")
 	}
-	if !state.FileStorage.IsNull() {
-		t.Error("FileStorage is populated after ImportState - optional everywhere, must not be recovered")
+	if state.FileStorage.IsNull() {
+		t.Error("FileStorage is null after ImportState - customer-reported bug: file_storage must now be recovered on every stack, including K8S")
 	}
 }

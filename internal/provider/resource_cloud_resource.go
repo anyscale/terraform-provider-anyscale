@@ -554,7 +554,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			// ─── Object Storage ───────────────────────────────────
 			"object_storage": schema.SingleNestedBlock{
-				MarkdownDescription: "Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP, [Azure Blob/ADLS](https://docs.anyscale.com/clouds/azure/storage) for Azure.",
+				MarkdownDescription: "Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). Recovered automatically when importing an existing cloud/resource, whenever the live resource actually has one configured. See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP, [Azure Blob/ADLS](https://docs.anyscale.com/clouds/azure/storage) for Azure.",
 				Attributes: map[string]schema.Attribute{
 					"bucket_name": schema.StringAttribute{
 						Optional:            true,
@@ -566,7 +566,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"region": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The bucket region (if different from cloud region).",
+						MarkdownDescription: "The bucket region (if different from cloud region). Only recovered at import when it genuinely differs from the cloud's own region - the backend fills in the cloud's own region by default even when this was never set, so a matching value is deliberately left null rather than copied back verbatim.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -583,7 +583,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			// ─── File Storage ─────────────────────────────────────
 			"file_storage": schema.SingleNestedBlock{
-				MarkdownDescription: "File storage configuration (EFS, Filestore, etc.). If omitted, Anyscale falls back to using the object storage bucket for shared storage. On GCP, Filestore is optional and not created by default, and must be in the same region as the cloud's VPC when used. See the [Anyscale shared storage documentation](https://docs.anyscale.com/storage/shared) for how this is used across a cluster.",
+				MarkdownDescription: "File storage configuration (EFS, Filestore, etc.). If omitted, Anyscale falls back to using the object storage bucket for shared storage. On GCP, Filestore is optional and not created by default, and must be in the same region as the cloud's VPC when used. Recovered automatically when importing an existing cloud/resource, whenever the live resource actually has one configured. See the [Anyscale shared storage documentation](https://docs.anyscale.com/storage/shared) for how this is used across a cluster.",
 				Attributes: map[string]schema.Attribute{
 					"file_storage_id": schema.StringAttribute{
 						Optional:            true,
@@ -595,8 +595,8 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"mount_path": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,
-						Default:             stringdefault.StaticString("/mnt/shared"),
-						MarkdownDescription: "The mount path for the file storage. Only meaningful for GCP Filestore and Azure/Generic NFS-backed clouds - AWS EFS-backed clouds have no backend field for it and reject the value at plan time. Known limitation on GCP: if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share name and silently overwrites this value - GCP still ends up with a valid path, just not necessarily this one. Because `file_storage` isn't refreshed from the API on read (a prior refresh attempt caused a state-consistency regression), Terraform state keeps showing the configured value after the backend overwrites it, and `terraform plan` won't surface the drift. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (neither has a backend mount_path field either) - set at most one. Changing this requires replacement; the provider has no in-place update path for it.",
+						Default:             stringdefault.StaticString(fileStorageDefaultMountPath),
+						MarkdownDescription: "The mount path for the file storage. Only meaningful for GCP Filestore and Azure/Generic NFS-backed clouds - AWS EFS-backed clouds have no backend field for it and reject the value at plan time. Recovered from the live value at import time on GCP, Azure, and Generic, where the backend genuinely stores one; left to the schema default on AWS, since no backend field exists there to recover from. Known limitation on GCP: if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share name and silently overwrites this value - GCP still ends up with a valid path, just not necessarily this one. Because `file_storage` isn't refreshed from the API on any later read (a prior refresh attempt caused a state-consistency regression), Terraform state keeps showing whatever value import recovered even after the backend overwrites it again, and `terraform plan` won't surface that later drift. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (neither has a backend mount_path field either) - set at most one. Changing this requires replacement; the provider has no in-place update path for it.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
@@ -1028,9 +1028,12 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 // ImportState imports an existing resource into Terraform state.
 //
 // C3-v2: this is the ONLY place that recovers aws_config/gcp_config/
-// kubernetes_config/object_storage from the API - never Create or Read (see
-// readCloudResource). Only the compute-stack-REQUIRED block(s) are
-// recovered, for the same reason as anyscale_cloud's ImportState: a
+// kubernetes_config/object_storage/file_storage from the API - never Create
+// or Read (see readCloudResource). Provider config stays compute-stack-
+// REQUIRED-only; object_storage/file_storage are recovered on every stack
+// whenever the API has the data - see requiredImportConfigBlocks' own doc
+// (cloud_config_flatten.go) and anyscale_cloud's ImportState for the full
+// reasoning, identical here since both resources share that one function. A
 // cloud_resource is never "empty" the way a cloud can be, but the
 // Create-time plan-consistency hazard applies here identically, since these
 // blocks are not Computed either.
