@@ -203,10 +203,7 @@ func TestCloudSummaryMapping(t *testing.T) {
 		CreatorID               string
 		IsDefault               bool
 		IsK8s                   bool
-		IsAIOA                  bool
-		IsBringYourOwnResource  bool
 		IsPrivateCloud          bool
-		IsPrivateServiceCloud   bool
 		AutoAddUser             bool
 		LineageTrackingEnabled  bool
 		IsAggregatedLogsEnabled bool
@@ -222,10 +219,7 @@ func TestCloudSummaryMapping(t *testing.T) {
 		CreatorID:               "user_123",
 		IsDefault:               true,
 		IsK8s:                   false,
-		IsAIOA:                  true,
-		IsBringYourOwnResource:  false,
 		IsPrivateCloud:          false,
-		IsPrivateServiceCloud:   false,
 		AutoAddUser:             true,
 		LineageTrackingEnabled:  true,
 		IsAggregatedLogsEnabled: true,
@@ -243,10 +237,7 @@ func TestCloudSummaryMapping(t *testing.T) {
 		CreatorID:               types.StringValue(apiCloud.CreatorID),
 		IsDefault:               types.BoolValue(apiCloud.IsDefault),
 		IsK8s:                   types.BoolValue(apiCloud.IsK8s),
-		IsAIOA:                  types.BoolValue(apiCloud.IsAIOA),
-		IsBringYourOwnResource:  types.BoolValue(apiCloud.IsBringYourOwnResource),
 		IsPrivateCloud:          types.BoolValue(apiCloud.IsPrivateCloud),
-		IsPrivateServiceCloud:   types.BoolValue(apiCloud.IsPrivateServiceCloud),
 		AutoAddUser:             types.BoolValue(apiCloud.AutoAddUser),
 		LineageTrackingEnabled:  types.BoolValue(apiCloud.LineageTrackingEnabled),
 		IsAggregatedLogsEnabled: types.BoolValue(apiCloud.IsAggregatedLogsEnabled),
@@ -337,8 +328,6 @@ func TestCloudBooleanFlags(t *testing.T) {
 		{"is_default false", "is_default", false},
 		{"is_k8s true", "is_k8s", true},
 		{"is_k8s false", "is_k8s", false},
-		{"is_aioa true", "is_aioa", true},
-		{"is_aioa false", "is_aioa", false},
 		{"auto_add_user true", "auto_add_user", true},
 		{"auto_add_user false", "auto_add_user", false},
 	}
@@ -357,11 +346,6 @@ func TestCloudBooleanFlags(t *testing.T) {
 				model.IsK8s = types.BoolValue(tt.value)
 				if model.IsK8s.ValueBool() != tt.value {
 					t.Errorf("IsK8s = %v, want %v", model.IsK8s.ValueBool(), tt.value)
-				}
-			case "is_aioa":
-				model.IsAIOA = types.BoolValue(tt.value)
-				if model.IsAIOA.ValueBool() != tt.value {
-					t.Errorf("IsAIOA = %v, want %v", model.IsAIOA.ValueBool(), tt.value)
 				}
 			case "auto_add_user":
 				model.AutoAddUser = types.BoolValue(tt.value)

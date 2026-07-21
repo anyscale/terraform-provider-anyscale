@@ -51,14 +51,11 @@ type CloudDataSourceModel struct {
 	// fields. Names deliberately kept as-is (not renamed to match the
 	// plural's lineage_tracking_enabled/is_aggregated_logs_enabled) - see
 	// CLOUD-SYNC-DESIGN.md C7, renaming an existing attribute is breaking.
-	ComputeStack           types.String `tfsdk:"compute_stack"`
-	CreatedAt              types.String `tfsdk:"created_at"`
-	CreatorID              types.String `tfsdk:"creator_id"`
-	IsDefault              types.Bool   `tfsdk:"is_default"`
-	IsAIOA                 types.Bool   `tfsdk:"is_aioa"`
-	IsBringYourOwnResource types.Bool   `tfsdk:"is_bring_your_own_resource"`
-	IsPrivateCloud         types.Bool   `tfsdk:"is_private_cloud"`
-	IsPrivateServiceCloud  types.Bool   `tfsdk:"is_private_service_cloud"`
+	ComputeStack   types.String `tfsdk:"compute_stack"`
+	CreatedAt      types.String `tfsdk:"created_at"`
+	CreatorID      types.String `tfsdk:"creator_id"`
+	IsDefault      types.Bool   `tfsdk:"is_default"`
+	IsPrivateCloud types.Bool   `tfsdk:"is_private_cloud"`
 
 	// DS-CLOUD-4/DS-CLOUD-5: parity fields added to both anyscale_cloud and
 	// anyscale_clouds via cloudSharedAttributes (is_k8s is schema-only shared,
@@ -259,10 +256,7 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	config.CreatedAt = types.StringValue(cloudResp.Result.CreatedAt)
 	config.CreatorID = types.StringValue(cloudResp.Result.CreatorID)
 	config.IsDefault = types.BoolValue(cloudResp.Result.IsDefault)
-	config.IsAIOA = types.BoolValue(cloudResp.Result.IsAIOA)
-	config.IsBringYourOwnResource = types.BoolValue(cloudResp.Result.IsBringYourOwnResource)
 	config.IsPrivateCloud = types.BoolValue(cloudResp.Result.IsPrivateCloud)
-	config.IsPrivateServiceCloud = types.BoolValue(cloudResp.Result.IsPrivateServiceCloud)
 
 	// DS-CLOUD-4/DS-CLOUD-5 (Phase B parity fields). is_k8s/version are plain
 	// bool/string on the backend Cloud model (always populated, no null case).

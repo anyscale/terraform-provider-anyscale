@@ -51,21 +51,9 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			MarkdownDescription: "Whether this is the default cloud for the organization.",
 		},
-		"is_aioa": schema.BoolAttribute{
-			Computed:            true,
-			MarkdownDescription: "Whether this is an AIOA (Anyscale In Your Own Account) cloud.",
-		},
-		"is_bring_your_own_resource": schema.BoolAttribute{
-			Computed:            true,
-			MarkdownDescription: "Whether this cloud allows bringing your own resources.",
-		},
 		"is_private_cloud": schema.BoolAttribute{
 			Computed:            true,
 			MarkdownDescription: "Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.",
-		},
-		"is_private_service_cloud": schema.BoolAttribute{
-			Computed:            true,
-			MarkdownDescription: "Whether this is a private service cloud.",
 		},
 		"auto_add_user": schema.BoolAttribute{
 			Computed:            true,

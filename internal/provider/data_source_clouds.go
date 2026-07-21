@@ -53,10 +53,7 @@ type CloudSummaryModel struct {
 	CreatorID               types.String `tfsdk:"creator_id"`
 	IsDefault               types.Bool   `tfsdk:"is_default"`
 	IsK8s                   types.Bool   `tfsdk:"is_k8s"`
-	IsAIOA                  types.Bool   `tfsdk:"is_aioa"`
-	IsBringYourOwnResource  types.Bool   `tfsdk:"is_bring_your_own_resource"`
 	IsPrivateCloud          types.Bool   `tfsdk:"is_private_cloud"`
-	IsPrivateServiceCloud   types.Bool   `tfsdk:"is_private_service_cloud"`
 	AutoAddUser             types.Bool   `tfsdk:"auto_add_user"`
 	LineageTrackingEnabled  types.Bool   `tfsdk:"lineage_tracking_enabled"`
 	IsAggregatedLogsEnabled types.Bool   `tfsdk:"is_aggregated_logs_enabled"`
@@ -237,10 +234,7 @@ func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values, c
 			CreatorID:               types.StringValue(cloud.CreatorID),
 			IsDefault:               types.BoolValue(cloud.IsDefault),
 			IsK8s:                   types.BoolValue(cloud.IsK8s),
-			IsAIOA:                  types.BoolValue(cloud.IsAIOA),
-			IsBringYourOwnResource:  types.BoolValue(cloud.IsBringYourOwnResource),
 			IsPrivateCloud:          types.BoolValue(cloud.IsPrivateCloud),
-			IsPrivateServiceCloud:   types.BoolValue(cloud.IsPrivateServiceCloud),
 			AutoAddUser:             types.BoolValue(cloud.AutoAddUser),
 			LineageTrackingEnabled:  types.BoolValue(cloud.LineageTrackingEnabled),
 			IsAggregatedLogsEnabled: types.BoolValue(cloud.IsAggregatedLogsEnabled),
