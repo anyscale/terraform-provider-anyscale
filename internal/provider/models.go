@@ -10,6 +10,15 @@ type CreateCloudRequest struct {
 	Provider    string `json:"provider,omitempty"`
 	Region      string `json:"region,omitempty"`
 	Credentials string `json:"credentials,omitempty"`
+
+	// IsPrivateCloud/IsPrivateServiceCloud must be set here: the backend has
+	// no route to change them after creation (update_cloud_sql_alchemy takes
+	// no such parameter), so this POST is the only place they can ever be
+	// set - never omitempty, matching the CLI's WriteCloud, which always
+	// sends both explicitly rather than relying on the server-side false
+	// default.
+	IsPrivateCloud        bool `json:"is_private_cloud"`
+	IsPrivateServiceCloud bool `json:"is_private_service_cloud"`
 }
 
 // CloudResponse represents a cloud in the Anyscale API

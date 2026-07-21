@@ -19,14 +19,28 @@ func TestCreateCloudRequestJSON(t *testing.T) {
 				Name:     "my-cloud",
 				Provider: "AWS",
 			},
-			expected: `{"name":"my-cloud","provider":"AWS"}`,
+			expected: `{"name":"my-cloud","provider":"AWS","is_private_cloud":false,"is_private_service_cloud":false}`,
 		},
 		{
 			name: "name only",
 			input: CreateCloudRequest{
 				Name: "my-cloud",
 			},
-			expected: `{"name":"my-cloud"}`,
+			expected: `{"name":"my-cloud","is_private_cloud":false,"is_private_service_cloud":false}`,
+		},
+		{
+			// The whole is_private_cloud fix hinges on this field never being
+			// omitted - unlike Provider/Region/Credentials above, it must
+			// always appear on the wire, true or false, since the backend has
+			// no other route to receive it.
+			name: "private cloud",
+			input: CreateCloudRequest{
+				Name:                  "my-cloud",
+				Provider:              "AWS",
+				IsPrivateCloud:        true,
+				IsPrivateServiceCloud: true,
+			},
+			expected: `{"name":"my-cloud","provider":"AWS","is_private_cloud":true,"is_private_service_cloud":true}`,
 		},
 	}
 

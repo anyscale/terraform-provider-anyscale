@@ -931,12 +931,22 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		)
 	}
 
-	// Step 1: Create the cloud with minimal required fields
+	// Step 1: Create the cloud with minimal required fields.
+	//
+	// is_private_cloud/is_private_service_cloud are set here rather than via
+	// a post-create reconciliation step (contrast Step 4 below): the backend
+	// has no update route for either, so this call is their only chance.
+	// is_private_service_cloud mirrors is_private_cloud (matching the CLI,
+	// which always couples the two) rather than exposing a second
+	// user-facing attribute for a value Anyscale's own CLI treats as
+	// internal.
 	createReq := CreateCloudRequest{
-		Name:        name,
-		Provider:    provider,
-		Region:      region,
-		Credentials: credentials,
+		Name:                  name,
+		Provider:              provider,
+		Region:                region,
+		Credentials:           credentials,
+		IsPrivateCloud:        plan.IsPrivateCloud.ValueBool(),
+		IsPrivateServiceCloud: plan.IsPrivateCloud.ValueBool(),
 	}
 
 	jsonData, err := json.Marshal(createReq)
