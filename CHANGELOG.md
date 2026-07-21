@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-07-21
+
+### Added
+
+- data-source/anyscale_compute_config: Add `cloud_resource`, `min_resources`, `max_resources`, and top-level `flags`/`advanced_instance_config` attributes, matching the resource's existing fields and closing the gap documented in the Compute Config guide.
+
+### Changed
+
+- provider: Rename the `gcp-gke-basic` example's `google_region` variable to `gcp_region`, matching the naming already used by its `gcp-vm`/`gcp-vm-basic` siblings. No behavior change, docs and examples only.
+- provider: Add a "Create a GCP VM Cloud" getting-started guide, the GCP counterpart to the existing (AWS-only) "Create a VM Cloud" guide, with a reciprocal cross-link between the two.
+- provider: Add missing example READMEs for `examples/aws-vm`, `examples/gcp-vm`, and `examples/aws-vm-basic-resource`.
+- provider: Label the timing-retry limitation in the Project guide and the data-source-gap limitation in the Compute Config guide under a consistent "Known limitation(s)" heading, and add a cross-link from the Project guide back to the Create a VM Cloud guide.
+- resource/anyscale_project: Raise the delete-time permission-race retry ceiling from 60s to 90s, so a terraform destroy shortly after create tolerates a longer SpiceDB propagation lag before failing.
+
 ## [0.14.1] - 2026-07-20
 
 ### Changed
@@ -749,7 +763,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.0
 [0.14.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.14.1
 [0.14.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.14.0
 [0.13.4]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.13.4
