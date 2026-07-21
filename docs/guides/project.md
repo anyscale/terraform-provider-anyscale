@@ -71,12 +71,12 @@ collaborator {
 ## Known limitation: brief delay on `terraform destroy` or adding a `collaborator` shortly after `terraform apply`
 
 Deleting a project you just created, or adding a `collaborator` to it, can occasionally retry for a
-few seconds — up to a minute in rare cases — before succeeding. This targets a known backend timing
+few seconds — up to a minute and a half in rare cases — before succeeding. This targets a known backend timing
 race in the delete-time and collaborator-add permission checks, not a provider bug — a project's
 create-time permission grant can take a moment to become visible to those checks, so an operation
 within about 5 minutes of the matching apply can hit a `403 Permission denied` that would not
 reproduce a moment later. The provider retries automatically with a capped-exponential backoff —
-starting at 1 second and holding at a short cap up to a 60 second total ceiling — only for a project
+starting at 1 second and holding at a short cap up to a 90 second total ceiling — only for a project
 this recently created; a project that has existed longer than that surfaces any real `403`
 immediately, exactly as before this behavior was added, so a genuine permission problem is never
 masked.
