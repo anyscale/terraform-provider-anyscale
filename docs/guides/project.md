@@ -15,6 +15,10 @@ import` recovers that ordinary use does not, how to move a `permission_level` of
 valid `write` value, and the brief retry delay you may see on `destroy` or when adding a
 `collaborator` shortly after `apply`.
 
+For a project created as part of a full cloud setup, see the [Create a VM
+Cloud](./create-a-vm-cloud.md) getting-started walkthrough; this guide is what to read next once
+you're sharing that project with a team rather than working solo.
+
 ## Importing an existing project
 
 `terraform import anyscale_project.example <project_id>` recovers the project's full, current
@@ -64,7 +68,7 @@ collaborator {
 }
 ```
 
-## Brief delay on `terraform destroy` or adding a `collaborator` shortly after `terraform apply`
+## Known limitation: brief delay on `terraform destroy` or adding a `collaborator` shortly after `terraform apply`
 
 Deleting a project you just created, or adding a `collaborator` to it, can occasionally retry for a
 few seconds — up to a minute in rare cases — before succeeding. This targets a known backend timing

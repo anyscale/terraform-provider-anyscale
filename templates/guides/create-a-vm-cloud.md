@@ -214,6 +214,8 @@ intend to keep, so an accidental `destroy` can't silently drop stored data.
   project variations
 - [Create a Kubernetes cloud](./create-a-kubernetes-cloud.md) - the Kubernetes/EKS equivalent of
   this same walkthrough, a bigger lift since it also installs the Anyscale Operator
+- [Create a GCP VM cloud](./create-a-vm-cloud-gcp.md) - the GCP equivalent of this same walkthrough,
+  same all-in-one pattern applied to a brand-new GCP project instead of an existing AWS account
 - [Kitchen Sink tour](./kitchen-sink-tour.md) - once the basics feel comfortable, a tour of every
   resource and data source this provider registers, composed together
 - [Cloud Resources guide](./cloud-resources.md) - provider support matrix, naming differences
