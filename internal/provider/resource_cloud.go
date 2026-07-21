@@ -933,20 +933,26 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	// Step 1: Create the cloud with minimal required fields.
 	//
-	// is_private_cloud/is_private_service_cloud are set here rather than via
-	// a post-create reconciliation step (contrast Step 4 below): the backend
-	// has no update route for either, so this call is their only chance.
-	// is_private_service_cloud mirrors is_private_cloud (matching the CLI,
-	// which always couples the two) rather than exposing a second
-	// user-facing attribute for a value Anyscale's own CLI treats as
-	// internal.
+	// is_private_cloud is set here rather than via a post-create
+	// reconciliation step (contrast Step 4 below): the backend has no update
+	// route for it, so this call is the only chance.
 	createReq := CreateCloudRequest{
-		Name:                  name,
-		Provider:              provider,
-		Region:                region,
-		Credentials:           credentials,
-		IsPrivateCloud:        plan.IsPrivateCloud.ValueBool(),
-		IsPrivateServiceCloud: plan.IsPrivateCloud.ValueBool(),
+		Name:           name,
+		Provider:       provider,
+		Region:         region,
+		Credentials:    credentials,
+		IsPrivateCloud: plan.IsPrivateCloud.ValueBool(),
+	}
+
+	// is_private_service_cloud mirrors is_private_cloud, but ONLY for GCP -
+	// exactly matching the CLI, where register_gcp_cloud always sends both
+	// (even when false) and register_aws_cloud/register_azure_or_generic_cloud
+	// never reference the field at all. Left nil (omitted from the request)
+	// for every other provider so is_private_cloud is the only signal there,
+	// not just a value fix - matching field-for-field, not just behaviorally.
+	if strings.ToUpper(provider) == "GCP" {
+		isPrivateServiceCloud := plan.IsPrivateCloud.ValueBool()
+		createReq.IsPrivateServiceCloud = &isPrivateServiceCloud
 	}
 
 	jsonData, err := json.Marshal(createReq)

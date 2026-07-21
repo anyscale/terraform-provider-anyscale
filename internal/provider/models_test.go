@@ -14,33 +14,60 @@ func TestCreateCloudRequestJSON(t *testing.T) {
 		expected string
 	}{
 		{
+			// is_private_service_cloud unset (nil) -> omitted, matching a
+			// non-GCP create where the resource never touches the field.
 			name: "full request",
 			input: CreateCloudRequest{
 				Name:     "my-cloud",
 				Provider: "AWS",
 			},
-			expected: `{"name":"my-cloud","provider":"AWS","is_private_cloud":false,"is_private_service_cloud":false}`,
+			expected: `{"name":"my-cloud","provider":"AWS","is_private_cloud":false}`,
 		},
 		{
 			name: "name only",
 			input: CreateCloudRequest{
 				Name: "my-cloud",
 			},
-			expected: `{"name":"my-cloud","is_private_cloud":false,"is_private_service_cloud":false}`,
+			expected: `{"name":"my-cloud","is_private_cloud":false}`,
 		},
 		{
 			// The whole is_private_cloud fix hinges on this field never being
 			// omitted - unlike Provider/Region/Credentials above, it must
 			// always appear on the wire, true or false, since the backend has
-			// no other route to receive it.
-			name: "private cloud",
+			// no other route to receive it. is_private_service_cloud stays
+			// nil/omitted here since this represents a non-GCP provider.
+			name: "private cloud, non-GCP - service cloud omitted",
+			input: CreateCloudRequest{
+				Name:           "my-cloud",
+				Provider:       "AWS",
+				IsPrivateCloud: true,
+			},
+			expected: `{"name":"my-cloud","provider":"AWS","is_private_cloud":true}`,
+		},
+		{
+			// GCP mirrors is_private_cloud into is_private_service_cloud.
+			name: "private cloud, GCP - service cloud mirrored true",
 			input: CreateCloudRequest{
 				Name:                  "my-cloud",
-				Provider:              "AWS",
+				Provider:              "GCP",
 				IsPrivateCloud:        true,
-				IsPrivateServiceCloud: true,
+				IsPrivateServiceCloud: boolPtr(true),
 			},
-			expected: `{"name":"my-cloud","provider":"AWS","is_private_cloud":true,"is_private_service_cloud":true}`,
+			expected: `{"name":"my-cloud","provider":"GCP","is_private_cloud":true,"is_private_service_cloud":true}`,
+		},
+		{
+			// A pointer is required, not a plain bool: the CLI's GCP path
+			// explicitly sends is_private_service_cloud=false for a public
+			// GCP cloud too (never omits it), and omitempty on a plain bool
+			// would incorrectly drop that explicit false.
+			name: "public cloud, GCP - service cloud explicitly false, not omitted",
+			input: CreateCloudRequest{
+				Name:                  "my-cloud",
+				Provider:              "GCP",
+				IsPrivateCloud:        false,
+				IsPrivateServiceCloud: boolPtr(false),
+			},
+			expected: `{"name":"my-cloud","provider":"GCP","is_private_cloud":false,"is_private_service_cloud":false}`,
 		},
 	}
 
@@ -495,4 +522,8 @@ func TestBuildResultResolvedRayVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }
