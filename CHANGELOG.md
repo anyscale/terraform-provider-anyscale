@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.3] - 2026-07-21
+
+### Changed
+
+- provider: Add is_private_cloud and auto_add_user to the Create a VM Cloud guide Step 3 example and explain their defaults, matching the GCP counterpart guide, no behavior change, docs only.
+- provider: Correct the `is_private_cloud`/`is_private` schema descriptions (on `anyscale_cloud`, `anyscale_cloud_resource`, and the `anyscale_cloud`/`anyscale_clouds` data sources) and the Cloud Resources guide, which previously implied a required customer-managed VPN/PrivateLink commitment. Both are self-asserted flags with no backend verification of actual connectivity, matching the Anyscale CLI's own `--private-network` behavior - not something this provider validates or provisions.
+
+### Fixed
+
+- resource/anyscale_cloud: fix `is_private_cloud` never reaching the backend on create - the provider previously dropped the field entirely, so a cloud created with `is_private_cloud = true` was silently registered as public, and the very next apply failed with a generic "Provider produced inconsistent result after apply" error after the cloud already existed. The value now round-trips correctly. `anyscale_cloud_resource`'s own `is_private` was not affected (different, already-correct code path).
+
 ## [0.15.2] - 2026-07-21
 
 ### Fixed
@@ -778,7 +789,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.15.2...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.15.3...HEAD
+[0.15.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.3
 [0.15.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.2
 [0.15.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.1
 [0.15.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.0

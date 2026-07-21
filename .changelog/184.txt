@@ -1,9 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_cloud: fix `is_private_cloud` never reaching the backend on create - the provider previously dropped the field entirely, so a cloud created with `is_private_cloud = true` was silently registered as public, and the very next apply failed with a generic "Provider produced inconsistent result after apply" error after the cloud already existed. The value now round-trips correctly. `anyscale_cloud_resource`'s own `is_private` was not affected (different, already-correct code path).
-```
-
-```
-release-note:changed
-provider: Correct the `is_private_cloud`/`is_private` schema descriptions (on `anyscale_cloud`, `anyscale_cloud_resource`, and the `anyscale_cloud`/`anyscale_clouds` data sources) and the Cloud Resources guide, which previously implied a required customer-managed VPN/PrivateLink commitment. Both are self-asserted flags with no backend verification of actual connectivity, matching the Anyscale CLI's own `--private-network` behavior - not something this provider validates or provisions.
-```
