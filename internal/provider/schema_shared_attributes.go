@@ -61,11 +61,11 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 		},
 		"is_private_cloud": schema.BoolAttribute{
 			Computed:            true,
-			MarkdownDescription: "Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.",
+			MarkdownDescription: "Whether this is a private cloud.",
 		},
 		"is_private_service_cloud": schema.BoolAttribute{
 			Computed:            true,
-			MarkdownDescription: "Whether this cloud's services are registered as private, independently of `is_private_cloud`. When a cloud is created through this provider, both are always set to the same value at creation (mirroring the Anyscale CLI's own behavior) - but for a cloud created some other way, the two could in principle differ. Like `is_private_cloud`, this is a self-asserted value with no backend verification of actual connectivity.",
+			MarkdownDescription: "Whether this is a private service cloud.",
 		},
 		"auto_add_user": schema.BoolAttribute{
 			Computed:            true,

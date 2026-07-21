@@ -186,7 +186,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to register this cloud as private - the Terraform equivalent of the Anyscale CLI's `anyscale cloud register --private-network` flag, which places Ray clusters in private subnets. This is a self-asserted flag, not a verified connectivity check: the value you set here is sent to the API as-is, and neither the provider nor the Anyscale backend validates, configures, or provisions any VPN or PrivateLink connectivity because of it. Setting `true` without real private connectivity already in place will not fail at plan or apply time - it only means private clusters may end up unreachable, which is your own responsibility to arrange separately, not something this attribute gates. Creating a cloud always sends this same value on to the backend's internal `is_private_service_cloud` too, mirroring the Anyscale CLI; this provider does not expose `is_private_service_cloud` as its own attribute on this resource - read it back via the `anyscale_cloud` data source instead. Changing this value after creation requires replacement: the backend itself has no route to update an existing cloud's `is_private_cloud`, so there's no in-place alternative to fall back on.",
+				MarkdownDescription: "Whether this is a private cloud. Implies customer-managed networking paths (e.g. VPN, PrivateLink) between users, clusters, and the control plane - a real infrastructure commitment, not just a network visibility flag.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.RequiresReplace(),
 				},
