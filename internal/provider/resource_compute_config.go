@@ -1328,24 +1328,13 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 	// Top-level flags: recover everything except the keys that surface as
 	// their own attributes (min_resources, max_resources, cross-zone
 	// scaling), matching the remainder Read always leaves for the user.
-	if eff.Flags != nil {
-		userFlags := make(map[string]interface{}, len(eff.Flags))
-		for k, v := range eff.Flags {
-			switch k {
-			case "min_resources", "max_resources", "allow-cross-zone-autoscaling":
-				continue
-			default:
-				userFlags[k] = v
-			}
+	if userFlags := userFlagsFrom(eff.Flags); len(userFlags) > 0 {
+		flagsDynamic, err := InterfaceToDynamic(ctx, userFlags)
+		if err != nil {
+			AddConfigError(&resp.Diagnostics, "Failed to Recover Flags", err.Error())
+			return
 		}
-		if len(userFlags) > 0 {
-			flagsDynamic, err := InterfaceToDynamic(ctx, userFlags)
-			if err != nil {
-				AddConfigError(&resp.Diagnostics, "Failed to Recover Flags", err.Error())
-				return
-			}
-			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("flags"), flagsDynamic)...)
-		}
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("flags"), flagsDynamic)...)
 	}
 
 	if len(eff.AdvancedConfig) > 0 {

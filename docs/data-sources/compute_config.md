@@ -3,12 +3,12 @@
 page_title: "anyscale_compute_config Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. A few resource-only top-level fields aren't yet exposed here: min_resources, max_resources, cloud_resource, and the compute-config-level flags and advanced_instance_config (the per-node flags and advanced_instance_config under head_node/worker_nodes are exposed) — see the Compute Config guide ../guides/compute-config.md.
+  Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. See the Compute Config guide ../guides/compute-config.md for the versioning model and other cross-cutting behavior not obvious from the schema alone.
 ---
 
 # anyscale_compute_config (Data Source)
 
-Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. A few resource-only top-level fields aren't yet exposed here: `min_resources`, `max_resources`, `cloud_resource`, and the compute-config-level `flags` and `advanced_instance_config` (the per-node `flags` and `advanced_instance_config` under `head_node`/`worker_nodes` are exposed) — see the [Compute Config guide](../guides/compute-config.md).
+Use this data source to retrieve information about an existing Anyscale Compute Configuration. You can look up a compute config by its ID or name. See the [Compute Config guide](../guides/compute-config.md) for the versioning model and other cross-cutting behavior not obvious from the schema alone.
 
 ## Example Usage
 
@@ -70,14 +70,19 @@ output "compute_config_zones" {
 
 ### Read-Only
 
+- `advanced_instance_config` (Dynamic) Cluster-level advanced instance configuration passed through to the cloud provider, matching the resource's top-level `advanced_instance_config` attribute. Distinct from the per-node `advanced_instance_config` under `head_node`/`worker_nodes` above, which is a JSON string rather than a structured value. Null if the compute config sets none.
 - `auto_select_worker_config` (Boolean) Whether worker node groups are automatically selected based on workload.
+- `cloud_resource` (String) The name of the cloud resource this compute config targets, matching the resource's `cloud_resource` attribute. Null if the compute config targets the cloud's primary resource rather than a specific named one - the API never backfills this to the primary resource's name, so null is the only value a primary-resource compute config ever reports here.
 - `config_id` (String) The version-specific API ID of the compute config. This is the API identifier for the specific version.
 - `created_at` (String) The timestamp when the compute config was created. Null if the API doesn't report a creation timestamp.
 - `enable_cross_zone_scaling` (Boolean) Whether instances can run across multiple availability zones.
+- `flags` (Dynamic) Cluster-level advanced flags, matching the resource's top-level `flags` attribute. Excludes the entries that surface as their own attributes here (`min_resources`, `max_resources`, `enable_cross_zone_scaling`). Distinct from the per-node `flags` under `head_node`/`worker_nodes` above, which is a JSON string rather than a structured value. Null if the compute config sets no other flags.
 - `head_node` (Attributes) Configuration for the head node of the cluster. (see [below for nested schema](#nestedatt--head_node))
 - `idle_termination_minutes` (Number) Number of minutes after which idle clusters will be terminated. 0 means disabled.
 - `last_modified_at` (String) The timestamp when the compute config was last modified. Null if the API doesn't report a last-modified timestamp.
+- `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster, matching the resource's `max_resources` attribute. Null if unset.
 - `maximum_uptime_minutes` (Number) Maximum uptime in minutes before cluster termination.
+- `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster, matching the resource's `min_resources` attribute. Null if unset.
 - `name_version` (String) The compute config name and version formatted as `name:version` for use with Anyscale APIs. Null for anonymous compute configs (created without a name).
 - `project_id` (String) The project ID this compute config is associated with.
 - `region` (String) The region to launch clusters in. Null if the API doesn't report a region for this compute config.

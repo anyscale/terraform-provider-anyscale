@@ -79,6 +79,33 @@ func firstNonNil(maps ...map[string]interface{}) map[string]interface{} {
 	return nil
 }
 
+// syntheticFlagKeys are the merged-flags entries that surface as their own
+// typed attributes (min_resources, max_resources, enable_cross_zone_scaling)
+// rather than through the top-level flags attribute. Shared by ImportState
+// and the data source's Read, both of which recover a user-facing flags
+// value straight from the API with no prior state to fall back on.
+var syntheticFlagKeys = map[string]struct{}{
+	"min_resources":                {},
+	"max_resources":                {},
+	"allow-cross-zone-autoscaling": {},
+}
+
+// userFlagsFrom strips syntheticFlagKeys out of a merged flags map, leaving
+// only the entries a user's own top-level flags attribute should reflect.
+func userFlagsFrom(flags map[string]interface{}) map[string]interface{} {
+	if len(flags) == 0 {
+		return nil
+	}
+	out := make(map[string]interface{}, len(flags))
+	for k, v := range flags {
+		if _, ok := syntheticFlagKeys[k]; ok {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // importAmbiguousNodeFields are head_node/worker_nodes sub-attributes
 // ImportState cannot recover unambiguously: there is no prior state yet to
 // tell "the user never configured this" apart from "the API auto-filled it",

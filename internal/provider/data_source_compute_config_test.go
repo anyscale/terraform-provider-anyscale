@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -16,16 +17,20 @@ import (
 )
 
 // computeConfigDataSourceLookupFixture builds a minimal valid by-id lookup
-// plan: every Object/List-typed attribute must be explicitly typed-null
-// (matching the schema's exact attr types), not left at its Go zero value,
-// or tfsdk.Config.Set rejects it with a Value Conversion Error.
+// plan: every Object/List/Map/Dynamic-typed attribute must be explicitly
+// typed-null (matching the schema's exact attr types), not left at its Go
+// zero value, or tfsdk.Config.Set rejects it with a Value Conversion Error.
 func computeConfigDataSourceLookupFixture(id string) ComputeConfigDataSourceModel {
 	return ComputeConfigDataSourceModel{
-		ID:          types.StringValue(id),
-		Versions:    types.ListNull(types.Int64Type),
-		Zones:       types.ListNull(types.StringType),
-		HeadNode:    types.ObjectNull(nodeConfigAttrTypes()),
-		WorkerNodes: types.ListNull(types.ObjectType{AttrTypes: workerNodeConfigAttrTypes()}),
+		ID:                     types.StringValue(id),
+		Versions:               types.ListNull(types.Int64Type),
+		Zones:                  types.ListNull(types.StringType),
+		HeadNode:               types.ObjectNull(nodeConfigAttrTypes()),
+		WorkerNodes:            types.ListNull(types.ObjectType{AttrTypes: workerNodeConfigAttrTypes()}),
+		MinResources:           types.MapNull(types.Float64Type),
+		MaxResources:           types.MapNull(types.Float64Type),
+		Flags:                  types.DynamicNull(),
+		AdvancedInstanceConfig: types.DynamicNull(),
 	}
 }
 
@@ -138,6 +143,175 @@ func TestComputeConfigRead_NotFoundByID_ProducesAPIError(t *testing.T) {
 	if !diags.HasError() {
 		t.Fatal("expected an error on a 404, got none")
 	}
+}
+
+// dynamicObjectAttrs unwraps a types.Dynamic asserted to hold a types.Object,
+// the shape InterfaceToDynamic always produces for a non-empty map. Fails the
+// test immediately on null/unknown/wrong-type rather than returning a zero
+// value, since every caller here is asserting real content is present.
+func dynamicObjectAttrs(t *testing.T, d types.Dynamic) map[string]attr.Value {
+	t.Helper()
+	if d.IsNull() || d.IsUnknown() {
+		t.Fatalf("dynamic value is null or unknown, want an object with real content")
+	}
+	obj, ok := d.UnderlyingValue().(types.Object)
+	if !ok {
+		t.Fatalf("dynamic underlying value = %T, want types.Object", d.UnderlyingValue())
+	}
+	return obj.Attributes()
+}
+
+// TestComputeConfigRead_ClusterLevelFieldParity is the DS-CC-7 proof: the five
+// cluster-level fields that used to be resource-only (cloud_resource,
+// min_resources, max_resources, top-level flags, top-level
+// advanced_instance_config - see the Compute Config guide's former "Known
+// limitations" section) round-trip through the data source correctly in both
+// directions - present in the API response, and absent.
+//
+// The "present" fixture deliberately reuses the exact payload shape
+// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI already
+// validated live against the real backend (disable_gpu_health_checks/
+// allow-cross-zone-autoscaling/min_resources/max_resources as flags, and a
+// TagSpecifications advanced_instance_config containing a nested list of
+// tag objects), rather than a fresh invented shape, for two reasons: it is
+// known-real, and TagSpecifications is a list of OBJECTS containing another
+// list of objects (Tags) - the exact shape that HCL/the framework infers as
+// nested types.Tuple, not types.List, and that silently null-ed out before
+// the CC15 fix. An empty or scalar-only fixture would not exercise that path
+// at all (see the CC15 memory: "An empty-list mock config proves nothing").
+func TestComputeConfigRead_ClusterLevelFieldParity(t *testing.T) {
+	const configID = "cpt_parity1"
+
+	newServer := func(t *testing.T, configJSON string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/compute_templates/"+configID:
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"result": {
+					"id": "` + configID + `", "name": "tfacc-cc-parity", "version": 1,
+					"created_at": "2024-01-01T00:00:00Z", "last_modified_at": "2024-01-02T00:00:00Z",
+					"config": ` + configJSON + `
+				}}`))
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v2/compute_templates/search":
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"results": [{"id": "` + configID + `", "name": "tfacc-cc-parity", "version": 1}], "metadata": {"next_paging_token": null}}`))
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/clouds/cld_1":
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"result": {"id": "cld_1", "name": "tfacc-cloud-parity"}}`))
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+	}
+
+	t.Run("present", func(t *testing.T) {
+		server := newServer(t, `{
+			"cloud_id": "cld_1",
+			"deployment_configs": [{
+				"cloud_deployment": "my-cloud-resource",
+				"flags": {
+					"min_resources": {"CPU": 4},
+					"max_resources": {"CPU": 100},
+					"allow-cross-zone-autoscaling": true,
+					"disable_gpu_health_checks": true
+				},
+				"advanced_configurations_json": {
+					"TagSpecifications": [{
+						"ResourceType": "instance",
+						"Tags": [{"Key": "team", "Value": "ml-platform"}]
+					}]
+				}
+			}]
+		}`)
+		defer server.Close()
+
+		d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+		result, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture(configID))
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+
+		if got, want := result.CloudResource.ValueString(), "my-cloud-resource"; got != want {
+			t.Errorf("cloud_resource = %q, want %q", got, want)
+		}
+
+		minEls := result.MinResources.Elements()
+		if cpu, ok := minEls["CPU"].(types.Float64); !ok || cpu.ValueFloat64() != 4 {
+			t.Errorf("min_resources[CPU] = %#v, want 4", minEls["CPU"])
+		}
+		maxEls := result.MaxResources.Elements()
+		if cpu, ok := maxEls["CPU"].(types.Float64); !ok || cpu.ValueFloat64() != 100 {
+			t.Errorf("max_resources[CPU] = %#v, want 100", maxEls["CPU"])
+		}
+
+		flagsAttrs := dynamicObjectAttrs(t, result.Flags)
+		if len(flagsAttrs) != 1 {
+			t.Fatalf("flags has %d entries %v, want exactly 1 (disable_gpu_health_checks only) - "+
+				"min_resources/max_resources/allow-cross-zone-autoscaling must be stripped since "+
+				"each already has its own attribute", len(flagsAttrs), flagsAttrs)
+		}
+		if b, ok := flagsAttrs["disable_gpu_health_checks"].(types.Bool); !ok || !b.ValueBool() {
+			t.Errorf("flags.disable_gpu_health_checks = %#v, want true", flagsAttrs["disable_gpu_health_checks"])
+		}
+
+		advAttrs := dynamicObjectAttrs(t, result.AdvancedInstanceConfig)
+		tagSpecs, ok := advAttrs["TagSpecifications"].(types.Tuple)
+		if !ok {
+			t.Fatalf("advanced_instance_config.TagSpecifications = %#v (type %T), want types.Tuple - "+
+				"nil/wrong-type here means the API response's list-of-objects silently dropped, "+
+				"the CC15 failure shape", advAttrs["TagSpecifications"], advAttrs["TagSpecifications"])
+		}
+		if len(tagSpecs.Elements()) != 1 {
+			t.Fatalf("len(TagSpecifications) = %d, want 1", len(tagSpecs.Elements()))
+		}
+		tagSpecObj, ok := tagSpecs.Elements()[0].(types.Object)
+		if !ok {
+			t.Fatalf("TagSpecifications[0] = %T, want types.Object", tagSpecs.Elements()[0])
+		}
+		if rt, ok := tagSpecObj.Attributes()["ResourceType"].(types.String); !ok || rt.ValueString() != "instance" {
+			t.Errorf("TagSpecifications[0].ResourceType = %#v, want \"instance\"", tagSpecObj.Attributes()["ResourceType"])
+		}
+		tagsTuple, ok := tagSpecObj.Attributes()["Tags"].(types.Tuple)
+		if !ok || len(tagsTuple.Elements()) != 1 {
+			t.Fatalf("TagSpecifications[0].Tags = %#v, want a 1-element types.Tuple (nested list of objects)", tagSpecObj.Attributes()["Tags"])
+		}
+		tagObj, ok := tagsTuple.Elements()[0].(types.Object)
+		if !ok {
+			t.Fatalf("Tags[0] = %T, want types.Object", tagsTuple.Elements()[0])
+		}
+		if key, ok := tagObj.Attributes()["Key"].(types.String); !ok || key.ValueString() != "team" {
+			t.Errorf("Tags[0].Key = %#v, want \"team\"", tagObj.Attributes()["Key"])
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		server := newServer(t, `{"cloud_id": "cld_1"}`)
+		defer server.Close()
+
+		d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+		result, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture(configID))
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+
+		if !result.CloudResource.IsNull() {
+			t.Errorf("cloud_resource = %#v, want null", result.CloudResource)
+		}
+		if !result.MinResources.IsNull() {
+			t.Errorf("min_resources = %#v, want null", result.MinResources)
+		}
+		if !result.MaxResources.IsNull() {
+			t.Errorf("max_resources = %#v, want null", result.MaxResources)
+		}
+		if !result.Flags.IsNull() {
+			t.Errorf("flags = %#v, want null", result.Flags)
+		}
+		if !result.AdvancedInstanceConfig.IsNull() {
+			t.Errorf("advanced_instance_config = %#v, want null", result.AdvancedInstanceConfig)
+		}
+	})
 }
 
 // This file previously only "tested" hand-copied re-implementations of the
