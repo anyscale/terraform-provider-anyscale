@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // isPrivateCloudMockServer serves a single anyscale_cloud whose
@@ -23,13 +24,27 @@ import (
 // GET always reads back whatever was persisted at create (spec.json:
 // is_private_cloud_fix).
 type isPrivateCloudMockServer struct {
-	mu               sync.Mutex
-	name             string
-	isPrivate        bool
-	isPrivateService bool
+	mu                          sync.Mutex
+	name                        string
+	provider                    string
+	region                      string
+	isPrivate                   bool
+	isPrivateService            bool
+	sawIsPrivateServiceCloudKey bool
 }
 
-func newIsPrivateCloudMockServer(t *testing.T, cloudID string) *httptest.Server {
+// sawServiceCloudKey reports whether the most recent POST /api/v2/clouds
+// body included the is_private_service_cloud key at all - distinct from its
+// VALUE, which is what the per-provider guard test needs to assert against
+// forge's *bool+omitempty mechanism (a present-but-false key must count as
+// "seen"; an absent key must not).
+func (m *isPrivateCloudMockServer) sawServiceCloudKey() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sawIsPrivateServiceCloudKey
+}
+
+func newIsPrivateCloudMockServer(t *testing.T, cloudID string) (*httptest.Server, *isPrivateCloudMockServer) {
 	t.Helper()
 	m := &isPrivateCloudMockServer{}
 	mux := http.NewServeMux()
@@ -38,10 +53,10 @@ func newIsPrivateCloudMockServer(t *testing.T, cloudID string) *httptest.Server 
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		return fmt.Sprintf(`{
-			"id": %[1]q, "name": %[2]q, "provider": "AWS", "region": "us-east-2",
+			"id": %[1]q, "name": %[2]q, "provider": %[3]q, "region": %[4]q,
 			"status": "ready", "state": "ACTIVE", "compute_stack": "VM", "is_default": false,
-			"is_private_cloud": %[3]t, "is_private_service_cloud": %[4]t
-		}`, cloudID, m.name, m.isPrivate, m.isPrivateService)
+			"is_private_cloud": %[5]t, "is_private_service_cloud": %[6]t
+		}`, cloudID, m.name, m.provider, m.region, m.isPrivate, m.isPrivateService)
 	}
 
 	mux.HandleFunc("/api/v2/clouds", func(w http.ResponseWriter, r *http.Request) {
@@ -51,13 +66,21 @@ func newIsPrivateCloudMockServer(t *testing.T, cloudID string) *httptest.Server 
 			_ = json.NewDecoder(r.Body).Decode(&body)
 
 			m.mu.Lock()
-			// Echo the requested name verbatim - a real create echoes what
-			// was sent, and a hardcoded/static name here would falsely trip
-			// the framework's OWN inconsistent-result check on the unrelated
-			// "name" attribute, masking the is_private_cloud signal this
-			// mock exists to isolate.
+			// Echo the requested name/provider/region verbatim - a real
+			// create echoes what was sent, and hardcoding any of them here
+			// would falsely trip the framework's OWN inconsistent-result
+			// check on an attribute unrelated to is_private_cloud, masking
+			// the signal this mock exists to isolate (bit us once already
+			// for "name" - provider/region need the same treatment now that
+			// the GCP-vs-AWS guard test varies both).
 			if v, ok := body["name"].(string); ok {
 				m.name = v
+			}
+			if v, ok := body["provider"].(string); ok {
+				m.provider = v
+			}
+			if v, ok := body["region"].(string); ok {
+				m.region = v
 			}
 			// Mimic today's real backend column exactly: a request that
 			// omits the key persists false (the column's zero value), not
@@ -70,6 +93,12 @@ func newIsPrivateCloudMockServer(t *testing.T, cloudID string) *httptest.Server 
 			} else {
 				m.isPrivate = false
 			}
+			// Track KEY PRESENCE separately from value: forge's *bool+
+			// omitempty mechanism must omit the key entirely for non-GCP,
+			// not just send a zero/false value - a plain ,ok type-assertion
+			// on the decoded value can't tell "false" from "absent" apart
+			// from a bare bool, so check key existence directly.
+			_, m.sawIsPrivateServiceCloudKey = body["is_private_service_cloud"]
 			if v, ok := body["is_private_service_cloud"].(bool); ok {
 				m.isPrivateService = v
 			} else {
@@ -118,7 +147,7 @@ func newIsPrivateCloudMockServer(t *testing.T, cloudID string) *httptest.Server 
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	return server
+	return server, m
 }
 
 // TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer is the mutation-proof
@@ -144,7 +173,7 @@ func TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			cloudID := fmt.Sprintf("cld_ipc_mock_%s", tc.name)
-			server := newIsPrivateCloudMockServer(t, cloudID)
+			server, _ := newIsPrivateCloudMockServer(t, cloudID)
 
 			config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
@@ -219,4 +248,69 @@ resource "anyscale_cloud_resource" "test" {
 			},
 		},
 	})
+}
+
+// TestAccCloudResource_IsPrivateServiceCloudPerProviderGuard_MockServer is the
+// mutation-proof end-to-end proof for the GCP-only scoping in
+// resource_cloud.go's Create (fix(cloud): scope is_private_service_cloud
+// mirroring to GCP only): register_gcp_cloud in the real CLI always sends
+// is_private_service_cloud (true or false); register_aws_cloud and
+// register_azure_or_generic_cloud never reference it at all. models.go's
+// CreateCloudRequest.IsPrivateServiceCloud is a *bool with omitempty so nil
+// omits the key entirely and a non-nil pointer sends it even when false -
+// this test inspects the actual POST /api/v2/clouds body (not just the
+// struct in isolation, which is what models_test.go's TestCreateCloudRequestJSON
+// already covers) to prove the createReq-level provider gate wires that
+// mechanism correctly end-to-end. GCP must see the key present; AWS must see
+// it absent - not merely "false", since a present-but-false key would still
+// be a real deviation from the CLI's AWS behavior.
+func TestAccCloudResource_IsPrivateServiceCloudPerProviderGuard_MockServer(t *testing.T) {
+	cases := []struct {
+		name          string
+		cloudProvider string
+		region        string
+		wantKeyOnPOST bool
+	}{
+		{name: "gcp_sends_the_key", cloudProvider: "GCP", region: "us-central1", wantKeyOnPOST: true},
+		{name: "aws_omits_the_key", cloudProvider: "AWS", region: "us-east-2", wantKeyOnPOST: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cloudID := fmt.Sprintf("cld_ipc_guard_%s", tc.name)
+			server, mock := newIsPrivateCloudMockServer(t, cloudID)
+
+			config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
+resource "anyscale_cloud" "test" {
+  name             = "ipc-guard-%s"
+  cloud_provider   = "%s"
+  region           = "%s"
+  is_private_cloud = true
+}
+`, tc.name, tc.cloudProvider, tc.region)
+
+			resource.Test(t, resource.TestCase{
+				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: config,
+						Check: resource.ComposeAggregateTestCheckFunc(
+							resource.TestCheckResourceAttr("anyscale_cloud.test", "is_private_cloud", "true"),
+							func(s *terraform.State) error {
+								if got := mock.sawServiceCloudKey(); got != tc.wantKeyOnPOST {
+									return fmt.Errorf(
+										"POST /api/v2/clouds is_private_service_cloud key present=%v, want %v (cloud_provider=%s) - the create-time provider gate does not match the CLI",
+										got, tc.wantKeyOnPOST, tc.cloudProvider,
+									)
+								}
+								return nil
+							},
+						),
+						ExpectNonEmptyPlan: false,
+					},
+				},
+			})
+		})
+	}
 }
