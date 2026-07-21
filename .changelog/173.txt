@@ -1,4 +1,0 @@
-```
-release-note:added
-data-source/anyscale_compute_config: Add `cloud_resource`, `min_resources`, `max_resources`, and top-level `flags`/`advanced_instance_config` attributes, matching the resource's existing fields and closing the gap documented in the Compute Config guide.
-```
