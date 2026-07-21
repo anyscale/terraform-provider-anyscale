@@ -477,8 +477,8 @@ func TestAccProjectResource_Disappears(t *testing.T) {
 // drift. Retries via provider.DeleteProjectWithRetry (same schedule as the resource's own Delete,
 // since this provokes the same delete-time SpiceDB propagation race from outside the provider);
 // time.Now() as createdAt trivially satisfies its age gate since the project was just created.
-// If that ~60s schedule still exhausts, extendProjectDeleteRetry adds a bounded second layer -
-// see its doc comment.
+// If that ~90s schedule still exhausts, extendProjectDeleteRetry adds a small bounded second
+// layer - see its doc comment.
 func testAccDeleteProjectViaAPI(t *testing.T, resourceName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[resourceName]
@@ -509,10 +509,20 @@ func testAccDeleteProjectViaAPI(t *testing.T, resourceName string) resource.Test
 
 // projectDisappearsExtendedRetryInterval and projectDisappearsExtendedRetryMaxWait bound a
 // second, test-only retry layer that testAccDeleteProjectViaAPI falls back to once
-// provider.DeleteProjectWithRetry's own ~60s schedule exhausts on an eligible 403. vars (not
+// provider.DeleteProjectWithRetry's own ~90s schedule exhausts on an eligible 403. vars (not
 // consts) so a unit test can shrink them, mirroring resource_project.go's
 // deleteProjectRetryInitialInterval pattern. Unlike production Delete, this cleanup has no
 // real-user latency cost, so it can afford to wait longer for the same SpiceDB propagation race.
+//
+// Deliberately small (was 96s against a 60s production ceiling; now 2 attempts, ~16s, against
+// 90s): production's own real worst case at a 90s ceiling is already ~95s (its capped-exponential
+// schedule overshoots the nominal ceiling by one more 8s step before giving up), which already
+// exceeds the historically observed 87-94s recurrence range on its own. This extension is now
+// pure margin for a slower-than-anything-yet-observed case, not something needed to reach the
+// known tail. MaxWait is 2x the interval rather than an exact 1x match: a same-interval bound is
+// latency-fragile in practice (confirmed empirically) - real request latency alone is enough to
+// trip the elapsed-since-deadline check one attempt earlier than idealized arithmetic predicts,
+// so an exact-multiple-of-one bound can silently give zero margin instead of one retry's worth.
 //
 // Handles two cases without distinguishing them: transient lag resolves within the longer bound;
 // a permanently un-deletable project (Postgres write succeeded but its SpiceDB tuple never got
@@ -522,7 +532,7 @@ func testAccDeleteProjectViaAPI(t *testing.T, resourceName string) resource.Test
 // manual triage, same as existing stuck specimens.
 var (
 	projectDisappearsExtendedRetryInterval = 8 * time.Second
-	projectDisappearsExtendedRetryMaxWait  = 96 * time.Second
+	projectDisappearsExtendedRetryMaxWait  = 16 * time.Second
 )
 
 // projectDisappearsKnownNonTransient403Messages mirrors resource_project.go's
@@ -718,16 +728,16 @@ func projectDisappearsState(projectID string) *terraform.State {
 
 // TestAccProjectResourceDisappearsRetryExtension is the real-time engagement proof for
 // testAccDeleteProjectViaAPI/extendProjectDeleteRetry: it drives the real, un-shrinkable
-// provider.DeleteProjectWithRetry schedule (~60s, ~11 requests) to genuine exhaustion against a
-// mock server, then confirms the extension picks up and succeeds - the one thing
+// provider.DeleteProjectWithRetry schedule (~90s ceiling, ~15 requests) to genuine exhaustion
+// against a mock server, then confirms the extension picks up and succeeds - the one thing
 // TestExtendProjectDeleteRetry's ms-scale unit test can't prove, since it manipulates its own
 // inputs rather than exercising the real call site (the same engagement-vs-logic gap the
 // collaborator-retry bug slipped through).
 //
-// Deliberately slow (~100s): fails the first 15 requests (past the real ~11-request ceiling) and
-// succeeds on the 16th, so both phases are provably exhausted rather than just close. Gated on
-// TF_ACC only (never the real-infra flag, which is unset in CI and would silently skip this),
-// named to match the acctest-resource shard's ^TestAcc[A-Za-z]+Resource selector.
+// Deliberately slow (~105s): fails exactly the real ~15-request ceiling, so production provably
+// exhausts (not just comes close), then succeeds on the 16th - the extension's first attempt.
+// Gated on TF_ACC only (never the real-infra flag, which is unset in CI and would silently skip
+// this), named to match the acctest-resource shard's ^TestAcc[A-Za-z]+Resource selector.
 func TestAccProjectResourceDisappearsRetryExtension(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -758,8 +768,8 @@ func TestAccProjectResourceDisappearsRetryExtension(t *testing.T) {
 		t.Fatalf("expected exactly %d requests (%d failed across the real schedule + extension attempts, then 1 success), got %d",
 			failCount+1, failCount, requestCount)
 	}
-	if requestCount <= 11 {
-		t.Fatalf("expected more requests than the production schedule's own ~11-attempt ceiling makes alone (got %d) - "+
+	if requestCount <= 15 {
+		t.Fatalf("expected more requests than the production schedule's own ~15-attempt ceiling makes alone (got %d) - "+
 			"this would mean the extension never actually engaged", requestCount)
 	}
 }

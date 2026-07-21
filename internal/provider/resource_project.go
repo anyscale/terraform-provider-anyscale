@@ -430,11 +430,11 @@ const recentlyCreatedRetryWindow = 5 * time.Minute
 // deleteProjectRetryInitialInterval, deleteProjectRetryMaxInterval, and deleteProjectRetryMaxWait
 // are vars, not consts, so tests can override them to near-zero for the duration of a test
 // (save, shrink, defer-restore) and keep the exhaust-path/retry-then-succeed unit tests instant
-// instead of really sleeping for the production ~60s. Real acctests hitting the live API are
+// instead of really sleeping for the production ~90s. Real acctests hitting the live API are
 // unaffected either way.
 //
-// Capped exponential backoff: 1s, 2s, 4s, 8s, then HELD at the 8s cap for the rest of the 60s
-// ceiling (~10-11 attempts total). Two properties this shape is chosen for, together: (1) short
+// Capped exponential backoff: 1s, 2s, 4s, 8s, then HELD at the 8s cap for the rest of the 90s
+// ceiling (~14-15 attempts total). Two properties this shape is chosen for, together: (1) short
 // lags are still detected fast via the initial ramp (same fast-catch property a fixed fine
 // interval gives), and (2) overshoot past the actual convergence moment stays bounded to
 // roughly the cap size (~8s) rather than growing with the ceiling, unlike UNCAPPED exponential
@@ -442,11 +442,11 @@ const recentlyCreatedRetryWindow = 5 * time.Minute
 // convergence event (observed once in practice at ~15.2s) - e.g. a convergence at ~17s under an
 // uncapped schedule isn't rechecked until the 32s step. Capping keeps the per-step overshoot
 // small at any ceiling while still reaching a much longer ceiling in far fewer calls than a
-// fixed-fine-interval schedule would need (~10 vs ~30 calls to reach 60s).
+// fixed-fine-interval schedule, which would need roughly 3x as many calls to reach the same ceiling.
 var (
 	deleteProjectRetryInitialInterval = 1 * time.Second
 	deleteProjectRetryMaxInterval     = 8 * time.Second
-	deleteProjectRetryMaxWait         = 60 * time.Second
+	deleteProjectRetryMaxWait         = 90 * time.Second
 )
 
 // deleteProjectNonTransient403Messages holds substrings of 403 error bodies known to indicate a
@@ -457,7 +457,7 @@ var (
 // to. It only ever NARROWS an already-eligible retry: an unrecognized 403 message still retries
 // by default, so the primary race-fix stays unweakened. Best-effort and deliberately brittle: if
 // the backend rewords one of these messages, matching silently lapses and that case just falls
-// back to the full 60s wait - the same behavior as before this exclusion existed, not worse.
+// back to the full 90s wait - the same behavior as before this exclusion existed, not worse.
 var deleteProjectNonTransient403Messages = []string{
 	"You cannot delete a project unless it has no jobs or services",
 }
@@ -504,7 +504,7 @@ func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID,
 // it from eligibility - see that var's doc comment for why this is a safe, retry-narrowing-only
 // exclusion rather than a rule that positively decides some other 403 is "fine."
 //
-// The bounded ~60s ceiling is deliberate and must stay bounded, not grow unbounded: a project
+// The bounded ~90s ceiling is deliberate and must stay bounded, not grow unbounded: a project
 // whose owner-grant tuple was genuinely never written (a separate, backend-config-caused
 // failure mode, not this lag) is textually identical to a slow-but-real lag and will also
 // exhaust this retry before surfacing its 403 - correct, since no client-side wait can produce a

@@ -1,0 +1,4 @@
+```
+release-note:changed
+resource/anyscale_project: Raise the delete-time permission-race retry ceiling from 60s to 90s, so a terraform destroy shortly after create tolerates a longer SpiceDB propagation lag before failing.
+```
