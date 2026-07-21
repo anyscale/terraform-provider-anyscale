@@ -176,6 +176,20 @@ func (r *ContainerImageBuildResource) Configure(ctx context.Context, req resourc
 	r.client = client
 }
 
+// populateBuildFields maps a completed BuildResult into the model's build-derived fields.
+// Shared by Create and Update, which perform this identical mapping once their respective
+// build finishes.
+func populateBuildFields(model *ContainerImageBuildResourceModel, build *BuildResult) {
+	model.BuildID = types.StringValue(build.ID)
+	model.BuildStatus = types.StringValue(build.Status)
+	model.CreatedAt = types.StringValue(build.CreatedAt)
+	model.ImageURI = types.StringPointerValue(build.DockerImageName)
+	model.RayVersion = types.StringPointerValue(build.RayVersion)
+	model.Revision = types.Int64Value(int64(build.Revision))
+	model.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", model.Name.ValueString(), build.Revision))
+	model.Digest = types.StringPointerValue(build.Digest)
+}
+
 // Create creates the resource and sets the initial Terraform state.
 func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan ContainerImageBuildResourceModel
@@ -304,31 +318,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 	})
 
 	// Map response to model
-	plan.BuildID = types.StringValue(build.ID)
-	plan.BuildStatus = types.StringValue(build.Status)
-	plan.CreatedAt = types.StringValue(build.CreatedAt)
-
-	if build.DockerImageName != nil {
-		plan.ImageURI = types.StringValue(*build.DockerImageName)
-	} else {
-		plan.ImageURI = types.StringNull()
-	}
-
-	if build.RayVersion != nil {
-		plan.RayVersion = types.StringValue(*build.RayVersion)
-	} else {
-		plan.RayVersion = types.StringNull()
-	}
-
-	// Set revision and name_version
-	plan.Revision = types.Int64Value(int64(build.Revision))
-	plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), build.Revision))
-
-	if build.Digest != nil {
-		plan.Digest = types.StringValue(*build.Digest)
-	} else {
-		plan.Digest = types.StringNull()
-	}
+	populateBuildFields(&plan, build)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -517,31 +507,7 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	plan.ID = state.ID
 
 	// Map response to model
-	plan.BuildID = types.StringValue(build.ID)
-	plan.BuildStatus = types.StringValue(build.Status)
-	plan.CreatedAt = types.StringValue(build.CreatedAt)
-
-	if build.DockerImageName != nil {
-		plan.ImageURI = types.StringValue(*build.DockerImageName)
-	} else {
-		plan.ImageURI = types.StringNull()
-	}
-
-	if build.RayVersion != nil {
-		plan.RayVersion = types.StringValue(*build.RayVersion)
-	} else {
-		plan.RayVersion = types.StringNull()
-	}
-
-	// Set revision and name_version
-	plan.Revision = types.Int64Value(int64(build.Revision))
-	plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), build.Revision))
-
-	if build.Digest != nil {
-		plan.Digest = types.StringValue(*build.Digest)
-	} else {
-		plan.Digest = types.StringNull()
-	}
+	populateBuildFields(&plan, build)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -559,48 +525,7 @@ func (r *ContainerImageBuildResource) Delete(ctx context.Context, req resource.D
 
 	clusterEnvID := state.ID.ValueString()
 
-	tflog.Info(ctx, "Archiving cluster environment for container image build", map[string]any{
-		"cluster_environment_id": clusterEnvID,
-	})
-
-	// Archive the cluster environment
-	// Note: The /ext/v0/cluster_environments/ endpoint do not have DELETE, so we use POST /api/v2/application_templates/{id}/archive
-	_, err := DoRequestRaw(
-		ctx,
-		r.client,
-		"POST",
-		fmt.Sprintf("/api/v2/application_templates/%s/archive", clusterEnvID),
-		nil,
-		http.StatusOK,
-		http.StatusNoContent,
-		http.StatusNotFound,
-		http.StatusBadRequest,
-	)
-	if err != nil {
-		// Check if already archived/deleted
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			tflog.Info(ctx, "Cluster environment already archived or deleted", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-			})
-			return
-		}
-
-		// Check if this is a default cluster environment that cannot be archived
-		// This happens when using Anyscale's official images (e.g., anyscale/ray:*)
-		if strings.Contains(err.Error(), "Cannot archive a default cluster environment") {
-			tflog.Info(ctx, "Cluster environment is a default environment and cannot be archived (this is expected for Anyscale-provided images)", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-			})
-			return
-		}
-
-		AddAPIError(&resp.Diagnostics, "archive cluster environment", err)
-		return
-	}
-
-	tflog.Info(ctx, "Cluster environment archived successfully", map[string]any{
-		"cluster_environment_id": clusterEnvID,
-	})
+	archiveClusterEnvironment(ctx, r.client, clusterEnvID, &resp.Diagnostics)
 }
 
 // ImportState imports the resource into Terraform state.

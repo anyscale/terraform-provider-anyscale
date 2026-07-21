@@ -272,12 +272,7 @@ func applyCollaboratorIdentityFields(ctx context.Context, model *OrganizationCol
 	// undetermined (render null), a non-nil (possibly empty) slice means the
 	// backend was actually queried (render [], never null, when genuinely
 	// none) - see hydrateCollaboratorRoles and the schema doc.
-	if collaborator.AdditionalRoles == nil {
-		model.AdditionalRoles = types.ListNull(types.StringType)
-		return nil
-	}
-
-	additionalRolesList, diags := types.ListValueFrom(ctx, types.StringType, collaborator.AdditionalRoles)
+	additionalRolesList, diags := additionalRolesToList(ctx, collaborator.AdditionalRoles)
 	model.AdditionalRoles = additionalRolesList
 	return diags
 }
@@ -306,7 +301,7 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 		PermissionLevel: plan.PermissionLevel.ValueString(),
 	}
 
-	jsonData, err := json.Marshal(updateReq)
+	reqBody, err := MarshalRequestBody(updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error marshaling request",
@@ -318,7 +313,7 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 	// Send update request. The response body isn't parsed into anything - the resource re-reads
 	// current state via findCollaboratorByID right after, so only the status code matters here.
 	if _, err := DoRequestRaw(
-		ctx, r.client, "PUT", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), strings.NewReader(string(jsonData)),
+		ctx, r.client, "PUT", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), reqBody,
 		http.StatusOK, http.StatusNoContent,
 	); err != nil {
 		resp.Diagnostics.AddError("Could Not Update Collaborator's Permission Level", collaboratorErrorDiagnosticDetail(err))
@@ -417,15 +412,9 @@ func (r *OrganizationCollaboratorResource) ImportState(ctx context.Context, req 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("created_at"), collaborator.CreatedAt)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("base_role"), collaborator.BaseRole)...)
 
-	// additional_roles tri-state: nil (undetermined) vs a real, possibly empty
-	// slice (queried) - see hydrateCollaboratorRoles and the schema doc.
-	if collaborator.AdditionalRoles == nil {
-		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("additional_roles"), types.ListNull(types.StringType))...)
-	} else {
-		additionalRolesList, diags := types.ListValueFrom(ctx, types.StringType, collaborator.AdditionalRoles)
-		resp.Diagnostics.Append(diags...)
-		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("additional_roles"), additionalRolesList)...)
-	}
+	additionalRolesList, diags := additionalRolesToList(ctx, collaborator.AdditionalRoles)
+	resp.Diagnostics.Append(diags...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("additional_roles"), additionalRolesList)...)
 
 	if collaborator.UserID != nil && *collaborator.UserID != "" {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("user_id"), *collaborator.UserID)...)
@@ -554,6 +543,18 @@ func hydrateCollaboratorRoles(ctx context.Context, client *Client, fromList Orga
 
 	fromList.AdditionalRoles = singular.Result.AdditionalRoles
 	return fromList
+}
+
+// additionalRolesToList converts the tri-state AdditionalRoles field populated by
+// hydrateCollaboratorRoles into its types.List representation: nil (undetermined) renders null,
+// a non-nil (possibly empty) slice renders as a real list, never null, when genuinely
+// queried-and-none. Shared by every collaborator/user model conversion so this tri-state handling
+// can't drift between them.
+func additionalRolesToList(ctx context.Context, additionalRoles []string) (types.List, diag.Diagnostics) {
+	if additionalRoles == nil {
+		return types.ListNull(types.StringType), nil
+	}
+	return types.ListValueFrom(ctx, types.StringType, additionalRoles)
 }
 
 // collaboratorErrorDiagnosticDetail builds a clean diagnostic body for a

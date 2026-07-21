@@ -1125,13 +1125,8 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		state.CloudProvider = types.StringValue(foundResource.Provider)
 	}
 
-	if foundResource.OperatorStatus != nil {
-		state.Status = types.StringValue(*foundResource.OperatorStatus)
-		state.OperatorStatus = types.StringValue(*foundResource.OperatorStatus)
-	} else {
-		state.Status = types.StringNull()
-		state.OperatorStatus = types.StringNull()
-	}
+	state.Status = types.StringPointerValue(foundResource.OperatorStatus)
+	state.OperatorStatus = types.StringPointerValue(foundResource.OperatorStatus)
 
 	// C4: operator_version/reported_at are only present once a K8s
 	// resource's operator has reported in at least once - null for VM,

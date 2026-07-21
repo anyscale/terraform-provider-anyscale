@@ -157,7 +157,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		Email: plan.Email.ValueString(),
 	}
 
-	jsonData, err := json.Marshal(createReq)
+	reqBody, err := MarshalRequestBody(createReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error marshaling request",
@@ -175,7 +175,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 	// fields are simply left at their zero value by json.Unmarshal, which is fine since only
 	// Result.ID is read.
 	invitationResp, err := DoRequestAndParse[OrganizationInvitationResponse](
-		ctx, r.client, "POST", "/api/v2/organization_invitations", strings.NewReader(string(jsonData)),
+		ctx, r.client, "POST", "/api/v2/organization_invitations", reqBody,
 		http.StatusOK, http.StatusCreated,
 	)
 	if err != nil {
@@ -220,11 +220,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 	plan.CreatedAt = types.StringValue(invitation.CreatedAt)
 	plan.ExpiresAt = types.StringValue(invitation.ExpiresAt)
 
-	if invitation.AcceptedAt != nil {
-		plan.AcceptedAt = types.StringValue(*invitation.AcceptedAt)
-	} else {
-		plan.AcceptedAt = types.StringNull()
-	}
+	plan.AcceptedAt = types.StringPointerValue(invitation.AcceptedAt)
 
 	// Compute status
 	status := computeInvitationStatus(invitation.AcceptedAt, invitation.ExpiresAt)
@@ -284,11 +280,7 @@ func (r *OrganizationInvitationResource) Read(ctx context.Context, req resource.
 	state.CreatedAt = types.StringValue(invitation.CreatedAt)
 	state.ExpiresAt = types.StringValue(invitation.ExpiresAt)
 
-	if invitation.AcceptedAt != nil {
-		state.AcceptedAt = types.StringValue(*invitation.AcceptedAt)
-	} else {
-		state.AcceptedAt = types.StringNull()
-	}
+	state.AcceptedAt = types.StringPointerValue(invitation.AcceptedAt)
 
 	// Compute status
 	status := computeInvitationStatus(invitation.AcceptedAt, invitation.ExpiresAt)

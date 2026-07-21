@@ -189,17 +189,9 @@ func (d *ServiceDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	}
 
 	// Resolve cloud_name to cloud_id if provided
-	cloudID := config.CloudID.ValueString()
-	if !config.CloudName.IsNull() {
-		cloudName := config.CloudName.ValueString()
-		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
-
-		resolvedID, err := ResolveCloudNameToID(ctx, d.client, cloudName)
-		if err != nil {
-			AddAPIError(&resp.Diagnostics, "resolve cloud name", err)
-			return
-		}
-		cloudID = resolvedID
+	cloudID, ok := resolveCloudIDFilter(ctx, d.client, config.CloudID, config.CloudName, &resp.Diagnostics)
+	if !ok {
+		return
 	}
 
 	projectID := config.ProjectID.ValueString()
