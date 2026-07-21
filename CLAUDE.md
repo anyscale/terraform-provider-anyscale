@@ -338,19 +338,19 @@ is passed inside the request **body** on `ext/v0` but as URL **query parameters*
 candidates and leaks resources) rather than returning an error. Migrate all related call
 sites together, not piecemeal.
 
-Point-in-time note (2026-07, compute-config sync) — RESOLVED 2026-07-21 (PR #182, CC5b tail).
-The `anyscale_compute_config` resource, its data source, and every test-infra touchpoint
-(acctest `CheckDestroy`, the exists-in-API check, and the sweeper search) are now fully
-converged on `api/v2/compute_templates` — nothing compute_config-related remains on
-`ext/v0/cluster_computes`. The sweeper search was the one genuinely risky site: it carried
-both the body-vs-query pagination difference described above and a `version` field that
-defaults to latest-only on `api/v2` (the opposite of `ext/v0`'s effective all-versions
-default the sweeper relied on) — both traced against the real backend and mutation-tested
-(temporarily reverted, confirmed the test fails, reverted back) before landing, not just
-assumed safe. This split is unlikely to be unique to compute_config — if another resource
-shows the same pattern (resource on `api/v2`, its data source or sweeper still on `ext/v0`),
-apply the same trace-don't-guess method there. Re-check current code before relying on any
-specific detail in this note.
+Point-in-time note (2026-07, compute-config sync). The `anyscale_compute_config`
+**resource** already uses `api/v2/compute_templates`. Still on `ext/v0/cluster_computes` at
+the time of writing: the data-source **read** path, the acctest **CheckDestroy** helper, the
+**exists-in-API** check, and the **sweeper search** call. CC5a moved the data source's
+*parsing* onto shared typed structs but deliberately left the *endpoint* on `ext/v0`; the
+endpoint move was scoped as CC5b and **deferred** — a real per-site trace showed 5 of those
+8 touchpoints were near-free, but the sweeper search hit the body-vs-query pagination
+difference above, whose silent-truncation failure mode did not clear the bar for a
+non-blocking cleanup. Converging the remaining sites onto `api/v2` is the intended
+direction. This split is unlikely to be unique to compute_config — if another resource shows
+the same pattern (resource on `api/v2`, its data source or sweeper still on `ext/v0`), apply
+the same policy and the same trace-don't-guess method there. Re-check current code before
+relying on any specific detail in this note.
 
 ## Test Resource Naming and Sweeping
 
