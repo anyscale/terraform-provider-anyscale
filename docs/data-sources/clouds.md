@@ -98,7 +98,7 @@ Read-Only:
 - `is_default` (Boolean) Whether this is the default cloud for the organization.
 - `is_k8s` (Boolean) Whether this cloud uses Kubernetes.
 - `is_private_cloud` (Boolean) Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.
-- `is_private_service_cloud` (Boolean) Whether this cloud's services are registered as private, independently of `is_private_cloud`. This provider sets it explicitly only when creating a GCP cloud (matching the Anyscale CLI, which likewise couples the two only for GCP registration) - for AWS, Azure, and Generic clouds created through this provider, the backend independently defaults it to the same value as `is_private_cloud` whenever it isn't sent, so a cloud created through this provider ends up with the same value here as `is_private_cloud` regardless of provider. A cloud created some other way could in principle diverge. Like `is_private_cloud`, this is a self-asserted value with no backend verification of actual connectivity.
+- `is_private_service_cloud` (Boolean) Whether this is a private service cloud.
 - `lineage_tracking_enabled` (Boolean) Whether lineage tracking is enabled for this cloud.
 - `name` (String) The name of the cloud.
 - `region` (String) The region where the cloud is deployed.

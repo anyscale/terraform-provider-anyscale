@@ -344,7 +344,7 @@ A few more things worth knowing:
   supporting it as a normal `Optional`/`Computed` attribute would need new plumbing for something that
   could only ever be set once and never changed in place — deferred as low-value for the scope of this
   effort.
-- `is_private_service_cloud`, `is_bring_your_own_resource`, and `is_aioa` can be read via either the
+- `is_bring_your_own_resource` and `is_aioa` can be read via either the
   singular `anyscale_cloud` data source or the plural `anyscale_clouds` data source, but cannot be set
   — there's no supported way to create a cloud with any of the three from this provider today.
 - The Kubernetes Anyscale Operator's individual named health checks (`check_results` in the API's

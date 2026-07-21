@@ -65,7 +65,7 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 		},
 		"is_private_service_cloud": schema.BoolAttribute{
 			Computed:            true,
-			MarkdownDescription: "Whether this cloud's services are registered as private, independently of `is_private_cloud`. This provider sets it explicitly only when creating a GCP cloud (matching the Anyscale CLI, which likewise couples the two only for GCP registration) - for AWS, Azure, and Generic clouds created through this provider, the backend independently defaults it to the same value as `is_private_cloud` whenever it isn't sent, so a cloud created through this provider ends up with the same value here as `is_private_cloud` regardless of provider. A cloud created some other way could in principle diverge. Like `is_private_cloud`, this is a self-asserted value with no backend verification of actual connectivity.",
+			MarkdownDescription: "Whether this is a private service cloud.",
 		},
 		"auto_add_user": schema.BoolAttribute{
 			Computed:            true,
