@@ -8,6 +8,9 @@ resource "anyscale_cloud" "primary" {
   region         = var.aws_region
   compute_stack  = "VM"
 
+  is_private_cloud = var.is_private_cloud
+  auto_add_user    = var.auto_add_user
+
   # enable_system_cluster is Optional-only; left unset here (uncomment to opt in).
   # enable_system_cluster = true
 
