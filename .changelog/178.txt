@@ -1,0 +1,4 @@
+```
+release-note:changed
+provider: Correct the Project guide's Known limitation section, which still described the pre-PR174 60-second delete-retry ceiling instead of the current 90 seconds (no behavior change, docs only).
+```
