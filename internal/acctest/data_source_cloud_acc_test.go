@@ -196,8 +196,12 @@ func TestAccCloudDataSource_C2ParityMatchesPluralDataSource(t *testing.T) {
 // testAccCheckCloudC2ParityFieldsMatch finds the entry in the plural data
 // source's clouds list whose id matches resourceName's id (rather than
 // assuming a specific index - see the comment on the test above), then
-// asserts 7 of the 8 C2 parity fields agree with the singular data source's
-// own values for that same cloud.
+// asserts 4 of the 5 remaining C2 parity fields agree with the singular data
+// source's own values for that same cloud. is_aioa/is_bring_your_own_resource/
+// is_private_service_cloud were part of the original 8-field C2 parity set
+// but were removed from both data sources (read-only, backend-internal
+// classification values users could not act on) - see the
+// data_source_attr_removal spec.
 //
 // is_default is deliberately excluded: confirmed reproducible (twice, hours
 // apart, same test org) that GET /clouds/{id} and GET /clouds disagree on
@@ -206,12 +210,11 @@ func TestAccCloudDataSource_C2ParityMatchesPluralDataSource(t *testing.T) {
 // CloudResult.IsDefault JSON field via the same code shape, so this is a
 // backend data-consistency question between those two read paths, not a
 // provider mapping bug - see commit 082e29f. Excluding it here keeps this
-// test a reliable CI signal for the 7 fields that DO agree, rather than
+// test a reliable CI signal for the fields that DO agree, rather than
 // permanently red over an already-reported, out-of-scope backend issue.
 func testAccCheckCloudC2ParityFieldsMatch(resourceName, singularDS, pluralDS string) resource.TestCheckFunc {
 	fields := []string{
-		"compute_stack", "created_at", "creator_id",
-		"is_aioa", "is_bring_your_own_resource", "is_private_cloud", "is_private_service_cloud",
+		"compute_stack", "created_at", "creator_id", "is_private_cloud",
 	}
 
 	return func(s *terraform.State) error {

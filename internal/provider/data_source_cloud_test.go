@@ -113,9 +113,12 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 
 // TestReadCloudIntoModel_C2ParityFieldsMapFromResponse is a regression test
 // for change C2: the singular anyscale_cloud data source previously exposed
-// none of the 8 fields the plural anyscale_clouds data source already had
-// per-item (compute_stack, created_at, creator_id, is_default, is_aioa,
-// is_bring_your_own_resource, is_private_cloud, is_private_service_cloud).
+// none of the fields the plural anyscale_clouds data source already had
+// per-item (compute_stack, created_at, creator_id, is_default, is_private_cloud).
+// is_aioa/is_bring_your_own_resource/is_private_service_cloud were part of
+// the original C2 parity set but were removed from both data sources
+// (read-only, backend-internal classification values users could not act
+// on) - see the data_source_attr_removal spec.
 func TestReadCloudIntoModel_C2ParityFieldsMapFromResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -125,8 +128,7 @@ func TestReadCloudIntoModel_C2ParityFieldsMapFromResponse(t *testing.T) {
 				"result": {
 					"id": "cloud-parity", "name": "c", "provider": "AWS", "region": "us-east-1",
 					"compute_stack": "K8S", "created_at": "2026-01-01T00:00:00Z", "creator_id": "usr_123",
-					"is_default": true, "is_aioa": true, "is_bring_your_own_resource": true,
-					"is_private_cloud": true, "is_private_service_cloud": true
+					"is_default": true, "is_private_cloud": true
 				}
 			}`)
 		case "/api/v2/clouds/cloud-parity/resources":
@@ -153,11 +155,8 @@ func TestReadCloudIntoModel_C2ParityFieldsMapFromResponse(t *testing.T) {
 		t.Errorf("CreatorID = %v, want usr_123", config.CreatorID.ValueString())
 	}
 	for name, got := range map[string]types.Bool{
-		"IsDefault":              config.IsDefault,
-		"IsAIOA":                 config.IsAIOA,
-		"IsBringYourOwnResource": config.IsBringYourOwnResource,
-		"IsPrivateCloud":         config.IsPrivateCloud,
-		"IsPrivateServiceCloud":  config.IsPrivateServiceCloud,
+		"IsDefault":      config.IsDefault,
+		"IsPrivateCloud": config.IsPrivateCloud,
 	} {
 		if !got.ValueBool() {
 			t.Errorf("%s = false, want true (from response)", name)
