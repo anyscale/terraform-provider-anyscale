@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-07-21
+
+### Breaking Changes
+
+- data-source/anyscale_cloud: removes is_aioa, is_bring_your_own_resource, and is_private_service_cloud - all three were read-only, backend-internal classification values with no way to act on them; to migrate, remove any reference to them from your configuration or outputs (there is no replacement attribute).
+- data-source/anyscale_clouds: removes is_aioa, is_bring_your_own_resource, and is_private_service_cloud from each list item, for the same reason as the singular anyscale_cloud data source above; to migrate, remove any reference to them from your configuration or outputs.
+
 ## [0.15.3] - 2026-07-21
 
 ### Changed
@@ -789,7 +796,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.15.3...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.0
 [0.15.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.3
 [0.15.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.2
 [0.15.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.1
