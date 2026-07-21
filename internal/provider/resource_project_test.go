@@ -749,7 +749,7 @@ func TestProjectResourceDelete_409Detection(t *testing.T) {
 // withFastRetryTiming overrides the three retry-timing vars to millisecond-scale values for the
 // duration of a test (saving and defer-restoring the real production values), so the
 // exhaust-path and multi-attempt-then-succeed subtests below run in low-single-digit
-// milliseconds instead of really sleeping for the production ~60s ceiling - per assayer's
+// milliseconds instead of really sleeping for the production ~90s ceiling - per assayer's
 // test-speed note. The relative shape (ramp then cap, same doubling) is preserved exactly, just
 // scaled down, so the subtests below exercise the identical control flow as production.
 func withFastRetryTiming(t *testing.T) {
@@ -770,7 +770,7 @@ func withFastRetryTiming(t *testing.T) {
 // any message-content check, since the race and a genuine long-standing
 // denial produce the identical bare "Permission denied" 403.
 //
-// Retry timing is capped-exponential (ramp 1/2/4/8s then held at the 8s cap, to a 60s ceiling
+// Retry timing is capped-exponential (ramp 1/2/4/8s then held at the 8s cap, to a 90s ceiling
 // in production); withFastRetryTiming scales that down to 1/2/4ms held at a 4ms cap to a 15ms
 // ceiling for these subtests, so the exact request counts below are derived from that scaled
 // schedule, not the production one - see withFastRetryTiming's doc comment for why that's safe.
@@ -836,7 +836,7 @@ func TestProjectResourceDelete_403Retry(t *testing.T) {
 		// Parallels the old-project anti-masking assertion above: this 403 is on a project well
 		// within the recently-created window (so eligible would otherwise be true), but its body
 		// matches a known non-transient message (deleteProjectNonTransient403Messages), so it
-		// must still fail fast rather than riding out the full 60s ceiling - see
+		// must still fail fast rather than riding out the full 90s ceiling - see
 		// isKnownNonTransient403's doc comment for why this exclusion is safe.
 		const projectID = "prj_recent_active_jobs"
 		var requestCount int
