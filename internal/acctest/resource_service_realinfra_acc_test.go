@@ -157,12 +157,12 @@ resource "anyscale_service" "test" {
 		Steps: []resource.TestStep{
 			{
 				Config: config,
-				Check: resource.ComposeAggregateTestCheckFunc(
+				Check: CaptureServiceDiagnosticsOnFailure(t, "anyscale_service.test", resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_service.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
 					resource.TestCheckResourceAttr("anyscale_service.test", "tags.purpose", "tfacc-real-infra-gate"),
 					CaptureResourceAttr("anyscale_service.test", "id", &serviceIDAfterCreate),
-				),
+				)),
 				// AC-R5, the load-bearing gate: an EMPTY plan across every attribute after a real
 				// apply, not just a spot-check on ray_serve_config.
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -177,7 +177,7 @@ resource "anyscale_service" "test" {
 			// yet proven against real infrastructure anywhere else in this suite.
 			{
 				Config: updatedConfig,
-				Check: resource.ComposeAggregateTestCheckFunc(
+				Check: CaptureServiceDiagnosticsOnFailure(t, "anyscale_service.test", resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
 					func(s *terraform.State) error {
 						rs, ok := s.RootModule().Resources["anyscale_service.test"]
@@ -191,7 +191,7 @@ resource "anyscale_service" "test" {
 						}
 						return nil
 					},
-				),
+				)),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -331,12 +331,12 @@ resource "anyscale_service" "test" {
 		Steps: []resource.TestStep{
 			{
 				Config: config,
-				Check: resource.ComposeAggregateTestCheckFunc(
+				Check: CaptureServiceDiagnosticsOnFailure(t, "anyscale_service.test", resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("anyscale_service.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
 					resource.TestCheckResourceAttr("anyscale_service.test", "rollout_strategy", "IN_PLACE"),
 					CaptureResourceAttr("anyscale_service.test", "id", &serviceIDAfterCreate),
-				),
+				)),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -345,7 +345,7 @@ resource "anyscale_service" "test" {
 			},
 			{
 				Config: updatedConfig,
-				Check: resource.ComposeAggregateTestCheckFunc(
+				Check: CaptureServiceDiagnosticsOnFailure(t, "anyscale_service.test", resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
 					resource.TestCheckResourceAttr("anyscale_service.test", "rollout_strategy", "IN_PLACE"),
 					func(s *terraform.State) error {
@@ -360,7 +360,7 @@ resource "anyscale_service" "test" {
 						}
 						return nil
 					},
-				),
+				)),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
