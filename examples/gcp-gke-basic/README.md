@@ -40,7 +40,7 @@ bring-your-own-cluster example would help.
   - `export ANYSCALE_CLI_TOKEN="your-token"`, or
   - `~/.anyscale/credentials.json` (same format `anyscale login` produces)
 
-`google_region` and `google_project_id` have no default and must be supplied - copy
+`gcp_region` and `google_project_id` have no default and must be supplied - copy
 [`terraform.tfvars.example`](./terraform.tfvars.example) to `terraform.tfvars` (already
 gitignored) and fill in your own project, or pass it explicitly with `-var-file`.
 
@@ -79,7 +79,7 @@ make destroy-gcp-gke-basic SUFFIX=dev1
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `google_region` | GCP region for all resources | *(required, no default)* |
+| `gcp_region` | GCP region for all resources | *(required, no default)* |
 | `google_project_id` | GCP project ID | *(required, no default)* |
 | `gke_cluster_name` | Name for the GKE cluster (and prefix for related resource names); must not start with a digit and must be under 23 characters | `anyscale-gke` |
 | `gpu_instance_configs` | Map of GPU node pool definitions to generate (see the variable's own description in `variables.tf` for the object shape) | a single `T4` entry |

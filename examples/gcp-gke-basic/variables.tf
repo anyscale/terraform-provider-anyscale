@@ -14,13 +14,13 @@
 # These variables have defaults but must be included when using this module.
 # ---------------------------------------------------------------------------------------------------------------------
 
-variable "google_region" {
+variable "gcp_region" {
   description = <<-EOT
     (Required) The Google region in which all resources will be created.
 
     ex:
     ```
-    google_region = "us-central1"
+    gcp_region = "us-central1"
     ```
   EOT
   type        = string

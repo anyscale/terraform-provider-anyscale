@@ -166,7 +166,7 @@ module "gke" {
 
   project_id = var.google_project_id
   name       = var.gke_cluster_name
-  region     = var.google_region
+  region     = var.gcp_region
   zones      = [data.google_compute_zones.available.names[0], data.google_compute_zones.available.names[1]]
 
   network           = google_compute_network.anyscale.name
@@ -210,7 +210,7 @@ resource "google_compute_subnetwork" "anyscale" {
   name          = "${var.gke_cluster_name}-subnet"
   ip_cidr_range = "10.0.0.0/16"
   network       = google_compute_network.anyscale.id
-  region        = var.google_region
+  region        = var.gcp_region
 
   secondary_ip_range {
     range_name    = "${var.gke_cluster_name}-subnet-pods"

@@ -345,7 +345,7 @@ Most examples use these common variables:
 | `cloud_name` | Name for the Anyscale Cloud | `"my-terraform-cloud"` |
 | `anyscale_org_id` | Your Anyscale org ID | `"org_abc123xyz"` |
 | `anyscale_external_id` | External ID for IAM | `"my-external-id-12345"` |
-| `aws_region` / `gcp_region` / `google_region` / `azure_location` | Cloud provider region (the variable name differs by example - check that example's `variables.tf`) | `"us-east-2"` (AWS) or `"us-central1"` (GCP) |
+| `aws_region` / `gcp_region` / `azure_location` | Cloud provider region (the variable name differs by cloud - check that example's `variables.tf`) | `"us-east-2"` (AWS) or `"us-central1"` (GCP) |
 
 ## Support
 
