@@ -123,8 +123,8 @@ func newMockSystemClusterServer(t *testing.T) (*httptest.Server, *mockSystemClus
 			status = "Terminated"
 		} else {
 			n := atomic.AddInt32(&s.describePollCount, 1)
-			switch {
-			case n == 1:
+			switch n {
+			case 1:
 				status = "StartingUp"
 			default:
 				status = "Running"
