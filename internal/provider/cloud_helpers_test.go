@@ -8,8 +8,12 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func TestResolveCloudNameToID(t *testing.T) {
@@ -683,6 +687,253 @@ func TestBucketNameSemanticEqualPlanModifier(t *testing.T) {
 			t.Errorf("PlanValue = %v, want unknown preserved", got)
 		}
 	})
+}
+
+// regionModifierTestSchema is a minimal synthetic schema - NOT the real
+// CloudResource/CloudResourceResource schema - just enough to exercise
+// regionSemanticEqualPlanModifier in isolation: a top-level region (the
+// sibling the modifier reads via req.Plan.GetAttribute) and an
+// object_storage block containing the region attribute under test, with
+// ONLY regionSemanticEqualPlanModifier in its PlanModifiers - no separate
+// stringplanmodifier.RequiresReplace() composed alongside it, since the
+// modifier subsumes that job directly (see its own doc comment for why
+// composing both does not work: a real acceptance run confirmed it produces
+// "provider produced invalid plan" against an explicit config value).
+func regionModifierTestSchema() schema.Schema {
+	return schema.Schema{
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{Computed: true},
+			"region": schema.StringAttribute{
+				Optional: true,
+			},
+		},
+		Blocks: map[string]schema.Block{
+			"object_storage": schema.SingleNestedBlock{
+				Attributes: map[string]schema.Attribute{
+					"bucket_name": schema.StringAttribute{Optional: true},
+					"region": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							regionSemanticEqualPlanModifier{},
+						},
+					},
+					"endpoint": schema.StringAttribute{Optional: true},
+				},
+			},
+		},
+	}
+}
+
+type regionModifierTestModel struct {
+	ID            types.String `tfsdk:"id"`
+	Region        types.String `tfsdk:"region"`
+	ObjectStorage types.Object `tfsdk:"object_storage"`
+}
+
+func regionModifierTestObjectStorageAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"bucket_name": types.StringType,
+		"region":      types.StringType,
+		"endpoint":    types.StringType,
+	}
+}
+
+// TestRegionSemanticEqualPlanModifier is the regression proof for the
+// object_storage.region "explicit-equal" import replace-loop
+// (OBJECT-STORAGE-REGION-DESIGN-CORRECTION.md, Fix C). Unlike
+// bucketNameSemanticEqualPlanModifier, this modifier never rewrites
+// resp.PlanValue - Terraform Core rejects a planned value that diverges
+// from an explicit, known, non-null config value for a non-Computed
+// attribute (confirmed against a real acceptance run: "provider produced
+// invalid plan" when this modifier tried the rewrite-to-null approach
+// instead). So this modifier implements requires-replace-with-an-exception
+// directly via resp.RequiresReplace, leaving PlanValue untouched in every
+// case - these assertions check RequiresReplace, not PlanValue.
+func TestRegionSemanticEqualPlanModifier(t *testing.T) {
+	ctx := context.Background()
+	m := regionSemanticEqualPlanModifier{}
+	testSchema := regionModifierTestSchema()
+
+	// buildRaw constructs a minimal tftypes.Value for this synthetic schema
+	// with the given top-level region and object_storage.region values, for
+	// use as the Raw field of req.Plan/req.Config/req.State (which all share
+	// the same {Raw, Schema} shape in this framework version).
+	buildRaw := func(cloudRegion, storageRegion string, storageRegionNull bool) tftypes.Value {
+		region := types.StringValue(cloudRegion)
+		var storageRegionVal types.String
+		if storageRegionNull {
+			storageRegionVal = types.StringNull()
+		} else {
+			storageRegionVal = types.StringValue(storageRegion)
+		}
+		obj, diags := types.ObjectValue(regionModifierTestObjectStorageAttrTypes(), map[string]attr.Value{
+			"bucket_name": types.StringValue("my-bucket"),
+			"region":      storageRegionVal,
+			"endpoint":    types.StringNull(),
+		})
+		if diags.HasError() {
+			t.Fatalf("building object_storage fixture: %v", diags)
+		}
+		model := regionModifierTestModel{
+			ID:            types.StringValue("cld_regionmodtest"),
+			Region:        region,
+			ObjectStorage: obj,
+		}
+		raw := tftypes.NewValue(testSchema.Type().TerraformType(ctx), nil)
+		holder := tfsdk.Plan{Schema: testSchema, Raw: raw}
+		if diags := holder.Set(ctx, &model); diags.HasError() {
+			t.Fatalf("setting fixture: %v", diags)
+		}
+		return holder.Raw
+	}
+
+	// runModifier builds Plan/Config/State sharing the given cloudRegion,
+	// invokes the real modifier, and returns whether it flagged
+	// RequiresReplace. isCreate models req.State.Raw as a null tftypes.Value
+	// (no prior state at all) rather than merely a null StateValue for this
+	// one attribute - the distinction this modifier must get right, since a
+	// modifier that only checks StateValue.IsNull() cannot tell a brand-new
+	// resource apart from an existing one whose region happens to be null,
+	// and would wrongly suppress a user's own configured value on every
+	// fresh Create where region matches the cloud region (the common case,
+	// not an edge one).
+	runModifier := func(cloudRegion string, stateRegion string, stateRegionNull bool, isCreate bool, configRegion string) bool {
+		configRaw := buildRaw(cloudRegion, configRegion, false)
+
+		var stateTfsdk tfsdk.State
+		var stateValue types.String
+		if isCreate {
+			stateTfsdk = tfsdk.State{Schema: testSchema, Raw: tftypes.NewValue(testSchema.Type().TerraformType(ctx), nil)}
+			stateValue = types.StringNull()
+		} else {
+			stateRaw := buildRaw(cloudRegion, stateRegion, stateRegionNull)
+			stateTfsdk = tfsdk.State{Schema: testSchema, Raw: stateRaw}
+			if stateRegionNull {
+				stateValue = types.StringNull()
+			} else {
+				stateValue = types.StringValue(stateRegion)
+			}
+		}
+
+		configValue := types.StringValue(configRegion)
+		req := planmodifier.StringRequest{
+			Path:        path.Root("object_storage").AtName("region"),
+			Config:      tfsdk.Config{Schema: testSchema, Raw: configRaw},
+			ConfigValue: configValue,
+			Plan:        tfsdk.Plan{Schema: testSchema, Raw: configRaw}, // plan mirrors config for an Optional non-Computed attribute with an explicit value
+			PlanValue:   configValue,
+			State:       stateTfsdk,
+			StateValue:  stateValue,
+		}
+		resp := &planmodifier.StringResponse{PlanValue: configValue}
+		m.PlanModifyString(ctx, req, resp)
+		if !resp.PlanValue.Equal(configValue) {
+			t.Errorf("PlanValue changed to %v - this modifier must never rewrite PlanValue away from the explicit config value, only decide RequiresReplace", resp.PlanValue)
+		}
+		return resp.RequiresReplace
+	}
+
+	t.Run("CREATE: config region == cloud region, no prior state at all - must not replace (nothing to replace yet)", func(t *testing.T) {
+		if got := runModifier("us-east-2", "", false, true, "us-east-2"); got {
+			t.Error("RequiresReplace = true, want false - Create has no prior resource to replace")
+		}
+	})
+
+	t.Run("SELF-HEAL: existing resource, state region null (lossy import), config region == cloud region - suppress, no replace", func(t *testing.T) {
+		if got := runModifier("us-east-2", "", true, false, "us-east-2"); got {
+			t.Error("RequiresReplace = true, want false - the backend cannot distinguish this from region never having been set")
+		}
+	})
+
+	t.Run("existing resource, state region null, config region genuinely different from cloud region - real change, must replace", func(t *testing.T) {
+		if got := runModifier("us-east-2", "", true, false, "us-west-2"); !got {
+			t.Error("RequiresReplace = false, want true - a config value that differs from the cloud region is a real change, not the null-collapse artifact")
+		}
+	})
+
+	t.Run("existing resource, state and config both already equal to cloud region - trivial no-op", func(t *testing.T) {
+		if got := runModifier("us-east-2", "us-east-2", false, false, "us-east-2"); got {
+			t.Error("RequiresReplace = true, want false - plan equals state, nothing changed")
+		}
+	})
+
+	t.Run("existing resource, state holds a REAL different region, config now sets region == cloud region - genuine change, must still replace", func(t *testing.T) {
+		// Not the same as the null-state self-heal case: state is a real,
+		// non-null, DIFFERENT value (the bucket genuinely was in a different
+		// region before) - moving it to match the cloud region is an actual
+		// change and must still replace, not be silently swallowed.
+		if got := runModifier("us-east-2", "us-west-2", false, false, "us-east-2"); !got {
+			t.Error("RequiresReplace = false, want true - a real prior region actually changing must still replace, even though the new value equals the cloud region")
+		}
+	})
+
+	t.Run("existing resource, state and config both unchanged at a real different region - trivial no-op", func(t *testing.T) {
+		if got := runModifier("us-east-2", "us-west-2", false, false, "us-west-2"); got {
+			t.Error("RequiresReplace = true, want false - plan equals state, nothing changed")
+		}
+	})
+
+	t.Run("existing resource, state region null, but top-level region is UNKNOWN at plan time - must replace, nothing reliable to compare against", func(t *testing.T) {
+		// Distinct from the other cases: the sibling region this modifier
+		// reads is itself Unknown (not yet resolved), not merely different.
+		// Suppressing here would be guessing at a value that isn't known
+		// yet - the safe default is to fall through to an ordinary replace,
+		// same as the framework's own RequiresReplace would without this
+		// modifier at all. buildRaw always sets a known top-level region, so
+		// this one case builds its plan fixture directly instead.
+		model := regionModifierTestModel{
+			ID:            types.StringValue("cld_regionmodtest"),
+			Region:        types.StringUnknown(),
+			ObjectStorage: buildObjectStorageValue(t, "us-east-2", false),
+		}
+		raw := tftypes.NewValue(testSchema.Type().TerraformType(ctx), nil)
+		planHolder := tfsdk.Plan{Schema: testSchema, Raw: raw}
+		if diags := planHolder.Set(ctx, &model); diags.HasError() {
+			t.Fatalf("setting unknown-region plan fixture: %v", diags)
+		}
+
+		stateRaw := buildRaw("us-east-2", "", true)
+		planValue := types.StringValue("us-east-2")
+		req := planmodifier.StringRequest{
+			Path:        path.Root("object_storage").AtName("region"),
+			ConfigValue: planValue,
+			Plan:        planHolder,
+			PlanValue:   planValue,
+			State:       tfsdk.State{Schema: testSchema, Raw: stateRaw},
+			StateValue:  types.StringNull(),
+		}
+		resp := &planmodifier.StringResponse{PlanValue: planValue}
+		m.PlanModifyString(ctx, req, resp)
+		if !resp.PlanValue.Equal(planValue) {
+			t.Errorf("PlanValue changed to %v, want untouched", resp.PlanValue)
+		}
+		if !resp.RequiresReplace {
+			t.Error("RequiresReplace = false, want true - the top-level region is Unknown, nothing reliable to compare against")
+		}
+	})
+}
+
+// buildObjectStorageValue builds an object_storage types.Object fixture -
+// factored out of buildRaw for the Unknown-cloud-region subtest above, which
+// needs to construct its plan fixture by hand (buildRaw always sets a known
+// top-level region).
+func buildObjectStorageValue(t *testing.T, storageRegion string, storageRegionNull bool) types.Object {
+	t.Helper()
+	var storageRegionVal types.String
+	if storageRegionNull {
+		storageRegionVal = types.StringNull()
+	} else {
+		storageRegionVal = types.StringValue(storageRegion)
+	}
+	obj, diags := types.ObjectValue(regionModifierTestObjectStorageAttrTypes(), map[string]attr.Value{
+		"bucket_name": types.StringValue("my-bucket"),
+		"region":      storageRegionVal,
+		"endpoint":    types.StringNull(),
+	})
+	if diags.HasError() {
+		t.Fatalf("building object_storage fixture: %v", diags)
+	}
+	return obj
 }
 
 func TestStripAnyBucketSchemePrefix(t *testing.T) {

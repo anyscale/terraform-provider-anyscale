@@ -486,9 +486,19 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"region": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The bucket region (if different from cloud region). Only recovered at import when it genuinely differs from the cloud's own region - the backend fills in the cloud's own region by default even when this was never set, so a matching value is deliberately left null rather than copied back verbatim.",
+						MarkdownDescription: "The bucket region (if different from cloud region). A configuration that sets this to the same value as the cloud's own region is treated as equivalent to a null recovered value for plan purposes, so it will not force replacement - the Anyscale API cannot tell \"never set\" apart from \"explicitly set to the cloud's own region\" once stored, so there is no matching value to compare against otherwise. A cloud that already has a null value in state from an older provider version reconciles this with a one-time in-place update on its next plan, never a replace. A genuinely different bucket region round-trips normally via the real API value, and a real change to it still requires replacement.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							// regionSemanticEqualPlanModifier replaces the
+							// plain stringplanmodifier.RequiresReplace() other
+							// attributes in this block use - it implements
+							// requires-replace-with-an-exception directly
+							// (see its own doc comment in cloud_helpers.go for
+							// why composing with a separate RequiresReplace()
+							// does not work here). Do not add
+							// stringplanmodifier.RequiresReplace() alongside
+							// it - that would force replacement unconditionally
+							// again, defeating the exception this exists for.
+							regionSemanticEqualPlanModifier{},
 						},
 					},
 					"endpoint": schema.StringAttribute{
@@ -1008,6 +1018,9 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// value; addCloudResource's own merge (mergeAWSDerivedFields/
 	// mergeGCPDerivedFields/mergeFileStorageDerivedFields with the real
 	// response) overwrites this placeholder once add_resource succeeds.
+	// object_storage.region is NOT in this set - it stays Optional (not
+	// Computed); its import replace-loop fix is regionSemanticEqualPlanModifier
+	// (see the schema), a plan-time fix with no merge/derive step needed.
 	if awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, nil); !d.HasError() {
 		plan.AWSConfig = awsConfig
 	} else {

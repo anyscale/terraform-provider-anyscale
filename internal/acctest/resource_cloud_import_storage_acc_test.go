@@ -70,7 +70,7 @@ func TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM(t *testing.T) {
 			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/storagetest-cluster-node",
 			"external_id": "storagetest-external-id"
 		},
-		"object_storage": {"bucket_name": "s3://my-bucket", "region": "us-east-2"},
+		"object_storage": {"bucket_name": "s3://my-bucket", "region": null},
 		"file_storage": {"file_storage_id": "fs-storagetest123"}
 	}]`
 
@@ -125,9 +125,14 @@ resource "anyscale_cloud" "test" {
 			{
 				// THE regression proof: import must recover object_storage and
 				// file_storage to exactly what create produced, landmines
-				// included. Today this fails: ImportState leaves both blocks
-				// null for a VM cloud, so they mismatch the prior (populated)
-				// state instead of matching it.
+				// included. object_storage.region stays null through both
+				// steps here - config never sets it, and the mock's
+				// resources-list response also carries no real region value
+				// (matching the real backend precisely: it never returns a
+				// region equal to the cloud's own region - see
+				// TestAccCloudResource_ObjectStorageRegionSemanticEqualOnImport_AWSVM
+				// for the explicit-equal case this reflects, and its own doc
+				// comment for the backend trace).
 				ResourceName:      resourceName,
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -333,7 +338,7 @@ func TestAccCloudResource_ImportRecoversStorageBlocks_K8S(t *testing.T) {
 			"anyscale_operator_iam_identity": "arn:aws:iam::123456789012:role/storagetest-k8s-operator",
 			"zones": ["us-east-2a", "us-east-2b"]
 		},
-		"object_storage": {"bucket_name": "s3://my-k8s-bucket", "region": "us-east-2"},
+		"object_storage": {"bucket_name": "s3://my-k8s-bucket", "region": null},
 		"file_storage": {"persistent_volume_claim": "storagetest-pvc"}
 	}]`
 
@@ -377,8 +382,10 @@ resource "anyscale_cloud" "test" {
 			{
 				// file_storage is deliberately NOT ignored here, unlike the
 				// pre-existing K8S lifecycle test - proving it now round-trips
-				// is the point. object_storage was already fine for K8S before
-				// this fix, so this step also guards against a regression there.
+				// is the point. object_storage.region stays null through both
+				// steps, same reasoning as the AWS-VM sibling test - the mock
+				// reflects the real backend, which never returns a region
+				// equal to the cloud's own region.
 				ResourceName:      resourceName,
 				ImportState:       true,
 				ImportStateVerify: true,

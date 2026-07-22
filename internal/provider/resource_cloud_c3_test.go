@@ -389,7 +389,13 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		}
 	})
 
-	t.Run("AWS: object_storage.region equal to the cloud region is masked (L1)", func(t *testing.T) {
+	t.Run("AWS: object_storage.region equal to the cloud region is now recovered verbatim (Computed self-heal, supersedes the old L1 masking)", func(t *testing.T) {
+		// region is now Optional+Computed with UseStateForUnknown ordered
+		// before RequiresReplace (see the schema) - recovering the real
+		// value at import is correct now, unlike the old null-when-equal
+		// guard (PR #180), which masked this exact case and left a config
+		// that explicitly sets region equal to the cloud region nulled at
+		// import, forcing a replace.
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack:  "VM",
 			Region:        "us-east-2",
@@ -404,8 +410,8 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 
 		var osModel ObjectStorageModel
 		blocks["object_storage"].As(ctx, &osModel, basetypes.ObjectAsOptions{})
-		if !osModel.Region.IsNull() {
-			t.Errorf("object_storage.Region = %v, want null - the backend's region auto-fill must not force a replace against a config that never set region (L1)", osModel.Region.ValueString())
+		if osModel.Region.ValueString() != "us-east-2" {
+			t.Errorf("object_storage.Region = %v, want us-east-2 - region is Computed now, so recovering it at import no longer risks a replace-loop the way it did when it was plain Optional+RequiresReplace", osModel.Region.ValueString())
 		}
 	})
 
