@@ -303,8 +303,9 @@ func upgradeCloudResourceStateV0toV1(ctx context.Context, req resource.UpgradeSt
 // from a v0 kubernetes_config Object, carrying the 3 real attributes
 // (anyscale_operator_iam_identity/zones/redis_endpoint) through unchanged.
 // There is nothing to migrate for the 5 dropped attributes: they were never
-// sent to the Anyscale API (see kubernetesConfigInertFieldDeprecationMessage),
-// so no value ever stored for them carried real information to preserve -
+// sent to the Anyscale API (pure Terraform-side bookkeeping - see
+// kubernetesConfigAttrTypes's doc comment in cloud_config_flatten.go), so no
+// value ever stored for them carried real information to preserve -
 // dropping them is the entire migration, not a lossy approximation of one.
 func upgradeKubernetesConfigV0toV1(v0 types.Object) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics

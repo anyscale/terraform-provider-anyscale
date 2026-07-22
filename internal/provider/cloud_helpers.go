@@ -14,16 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// kubernetesConfigInertFieldDeprecationMessage is shared by both resources'
-// kubernetes_config.{namespace,ingress_host,cluster_name,context,
-// kubeconfig_path} attributes (C5): expandKubernetesConfig only ever sends
-// anyscale_operator_iam_identity/zones/redis_endpoint to the API, so these
-// five have never had any effect - they're deprecated, not removed, since
-// removing a schema attribute outright is a breaking change on its own
-// (batched into a future major with migration notes instead; see
-// CLOUD-SYNC-DESIGN.md C5).
-const kubernetesConfigInertFieldDeprecationMessage = "not sent to the Anyscale API; has no effect. Will be removed in a future major release - remove from your configuration."
-
 // azureCloudNotSupportedMessage and genericCloudNotSupportedMessage are the
 // single source of truth for the AZURE/GENERIC rejection, shared between each
 // resource's ValidateConfig (plan-time guard, added for K9 - catches the
