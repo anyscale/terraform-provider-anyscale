@@ -636,7 +636,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				},
 				Blocks: map[string]schema.Block{
 					"mount_targets": schema.ListNestedBlock{
-						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both.",
+						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both. Not recovered during `terraform import`: imported state deliberately leaves this null even when the backend has auto-discovered real mount target addresses for a registered cloud, since those addresses are cloud-provider-assigned and not reliably expressible in configuration - a config that omits this block continues to plan cleanly after import. Only set this block when creating a new cloud through Terraform, sourcing the address from your EFS/Filestore module output (see the aws-vm example).",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.RequiresReplace(),
 						},

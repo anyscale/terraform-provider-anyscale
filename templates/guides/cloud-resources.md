@@ -267,7 +267,7 @@ plans cleanly too.
 
 One tradeoff worth knowing: at import time the provider can't see your `.tf`, only the live cloud, so
 `object_storage` and `file_storage` recover whatever genuinely exists on the backend regardless of what
-your configuration declares. If a cloud's storage was auto-provisioned (or configured outside
+your configuration declares (with one deliberate exception — see `mount_targets` below). If a cloud's storage was auto-provisioned (or configured outside
 Terraform) and was never written into your `.tf`, importing it now surfaces a one-time reconcile diff
 on the very next `plan` — where before, that same gap stayed silent because these blocks were never
 recovered at all. This is the intended tradeoff: a reviewable diff is safer than the destructive
@@ -303,6 +303,18 @@ A few more things worth knowing:
   than silently defaulting to a path the backend isn't actually using. This is strictly better than
   before this fix, when `file_storage` wasn't recovered at import at all; it's a one-time consequence
   of the pre-existing GCP auto-discovery behavior, not a new limitation of its own.
+- **`file_storage.mount_targets` is deliberately excluded from this recovery, unlike the rest of
+  `file_storage`.** Import always leaves it null, even when the backend has auto-discovered real
+  mount target addresses for a registered cloud. On AWS and GCP the backend derives a single address
+  from the EFS/Filestore resource itself; only Azure and Generic (always K8S) carry a genuine
+  multi-element, per-zone list. Either way these addresses are backend-discovered, not something you
+  can reliably declare in your configuration, so recovering them would just relocate the same
+  forced-replace problem this fix exists to solve onto a field nobody can actually redeclare. A
+  configuration that only declares `file_storage_id` (and omits `mount_targets` entirely) plans
+  cleanly after import and stays that way, since state never gains a value your config didn't put
+  there. `mount_targets` remains a valid input when creating a new cloud through Terraform, sourcing
+  the address from your EFS/Filestore module output (see the aws-vm or gcp-vm example) — this only
+  affects what import recovers into state.
 - **`compute_stack` is read from the cloud's own attached resource, not just the cloud-level
   summary field.** `GET /clouds/{id}` includes its own `compute_stack`, but that value is
   backend-derived from whichever resource the API considers primary, and defaults to `VM` if it
