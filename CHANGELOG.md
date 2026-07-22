@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-07-22
+
+### Fixed
+
+- resource/anyscale_cloud: `terraform import` no longer recovers `file_storage.mount_targets` from the backend, since those mount target addresses are cloud-provider-assigned and cannot be reliably declared in configuration; a configuration that only declares `file_storage_id` now plans cleanly after a fresh import. This only applies to imports performed with this version or later; a cloud already imported under a prior version keeps its previously-recovered `mount_targets` in state and must be re-imported (`terraform state rm` then `terraform import` again) to pick up the fix — upgrading the provider in place or running `terraform apply -refresh-only` will not recover it.
+- resource/anyscale_cloud_resource: `terraform import` no longer recovers `file_storage.mount_targets` from the backend, for the same reason as the `anyscale_cloud` fix above; a configuration that only declares `file_storage_id` now plans cleanly after a fresh import. This only applies to imports performed with this version or later; a cloud resource already imported under a prior version keeps its previously-recovered `mount_targets` in state and must be re-imported (`terraform state rm` then `terraform import` again) to pick up the fix — upgrading the provider in place or running `terraform apply -refresh-only` will not recover it.
+
 ## [0.16.0] - 2026-07-21
 
 ### Breaking Changes
@@ -796,7 +803,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.1
 [0.16.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.0
 [0.15.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.3
 [0.15.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.2
