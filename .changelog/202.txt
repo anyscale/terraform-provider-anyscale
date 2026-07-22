@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: Remove a stale `enable_system_cluster` reference from the cloud-resources guide (docs/guides/cloud-resources.md); the field was removed in v0.18.0, this guide just hadn't been updated to match.
-```
