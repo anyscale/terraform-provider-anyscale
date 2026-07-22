@@ -186,6 +186,58 @@ func flattenAWSConfig(ctx context.Context, cfg *AWSConfig) (types.Object, diag.D
 	return obj, diags
 }
 
+// mergeAWSDerivedFields fills memorydb_cluster_arn and
+// memorydb_cluster_endpoint into awsConfig ONLY where the plan left them
+// null or unknown (config omitted them) - an explicit config value is never
+// overwritten. derived is the add_resource response's own AWSConfig, which
+// already carries these fields fully resolved by the time Create's response
+// arrives (the backend's own _populate_aws_values gates its derivation on
+// "unset", the identical fill-when-omitted semantics this mirrors). Called
+// from Create only - Update never touches aws_config (see C3-v2), and these
+// 3 fields are Computed+UseStateForUnknown, so Update's plan value is
+// already resolved before Update ever runs.
+//
+// derived may be nil - both resources persist an early, defensive
+// State.Set before add_resource is even called (to avoid orphaning a
+// partially-created cloud on a later failure), and a Computed attribute
+// left Unknown at that early Set is a hard "provider produced inconsistent
+// result" error - the same reason CloudResourceID/IsDefault/ComputeStack
+// are defensively nulled nearby in both Create functions. So a nil derived
+// resolves any still-Unknown field to null (a safe placeholder for that
+// early Set) rather than leaving it Unknown; calling this again once the
+// real derived data is available overwrites the placeholder with the real
+// value. Returns awsConfig unchanged if it is null (no aws_config in this
+// plan, e.g. a K8S cloud).
+func mergeAWSDerivedFields(awsConfig types.Object, derived *AWSConfig) (types.Object, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if awsConfig.IsNull() || awsConfig.IsUnknown() {
+		return awsConfig, diags
+	}
+
+	attrs := awsConfig.Attributes()
+	patched := make(map[string]attr.Value, len(attrs))
+	for k, v := range attrs {
+		patched[k] = v
+	}
+
+	var arn, endpoint *string
+	if derived != nil {
+		arn = derived.MemoryDBClusterARN
+		endpoint = derived.MemoryDBClusterEndpoint
+	}
+
+	if v, ok := patched["memorydb_cluster_arn"]; ok && (v.IsNull() || v.IsUnknown()) {
+		patched["memorydb_cluster_arn"] = stringPtrOrNull(arn)
+	}
+	if v, ok := patched["memorydb_cluster_endpoint"]; ok && (v.IsNull() || v.IsUnknown()) {
+		patched["memorydb_cluster_endpoint"] = stringPtrOrNull(endpoint)
+	}
+
+	obj, d := types.ObjectValue(awsConfigAttrTypes(), patched)
+	diags.Append(d...)
+	return obj, diags
+}
+
 // flattenGCPConfig populates gcp_config from the API's GCPConfig.
 func flattenGCPConfig(ctx context.Context, cfg *GCPConfig) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
@@ -212,6 +264,36 @@ func flattenGCPConfig(ctx context.Context, cfg *GCPConfig) (types.Object, diag.D
 	}
 
 	obj, d := types.ObjectValue(gcpConfigAttrTypes(), attrs)
+	diags.Append(d...)
+	return obj, diags
+}
+
+// mergeGCPDerivedFields is mergeAWSDerivedFields for
+// gcp_config.memorystore_endpoint - same fill-when-omitted rule, same
+// Create-only call site, same nil-derived-resolves-Unknown-to-null
+// reasoning for the early pre-add_resource State.Set.
+func mergeGCPDerivedFields(gcpConfig types.Object, derived *GCPConfig) (types.Object, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if gcpConfig.IsNull() || gcpConfig.IsUnknown() {
+		return gcpConfig, diags
+	}
+
+	attrs := gcpConfig.Attributes()
+	patched := make(map[string]attr.Value, len(attrs))
+	for k, v := range attrs {
+		patched[k] = v
+	}
+
+	endpoint := ""
+	if derived != nil {
+		endpoint = derived.MemorystoreEndpoint
+	}
+
+	if v, ok := patched["memorystore_endpoint"]; ok && (v.IsNull() || v.IsUnknown()) {
+		patched["memorystore_endpoint"] = stringOrNull(endpoint)
+	}
+
+	obj, d := types.ObjectValue(gcpConfigAttrTypes(), patched)
 	diags.Append(d...)
 	return obj, diags
 }

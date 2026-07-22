@@ -268,6 +268,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Optional:            true,
 						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.",
 						PlanModifiers: []planmodifier.List{
+							awsSubnetIDsSemanticEqualPlanModifier{},
 							listplanmodifier.RequiresReplace(),
 						},
 					},
@@ -276,6 +277,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Optional:            true,
 						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).",
 						PlanModifiers: []planmodifier.Map{
+							awsSubnetIDsToAZSemanticEqualPlanModifier{},
 							mapplanmodifier.RequiresReplace(),
 						},
 					},
@@ -324,15 +326,19 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"memorydb_cluster_arn": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "MemoryDB cluster ARN. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
+						Computed:            true,
+						MarkdownDescription: "MemoryDB cluster ARN. Derived automatically from `memorydb_cluster_name` when left unset - the Anyscale API returns the cluster's real ARN once it exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
 					"memorydb_cluster_endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS - use a `rediss://` prefix when connecting. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
+						Computed:            true,
+						MarkdownDescription: "MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS - use a `rediss://` prefix when connecting. Derived automatically from `memorydb_cluster_name` when left unset, the same way as `memorydb_cluster_arn` above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
 						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
@@ -410,8 +416,10 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 					"memorystore_endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
+						Computed:            true,
+						MarkdownDescription: "Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Derived automatically from `memorystore_instance_name` when left unset, the same way as MemoryDB's arn/endpoint fields above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
 						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
@@ -1034,6 +1042,24 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		} else {
 			plan.ComputeStack = types.StringValue("VM")
 		}
+	}
+
+	// memorydb_cluster_arn/memorydb_cluster_endpoint/memorystore_endpoint are
+	// now Computed - if config omitted them, they are still Unknown here
+	// (add_resource, which resolves them, hasn't run yet at this point for
+	// the all-in-one path). Resolve to a safe null placeholder so the early
+	// State.Set below never persists an Unknown value; addCloudResource's
+	// own merge (mergeAWSDerivedFields/mergeGCPDerivedFields with the real
+	// response) overwrites this placeholder once add_resource succeeds.
+	if awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, nil); !d.HasError() {
+		plan.AWSConfig = awsConfig
+	} else {
+		resp.Diagnostics.Append(d...)
+	}
+	if gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, nil); !d.HasError() {
+		plan.GCPConfig = gcpConfig
+	} else {
+		resp.Diagnostics.Append(d...)
 	}
 
 	// Persist state now that the cloud exists remotely, before any subsequent
@@ -1695,6 +1721,20 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		tflog.Warn(ctx, "Failed to parse add_resource response", map[string]any{"error": err.Error()})
 	} else {
 		plan.CloudResourceID = types.StringValue(deployResult.Result.CloudResourceID)
+
+		// Fill memorydb/memorystore fields the plan left unset from the
+		// response we already received and, until now, discarded the rest
+		// of (see mergeAWSDerivedFields/mergeGCPDerivedFields doc comments).
+		if awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, deployResult.Result.AWSConfig); !d.HasError() {
+			plan.AWSConfig = awsConfig
+		} else {
+			tflog.Warn(ctx, "Failed to merge memorydb-derived fields into aws_config", map[string]any{"diagnostics": d.Errors()})
+		}
+		if gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, deployResult.Result.GCPConfig); !d.HasError() {
+			plan.GCPConfig = gcpConfig
+		} else {
+			tflog.Warn(ctx, "Failed to merge memorystore-derived fields into gcp_config", map[string]any{"diagnostics": d.Errors()})
+		}
 	}
 
 	tflog.Info(ctx, "Cloud resource added successfully", map[string]any{"cloud_id": cloudID})

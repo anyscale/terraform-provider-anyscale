@@ -311,6 +311,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.",
 						PlanModifiers: []planmodifier.List{
+							awsSubnetIDsSemanticEqualPlanModifier{},
 							listplanmodifier.RequiresReplace(),
 						},
 					},
@@ -319,6 +320,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).",
 						PlanModifiers: []planmodifier.Map{
+							awsSubnetIDsToAZSemanticEqualPlanModifier{},
 							mapplanmodifier.RequiresReplace(),
 						},
 					},
@@ -367,15 +369,19 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"memorydb_cluster_arn": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "MemoryDB cluster ARN. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
+						Computed:            true,
+						MarkdownDescription: "MemoryDB cluster ARN. Derived automatically from `memorydb_cluster_name` when left unset - the Anyscale API returns the cluster's real ARN once it exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.",
 						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
 					"memorydb_cluster_endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS - use a `rediss://` prefix when connecting. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
+						Computed:            true,
+						MarkdownDescription: "MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS - use a `rediss://` prefix when connecting. Derived automatically from `memorydb_cluster_name` when left unset, the same way as `memorydb_cluster_arn` above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
 						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
@@ -453,8 +459,10 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"memorystore_endpoint": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
+						Computed:            true,
+						MarkdownDescription: "Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Derived automatically from `memorystore_instance_name` when left unset, the same way as MemoryDB's arn/endpoint fields above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.",
 						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
@@ -862,6 +870,24 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	plan.ID = types.StringValue(fmt.Sprintf("%s:%s", cloudID, resourceName))
 	plan.Name = types.StringValue(resourceName)
 	plan.CloudResourceID = types.StringValue(deployResp.Result.CloudResourceID)
+
+	// Fill memorydb/memorystore fields the plan left unset from the response
+	// we already received and, until now, discarded the rest of (see
+	// mergeAWSDerivedFields/mergeGCPDerivedFields doc comments). Must happen
+	// before the early State.Set below - these 3 fields are now
+	// Computed, and an omitted-in-config value is still Unknown at this
+	// point, same reasoning as the OperatorStatus/IsDefault defensive block
+	// immediately following this one.
+	if awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, deployResp.Result.AWSConfig); !d.HasError() {
+		plan.AWSConfig = awsConfig
+	} else {
+		resp.Diagnostics.Append(d...)
+	}
+	if gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, deployResp.Result.GCPConfig); !d.HasError() {
+		plan.GCPConfig = gcpConfig
+	} else {
+		resp.Diagnostics.Append(d...)
+	}
 
 	// Initialize Status to known null - will be updated by readCloudResource if available
 	if plan.Status.IsUnknown() {
