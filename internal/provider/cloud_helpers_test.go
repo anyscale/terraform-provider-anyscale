@@ -313,27 +313,20 @@ func testAzureConfigObj(tenantID string) types.Object {
 	)
 }
 
+// testKubernetesConfigObj builds a kubernetes_config fixture with only the
+// 3 real, API-backed fields - the other 5 were removed by task #8 (see
+// TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why).
 func testKubernetesConfigObj(operatorIdentity string) types.Object {
 	return types.ObjectValueMust(
 		map[string]attr.Type{
 			"anyscale_operator_iam_identity": types.StringType,
 			"zones":                          types.ListType{ElemType: types.StringType},
 			"redis_endpoint":                 types.StringType,
-			"namespace":                      types.StringType,
-			"ingress_host":                   types.StringType,
-			"cluster_name":                   types.StringType,
-			"context":                        types.StringType,
-			"kubeconfig_path":                types.StringType,
 		},
 		map[string]attr.Value{
 			"anyscale_operator_iam_identity": types.StringValue(operatorIdentity),
 			"zones":                          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("us-east-2a")}),
 			"redis_endpoint":                 types.StringNull(),
-			"namespace":                      types.StringNull(),
-			"ingress_host":                   types.StringNull(),
-			"cluster_name":                   types.StringNull(),
-			"context":                        types.StringNull(),
-			"kubeconfig_path":                types.StringNull(),
 		},
 	)
 }

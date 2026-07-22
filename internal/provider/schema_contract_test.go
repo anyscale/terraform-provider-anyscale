@@ -99,13 +99,16 @@ func hasMapPlanModifierDescription(mods []planmodifier.Map, want string) bool {
 	return false
 }
 
-func hasListPlanModifierDescription(mods []planmodifier.List, want string) bool {
-	for _, m := range mods {
+// indexOfListPlanModifierDescription is indexOfPlanModifierDescription's
+// planmodifier.List analogue - same ordering hazard, same reasoning, for
+// List-typed attributes like file_storage.mount_targets.
+func indexOfListPlanModifierDescription(mods []planmodifier.List, want string) int {
+	for i, m := range mods {
 		if m.Description(context.Background()) == want {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 func hasInt64PlanModifierDescription(mods []planmodifier.Int64, want string) bool {
@@ -471,39 +474,22 @@ func TestComputeConfigCC6DataSourceTopologyParity(t *testing.T) {
 
 // TestCloudResourceHardenedFieldsRequireReplace pins task 861aaf10's fix: on
 // anyscale_cloud_resource, Update() is a no-op (it re-reads state but never
-// calls the API), so any nested kubernetes_config / file_storage attribute
-// without RequiresReplace silently swallows an edit — the plan diff never
-// converges because nothing ever tells Terraform the change needs a replace.
-// This catches that regression class in milliseconds instead of needing the
+// calls the API), so any nested file_storage attribute without
+// RequiresReplace silently swallows an edit — the plan diff never converges
+// because nothing ever tells Terraform the change needs a replace. This
+// catches that regression class in milliseconds instead of needing the
 // real-AWS-infra acceptance tests (SkipIfNoRealInfra) to ever run.
 //
-// Deliberately NOT covered here yet: anyscale_cloud carries the identical
-// duplicated kubernetes_config/file_storage shape (tracked as task 02118d55,
-// the sibling mirror fix). Asserting it here before that fix lands would fail
-// for the right reason but at the wrong time — add that case once 02118d55
-// merges, not before.
+// The kubernetes_config coverage this test originally had is gone along
+// with the 5 fields task #8 removed (see
+// TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why) - nothing
+// left to pin, since the fields don't exist.
+//
+// anyscale_cloud's identical duplicated file_storage shape is covered
+// separately by TestCloudMountTargetsHardenedFieldsRequireReplace below,
+// closing the previously-tracked gap (task 02118d55).
 func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
 	s := schemaOf(t, &CloudResourceResource{})
-
-	k8sBlock, ok := s.Blocks["kubernetes_config"].(schema.SingleNestedBlock)
-	if !ok {
-		t.Fatalf("kubernetes_config is not a schema.SingleNestedBlock (got %T)", s.Blocks["kubernetes_config"])
-	}
-
-	k8sStringAttrs := []string{"namespace", "ingress_host", "cluster_name", "context", "kubeconfig_path"}
-	for _, name := range k8sStringAttrs {
-		name := name
-		t.Run("kubernetes_config."+name, func(t *testing.T) {
-			attr, ok := k8sBlock.Attributes[name].(schema.StringAttribute)
-			if !ok {
-				t.Fatalf("kubernetes_config.%s is not a schema.StringAttribute (got %T)", name, k8sBlock.Attributes[name])
-			}
-			if !hasPlanModifierDescription(attr.PlanModifiers, descRequiresReplace) {
-				t.Errorf("kubernetes_config.%s must include stringplanmodifier.RequiresReplace() — Update() is a "+
-					"no-op, so without this an edit is silently swallowed and the plan never converges (task 861aaf10)", name)
-			}
-		})
-	}
 
 	fileStorageBlock, ok := s.Blocks["file_storage"].(schema.SingleNestedBlock)
 	if !ok {
@@ -521,60 +507,95 @@ func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
 		}
 	})
 
+	// mount_targets is now Optional+Computed (see
+	// mount_targets_state_compat_test.go for the Block-to-Attribute
+	// rationale). This subtest pins the new attribute shape, replacing the
+	// old ListNestedBlock pin (task 861aaf10).
 	t.Run("file_storage.mount_targets", func(t *testing.T) {
-		mountTargets, ok := fileStorageBlock.Blocks["mount_targets"].(schema.ListNestedBlock)
+		mountTargets, ok := fileStorageBlock.Attributes["mount_targets"].(schema.ListNestedAttribute)
 		if !ok {
-			t.Fatalf("file_storage.mount_targets is not a schema.ListNestedBlock (got %T)", fileStorageBlock.Blocks["mount_targets"])
+			t.Fatalf("file_storage.mount_targets is not a schema.ListNestedAttribute (got %T)", fileStorageBlock.Attributes["mount_targets"])
 		}
-		if !hasListPlanModifierDescription(mountTargets.PlanModifiers, descRequiresReplace) {
-			t.Errorf("file_storage.mount_targets must include listplanmodifier.RequiresReplace() at the block level " +
-				"— editing an element's zone hits the same swallowed-edit bug via a different modifier type (task 861aaf10)")
+		if !mountTargets.Computed {
+			t.Error("file_storage.mount_targets must be Computed - it self-heals already-imported state via " +
+				"UseStateForUnknown instead of staying a frozen, never-recovered null forever")
+		}
+		if !mountTargets.Optional {
+			t.Error("file_storage.mount_targets must remain Optional - a config may still set it explicitly")
+		}
+		usfuIdx := indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descUseStateForUnknown)
+		rrIdx := indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descRequiresReplace)
+		if usfuIdx == -1 {
+			t.Error("file_storage.mount_targets must include listplanmodifier.UseStateForUnknown()")
+		}
+		if rrIdx == -1 {
+			t.Error("file_storage.mount_targets must include listplanmodifier.RequiresReplace() - the provider has " +
+				"no in-place update path for it (task 861aaf10)")
+		}
+		if usfuIdx != -1 && rrIdx != -1 && usfuIdx > rrIdx {
+			t.Errorf("file_storage.mount_targets: UseStateForUnknown (index %d) must be declared BEFORE "+
+				"RequiresReplace (index %d) - the backwards order silently reproduces the replace-on-import bug "+
+				"this fix exists to close, see indexOfPlanModifierDescription's doc comment", usfuIdx, rrIdx)
 		}
 	})
 }
 
-// TestKubernetesConfigInertFieldsAreDeprecated pins C5: namespace/
-// ingress_host/cluster_name/context/kubeconfig_path are never sent to the
-// API (expandKubernetesConfig only forwards anyscale_operator_iam_identity/
-// zones/redis_endpoint), so setting any of them silently does nothing. Both
-// resources' kubernetes_config block must mark all five Deprecated with a
-// message that states a removal target, not just "deprecated" - a bare
-// "deprecated" tells a user something changed but not what to do about it.
-func TestKubernetesConfigInertFieldsAreDeprecated(t *testing.T) {
-	inertFields := []string{"namespace", "ingress_host", "cluster_name", "context", "kubeconfig_path"}
+// TestCloudMountTargetsHardenedFieldsRequireReplace is
+// TestCloudResourceHardenedFieldsRequireReplace's sibling for anyscale_cloud
+// - closing task 02118d55, the previously-tracked gap where only
+// anyscale_cloud_resource had this pinned. anyscale_cloud carries the
+// identical duplicated file_storage shape (both resources build their
+// schema independently, field-for-field identical), so the same
+// swallowed-edit risk applies here too.
+func TestCloudMountTargetsHardenedFieldsRequireReplace(t *testing.T) {
+	s := schemaOf(t, &CloudResource{})
 
-	for _, tc := range []struct {
-		name string
-		res  resource.Resource
-	}{
-		{"anyscale_cloud", &CloudResource{}},
-		{"anyscale_cloud_resource", &CloudResourceResource{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s := schemaOf(t, tc.res)
-			k8sBlock, ok := s.Blocks["kubernetes_config"].(schema.SingleNestedBlock)
-			if !ok {
-				t.Fatalf("kubernetes_config is not a schema.SingleNestedBlock (got %T)", s.Blocks["kubernetes_config"])
-			}
-
-			for _, name := range inertFields {
-				name := name
-				t.Run(name, func(t *testing.T) {
-					attr, ok := k8sBlock.Attributes[name].(schema.StringAttribute)
-					if !ok {
-						t.Fatalf("kubernetes_config.%s is not a schema.StringAttribute (got %T)", name, k8sBlock.Attributes[name])
-					}
-					if attr.DeprecationMessage == "" {
-						t.Errorf("kubernetes_config.%s has no DeprecationMessage - it's never sent to the API and has no effect (C5)", name)
-					}
-					if !strings.Contains(strings.ToLower(attr.DeprecationMessage), "removed in a future") {
-						t.Errorf("kubernetes_config.%s DeprecationMessage = %q, want it to state a removal target (shipwright's refinement) not just \"deprecated\"", name, attr.DeprecationMessage)
-					}
-				})
-			}
-		})
+	fileStorageBlock, ok := s.Blocks["file_storage"].(schema.SingleNestedBlock)
+	if !ok {
+		t.Fatalf("file_storage is not a schema.SingleNestedBlock (got %T)", s.Blocks["file_storage"])
 	}
+
+	t.Run("file_storage.mount_path", func(t *testing.T) {
+		mountPath, ok := fileStorageBlock.Attributes["mount_path"].(schema.StringAttribute)
+		if !ok {
+			t.Fatalf("file_storage.mount_path is not a schema.StringAttribute (got %T)", fileStorageBlock.Attributes["mount_path"])
+		}
+		if !hasPlanModifierDescription(mountPath.PlanModifiers, descRequiresReplace) {
+			t.Errorf("file_storage.mount_path must include stringplanmodifier.RequiresReplace() — same swallowed-edit " +
+				"bug as anyscale_cloud_resource (task 861aaf10)")
+		}
+	})
+
+	t.Run("file_storage.mount_targets", func(t *testing.T) {
+		mountTargets, ok := fileStorageBlock.Attributes["mount_targets"].(schema.ListNestedAttribute)
+		if !ok {
+			t.Fatalf("file_storage.mount_targets is not a schema.ListNestedAttribute (got %T)", fileStorageBlock.Attributes["mount_targets"])
+		}
+		if !mountTargets.Computed {
+			t.Error("file_storage.mount_targets must be Computed - it self-heals already-imported state via " +
+				"UseStateForUnknown instead of staying a frozen, never-recovered null forever")
+		}
+		usfuIdx := indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descUseStateForUnknown)
+		rrIdx := indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descRequiresReplace)
+		if usfuIdx == -1 || rrIdx == -1 {
+			t.Fatalf("file_storage.mount_targets must include both UseStateForUnknown and RequiresReplace (got usfuIdx=%d rrIdx=%d)", usfuIdx, rrIdx)
+		}
+		if usfuIdx > rrIdx {
+			t.Errorf("file_storage.mount_targets: UseStateForUnknown (index %d) must be declared BEFORE "+
+				"RequiresReplace (index %d) - same ordering hazard as anyscale_cloud_resource", usfuIdx, rrIdx)
+		}
+	})
 }
+
+// TestKubernetesConfigInertFieldsAreDeprecated (C5's original deprecation
+// pin for the 5 fields task #8 removed - see
+// TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why) is deleted,
+// not rewritten: there is no longer a deprecation state to assert. See
+// internal/acctest/warning_diagnostics_acc_test.go,
+// TestAccCloudResource_KubernetesConfigRemovedFieldsRejected, for the
+// replacement coverage - a removed attribute must hard-error at
+// validate-time, not warn, which needs the real terraform-validate flow
+// this schema-only test file cannot exercise.
 
 // TestProjectDescriptionRequiresReplaceIfConfigured pins task 452e7154's fix.
 // anyscale_project.description is Optional+Computed (the API auto-generates
@@ -727,14 +748,9 @@ func TestContainerImageBuildStatusDescriptionsMatchAcceptedEnum(t *testing.T) {
 // Import Round-Trip Gaps memorydb/memorystore fix (Path A): the 3
 // backend-derived fields (aws_config.memorydb_cluster_arn,
 // aws_config.memorydb_cluster_endpoint, gcp_config.memorystore_endpoint)
-// must be Optional+Computed with stringplanmodifier.UseStateForUnknown()
-// declared BEFORE stringplanmodifier.RequiresReplace() in each field's
-// PlanModifiers slice - order is load-bearing, not stylistic (see
-// indexOfPlanModifierDescription's doc comment). A backwards order
-// compiles, both modifiers report "present", and every other test that only
-// checks presence would pass - it silently reproduces the exact
-// replace-on-import bug the fix exists to close. This test is the one place
-// that would catch that regression.
+// must be Optional+Computed with UseStateForUnknown declared BEFORE
+// RequiresReplace - see indexOfPlanModifierDescription's doc comment for
+// why the order is load-bearing, not stylistic.
 func TestMemoryDBMemorystoreFieldsComputedWithCorrectModifierOrder(t *testing.T) {
 	type fieldCase struct {
 		block string

@@ -619,8 +619,7 @@ resource "anyscale_cloud_resource" "test" {
   compute_stack  = "K8S"
 
   kubernetes_config {
-    context         = "my-context"
-    kubeconfig_path = "/tmp/kubeconfig"
+    anyscale_operator_iam_identity = "arn:aws:iam::123456789012:role/fake"
   }
 }
 `, cloudName)
@@ -764,10 +763,10 @@ resource "anyscale_cloud_resource" "test" {
   file_storage {
     file_storage_id = "fs-test123"
     mount_path      = "%s"
-    mount_targets {
+    mount_targets = [{
       address = "fs-test123.efs.us-east-2.amazonaws.com"
       zone    = "%s"
-    }
+    }]
   }
 }
 `, cloudName, resourceName, awsConfigBlock("tfacc-cloudres-fs", randSuffix), randSuffix, mountPath, mountTargetZone)

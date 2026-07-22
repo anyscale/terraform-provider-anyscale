@@ -83,10 +83,10 @@ resource "anyscale_cloud" "eks_example" {
   file_storage {
     file_storage_id = "fs-0abc123def456789"
 
-    mount_targets {
+    mount_targets = [{
       address = "fs-0abc123def456789.efs.us-west-2.amazonaws.com"
       zone    = "us-west-2a"
-    }
+    }]
 
     # persistent_volume_claim     = "my-shared-storage-pvc"
     # csi_ephemeral_volume_driver = "csi.example.com"

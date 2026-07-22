@@ -71,10 +71,10 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
   file_storage {
     file_storage_id = "fs-0abc123def456789"
 
-    mount_targets {
+    mount_targets = [{
       address = "fs-0abc123def456789.efs.us-west-2.amazonaws.com"
       zone    = "us-west-2a"
-    }
+    }]
 
     # Alternatives to EFS mount targets above, for a pre-existing Kubernetes
     # volume instead: a PersistentVolumeClaim by name, or a CSI ephemeral

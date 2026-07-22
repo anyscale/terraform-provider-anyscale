@@ -141,7 +141,14 @@ func TestFlattenObjectStorage_ProviderAwarePrefix(t *testing.T) {
 	})
 }
 
-func TestFlattenKubernetesConfig_OnlyAPIBackedFieldsPopulateNamespaceGetsDefault(t *testing.T) {
+// TestFlattenKubernetesConfig_APIBackedFieldsPopulate replaces
+// TestFlattenKubernetesConfig_OnlyAPIBackedFieldsPopulateNamespaceGetsDefault
+// now that namespace/ingress_host/cluster_name/context/kubeconfig_path are
+// removed (task #8, user-approved breaking change): they were pure
+// Terraform-side bookkeeping the API never saw, and flattenKubernetesConfig
+// no longer sets or references them at all. What is left to prove is only
+// that the 3 real API-backed fields still populate correctly.
+func TestFlattenKubernetesConfig_APIBackedFieldsPopulate(t *testing.T) {
 	ctx := context.Background()
 	cfg := &KubernetesConfig{
 		AnyscaleOperatorIAMIdentity: "arn:aws:iam::123:role/operator",
@@ -160,53 +167,27 @@ func TestFlattenKubernetesConfig_OnlyAPIBackedFieldsPopulateNamespaceGetsDefault
 	if model.AnyscaleOperatorIAMIdentity.ValueString() != "arn:aws:iam::123:role/operator" {
 		t.Errorf("AnyscaleOperatorIAMIdentity = %v, want the operator ARN", model.AnyscaleOperatorIAMIdentity.ValueString())
 	}
-	// namespace has no API-backed source of truth - it must get the schema's
-	// own documented default, not null, to match a config that never set it.
-	if model.Namespace.ValueString() != "anyscale" {
-		t.Errorf("Namespace = %v, want \"anyscale\" (the schema default)", model.Namespace.ValueString())
+	zones, d := model.Zones.ToListValue(ctx)
+	if d.HasError() {
+		t.Fatalf("unexpected error reading Zones: %v", d)
 	}
-	// The other four inert fields (C5) have no API-backed value at all - they
-	// must be null, not fabricated.
-	for name, got := range map[string]types.String{
-		"IngressHost":    model.IngressHost,
-		"ClusterName":    model.ClusterName,
-		"Context":        model.Context,
-		"KubeconfigPath": model.KubeconfigPath,
-	} {
-		if !got.IsNull() {
-			t.Errorf("%s = %v, want null (not sent to or returned by the API)", name, got)
-		}
+	if len(zones.Elements()) != 1 {
+		t.Errorf("Zones = %v, want exactly 1 element", zones.Elements())
+	}
+	if model.RedisEndpoint.ValueString() != "redis.ray-system.svc.cluster.local:6379" {
+		t.Errorf("RedisEndpoint = %v, want the redis endpoint", model.RedisEndpoint.ValueString())
 	}
 }
 
-// TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport is the
-// mutation-proof unit test for the mount_targets import replace-loop
-// (yunhao report, ratified plan: .crystl/quest/mount-targets-import-plan.md,
-// Option C). mount_targets is a schema.ListNestedBlock - blocks cannot be
-// Computed in terraform-plugin-framework, so a value written into state at
-// ImportState time (the v0.15.2 behavior this replaces) can never survive a
-// later plan when config omits the block: Terraform plans a Block purely
-// from config, with no Computed fallback to prior state, so state-populated/
-// config-absent is read as a real removal and the block's own
-// listplanmodifier.RequiresReplace() fires. The fix is therefore not "recover
-// it correctly" but "never recover it": flattenFileStorage must resolve
-// mount_targets to null unconditionally, regardless of what the API returns,
-// so imported state always matches a config that (correctly, since the
-// addresses are backend-assigned and not reliably expressible in HCL) never
-// declares the block.
-//
-// Pre-fix (today, v0.15.2's flattenFileStorage), this test FAILS: the
-// function builds a populated list from cfg.MountTargets. Forge's fix
-// deletes that loop and resolves mount_targets to
-// types.ListNull(types.ObjectType{AttrTypes: mountTargetAttrTypes()})
-// unconditionally - confirmed here directly against the shared function, so
-// this proof covers anyscale_cloud_resource's identical ImportState path too
-// (both call flattenFileStorage via requiredImportConfigBlocks; neither has
-// its own copy).
-func TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport(t *testing.T) {
+// TestFlattenFileStorage_MountTargets replaces
+// TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport: mount_targets
+// is now Optional+Computed (schema.ListNestedAttribute, not a Block), so
+// recovering the real value at import is correct and self-heals - see
+// mount_targets_state_compat_test.go for the Block-to-Attribute rationale.
+func TestFlattenFileStorage_MountTargets(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("populated mount_targets from the API flattens to null, not the recovered list", func(t *testing.T) {
+	t.Run("populated mount_targets from the API is recovered verbatim", func(t *testing.T) {
 		obj, diags := flattenFileStorage(ctx, &FileStorage{
 			FileStorageID: "fs-mt123",
 			MountTargets: []MountTarget{
@@ -223,11 +204,13 @@ func TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport(t *testing.T) {
 			t.Fatalf("unexpected error converting back: %v", diags)
 		}
 
-		if !model.MountTargets.IsNull() {
-			t.Errorf("MountTargets = %v, want null - mount_targets must never be recovered at import "+
-				"(backend-assigned addresses are not reliably expressible in HCL; recovering them here "+
-				"is exactly what forces a destroy-and-recreate on the next plan against a config that "+
-				"correctly omits the block)", model.MountTargets)
+		if model.MountTargets.IsNull() {
+			t.Fatal("MountTargets is null, want the 2 real recovered mount targets - mount_targets is now " +
+				"Computed, so recovering it at import self-heals instead of risking a replace-loop")
+		}
+		elems := model.MountTargets.Elements()
+		if len(elems) != 2 {
+			t.Fatalf("MountTargets has %d elements, want 2", len(elems))
 		}
 
 		// file_storage_id recovery (the v0.15.2 fix this one sits alongside)

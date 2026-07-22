@@ -122,11 +122,6 @@ type KubernetesConfigModel struct {
 	AnyscaleOperatorIAMIdentity types.String `tfsdk:"anyscale_operator_iam_identity"`
 	Zones                       types.List   `tfsdk:"zones"`
 	RedisEndpoint               types.String `tfsdk:"redis_endpoint"`
-	Namespace                   types.String `tfsdk:"namespace"`
-	IngressHost                 types.String `tfsdk:"ingress_host"`
-	ClusterName                 types.String `tfsdk:"cluster_name"`
-	Context                     types.String `tfsdk:"context"`
-	KubeconfigPath              types.String `tfsdk:"kubeconfig_path"`
 }
 
 // ObjectStorageModel represents object storage configuration.
@@ -159,6 +154,11 @@ func (r *CloudResourceResource) Metadata(ctx context.Context, req resource.Metad
 // Schema defines the resource schema.
 func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// v1: mount_targets converted from a block to a list-of-objects
+		// attribute, and the 5 inert kubernetes_config bookkeeping fields
+		// were removed - see resource_cloud_resource_upgrade.go's v0->v1
+		// UpgradeState.
+		Version:             1,
 		MarkdownDescription: "Manages an Anyscale Cloud Resource deployment. This attaches infrastructure configuration to an existing Anyscale Cloud.",
 
 		Attributes: map[string]schema.Attribute{
@@ -515,48 +515,6 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 							),
 						},
 					},
-					"namespace": schema.StringAttribute{
-						Optional:            true,
-						Computed:            true,
-						Default:             stringdefault.StaticString("anyscale"),
-						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The Kubernetes namespace for Anyscale workloads. Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
-					"ingress_host": schema.StringAttribute{
-						Optional:            true,
-						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The ingress host for the Anyscale operator (e.g., anyscale.example.com). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
-					"cluster_name": schema.StringAttribute{
-						Optional:            true,
-						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "The Kubernetes cluster name (EKS, GKE, AKS cluster name). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
-					"context": schema.StringAttribute{
-						Optional:            true,
-						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "Kubeconfig context to use (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
-					"kubeconfig_path": schema.StringAttribute{
-						Optional:            true,
-						DeprecationMessage:  kubernetesConfigInertFieldDeprecationMessage,
-						MarkdownDescription: "Path to kubeconfig file (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
-					},
 				},
 			},
 
@@ -641,14 +599,15 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 							),
 						},
 					},
-				},
-				Blocks: map[string]schema.Block{
-					"mount_targets": schema.ListNestedBlock{
-						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both. Not recovered during `terraform import`: imported state deliberately leaves this null even when the backend has auto-discovered real mount target addresses for a registered cloud, since those addresses are cloud-provider-assigned and not reliably expressible in configuration - a config that omits this block continues to plan cleanly after import. Only set this block when creating a new cloud through Terraform, sourcing the address from your EFS/Filestore module output (see the aws-vm example).",
+					"mount_targets": schema.ListNestedAttribute{
+						Optional:            true,
+						Computed:            true,
+						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both. Derived automatically from `file_storage_id` when left unset - the backend auto-discovers the real address (and zone, where applicable) once the EFS/Filestore resource exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself, such as referencing a sibling EFS/Filestore module output at create time (see the aws-vm/gcp-vm examples). Because `file_storage` isn't refreshed from the API on any later read, the recovered value is a frozen create/import-time snapshot - if the backend-discovered address ever changes out of band, Terraform state and `terraform plan` won't surface that later drift.",
 						PlanModifiers: []planmodifier.List{
+							listplanmodifier.UseStateForUnknown(),
 							listplanmodifier.RequiresReplace(),
 						},
-						NestedObject: schema.NestedBlockObject{
+						NestedObject: schema.NestedAttributeObject{
 							Attributes: map[string]schema.Attribute{
 								"address": schema.StringAttribute{
 									Optional:            true,
@@ -826,6 +785,20 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		NetworkingMode: networkingMode,
 	}
 
+	// mount_targets is Computed - if config omitted it, plan.FileStorage's
+	// mount_targets is still Unknown here (add_resource, which resolves it,
+	// hasn't run yet). buildProviderConfig below expands file_storage into
+	// the outgoing request; resolve to a safe null placeholder first so
+	// that expand sees a known (null) value instead of Unknown, mirroring
+	// resource_cloud.go's identical placeholder before its own
+	// buildProviderConfig call. The real merge below (using the add_resource
+	// response) overwrites this placeholder for the final State.Set.
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil); !d.HasError() {
+		plan.FileStorage = fileStorage
+	} else {
+		resp.Diagnostics.Append(d...)
+	}
+
 	// Add provider-specific configuration
 	if err := buildProviderConfig(ctx, &deployReq, provider, computeStack, plan.AWSConfig, plan.GCPConfig, plan.AzureConfig, plan.KubernetesConfig, plan.ObjectStorage, plan.FileStorage); err != nil {
 		AddConfigError(&resp.Diagnostics, "Configuration Error", err.Error())
@@ -885,6 +858,11 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	}
 	if gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, deployResp.Result.GCPConfig); !d.HasError() {
 		plan.GCPConfig = gcpConfig
+	} else {
+		resp.Diagnostics.Append(d...)
+	}
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResp.Result.FileStorage); !d.HasError() {
+		plan.FileStorage = fileStorage
 	} else {
 		resp.Diagnostics.Append(d...)
 	}
@@ -1411,7 +1389,7 @@ func expandFileStorage(ctx context.Context, obj types.Object) (*FileStorage, err
 		storage.CSIEphemeralVolumeDriver = storageModel.CSIEphemeralVolumeDriver.ValueString()
 	}
 
-	if !storageModel.MountTargets.IsNull() {
+	if !storageModel.MountTargets.IsNull() && !storageModel.MountTargets.IsUnknown() {
 		var mountTargetModels []MountTargetModel
 		diags = storageModel.MountTargets.ElementsAs(ctx, &mountTargetModels, false)
 		if diags.HasError() {
