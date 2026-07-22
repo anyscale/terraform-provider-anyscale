@@ -430,15 +430,10 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 	})
 
 	t.Run("AWS: file_storage.mount_targets from the API is recovered verbatim (Computed self-heal, supersedes the old never-recover fix)", func(t *testing.T) {
-		// mount_targets converted from a schema.ListNestedBlock to an
-		// Optional+Computed schema.ListNestedAttribute (Import Round-Trip
-		// Gaps, co-flagship breaking change alongside memorydb/memorystore).
-		// The old "never recover, leave null" fix (Option C, PR #189) was
-		// specifically a workaround for Blocks being unable to carry
-		// Computed semantics at all - now that it is a real Computed
-		// attribute with UseStateForUnknown, recovering the real value at
-		// import is correct and desired: it is what lets an omitted-in-config
-		// value self-heal instead of staying permanently invisible.
+		// mount_targets is now Optional+Computed (see
+		// mount_targets_state_compat_test.go for the Block-to-Attribute
+		// rationale) - recovering the real value at import is correct now,
+		// unlike the old Option C (PR #189) never-recover fix.
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack: "VM",
 			AWSConfig:    &AWSConfig{VPCID: "vpc-real"},

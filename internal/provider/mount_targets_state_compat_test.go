@@ -11,30 +11,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-// This file formalizes forge's mount_targets state-compat spike (Import
-// Round-Trip Gaps, the breaking Block->ListNestedAttribute conversion) into
-// a permanent, committed test, per architect's instruction. It proves a
-// narrower, standalone claim than the full v0->v1 resource upgrader test:
-// that reclassifying file_storage.mount_targets from a schema.ListNestedBlock
-// to a schema.ListNestedAttribute+Optional+Computed - keeping the exact same
-// nested address/zone attribute names and types - is a pure value-identity
-// passthrough with no transformation logic required. This is what lets the
-// real per-resource StateUpgrader (a separate, fuller test - see the
-// upcoming resource_cloud_upgrade_test.go, which also covers the k8s
-// 5-field drop) skip any bespoke handling for this specific field: whatever
-// it does for the k8s fields, mount_targets can ride through unchanged.
-//
-// Deliberately uses hand-built SCRATCH schemas rather than the real
-// CloudResource/CloudResourceResource schema, isolating this claim from the
-// rest of the schema and from the k8s field-drop machinery entirely - a
-// regression in either of those must not be able to mask a regression here,
-// or vice versa.
-//
-// Mirrors forge's exact spike methodology: build real state via
-// tfsdk.State.Set under the OLD (Block) schema, then decode that SAME raw
-// value via tfsdk.State.Get under the NEW (Attribute) schema - the actual
-// framework decode path Terraform Core's plugin protocol uses, not a
-// hand-rolled reimplementation.
+// Formalizes forge's mount_targets state-compat spike into a permanent
+// test: reclassifying file_storage.mount_targets from a
+// schema.ListNestedBlock to a schema.ListNestedAttribute+Optional+Computed
+// (same nested address/zone types) is a pure value-identity passthrough -
+// see decodeUnderNewSchema below for the mechanism. This is a narrower,
+// standalone claim than the full v0->v1 resource upgrader test
+// (resource_cloud_upgrade_test.go, which also covers the k8s field-drop):
+// hand-built scratch schemas isolate it from the rest of the resource
+// schema, so a regression in one can't mask a regression in the other.
 
 func mountTargetsScratchAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{

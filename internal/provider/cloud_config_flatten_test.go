@@ -179,38 +179,11 @@ func TestFlattenKubernetesConfig_APIBackedFieldsPopulate(t *testing.T) {
 	}
 }
 
-// TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport is the
-// mutation-proof unit test for the mount_targets import replace-loop
-// (yunhao report, ratified plan: .crystl/quest/mount-targets-import-plan.md,
-// Option C). mount_targets is a schema.ListNestedBlock - blocks cannot be
-// Computed in terraform-plugin-framework, so a value written into state at
-// ImportState time (the v0.15.2 behavior this replaces) can never survive a
-// later plan when config omits the block: Terraform plans a Block purely
-// from config, with no Computed fallback to prior state, so state-populated/
-// config-absent is read as a real removal and the block's own
-// listplanmodifier.RequiresReplace() fires. The fix is therefore not "recover
-// it correctly" but "never recover it": flattenFileStorage must resolve
-// mount_targets to null unconditionally, regardless of what the API returns,
-// so imported state always matches a config that (correctly, since the
-// addresses are backend-assigned and not reliably expressible in HCL) never
-// declares the block.
-//
-// Pre-fix (today, v0.15.2's flattenFileStorage), this test FAILS: the
-// function builds a populated list from cfg.MountTargets. Forge's fix
-// deletes that loop and resolves mount_targets to
-// types.ListNull(types.ObjectType{AttrTypes: mountTargetAttrTypes()})
-// unconditionally - confirmed here directly against the shared function, so
-// this proof covers anyscale_cloud_resource's identical ImportState path too
-// (both call flattenFileStorage via requiredImportConfigBlocks; neither has
-// its own copy).
 // TestFlattenFileStorage_MountTargets replaces
-// TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport now that
-// mount_targets is a real Optional+Computed schema.ListNestedAttribute
-// (Import Round-Trip Gaps, co-flagship breaking change) instead of a
-// schema.ListNestedBlock. The old "never recover, leave null" premise
-// (Option C, PR #189) existed specifically because Blocks cannot carry
-// Computed semantics - now that it can, recovering the real value at
-// import is correct and is what lets an omitted-in-config value self-heal.
+// TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport: mount_targets
+// is now Optional+Computed (schema.ListNestedAttribute, not a Block), so
+// recovering the real value at import is correct and self-heals - see
+// mount_targets_state_compat_test.go for the Block-to-Attribute rationale.
 func TestFlattenFileStorage_MountTargets(t *testing.T) {
 	ctx := context.Background()
 

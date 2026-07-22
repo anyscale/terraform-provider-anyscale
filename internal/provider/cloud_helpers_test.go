@@ -313,11 +313,9 @@ func testAzureConfigObj(tenantID string) types.Object {
 	)
 }
 
-// testKubernetesConfigObj builds a kubernetes_config fixture with only the 3
-// real, API-backed fields - namespace/ingress_host/cluster_name/context/
-// kubeconfig_path were removed (task #8, user-approved breaking change):
-// pure Terraform-side bookkeeping the API never saw, dropped entirely
-// rather than kept as inert no-ops.
+// testKubernetesConfigObj builds a kubernetes_config fixture with only the
+// 3 real, API-backed fields - the other 5 were removed by task #8 (see
+// TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why).
 func testKubernetesConfigObj(operatorIdentity string) types.Object {
 	return types.ObjectValueMust(
 		map[string]attr.Type{

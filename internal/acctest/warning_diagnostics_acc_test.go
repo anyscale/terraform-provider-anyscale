@@ -129,15 +129,15 @@ provider "anyscale" {
 }
 
 // TestAccCloudResource_KubernetesConfigRemovedFieldsRejected replaces
-// TestAccCloudResource_KubernetesConfigDeprecatedFields_WarningActuallyFires
-// now that namespace/ingress_host/cluster_name/context/kubeconfig_path are
-// removed from the schema entirely (task #8, user-approved breaking
-// change), not merely deprecated. The diagnostic shape changes completely:
-// a removed schema attribute is a config-vs-schema mismatch Terraform Core
-// itself rejects at validate time ("Unsupported argument"), not a
-// provider-served warning - leaving the old warning-count assertion running
-// would either fail confusingly (0 warnings, since the fields no longer
-// exist to warn about) or, worse, quietly stop proving anything if some
+// TestAccCloudResource_KubernetesConfigDeprecatedFields_WarningActuallyFires:
+// task #8 removed the 5 fields entirely rather than just deprecating them
+// (see TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why), which
+// changes the diagnostic shape completely - a removed schema attribute is a
+// config-vs-schema mismatch Terraform Core itself rejects at validate time
+// ("Unsupported argument"), not a provider-served warning. Leaving the old
+// warning-count assertion running would either fail confusingly (0
+// warnings, since the fields no longer exist to warn about) or, worse,
+// quietly stop proving anything if some
 // unrelated diagnostic happened to match its loose Contains check. This
 // asserts the actual post-removal contract: validate fails, and every one
 // of the 5 removed names is named in its own "Unsupported argument" error.

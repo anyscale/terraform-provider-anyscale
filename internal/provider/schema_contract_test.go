@@ -489,18 +489,14 @@ func TestComputeConfigCC6DataSourceTopologyParity(t *testing.T) {
 // catches that regression class in milliseconds instead of needing the
 // real-AWS-infra acceptance tests (SkipIfNoRealInfra) to ever run.
 //
-// The kubernetes_config coverage this test originally had (namespace/
-// ingress_host/cluster_name/context/kubeconfig_path) is gone along with the
-// fields themselves (task #8, user-approved breaking removal - they were
-// pure Terraform-side bookkeeping the API never saw). There is nothing left
-// to pin there: the fields don't exist, so there's no swallowed-edit risk
-// to guard against.
+// The kubernetes_config coverage this test originally had is gone along
+// with the 5 fields task #8 removed (see
+// TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why) - nothing
+// left to pin, since the fields don't exist.
 //
-// Deliberately NOT covered here yet: anyscale_cloud carries the identical
-// duplicated file_storage shape (tracked as task 02118d55, the sibling
-// mirror fix). Asserting it here before that fix lands would fail for the
-// right reason but at the wrong time — add that case once 02118d55 merges,
-// not before.
+// anyscale_cloud's identical duplicated file_storage shape is covered
+// separately by TestCloudMountTargetsHardenedFieldsRequireReplace below,
+// closing the previously-tracked gap (task 02118d55).
 func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
 	s := schemaOf(t, &CloudResourceResource{})
 
@@ -520,16 +516,10 @@ func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
 		}
 	})
 
-	// file_storage.mount_targets converted from a schema.ListNestedBlock to
-	// an Optional+Computed schema.ListNestedAttribute (Import Round-Trip
-	// Gaps, co-flagship breaking change alongside memorydb/memorystore) -
-	// Blocks cannot be Computed at all in this framework, which is why the
-	// old fix (Option C, PR #189) had to leave it permanently unrecovered
-	// instead of self-healing. This subtest pins the NEW attribute shape;
-	// it replaces the old ListNestedBlock+block-level-RequiresReplace pin
-	// that lived here (task 861aaf10) and adds anyscale_cloud's own
-	// coverage in the same pass, closing the previously-tracked gap (task
-	// 02118d55) where only anyscale_cloud_resource had this pinned.
+	// mount_targets is now Optional+Computed (see
+	// mount_targets_state_compat_test.go for the Block-to-Attribute
+	// rationale). This subtest pins the new attribute shape, replacing the
+	// old ListNestedBlock pin (task 861aaf10).
 	t.Run("file_storage.mount_targets", func(t *testing.T) {
 		mountTargets, ok := fileStorageBlock.Attributes["mount_targets"].(schema.ListNestedAttribute)
 		if !ok {
@@ -607,10 +597,9 @@ func TestCloudMountTargetsHardenedFieldsRequireReplace(t *testing.T) {
 }
 
 // TestKubernetesConfigInertFieldsAreDeprecated (C5's original deprecation
-// pin for namespace/ingress_host/cluster_name/context/kubeconfig_path) is
-// deleted, not rewritten: task #8 removed the five fields entirely
-// (user-approved breaking change), so there is no longer a deprecation
-// state to assert - they simply don't exist in the schema anymore. See
+// pin for the 5 fields task #8 removed - see
+// TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why) is deleted,
+// not rewritten: there is no longer a deprecation state to assert. See
 // internal/acctest/warning_diagnostics_acc_test.go,
 // TestAccCloudResource_KubernetesConfigRemovedFieldsRejected, for the
 // replacement coverage - a removed attribute must hard-error at
@@ -768,14 +757,9 @@ func TestContainerImageBuildStatusDescriptionsMatchAcceptedEnum(t *testing.T) {
 // Import Round-Trip Gaps memorydb/memorystore fix (Path A): the 3
 // backend-derived fields (aws_config.memorydb_cluster_arn,
 // aws_config.memorydb_cluster_endpoint, gcp_config.memorystore_endpoint)
-// must be Optional+Computed with stringplanmodifier.UseStateForUnknown()
-// declared BEFORE stringplanmodifier.RequiresReplace() in each field's
-// PlanModifiers slice - order is load-bearing, not stylistic (see
-// indexOfPlanModifierDescription's doc comment). A backwards order
-// compiles, both modifiers report "present", and every other test that only
-// checks presence would pass - it silently reproduces the exact
-// replace-on-import bug the fix exists to close. This test is the one place
-// that would catch that regression.
+// must be Optional+Computed with UseStateForUnknown declared BEFORE
+// RequiresReplace - see indexOfPlanModifierDescription's doc comment for
+// why the order is load-bearing, not stylistic.
 func TestMemoryDBMemorystoreFieldsComputedWithCorrectModifierOrder(t *testing.T) {
 	type fieldCase struct {
 		block string

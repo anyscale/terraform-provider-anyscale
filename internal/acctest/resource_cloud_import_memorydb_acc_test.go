@@ -75,46 +75,20 @@ func newMemoryDBImportMockCloudServer(t *testing.T, cloudID, cloudJSON, resource
 
 // TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM is the fail-first
 // regression test for the memorydb_cluster_arn/memorydb_cluster_endpoint
-// replace-on-import bug (Import Round-Trip Gaps, HIGH item, architect review
-// 2026-07-21). Both fields are backend-derived from memorydb_cluster_name
-// (product backend _populate_missing_derived_values) whenever the user
-// leaves them unset, exactly like mount_targets - but unlike mount_targets
-// they are plain schema.StringAttribute (Optional, RequiresReplace, NOT
-// Computed today), not a Block, so today's flattenAWSConfig recovers them
-// VERBATIM at import into a slot Create/Read never populate.
+// replace-on-import bug (Import Round-Trip Gaps, HIGH item). Both fields
+// are backend-derived from memorydb_cluster_name when left unset - like
+// mount_targets, but as plain schema.StringAttribute (not Computed today),
+// so flattenAWSConfig recovers them at import into a slot Create/Read
+// never populate.
 //
-// Mirrors the customer-shape config: memorydb_cluster_name only, arn/
-// endpoint both omitted - the exact input this fix targets.
-//
-// Step 1 creates and captures real applied state. Since aws_config is not
-// Computed, Create/Read never touch it from the API (C3-v2) - a config that
-// omits arn/endpoint MUST leave them null in state today, regardless of
-// what the backend derived and would return, because nothing in the
-// current Create path ever reads AWSConfig back out of add_resource's
-// response (confirmed by tracing resource_cloud.go directly - only
-// CloudResourceID is extracted from it) or out of readCloudState's
-// listCloudResources call (backfillComputedCloudFields only ever touches
-// is_empty_cloud/cloud_resource_id, by the same C3-v2 discipline that keeps
-// config blocks out of Read).
-//
-// Step 2 imports the SAME cloud from a mock whose API responses (both
-// add_resource and the resources listing) DO carry real derived arn/
-// endpoint values, simulating a live registered cloud. ImportStateVerify
-// compares against step 1's state with memorydb_cluster_arn/endpoint
-// deliberately NOT in ImportStateVerifyIgnore - proving whether recovery
-// is consistent with create.
-//
-// Step 3 re-applies the same name-only config and asserts the plan is a
-// no-op - the literal replace-on-import bar this fix exists to clear.
-//
-// Today (pre-Path-A) this test does not reach step 3 clean: step 1 leaves
-// both fields null, step 2 recovers real non-null values, so
-// ImportStateVerify itself reports the mismatch - proof the create-path
-// and import-path disagree on the exact same live cloud before either
-// hits the replace-loop. Once Path A's Optional+Computed+UseStateForUnknown
-// fix (plus the Create/Update merge from add_resource/resources-list) is
-// in place, step 1 must ALSO produce the real values (not null), making
-// steps 1-3 agree end-to-end.
+// Today (pre-Path-A): Create leaves both fields null (nothing reads
+// AWSConfig back out of add_resource's response or the resources-list -
+// confirmed by tracing resource_cloud.go directly), while import recovers
+// the real values - so ImportStateVerify (step 2 below) catches the
+// mismatch before the replace-loop (step 3) is even reached. Once Path A
+// lands (Optional+Computed+UseStateForUnknown, plus the Create/Update
+// merge), step 1 produces the real values too, and all 3 steps go green
+// unchanged.
 func TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
