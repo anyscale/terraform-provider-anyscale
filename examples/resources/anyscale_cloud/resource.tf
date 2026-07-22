@@ -9,7 +9,6 @@ resource "anyscale_cloud" "aws_example" {
   auto_add_user           = false
   enable_lineage_tracking = false
   enable_log_ingestion    = false
-  enable_system_cluster   = false
   is_private_cloud        = false
 
   # AWS-specific configuration
