@@ -785,6 +785,20 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		NetworkingMode: networkingMode,
 	}
 
+	// mount_targets is Computed - if config omitted it, plan.FileStorage's
+	// mount_targets is still Unknown here (add_resource, which resolves it,
+	// hasn't run yet). buildProviderConfig below expands file_storage into
+	// the outgoing request; resolve to a safe null placeholder first so
+	// that expand sees a known (null) value instead of Unknown, mirroring
+	// resource_cloud.go's identical placeholder before its own
+	// buildProviderConfig call. The real merge below (using the add_resource
+	// response) overwrites this placeholder for the final State.Set.
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil); !d.HasError() {
+		plan.FileStorage = fileStorage
+	} else {
+		resp.Diagnostics.Append(d...)
+	}
+
 	// Add provider-specific configuration
 	if err := buildProviderConfig(ctx, &deployReq, provider, computeStack, plan.AWSConfig, plan.GCPConfig, plan.AzureConfig, plan.KubernetesConfig, plan.ObjectStorage, plan.FileStorage); err != nil {
 		AddConfigError(&resp.Diagnostics, "Configuration Error", err.Error())
@@ -1375,7 +1389,7 @@ func expandFileStorage(ctx context.Context, obj types.Object) (*FileStorage, err
 		storage.CSIEphemeralVolumeDriver = storageModel.CSIEphemeralVolumeDriver.ValueString()
 	}
 
-	if !storageModel.MountTargets.IsNull() {
+	if !storageModel.MountTargets.IsNull() && !storageModel.MountTargets.IsUnknown() {
 		var mountTargetModels []MountTargetModel
 		diags = storageModel.MountTargets.ElementsAs(ctx, &mountTargetModels, false)
 		if diags.HasError() {
