@@ -82,7 +82,8 @@ func oneTagBody(key, value string) string {
 // serviceFindingsCurrentState reports "TERMINATED" once terminated is set, else "RUNNING" - used
 // by every test below's GET handler so the resource.Test-automatic end-of-test destroy's
 // wait-for-TERMINATED loop resolves on its first or second poll instead of hanging for the real
-// rollout_timeout default (45m) against a mock that never reflects termination.
+// delete timeout default (30m, PR2 timeouts{} migration - previously 45m) against a mock that
+// never reflects termination.
 func serviceFindingsCurrentState(terminated *int32) string {
 	if atomic.LoadInt32(terminated) == 1 {
 		return "TERMINATED"
@@ -138,7 +139,8 @@ func TestAccServiceResource_PlainCreateSucceeds(t *testing.T) {
 		// Every test's TestCase issues a REAL destroy automatically at the end, which waits for
 		// current_state==TERMINATED before the DELETE call - so GET must reflect termination
 		// once this fires, or that wait polls a state that can never arrive and hangs for the
-		// real rollout_timeout default (45m), blowing well past this test's own timeout.
+		// real delete timeout default (30m, PR2 timeouts{} migration - previously 45m), blowing
+		// well past this test's own timeout.
 		atomic.StoreInt32(&terminated, 1)
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": {}}`)
@@ -204,9 +206,9 @@ func TestAccServiceResource_DeleteAlreadyGone(t *testing.T) {
 				// GET's point of view too - consistent with the already-gone scenario, and
 				// critically, this makes a regression (falling through to the wait) fail FAST
 				// (getServiceByID errors on the first poll, since GET only accepts 200) rather
-				// than hang for the real rollout_timeout default (45m) waiting on a state that
-				// can never arrive, which would otherwise blow well past this test's own timeout
-				// instead of failing informatively.
+				// than hang for the real delete timeout default (30m, PR2 timeouts{} migration -
+				// previously 45m) waiting on a state that can never arrive, which would otherwise
+				// blow well past this test's own timeout instead of failing informatively.
 				atomic.AddInt32(&getsAfterTerminate, 1)
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = fmt.Fprint(w, `{"error": {"detail": "Service not found"}}`)
@@ -257,12 +259,13 @@ func TestAccServiceResource_DeleteAlreadyGone(t *testing.T) {
 }
 
 // TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges is the H2 regression:
-// rollout_timeout is a purely client-local wait knob (never sent to or read from the API - see
-// its schema MarkdownDescription), so changing ONLY it must not trigger a new PUT /apply or
-// rollout wait against an already-healthy, unrelated-in-every-other-way service. Today, Update()
-// unconditionally applies+waits on every call regardless of which field changed, so this asserts
-// the apply endpoint is hit exactly once (from Create) even after a second apply with a
-// different rollout_timeout.
+// the timeouts{} block (formerly rollout_timeout, migrated under PR2) is a purely client-local
+// wait knob (never sent to or read from the API - see its schema MarkdownDescription), so
+// changing ONLY it must not trigger a new PUT /apply or rollout wait against an already-healthy,
+// unrelated-in-every-other-way service. serviceDeployFieldsChanged (resource_service.go) never
+// referenced the flat attribute and needs no changes for the migration - this asserts that
+// still holds true for the timeouts{} block by exercising it directly: the apply endpoint is hit
+// exactly once (from Create) even after a second apply with a different timeouts.update value.
 func TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -304,7 +307,9 @@ resource "anyscale_service" "test" {
   build_id          = "bld_findings"
   compute_config_id = "cpt_findings"
 %[1]s
-  rollout_timeout = "45m"
+  timeouts {
+    update = "45m"
+  }
 }
 `, testAccServiceRayServeConfigHCL)
 
@@ -328,7 +333,7 @@ resource "anyscale_service" "test" {
 					resource.TestCheckResourceAttr("anyscale_service.test", "hostname", "findings.example.com"),
 					func(s *terraform.State) error {
 						if got := atomic.LoadInt32(&applyCallCount); got != 1 {
-							return fmt.Errorf("apply was called %d time(s) after a rollout_timeout-only "+
+							return fmt.Errorf("apply was called %d time(s) after a timeouts-only "+
 								"change (want exactly 1, from Create only) - Update must not re-apply/"+
 								"re-wait a running service just because a client-local wait knob changed", got)
 						}
@@ -494,7 +499,7 @@ resource "anyscale_service" "test" {
 // record of it to destroy or reconcile on the next apply. The fix is to persist id (and the rest
 // of the computed fields) via resp.State.Set BEFORE the wait, so a subsequent wait failure still
 // leaves a recoverable record. Proven here with a service that never leaves STARTING and a short
-// rollout_timeout: the apply is expected to error (the wait times out), but the resource's id
+// timeouts.create: the apply is expected to error (the wait times out), but the resource's id
 // must still be checkable afterward - proving it landed in state despite the error, not just that
 // the error occurred.
 func TestAccServiceResource_CreateWaitTimeoutPreservesID(t *testing.T) {
@@ -543,7 +548,9 @@ resource "anyscale_service" "test" {
   build_id          = "bld_findings"
   compute_config_id = "cpt_findings"
 %[1]s
-  rollout_timeout = "2s"
+  timeouts {
+    create = "2s"
+  }
 }
 `, testAccServiceRayServeConfigHCL)
 

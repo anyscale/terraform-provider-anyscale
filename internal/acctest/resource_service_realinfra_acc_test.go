@@ -22,8 +22,8 @@ import (
 //   - Real rollout (added after user follow-up, not in the original AC-R5/AC-R6 scope): changing
 //     a deploy-affecting field (ray_serve_config) on an already-RUNNING service must roll out a
 //     real new version, in place (same id, not a replace), and reach RUNNING again. The mock
-//     suite only proves the OPPOSITE case (H2: a non-deploy-affecting change like rollout_timeout
-//     must NOT redeploy) - this is the first real proof that a redeploy actually works end to end.
+//     suite only proves the OPPOSITE case (H2: a non-deploy-affecting change like the timeouts{}
+//     block must NOT redeploy) - this is the first real proof that a redeploy actually works end to end.
 //   - AC-R6: after a real destroy, GET /{id} must actually 404 - proving terminate-then-wait-
 //     then-delete really leaves nothing behind, not just that Destroy returned without error.
 //
@@ -85,7 +85,12 @@ resource "anyscale_service" "test" {
   // minutes at this exact 60m value. The original 20m was simply too tight for this test, not
   // evidence of a hang, a capacity ceiling, or a provider defect - the wait predicate
   // (evaluateServiceState, gating on service.CurrentState) is correct; it just needed more time.
-  rollout_timeout   = "60m"
+  // PR2 timeouts{} migration: only create is exercised in this scenario, so only create is set.
+  // Block syntax (no "="), since timeouts.Block() returns a schema.SingleNestedBlock, not an
+  // attribute - verified against the vendored terraform-plugin-framework-timeouts source.
+  timeouts {
+    create = "60m"
+  }
 
   ray_serve_config = {
     applications = [
@@ -106,7 +111,7 @@ resource "anyscale_service" "test" {
 
 	// updatedConfig changes ONLY ray_serve_config (adds a real env_var) - a genuine
 	// deploy-affecting field change (contract §6), so it must roll out a new version in place
-	// (same id, not RequiresReplace) rather than be a no-op like H2's rollout_timeout-only case.
+	// (same id, not RequiresReplace) rather than be a no-op like H2's timeouts-only case.
 	updatedConfig := fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name     = %[1]q
@@ -126,7 +131,12 @@ resource "anyscale_service" "test" {
   // minutes at this exact 60m value. The original 20m was simply too tight for this test, not
   // evidence of a hang, a capacity ceiling, or a provider defect - the wait predicate
   // (evaluateServiceState, gating on service.CurrentState) is correct; it just needed more time.
-  rollout_timeout   = "60m"
+  // PR2 timeouts{} migration: only create is exercised in this scenario, so only create is set.
+  // Block syntax (no "="), since timeouts.Block() returns a schema.SingleNestedBlock, not an
+  // attribute - verified against the vendored terraform-plugin-framework-timeouts source.
+  timeouts {
+    create = "60m"
+  }
 
   ray_serve_config = {
     applications = [
@@ -262,7 +272,12 @@ resource "anyscale_service" "test" {
   build_id          = "anyscaleray2561-slim-py312-cu129"
   compute_config_id = anyscale_compute_config.test.config_id
   rollout_strategy  = "IN_PLACE"
-  rollout_timeout   = "20m"
+  // PR2 timeouts{} migration: both create and update exercised here (initial apply + IN_PLACE
+  // update to the same cluster) - block syntax (no "="), see the 60m fixture's comment above.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
 
   ray_serve_config = {
     applications = [
@@ -300,7 +315,12 @@ resource "anyscale_service" "test" {
   build_id          = "anyscaleray2561-slim-py312-cu129"
   compute_config_id = anyscale_compute_config.test.config_id
   rollout_strategy  = "IN_PLACE"
-  rollout_timeout   = "20m"
+  // PR2 timeouts{} migration: both create and update exercised here (initial apply + IN_PLACE
+  // update to the same cluster) - block syntax (no "="), see the 60m fixture's comment above.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
 
   ray_serve_config = {
     applications = [
