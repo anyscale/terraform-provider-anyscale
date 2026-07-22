@@ -86,10 +86,10 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
   file_storage {
     file_storage_id = "fs-0abc123def456789"
 
-    mount_targets {
+    mount_targets = [{
       address = "fs-0abc123def456789.efs.us-west-2.amazonaws.com"
       zone    = "us-west-2a"
-    }
+    }]
 
     # Alternatives to EFS mount targets above, for a pre-existing Kubernetes
     # volume instead: a PersistentVolumeClaim by name, or a CSI ephemeral
@@ -212,10 +212,10 @@ Optional:
 - `csi_ephemeral_volume_driver` (String) CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only). Mutually exclusive with `persistent_volume_claim` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.
 - `file_storage_id` (String) The file storage ID (EFS ID, Filestore name, etc.).
 - `mount_path` (String) The mount path for the file storage. Only meaningful for GCP Filestore and Azure/Generic NFS-backed clouds - AWS EFS-backed clouds have no backend field for it and reject the value at plan time. Recovered from the live value at import time on GCP, Azure, and Generic, where the backend genuinely stores one; left to the schema default on AWS, since no backend field exists there to recover from. Known limitation on GCP: if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share name and silently overwrites this value - GCP still ends up with a valid path, just not necessarily this one. Because `file_storage` isn't refreshed from the API on any later read (a prior refresh attempt caused a state-consistency regression), Terraform state keeps showing whatever value import recovered even after the backend overwrites it again, and `terraform plan` won't surface that later drift. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (neither has a backend mount_path field either) - set at most one. Changing this requires replacement; the provider has no in-place update path for it.
-- `mount_targets` (Block List) List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both. Not recovered during `terraform import`: imported state deliberately leaves this null even when the backend has auto-discovered real mount target addresses for a registered cloud, since those addresses are cloud-provider-assigned and not reliably expressible in configuration - a config that omits this block continues to plan cleanly after import. Only set this block when creating a new cloud through Terraform, sourcing the address from your EFS/Filestore module output (see the aws-vm example). (see [below for nested schema](#nestedblock--file_storage--mount_targets))
+- `mount_targets` (Attributes List) List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both. Derived automatically from `file_storage_id` when left unset - the backend auto-discovers the real address (and zone, where applicable) once the EFS/Filestore resource exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself, such as referencing a sibling EFS/Filestore module output at create time (see the aws-vm/gcp-vm examples). Because `file_storage` isn't refreshed from the API on any later read, the recovered value is a frozen create/import-time snapshot - if the backend-discovered address ever changes out of band, Terraform state and `terraform plan` won't surface that later drift. (see [below for nested schema](#nestedatt--file_storage--mount_targets))
 - `persistent_volume_claim` (String) Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only). Mutually exclusive with `csi_ephemeral_volume_driver` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.
 
-<a id="nestedblock--file_storage--mount_targets"></a>
+<a id="nestedatt--file_storage--mount_targets"></a>
 ### Nested Schema for `file_storage.mount_targets`
 
 Optional:
@@ -248,11 +248,6 @@ Optional:
 Optional:
 
 - `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator via an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)) - a node group's IAM role will NOT work here, since node roles trust `ec2.amazonaws.com` instead; the provider cannot see a role's trust policy, so getting this wrong fails the operator's own authentication at runtime, not at `terraform plan`. For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).
-- `cluster_name` (String, Deprecated) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
-- `context` (String, Deprecated) Kubeconfig context to use (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
-- `ingress_host` (String, Deprecated) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
-- `kubeconfig_path` (String, Deprecated) Path to kubeconfig file (for Generic K8S deployments). Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
-- `namespace` (String, Deprecated) The Kubernetes namespace for Anyscale workloads. Deprecated and inert: this value is not sent to the Anyscale API and has no effect - remove it from your configuration.
 - `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance. Conflicts with `aws_config.memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.
 - `zones` (List of String) List of availability zones for the Kubernetes cluster.
 

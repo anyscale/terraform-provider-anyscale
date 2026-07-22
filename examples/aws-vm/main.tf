@@ -56,9 +56,9 @@ resource "anyscale_cloud_resource" "primary" {
     content {
       file_storage_id = module.aws_anyscale_v2.anyscale_efs_id
 
-      mount_targets {
+      mount_targets = [{
         address = module.aws_anyscale_v2.anyscale_efs_mount_target_ips[0]
-      }
+      }]
     }
   }
 

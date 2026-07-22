@@ -102,16 +102,17 @@ func azureConfigAttrTypes() map[string]attr.Type {
 	}
 }
 
+// kubernetesConfigAttrTypes is kubernetes_config's live (v1+) attribute
+// set: anyscale_operator_iam_identity/zones/redis_endpoint are the only
+// fields ever sent to or returned by the API. namespace/ingress_host/
+// cluster_name/context/kubeconfig_path (the 5 inert Terraform-side-only
+// bookkeeping fields) were removed - see cloudResourceSchemaV0 in
+// resource_cloud_upgrade.go for the frozen v0 shape UpgradeState decodes.
 func kubernetesConfigAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"anyscale_operator_iam_identity": types.StringType,
 		"zones":                          types.ListType{ElemType: types.StringType},
 		"redis_endpoint":                 types.StringType,
-		"namespace":                      types.StringType,
-		"ingress_host":                   types.StringType,
-		"cluster_name":                   types.StringType,
-		"context":                        types.StringType,
-		"kubeconfig_path":                types.StringType,
 	}
 }
 
@@ -306,13 +307,11 @@ func mergeGCPDerivedFields(gcpConfig types.Object, derived *GCPConfig) (types.Ob
 // directly (e.g. to build a null Object) without needing a flatten function.
 
 // flattenKubernetesConfig populates kubernetes_config from the API's
-// KubernetesConfig. Only anyscale_operator_iam_identity/zones/redis_endpoint
-// are ever sent to or returned by the API (see KubernetesConfig's doc
-// comment in models.go) - namespace/ingress_host/cluster_name/context/
-// kubeconfig_path are pure Terraform-side bookkeeping the API has never seen
-// (and, per C5, are being deprecated as no-ops). namespace gets the schema's
-// own documented default ("anyscale") since there's no other source of truth
-// for it; the other four have none and are left null.
+// KubernetesConfig. anyscale_operator_iam_identity/zones/redis_endpoint are
+// the only 3 attributes left (see kubernetesConfigAttrTypes) - the 5 inert
+// Terraform-side bookkeeping fields the API never saw
+// (namespace/ingress_host/cluster_name/context/kubeconfig_path) were
+// removed; existing state upgrades to drop them (resource_cloud_upgrade.go).
 func flattenKubernetesConfig(ctx context.Context, cfg *KubernetesConfig) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if cfg == nil {
@@ -326,11 +325,6 @@ func flattenKubernetesConfig(ctx context.Context, cfg *KubernetesConfig) (types.
 		"anyscale_operator_iam_identity": stringOrNull(cfg.AnyscaleOperatorIAMIdentity),
 		"zones":                          zones,
 		"redis_endpoint":                 stringOrNull(cfg.RedisEndpoint),
-		"namespace":                      types.StringValue("anyscale"),
-		"ingress_host":                   types.StringNull(),
-		"cluster_name":                   types.StringNull(),
-		"context":                        types.StringNull(),
-		"kubeconfig_path":                types.StringNull(),
 	}
 
 	obj, d := types.ObjectValue(kubernetesConfigAttrTypes(), attrs)
@@ -424,23 +418,18 @@ const fileStorageDefaultMountPath = "/mnt/shared"
 // stated for the contract: recover mount_path only when the API actually
 // returns a non-empty value, else resolve to the default directly.
 //
-// L3: mount_targets is deliberately NOT recovered here (v0.15.2/PR #180
-// recovered it; this reverts that one field, everything else in this
-// function is unchanged). It is an Optional sub-block a valid import-target
-// config may legitimately omit - the addresses are backend-discovered
-// per-AZ EFS/Filestore mount targets, not reliably expressible in HCL, the
-// same "recovered vs. genuinely absent" ambiguity C3-v2 already avoids by
-// never recovering optional blocks. Recovering it verbatim (the v0.15.2
-// behavior) left state with real addresses against a config that only set
-// file_storage_id, and since mount_targets carries
-// listplanmodifier.RequiresReplace(), every subsequent plan proposed
-// destroying and recreating the live, in-use cloud - a real customer
-// report. Leaving it null here matches a config that never sets it: null
-// state, null config, no diff, ever (file_storage is never Read-refreshed -
-// see mount_path's own note above - so state can't drift back to non-null
-// later). The create path is untouched: expandFileStorage still sends a
-// config-supplied mount_targets to the backend, and changing it still
-// forces replacement - only import recovery is disabled.
+// L3: mount_targets IS recovered here again, reversing the v0.15.2-through-
+// v0.16.1 history - v0.15.2/PR #180 recovered it verbatim; v0.16.1/PR #189
+// stopped recovering it because it was then a schema.ListNestedBlock, which
+// cannot be Computed, so a recovered value against an omitting config forced
+// listplanmodifier.RequiresReplace() to destroy-and-recreate the live cloud
+// (a real customer report). This release converts mount_targets to a
+// ListNestedAttribute with Optional+Computed+UseStateForUnknown (see the
+// schema), which makes recovering it here safe again: a recovered value
+// against an omitting config is absorbed by Computed instead of diffing.
+// The create path is unaffected either way - expandFileStorage still sends
+// a config-supplied mount_targets to the backend, and an explicit config
+// change still forces replacement.
 //
 // persistent_volume_claim/csi_ephemeral_volume_driver have no Default and no
 // AWS-specific quirk - still recovered exactly as the API carries them,
@@ -456,10 +445,8 @@ func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, di
 		mountPath = types.StringValue(cfg.MountPath)
 	}
 
-	// See the L3 doc comment above: mount_targets is never populated from
-	// cfg here, regardless of what the API returned - deliberate, not an
-	// oversight.
-	mountTargets := types.ListNull(types.ObjectType{AttrTypes: mountTargetAttrTypes()})
+	mountTargets, d := flattenMountTargets(cfg.MountTargets)
+	diags.Append(d...)
 
 	attrs := map[string]attr.Value{
 		"file_storage_id":             stringOrNull(cfg.FileStorageID),
@@ -472,6 +459,32 @@ func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, di
 	obj, d := types.ObjectValue(fileStorageAttrTypes(), attrs)
 	diags.Append(d...)
 	return obj, diags
+}
+
+// flattenMountTargets converts the API's []MountTarget into the
+// mount_targets list-of-objects value, or a null list for an empty/nil
+// slice - matching every other flatten* function's "omitted looks like
+// null" discipline in this file.
+func flattenMountTargets(mountTargets []MountTarget) (types.List, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	elemType := types.ObjectType{AttrTypes: mountTargetAttrTypes()}
+	if len(mountTargets) == 0 {
+		return types.ListNull(elemType), diags
+	}
+
+	elems := make([]attr.Value, 0, len(mountTargets))
+	for _, mt := range mountTargets {
+		obj, d := types.ObjectValue(mountTargetAttrTypes(), map[string]attr.Value{
+			"address": stringOrNull(mt.Address),
+			"zone":    stringOrNull(mt.Zone),
+		})
+		diags.Append(d...)
+		elems = append(elems, obj)
+	}
+
+	list, d := types.ListValue(elemType, elems)
+	diags.Append(d...)
+	return list, diags
 }
 
 // requiredImportConfigBlocks recovers every config block ImportState can

@@ -58,10 +58,10 @@ resource "anyscale_cloud_resource" "primary" {
     content {
       file_storage_id = module.google_anyscale_v2.filestore_name
       mount_path      = "/mnt/shared"
-      mount_targets {
+      mount_targets = [{
         address = module.google_anyscale_v2.filestore_ip_address
         zone    = var.gcp_zone
-      }
+      }]
     }
   }
 
