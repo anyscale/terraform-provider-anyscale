@@ -429,6 +429,38 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		}
 	})
 
+	t.Run("AWS: file_storage.mount_targets from the API is never recovered (mount_targets replace-loop fix)", func(t *testing.T) {
+		defaultResource := &CloudDeploymentResult{
+			ComputeStack: "VM",
+			AWSConfig:    &AWSConfig{VPCID: "vpc-real"},
+			FileStorage: &FileStorage{
+				FileStorageID: "fs-mt123",
+				MountTargets: []MountTarget{
+					{Address: "10.0.1.5", Zone: "us-east-2a"},
+					{Address: "10.0.2.5", Zone: "us-east-2b"},
+				},
+			},
+		}
+
+		blocks, diags := requiredImportConfigBlocks(ctx, "AWS", defaultResource)
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+
+		var fsModel FileStorageModel
+		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
+		if !fsModel.MountTargets.IsNull() {
+			t.Errorf("file_storage.MountTargets = %v, want null - mount_targets is a ListNestedBlock with "+
+				"no Computed fallback, so recovering it here writes a value the next plan can never reconcile "+
+				"against a config that (correctly) omits the backend-assigned addresses, forcing a "+
+				"destroy-and-recreate of the live cloud (yunhao's report)", fsModel.MountTargets)
+		}
+		// file_storage_id must still recover - only mount_targets changes.
+		if fsModel.FileStorageID.ValueString() != "fs-mt123" {
+			t.Errorf("file_storage.FileStorageID = %v, want fs-mt123", fsModel.FileStorageID.ValueString())
+		}
+	})
+
 	t.Run("GCP: gcp_config recovered, aws_config is not, and a real mount_path round-trips", func(t *testing.T) {
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack: "VM",

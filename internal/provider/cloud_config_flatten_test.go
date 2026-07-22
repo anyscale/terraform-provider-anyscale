@@ -179,6 +179,80 @@ func TestFlattenKubernetesConfig_OnlyAPIBackedFieldsPopulateNamespaceGetsDefault
 	}
 }
 
+// TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport is the
+// mutation-proof unit test for the mount_targets import replace-loop
+// (yunhao report, ratified plan: .crystl/quest/mount-targets-import-plan.md,
+// Option C). mount_targets is a schema.ListNestedBlock - blocks cannot be
+// Computed in terraform-plugin-framework, so a value written into state at
+// ImportState time (the v0.15.2 behavior this replaces) can never survive a
+// later plan when config omits the block: Terraform plans a Block purely
+// from config, with no Computed fallback to prior state, so state-populated/
+// config-absent is read as a real removal and the block's own
+// listplanmodifier.RequiresReplace() fires. The fix is therefore not "recover
+// it correctly" but "never recover it": flattenFileStorage must resolve
+// mount_targets to null unconditionally, regardless of what the API returns,
+// so imported state always matches a config that (correctly, since the
+// addresses are backend-assigned and not reliably expressible in HCL) never
+// declares the block.
+//
+// Pre-fix (today, v0.15.2's flattenFileStorage), this test FAILS: the
+// function builds a populated list from cfg.MountTargets. Forge's fix
+// deletes that loop and resolves mount_targets to
+// types.ListNull(types.ObjectType{AttrTypes: mountTargetAttrTypes()})
+// unconditionally - confirmed here directly against the shared function, so
+// this proof covers anyscale_cloud_resource's identical ImportState path too
+// (both call flattenFileStorage via requiredImportConfigBlocks; neither has
+// its own copy).
+func TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("populated mount_targets from the API flattens to null, not the recovered list", func(t *testing.T) {
+		obj, diags := flattenFileStorage(ctx, &FileStorage{
+			FileStorageID: "fs-mt123",
+			MountTargets: []MountTarget{
+				{Address: "10.0.1.5", Zone: "us-east-2a"},
+				{Address: "10.0.2.5", Zone: "us-east-2b"},
+			},
+		})
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+		var model FileStorageModel
+		diags = obj.As(ctx, &model, basetypes.ObjectAsOptions{})
+		if diags.HasError() {
+			t.Fatalf("unexpected error converting back: %v", diags)
+		}
+
+		if !model.MountTargets.IsNull() {
+			t.Errorf("MountTargets = %v, want null - mount_targets must never be recovered at import "+
+				"(backend-assigned addresses are not reliably expressible in HCL; recovering them here "+
+				"is exactly what forces a destroy-and-recreate on the next plan against a config that "+
+				"correctly omits the block)", model.MountTargets)
+		}
+
+		// file_storage_id recovery (the v0.15.2 fix this one sits alongside)
+		// must be untouched - only mount_targets changes behavior here.
+		if model.FileStorageID.ValueString() != "fs-mt123" {
+			t.Errorf("FileStorageID = %v, want \"fs-mt123\" - unrelated fields must still recover normally", model.FileStorageID.ValueString())
+		}
+	})
+
+	t.Run("genuinely absent mount_targets still flattens to null (no regression to the nil-safe base case)", func(t *testing.T) {
+		obj, diags := flattenFileStorage(ctx, &FileStorage{FileStorageID: "fs-empty"})
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+		var model FileStorageModel
+		diags = obj.As(ctx, &model, basetypes.ObjectAsOptions{})
+		if diags.HasError() {
+			t.Fatalf("unexpected error converting back: %v", diags)
+		}
+		if !model.MountTargets.IsNull() {
+			t.Errorf("MountTargets = %v, want null", model.MountTargets)
+		}
+	})
+}
+
 // TestFlattenAWSConfig_ClusterInstanceProfileID is a regression test for C6:
 // aws_config.cluster_instance_profile_id must round-trip through import like
 // every other optional AWSConfig field.

@@ -342,8 +342,26 @@ const fileStorageDefaultMountPath = "/mnt/shared"
 // stated for the contract: recover mount_path only when the API actually
 // returns a non-empty value, else resolve to the default directly.
 //
-// mount_targets/persistent_volume_claim/csi_ephemeral_volume_driver have no
-// Default and no AWS-specific quirk - recover exactly what the API carries,
+// L3: mount_targets is deliberately NOT recovered here (v0.15.2/PR #180
+// recovered it; this reverts that one field, everything else in this
+// function is unchanged). It is an Optional sub-block a valid import-target
+// config may legitimately omit - the addresses are backend-discovered
+// per-AZ EFS/Filestore mount targets, not reliably expressible in HCL, the
+// same "recovered vs. genuinely absent" ambiguity C3-v2 already avoids by
+// never recovering optional blocks. Recovering it verbatim (the v0.15.2
+// behavior) left state with real addresses against a config that only set
+// file_storage_id, and since mount_targets carries
+// listplanmodifier.RequiresReplace(), every subsequent plan proposed
+// destroying and recreating the live, in-use cloud - a real customer
+// report. Leaving it null here matches a config that never sets it: null
+// state, null config, no diff, ever (file_storage is never Read-refreshed -
+// see mount_path's own note above - so state can't drift back to non-null
+// later). The create path is untouched: expandFileStorage still sends a
+// config-supplied mount_targets to the backend, and changing it still
+// forces replacement - only import recovery is disabled.
+//
+// persistent_volume_claim/csi_ephemeral_volume_driver have no Default and no
+// AWS-specific quirk - still recovered exactly as the API carries them,
 // nil-safe, same discipline as every other flatten* function in this file.
 func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
@@ -356,21 +374,10 @@ func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, di
 		mountPath = types.StringValue(cfg.MountPath)
 	}
 
+	// See the L3 doc comment above: mount_targets is never populated from
+	// cfg here, regardless of what the API returned - deliberate, not an
+	// oversight.
 	mountTargets := types.ListNull(types.ObjectType{AttrTypes: mountTargetAttrTypes()})
-	if len(cfg.MountTargets) > 0 {
-		targetValues := make([]attr.Value, 0, len(cfg.MountTargets))
-		for _, mt := range cfg.MountTargets {
-			targetObj, d := types.ObjectValue(mountTargetAttrTypes(), map[string]attr.Value{
-				"address": stringOrNull(mt.Address),
-				"zone":    stringOrNull(mt.Zone),
-			})
-			diags.Append(d...)
-			targetValues = append(targetValues, targetObj)
-		}
-		listVal, d := types.ListValue(types.ObjectType{AttrTypes: mountTargetAttrTypes()}, targetValues)
-		diags.Append(d...)
-		mountTargets = listVal
-	}
 
 	attrs := map[string]attr.Value{
 		"file_storage_id":             stringOrNull(cfg.FileStorageID),
