@@ -169,6 +169,12 @@ were independent verification. If a design's correctness genuinely depends only 
 stable behavior nobody disputes, say so explicitly and skip the rest — that's a stated judgment
 call, not a silent omission.
 
+A Gate 1 confirmation doesn't stop at the design doc — the same confirmed wire shape must carry
+into any mock/fixture the committed tests use. A mock that returns a value the real API would never
+send in that scenario can pass against a broken fix and prove nothing (see the `mount_targets`
+mock-omission miss under Testing guidance below, and the same shape repeated in this fix's own first
+test draft before Gate 1's live `GET` corrected it).
+
 This is a **design-time** gate, separate from the standard **ship-time** gate (`make build`/`test`/
 `docs` green, changelog fragment wording checked against the actual merged diff, real-infra
 end-to-end confirmation before tagging). Different question, different stage — don't collapse them
