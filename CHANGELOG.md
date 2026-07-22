@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-07-22
+
+### Breaking Changes
+
+- resource/anyscale_cloud: `enable_system_cluster` is removed - System Cluster support is now the dedicated `anyscale_system_cluster` resource (and data source) instead of a config flag on the cloud, since starting and monitoring the actual cluster needs its own lifecycle a boolean can't represent. To migrate, delete `enable_system_cluster` from your `anyscale_cloud` configuration, then add an `anyscale_system_cluster` resource with the same `cloud_id` if you want Terraform to keep ensuring the System Cluster is enabled and running. Existing state auto-migrates to drop the removed field on your next plan; no manual state surgery is needed.
+
+### New Resources
+
+- resource/anyscale_system_cluster: Ensure an Anyscale Cloud's System Cluster (the always-on cluster backing the task and actor observability dashboards) is enabled and running.
+
+### New Data Sources
+
+- data-source/anyscale_system_cluster: Look up an Anyscale Cloud's System Cluster status.
+
 ## [0.17.0] - 2026-07-22
 
 ### Breaking Changes
@@ -821,7 +835,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.18.0
 [0.17.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.17.0
 [0.16.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.2
 [0.16.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.1
