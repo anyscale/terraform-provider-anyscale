@@ -99,15 +99,6 @@ func hasMapPlanModifierDescription(mods []planmodifier.Map, want string) bool {
 	return false
 }
 
-func hasListPlanModifierDescription(mods []planmodifier.List, want string) bool {
-	for _, m := range mods {
-		if m.Description(context.Background()) == want {
-			return true
-		}
-	}
-	return false
-}
-
 // indexOfListPlanModifierDescription is indexOfPlanModifierDescription's
 // planmodifier.List analogue - same ordering hazard, same reasoning, for
 // List-typed attributes like file_storage.mount_targets.
