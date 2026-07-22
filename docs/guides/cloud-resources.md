@@ -300,17 +300,16 @@ A few more things worth knowing:
 - **`aws_config.memorydb_cluster_arn`/`memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint`
   are Computed and now round-trip cleanly whether or not your configuration sets them.** All three
   are backend-derived from `memorydb_cluster_name` (AWS) or `memorystore_instance_name` (GCP)
-  whenever left unset — the provider records the real derived value in state at create time and
-  recovers it at import, so a configuration that only sets the name/instance-name field plans
-  cleanly either way, and one that sets the derived field explicitly still compares normally
+  whenever left unset — the provider reads the derived value from the same API response already
+  used to recover it at import, so a configuration that only sets the name/instance-name field
+  plans cleanly either way, and one that sets the derived field explicitly still compares normally
   against the real value. Timing matters for an existing cloud: one already imported before this
   fix had the correct value recovered into state all along (the bug was `RequiresReplace` treating
   that as a diff, not a wrong value) — it self-heals on its very next plan after upgrading, no
   re-import needed. A cloud created directly (never imported) with these fields left unset kept
   state null under the old behavior; upgrading alone doesn't retroactively populate that null (no
-  diff, no regression, just no backfill) — a fresh create or a re-import is what picks up the real
-  value from here forward. Every cloud created from this version forward gets the value populated
-  automatically at create time.
+  diff, no regression, just no backfill) — a fresh create or a re-import is what picks up the value
+  from here forward.
 - **`file_storage.mount_path` only recovers a real value on GCP, Azure, and Generic.** AWS has no
   backend field for it at all, so the `/mnt/shared` you see there is always the schema default, never
   something recovered from the API — import leaves it to that default, exactly as before. GCP,
