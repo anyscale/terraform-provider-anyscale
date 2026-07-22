@@ -91,7 +91,7 @@ Two constraints shape every fix here:
 - **Recover only in `ImportState`, never in `Read`/Create.** The config blocks (`aws_config`/`gcp_config`/`kubernetes_config`/`object_storage`/`file_storage`) are deliberately **not** Read-refreshed; populating one outside `ImportState` triggers "provider produced inconsistent result after apply" (the C12 regression). Consequence: a recovered value is a **frozen import-time snapshot** — if the backend value later changes, state won't update and `plan` won't surface it.
 - **An `ImportState`-only fix does not self-heal already-imported state.** A resource imported under a buggy version keeps the bad value in state; upgrading the provider or `apply -refresh-only` will not correct it (Read never touches the field). Affected users must **re-import** (`terraform state rm` then `terraform import`). Ship every such fix with that migration note (precedents: `anyscale_project` collaborators; `anyscale_cloud` `mount_targets`).
 
-**Validate the premise against the real API, not just source.** Any claim about what the backend returns on `GET` (which fields, cardinality, null vs. empty) must be confirmed by a live create+import against real infra — the source trace tells you the code path, the live API tells you the actual response shape. The `mount_targets` behavior above was source-traced first and only *confirmed* correct after a real 3-scenario AWS run (real infra creation for this is pre-authorized; see Acceptance Tests).
+**Validate the premise against the real API, not just source.** This is an instance of the Design Verification Policy below — see there for the general rule. The `mount_targets` behavior above was source-traced first and only *confirmed* correct after a real 3-scenario AWS run (real infra creation for this is pre-authorized; see Acceptance Tests).
 
 ### Error handling
 - Use `resp.Diagnostics.AddError` for configuration/auth issues.
@@ -143,13 +143,73 @@ migration guide is needed just because a breaking change shipped — the `cloud_
 `cloud_resource_id` removal (v0.13.0) intentionally skipped one, since the provider had no
 production users yet to migrate. That call belongs to the user each time, not a default.
 
+## Design Verification Policy: Real-Execution Gate
+
+Before a design for a bug fix or new behavior is confirmed and handed off for implementation —
+at design-confirmation time, not just before it ships — get a real, logged confirmation for any
+part of it that depends on either of these, treated as two distinct checks (they catch different
+failure modes and neither substitutes for the other):
+
+- **Gate 1 — API response shape.** Applies whenever correctness depends on a *specific* API
+  response shape or behavior for a given scenario — not "does this endpoint exist," but "what does
+  it actually return here." Confirm with a read-only call against a shared fixture (the static test
+  cloud used elsewhere in this doc) by default; escalate to a real create+import only when a
+  read-only check can't answer the question.
+- **Gate 2 — Framework/Core contract compliance.** Applies whenever a design relies on a specific
+  Terraform Plugin Framework or Core behavior for a plan modifier, schema shape, or state
+  transition — e.g. whether a modifier may rewrite `resp.PlanValue` at all for a given attribute.
+  Framework source can describe the mechanism without revealing every constraint Core enforces at
+  plan time. Confirm with a real `resource.Test` plan/apply run, not just a read of the vendored
+  source or a unit test built against it — a unit test written against the same source can share
+  its blind spot.
+
+"Done" means a real logged request/response, or real acceptance-test output, cited in the design
+doc — not "should return/behave like X" reasoning, and not a second source-trace restated as if it
+were independent verification. If a design's correctness genuinely depends only on documented,
+stable behavior nobody disputes, say so explicitly and skip the rest — that's a stated judgment
+call, not a silent omission.
+
+A Gate 1 confirmation doesn't stop at the design doc — the same confirmed wire shape must carry
+into any mock/fixture the committed tests use. A mock that returns a value the real API would never
+send in that scenario can pass against a broken fix and prove nothing (see the `mount_targets`
+mock-omission miss under Testing guidance below, and the same shape repeated in this fix's own first
+test draft before Gate 1's live `GET` corrected it).
+
+This is a **design-time** gate, separate from the standard **ship-time** gate (`make build`/`test`/
+`docs` green, changelog fragment wording checked against the actual merged diff, real-infra
+end-to-end confirmation before tagging). Different question, different stage — don't collapse them
+into one checkbox. Assign each gate as an explicit line item when scoping a design's test criteria;
+don't leave it to whoever happens to get blocked into finding it.
+
+Point-in-time precedent (2026-07-22, `object_storage.region` import fix): a design
+(Optional+Computed, recover-always) was independently source-traced and approved by three people
+before anyone ran it against a live API — only caught when one contributor, blocked on their own
+execution, traced the real backend and found the API collapses two distinct scenarios into an
+identical null response, which a follow-up live read-only `GET` against the static test cloud then
+confirmed byte-for-byte (Gate 1). The corrected design's own first implementation attempt then
+failed a *second*, unrelated way — a plan modifier rewriting `resp.PlanValue` to `null` against a
+non-null config, which Terraform Core rejects outright — caught only by an actual `resource.Test`
+acceptance run, not by re-reading the spec or the framework source (Gate 2). Same root gap behind
+both: design confirmed on paper before it was confirmed against anything real. Re-derive current
+specifics before citing this precedent as still-accurate; this note describes what happened, not a
+permanent property of this fix.
+
 ## Terraform Local Testing (dev_overrides)
 
 This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provider binary.
 
 ### Key rules
 
-- **Do not run terraform init** when dev_overrides is active (provider is not in the public registry).
+- **Do not rely on `terraform init` to install the dev-overridden provider itself** — it is not in
+  the public registry, so init cannot fetch it; your locally built binary is what dev_overrides
+  substitutes in its place. Init still runs fine and installs every *other* provider normally in
+  this state — it explicitly skips only the overridden one ("These providers are not installed as
+  part of init since they were overwritten") — so it's safe, and sometimes necessary, to run for a
+  reason unrelated to this provider (e.g. `terraform providers lock -platform=...` to refresh
+  another provider's lock entries, or a fresh module fetch), as long as you don't expect it to touch
+  `anyscale/anyscale`. Confirmed empirically 2026-07-22 (forge, `object_storage.region` real-infra
+  e2e) — re-verify against the terraform-plugin-framework/CLI version in use before relying on this
+  if it's been a while.
 - Rebuild after changes (`make build`) before running terraform plan/apply.
 - `make install` is a convenience wrapper that builds and prints the expected local binary location.
 
