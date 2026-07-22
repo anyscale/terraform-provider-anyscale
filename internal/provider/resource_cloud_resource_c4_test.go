@@ -40,9 +40,6 @@ func TestReadCloudResource_K8sOperatorStatusDetailsDecodesWithoutError(t *testin
 		t.Fatalf("unexpected decode error (this is exactly the pre-fix failure mode): %v", err)
 	}
 
-	if state.Status.ValueString() != "HEALTHY" {
-		t.Errorf("Status = %v, want HEALTHY", state.Status.ValueString())
-	}
 	if state.OperatorStatus.ValueString() != "HEALTHY" {
 		t.Errorf("OperatorStatus = %v, want HEALTHY", state.OperatorStatus.ValueString())
 	}

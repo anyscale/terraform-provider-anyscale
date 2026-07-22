@@ -173,10 +173,9 @@ output "eks_operator_reported_at" {
 - `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale when this resource deployment was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). `anyscale_cloud`'s own `cloud_resource_id` attribute exposes the same populated identifier for the all-in-one pattern. Stable for the life of this resource deployment - it does not move out of band between applies.
 - `id` (String) Composite identifier in format cloud_id:name
 - `is_default` (Boolean) Whether this is the default resource for the cloud.
-- `operator_status` (String) The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM). Same underlying value as `status`.
+- `operator_status` (String) The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM).
 - `operator_version` (String) The version of the Anyscale Operator that last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).
 - `reported_at` (String) Timestamp when the Anyscale Operator last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).
-- `status` (String, Deprecated) The operator status of the cloud resource. Duplicates `operator_status` (identical value; null for VM); use `operator_status` instead.
 
 <a id="nestedblock--aws_config"></a>
 ### Nested Schema for `aws_config`

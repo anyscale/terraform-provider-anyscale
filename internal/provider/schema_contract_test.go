@@ -870,3 +870,34 @@ func TestObjectStorageRegionSemanticEqualWithCorrectModifierOrder(t *testing.T) 
 		})
 	}
 }
+
+// TestCloudResourceStatusRemoved pins PR1 (PR1-STATUS-REMOVAL-PLAN.md):
+// anyscale_cloud_resource.status must be fully gone from the schema, while
+// operator_status (the replacement - identical underlying value, clearer
+// name) must remain Computed. Mutation-proof by construction: if the
+// removal is incomplete (status left in the Attributes map), the first
+// assertion below fails immediately - there is no code path where this test
+// passes against an unfinished removal.
+//
+// Deliberately does NOT check anyscale_cloud's own status/state, or the
+// anyscale_cloud/anyscale_clouds data sources' status/state - those are the
+// DISTINCT cloud lifecycle status per the plan's explicit out-of-scope note
+// (statusDeprecationMessage's own doc comment, resource_cloud_resource.go)
+// and must be untouched by this change.
+func TestCloudResourceStatusRemoved(t *testing.T) {
+	s := schemaOf(t, &CloudResourceResource{})
+
+	if _, present := s.Attributes["status"]; present {
+		t.Fatal("anyscale_cloud_resource.status must be fully removed - it duplicates operator_status " +
+			"(PR1-STATUS-REMOVAL-PLAN.md); found it still declared in the schema")
+	}
+
+	operatorStatus, ok := s.Attributes["operator_status"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("operator_status is not a schema.StringAttribute (got %T) - it is the replacement for "+
+			"status and must remain untouched by this removal", s.Attributes["operator_status"])
+	}
+	if !operatorStatus.Computed {
+		t.Error("operator_status must remain Computed - status removal must not regress its sibling attribute")
+	}
+}
