@@ -1,0 +1,8 @@
+```
+release-note:fixed
+resource/anyscale_cloud: importing an existing cloud no longer recovers file_storage.mount_targets from the backend, since those mount target addresses are cloud-provider-assigned and cannot be reliably declared in configuration; a configuration that only declares file_storage_id now plans cleanly instead of forcing a destroy-and-recreate, and clouds already imported under the old behavior self-heal on the next plan without needing to be re-imported.
+```
+```
+release-note:fixed
+resource/anyscale_cloud_resource: importing an existing cloud resource no longer recovers file_storage.mount_targets from the backend, for the same reason as the anyscale_cloud fix above; a configuration that only declares file_storage_id now plans cleanly instead of forcing a destroy-and-recreate, and cloud resources already imported under the old behavior self-heal on the next plan without needing to be re-imported.
+```
