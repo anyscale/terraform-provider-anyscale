@@ -11,9 +11,6 @@ resource "anyscale_cloud" "primary" {
   is_private_cloud = var.is_private_cloud
   auto_add_user    = var.auto_add_user
 
-  # enable_system_cluster is Optional-only; left unset here (uncomment to opt in).
-  # enable_system_cluster = true
-
   # AWS Configuration
   aws_config {
     vpc_id           = module.aws_anyscale_v2.anyscale_vpc_id
