@@ -34,6 +34,12 @@ const (
 	// produced inconsistent result after apply" (task 1f2d592f, found via a
 	// live update-add-worker-group repro).
 	descUseNonNullStateForUnknown = "Once set to a non-null value, the value of this attribute in state will not change."
+	// descRegionSemanticEqual matches regionSemanticEqualPlanModifier's own
+	// Description() (cloud_helpers.go) - our own unexported type, unlike the
+	// framework built-ins above, but the same identify-by-Description
+	// technique applies since PlanModifiers is a slice of the planmodifier.String
+	// interface either way.
+	descRegionSemanticEqual = "Treats object_storage.region as unchanged when it equals the resource's own region and the prior state has no region recorded, since the backend cannot distinguish an explicitly-matching region from one that was never set."
 )
 
 // schemaOf returns the resource.Schema for a resource.Resource implementation
@@ -803,6 +809,63 @@ func TestMemoryDBMemorystoreFieldsComputedWithCorrectModifierOrder(t *testing.T)
 							"see indexOfPlanModifierDescription's doc comment", fc.block, fc.field, usfuIdx, rrIdx)
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestObjectStorageRegionSemanticEqualWithCorrectModifierOrder pins the
+// object_storage.region import replace-loop fix (WORKBENCH "Import gap:
+// object_storage.region explicit-equal", OBJECT-STORAGE-REGION-DESIGN-CORRECTION.md
+// - Fix C, superseding the withdrawn Optional+Computed design): region stays
+// plain Optional (NOT Computed - the backend genuinely has no real value to
+// recover for the explicit-equal case, verified directly against product
+// source and a live cloud, so Computed/recover-always cannot work), with
+// regionSemanticEqualPlanModifier as region's ONLY plan modifier on BOTH
+// anyscale_cloud and anyscale_cloud_resource. It replaces
+// stringplanmodifier.RequiresReplace() entirely rather than composing
+// alongside it - a separate composed RequiresReplace() was tried and
+// rejected (see the modifier's own doc comment in cloud_helpers.go): it
+// unconditionally flags replace before this modifier's exception has any
+// chance to matter, since RequiresReplace's own equality check runs against
+// the ORIGINAL plan value, not this modifier's suppressed one. A plain
+// presence check for RequiresReplace would therefore be WRONG here - its
+// absence is the correct, load-bearing shape, not an oversight.
+func TestObjectStorageRegionSemanticEqualWithCorrectModifierOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  resource.Resource
+	}{
+		{"anyscale_cloud", &CloudResource{}},
+		{"anyscale_cloud_resource", &CloudResourceResource{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := schemaOf(t, tc.res)
+			objectStorageBlock, ok := s.Blocks["object_storage"].(schema.SingleNestedBlock)
+			if !ok {
+				t.Fatalf("object_storage is not a schema.SingleNestedBlock (got %T)", s.Blocks["object_storage"])
+			}
+			region, ok := objectStorageBlock.Attributes["region"].(schema.StringAttribute)
+			if !ok {
+				t.Fatalf("object_storage.region is not a schema.StringAttribute (got %T)", objectStorageBlock.Attributes["region"])
+			}
+			if region.Computed {
+				t.Error("object_storage.region must NOT be Computed - the backend never returns a real value when " +
+					"region equals the resource's own region (verified against product source and a live cloud), so " +
+					"there is nothing to recover; the fix is regionSemanticEqualPlanModifier at plan time, not Computed")
+			}
+			if !region.Optional {
+				t.Error("object_storage.region must remain Optional - a config may still set it explicitly, " +
+					"including to a value different from the resource's own region")
+			}
+			if indexOfPlanModifierDescription(region.PlanModifiers, descRegionSemanticEqual) == -1 {
+				t.Error("object_storage.region must include regionSemanticEqualPlanModifier{}")
+			}
+			if indexOfPlanModifierDescription(region.PlanModifiers, descRequiresReplace) != -1 {
+				t.Error("object_storage.region must NOT also include a separate stringplanmodifier.RequiresReplace() - " +
+					"regionSemanticEqualPlanModifier subsumes it (sets resp.RequiresReplace itself); composing both " +
+					"reintroduces the unconditional replace this fix exists to suppress, since the plain " +
+					"RequiresReplace() checks the pre-modifier plan value, not the exception this one applies")
 			}
 		})
 	}
