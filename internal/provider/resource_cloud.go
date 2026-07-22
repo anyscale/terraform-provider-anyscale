@@ -1053,9 +1053,13 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// response) overwrites this placeholder once add_resource succeeds.
 	if awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, nil); !d.HasError() {
 		plan.AWSConfig = awsConfig
+	} else {
+		resp.Diagnostics.Append(d...)
 	}
 	if gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, nil); !d.HasError() {
 		plan.GCPConfig = gcpConfig
+	} else {
+		resp.Diagnostics.Append(d...)
 	}
 
 	// Persist state now that the cloud exists remotely, before any subsequent
@@ -1723,9 +1727,13 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		// of (see mergeAWSDerivedFields/mergeGCPDerivedFields doc comments).
 		if awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, deployResult.Result.AWSConfig); !d.HasError() {
 			plan.AWSConfig = awsConfig
+		} else {
+			tflog.Warn(ctx, "Failed to merge memorydb-derived fields into aws_config", map[string]any{"diagnostics": d.Errors()})
 		}
 		if gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, deployResult.Result.GCPConfig); !d.HasError() {
 			plan.GCPConfig = gcpConfig
+		} else {
+			tflog.Warn(ctx, "Failed to merge memorystore-derived fields into gcp_config", map[string]any{"diagnostics": d.Errors()})
 		}
 	}
 

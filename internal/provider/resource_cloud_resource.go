@@ -880,9 +880,13 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	// immediately following this one.
 	if awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, deployResp.Result.AWSConfig); !d.HasError() {
 		plan.AWSConfig = awsConfig
+	} else {
+		resp.Diagnostics.Append(d...)
 	}
 	if gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, deployResp.Result.GCPConfig); !d.HasError() {
 		plan.GCPConfig = gcpConfig
+	} else {
+		resp.Diagnostics.Append(d...)
 	}
 
 	// Initialize Status to known null - will be updated by readCloudResource if available

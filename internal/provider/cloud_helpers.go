@@ -696,12 +696,9 @@ func stringSetsEqual(a, b []string) bool {
 // RequiresReplace in the same attribute's PlanModifiers slice sees no
 // change. Must be ordered BEFORE listplanmodifier.RequiresReplace().
 //
-// Deliberately does nothing when state already holds a real subnet_ids
-// value (not today's behavior, but defensive: normal plan-vs-state
-// comparison already handles that case correctly without this modifier's
-// help) or when the config genuinely differs in substance from what was
-// recovered (a real topology change still replaces, as it should - there is
-// no in-place update path for this field).
+// No-ops when state already has a real value (ordinary plan-vs-state
+// handles that) or when the sets genuinely differ (a real topology change
+// still replaces).
 type awsSubnetIDsSemanticEqualPlanModifier struct{}
 
 func (m awsSubnetIDsSemanticEqualPlanModifier) Description(ctx context.Context) string {
@@ -746,22 +743,14 @@ func (m awsSubnetIDsSemanticEqualPlanModifier) PlanModifyList(ctx context.Contex
 
 // awsSubnetIDsToAZSemanticEqualPlanModifier is
 // awsSubnetIDsSemanticEqualPlanModifier's sibling for subnet_ids_to_az -
-// same bug, same fix shape, opposite direction. When the plan (config)
-// leaves subnet_ids_to_az null but state holds a real recovered map (the
-// case that fires when the original configuration used plain subnet_ids
-// instead), it compares that recovered map's key set against the sibling
-// subnet_ids' CONFIG value - config, not state, because subnet_ids' own
-// state is never populated (see the sibling modifier's doc comment), so
-// config is the only place a real value to compare against exists. On an
-// exact set match, it pins subnet_ids_to_az's plan value back to the
-// recovered state map, so the subsequent RequiresReplace sees no change.
-// Must be ordered BEFORE mapplanmodifier.RequiresReplace().
+// same bug, same fix shape, opposite direction: reads subnet_ids' CONFIG
+// instead of STATE, since subnet_ids' own state is never populated. Must be
+// ordered BEFORE mapplanmodifier.RequiresReplace().
 //
-// Neither this modifier nor its sibling depends on the other's output:
-// this one reads subnet_ids' CONFIG (always known, regardless of modifier
-// ordering), the sibling reads this attribute's STATE (also always known
-// going in) - never each other's in-flight PLAN value - so there is no
-// ordering dependency between the two attributes' modifier chains.
+// Neither modifier depends on the other's output - each reads a value
+// that's already known going in (this one config, the sibling state), never
+// the other's in-flight plan - so there is no ordering dependency between
+// the two attributes' modifier chains.
 type awsSubnetIDsToAZSemanticEqualPlanModifier struct{}
 
 func (m awsSubnetIDsToAZSemanticEqualPlanModifier) Description(ctx context.Context) string {

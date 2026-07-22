@@ -197,18 +197,17 @@ func flattenAWSConfig(ctx context.Context, cfg *AWSConfig) (types.Object, diag.D
 // 3 fields are Computed+UseStateForUnknown, so Update's plan value is
 // already resolved before Update ever runs.
 //
-// derived may be nil - both because add_resource genuinely returns no
-// AWSConfig for this deployment (e.g. a K8S cloud), AND because both
-// resources persist an early, defensive State.Set before add_resource is
-// even called (to avoid orphaning a partially-created cloud on a later
-// failure). A Computed attribute left Unknown at that early Set is a hard
-// "provider produced inconsistent result" error - the same reason
-// CloudResourceID/IsDefault/ComputeStack are defensively nulled nearby in
-// both Create functions. So a nil derived resolves any still-Unknown field
-// to null (a safe placeholder for that early Set) rather than leaving it
-// Unknown; calling this again once the real derived data is available
-// overwrites the placeholder with the real value. Returns awsConfig
-// unchanged if it is null (no aws_config in this plan, e.g. a K8S cloud).
+// derived may be nil - both resources persist an early, defensive
+// State.Set before add_resource is even called (to avoid orphaning a
+// partially-created cloud on a later failure), and a Computed attribute
+// left Unknown at that early Set is a hard "provider produced inconsistent
+// result" error - the same reason CloudResourceID/IsDefault/ComputeStack
+// are defensively nulled nearby in both Create functions. So a nil derived
+// resolves any still-Unknown field to null (a safe placeholder for that
+// early Set) rather than leaving it Unknown; calling this again once the
+// real derived data is available overwrites the placeholder with the real
+// value. Returns awsConfig unchanged if it is null (no aws_config in this
+// plan, e.g. a K8S cloud).
 func mergeAWSDerivedFields(awsConfig types.Object, derived *AWSConfig) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if awsConfig.IsNull() || awsConfig.IsUnknown() {
