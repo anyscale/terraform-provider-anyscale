@@ -200,7 +200,16 @@ This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provi
 
 ### Key rules
 
-- **Do not run terraform init** when dev_overrides is active (provider is not in the public registry).
+- **Do not rely on `terraform init` to install the dev-overridden provider itself** — it is not in
+  the public registry, so init cannot fetch it; your locally built binary is what dev_overrides
+  substitutes in its place. Init still runs fine and installs every *other* provider normally in
+  this state — it explicitly skips only the overridden one ("These providers are not installed as
+  part of init since they were overwritten") — so it's safe, and sometimes necessary, to run for a
+  reason unrelated to this provider (e.g. `terraform providers lock -platform=...` to refresh
+  another provider's lock entries, or a fresh module fetch), as long as you don't expect it to touch
+  `anyscale/anyscale`. Confirmed empirically 2026-07-22 (forge, `object_storage.region` real-infra
+  e2e) — re-verify against the terraform-plugin-framework/CLI version in use before relying on this
+  if it's been a while.
 - Rebuild after changes (`make build`) before running terraform plan/apply.
 - `make install` is a convenience wrapper that builds and prints the expected local binary location.
 
