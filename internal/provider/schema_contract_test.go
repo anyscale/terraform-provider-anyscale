@@ -70,6 +70,26 @@ func hasPlanModifierDescription(mods []planmodifier.String, want string) bool {
 	return false
 }
 
+// indexOfPlanModifierDescription returns the index of the first modifier in
+// mods whose Description matches want, or -1 if absent. Order matters for
+// UseStateForUnknown vs. RequiresReplace specifically: the framework runs
+// PlanModifiers sequentially, feeding each one's output into the next one's
+// input (internal/fwserver/attribute_plan_modification.go). UseStateForUnknown
+// declared AFTER RequiresReplace runs RequiresReplace while the planned value
+// is still Unknown (an omitted Computed field's framework default) - Unknown
+// never equals the known state value, so RequiresReplace fires on every
+// plan, silently reproducing the exact replace-on-import bug this ordering
+// exists to fix. Presence-only checks (hasPlanModifierDescription) cannot
+// catch a backwards order - both modifiers would still be "present".
+func indexOfPlanModifierDescription(mods []planmodifier.String, want string) int {
+	for i, m := range mods {
+		if m.Description(context.Background()) == want {
+			return i
+		}
+	}
+	return -1
+}
+
 func hasMapPlanModifierDescription(mods []planmodifier.Map, want string) bool {
 	for _, m := range mods {
 		if m.Description(context.Background()) == want {
@@ -701,4 +721,73 @@ func TestContainerImageBuildStatusDescriptionsMatchAcceptedEnum(t *testing.T) {
 		}
 		assertHasAllTokens(t, "container_images.container_images[].latest_build_status", attr.MarkdownDescription)
 	})
+}
+
+// TestMemoryDBMemorystoreFieldsComputedWithCorrectModifierOrder pins the
+// Import Round-Trip Gaps memorydb/memorystore fix (Path A): the 3
+// backend-derived fields (aws_config.memorydb_cluster_arn,
+// aws_config.memorydb_cluster_endpoint, gcp_config.memorystore_endpoint)
+// must be Optional+Computed with stringplanmodifier.UseStateForUnknown()
+// declared BEFORE stringplanmodifier.RequiresReplace() in each field's
+// PlanModifiers slice - order is load-bearing, not stylistic (see
+// indexOfPlanModifierDescription's doc comment). A backwards order
+// compiles, both modifiers report "present", and every other test that only
+// checks presence would pass - it silently reproduces the exact
+// replace-on-import bug the fix exists to close. This test is the one place
+// that would catch that regression.
+func TestMemoryDBMemorystoreFieldsComputedWithCorrectModifierOrder(t *testing.T) {
+	type fieldCase struct {
+		block string
+		field string
+	}
+	fields := []fieldCase{
+		{"aws_config", "memorydb_cluster_arn"},
+		{"aws_config", "memorydb_cluster_endpoint"},
+		{"gcp_config", "memorystore_endpoint"},
+	}
+
+	for _, tc := range []struct {
+		name string
+		res  resource.Resource
+	}{
+		{"anyscale_cloud", &CloudResource{}},
+		{"anyscale_cloud_resource", &CloudResourceResource{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := schemaOf(t, tc.res)
+			for _, fc := range fields {
+				fc := fc
+				t.Run(fc.block+"."+fc.field, func(t *testing.T) {
+					block, ok := s.Blocks[fc.block].(schema.SingleNestedBlock)
+					if !ok {
+						t.Fatalf("%s is not a schema.SingleNestedBlock (got %T)", fc.block, s.Blocks[fc.block])
+					}
+					attr, ok := block.Attributes[fc.field].(schema.StringAttribute)
+					if !ok {
+						t.Fatalf("%s.%s is not a schema.StringAttribute (got %T)", fc.block, fc.field, block.Attributes[fc.field])
+					}
+					if !attr.Computed {
+						t.Errorf("%s.%s must be Computed - it is backend-derived and must self-heal already-imported "+
+							"state via UseStateForUnknown, not just be recovered at import", fc.block, fc.field)
+					}
+					if !attr.Optional {
+						t.Errorf("%s.%s must remain Optional - a config may still set it explicitly", fc.block, fc.field)
+					}
+					usfuIdx := indexOfPlanModifierDescription(attr.PlanModifiers, descUseStateForUnknown)
+					rrIdx := indexOfPlanModifierDescription(attr.PlanModifiers, descRequiresReplace)
+					if usfuIdx == -1 {
+						t.Errorf("%s.%s must include stringplanmodifier.UseStateForUnknown()", fc.block, fc.field)
+					}
+					if rrIdx == -1 {
+						t.Errorf("%s.%s must include stringplanmodifier.RequiresReplace() - it is a creation-time property", fc.block, fc.field)
+					}
+					if usfuIdx != -1 && rrIdx != -1 && usfuIdx > rrIdx {
+						t.Errorf("%s.%s: UseStateForUnknown (index %d) must be declared BEFORE RequiresReplace (index %d) - "+
+							"the backwards order silently reproduces the replace-on-import bug this fix exists to close, "+
+							"see indexOfPlanModifierDescription's doc comment", fc.block, fc.field, usfuIdx, rrIdx)
+					}
+				})
+			}
+		})
+	}
 }
