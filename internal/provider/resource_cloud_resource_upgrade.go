@@ -33,7 +33,8 @@ func (r *CloudResourceResource) UpgradeState(ctx context.Context) map[int64]reso
 
 // cloudResourceResourceSchemaV0 is a frozen copy of anyscale_cloud_resource's
 // schema exactly as shipped through v0.16.x - see cloudResourceSchemaV0's
-// doc comment for why this must byte-match real v0.16.x state and must not
+// doc comment for why flags (Optional/Computed/Default/etc) don't need to
+// match true v0.16.x but names/types/structure must, and why this must not
 // evolve alongside the live schema.
 func cloudResourceResourceSchemaV0() *schema.Schema {
 	return &schema.Schema{
