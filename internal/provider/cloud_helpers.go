@@ -647,3 +647,158 @@ func (m bucketNameSemanticEqualPlanModifier) PlanModifyString(ctx context.Contex
 		resp.PlanValue = req.StateValue
 	}
 }
+
+// stringSetsEqual reports whether a and b contain exactly the same set of
+// strings - true bidirectional equality (same cardinality after
+// deduplication AND full mutual containment), not a one-directional subset
+// check. A subset check would wrongly treat a genuine partial-overlap
+// change (e.g. one subnet swapped for another) as unchanged; order is
+// deliberately ignored, since aws_config.subnet_ids (list) and
+// subnet_ids_to_az (map) have no shared ordering to compare.
+func stringSetsEqual(a, b []string) bool {
+	setA := make(map[string]struct{}, len(a))
+	for _, s := range a {
+		setA[s] = struct{}{}
+	}
+	setB := make(map[string]struct{}, len(b))
+	for _, s := range b {
+		setB[s] = struct{}{}
+	}
+	if len(setA) != len(setB) {
+		return false
+	}
+	for s := range setA {
+		if _, ok := setB[s]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// awsSubnetIDsSemanticEqualPlanModifier is the fix for the aws_config
+// list/map import round-trip bug: subnet_ids and subnet_ids_to_az are two
+// alternate representations of the same underlying subnets, but the API
+// only ever returns the parallel-array shape, so flattenAWSConfig recovers
+// ONLY subnet_ids_to_az at import (see its own doc comment) - subnet_ids
+// always comes back null. A configuration originally written with plain
+// subnet_ids therefore diffs on import: config sets subnet_ids (state is
+// null), state has subnet_ids_to_az populated (config is null there) - two
+// independent RequiresReplace triggers, on two different attributes, both
+// pointing at the same substance-free difference.
+//
+// This modifier handles the subnet_ids side: when the plan (config) sets
+// subnet_ids explicitly but state has no subnet_ids of its own (the case
+// above), it compares the plan's ID set against the sibling
+// subnet_ids_to_az's recovered STATE key set - subnet_ids_to_az's own state
+// is the only place a real recovered value can be found, since subnet_ids
+// itself is never recovered. On an exact set match, it pins subnet_ids'
+// plan value back to its (null) state value, so the subsequent
+// RequiresReplace in the same attribute's PlanModifiers slice sees no
+// change. Must be ordered BEFORE listplanmodifier.RequiresReplace().
+//
+// Deliberately does nothing when state already holds a real subnet_ids
+// value (not today's behavior, but defensive: normal plan-vs-state
+// comparison already handles that case correctly without this modifier's
+// help) or when the config genuinely differs in substance from what was
+// recovered (a real topology change still replaces, as it should - there is
+// no in-place update path for this field).
+type awsSubnetIDsSemanticEqualPlanModifier struct{}
+
+func (m awsSubnetIDsSemanticEqualPlanModifier) Description(ctx context.Context) string {
+	return "Treats subnet_ids as unchanged when its values match aws_config.subnet_ids_to_az's recovered keys as a set, so a configuration using the list form does not force replacement against the map form recovered at import."
+}
+
+func (m awsSubnetIDsSemanticEqualPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m awsSubnetIDsSemanticEqualPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+	if req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
+		return
+	}
+	if !req.StateValue.IsNull() {
+		// subnet_ids already carries a real state value (or this is Create,
+		// where StateValue is unknown/absent) - ordinary plan-vs-state
+		// comparison already does the right thing, nothing to reconcile via
+		// the sibling attribute.
+		return
+	}
+
+	var planIDs []string
+	if d := req.PlanValue.ElementsAs(ctx, &planIDs, false); d.HasError() || len(planIDs) == 0 {
+		return
+	}
+
+	var stateSubnetToAZ map[string]string
+	if d := req.State.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids_to_az"), &stateSubnetToAZ); d.HasError() || len(stateSubnetToAZ) == 0 {
+		return
+	}
+
+	stateIDs := make([]string, 0, len(stateSubnetToAZ))
+	for id := range stateSubnetToAZ {
+		stateIDs = append(stateIDs, id)
+	}
+
+	if stringSetsEqual(planIDs, stateIDs) {
+		resp.PlanValue = req.StateValue
+	}
+}
+
+// awsSubnetIDsToAZSemanticEqualPlanModifier is
+// awsSubnetIDsSemanticEqualPlanModifier's sibling for subnet_ids_to_az -
+// same bug, same fix shape, opposite direction. When the plan (config)
+// leaves subnet_ids_to_az null but state holds a real recovered map (the
+// case that fires when the original configuration used plain subnet_ids
+// instead), it compares that recovered map's key set against the sibling
+// subnet_ids' CONFIG value - config, not state, because subnet_ids' own
+// state is never populated (see the sibling modifier's doc comment), so
+// config is the only place a real value to compare against exists. On an
+// exact set match, it pins subnet_ids_to_az's plan value back to the
+// recovered state map, so the subsequent RequiresReplace sees no change.
+// Must be ordered BEFORE mapplanmodifier.RequiresReplace().
+//
+// Neither this modifier nor its sibling depends on the other's output:
+// this one reads subnet_ids' CONFIG (always known, regardless of modifier
+// ordering), the sibling reads this attribute's STATE (also always known
+// going in) - never each other's in-flight PLAN value - so there is no
+// ordering dependency between the two attributes' modifier chains.
+type awsSubnetIDsToAZSemanticEqualPlanModifier struct{}
+
+func (m awsSubnetIDsToAZSemanticEqualPlanModifier) Description(ctx context.Context) string {
+	return "Treats subnet_ids_to_az as unchanged when its keys match aws_config.subnet_ids's configured values as a set, so a configuration using the list form does not force replacement on the map form recovered at import."
+}
+
+func (m awsSubnetIDsToAZSemanticEqualPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m awsSubnetIDsToAZSemanticEqualPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
+	if req.StateValue.IsNull() || req.StateValue.IsUnknown() {
+		return
+	}
+	if !req.PlanValue.IsNull() {
+		// Explicit config value for subnet_ids_to_az itself - compare
+		// directly against state as normal, nothing to reconcile via the
+		// sibling attribute.
+		return
+	}
+
+	var stateSubnetToAZ map[string]string
+	if d := req.StateValue.ElementsAs(ctx, &stateSubnetToAZ, false); d.HasError() || len(stateSubnetToAZ) == 0 {
+		return
+	}
+
+	var configSubnetIDs []string
+	if d := req.Config.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids"), &configSubnetIDs); d.HasError() || len(configSubnetIDs) == 0 {
+		return
+	}
+
+	stateIDs := make([]string, 0, len(stateSubnetToAZ))
+	for id := range stateSubnetToAZ {
+		stateIDs = append(stateIDs, id)
+	}
+
+	if stringSetsEqual(configSubnetIDs, stateIDs) {
+		resp.PlanValue = req.StateValue
+	}
+}
