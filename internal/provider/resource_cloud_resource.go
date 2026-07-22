@@ -847,6 +847,11 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	} else {
 		resp.Diagnostics.Append(d...)
 	}
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResp.Result.FileStorage); !d.HasError() {
+		plan.FileStorage = fileStorage
+	} else {
+		resp.Diagnostics.Append(d...)
+	}
 
 	// Initialize Status to known null - will be updated by readCloudResource if available
 	if plan.Status.IsUnknown() {

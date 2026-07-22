@@ -1007,12 +1007,13 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		}
 	}
 
-	// memorydb_cluster_arn/memorydb_cluster_endpoint/memorystore_endpoint are
-	// now Computed - if config omitted them, they are still Unknown here
-	// (add_resource, which resolves them, hasn't run yet at this point for
-	// the all-in-one path). Resolve to a safe null placeholder so the early
-	// State.Set below never persists an Unknown value; addCloudResource's
-	// own merge (mergeAWSDerivedFields/mergeGCPDerivedFields with the real
+	// memorydb_cluster_arn/memorydb_cluster_endpoint/memorystore_endpoint/
+	// mount_targets are now Computed - if config omitted them, they are
+	// still Unknown here (add_resource, which resolves them, hasn't run yet
+	// at this point for the all-in-one path). Resolve to a safe null
+	// placeholder so the early State.Set below never persists an Unknown
+	// value; addCloudResource's own merge (mergeAWSDerivedFields/
+	// mergeGCPDerivedFields/mergeFileStorageDerivedFields with the real
 	// response) overwrites this placeholder once add_resource succeeds.
 	if awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, nil); !d.HasError() {
 		plan.AWSConfig = awsConfig
@@ -1021,6 +1022,11 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 	if gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, nil); !d.HasError() {
 		plan.GCPConfig = gcpConfig
+	} else {
+		resp.Diagnostics.Append(d...)
+	}
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil); !d.HasError() {
+		plan.FileStorage = fileStorage
 	} else {
 		resp.Diagnostics.Append(d...)
 	}
@@ -1697,6 +1703,11 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 			plan.GCPConfig = gcpConfig
 		} else {
 			tflog.Warn(ctx, "Failed to merge memorystore-derived fields into gcp_config", map[string]any{"diagnostics": d.Errors()})
+		}
+		if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResult.Result.FileStorage); !d.HasError() {
+			plan.FileStorage = fileStorage
+		} else {
+			tflog.Warn(ctx, "Failed to merge mount_targets-derived fields into file_storage", map[string]any{"diagnostics": d.Errors()})
 		}
 	}
 

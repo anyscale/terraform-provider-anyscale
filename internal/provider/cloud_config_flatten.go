@@ -487,6 +487,43 @@ func flattenMountTargets(mountTargets []MountTarget) (types.List, diag.Diagnosti
 	return list, diags
 }
 
+// mergeFileStorageDerivedFields is mergeAWSDerivedFields for
+// file_storage.mount_targets - same fill-when-omitted rule, same
+// Create-only call site, same nil-derived-resolves-Unknown-to-null
+// reasoning for the early pre-add_resource State.Set, generalized from a
+// scalar field to a list via flattenMountTargets. derived is the
+// add_resource response's own FileStorage, whose MountTargets the backend
+// gates on "unset" the identical way as memorydb/memorystore (EFS/Filestore
+// auto-discovery - see clouds_resource.py's _populate_aws_values/
+// _populate_gcp_values). Returns fileStorage unchanged if it is null (no
+// file_storage in this plan).
+func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorage) (types.Object, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if fileStorage.IsNull() || fileStorage.IsUnknown() {
+		return fileStorage, diags
+	}
+
+	attrs := fileStorage.Attributes()
+	patched := make(map[string]attr.Value, len(attrs))
+	for k, v := range attrs {
+		patched[k] = v
+	}
+
+	if v, ok := patched["mount_targets"]; ok && (v.IsNull() || v.IsUnknown()) {
+		var apiMountTargets []MountTarget
+		if derived != nil {
+			apiMountTargets = derived.MountTargets
+		}
+		mountTargets, d := flattenMountTargets(apiMountTargets)
+		diags.Append(d...)
+		patched["mount_targets"] = mountTargets
+	}
+
+	obj, d := types.ObjectValue(fileStorageAttrTypes(), patched)
+	diags.Append(d...)
+	return obj, diags
+}
+
 // requiredImportConfigBlocks recovers every config block ImportState can
 // safely populate for a valid anyscale_cloud or anyscale_cloud_resource
 // config, based on compute stack and provider, flattened from the given
