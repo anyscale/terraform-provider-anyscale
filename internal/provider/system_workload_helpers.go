@@ -188,11 +188,7 @@ const systemClusterStateRunning = "Running"
 // resource (cloud_sdk.py's terminate wait uses interval_s=10) and this provider's existing
 // service-rollout default. Kept separate from the timeout (see waitForSystemClusterState) so
 // unit tests can drive both down to milliseconds via waitForSystemClusterStateWithTiming
-// directly. Consumed by resource_system_cluster.go's Create/Update, which lands on a separate
-// quest branch and merges with this one - the nolint below is temporary and resolves on its own
-// once merged (harmless no-op the moment a real caller exists; safe to leave or strip either way).
-//
-//nolint:unused // no caller within this branch alone - see comment above
+// directly.
 const defaultSystemClusterPollInterval = 10 * time.Second
 
 // systemClusterErrorStates are the ClusterState values that terminate the wait loop with a
@@ -265,11 +261,7 @@ func evaluateSystemClusterState(result *DescribeSystemWorkloadResult, target, cl
 // Terminating or in any other state, regardless of how evaluateSystemClusterState/the continue
 // map classify what comes back.
 //
-// Consumed by resource_system_cluster.go's Create/Update, which lands on a separate quest
-// branch and merges with this one - the nolint below is temporary and resolves on its own once
-// merged (harmless no-op the moment a real caller exists; safe to leave or strip either way).
-//
-//nolint:unused // no caller within this branch alone - see comment above
+// Consumed by resource_system_cluster.go's Create/Update.
 func waitForSystemClusterState(ctx context.Context, client *Client, cloudID, target string, timeout time.Duration) (*DescribeSystemWorkloadResult, error) {
 	return waitForSystemClusterStateWithTiming(ctx, client, cloudID, target, timeout, defaultSystemClusterPollInterval)
 }

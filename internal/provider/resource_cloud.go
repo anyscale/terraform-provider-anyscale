@@ -59,7 +59,6 @@ type CloudResourceModel struct {
 	Credentials           types.String `tfsdk:"credentials"`
 	EnableLineageTracking types.Bool   `tfsdk:"enable_lineage_tracking"`
 	EnableLogIngestion    types.Bool   `tfsdk:"enable_log_ingestion"`
-	EnableSystemCluster   types.Bool   `tfsdk:"enable_system_cluster"`
 
 	// Provider-specific configurations (nested)
 	AWSConfig        types.Object `tfsdk:"aws_config"`
@@ -132,7 +131,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 		// v1: mount_targets converted from a block to a list-of-objects
 		// attribute, and the 5 inert kubernetes_config bookkeeping fields
 		// were removed - see resource_cloud_upgrade.go's v0->v1 UpgradeState.
-		Version:             1,
+		Version:             2,
 		MarkdownDescription: "Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).",
 
 		Attributes: map[string]schema.Attribute{
@@ -224,12 +223,6 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 				MarkdownDescription: "Whether to enable aggregated log ingestion for this cloud.",
-			},
-
-			"enable_system_cluster": schema.BoolAttribute{
-				Optional: true,
-				MarkdownDescription: "Whether to enable the system cluster for this cloud, which powers the task and actor observability dashboards. See the [Anyscale System Cluster documentation](https://docs.anyscale.com/clouds/system-cluster) for what it provisions and how it behaves (e.g. the default 8-hour auto-termination when nobody is viewing a dashboard, and that enabling it turns on both the task and actor dashboards together); the same setting is also reachable via `anyscale cloud config update --enable-system-cluster` or the console's Clouds > Settings > Observability page. Only the cloud's primary `anyscale_cloud_resource` ever gets a working system cluster - a secondary resource attached to the same cloud does not. " +
-					"Deliberately NOT Computed, unlike the other cloud-level booleans above: the Anyscale API has no side-effect-free way to read back whether the system cluster is currently enabled - the only readable field on a cloud is an opaque config ID that, once created, stays non-null regardless of the current enabled/disabled state, and the one endpoint that resolves the true value has a real side effect (it provisions a cluster) and requires broader permissions.",
 			},
 
 			// ─── Computed Fields ──────────────────────────────────
@@ -1106,7 +1099,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// overwrite it with the backend's untouched default, producing "Provider
 	// produced inconsistent result after apply" on the first apply for any
 	// cloud that sets one of these. A freshly created cloud always starts
-	// with all four false/unset, so comparing plan against that fixed
+	// with all three false, so comparing plan against that fixed
 	// zero-value baseline (rather than a real prior state, which doesn't
 	// exist yet) reuses the exact same diff-and-call logic Update() already
 	// uses and has already been proven against.
@@ -1114,7 +1107,6 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		AutoAddUser:           types.BoolValue(false),
 		EnableLineageTracking: types.BoolValue(false),
 		EnableLogIngestion:    types.BoolValue(false),
-		EnableSystemCluster:   types.BoolNull(),
 	}
 	if err := r.updateMutableFields(ctx, cloudID, plan, zeroValueState); err != nil {
 		resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
@@ -1211,17 +1203,6 @@ func (r *CloudResource) updateMutableFields(ctx context.Context, cloudID string,
 			return fmt.Errorf("update is_aggregated_logs_enabled: %w", err)
 		}
 	}
-	// enable_system_cluster is Optional-only, not Computed (see schema doc -
-	// no side-effect-free read exists for it), so unlike the three booleans
-	// above, plan can genuinely be null (never configured). Only call the
-	// endpoint when the user has actually asserted a value - null must never
-	// be coerced to false, whether at Create (a fresh zero-state comparison)
-	// or Update (config removed after previously being set).
-	if !plan.EnableSystemCluster.IsNull() && !plan.EnableSystemCluster.Equal(state.EnableSystemCluster) {
-		if err := r.updateCloudSystemClusterConfig(ctx, cloudID, plan.EnableSystemCluster.ValueBool()); err != nil {
-			return fmt.Errorf("update system_cluster_config: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -1315,22 +1296,6 @@ func isTransientAutoAddUserConflict(err error) bool {
 // schema's own field name here would silently no-op against the real API.
 func (r *CloudResource) updateCloudAggregatedLogsConfig(ctx context.Context, cloudID string, enabled bool) error {
 	path := fmt.Sprintf("/api/v2/clouds/%s/update_customer_aggregated_logs_config?is_enabled=%t", cloudID, enabled)
-	tflog.Debug(ctx, "PUT "+path)
-	_, err := DoRequestRaw(ctx, r.client, "PUT", path, nil, http.StatusOK, http.StatusNoContent)
-	return err
-}
-
-// updateCloudSystemClusterConfig calls the system-cluster config PUT route.
-// Its query parameter is named is_enabled, not enable_system_cluster or
-// system_cluster - same real path-vs-query-param naming mismatch as
-// updateCloudAggregatedLogsConfig, confirmed against clouds_router.py's
-// update_system_cluster_config. Deliberately does NOT call the separate
-// POST /{cloud_id}/terminate route: that terminates the actual running
-// cluster (heavier, async, requires an existing cluster) and is a distinct
-// concept from this config-level enable/disable toggle - bool=false must
-// only ever reach this endpoint, never terminate.
-func (r *CloudResource) updateCloudSystemClusterConfig(ctx context.Context, cloudID string, enabled bool) error {
-	path := fmt.Sprintf("/api/v2/clouds/%s/update_system_cluster_config?is_enabled=%t", cloudID, enabled)
 	tflog.Debug(ctx, "PUT "+path)
 	_, err := DoRequestRaw(ctx, r.client, "PUT", path, nil, http.StatusOK, http.StatusNoContent)
 	return err

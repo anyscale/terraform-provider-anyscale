@@ -32,9 +32,10 @@ func kubernetesConfigAttrTypesV0() map[string]attr.Type {
 	}
 }
 
-// upgradeCloudFixture runs a v0 CloudResourceModel through the real
-// UpgradeState() map and returns the decoded v1 model.
-func upgradeCloudFixture(t *testing.T, v0Model CloudResourceModel) CloudResourceModel {
+// upgradeCloudFixture runs a v0 cloudResourceModelV1 (the pre-removal shape,
+// which still has EnableSystemCluster - see its doc comment) through the
+// real UpgradeState() map and returns the decoded current-schema model.
+func upgradeCloudFixture(t *testing.T, v0Model cloudResourceModelV1) CloudResourceModel {
 	t.Helper()
 	ctx := context.Background()
 
@@ -112,7 +113,7 @@ func TestCloudResourceStateUpgradeV0toV1_FullVMCloud(t *testing.T) {
 		"mount_targets":               types.ListValueMust(types.ObjectType{AttrTypes: mountTargetAttrTypes()}, []attr.Value{mountTarget}),
 	})
 
-	v0 := CloudResourceModel{
+	v0 := cloudResourceModelV1{
 		ID:                    types.StringValue("cld_real"),
 		Name:                  types.StringValue("real-vm-cloud"),
 		CloudProvider:         types.StringValue("AWS"),
@@ -187,7 +188,7 @@ func TestCloudResourceStateUpgradeV0toV1_FullK8SCloud(t *testing.T) {
 		"kubeconfig_path":                types.StringValue("/tmp/kubeconfig"),
 	})
 
-	v0 := CloudResourceModel{
+	v0 := cloudResourceModelV1{
 		ID:                    types.StringValue("cld_k8s_real"),
 		Name:                  types.StringValue("real-k8s-cloud"),
 		CloudProvider:         types.StringValue("AWS"),
@@ -198,7 +199,7 @@ func TestCloudResourceStateUpgradeV0toV1_FullK8SCloud(t *testing.T) {
 		Credentials:           types.StringValue("cred-placeholder"),
 		EnableLineageTracking: types.BoolValue(false),
 		EnableLogIngestion:    types.BoolValue(false),
-		EnableSystemCluster:   types.BoolNull(),
+		EnableSystemCluster:   types.BoolValue(true),
 		AWSConfig:             types.ObjectNull(awsConfigAttrTypes()),
 		GCPConfig:             types.ObjectNull(gcpConfigAttrTypes()),
 		AzureConfig:           types.ObjectNull(azureConfigAttrTypes()),
@@ -237,5 +238,117 @@ func TestCloudResourceStateUpgradeV0toV1_FullK8SCloud(t *testing.T) {
 
 	if !v1.AWSConfig.IsNull() || !v1.GCPConfig.IsNull() {
 		t.Error("AWSConfig/GCPConfig must stay null for a K8S cloud that never had them")
+	}
+}
+
+// Real v1->v2 upgrader test (anyscale_cloud), covering the
+// enable_system_cluster removal (AC22). The v1 fixture sets
+// EnableSystemCluster to a real, non-null true (not just BoolNull) so this
+// proves the upgrade tolerates real prior data, not merely an
+// already-empty field. Uses cloudResourceModelV1 (not CloudResourceModel)
+// to build/read the fixture, since v1's real schema still declares
+// enable_system_cluster and CloudResourceModel no longer has a field for
+// it - see cloudResourceModelV1's doc comment. If the v1->v2 map entry
+// were removed, upgraders[1] below would fail immediately - this test is
+// sensitive to that regression, not just to whether the passthrough logic
+// happens to work.
+func TestCloudResourceStateUpgradeV1toV2_DropsEnableSystemCluster(t *testing.T) {
+	ctx := context.Background()
+
+	awsConfig := types.ObjectValueMust(awsConfigAttrTypes(), map[string]attr.Value{
+		"vpc_id":                      types.StringValue("vpc-v1v2"),
+		"subnet_ids":                  types.ListNull(types.StringType),
+		"subnet_ids_to_az":            types.MapValueMust(types.StringType, map[string]attr.Value{"subnet-1": types.StringValue("us-east-2a")}),
+		"security_group_ids":          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("sg-v1v2")}),
+		"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::123456789012:role/control-v1v2"),
+		"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::123456789012:role/data-v1v2"),
+		"cluster_instance_profile_id": types.StringNull(),
+		"external_id":                 types.StringValue("ext-id-v1v2"),
+		"memorydb_cluster_name":       types.StringNull(),
+		"memorydb_cluster_arn":        types.StringNull(),
+		"memorydb_cluster_endpoint":   types.StringNull(),
+	})
+
+	v1 := cloudResourceModelV1{
+		ID:                    types.StringValue("cld_v1v2"),
+		Name:                  types.StringValue("v1-to-v2-cloud"),
+		CloudProvider:         types.StringValue("AWS"),
+		ComputeStack:          types.StringValue("VM"),
+		Region:                types.StringValue("us-east-2"),
+		IsPrivateCloud:        types.BoolValue(false),
+		AutoAddUser:           types.BoolValue(true),
+		Credentials:           types.StringValue("cred-placeholder"),
+		EnableLineageTracking: types.BoolValue(false),
+		EnableLogIngestion:    types.BoolValue(false),
+		EnableSystemCluster:   types.BoolValue(true),
+		AWSConfig:             awsConfig,
+		GCPConfig:             types.ObjectNull(gcpConfigAttrTypes()),
+		AzureConfig:           types.ObjectNull(azureConfigAttrTypes()),
+		KubernetesConfig:      types.ObjectNull(kubernetesConfigAttrTypes()),
+		ObjectStorage:         types.ObjectNull(objectStorageAttrTypes()),
+		FileStorage:           types.ObjectNull(fileStorageAttrTypes()),
+		IsEmptyCloud:          types.BoolValue(false),
+		IsDefault:             types.BoolValue(false),
+		CloudResourceID:       types.StringValue("cldrsrc_v1v2"),
+	}
+
+	r := &CloudResource{}
+	upgraders := r.UpgradeState(ctx)
+	upgrader, ok := upgraders[1]
+	if !ok {
+		t.Fatalf("UpgradeState() has no entry for schema version 1 - the v1->v2 upgrader is missing")
+	}
+
+	v1Schema := cloudResourceSchemaV1()
+	priorState := &tfsdk.State{
+		Schema: *v1Schema,
+		Raw:    tftypes.NewValue(v1Schema.Type().TerraformType(ctx), nil),
+	}
+	if diags := priorState.Set(ctx, &v1); diags.HasError() {
+		t.Fatalf("failed to build v1 prior state fixture: %v", diags)
+	}
+
+	var v2SchemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &v2SchemaResp)
+	if v2SchemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build v2 (current) schema: %v", v2SchemaResp.Diagnostics)
+	}
+	if v2SchemaResp.Schema.Version != 2 {
+		t.Fatalf("current schema Version = %d, want 2 (bumped for the enable_system_cluster removal)", v2SchemaResp.Schema.Version)
+	}
+	if _, present := v2SchemaResp.Schema.Attributes["enable_system_cluster"]; present {
+		t.Fatal("current schema still declares enable_system_cluster - it should be fully removed")
+	}
+
+	req := resource.UpgradeStateRequest{State: priorState}
+	resp := &resource.UpgradeStateResponse{
+		State: tfsdk.State{
+			Schema: v2SchemaResp.Schema,
+			Raw:    tftypes.NewValue(v2SchemaResp.Schema.Type().TerraformType(ctx), nil),
+		},
+	}
+	upgrader.StateUpgrader(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("upgradeCloudResourceStateV1toV2() diagnostics: %v", resp.Diagnostics)
+	}
+
+	var v2 CloudResourceModel
+	if diags := resp.State.Get(ctx, &v2); diags.HasError() {
+		t.Fatalf("failed to decode upgraded v2 state: %v", diags)
+	}
+
+	if v2.Name.ValueString() != "v1-to-v2-cloud" {
+		t.Errorf("Name = %v, want unchanged", v2.Name.ValueString())
+	}
+	if v2.AutoAddUser.ValueBool() != true {
+		t.Errorf("AutoAddUser = %v, want unchanged (true)", v2.AutoAddUser.ValueBool())
+	}
+
+	var awsModel AWSConfigModel
+	if diags := v2.AWSConfig.As(ctx, &awsModel, basetypes.ObjectAsOptions{}); diags.HasError() {
+		t.Fatalf("failed to decode upgraded AWSConfig: %v", diags)
+	}
+	if awsModel.VPCID.ValueString() != "vpc-v1v2" {
+		t.Errorf("AWSConfig.VPCID = %v, want unchanged", awsModel.VPCID.ValueString())
 	}
 }
