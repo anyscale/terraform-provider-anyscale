@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -28,9 +28,10 @@ const buildPollInterval = 10 * time.Second
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                = &ContainerImageBuildResource{}
-	_ resource.ResourceWithConfigure   = &ContainerImageBuildResource{}
-	_ resource.ResourceWithImportState = &ContainerImageBuildResource{}
+	_ resource.Resource                 = &ContainerImageBuildResource{}
+	_ resource.ResourceWithConfigure    = &ContainerImageBuildResource{}
+	_ resource.ResourceWithImportState  = &ContainerImageBuildResource{}
+	_ resource.ResourceWithUpgradeState = &ContainerImageBuildResource{}
 )
 
 // NewContainerImageBuildResource creates a new container image build resource.
@@ -49,11 +50,11 @@ type ContainerImageBuildResourceModel struct {
 	ID types.String `tfsdk:"id"`
 
 	// User-provided attributes
-	Name              types.String `tfsdk:"name"`               // Required
-	Containerfile     types.String `tfsdk:"containerfile"`      // Inline content (mutually exclusive with containerfile_path)
-	ContainerfilePath types.String `tfsdk:"containerfile_path"` // File path (mutually exclusive with containerfile)
-	ProjectID         types.String `tfsdk:"project_id"`         // Optional
-	BuildTimeout      types.String `tfsdk:"build_timeout"`      // Optional, default 30m
+	Name              types.String   `tfsdk:"name"`               // Required
+	Containerfile     types.String   `tfsdk:"containerfile"`      // Inline content (mutually exclusive with containerfile_path)
+	ContainerfilePath types.String   `tfsdk:"containerfile_path"` // File path (mutually exclusive with containerfile)
+	ProjectID         types.String   `tfsdk:"project_id"`         // Optional
+	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 
 	// Computed attributes
 	BuildID     types.String `tfsdk:"build_id"`
@@ -74,6 +75,7 @@ func (r *ContainerImageBuildResource) Metadata(ctx context.Context, req resource
 // Schema defines the schema for the resource.
 func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version: 1,
 		MarkdownDescription: `Builds a container image from a Containerfile (Dockerfile). Use this resource to create custom container images for Anyscale workloads.
 
 ~> **Note:** When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting ` + "`include_archived = true`" + ` on the ` + "`anyscale_container_images`" + ` data source.`,
@@ -116,12 +118,6 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"build_timeout": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString("30m"),
-				MarkdownDescription: "Maximum time to wait for the build to complete (e.g., `30m`, `1h`). Defaults to `30m`.",
-			},
 
 			// Computed attributes - these change when containerfile is updated
 			"build_id": schema.StringAttribute{
@@ -156,6 +152,14 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 				Computed:            true,
 				MarkdownDescription: "Timestamp when the build was created. Changes when a new build is created.",
 			},
+		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create:            true,
+				Update:            true,
+				CreateDescription: "Maximum time to wait for the initial build to complete (e.g. `30m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.",
+				UpdateDescription: "Maximum time to wait for a new build triggered by a `containerfile`/`containerfile_path` change to complete. Same default as `create`. Not consulted when an update changes only this `timeouts` block itself (no new build is triggered in that case).",
+			}),
 		},
 	}
 }
@@ -207,10 +211,9 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	// Parse timeout
-	timeout, err := r.parseTimeout(plan.BuildTimeout.ValueString())
-	if err != nil {
-		AddConfigError(&resp.Diagnostics, "Invalid Build Timeout", err.Error())
+	timeout, diags := plan.Timeouts.Create(ctx, defaultBuildTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -422,8 +425,27 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	// Check if containerfile has changed
 	containerfileChanged := !plan.Containerfile.Equal(state.Containerfile) || !plan.ContainerfilePath.Equal(state.ContainerfilePath)
 
-	// If containerfile hasn't changed, just update state (timeout may have changed)
+	// If containerfile hasn't changed, skip triggering a new build (timeouts may have
+	// changed) - containerfileChanged deliberately never compares Timeouts (same as it
+	// never compared the old flat BuildTimeout), so a timeouts-only change never triggers
+	// a new build.
+	//
+	// Still need a fresh GET to populate the computed outputs before persisting (mirrors
+	// resource_service.go's H2/H5 handling of the same shape): every Computed attribute
+	// here has no UseStateForUnknown plan modifier, so all of them (build_status,
+	// created_at, digest, image_uri, name_version, ray_version, revision) are Unknown in
+	// this plan once anything triggers Update at all - confirmed by a real acceptance run
+	// failing with "provider produced invalid result" before this fix, not assumed. This
+	// bug pre-dates PR2 (any build_timeout-only change would have hit it too - nothing
+	// ever tested that path before), surfaced by the PR2 test that closes exactly that
+	// coverage gap.
 	if !containerfileChanged {
+		build, err := r.getBuild(ctx, state.BuildID.ValueString())
+		if err != nil {
+			AddAPIError(&resp.Diagnostics, "read build", err)
+			return
+		}
+		populateBuildFields(&plan, build)
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
@@ -439,10 +461,9 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	// Parse timeout
-	timeout, err := r.parseTimeout(plan.BuildTimeout.ValueString())
-	if err != nil {
-		AddConfigError(&resp.Diagnostics, "Invalid Build Timeout", err.Error())
+	timeout, diags := plan.Timeouts.Update(ctx, defaultBuildTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -553,20 +574,6 @@ func (r *ContainerImageBuildResource) resolveContainerfile(plan *ContainerImageB
 	}
 
 	return "", fmt.Errorf("either containerfile or containerfile_path must be specified")
-}
-
-// parseTimeout parses a timeout string (e.g., "30m", "1h") into a time.Duration.
-func (r *ContainerImageBuildResource) parseTimeout(timeoutStr string) (time.Duration, error) {
-	if timeoutStr == "" {
-		return defaultBuildTimeout, nil
-	}
-
-	duration, err := time.ParseDuration(timeoutStr)
-	if err != nil {
-		return 0, fmt.Errorf("invalid timeout format '%s': %w", timeoutStr, err)
-	}
-
-	return duration, nil
 }
 
 // getLatestBuildID resolves the latest build ID for an application template

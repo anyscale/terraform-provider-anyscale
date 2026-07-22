@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -97,51 +99,46 @@ func TestResolveContainerfile(t *testing.T) {
 	})
 }
 
-// TestParseTimeout proves the real parseTimeout, not a hand-copy of it. The previous version
-// (TestBuildTimeoutParsing) duplicated defaultBuildTimeout as a bare "30 * time.Minute" literal
-// (silently drifts if the constant ever changes) and populated errorContains on two cases without
-// ever asserting it -- both invalid-format cases would have passed even with an empty or wrong
-// error message.
-func TestParseTimeout(t *testing.T) {
-	r := &ContainerImageBuildResource{}
-	tests := []struct {
-		name          string
-		timeoutStr    string
-		wantDuration  time.Duration
-		wantError     bool
-		errorContains string
-	}{
-		{name: "30 minutes", timeoutStr: "30m", wantDuration: 30 * time.Minute},
-		{name: "1 hour", timeoutStr: "1h", wantDuration: 1 * time.Hour},
-		{name: "45 minutes", timeoutStr: "45m", wantDuration: 45 * time.Minute},
-		{name: "1 hour 30 minutes", timeoutStr: "1h30m", wantDuration: 90 * time.Minute},
-		{name: "empty string uses the provider's real default constant", timeoutStr: "", wantDuration: defaultBuildTimeout},
-		{name: "invalid format", timeoutStr: "invalid", wantError: true, errorContains: "invalid timeout format"},
-		{name: "missing unit", timeoutStr: "30", wantError: true, errorContains: "invalid timeout format"},
-	}
+// TestTimeoutsCreateResolvesExpectedDuration replaces the now-obsolete
+// TestParseTimeout (parseTimeout/defaultBuildTimeout's hand-rolled string
+// parsing is gone, replaced by timeouts.Value.Create/Update(ctx, default) -
+// per PR2-TIMEOUTS-PLAN.md, the framework's own validator now owns the
+// invalid-format/missing-unit error paths at plan time, so those two cases
+// don't have a unit-level equivalent here anymore). Mirrors the two most
+// meaningful cases from the old table: an omitted value resolving to the
+// real default, and an explicit value parsing correctly.
+//
+// Landed as a compile-unblocking fix while migrating this resource to
+// timeouts{} (PR2) - tfp-assayer owns the full PR2 test contract per
+// PR2-TIMEOUTS-PLAN.md and may replace or extend this with their own
+// version.
+func TestTimeoutsCreateResolvesExpectedDuration(t *testing.T) {
+	attrTypes := map[string]attr.Type{"create": types.StringType, "update": types.StringType}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			duration, err := r.parseTimeout(tt.timeoutStr)
+	t.Run("omitted value resolves to the real default constant", func(t *testing.T) {
+		v := timeouts.Value{Object: types.ObjectNull(attrTypes)}
+		got, diags := v.Create(context.Background(), defaultBuildTimeout)
+		if diags.HasError() {
+			t.Fatalf("Create() diagnostics: %v", diags)
+		}
+		if got != defaultBuildTimeout {
+			t.Errorf("Create() = %v, want %v (the default)", got, defaultBuildTimeout)
+		}
+	})
 
-			if tt.wantError {
-				if err == nil {
-					t.Fatalf("parseTimeout(%q) error = nil, want an error", tt.timeoutStr)
-				}
-				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("parseTimeout(%q) error = %q, want it to contain %q", tt.timeoutStr, err.Error(), tt.errorContains)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("parseTimeout(%q) error = %v, want nil", tt.timeoutStr, err)
-			}
-			if duration != tt.wantDuration {
-				t.Errorf("parseTimeout(%q) = %v, want %v", tt.timeoutStr, duration, tt.wantDuration)
-			}
-		})
-	}
+	t.Run("explicit value resolves to the parsed duration", func(t *testing.T) {
+		v := timeouts.Value{Object: types.ObjectValueMust(attrTypes, map[string]attr.Value{
+			"create": types.StringValue("1h30m"),
+			"update": types.StringNull(),
+		})}
+		got, diags := v.Create(context.Background(), defaultBuildTimeout)
+		if diags.HasError() {
+			t.Fatalf("Create() diagnostics: %v", diags)
+		}
+		if got != 90*time.Minute {
+			t.Errorf("Create() = %v, want 90m", got)
+		}
+	})
 }
 
 // TestEvaluateBuildStatus_AllAcceptedStatuses proves evaluateBuildStatus — the pure classifier
@@ -494,7 +491,7 @@ func TestContainerImageBuildCreate_MapsFieldsFromThreeCallSequence(t *testing.T)
 				Name:          types.StringValue(resourceName),
 				Containerfile: types.StringValue(containerfileContent),
 				ProjectID:     types.StringValue(projectID),
-				BuildTimeout:  types.StringValue("30m"),
+				Timeouts:      timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "update": types.StringType})},
 			})
 			if planDiags.HasError() {
 				t.Fatalf("failed to build plan: %v", planDiags)

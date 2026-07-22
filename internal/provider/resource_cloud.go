@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -74,6 +75,8 @@ type CloudResourceModel struct {
 	IsEmptyCloud    types.Bool   `tfsdk:"is_empty_cloud"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	CloudResourceID types.String `tfsdk:"cloud_resource_id"`
+
+	Timeouts timeouts.Value `tfsdk:"timeouts"`
 }
 
 // AzureConfigModel represents Azure-specific configuration. See AzureConfig
@@ -586,6 +589,10 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					},
 				},
 			},
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create:            true,
+				CreateDescription: "Maximum time to wait for a newly created cloud to become ready (e.g. `20m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.",
+			}),
 		},
 	}
 }
@@ -1094,7 +1101,11 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	// Step 3: Wait for cloud to be ready
-	createTimeout := 30 * time.Minute
+	createTimeout, timeoutDiags := plan.Timeouts.Create(ctx, 30*time.Minute)
+	resp.Diagnostics.Append(timeoutDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if err := waitForCloudReady(ctx, r.client, cloudID, createTimeout); err != nil {
 		tflog.Error(ctx, "Failed waiting for cloud to be ready", map[string]any{"error": err.Error()})
 		resp.Diagnostics.AddError("Wait Error", err.Error())

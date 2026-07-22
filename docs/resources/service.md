@@ -71,10 +71,14 @@ resource "anyscale_service" "example" {
   # yet), so the config stays stable across create and every later update.
   rollout_strategy  = "ROLLOUT"
   max_surge_percent = 25 # paces the rollout only - it still converges to 100%, never holds at a canary percent
-  # Defaults to 45m, already sized for a real standard ROLLOUT (a full second cluster spins up
+  # Defaults to 30m, already sized for a real standard ROLLOUT (a full second cluster spins up
   # before the gradual canary traffic-shift even starts). Raise it further for a heavier image,
   # more replicas, or slower health checks than that default already assumes.
-  rollout_timeout = "1h"
+  timeouts {
+    create = "1h"
+    update = "1h"
+    delete = "1h"
+  }
 
   tags = {
     team        = "ml-platform"
@@ -84,7 +88,8 @@ resource "anyscale_service" "example" {
 
 # Minimal service - only the required inputs. project_id, tags, and the rollout knobs all take
 # sensible defaults (project_id resolves to your org's default project for the compute config's
-# cloud; rollout_strategy defaults to ROLLOUT; rollout_timeout defaults to 45m).
+# cloud; rollout_strategy defaults to ROLLOUT; an omitted timeouts block defaults to 30m for
+# create/update/delete alike).
 resource "anyscale_service" "minimal" {
   name     = "minimal-service"
   build_id = "cenv_def456"
@@ -148,8 +153,8 @@ output "service_live_ray_serve_config" {
 - `max_surge_percent` (Number) Pacing knob only (0-100): how much excess capacity to allocate during the rollout. The rollout always still converges to 100% - this does not hold the rollout at a partial percent. Null lets the backend pick its own pacing. Not readable back from the API (see `rollout_strategy`).
 - `project_id` (String) The ID of the project this service starts clusters in. If omitted, the backend resolves your organization's default project for the compute config's cloud - that resolved value is written back here, so leaving this unset does not produce a diff on later plans. Immutable: the backend has no move-project endpoint, so changing this (including changing which project an omitted value would resolve to, e.g. by changing `compute_config_id` to a different cloud) replaces the resource. When explicitly set, its own cloud must match `compute_config_id`'s cloud - a plan-time check catches a mismatch here (naming both cloud IDs and a remedy) rather than letting the backend reject the cluster after apply.
 - `rollout_strategy` (String) Either `ROLLOUT` (default) or `IN_PLACE`. Controls how UPDATES roll in a new version - the initial create always performs a standard deploy, since there is no existing version yet to upgrade in place (the backend rejects `IN_PLACE` outright on a fresh create), so this attribute can be set from the start and left unchanged across create and every later update. `ROLLOUT` deploys the new version on a newly started cluster and shifts traffic over, then converges to RUNNING. `IN_PLACE` upgrades the existing cluster in place - faster, but the backend permits changing only `ray_serve_config` under it; changing `build_id`, `compute_config_id`, or `connection_ids` in the same apply as `rollout_strategy = "IN_PLACE"` is rejected at plan time (see this resource's plan-time validation) rather than left to fail opaquely at apply. Not readable back from the API, so - like `tags` - drift on this attribute is never detected; it is a pure rollout directive re-sent on every apply.
-- `rollout_timeout` (String) Maximum time to wait for a create or update rollout to reach `RUNNING`, or for destroy to wait for termination to reach `TERMINATED` before deleting (e.g. `30m`, `1h`). Defaults to `45m` - a standard `ROLLOUT` genuinely takes tens of minutes on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), so this default is sized with real-world headroom, not just the minimum a bare test app needs.
 - `tags` (Map of String) Tags to associate with the service. The backend stores tags through a separate system from the service record itself (`/api/v2/tags/resource`, not the service GET/apply endpoints), so this resource makes its own extra calls to keep it a true round trip: read back on refresh, and - since that system's write endpoint only upserts (adds/updates) rather than replaces - any key removed from this map is explicitly deleted so it does not linger on the backend forever.
+- `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
 ### Read-Only
 
@@ -169,6 +174,16 @@ output "service_live_ray_serve_config" {
 - `primary_version` (Attributes) The primary (currently active) version of this service, as last observed from the server - including its own `ray_serve_config`/`connection_ids`, which reflect the live server-side state rather than this resource's authored `ray_serve_config`/`connection_ids` inputs above. Compare the two if you suspect drift. Can be null if the backend has not returned it yet. (see [below for nested schema](#nestedatt--primary_version))
 - `service_observability_urls` (Attributes) Dashboard URLs for this service. The whole block is null while a service is still being processed (a confirmed real transitional state, e.g. a not-yet-healthy service that has not finished its first reconcile). Once present, each individual URL is separately null if the backend has none to report for it (e.g. before the service's first successful deploy). (see [below for nested schema](#nestedatt--service_observability_urls))
 - `service_status_checklist` (Attributes) Per-component status breakdown derived from the most recent reconciler snapshot. Null for terminated services and during the brief window before the reconciler's first tick on a brand-new service. (see [below for nested schema](#nestedatt--service_status_checklist))
+
+<a id="nestedblock--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) Maximum time to wait for a create rollout to reach `RUNNING` (e.g. `20m`, `1h`). Defaults to `30m` - a standard `ROLLOUT` genuinely takes real time on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), but observed real rollouts run closer to ~20m, so this default carries real margin without being needlessly long. Purely local to this provider - never sent to or read from the Anyscale API.
+- `delete` (String) Maximum time to wait for destroy to wait for termination to reach `TERMINATED` before deleting. Same default and rationale as `create`.
+- `update` (String) Maximum time to wait for an update rollout to reach `RUNNING`. Same default and rationale as `create`. Only consulted when the update actually triggers a new rollout (see `ray_serve_config`/`build_id`/`compute_config_id`) - an update that only changes `tags` or this `timeouts` block itself never applies a new version, so this value is not consulted for those.
+
 
 <a id="nestedatt--canary_version"></a>
 ### Nested Schema for `canary_version`

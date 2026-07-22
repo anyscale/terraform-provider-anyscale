@@ -5,26 +5,27 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// defaultSystemClusterStartTimeout is sized against assayer's live smoke
+// defaultSystemClusterCreateTimeout is sized against assayer's live smoke
 // test (~49s to reach Running on the static fixture cloud) with generous
-// real-world headroom - see start_timeout's MarkdownDescription.
-const defaultSystemClusterStartTimeout = "20m"
+// real-world headroom - see the timeouts block's CreateDescription.
+const defaultSystemClusterCreateTimeout = 20 * time.Minute
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                = &SystemClusterResource{}
-	_ resource.ResourceWithConfigure   = &SystemClusterResource{}
-	_ resource.ResourceWithImportState = &SystemClusterResource{}
+	_ resource.Resource                 = &SystemClusterResource{}
+	_ resource.ResourceWithConfigure    = &SystemClusterResource{}
+	_ resource.ResourceWithImportState  = &SystemClusterResource{}
+	_ resource.ResourceWithUpgradeState = &SystemClusterResource{}
 )
 
 // NewSystemClusterResource creates a new System Cluster resource. Named
@@ -45,13 +46,13 @@ type SystemClusterResource struct {
 // the data source (data_source_system_cluster.go) since both surface the
 // same observed fields.
 type SystemClusterResourceModel struct {
-	ID                 types.String `tfsdk:"id"`
-	CloudID            types.String `tfsdk:"cloud_id"`
-	ClusterID          types.String `tfsdk:"cluster_id"`
-	State              types.String `tfsdk:"state"`
-	IsEnabled          types.Bool   `tfsdk:"is_enabled"`
-	WorkloadServiceURL types.String `tfsdk:"workload_service_url"`
-	StartTimeout       types.String `tfsdk:"start_timeout"`
+	ID                 types.String   `tfsdk:"id"`
+	CloudID            types.String   `tfsdk:"cloud_id"`
+	ClusterID          types.String   `tfsdk:"cluster_id"`
+	State              types.String   `tfsdk:"state"`
+	IsEnabled          types.Bool     `tfsdk:"is_enabled"`
+	WorkloadServiceURL types.String   `tfsdk:"workload_service_url"`
+	Timeouts           timeouts.Value `tfsdk:"timeouts"`
 }
 
 func (r *SystemClusterResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -60,6 +61,7 @@ func (r *SystemClusterResource) Metadata(ctx context.Context, req resource.Metad
 
 func (r *SystemClusterResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version: 1,
 		MarkdownDescription: `Ensures the System Cluster for an Anyscale Cloud - the always-on cluster that backs the task and actor observability dashboards - is enabled and running. Declarative: applying this resource enables the System Cluster if it is not already enabled, starts it if it is terminated, and waits until it reaches a healthy ` + "`RUNNING`" + ` state. Re-applying against an already-running cluster is a no-op.
 
 A cloud's System Cluster is tied to that cloud's primary (default) ` + "`anyscale_cloud_resource`" + ` - a secondary cloud resource on the same cloud never gets a working System Cluster of its own today. Anyscale engineering is actively working on multi-resource System Cluster support; this limitation is not enforced by this resource (the Anyscale API currently exposes no way to detect or check it), so it is a documentation caveat rather than a plan/apply-time guard.
@@ -96,12 +98,12 @@ A cloud's System Cluster is tied to that cloud's primary (default) ` + "`anyscal
 				Computed:            true,
 				MarkdownDescription: "The URL the task and actor observability dashboards use to reach this System Cluster's workload service. Null until the cluster has been created and reaches a state where this URL is populated.",
 			},
-			"start_timeout": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString(defaultSystemClusterStartTimeout),
-				MarkdownDescription: "Maximum time to wait for the System Cluster to reach `Running` after a create or update triggers a start (e.g. `10m`, `30m`). Defaults to `20m` - a real start observed on a live cloud took about 49 seconds, so this default carries substantial real-world headroom rather than just the minimum a fast environment needs. Purely local to this provider - never sent to or read from the Anyscale API.",
-			},
+		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create:            true,
+				CreateDescription: "Maximum time to wait for the System Cluster to reach `Running` after create triggers a start (e.g. `10m`, `30m`). Defaults to `20m` - a real start observed on a live cloud took about 49 seconds, so this default carries substantial real-world headroom rather than just the minimum a fast environment needs. Purely local to this provider - never sent to or read from the Anyscale API.",
+			}),
 		},
 	}
 }
@@ -136,9 +138,9 @@ func (r *SystemClusterResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	timeout, err := time.ParseDuration(plan.StartTimeout.ValueString())
-	if err != nil {
-		AddConfigError(&resp.Diagnostics, "Invalid Start Timeout", err.Error())
+	timeout, diags := plan.Timeouts.Create(ctx, defaultSystemClusterCreateTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 

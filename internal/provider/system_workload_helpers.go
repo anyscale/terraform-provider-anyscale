@@ -253,8 +253,9 @@ func evaluateSystemClusterState(result *DescribeSystemWorkloadResult, target, cl
 
 // waitForSystemClusterState polls describeSystemWorkload(startCluster=false) until status
 // reaches target, a terminal error state, or timeout, pinning the real poll interval. timeout is
-// caller-supplied (read from the resource's own start_timeout attribute), not pinned - there is
-// no single real constant to pin the way e.g. waitForBuildDigest pins both of its own.
+// caller-supplied (read from the resource's own timeouts.create block, or
+// defaultSystemClusterCreateTimeout if unset), not pinned - there is no
+// single real constant to pin the way e.g. waitForBuildDigest pins both of its own.
 //
 // Every poll in this loop passes startCluster=false - never true again after the initial Create
 // request - so this can never re-trigger an actual start against a cloud whose cluster is

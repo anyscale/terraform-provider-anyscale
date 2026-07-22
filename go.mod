@@ -11,6 +11,8 @@ require (
 
 require github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
 
+require github.com/hashicorp/terraform-plugin-framework-timeouts v0.7.0
+
 require (
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
