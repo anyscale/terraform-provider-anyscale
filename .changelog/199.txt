@@ -1,0 +1,8 @@
+```
+release-note:fixed
+resource/anyscale_cloud: `object_storage.region` no longer forces a destroy-and-recreate on import or plan when a configuration sets it equal to the cloud's own region; a null recovered value in that case is now treated as equivalent to the configured value. Already-affected clouds resolve this with a one-time in-place update on their next plan after upgrading, never a replace, and need no re-import.
+```
+```
+release-note:fixed
+resource/anyscale_cloud_resource: `object_storage.region` no longer forces a destroy-and-recreate on import or plan when a configuration sets it equal to the cloud resource's own region; a null recovered value in that case is now treated as equivalent to the configured value. Already-affected cloud resources resolve this with a one-time in-place update on their next plan after upgrading, never a replace, and need no re-import.
+```
