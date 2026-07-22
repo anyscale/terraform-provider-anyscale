@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-07-22
+
+### Fixed
+
+- resource/anyscale_cloud: `aws_config.memorydb_cluster_arn`, `aws_config.memorydb_cluster_endpoint`, and `gcp_config.memorystore_endpoint` no longer force a destroy-and-recreate on import or subsequent plans when a configuration sets only `memorydb_cluster_name` (or `memorystore_instance_name`) and leaves these backend-derived fields unset; all three are now Computed, and the provider populates them from the Create API response and recovers them at import, verified via mock-server tests against the documented response shape. A cloud imported under a prior version self-heals on its next plan with no re-import needed, since the correct value was already recovered into state at import time. A cloud created directly (never imported) with these fields left unset keeps its existing null value until its next update or a re-import - a pre-existing gap, not a new regression, now closed for every cloud created from this version forward.
+- resource/anyscale_cloud_resource: `aws_config.memorydb_cluster_arn`, `aws_config.memorydb_cluster_endpoint`, and `gcp_config.memorystore_endpoint` no longer force a destroy-and-recreate on import or subsequent plans when a configuration sets only `memorydb_cluster_name` (or `memorystore_instance_name`) and leaves these backend-derived fields unset; all three are now Computed, and the provider populates them from the Create API response and recovers them at import, verified via mock-server tests against the documented response shape. A cloud imported under a prior version self-heals on its next plan with no re-import needed, since the correct value was already recovered into state at import time. A cloud created directly (never imported) with these fields left unset keeps its existing null value until its next update or a re-import - a pre-existing gap, not a new regression, now closed for every cloud created from this version forward.
+- resource/anyscale_cloud: `aws_config.subnet_ids` (the plain list form) no longer forces a destroy-and-recreate on import or subsequent plans when a configuration uses it instead of the equivalent `subnet_ids_to_az` map form; a new plan modifier treats the two forms as equivalent whenever they describe the same set of subnets, regardless of order (the backend returns subnet_ids sorted by availability zone, which previously looked like a real change to Terraform's order-sensitive list comparison). A genuine subnet change still correctly forces replacement.
+- resource/anyscale_cloud_resource: `aws_config.subnet_ids` (the plain list form) no longer forces a destroy-and-recreate on import or subsequent plans when a configuration uses it instead of the equivalent `subnet_ids_to_az` map form; a new plan modifier treats the two forms as equivalent whenever they describe the same set of subnets, regardless of order (the backend returns subnet_ids sorted by availability zone, which previously looked like a real change to Terraform's order-sensitive list comparison). A genuine subnet change still correctly forces replacement.
+
 ## [0.16.1] - 2026-07-22
 
 ### Fixed
@@ -803,7 +812,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.16.2...HEAD
+[0.16.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.2
 [0.16.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.1
 [0.16.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.0
 [0.15.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.15.3
