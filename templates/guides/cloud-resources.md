@@ -184,16 +184,21 @@ differences between resources and data sources](#naming-differences-between-reso
 above for other cases where the singular and plural data sources deliberately don't expose identical
 attributes.
 
-### Kubernetes configuration fields with no effect
+### Removed: Kubernetes configuration bookkeeping fields
 
-`kubernetes_config.namespace`, `ingress_host`, `cluster_name`, `context`, and `kubeconfig_path` are
-marked Deprecated on both `anyscale_cloud` and `anyscale_cloud_resource` (`terraform plan`/`validate`
-will warn on them): the provider never sends them to the Anyscale API, so setting them has no effect
-on the deployed cloud, and never has. They're deprecated rather than removed immediately, since
-removing a schema attribute outright is itself a breaking change; they'll be removed in a future major
-release, with migration guidance at that time — remove them from your configuration now rather than
-waiting. Only `anyscale_operator_iam_identity`, `zones`, and `redis_endpoint` in `kubernetes_config`
-actually reach the API today.
+As of v0.17.0, `kubernetes_config.namespace`, `ingress_host`, `cluster_name`, `context`, and
+`kubeconfig_path` are gone — not deprecated, fully removed — from both `anyscale_cloud` and
+`anyscale_cloud_resource`: the attributes, their schema entries, and the backing model fields no
+longer exist on either resource. They were deprecated (not removed) since v0.1.2, since the
+provider never sent them to the Anyscale API and setting them never had any effect on the deployed
+cloud. To migrate: delete all five attributes from your configuration wherever they appear —
+`terraform plan`/`validate` fails with an "Unsupported argument" error if any remain. Existing
+state upgrades automatically on the next `plan`/`apply`; no manual state surgery is required, even
+if your configuration still sets one of the five (the value is simply dropped during the upgrade,
+same as the schema no longer accepting it).
+
+Only `anyscale_operator_iam_identity`, `zones`, and `redis_endpoint` in `kubernetes_config` ever
+reached the API and continue to.
 
 ### `is_k8s` on the `anyscale_cloud` and `anyscale_clouds` data sources
 
@@ -324,18 +329,18 @@ A few more things worth knowing:
   than silently defaulting to a path the backend isn't actually using. This is strictly better than
   before this fix, when `file_storage` wasn't recovered at import at all; it's a one-time consequence
   of the pre-existing GCP auto-discovery behavior, not a new limitation of its own.
-- **`file_storage.mount_targets` is deliberately excluded from this recovery, unlike the rest of
-  `file_storage`.** Import always leaves it null, even when the backend has auto-discovered real
-  mount target addresses for a registered cloud. On AWS and GCP the backend derives a single address
-  from the EFS/Filestore resource itself; only Azure and Generic (always K8S) carry a genuine
-  multi-element, per-zone list. Either way these addresses are backend-discovered, not something you
-  can reliably declare in your configuration, so recovering them would just relocate the same
-  forced-replace problem this fix exists to solve onto a field nobody can actually redeclare. A
-  configuration that only declares `file_storage_id` (and omits `mount_targets` entirely) plans
-  cleanly after import and stays that way, since state never gains a value your config didn't put
-  there. `mount_targets` remains a valid input when creating a new cloud through Terraform, sourcing
-  the address from your EFS/Filestore module output (see the aws-vm or gcp-vm example) — this only
-  affects what import recovers into state.
+- **`file_storage.mount_targets` is Computed and recovers cleanly at import, whether or not your
+  configuration sets it.** As of v0.17.0, `mount_targets` changed from a block to a list-of-objects
+  attribute specifically so it could be genuinely Computed — the backend-discovered address (and
+  zone, where applicable) is recovered into state at import and populated automatically at create
+  time, the same self-heal story as the `memorydb`/`memorystore` fields above. A configuration that
+  only declares `file_storage_id` and omits `mount_targets` now plans cleanly with the real value in
+  state, rather than the field staying permanently null. `mount_targets` remains a valid input when
+  creating a new cloud through Terraform, sourcing the address from your EFS/Filestore module output
+  (see the aws-vm or gcp-vm example) — setting it explicitly is compared against the real value as
+  normal, and a genuine change still correctly proposes a replace. As with the rest of
+  `file_storage`, this value isn't refreshed from the API on any later read, so it's a frozen
+  create/import-time snapshot even though it's Computed.
 - **`compute_stack` is read from the cloud's own attached resource, not just the cloud-level
   summary field.** `GET /clouds/{id}` includes its own `compute_stack`, but that value is
   backend-derived from whichever resource the API considers primary, and defaults to `VM` if it
@@ -348,11 +353,6 @@ A few more things worth knowing:
   values already agreed, so this is defense-in-depth rather than a behavior change you'd notice day
   to day - it specifically protects a cold import of a cloud registered outside Terraform (e.g. via
   the CLI) from ever showing `compute_stack = "VM"` for what is actually a K8S cloud.
-- The five inert `kubernetes_config` fields (see [Deprecated and removed attributes](#deprecated-and-removed-attributes) above)
-  can't be populated from an API that never received them: `namespace` comes back as its documented
-  default (`"anyscale"`); `ingress_host`, `cluster_name`, `context`, and `kubeconfig_path` come back
-  null regardless of what your configuration says. They have no effect either way, so this doesn't
-  produce a plan diff on those specific fields — just don't expect them to round-trip.
 - Importing an `anyscale_cloud` that was originally created empty (the multi-resource cloud pattern) but already has a
   resource attached looks, from the API, identical to one created all-in-one — both simply have a
   default resource present. Importing in that situation recovers the resource's config - the required
