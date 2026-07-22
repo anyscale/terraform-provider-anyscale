@@ -300,9 +300,9 @@ A few more things worth knowing:
 - **`aws_config.memorydb_cluster_arn`/`memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint`
   are Computed and now round-trip cleanly whether or not your configuration sets them.** All three
   are backend-derived from `memorydb_cluster_name` (AWS) or `memorystore_instance_name` (GCP)
-  whenever left unset — the provider reads the derived value from the same API response already
-  used to recover it at import, so a configuration that only sets the name/instance-name field
-  plans cleanly either way, and one that sets the derived field explicitly still compares normally
+  whenever left unset — the provider populates them from the Create API response and recovers them
+  at import, verified via mock-server tests, so a configuration that only sets the name/instance-name
+  field plans cleanly either way, and one that sets the derived field explicitly still compares normally
   against the real value. Timing matters for an existing cloud: one already imported before this
   fix had the correct value recovered into state all along (the bug was `RequiresReplace` treating
   that as a diff, not a wrong value) — it self-heals on its very next plan after upgrading, no
