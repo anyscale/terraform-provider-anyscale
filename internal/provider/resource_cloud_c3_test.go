@@ -429,7 +429,16 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		}
 	})
 
-	t.Run("AWS: file_storage.mount_targets from the API is never recovered (mount_targets replace-loop fix)", func(t *testing.T) {
+	t.Run("AWS: file_storage.mount_targets from the API is recovered verbatim (Computed self-heal, supersedes the old never-recover fix)", func(t *testing.T) {
+		// mount_targets converted from a schema.ListNestedBlock to an
+		// Optional+Computed schema.ListNestedAttribute (Import Round-Trip
+		// Gaps, co-flagship breaking change alongside memorydb/memorystore).
+		// The old "never recover, leave null" fix (Option C, PR #189) was
+		// specifically a workaround for Blocks being unable to carry
+		// Computed semantics at all - now that it is a real Computed
+		// attribute with UseStateForUnknown, recovering the real value at
+		// import is correct and desired: it is what lets an omitted-in-config
+		// value self-heal instead of staying permanently invisible.
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack: "VM",
 			AWSConfig:    &AWSConfig{VPCID: "vpc-real"},
@@ -449,13 +458,16 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 
 		var fsModel FileStorageModel
 		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
-		if !fsModel.MountTargets.IsNull() {
-			t.Errorf("file_storage.MountTargets = %v, want null - mount_targets is a ListNestedBlock with "+
-				"no Computed fallback, so recovering it here writes a value the next plan can never reconcile "+
-				"against a config that (correctly) omits the backend-assigned addresses, forcing a "+
-				"destroy-and-recreate of the live cloud (yunhao's report)", fsModel.MountTargets)
+		if fsModel.MountTargets.IsNull() {
+			t.Fatal("file_storage.MountTargets is null, want the 2 real recovered mount targets - " +
+				"mount_targets is now Computed, so recovering it at import no longer risks a replace-loop " +
+				"the way it did as a plain Block")
 		}
-		// file_storage_id must still recover - only mount_targets changes.
+		elems := fsModel.MountTargets.Elements()
+		if len(elems) != 2 {
+			t.Fatalf("file_storage.MountTargets has %d elements, want 2", len(elems))
+		}
+		// file_storage_id must still recover too.
 		if fsModel.FileStorageID.ValueString() != "fs-mt123" {
 			t.Errorf("file_storage.FileStorageID = %v, want fs-mt123", fsModel.FileStorageID.ValueString())
 		}

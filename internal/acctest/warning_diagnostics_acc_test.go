@@ -128,18 +128,27 @@ provider "anyscale" {
 	return result
 }
 
-// TestAccCloudResource_KubernetesConfigDeprecatedFields_WarningActuallyFires is the
-// corrected C5 acceptance criterion: setting each of the 5 inert
-// kubernetes_config fields must produce a real, served deprecation warning,
-// not just a schema struct field asserted by a unit test.
-func TestAccCloudResource_KubernetesConfigDeprecatedFields_WarningActuallyFires(t *testing.T) {
+// TestAccCloudResource_KubernetesConfigRemovedFieldsRejected replaces
+// TestAccCloudResource_KubernetesConfigDeprecatedFields_WarningActuallyFires
+// now that namespace/ingress_host/cluster_name/context/kubeconfig_path are
+// removed from the schema entirely (task #8, user-approved breaking
+// change), not merely deprecated. The diagnostic shape changes completely:
+// a removed schema attribute is a config-vs-schema mismatch Terraform Core
+// itself rejects at validate time ("Unsupported argument"), not a
+// provider-served warning - leaving the old warning-count assertion running
+// would either fail confusingly (0 warnings, since the fields no longer
+// exist to warn about) or, worse, quietly stop proving anything if some
+// unrelated diagnostic happened to match its loose Contains check. This
+// asserts the actual post-removal contract: validate fails, and every one
+// of the 5 removed names is named in its own "Unsupported argument" error.
+func TestAccCloudResource_KubernetesConfigRemovedFieldsRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	binDir := buildProviderBinaryForCLICheck(t)
 
 	resourceHCL := `
 resource "anyscale_cloud" "test" {
-  name           = "c5-deprecation-check"
+  name           = "k8s-field-removal-check"
   cloud_provider = "AWS"
   compute_stack  = "K8S"
 
@@ -159,23 +168,37 @@ resource "anyscale_cloud" "test" {
 `
 	result := runTerraformValidate(t, binDir, resourceHCL)
 
-	deprecatedFields := []string{"namespace", "ingress_host", "cluster_name", "context", "kubeconfig_path"}
-	// All 5 fields share the identical DeprecationMessage text
-	// (kubernetesConfigInertFieldDeprecationMessage), so a single warning
-	// can't be attributed to one specific field by content alone. What IS
-	// verifiable, and is the actual point of this test, is the count: all 5
-	// fields are set above, so a correct fix produces exactly 5 such
-	// warnings. A fix that only wires up some of the 5 (or the previous,
-	// silently-broken state producing 0) shows up as a wrong count here.
-	sharedMessageCount := 0
+	if result.Valid {
+		t.Fatal("expected validate to fail - all 5 removed kubernetes_config fields are still set in config, " +
+			"each must be rejected as an unsupported argument")
+	}
+
+	removedFields := []string{"namespace", "ingress_host", "cluster_name", "context", "kubeconfig_path"}
+	unsupportedArgumentCount := 0
 	for _, d := range result.Diagnostics {
-		if d.Severity == "warning" && strings.Contains(d.Detail, "not sent to the Anyscale API") {
-			sharedMessageCount++
+		if d.Severity == "error" && d.Summary == "Unsupported argument" {
+			unsupportedArgumentCount++
 		}
 	}
-	if sharedMessageCount != len(deprecatedFields) {
-		t.Errorf("expected exactly %d deprecation warnings (one per inert field: %v), got %d. Full diagnostics: %+v",
-			len(deprecatedFields), deprecatedFields, sharedMessageCount, result.Diagnostics)
+	if unsupportedArgumentCount != len(removedFields) {
+		t.Errorf("expected exactly %d \"Unsupported argument\" errors (one per removed field: %v), got %d. Full diagnostics: %+v",
+			len(removedFields), removedFields, unsupportedArgumentCount, result.Diagnostics)
+	}
+
+	// Cross-check that the errors actually name the removed fields, not some
+	// other unrelated schema mismatch that happens to produce the same
+	// summary text.
+	for _, field := range removedFields {
+		found := false
+		for _, d := range result.Diagnostics {
+			if d.Severity == "error" && d.Summary == "Unsupported argument" && strings.Contains(d.Detail, field) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("no \"Unsupported argument\" error named %q. Full diagnostics: %+v", field, result.Diagnostics)
+		}
 	}
 }
 

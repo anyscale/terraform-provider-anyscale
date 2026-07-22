@@ -313,27 +313,22 @@ func testAzureConfigObj(tenantID string) types.Object {
 	)
 }
 
+// testKubernetesConfigObj builds a kubernetes_config fixture with only the 3
+// real, API-backed fields - namespace/ingress_host/cluster_name/context/
+// kubeconfig_path were removed (task #8, user-approved breaking change):
+// pure Terraform-side bookkeeping the API never saw, dropped entirely
+// rather than kept as inert no-ops.
 func testKubernetesConfigObj(operatorIdentity string) types.Object {
 	return types.ObjectValueMust(
 		map[string]attr.Type{
 			"anyscale_operator_iam_identity": types.StringType,
 			"zones":                          types.ListType{ElemType: types.StringType},
 			"redis_endpoint":                 types.StringType,
-			"namespace":                      types.StringType,
-			"ingress_host":                   types.StringType,
-			"cluster_name":                   types.StringType,
-			"context":                        types.StringType,
-			"kubeconfig_path":                types.StringType,
 		},
 		map[string]attr.Value{
 			"anyscale_operator_iam_identity": types.StringValue(operatorIdentity),
 			"zones":                          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("us-east-2a")}),
 			"redis_endpoint":                 types.StringNull(),
-			"namespace":                      types.StringNull(),
-			"ingress_host":                   types.StringNull(),
-			"cluster_name":                   types.StringNull(),
-			"context":                        types.StringNull(),
-			"kubeconfig_path":                types.StringNull(),
 		},
 	)
 }
