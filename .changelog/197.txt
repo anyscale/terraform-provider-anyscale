@@ -1,0 +1,14 @@
+```
+release-note:new-resource
+resource/anyscale_system_cluster: Ensure an Anyscale Cloud's System Cluster (the always-on cluster backing the task and actor observability dashboards) is enabled and running.
+```
+
+```
+release-note:new-data-source
+data-source/anyscale_system_cluster: Look up an Anyscale Cloud's System Cluster status.
+```
+
+```
+release-note:breaking-change
+resource/anyscale_cloud: `enable_system_cluster` is removed - System Cluster support is now the dedicated `anyscale_system_cluster` resource (and data source) instead of a config flag on the cloud, since starting and monitoring the actual cluster needs its own lifecycle a boolean can't represent. To migrate, delete `enable_system_cluster` from your `anyscale_cloud` configuration, then add an `anyscale_system_cluster` resource with the same `cloud_id` if you want Terraform to keep ensuring the System Cluster is enabled and running. Existing state auto-migrates to drop the removed field on your next plan; no manual state surgery is needed.
+```

@@ -754,3 +754,69 @@ type StatusChecklistItemResult struct {
 	VersionID  *string `json:"version_id"`
 	ObservedAt *string `json:"observed_at"`
 }
+
+// ─── System Cluster (system_workload API) ──────────────────────────────
+
+// DescribeSystemWorkloadResponse wraps POST /api/v2/system_workload/{cloud_id}/describe's
+// response envelope.
+type DescribeSystemWorkloadResponse struct {
+	Result DescribeSystemWorkloadResult `json:"result"`
+}
+
+// DescribeSystemWorkloadResult is the ONLY authoritative source of System Cluster status in
+// this provider (see system_workload_helpers.go's package doc comment for why
+// decorated_sessions' own state/status fields must never be treated as this). Status is the
+// backend's ClusterState enum (PascalCase: "Running", "StartingUp", ... - 10 values); nil is
+// possible before a cluster has ever been created.
+//
+// Deliberately absent: workload_names ([]SystemWorkloadName) - this provider always hardcodes
+// a single workload (see systemWorkloadNameRayObsEventsAPIService) and never exposes it as
+// configurable, so the response's own echo of it back is not useful state.
+type DescribeSystemWorkloadResult struct {
+	ClusterID              *string `json:"cluster_id"`
+	WorkloadServiceURL     *string `json:"workload_service_url"`
+	WorkloadServiceURLAuth *string `json:"workload_service_url_auth"`
+	Status                 *string `json:"status"`
+	IsEnabled              bool    `json:"is_enabled"`
+}
+
+// DecoratedSessionsListResponse is the list response from GET /api/v2/decorated_sessions/,
+// used only by findSystemWorkloadCluster as a side-effect-free existence oracle.
+type DecoratedSessionsListResponse struct {
+	Results  []DecoratedSessionResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// DecoratedSessionResult is intentionally a narrow slice of the real DecoratedSession model -
+// used ONLY to answer "does this cloud's System Cluster session already exist, and what is its
+// id", never for status (see findSystemWorkloadCluster). Both CloudID (a plain inherited scalar
+// per source) and Cloud (the "decorated"/expanded form) are modeled defensively since which one
+// actually serializes on the wire is a live_verify_item, not yet confirmed against a real
+// response as of this writing - MatchesCloud checks both so the client-side cloud filter works
+// either way. State/Status are deliberately NOT modeled here at all: they are two different,
+// differently-cased enums (SessionState/ClusterStatus) from describe's own ClusterState, and
+// this provider must never surface either as System Cluster status (see architect_design in
+// the quest's decision record for the full reasoning).
+type DecoratedSessionResult struct {
+	ID              string  `json:"id"`
+	CloudID         *string `json:"cloud_id"`
+	IsSystemCluster bool    `json:"is_system_cluster"`
+	Cloud           *struct {
+		ID string `json:"id"`
+	} `json:"cloud"`
+}
+
+// MatchesCloud reports whether this session belongs to cloudID, checking both the plain
+// cloud_id scalar and the expanded cloud object (see the doc comment above for why both).
+func (r DecoratedSessionResult) MatchesCloud(cloudID string) bool {
+	if r.CloudID != nil && *r.CloudID == cloudID {
+		return true
+	}
+	if r.Cloud != nil && r.Cloud.ID == cloudID {
+		return true
+	}
+	return false
+}

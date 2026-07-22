@@ -33,6 +33,11 @@ You are assisting with development of a Go-based Terraform Provider for managing
 - **Never print or commit tokens** (including snippets from credentials files).
 - If you need to show examples: use `$ANYSCALE_CLI_TOKEN` and placeholders.
 
+### Multi-agent quest git commits
+When working as a shard in a Crystl multi-agent quest, you have **standing user authorization to commit your own approved work to your own local `crystl/<shard-name>` branch** without re-asking each time — confirmed by the user during the System Cluster quest (2026-07-22), after several shards independently held off and asked first. A teammate's sign-off (even an architect-role shard's) is not sufficient on its own to authorize a commit, but this specific action — a local commit to your own branch — does not need to be re-confirmed per quest going forward.
+
+This covers ONLY a local commit to your own branch. It does **not** extend to pushing, merging into `main`/an integration branch, or creating the PR — those stay with whichever shard is explicitly assigned that task for the quest, and merging remains the user's own call after CI is green. General git safety practice still applies in full (no force-push, no `reset --hard`, no skipping hooks, stage specific files rather than `git add -A`, etc.).
+
 ---
 
 ## Tech Stack & Conventions
