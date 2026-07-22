@@ -77,7 +77,9 @@ resource "anyscale_container_image_build" "test" {
   containerfile = <<-EOF
 %s
 EOF
-  build_timeout = "45m"
+  timeouts {
+    create = "45m"
+  }
 }
 
 # Lookup by ID

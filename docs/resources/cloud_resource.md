@@ -167,6 +167,7 @@ output "eks_operator_reported_at" {
 - `kubernetes_config` (Block, Optional) Kubernetes-specific configuration. Required when compute_stack is K8S. See the [Anyscale Kubernetes documentation](https://docs.anyscale.com/clouds/kubernetes) for cluster requirements and how these fields map to the Anyscale Operator installation. (see [below for nested schema](#nestedblock--kubernetes_config))
 - `object_storage` (Block, Optional) Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). Recovered automatically when importing an existing cloud/resource, whenever the live resource actually has one configured. See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP, [Azure Blob/ADLS](https://docs.anyscale.com/clouds/azure/storage) for Azure. (see [below for nested schema](#nestedblock--object_storage))
 - `region` (String) The region for this cloud resource. Inferred from the cloud/provider configuration when not specified. For AWS, Anyscale does not support the China or GovCloud partitions.
+- `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
 ### Read-Only
 
@@ -259,6 +260,14 @@ Optional:
 - `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS). A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so importing a cloud whose bucket was written without the prefix does not force replacement.
 - `endpoint` (String) Custom S3-compatible endpoint (for MinIO, etc.).
 - `region` (String) The bucket region (if different from cloud region). A configuration that sets this to the same value as the cloud resource's own region is treated as equivalent to a null recovered value for plan purposes, so it will not force replacement - the Anyscale API cannot tell "never set" apart from "explicitly set to the resource's own region" once stored, so there is no matching value to compare against otherwise. A cloud resource that already has a null value in state from an older provider version reconciles this with a one-time in-place update on its next plan, never a replace. A genuinely different bucket region round-trips normally via the real API value, and a real change to it still requires replacement.
+
+
+<a id="nestedblock--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) Maximum time to wait for a newly created cloud resource to become ready (e.g. `20m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.
 
 ## Import
 

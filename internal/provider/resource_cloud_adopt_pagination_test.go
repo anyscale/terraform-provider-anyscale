@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -259,6 +261,7 @@ func TestCreate_MultipleExistingCloudsProducesResourceLevelDiagnostic(t *testing
 		KubernetesConfig: types.ObjectNull(kubernetesConfigAttrTypes()),
 		ObjectStorage:    types.ObjectNull(objectStorageAttrTypes()),
 		FileStorage:      types.ObjectNull(fileStorageAttrTypes()),
+		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
 	}
 
 	_, diags := runCloudResourceCreate(t, r, plan)

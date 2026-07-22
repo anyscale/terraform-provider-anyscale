@@ -50,10 +50,14 @@ resource "anyscale_service" "example" {
   # yet), so the config stays stable across create and every later update.
   rollout_strategy  = "ROLLOUT"
   max_surge_percent = 25 # paces the rollout only - it still converges to 100%, never holds at a canary percent
-  # Defaults to 45m, already sized for a real standard ROLLOUT (a full second cluster spins up
+  # Defaults to 30m, already sized for a real standard ROLLOUT (a full second cluster spins up
   # before the gradual canary traffic-shift even starts). Raise it further for a heavier image,
   # more replicas, or slower health checks than that default already assumes.
-  rollout_timeout = "1h"
+  timeouts {
+    create = "1h"
+    update = "1h"
+    delete = "1h"
+  }
 
   tags = {
     team        = "ml-platform"
@@ -63,7 +67,8 @@ resource "anyscale_service" "example" {
 
 # Minimal service - only the required inputs. project_id, tags, and the rollout knobs all take
 # sensible defaults (project_id resolves to your org's default project for the compute config's
-# cloud; rollout_strategy defaults to ROLLOUT; rollout_timeout defaults to 45m).
+# cloud; rollout_strategy defaults to ROLLOUT; an omitted timeouts block defaults to 30m for
+# create/update/delete alike).
 resource "anyscale_service" "minimal" {
   name     = "minimal-service"
   build_id = "cenv_def456"

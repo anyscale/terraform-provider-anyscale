@@ -3,7 +3,9 @@ package provider
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -81,8 +83,9 @@ type cloudResourceResourceModelV1 struct {
 	ID types.String `tfsdk:"id"`
 }
 
-// toCloudResourceResourceModel drops Status - the only difference between
-// this struct and the current (v2) CloudResourceResourceModel.
+// toCloudResourceResourceModel drops Status and initializes Timeouts null
+// (PR2, additive - no prior state ever had a value for it) - the only
+// differences between this struct and the current (v2) CloudResourceResourceModel.
 func (m cloudResourceResourceModelV1) toCloudResourceResourceModel() CloudResourceResourceModel {
 	return CloudResourceResourceModel{
 		CloudID:          m.CloudID,
@@ -104,6 +107,7 @@ func (m cloudResourceResourceModelV1) toCloudResourceResourceModel() CloudResour
 		ReportedAt:       m.ReportedAt,
 		IsDefault:        m.IsDefault,
 		ID:               m.ID,
+		Timeouts:         timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
 	}
 }
 

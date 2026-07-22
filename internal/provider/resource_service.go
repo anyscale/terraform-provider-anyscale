@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -34,14 +35,21 @@ const (
 	serviceRolloutStrategyInPlace = "IN_PLACE"
 )
 
-const defaultServiceRolloutTimeout = "45m"
+// defaultServiceRolloutTimeout governs create/update/delete alike (one value
+// for all three, per timeouts.Opts{Create,Update,Delete: true} below).
+// Lowered from an original 45m per the user 2026-07-22: a standard ROLLOUT
+// genuinely takes tens of minutes on real infra, but observed real rollouts
+// run closer to ~20m - 45m was excessive headroom, 30m keeps real margin
+// without being needlessly long for a default.
+const defaultServiceRolloutTimeout = 30 * time.Minute
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                = &ServiceResource{}
-	_ resource.ResourceWithConfigure   = &ServiceResource{}
-	_ resource.ResourceWithImportState = &ServiceResource{}
-	_ resource.ResourceWithModifyPlan  = &ServiceResource{}
+	_ resource.Resource                 = &ServiceResource{}
+	_ resource.ResourceWithConfigure    = &ServiceResource{}
+	_ resource.ResourceWithImportState  = &ServiceResource{}
+	_ resource.ResourceWithModifyPlan   = &ServiceResource{}
+	_ resource.ResourceWithUpgradeState = &ServiceResource{}
 )
 
 // NewServiceResource creates a new service resource.
@@ -69,10 +77,10 @@ type ServiceResourceModel struct {
 	Tags        types.Map    `tfsdk:"tags"`
 
 	// Optional rollout inputs
-	RolloutStrategy types.String `tfsdk:"rollout_strategy"`
-	MaxSurgePercent types.Int64  `tfsdk:"max_surge_percent"`
-	ConnectionIDs   types.List   `tfsdk:"connection_ids"`
-	RolloutTimeout  types.String `tfsdk:"rollout_timeout"`
+	RolloutStrategy types.String   `tfsdk:"rollout_strategy"`
+	MaxSurgePercent types.Int64    `tfsdk:"max_surge_percent"`
+	ConnectionIDs   types.List     `tfsdk:"connection_ids"`
+	Timeouts        timeouts.Value `tfsdk:"timeouts"`
 
 	// Computed outputs. The four nested-object fields are typed as types.Object rather than the
 	// concrete ServiceObservabilityURLsModel/ServiceVersionModel/ServiceStatusChecklistModel
@@ -143,6 +151,7 @@ func (r *ServiceResource) Metadata(ctx context.Context, req resource.MetadataReq
 // Schema defines the schema for the resource.
 func (r *ServiceResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version: 1,
 		MarkdownDescription: `Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only ` + "`anyscale_service`" + `/` + "`anyscale_services`" + ` data sources, which share this resource's computed field shapes.
 
 A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute_config_id`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
@@ -230,12 +239,6 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 				Optional:    true,
 				MarkdownDescription: "Connection IDs to associate with the new service version. Wire semantics matter here: leaving this null preserves whatever connections are already attached (the common case), while explicitly setting `[]` removes all of them - so this is modeled as a nullable list rather than defaulting to empty. " +
 					"For the same reason, this is never refreshed from the server on read (mirroring `ray_serve_config`'s treatment): the server's actual current connections are visible read-only via `primary_version.connection_ids`, but copying them into this null-preserving directive would silently turn a future \"don't touch connections\" apply into \"remove every connection that's actually attached.\"",
-			},
-			"rollout_timeout": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString(defaultServiceRolloutTimeout),
-				MarkdownDescription: "Maximum time to wait for a create or update rollout to reach `RUNNING`, or for destroy to wait for termination to reach `TERMINATED` before deleting (e.g. `30m`, `1h`). Defaults to `45m` - a standard `ROLLOUT` genuinely takes tens of minutes on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), so this default is sized with real-world headroom, not just the minimum a bare test app needs.",
 			},
 
 			// ─── Computed outputs (reused from the anyscale_service data source's model - see
@@ -349,6 +352,16 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 					},
 				},
 			},
+		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create:            true,
+				Update:            true,
+				Delete:            true,
+				CreateDescription: "Maximum time to wait for a create rollout to reach `RUNNING` (e.g. `20m`, `1h`). Defaults to `30m` - a standard `ROLLOUT` genuinely takes real time on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), but observed real rollouts run closer to ~20m, so this default carries real margin without being needlessly long. Purely local to this provider - never sent to or read from the Anyscale API.",
+				UpdateDescription: "Maximum time to wait for an update rollout to reach `RUNNING`. Same default and rationale as `create`. Only consulted when the update actually triggers a new rollout (see `ray_serve_config`/`build_id`/`compute_config_id`) - an update that only changes `tags` or this `timeouts` block itself never applies a new version, so this value is not consulted for those.",
+				DeleteDescription: "Maximum time to wait for destroy to wait for termination to reach `TERMINATED` before deleting. Same default and rationale as `create`.",
+			}),
 		},
 	}
 }
@@ -608,9 +621,9 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	timeout, err := time.ParseDuration(plan.RolloutTimeout.ValueString())
-	if err != nil {
-		AddConfigError(&resp.Diagnostics, "Invalid Rollout Timeout", err.Error())
+	timeout, diags := plan.Timeouts.Create(ctx, defaultServiceRolloutTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -710,7 +723,7 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	// fail (tags sync below, then the potentially long-running rollout wait) - without this, a
 	// later failure would leave the service orphaned in the backend with no Terraform record to
 	// destroy it (G2, contract section H). Mirrors resource_container_image_build.go's Create.
-	diags := populateServiceResourceModelComputed(ctx, &plan, &service)
+	diags = populateServiceResourceModelComputed(ctx, &plan, &service)
 	resp.Diagnostics.Append(diags...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -808,7 +821,7 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 }
 
 // serviceDeployFieldsChanged reports whether any field that requires a new PUT /apply + rollout
-// wait differs between plan and state (H2, contract section H). rollout_timeout (purely local
+// wait differs between plan and state (H2, contract section H). timeouts (purely local
 // to this provider) and tags (its own always-run sync via syncServiceTags, independent of
 // whether a deploy happens) are deliberately excluded: neither has a version/rollout concept,
 // so changing only one of them must not redeploy an otherwise-unchanged, healthy running
@@ -852,8 +865,12 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	if !serviceDeployFieldsChanged(&plan, &state) {
 		// H2 (contract section H): nothing that requires a new version changed - e.g. only
-		// rollout_timeout, or only tags (already synced above) - so skip the PUT /apply +
+		// timeouts, or only tags (already synced above) - so skip the PUT /apply +
 		// rollout wait against an otherwise-unchanged, healthy running service.
+		// serviceDeployFieldsChanged deliberately never compares Timeouts (same as it never
+		// compared the old flat RolloutTimeout) - a timeouts-only change must never look like
+		// a deploy-affecting one, regardless of whether that field is a flat string or a
+		// nested block.
 		//
 		// H5 (contract section H): still need a fresh GET to populate the computed outputs
 		// before persisting. Every Computed attribute without a UseStateForUnknown plan
@@ -878,9 +895,9 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	timeout, err := time.ParseDuration(plan.RolloutTimeout.ValueString())
-	if err != nil {
-		AddConfigError(&resp.Diagnostics, "Invalid Rollout Timeout", err.Error())
+	timeout, diags := plan.Timeouts.Update(ctx, defaultServiceRolloutTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -914,7 +931,7 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	plan.ProjectID = types.StringValue(service.ProjectID)
 
 	// Persist immediately for the same orphan-avoidance reason as Create.
-	diags := populateServiceResourceModelComputed(ctx, &plan, &service)
+	diags = populateServiceResourceModelComputed(ctx, &plan, &service)
 	resp.Diagnostics.Append(diags...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -949,9 +966,14 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	serviceID := state.ID.ValueString()
 
-	timeout, err := time.ParseDuration(state.RolloutTimeout.ValueString())
-	if err != nil {
-		timeout, _ = time.ParseDuration(defaultServiceRolloutTimeout)
+	// The old hand-rolled fallback (parse state.RolloutTimeout, fall back to the
+	// default string on error) is now handled internally by Timeouts.Delete
+	// itself - a null/unknown/unparseable value already resolves to
+	// defaultServiceRolloutTimeout, so no separate fallback is needed here.
+	timeout, diags := state.Timeouts.Delete(ctx, defaultServiceRolloutTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	tflog.Info(ctx, "Terminating service", map[string]any{"service_id": serviceID})
@@ -963,7 +985,7 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 	// which 404s there instead and turns an idempotent "already deleted" destroy into a
 	// failure. Only StatusAccepted is a real success here; a 404 must produce a real error for
 	// the guard below to catch.
-	_, err = DoRequestRaw(
+	_, err := DoRequestRaw(
 		ctx, r.client, "POST", fmt.Sprintf("/api/v2/services-v2/%s/terminate", serviceID), nil,
 		http.StatusAccepted,
 	)

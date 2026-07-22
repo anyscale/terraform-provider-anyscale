@@ -59,7 +59,7 @@ RUN pip install emoji==2.15.0`
 					resource.TestCheckResourceAttr("anyscale_container_image_build.test", "name", imageName),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_build.test", "build_id"),
 					resource.TestCheckResourceAttr("anyscale_container_image_build.test", "build_status", "succeeded"),
-					resource.TestCheckResourceAttr("anyscale_container_image_build.test", "build_timeout", "45m"),
+					resource.TestCheckResourceAttr("anyscale_container_image_build.test", "timeouts.create", "45m"),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_build.test", "created_at"),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_build.test", "revision"),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_build.test", "name_version"),
@@ -79,7 +79,10 @@ RUN pip install emoji==2.15.0`
 				ImportStateVerifyIgnore: []string{
 					"containerfile",      // client-only: Dockerfile body is sent to the build API and not echoed back
 					"containerfile_path", // client-only: local filesystem path, never sent to the API
-					"build_timeout",      // client-side wait knob; not stored server-side
+					// timeouts needs no entry here - terraform-plugin-testing's
+					// ImportStateVerify already strips any "timeouts"/"timeouts.*"
+					// key from the comparison unconditionally (verified against the
+					// pinned v1.16.0 source by assayer).
 				},
 			},
 		},
@@ -220,7 +223,9 @@ resource "anyscale_container_image_build" "test" {
   containerfile = <<-EOF
 %s
 EOF
-  build_timeout = "45m"
+  timeouts {
+    create = "45m"
+  }
 }
 `, name, containerfile)
 }
@@ -239,7 +244,9 @@ resource "anyscale_container_image_build" "test" {
   containerfile = <<-EOF
 %s
 EOF
-  build_timeout = "45m"
+  timeouts {
+    create = "45m"
+  }
 }
 `, projectName, cloudID, imageName, containerfile)
 }

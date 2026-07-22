@@ -19,7 +19,10 @@ resource "anyscale_container_image_build" "example" {
     RUN pip install --no-cache-dir pandas scikit-learn
   EOT
 
-  build_timeout = "30m"
+  timeouts {
+    create = "30m"
+    update = "30m"
+  }
 }
 
 # --- Option 2: register an image that already exists in your own registry --------------

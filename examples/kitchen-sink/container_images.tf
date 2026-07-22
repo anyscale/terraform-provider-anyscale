@@ -14,7 +14,10 @@ resource "anyscale_container_image_build" "training" {
     RUN pip install --no-cache-dir pandas scikit-learn
   EOT
 
-  build_timeout = "30m"
+  timeouts {
+    create = "30m"
+    update = "30m"
+  }
 }
 
 resource "anyscale_container_image_registry" "base" {

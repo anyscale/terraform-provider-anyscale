@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -308,7 +309,9 @@ type cloudResourceModelV1 struct {
 }
 
 // toCloudResourceModel drops EnableSystemCluster - the only difference
-// between this struct and the current (v2) CloudResourceModel.
+// between this struct and the current (v2) CloudResourceModel, aside from
+// Timeouts (PR2, additive - no prior state ever had a value for it, so it
+// is always initialized null here rather than carried from m).
 func (m cloudResourceModelV1) toCloudResourceModel() CloudResourceModel {
 	return CloudResourceModel{
 		ID:                    m.ID,
@@ -330,6 +333,7 @@ func (m cloudResourceModelV1) toCloudResourceModel() CloudResourceModel {
 		IsEmptyCloud:          m.IsEmptyCloud,
 		IsDefault:             m.IsDefault,
 		CloudResourceID:       m.CloudResourceID,
+		Timeouts:              timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
 	}
 }
 

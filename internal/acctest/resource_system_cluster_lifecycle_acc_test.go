@@ -343,16 +343,19 @@ func TestAccSystemClusterResource_ImportByCloudID(t *testing.T) {
 				Check:  resource.TestCheckResourceAttr(resourceAddr, "state", "Running"),
 			},
 			{
+				// No ImportStateVerifyIgnore needed for the timeouts{} block
+				// (PR2 migration, replacing start_timeout): terraform-plugin-
+				// testing's own ImportStateVerify unconditionally excludes any
+				// state key that is exactly "timeouts" or starts with
+				// "timeouts." from its comparison (helper/resource/
+				// testing_new_import_state.go, v1.16.0 - the version this repo
+				// pins) - "timeouts are only _sometimes_ added to state ...
+				// just don't compare timeouts at all" per its own comment.
+				// Verified directly against that source, not assumed.
 				Config:            testAccProviderBlock(server.URL) + syscClusterBaseConfig,
 				ResourceName:      resourceAddr,
 				ImportState:       true,
 				ImportStateVerify: true,
-				// start_timeout is Optional+Computed+Default and purely local
-				// (never sent to or read from the API - see its schema doc) -
-				// ImportState has no server-side value to recover it from, so
-				// it is re-seeded from the schema default on import rather
-				// than compared byte-for-byte against the pre-import state.
-				ImportStateVerifyIgnore: []string{"start_timeout"},
 			},
 			{
 				Config: testAccProviderBlock(server.URL) + syscClusterBaseConfig,

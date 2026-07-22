@@ -49,7 +49,7 @@ output "system_cluster_workload_service_url" {
 
 ### Optional
 
-- `start_timeout` (String) Maximum time to wait for the System Cluster to reach `Running` after a create or update triggers a start (e.g. `10m`, `30m`). Defaults to `20m` - a real start observed on a live cloud took about 49 seconds, so this default carries substantial real-world headroom rather than just the minimum a fast environment needs. Purely local to this provider - never sent to or read from the Anyscale API.
+- `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
 ### Read-Only
 
@@ -58,6 +58,13 @@ output "system_cluster_workload_service_url" {
 - `is_enabled` (Boolean) Whether the System Cluster is enabled for this cloud. Always `true` once this resource has been successfully created or imported - `Create`/`Update` unconditionally ensure the System Cluster is enabled before starting it, so there is no separate user-facing toggle on this resource for enable-vs-disable (unlike the removed `anyscale_cloud.enable_system_cluster`, which this resource supersedes). Exposed read-only for observability: `is_enabled = true` together with a non-running `state` is a real, valid combination (e.g. the cluster is enabled but has since been terminated), not something this attribute collapses away.
 - `state` (String) The System Cluster's current status (e.g. `Running`, `StartingUp`, `Terminated`, `Terminating`, `StartupErrored`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list. Refreshed on every `terraform plan`/`apply` - if the cluster is terminated outside Terraform (e.g. from the console, or by the backend's own idle auto-termination), this reflects `Terminated` rather than hiding the change; re-run `terraform apply -replace` against this resource to start it again (this resource does not auto-recreate on an observed termination).
 - `workload_service_url` (String) The URL the task and actor observability dashboards use to reach this System Cluster's workload service. Null until the cluster has been created and reaches a state where this URL is populated.
+
+<a id="nestedblock--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) Maximum time to wait for the System Cluster to reach `Running` after create triggers a start (e.g. `10m`, `30m`). Defaults to `20m` - a real start observed on a live cloud took about 49 seconds, so this default carries substantial real-world headroom rather than just the minimum a fast environment needs. Purely local to this provider - never sent to or read from the Anyscale API.
 
 ## Import
 

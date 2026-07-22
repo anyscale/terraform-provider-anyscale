@@ -7,7 +7,10 @@ resource "anyscale_container_image_build" "inline" {
     RUN pip install --no-cache-dir pandas scikit-learn
   EOT
 
-  build_timeout = "30m"
+  timeouts {
+    create = "30m"
+    update = "30m"
+  }
 }
 
 # Build from a Containerfile checked into the repo, scoped to a project.

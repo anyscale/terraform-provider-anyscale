@@ -106,7 +106,9 @@ resource "anyscale_container_image_build" "test" {
 FROM anyscale/ray:2.53.0-slim-py312
 RUN pip install emoji==2.15.0
 EOF
-  build_timeout = "45m"
+  timeouts {
+    create = "45m"
+  }
 }
 
 # Filter by name

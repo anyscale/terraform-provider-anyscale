@@ -101,8 +101,11 @@ func TestAccServiceResource_UpdateRedeploysAndConverges(t *testing.T) {
 
 		// Once terminate has fired (the automatic end-of-test destroy), report TERMINATED so
 		// that wait loop resolves - otherwise it polls a state (RUNNING) that can never satisfy
-		// its target (TERMINATED) and hangs for the real rollout_timeout default (30m). Checked
-		// BEFORE the transitional-window logic since destroy always happens after both applies.
+		// its target (TERMINATED) and hangs for the real rollout timeout default (30m, confirmed
+		// 2026-07-22 per the PR2 timeouts{} migration - previously 45m; this comment was stale
+		// against the old default before that change and is deliberately correct now, not a
+		// coincidence). Checked BEFORE the transitional-window logic since destroy always
+		// happens after both applies.
 		state := "RUNNING"
 		switch {
 		case isTerminated:

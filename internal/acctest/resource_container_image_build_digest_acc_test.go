@@ -216,7 +216,10 @@ resource "anyscale_container_image_build" "test" {
   containerfile = <<-EOF
 %[2]s
 EOF
-  build_timeout = "5m"
+  timeouts {
+    create = "5m"
+    update = "5m"
+  }
 }
 `, name, containerfile)
 	}
