@@ -1,0 +1,4 @@
+```
+release-note:breaking-change
+resource/anyscale_cloud: `enable_lineage_tracking` is renamed to `lineage_tracking_enabled` and `enable_log_ingestion` is renamed to `is_aggregated_logs_enabled`, matching the backend's own field names (and the plural `anyscale_clouds` data source, which already used them); to migrate, update both attribute names (and any output/interpolation references to the old names) in your configuration - existing state migrates automatically on your next plan, no re-import needed.
+```
