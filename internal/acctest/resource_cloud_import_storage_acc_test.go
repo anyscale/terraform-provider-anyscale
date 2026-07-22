@@ -6,6 +6,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM is the fail-first
@@ -148,59 +149,20 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_ImportDropsMountTargets_AWSVM is the mutation-proof
-// regression test for the mount_targets tail of the storage-import fix
-// (yunhao's follow-up report, ratified plan:
-// .crystl/quest/mount-targets-import-plan.md, Option C). Where the test
-// above proves file_storage_id/mount_path now recover correctly at import,
-// this one proves the opposite is required for mount_targets specifically:
-// it must NOT be recovered, even though the backend returns it.
+// TestAccCloudResource_ImportRecoversMountTargets_AWSVM replaces
+// TestAccCloudResource_ImportDropsMountTargets_AWSVM: mount_targets is now
+// Optional+Computed (schema.ListNestedAttribute, not a Block - see
+// mount_targets_state_compat_test.go), so recovering the real value at
+// import is correct and self-heals, the same as memorydb/memorystore.
 //
-// Why: mount_targets is a schema.ListNestedBlock, and blocks cannot be
-// Computed in terraform-plugin-framework (only Attributes can) - confirmed
-// against the vendored framework source, not just precedent. Writing a
-// recovered value into state at import (what v0.15.2's flattenFileStorage
-// did for every file_storage field, mount_targets included) can never
-// survive the NEXT plan when config omits the block: a Block's planned
-// value comes from config alone, with no Computed fallback to prior state,
-// so state-populated/config-absent reads as a real removal and the block's
-// own listplanmodifier.RequiresReplace() fires - destroying and recreating
-// the live, in-use cloud. Since these addresses are cloud-provider-assigned
-// (AWS EFS per-mount-target IPs) and not reliably expressible in HCL, a
-// correct import-target config can only ever declare file_storage_id, so
-// this isn't a fixable recovery bug - the field must stay unrecovered.
-//
-// Mock fixture uses exactly ONE mount_targets entry, address only, no zone -
-// matching what a real registered AWS cloud's GET actually returns (AWS/GCP
-// store exactly one address server-side and drop zone; the backend errors
-// on more than one; only Azure/Generic, always K8S, return a genuine
-// multi-element per-zone list). A two-element AWS fixture would be an
-// impossible backend state, so this is the faithful reproduction of
-// yunhao's exact bug (architect's fidelity note, cross-validated by two
-// independent backend traces). The general "any non-empty list is dropped,
-// regardless of count or zone" behavior is proven separately at the unit
-// level (TestFlattenFileStorage_MountTargetsNeverRecoveredAtImport and
-// TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage in
-// internal/provider), which deliberately keep a two-element, zone-populated
-// fixture since flattenFileStorage itself is provider-agnostic and that
-// shape is real for Azure/Generic.
-//
-// Step 1 creates with file_storage_id only (mount_targets is not, and
-// cannot practically be, set in config) - establishing mount_targets = null
-// in state, matching what a config that never touches the field produces.
-// Step 2 imports the SAME cloud from a mock whose API response DOES include
-// mount_targets (simulating the backend's real EFS auto-discovery for an
-// out-of-band-registered cloud) - ImportStateVerify must still match step
-// 1's null exactly, with file_storage NOT in the ignore list, proving
-// mount_targets did not get recovered despite being present server-side.
-// Step 3 re-applies the same config and asserts the plan is a no-op - the
-// literal destroy-and-recreate this test exists to prevent.
-//
-// Mutation-proof: reverting flattenFileStorage's mount_targets handling back
-// to recovering cfg.MountTargets (the v0.15.2 behavior) makes step 2's
-// ImportStateVerify fail immediately (imported mount_targets non-null vs.
-// step 1's null), before the plan-check in step 3 is even reached.
-func TestAccCloudResource_ImportDropsMountTargets_AWSVM(t *testing.T) {
+// This mock (newC3MockCloudServer) doesn't return file_storage from
+// add_resource, so step 1's Create leaves mount_targets null - a legitimate
+// "derived data wasn't available at create time" outcome, not a bug (see
+// resource_cloud_import_mounttargets_acc_test.go for the create-path
+// resolve proof). Step 2 imports from a mock response that DOES carry a
+// real mount_targets entry, and step 3 confirms the plan converges cleanly
+// on the recovered value - proving self-heal, not the old drop-it premise.
+func TestAccCloudResource_ImportRecoversMountTargets_AWSVM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudID = "cld_mount_targets_import_aws_mock"
@@ -274,9 +236,12 @@ resource "anyscale_cloud" "test" {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Establish real applied state: mount_targets absent from
-				// config means null in state, since Create/Read never
-				// touch file_storage from the API (C3-v2).
+				// Establish real applied state. This mock's add_resource
+				// response doesn't carry file_storage, so mount_targets
+				// legitimately resolves to null at create time (nothing to
+				// derive it from yet) - not a bug, see
+				// resource_cloud_import_mounttargets_acc_test.go for the
+				// create-path-resolve proof when the response does carry it.
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "file_storage.file_storage_id", "fs-mt123"),
@@ -285,23 +250,40 @@ resource "anyscale_cloud" "test" {
 				ExpectNonEmptyPlan: false,
 			},
 			{
-				// THE regression proof: even though the mock's API response
-				// for this cloud DOES carry mount_targets, imported state
-				// must still come back null - matching step 1 exactly, not
-				// the API's populated value. Today (pre-fix) this fails:
-				// flattenFileStorage recovers mount_targets from cfg.MountTargets,
-				// so imported state mismatches step 1's null.
+				// THE regression proof: import must recover the real
+				// mount_targets value from the API's resources listing.
+				// mount_targets is expected to legitimately differ from
+				// step 1 (null -> real value), so it's excluded from
+				// ImportStateVerify's byte-for-byte comparison and checked
+				// explicitly instead via ImportStateCheck - this is a
+				// deliberate is-different-by-design case, not a placebo:
+				// ImportStateCheck asserts the exact recovered value, not
+				// just "ignore and move on".
 				ResourceName:      resourceName,
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"credentials", "is_empty_cloud",
+					"credentials", "is_empty_cloud", "file_storage.mount_targets.#", "file_storage.mount_targets.0.%",
+					"file_storage.mount_targets.0.address", "file_storage.mount_targets.0.zone",
+				},
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported instance state, got %d", len(states))
+					}
+					attrs := states[0].Attributes
+					if got := attrs["file_storage.mount_targets.#"]; got != "1" {
+						return fmt.Errorf("file_storage.mount_targets.# = %q, want \"1\" - the real value must be recovered at import", got)
+					}
+					if got := attrs["file_storage.mount_targets.0.address"]; got != "fs-mt123.efs.us-east-2.amazonaws.com" {
+						return fmt.Errorf("file_storage.mount_targets.0.address = %q, want the real recovered address", got)
+					}
+					return nil
 				},
 			},
 			{
-				// The literal bug-report bar: for a config matching the live
-				// cloud, the plan after import is a no-op - never the
-				// destroy-and-recreate yunhao reported.
+				// The self-heal bar: for a config matching the live cloud,
+				// the plan after import is a no-op - the recovered value
+				// converges cleanly, never a destroy-and-recreate.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
