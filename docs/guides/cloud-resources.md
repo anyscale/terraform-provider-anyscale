@@ -87,9 +87,9 @@ than either an update or an automatic replacement; the provider deliberately doe
 someone's configuration drifted, with no chance to review it first. To rename a cloud, destroy and
 recreate it deliberately.
 
-The other mutable fields on `anyscale_cloud` — `auto_add_user`, `enable_lineage_tracking`,
-`enable_log_ingestion`, and `enable_system_cluster` — update in place normally; each is backed by
-its own dedicated API endpoint, called only when its value actually changes. `enable_system_cluster`
+The other mutable fields on `anyscale_cloud` — `auto_add_user`, `lineage_tracking_enabled`,
+`is_aggregated_logs_enabled`, and `enable_system_cluster` — update in place normally; each is backed
+by its own dedicated API endpoint, called only when its value actually changes. `enable_system_cluster`
 is Optional-only rather than Optional+Computed like the other three (see its [schema
 description](../resources/cloud.md#schema)) — set it like any other cloud-level boolean.
 
@@ -147,12 +147,7 @@ cloud has more than one resource attached.
 ## Naming differences between resources and data sources
 
 A few concepts are named differently depending on which resource or data source you're looking at.
-These are intentional (renaming any of them would be a breaking change), not something to work around:
 
-- **Lineage tracking**: `enable_lineage_tracking` on the `anyscale_cloud` resource and the singular
-  `anyscale_cloud` data source; `lineage_tracking_enabled` on the plural `anyscale_clouds` data source.
-- **Log ingestion**: `enable_log_ingestion` on the `anyscale_cloud` resource and the singular
-  `anyscale_cloud` data source; `is_aggregated_logs_enabled` on the plural `anyscale_clouds` data source.
 - **Private networking**: `is_private_cloud` on the `anyscale_cloud` resource refers to the cloud as a
   whole; `is_private` on the `anyscale_cloud_resource` resource refers to that specific resource
   deployment. They are distinct attributes on distinct objects, not a typo. Both are self-asserted
@@ -161,6 +156,16 @@ These are intentional (renaming any of them would be a breaking change), not som
   Prior to v0.15.3, setting `is_private_cloud` on an all-in-one `anyscale_cloud` never actually reached
   the API, so a real cloud got created and the very next apply failed with a generic "Provider produced
   inconsistent result after apply" error; that's fixed, and the value now round-trips correctly.
+
+Lineage tracking and log ingestion used to be a second case here: the `anyscale_cloud` resource and the
+singular `anyscale_cloud` data source called these `enable_lineage_tracking` and `enable_log_ingestion`,
+while the plural `anyscale_clouds` data source already used the backend's own field names,
+`lineage_tracking_enabled` and `is_aggregated_logs_enabled`. This is now unified: the resource and
+singular data source were renamed to match the plural (and the backend's own field and API parameter
+names) — a breaking change for any configuration that set or referenced the old names. Existing state
+migrates automatically the next time Terraform reads it, with no `terraform import` required; update
+your configuration and any output references (`anyscale_cloud.example.enable_lineage_tracking` etc.) to
+the new names. See CHANGELOG.md for the release this shipped in.
 
 ## Deprecated and removed attributes
 

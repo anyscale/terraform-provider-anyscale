@@ -84,9 +84,12 @@ func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 		Computed:            true,
 		MarkdownDescription: "Whether this cloud uses Kubernetes.",
 	}
-	// C7: same backend fields as the singular's enable_lineage_tracking/enable_log_ingestion,
-	// kept under these names since renaming a shipped attribute is breaking. See
-	// CLOUD-SYNC-DESIGN.md C7 and schema_shared_attributes.go's cloudSharedAttributes doc.
+	// Same backend fields the singular anyscale_cloud data source (and the anyscale_cloud
+	// resource) now also call lineage_tracking_enabled/is_aggregated_logs_enabled - both
+	// previously called these enable_lineage_tracking/enable_log_ingestion instead; this
+	// plural data source always used the backend's own names. See CHANGELOG.md and
+	// schema_shared_attributes.go's cloudSharedAttributes doc comment for the
+	// naming-unification history.
 	itemAttributes["lineage_tracking_enabled"] = schema.BoolAttribute{
 		Computed:            true,
 		MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",

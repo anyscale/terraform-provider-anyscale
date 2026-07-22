@@ -50,16 +50,16 @@ type CloudResource struct {
 // CloudResourceModel describes the resource data model.
 type CloudResourceModel struct {
 	// Common fields
-	ID                    types.String `tfsdk:"id"`
-	Name                  types.String `tfsdk:"name"`
-	CloudProvider         types.String `tfsdk:"cloud_provider"`
-	ComputeStack          types.String `tfsdk:"compute_stack"`
-	Region                types.String `tfsdk:"region"`
-	IsPrivateCloud        types.Bool   `tfsdk:"is_private_cloud"`
-	AutoAddUser           types.Bool   `tfsdk:"auto_add_user"`
-	Credentials           types.String `tfsdk:"credentials"`
-	EnableLineageTracking types.Bool   `tfsdk:"enable_lineage_tracking"`
-	EnableLogIngestion    types.Bool   `tfsdk:"enable_log_ingestion"`
+	ID                      types.String `tfsdk:"id"`
+	Name                    types.String `tfsdk:"name"`
+	CloudProvider           types.String `tfsdk:"cloud_provider"`
+	ComputeStack            types.String `tfsdk:"compute_stack"`
+	Region                  types.String `tfsdk:"region"`
+	IsPrivateCloud          types.Bool   `tfsdk:"is_private_cloud"`
+	AutoAddUser             types.Bool   `tfsdk:"auto_add_user"`
+	Credentials             types.String `tfsdk:"credentials"`
+	LineageTrackingEnabled  types.Bool   `tfsdk:"lineage_tracking_enabled"`
+	IsAggregatedLogsEnabled types.Bool   `tfsdk:"is_aggregated_logs_enabled"`
 
 	// Provider-specific configurations (nested)
 	AWSConfig        types.Object `tfsdk:"aws_config"`
@@ -134,7 +134,12 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 		// v1: mount_targets converted from a block to a list-of-objects
 		// attribute, and the 5 inert kubernetes_config bookkeeping fields
 		// were removed - see resource_cloud_upgrade.go's v0->v1 UpgradeState.
-		Version:             2,
+		// v3: enable_lineage_tracking/enable_log_ingestion renamed to
+		// lineage_tracking_enabled/is_aggregated_logs_enabled to match the
+		// backend's own field names (already used by the plural
+		// anyscale_clouds data source) - see resource_cloud_upgrade.go's
+		// v2->v3 UpgradeState.
+		Version:             3,
 		MarkdownDescription: "Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).",
 
 		Attributes: map[string]schema.Attribute{
@@ -214,18 +219,18 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				},
 			},
 
-			"enable_lineage_tracking": schema.BoolAttribute{
+			"lineage_tracking_enabled": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to enable lineage tracking for this cloud.",
+				MarkdownDescription: "Whether to enable lineage tracking for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_lineage_tracking` on both the resource and the singular `anyscale_cloud` data source; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
 			},
 
-			"enable_log_ingestion": schema.BoolAttribute{
+			"is_aggregated_logs_enabled": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to enable aggregated log ingestion for this cloud.",
+				MarkdownDescription: "Whether to enable aggregated log ingestion for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_log_ingestion` on both the resource and the singular `anyscale_cloud` data source; `log_ingestion` was a name this provider invented that never existed backend-side. See CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
 			},
 
 			// ─── Computed Fields ──────────────────────────────────
@@ -1128,9 +1133,9 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// exist yet) reuses the exact same diff-and-call logic Update() already
 	// uses and has already been proven against.
 	zeroValueState := CloudResourceModel{
-		AutoAddUser:           types.BoolValue(false),
-		EnableLineageTracking: types.BoolValue(false),
-		EnableLogIngestion:    types.BoolValue(false),
+		AutoAddUser:             types.BoolValue(false),
+		LineageTrackingEnabled:  types.BoolValue(false),
+		IsAggregatedLogsEnabled: types.BoolValue(false),
 	}
 	if err := r.updateMutableFields(ctx, cloudID, plan, zeroValueState); err != nil {
 		resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
@@ -1217,13 +1222,13 @@ func (r *CloudResource) updateMutableFields(ctx context.Context, cloudID string,
 			return fmt.Errorf("update auto_add_user: %w", err)
 		}
 	}
-	if !plan.EnableLineageTracking.Equal(state.EnableLineageTracking) {
-		if err := r.updateCloudBoolField(ctx, cloudID, "lineage_tracking_enabled", plan.EnableLineageTracking.ValueBool()); err != nil {
+	if !plan.LineageTrackingEnabled.Equal(state.LineageTrackingEnabled) {
+		if err := r.updateCloudBoolField(ctx, cloudID, "lineage_tracking_enabled", plan.LineageTrackingEnabled.ValueBool()); err != nil {
 			return fmt.Errorf("update lineage_tracking_enabled: %w", err)
 		}
 	}
-	if !plan.EnableLogIngestion.Equal(state.EnableLogIngestion) {
-		if err := r.updateCloudAggregatedLogsConfig(ctx, cloudID, plan.EnableLogIngestion.ValueBool()); err != nil {
+	if !plan.IsAggregatedLogsEnabled.Equal(state.IsAggregatedLogsEnabled) {
+		if err := r.updateCloudAggregatedLogsConfig(ctx, cloudID, plan.IsAggregatedLogsEnabled.ValueBool()); err != nil {
 			return fmt.Errorf("update is_aggregated_logs_enabled: %w", err)
 		}
 	}
@@ -1634,7 +1639,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		return err
 	}
 
-	// Note: Cloud-level settings (auto_add_user, enable_lineage_tracking, enable_log_ingestion)
+	// Note: Cloud-level settings (auto_add_user, lineage_tracking_enabled, is_aggregated_logs_enabled)
 	// are set during cloud creation (POST /api/v2/clouds), NOT during add_resource (PUT /api/v2/clouds/{id}/add_resource)
 
 	deployJSON, err := json.Marshal(deployReq)
@@ -1744,8 +1749,8 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	// with a Default of false; rehydrating them keeps import round-tripping lossless.
 	state.IsPrivateCloud = types.BoolValue(cloudResp.Result.IsPrivateCloud)
 	state.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
-	state.EnableLineageTracking = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
-	state.EnableLogIngestion = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
+	state.LineageTrackingEnabled = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
+	state.IsAggregatedLogsEnabled = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
 
 	// is_default is genuinely mutable out of band (the org default can move to
 	// a different cloud via the console/CLI), so unlike the Computed fields

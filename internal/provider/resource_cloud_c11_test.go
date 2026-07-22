@@ -75,7 +75,7 @@ func TestUpdateMutableFields_OnlyCallsRoutesForChangedFields(t *testing.T) {
 	// Only auto_add_user changes (false -> true); the other two are identical
 	// between plan and state and must NOT trigger a PUT call.
 	state := CloudResourceModel{
-		AutoAddUser: types.BoolValue(false), EnableLineageTracking: types.BoolValue(false), EnableLogIngestion: types.BoolValue(false),
+		AutoAddUser: types.BoolValue(false), LineageTrackingEnabled: types.BoolValue(false), IsAggregatedLogsEnabled: types.BoolValue(false),
 	}
 	plan := state
 	plan.AutoAddUser = types.BoolValue(true)
@@ -99,7 +99,7 @@ func TestUpdateMutableFields_NoChangesCallsNothing(t *testing.T) {
 
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 	same := CloudResourceModel{
-		AutoAddUser: types.BoolValue(true), EnableLineageTracking: types.BoolValue(false), EnableLogIngestion: types.BoolValue(true),
+		AutoAddUser: types.BoolValue(true), LineageTrackingEnabled: types.BoolValue(false), IsAggregatedLogsEnabled: types.BoolValue(true),
 	}
 
 	if err := r.updateMutableFields(context.Background(), "cloud-1", same, same); err != nil {
@@ -121,10 +121,10 @@ func TestUpdateMutableFields_AllThreeChanged(t *testing.T) {
 
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 	state := CloudResourceModel{
-		AutoAddUser: types.BoolValue(false), EnableLineageTracking: types.BoolValue(false), EnableLogIngestion: types.BoolValue(false),
+		AutoAddUser: types.BoolValue(false), LineageTrackingEnabled: types.BoolValue(false), IsAggregatedLogsEnabled: types.BoolValue(false),
 	}
 	plan := CloudResourceModel{
-		AutoAddUser: types.BoolValue(true), EnableLineageTracking: types.BoolValue(true), EnableLogIngestion: types.BoolValue(true),
+		AutoAddUser: types.BoolValue(true), LineageTrackingEnabled: types.BoolValue(true), IsAggregatedLogsEnabled: types.BoolValue(true),
 	}
 
 	if err := r.updateMutableFields(context.Background(), "cloud-1", plan, state); err != nil {

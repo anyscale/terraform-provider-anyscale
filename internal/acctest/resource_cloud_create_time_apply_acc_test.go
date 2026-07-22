@@ -17,12 +17,12 @@ import (
 // model, which declares the first two Field(False) and omits the third entirely - a fresh
 // cloud has no log-ingestion config at all until the update endpoint below is called at
 // least once). Before the fix, Create() never called that update endpoint, so config
-// enable_log_ingestion = true would apply cleanly in the plan but the immediately-following
-// readCloudState would read back the untouched false default, producing "Provider produced
-// inconsistent result after apply" on the very first apply. This mock tracks whether the
-// update endpoint was actually called and what value it was called with, not just whether
-// the final state happens to look right - either signal on its own can be gamed, together
-// they can't.
+// is_aggregated_logs_enabled = true would apply cleanly in the plan but the
+// immediately-following readCloudState would read back the untouched false default,
+// producing "Provider produced inconsistent result after apply" on the very first apply.
+// This mock tracks whether the update endpoint was actually called and what value it was
+// called with, not just whether the final state happens to look right - either signal on
+// its own can be gamed, together they can't.
 type mockCloudCreateTimeServer struct {
 	mu                      sync.Mutex
 	cloudID                 string
@@ -138,17 +138,18 @@ func (s *mockCloudCreateTimeServer) snapshot() (putCalled, putValue bool) {
 	return s.logIngestionPutCalled, s.logIngestionPutValue
 }
 
-// TestAccCloudResource_EnableLogIngestion_AppliesAtCreate is the fail-without-fix regression
-// guard for the Create-time mutable-field bug: setting enable_log_ingestion = true in the
-// very first apply must actually call the update endpoint during Create() (not just Update()),
-// and the resulting state must stay consistent with what was configured. Before the fix,
-// Create() never called updateMutableFields at all, so this mock (which always starts a fresh
-// cloud at is_aggregated_logs_enabled=false, matching the real backend) would make Terraform
-// Core reject the apply outright with "Provider produced inconsistent result after apply" -
-// the exact class of bug the collaborator base_role fix was built around, on a different
-// resource and field. Confirmed by reverting the fix locally and rerunning: this test goes red
-// with a real inconsistent-result apply error, not just a failed assertion.
-func TestAccCloudResource_EnableLogIngestion_AppliesAtCreate(t *testing.T) {
+// TestAccCloudResource_IsAggregatedLogsEnabled_AppliesAtCreate is the fail-without-fix
+// regression guard for the Create-time mutable-field bug: setting
+// is_aggregated_logs_enabled = true in the very first apply must actually call the update
+// endpoint during Create() (not just Update()), and the resulting state must stay consistent
+// with what was configured. Before the fix, Create() never called updateMutableFields at all,
+// so this mock (which always starts a fresh cloud at is_aggregated_logs_enabled=false,
+// matching the real backend) would make Terraform Core reject the apply outright with
+// "Provider produced inconsistent result after apply" - the exact class of bug the
+// collaborator base_role fix was built around, on a different resource and field. Confirmed
+// by reverting the fix locally and rerunning: this test goes red with a real
+// inconsistent-result apply error, not just a failed assertion.
+func TestAccCloudResource_IsAggregatedLogsEnabled_AppliesAtCreate(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	server, mockServer := newMockCloudCreateTimeServer(t)
@@ -156,11 +157,11 @@ func TestAccCloudResource_EnableLogIngestion_AppliesAtCreate(t *testing.T) {
 
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_cloud" "test" {
-  name                 = "createtime-mock"
-  cloud_provider       = "AWS"
-  compute_stack        = "VM"
-  region               = "us-east-2"
-  enable_log_ingestion = true
+  name                       = "createtime-mock"
+  cloud_provider             = "AWS"
+  compute_stack              = "VM"
+  region                     = "us-east-2"
+  is_aggregated_logs_enabled = true
 
   aws_config {
     vpc_id             = "vpc-realct123"
@@ -186,11 +187,11 @@ resource "anyscale_cloud" "test" {
 			{
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceAddr, "enable_log_ingestion", "true"),
+					resource.TestCheckResourceAttr(resourceAddr, "is_aggregated_logs_enabled", "true"),
 				),
 				// The headline consistency gate: if Create() silently skipped applying
-				// enable_log_ingestion, the immediately-following readCloudState would
-				// have read back false, and Terraform Core itself would reject the
+				// is_aggregated_logs_enabled, the immediately-following readCloudState
+				// would have read back false, and Terraform Core itself would reject the
 				// apply before this plan check ever ran - ExpectEmptyPlan here is a
 				// secondary confirmation that nothing drifts on top of that.
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -204,7 +205,7 @@ resource "anyscale_cloud" "test" {
 
 	putCalled, putValue := mockServer.snapshot()
 	if !putCalled {
-		t.Fatal("update_customer_aggregated_logs_config was never called during Create - enable_log_ingestion = true in the initial config must apply at Create time, not only on a later Update")
+		t.Fatal("update_customer_aggregated_logs_config was never called during Create - is_aggregated_logs_enabled = true in the initial config must apply at Create time, not only on a later Update")
 	}
 	if !putValue {
 		t.Errorf("update_customer_aggregated_logs_config was called with is_enabled=false, want true to match the configured value")

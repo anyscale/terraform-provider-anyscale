@@ -313,8 +313,11 @@ func TestCloudResourceStateUpgradeV1toV2_DropsEnableSystemCluster(t *testing.T) 
 	if v2SchemaResp.Diagnostics.HasError() {
 		t.Fatalf("failed to build v2 (current) schema: %v", v2SchemaResp.Diagnostics)
 	}
-	if v2SchemaResp.Schema.Version != 2 {
-		t.Fatalf("current schema Version = %d, want 2 (bumped for the enable_system_cluster removal)", v2SchemaResp.Schema.Version)
+	// >= 2, not == 2: this test's actual intent is "the v1->v2 bump for the
+	// enable_system_cluster removal landed", not "no later PR ever bumps the
+	// schema again" - PR3's own lineage/log rename bumped it again to 3.
+	if v2SchemaResp.Schema.Version < 2 {
+		t.Fatalf("current schema Version = %d, want >= 2 (bumped for the enable_system_cluster removal)", v2SchemaResp.Schema.Version)
 	}
 	if _, present := v2SchemaResp.Schema.Attributes["enable_system_cluster"]; present {
 		t.Fatal("current schema still declares enable_system_cluster - it should be fully removed")

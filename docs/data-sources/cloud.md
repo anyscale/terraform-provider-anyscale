@@ -76,13 +76,13 @@ output "cloud_external_id" {
 - `compute_stack` (String) The compute stack (VM or K8S).
 - `created_at` (String) Timestamp when the cloud was created.
 - `creator_id` (String) The ID of the user who created the cloud.
-- `enable_lineage_tracking` (Boolean) Whether lineage tracking is enabled for this cloud.
-- `enable_log_ingestion` (Boolean) Whether aggregated log ingestion is enabled for this cloud.
 - `external_id` (String) The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.
+- `is_aggregated_logs_enabled` (Boolean) Whether aggregated log ingestion is enabled for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_log_ingestion` on both this data source and the `anyscale_cloud` resource; `log_ingestion` was a name this provider invented that never existed backend-side. See CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
 - `is_default` (Boolean) Whether this is the default cloud for the organization.
 - `is_empty_cloud` (Boolean) Whether this is an empty cloud (created without embedded resource configuration).
 - `is_k8s` (Boolean) Whether this cloud uses Kubernetes.
 - `is_private_cloud` (Boolean) Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.
+- `lineage_tracking_enabled` (Boolean) Whether lineage tracking is enabled for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_lineage_tracking` on both this data source and the `anyscale_cloud` resource; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
 - `region` (String) The region where the cloud is deployed.
 - `state` (String) The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).
 - `status` (String) The operational status of the cloud (e.g., ready, pending, failed).
