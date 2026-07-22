@@ -34,6 +34,12 @@ const (
 	// produced inconsistent result after apply" (task 1f2d592f, found via a
 	// live update-add-worker-group repro).
 	descUseNonNullStateForUnknown = "Once set to a non-null value, the value of this attribute in state will not change."
+	// descRegionSemanticEqual matches regionSemanticEqualPlanModifier's own
+	// Description() (cloud_helpers.go) - our own unexported type, unlike the
+	// framework built-ins above, but the same identify-by-Description
+	// technique applies since PlanModifiers is a slice of the planmodifier.String
+	// interface either way.
+	descRegionSemanticEqual = "Treats object_storage.region as unchanged when it equals the resource's own region and the prior state has no region recorded, since the backend cannot distinguish an explicitly-matching region from one that was never set."
 )
 
 // schemaOf returns the resource.Schema for a resource.Resource implementation
@@ -805,5 +811,93 @@ func TestMemoryDBMemorystoreFieldsComputedWithCorrectModifierOrder(t *testing.T)
 				})
 			}
 		})
+	}
+}
+
+// TestObjectStorageRegionSemanticEqualWithCorrectModifierOrder pins the
+// object_storage.region import replace-loop fix (WORKBENCH "Import gap:
+// object_storage.region explicit-equal", OBJECT-STORAGE-REGION-DESIGN-CORRECTION.md
+// - Fix C, superseding the withdrawn Optional+Computed design): region stays
+// plain Optional (NOT Computed - the backend genuinely has no real value to
+// recover for the explicit-equal case, verified directly against product
+// source and a live cloud, so Computed/recover-always cannot work), with
+// regionSemanticEqualPlanModifier as region's ONLY plan modifier on BOTH
+// anyscale_cloud and anyscale_cloud_resource. It replaces
+// stringplanmodifier.RequiresReplace() entirely rather than composing
+// alongside it - a separate composed RequiresReplace() was tried and
+// rejected (see the modifier's own doc comment in cloud_helpers.go): it
+// unconditionally flags replace before this modifier's exception has any
+// chance to matter, since RequiresReplace's own equality check runs against
+// the ORIGINAL plan value, not this modifier's suppressed one. A plain
+// presence check for RequiresReplace would therefore be WRONG here - its
+// absence is the correct, load-bearing shape, not an oversight.
+func TestObjectStorageRegionSemanticEqualWithCorrectModifierOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  resource.Resource
+	}{
+		{"anyscale_cloud", &CloudResource{}},
+		{"anyscale_cloud_resource", &CloudResourceResource{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := schemaOf(t, tc.res)
+			objectStorageBlock, ok := s.Blocks["object_storage"].(schema.SingleNestedBlock)
+			if !ok {
+				t.Fatalf("object_storage is not a schema.SingleNestedBlock (got %T)", s.Blocks["object_storage"])
+			}
+			region, ok := objectStorageBlock.Attributes["region"].(schema.StringAttribute)
+			if !ok {
+				t.Fatalf("object_storage.region is not a schema.StringAttribute (got %T)", objectStorageBlock.Attributes["region"])
+			}
+			if region.Computed {
+				t.Error("object_storage.region must NOT be Computed - the backend never returns a real value when " +
+					"region equals the resource's own region (verified against product source and a live cloud), so " +
+					"there is nothing to recover; the fix is regionSemanticEqualPlanModifier at plan time, not Computed")
+			}
+			if !region.Optional {
+				t.Error("object_storage.region must remain Optional - a config may still set it explicitly, " +
+					"including to a value different from the resource's own region")
+			}
+			if indexOfPlanModifierDescription(region.PlanModifiers, descRegionSemanticEqual) == -1 {
+				t.Error("object_storage.region must include regionSemanticEqualPlanModifier{}")
+			}
+			if indexOfPlanModifierDescription(region.PlanModifiers, descRequiresReplace) != -1 {
+				t.Error("object_storage.region must NOT also include a separate stringplanmodifier.RequiresReplace() - " +
+					"regionSemanticEqualPlanModifier subsumes it (sets resp.RequiresReplace itself); composing both " +
+					"reintroduces the unconditional replace this fix exists to suppress, since the plain " +
+					"RequiresReplace() checks the pre-modifier plan value, not the exception this one applies")
+			}
+		})
+	}
+}
+
+// TestCloudResourceStatusRemoved pins PR1 (PR1-STATUS-REMOVAL-PLAN.md):
+// anyscale_cloud_resource.status must be fully gone from the schema, while
+// operator_status (the replacement - identical underlying value, clearer
+// name) must remain Computed. Mutation-proof by construction: if the
+// removal is incomplete (status left in the Attributes map), the first
+// assertion below fails immediately - there is no code path where this test
+// passes against an unfinished removal.
+//
+// Deliberately does NOT check anyscale_cloud's own status/state, or the
+// anyscale_cloud/anyscale_clouds data sources' status/state - those are the
+// DISTINCT cloud lifecycle status per the plan's explicit out-of-scope note
+// (statusDeprecationMessage's own doc comment, resource_cloud_resource.go)
+// and must be untouched by this change.
+func TestCloudResourceStatusRemoved(t *testing.T) {
+	s := schemaOf(t, &CloudResourceResource{})
+
+	if _, present := s.Attributes["status"]; present {
+		t.Fatal("anyscale_cloud_resource.status must be fully removed - it duplicates operator_status " +
+			"(PR1-STATUS-REMOVAL-PLAN.md); found it still declared in the schema")
+	}
+
+	operatorStatus, ok := s.Attributes["operator_status"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("operator_status is not a schema.StringAttribute (got %T) - it is the replacement for "+
+			"status and must remain untouched by this removal", s.Attributes["operator_status"])
+	}
+	if !operatorStatus.Computed {
+		t.Error("operator_status must remain Computed - status removal must not regress its sibling attribute")
 	}
 }

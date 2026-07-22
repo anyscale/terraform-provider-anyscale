@@ -173,10 +173,9 @@ output "eks_operator_reported_at" {
 - `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale when this resource deployment was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). `anyscale_cloud`'s own `cloud_resource_id` attribute exposes the same populated identifier for the all-in-one pattern. Stable for the life of this resource deployment - it does not move out of band between applies.
 - `id` (String) Composite identifier in format cloud_id:name
 - `is_default` (Boolean) Whether this is the default resource for the cloud.
-- `operator_status` (String) The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM). Same underlying value as `status`.
+- `operator_status` (String) The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM).
 - `operator_version` (String) The version of the Anyscale Operator that last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).
 - `reported_at` (String) Timestamp when the Anyscale Operator last reported status (Kubernetes cloud resources only; null for VM, or if the operator has not yet reported).
-- `status` (String, Deprecated) The operator status of the cloud resource. Duplicates `operator_status` (identical value; null for VM); use `operator_status` instead.
 
 <a id="nestedblock--aws_config"></a>
 ### Nested Schema for `aws_config`
@@ -259,7 +258,7 @@ Optional:
 
 - `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS). A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so importing a cloud whose bucket was written without the prefix does not force replacement.
 - `endpoint` (String) Custom S3-compatible endpoint (for MinIO, etc.).
-- `region` (String) The bucket region (if different from cloud region). Only recovered at import when it genuinely differs from the cloud's own region - the backend fills in the cloud's own region by default even when this was never set, so a matching value is deliberately left null rather than copied back verbatim.
+- `region` (String) The bucket region (if different from cloud region). A configuration that sets this to the same value as the cloud resource's own region is treated as equivalent to a null recovered value for plan purposes, so it will not force replacement - the Anyscale API cannot tell "never set" apart from "explicitly set to the resource's own region" once stored, so there is no matching value to compare against otherwise. A cloud resource that already has a null value in state from an older provider version reconciles this with a one-time in-place update on its next plan, never a replace. A genuinely different bucket region round-trips normally via the real API value, and a real change to it still requires replacement.
 
 ## Import
 

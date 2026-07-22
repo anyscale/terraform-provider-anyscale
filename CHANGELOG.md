@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-07-22
+
+### Fixed
+
+- resource/anyscale_cloud: `object_storage.region` no longer forces a destroy-and-recreate on import or plan when a configuration sets it equal to the cloud's own region; a null recovered value in that case is now treated as equivalent to the configured value. Already-affected clouds resolve this with a one-time in-place update on their next plan after upgrading, never a replace, and need no re-import.
+- resource/anyscale_cloud_resource: `object_storage.region` no longer forces a destroy-and-recreate on import or plan when a configuration sets it equal to the cloud resource's own region; a null recovered value in that case is now treated as equivalent to the configured value. Already-affected cloud resources resolve this with a one-time in-place update on their next plan after upgrading, never a replace, and need no re-import.
+
 ## [0.18.0] - 2026-07-22
 
 ### Breaking Changes
@@ -835,7 +842,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.18.1
 [0.18.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.18.0
 [0.17.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.17.0
 [0.16.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.16.2

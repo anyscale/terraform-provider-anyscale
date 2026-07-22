@@ -354,34 +354,32 @@ func stripBucketPrefix(provider, bucketName string) string {
 
 // flattenObjectStorage populates object_storage from the API's ObjectStorage.
 // provider decides whether bucket_name is unprefixed to match how a user
-// would naturally write it (see stripBucketPrefix). cloudRegion is the
-// resource's own region (CloudDeploymentResult.Region).
+// would naturally write it (see stripBucketPrefix).
 //
-// L1: the backend defaults an unset bucket region to the cloud's own region
-// and returns that derived value indistinguishably from a genuinely
-// user-configured one - confirmed against a real customer report where the
-// config set only bucket_name. object_storage.region is Optional and
-// RequiresReplace, not Computed, so writing that derived value into state
-// at import would force a replace against a config that never set region -
-// the same destroy-and-recreate this whole fix exists to remove, just
-// relocated to a different attribute. Recover region ONLY when it genuinely
-// differs from cloudRegion, matching the schema's own documented meaning
-// ("the bucket region, if different from cloud region"); a user who set a
-// real, different region still round-trips it.
-func flattenObjectStorage(cfg *ObjectStorage, provider, cloudRegion string) (types.Object, diag.Diagnostics) {
+// region is recovered unconditionally, with no null-when-equal guard (PR
+// #180's guard is dead code, removed for clarity - see below). region stays
+// Optional (not Computed): the fix for the explicit-equal replace-loop lives
+// entirely in regionSemanticEqualPlanModifier (cloud_helpers.go), a plan-time
+// fix, not a recover-a-real-value one, because the backend itself
+// (toExternalCloudDeployment, verified directly against product source and
+// against a real live cloud) never returns a real region value when it
+// equals the cloud's own region - "user never set it" and "user explicitly
+// set it to the same value" are byte-identical in storage and on the wire,
+// so there is nothing here for this function to recover differently either
+// way. PR #180's guard predates that finding: it assumed nulling a
+// same-as-cloud-region value was necessary to avoid re-deriving the
+// backend's auto-fill, but the backend already never sends that value back
+// - the guard was never actually preventing anything real from round-tripping,
+// so removing it changes no observable behavior.
+func flattenObjectStorage(cfg *ObjectStorage, provider string) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if cfg == nil {
 		return types.ObjectNull(objectStorageAttrTypes()), diags
 	}
 
-	region := cfg.Region
-	if region != nil && *region == cloudRegion {
-		region = nil
-	}
-
 	attrs := map[string]attr.Value{
 		"bucket_name": stringOrNull(stripBucketPrefix(provider, cfg.BucketName)),
-		"region":      stringPtrOrNull(region),
+		"region":      stringPtrOrNull(cfg.Region),
 		"endpoint":    stringPtrOrNull(cfg.Endpoint),
 	}
 
@@ -552,11 +550,14 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 // declared in .tf now sees a one-time reconcile diff instead of silence),
 // which is a plan diff to review, not a destructive replace, and is called
 // out explicitly in the changelog/docs for this fix rather than buried.
-// object_storage additionally guards against the backend's region auto-fill
-// (see flattenObjectStorage's own doc, L1) and file_storage's mount_path
-// against collapsing the schema's Computed default (see flattenFileStorage,
-// L2) - both are real, verified landmines a naive "recover whatever the API
-// returns" change would have hit.
+// file_storage's mount_path additionally guards against collapsing the
+// schema's Computed default (see flattenFileStorage, L2) - a real, verified
+// landmine a naive "recover whatever the API returns" change would have
+// hit. object_storage.region has no equivalent guard here: it is recovered
+// unconditionally (never anything but null to recover in the one case that
+// used to need a guard - see flattenObjectStorage's own doc), and the
+// explicit-equal replace-loop this could otherwise cause is handled at plan
+// time by regionSemanticEqualPlanModifier (cloud_helpers.go), not here.
 //
 // Shared by both resources' ImportState: the decision (which block, from
 // which struct field) is identical, only the surrounding API calls to reach
@@ -594,7 +595,7 @@ func requiredImportConfigBlocks(ctx context.Context, provider string, defaultRes
 	}
 
 	if defaultResource.ObjectStorage != nil {
-		obj, d := flattenObjectStorage(defaultResource.ObjectStorage, provider, defaultResource.Region)
+		obj, d := flattenObjectStorage(defaultResource.ObjectStorage, provider)
 		diags.Append(d...)
 		blocks["object_storage"] = obj
 	}

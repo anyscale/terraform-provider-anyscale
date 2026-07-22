@@ -34,11 +34,16 @@ var (
 	_ resource.ResourceWithValidateConfig = &CloudResourceResource{}
 )
 
-// statusDeprecationMessage: status and operator_status are set from the same
-// underlying value in readCloudResource; status is also always null for VM
-// cloud resources, making operator_status the clearer name. cloud_resource
-// only - anyscale_cloud/its data source's status/state fields are the
-// distinct cloud lifecycle status, not an operator_status duplicate.
+// statusDeprecationMessage documented status (removed at v1->v2, see
+// resource_cloud_resource_upgrade.go) before its removal: it and
+// operator_status were set from the same underlying value in
+// readCloudResource; status was also always null for VM cloud resources,
+// making operator_status the clearer name. Kept only for
+// cloudResourceResourceSchemaV1's frozen historical schema, which must
+// describe the real v1 schema byte-for-byte, DeprecationMessage included -
+// no longer referenced by the live schema. cloud_resource only -
+// anyscale_cloud/its data source's status/state fields are the distinct
+// cloud lifecycle status, not an operator_status duplicate.
 const statusDeprecationMessage = "Duplicates `operator_status` (identical value; always null for VM cloud resources). Will be removed in a future major release - use `operator_status` instead."
 
 // NewCloudResourceResource returns a new cloud resource resource.
@@ -78,7 +83,6 @@ type CloudResourceResourceModel struct {
 
 	// Computed fields
 	CloudResourceID types.String `tfsdk:"cloud_resource_id"`
-	Status          types.String `tfsdk:"status"`
 	OperatorStatus  types.String `tfsdk:"operator_status"`
 	OperatorVersion types.String `tfsdk:"operator_version"`
 	ReportedAt      types.String `tfsdk:"reported_at"`
@@ -158,7 +162,9 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 		// attribute, and the 5 inert kubernetes_config bookkeeping fields
 		// were removed - see resource_cloud_resource_upgrade.go's v0->v1
 		// UpgradeState.
-		Version:             1,
+		// v2: status removed (duplicated operator_status; see
+		// statusDeprecationMessage) - see the same file's v1->v2 UpgradeState.
+		Version:             2,
 		MarkdownDescription: "Manages an Anyscale Cloud Resource deployment. This attaches infrastructure configuration to an existing Anyscale Cloud.",
 
 		Attributes: map[string]schema.Attribute{
@@ -252,18 +258,9 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 				},
 			},
 
-			"status": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The operator status of the cloud resource. Duplicates `operator_status` (identical value; null for VM); use `operator_status` instead.",
-				DeprecationMessage:  statusDeprecationMessage,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-
 			"operator_status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM). Same underlying value as `status`.",
+				MarkdownDescription: "The status of the Anyscale Operator (Kubernetes cloud resources only; null for VM).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -532,9 +529,16 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					},
 					"region": schema.StringAttribute{
 						Optional:            true,
-						MarkdownDescription: "The bucket region (if different from cloud region). Only recovered at import when it genuinely differs from the cloud's own region - the backend fills in the cloud's own region by default even when this was never set, so a matching value is deliberately left null rather than copied back verbatim.",
+						MarkdownDescription: "The bucket region (if different from cloud region). A configuration that sets this to the same value as the cloud resource's own region is treated as equivalent to a null recovered value for plan purposes, so it will not force replacement - the Anyscale API cannot tell \"never set\" apart from \"explicitly set to the resource's own region\" once stored, so there is no matching value to compare against otherwise. A cloud resource that already has a null value in state from an older provider version reconciles this with a one-time in-place update on its next plan, never a replace. A genuinely different bucket region round-trips normally via the real API value, and a real change to it still requires replacement.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							// regionSemanticEqualPlanModifier replaces the
+							// plain stringplanmodifier.RequiresReplace() other
+							// attributes in this block use - see its own doc
+							// comment (cloud_helpers.go) for why composing
+							// with a separate RequiresReplace() does not work
+							// here. Do not add stringplanmodifier.RequiresReplace()
+							// alongside it.
+							regionSemanticEqualPlanModifier{},
 						},
 					},
 					"endpoint": schema.StringAttribute{
@@ -867,11 +871,6 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		resp.Diagnostics.Append(d...)
 	}
 
-	// Initialize Status to known null - will be updated by readCloudResource if available
-	if plan.Status.IsUnknown() {
-		plan.Status = types.StringNull()
-	}
-
 	// Same reasoning for the remaining operator/default fields: none of them
 	// are set yet at this point, so without this they'd still be Unknown at
 	// the early State.Set below - Terraform Core rejects a post-apply state
@@ -1132,7 +1131,6 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		state.CloudProvider = types.StringValue(foundResource.Provider)
 	}
 
-	state.Status = types.StringPointerValue(foundResource.OperatorStatus)
 	state.OperatorStatus = types.StringPointerValue(foundResource.OperatorStatus)
 
 	// C4: operator_version/reported_at are only present once a K8s
