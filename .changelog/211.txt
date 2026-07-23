@@ -1,0 +1,4 @@
+```
+release-note:new-resource
+resource/anyscale_organization_default_cloud: Manage which cloud is the organization's default. Requires an organization-owner-scoped token; declare at most one per organization.
+```
