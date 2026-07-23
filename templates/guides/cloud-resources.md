@@ -168,8 +168,10 @@ source, to match what the plural already used. `aggregated_logs_enabled` is a re
 surfaces, including the plural: `is_aggregated_logs_enabled` was the lone `is_`-prefixed name once the
 other two settled on the uniform shape, so it was dropped there too rather than left as a mismatch. This
 is a breaking change for any configuration that set or referenced the old names on any of the three
-surfaces. Existing state migrates automatically the next time Terraform reads it, with no
-`terraform import` required; update your configuration and any output references
+surfaces. On the resource, existing state migrates automatically the next time Terraform reads it,
+with no `terraform import` required. The data sources have no persisted state to migrate - they
+simply return the value under its new attribute name on your next read, so there is nothing to do
+beyond updating your configuration and any output references
 (`anyscale_cloud.example.enable_lineage_tracking`, `data.anyscale_clouds.example.clouds[0].is_aggregated_logs_enabled`,
 etc.) to the new names. See CHANGELOG.md for the release this shipped in.
 
