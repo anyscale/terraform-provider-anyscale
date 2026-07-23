@@ -1068,3 +1068,55 @@ func TestEphemeralCredentialsSensitiveAttributesAreMarkedSensitive(t *testing.T)
 		})
 	}
 }
+
+// TestServiceAuthTokenNeverInPersistedSchemas is a permanent regression guard, not a new
+// assertion invented after the fact: auth_token and secondary_auth_token exist as real Go struct
+// fields on ServiceResult (models.go) specifically for anyscale_service_credentials' Open to
+// read - see that struct's doc comment. This test pins that anyscale_service's own resource and
+// both data sources never gain either attribute, which would defeat the entire reason the
+// ephemeral resource exists (the exact state leak it is meant to prevent).
+//
+// Independently confirmed (2026-07-23) that neither populateServiceDataSourceModel nor
+// populateServiceResourceModelComputed reference either field today, and neither does the plural
+// data_source_services.go - but that is a snapshot of hand-written code, not a structural
+// guarantee, so this test is what actually catches a future careless one-line addition to either
+// conversion function before it ships, rather than relying on someone re-grepping by hand.
+func TestServiceAuthTokenNeverInPersistedSchemas(t *testing.T) {
+	t.Run("ServiceResource", func(t *testing.T) {
+		s := schemaOf(t, &ServiceResource{})
+		for _, key := range []string{"auth_token", "secondary_auth_token"} {
+			if _, ok := s.Attributes[key]; ok {
+				t.Errorf("anyscale_service resource schema unexpectedly has attribute %q - "+
+					"this must never be persisted to state, that is the entire reason "+
+					"anyscale_service_credentials (an ephemeral resource) exists instead", key)
+			}
+		}
+	})
+
+	t.Run("ServiceDataSource", func(t *testing.T) {
+		s := datasourceSchemaOf(t, &ServiceDataSource{})
+		for _, key := range []string{"auth_token", "secondary_auth_token"} {
+			if _, ok := s.Attributes[key]; ok {
+				t.Errorf("anyscale_service data source schema unexpectedly has attribute %q - "+
+					"this must never be persisted to state, that is the entire reason "+
+					"anyscale_service_credentials (an ephemeral resource) exists instead", key)
+			}
+		}
+	})
+
+	t.Run("ServicesDataSource_NestedItem", func(t *testing.T) {
+		s := datasourceSchemaOf(t, &ServicesDataSource{})
+		servicesAttr, ok := s.Attributes["services"].(dsschema.ListNestedAttribute)
+		if !ok {
+			t.Fatalf("services attribute is not a dsschema.ListNestedAttribute (got %T) - "+
+				"update this test if the plural data source's schema shape changes", s.Attributes["services"])
+		}
+		for _, key := range []string{"auth_token", "secondary_auth_token"} {
+			if _, ok := servicesAttr.NestedObject.Attributes[key]; ok {
+				t.Errorf("anyscale_services (plural) data source's per-item schema unexpectedly "+
+					"has attribute %q - this must never be persisted to state, that is the "+
+					"entire reason anyscale_service_credentials (an ephemeral resource) exists instead", key)
+			}
+		}
+	})
+}
