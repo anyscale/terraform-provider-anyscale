@@ -124,7 +124,7 @@ data-source/anyscale_project: Look up an existing Anyscale project by name or ID
 `````
 ```
 release-note:new-ephemeral-resource
-ephemeral-resource/anyscale_system_cluster_credentials: Fetch a System Cluster's live workload auth token without ever writing it to state.
+ephemeral-resource/anyscale_service_credentials: Fetch a running Service's live auth token without ever writing it to state.
 ```
 `````
 
