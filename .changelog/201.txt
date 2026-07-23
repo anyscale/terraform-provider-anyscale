@@ -1,4 +1,0 @@
-```
-release-note:breaking-change
-resource/anyscale_cloud_resource: `status` is removed; it duplicated `operator_status` (identical value, always null for VM cloud resources) and is superseded by it. To migrate, replace any reference to `status` (outputs, interpolations) with `operator_status`; existing state auto-migrates on your next plan, no manual state surgery is needed.
-```
