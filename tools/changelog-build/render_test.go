@@ -50,10 +50,37 @@ func TestParseFragmentContent_MultipleBlocksPerFile(t *testing.T) {
 	}
 }
 
+func TestParseFragmentContent_NewEphemeralResourceAndNewActionTypes(t *testing.T) {
+	content := "```\nrelease-note:new-ephemeral-resource\nephemeral-resource/anyscale_service_credentials: Fetch a running Service's live auth token without ever writing it to state.\n```\n\n```\nrelease-note:new-action\naction/anyscale_system_cluster_terminate: Terminate a System Cluster's underlying compute imperatively.\n```\n"
+	entries, err := parseFragmentContent("210.txt", content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	if entries[0].Type != TypeNewEphemeralResource || entries[1].Type != TypeNewAction {
+		t.Fatalf("got types %q, %q, want %q, %q", entries[0].Type, entries[1].Type, TypeNewEphemeralResource, TypeNewAction)
+	}
+}
+
 func TestParseFragmentContent_UnknownTypeErrors(t *testing.T) {
 	content := "```\nrelease-note:enhancement\nsomething\n```\n"
 	if _, err := parseFragmentContent("1.txt", content); err == nil {
 		t.Fatal("expected an error for an unrecognized type, got nil")
+	}
+}
+
+func TestParseFragmentContent_UnknownTypeErrorListsNewTypes(t *testing.T) {
+	content := "```\nrelease-note:enhancement\nsomething\n```\n"
+	_, err := parseFragmentContent("1.txt", content)
+	if err == nil {
+		t.Fatal("expected an error for an unrecognized type, got nil")
+	}
+	for _, want := range []string{"new-ephemeral-resource", "new-action"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention valid type %q — the error message must stay in sync with typeOrder", err.Error(), want)
+		}
 	}
 }
 
@@ -68,6 +95,20 @@ func TestParseFragmentContent_UnterminatedFenceErrors(t *testing.T) {
 	content := "```\nrelease-note:added\nsomething"
 	if _, err := parseFragmentContent("1.txt", content); err == nil {
 		t.Fatal("expected an error for an unterminated fence, got nil")
+	}
+}
+
+func TestRenderSection_NewEphemeralResourceAndNewActionHeadingsAndOrder(t *testing.T) {
+	entries := []Entry{
+		{Type: TypeAdded, Text: "add one"},
+		{Type: TypeNewAction, Text: "action one"},
+		{Type: TypeNewResource, Text: "resource one"},
+		{Type: TypeNewEphemeralResource, Text: "ephemeral one"},
+	}
+	got := RenderSection(entries)
+	want := "### New Resources\n\n- resource one\n\n### New Ephemeral Resources\n\n- ephemeral one\n\n### New Actions\n\n- action one\n\n### Added\n\n- add one\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
 

@@ -649,13 +649,19 @@ type ServicesListResponse struct {
 }
 
 // ServiceResult is the actual service data, shared by both the singular GET and plural LIST
-// responses (see ServicesListResponse's doc comment for why one struct covers both).
+// responses (see ServicesListResponse's doc comment for why one struct covers both), AND by the
+// anyscale_service_credentials ephemeral resource (ephemeral_service_credentials.go).
+//
+// AuthToken/SecondaryAuthToken are parsed here ONLY for that ephemeral resource's Open method to
+// read directly - confirmed on the wire at BaseProductionServiceV2Model (services_base_api_models.py)
+// as real, always-present (present-as-null, never omitted) Optional[str] fields. Do NOT wire either
+// into populateServiceDataSourceModel/populateServiceResourceModelComputed or the
+// ServiceDataSourceModel/ServiceResourceModel schemas - both of those paths persist to Terraform
+// state, which is exactly the leak this ephemeral resource exists to avoid (the same "excluded
+// entirely rather than included-and-marked-Sensitive" ruling this provider applies to API keys
+// generally, now satisfied via the ephemeral resource instead of omission).
 //
 // Deliberately absent fields, each a documented gap rather than an oversight:
-//   - auth_token: a live bearer credential for calling the deployed service. A Terraform data
-//     source's output is always written to state in plaintext regardless of any Sensitive
-//     marking, so this is excluded entirely rather than included-and-marked-Sensitive - the same
-//     ruling this provider already applies to API keys generally.
 //   - versions: deprecated upstream in favor of primary_version/canary_version.
 //   - type (ServiceType): list-only field; redundant discriminator since this router is V2-only.
 //   - creator (MiniUser object): flat CreatorID is kept instead, consistent with this provider's
@@ -677,6 +683,10 @@ type ServiceResult struct {
 	AutoRolloutEnabled bool    `json:"auto_rollout_enabled"`
 	IsMultiVersion     bool    `json:"is_multi_version"`
 	ErrorMessage       *string `json:"error_message"`
+
+	// AuthToken/SecondaryAuthToken: see the doc comment above - ephemeral-resource use ONLY.
+	AuthToken          *string `json:"auth_token"`
+	SecondaryAuthToken *string `json:"secondary_auth_token"`
 
 	// ServiceObservabilityURLs and PrimaryVersion are pointers, not value structs, despite
 	// nominally being "always present" per the backend model: CONFIRMED via a real CI

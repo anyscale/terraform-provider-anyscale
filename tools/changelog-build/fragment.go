@@ -14,15 +14,17 @@ import (
 type EntryType string
 
 const (
-	TypeBreakingChange EntryType = "breaking-change"
-	TypeNewResource    EntryType = "new-resource"
-	TypeNewDataSource  EntryType = "new-data-source"
-	TypeAdded          EntryType = "added"
-	TypeChanged        EntryType = "changed"
-	TypeDeprecated     EntryType = "deprecated"
-	TypeRemoved        EntryType = "removed"
-	TypeFixed          EntryType = "fixed"
-	TypeSecurity       EntryType = "security"
+	TypeBreakingChange       EntryType = "breaking-change"
+	TypeNewResource          EntryType = "new-resource"
+	TypeNewDataSource        EntryType = "new-data-source"
+	TypeNewEphemeralResource EntryType = "new-ephemeral-resource"
+	TypeNewAction            EntryType = "new-action"
+	TypeAdded                EntryType = "added"
+	TypeChanged              EntryType = "changed"
+	TypeDeprecated           EntryType = "deprecated"
+	TypeRemoved              EntryType = "removed"
+	TypeFixed                EntryType = "fixed"
+	TypeSecurity             EntryType = "security"
 )
 
 // typeOrder is the section render order: highest-signal entries first.
@@ -30,6 +32,8 @@ var typeOrder = []EntryType{
 	TypeBreakingChange,
 	TypeNewResource,
 	TypeNewDataSource,
+	TypeNewEphemeralResource,
+	TypeNewAction,
 	TypeAdded,
 	TypeChanged,
 	TypeDeprecated,
@@ -39,15 +43,17 @@ var typeOrder = []EntryType{
 }
 
 var sectionHeading = map[EntryType]string{
-	TypeBreakingChange: "Breaking Changes",
-	TypeNewResource:    "New Resources",
-	TypeNewDataSource:  "New Data Sources",
-	TypeAdded:          "Added",
-	TypeChanged:        "Changed",
-	TypeDeprecated:     "Deprecated",
-	TypeRemoved:        "Removed",
-	TypeFixed:          "Fixed",
-	TypeSecurity:       "Security",
+	TypeBreakingChange:       "Breaking Changes",
+	TypeNewResource:          "New Resources",
+	TypeNewDataSource:        "New Data Sources",
+	TypeNewEphemeralResource: "New Ephemeral Resources",
+	TypeNewAction:            "New Actions",
+	TypeAdded:                "Added",
+	TypeChanged:              "Changed",
+	TypeDeprecated:           "Deprecated",
+	TypeRemoved:              "Removed",
+	TypeFixed:                "Fixed",
+	TypeSecurity:             "Security",
 }
 
 var validTypes = func() map[string]EntryType {
@@ -57,6 +63,18 @@ var validTypes = func() map[string]EntryType {
 	}
 	return m
 }()
+
+// validTypeNames returns every valid type string, in typeOrder's order, for
+// use in the "unrecognized release-note type" error message — derived from
+// typeOrder rather than a second hardcoded list, so the message can't drift
+// out of sync with the types this file actually accepts.
+func validTypeNames() []string {
+	names := make([]string, len(typeOrder))
+	for i, t := range typeOrder {
+		names[i] = string(t)
+	}
+	return names
+}
 
 // Entry is one release-note fragment entry, parsed from a .changelog/<PR#>.txt file.
 type Entry struct {
@@ -153,7 +171,7 @@ func parseFragmentContent(source, content string) ([]Entry, error) {
 		rawType = strings.TrimSpace(strings.TrimPrefix(rawType, "release-note:"))
 		entryType, ok := validTypes[strings.ToLower(rawType)]
 		if !ok {
-			return nil, fmt.Errorf("unrecognized release-note type %q (want one of: breaking-change, new-resource, new-data-source, added, changed, deprecated, removed, fixed, security)", rawType)
+			return nil, fmt.Errorf("unrecognized release-note type %q (want one of: %s)", rawType, strings.Join(validTypeNames(), ", "))
 		}
 
 		var bodyLines []string

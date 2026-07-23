@@ -72,8 +72,9 @@ git push
 `````
 
 See [`.changelog/README.md`](.changelog/README.md) for the full block syntax, the complete list
-of valid types (`breaking-change`, `new-resource`, `new-data-source`, `added`, `changed`,
-`deprecated`, `removed`, `fixed`, `security`), and one worked example per type.
+of valid types (`breaking-change`, `new-resource`, `new-data-source`, `new-ephemeral-resource`,
+`new-action`, `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`), and one worked
+example per type.
 
 **Shipping a breaking change?** Its fragment must use `release-note:breaking-change` and state
 both what breaks and how to migrate, in one sentence — see the breaking-change section of
