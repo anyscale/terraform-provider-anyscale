@@ -35,7 +35,7 @@ README as the manual you keep open while running it.
 
 ## What you'll need
 
-- Terraform >= 1.9
+- Terraform >= 1.10
 - The AWS CLI, installed and authenticated - not just AWS credentials in the usual Terraform
   sense. This example's `kubernetes`/`helm` provider blocks fetch a short-lived cluster auth token
   by shelling out to `aws eks get-token` at apply time (an "exec plugin"), rather than minting one

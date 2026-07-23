@@ -98,7 +98,10 @@ Two constraints shape every fix here:
 - Avoid panics / fatal logs.
 
 ### Compatibility targets
-- Terraform >= 1.6
+- Terraform >= 1.10 - the floor required by this provider's Ephemeral Resources adoption
+  (`anyscale_service_credentials`), currently its highest real requirement. Verify this number
+  against the provider's actual adopted primitives before citing it elsewhere - it moves if a
+  higher-floor primitive (e.g. Actions, requiring 1.14) is adopted and shipped.
 - Current `terraform-plugin-framework` version used by the repo
 
 ## Local Dev Workflow (Canonical: Makefile)

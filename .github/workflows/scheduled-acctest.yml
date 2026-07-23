@@ -56,7 +56,7 @@ jobs:
         # Keep this version in sync with ci.yml's Setup Terraform step -- that
         # workflow's comment explains why 1.15.7 specifically is required and
         # confirms it's verified compatible with acctest-data/acctest-resource.
-        # sweep.yml pins an older 1.9.8 for a different, non-acctest code path
+        # sweep.yml pins an older 1.10.0 for a different, non-acctest code path
         # (sweeper only, no real plan/apply) -- do not copy that pin here.
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:

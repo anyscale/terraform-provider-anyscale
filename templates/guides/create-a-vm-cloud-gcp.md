@@ -30,7 +30,7 @@ it first.
 
 ## What you'll need
 
-- Terraform >= 1.9
+- Terraform >= 1.10
 - GCP credentials with permission to create a new project under the folder you specify, associate
   it with the billing account you specify, and create VPCs, service accounts, and a GCS bucket
   within it once it exists (e.g. `gcloud auth application-default login`) - this guide provisions
