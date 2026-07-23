@@ -103,13 +103,13 @@ func TestAccCloudResource_Lifecycle_AWS_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const cloudID = "cld_c3_aws_mock"
-	// is_default: true here is the TOP-LEVEL CloudResult.IsDefault (org
-	// default cloud) - a different field from resourcesJSON's per-resource
-	// "is_default" below (CloudDeploymentResult.IsDefault, cold-import
-	// compute_stack disambiguation). true rather than false deliberately: the
-	// schema attribute's zero value is also false, so a regression that never
-	// assigns it at all would still pass a false-in/false-out test and prove
-	// nothing.
+	// The top-level cloudJSON is_default below is a vestige of the (now
+	// removed) anyscale_cloud resource attribute that used to mirror
+	// CloudResult.IsDefault (org default cloud) - readCloudState no longer
+	// reads it at all, so its value here is inert. resourcesJSON's
+	// per-resource "is_default" further down is a DIFFERENT field
+	// (CloudDeploymentResult.IsDefault, cold-import compute_stack
+	// disambiguation) and is still very much live.
 	cloudJSON := fmt.Sprintf(`{
 		"id": %[1]q, "name": "c3-aws-mock", "provider": "AWS", "region": "us-east-2",
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM", "is_default": true
@@ -170,7 +170,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "aws_config.vpc_id", "vpc-real123"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "aws_config.cluster_instance_profile_id", "arn:aws:iam::123456789012:instance-profile/real-cluster-node"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "object_storage.bucket_name", "real-bucket-name"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "is_default", "true"),
+					resource.TestCheckNoResourceAttr("anyscale_cloud.test", "is_default"),
 				),
 				// Headline C3 gate: a config populated at create against a
 				// realistically-shaped (hazard-laden) API response must not
@@ -757,11 +757,8 @@ resource "anyscale_cloud" "test" {
 				// intact) and this step still passed, because nothing else
 				// in the config changes here, so the framework has no
 				// "known after apply" pressure to relieve regardless of the
-				// modifier. UseStateForUnknown's actual failure mode (a
-				// spurious diff on an otherwise-idle plan) is a MUCH more
-				// commonly-relied-upon proof shape elsewhere in this file
-				// (e.g. is_default's own comment on why IT has no modifier);
-				// isolating it here would need a second, unrelated config
+				// modifier. Isolating UseStateForUnknown's actual presence
+				// here would need a second, unrelated config
 				// change forcing a real plan alongside this attribute, which
 				// this test does not attempt - see the test's own doc
 				// comment.

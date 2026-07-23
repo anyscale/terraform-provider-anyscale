@@ -44,6 +44,10 @@ func (r *CloudResource) UpgradeState(ctx context.Context) map[int64]resource.Sta
 			PriorSchema:   cloudResourceSchemaV2(),
 			StateUpgrader: upgradeCloudResourceStateV2toV3,
 		},
+		3: {
+			PriorSchema:   cloudResourceSchemaV3(),
+			StateUpgrader: upgradeCloudResourceStateV3toV4,
+		},
 	}
 }
 
@@ -315,14 +319,17 @@ type cloudResourceModelV1 struct {
 	CloudResourceID types.String `tfsdk:"cloud_resource_id"`
 }
 
-// toCloudResourceModel drops EnableSystemCluster, initializes Timeouts null
-// (PR2, additive - no prior state ever had a value for it, so it is always
-// initialized null here rather than carried from m), and renames
-// EnableLineageTracking/EnableLogIngestion to LineageTrackingEnabled/
-// AggregatedLogsEnabled (values carry across unchanged under the new field
-// names - see cloudResourceModelV2.toCloudResourceModel() for the same rename
-// applied one version later) - together the only differences between this
-// struct and the current (v3) CloudResourceModel.
+// toCloudResourceModel drops EnableSystemCluster and is_default (removed
+// later at v1->v2 and v3->v4 respectively, but this function's output must
+// target the CURRENT live schema directly - the same reasoning applies to
+// both), initializes Timeouts null (PR2, additive - no prior state ever had
+// a value for it, so it is always initialized null here rather than carried
+// from m), and renames EnableLineageTracking/EnableLogIngestion to
+// LineageTrackingEnabled/AggregatedLogsEnabled (values carry across
+// unchanged under the new field names - see
+// cloudResourceModelV2.toCloudResourceModel() for the same rename applied
+// one version later) - together the only differences between this struct
+// and the current (v4) CloudResourceModel.
 func (m cloudResourceModelV1) toCloudResourceModel() CloudResourceModel {
 	return CloudResourceModel{
 		ID:                     m.ID,
@@ -342,7 +349,6 @@ func (m cloudResourceModelV1) toCloudResourceModel() CloudResourceModel {
 		ObjectStorage:          m.ObjectStorage,
 		FileStorage:            m.FileStorage,
 		IsEmptyCloud:           m.IsEmptyCloud,
-		IsDefault:              m.IsDefault,
 		CloudResourceID:        m.CloudResourceID,
 		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
 	}
@@ -701,16 +707,18 @@ type cloudResourceModelV2 struct {
 	CloudResourceID types.String `tfsdk:"cloud_resource_id"`
 }
 
-// toCloudResourceModel maps cloudResourceModelV2 onto the current (v3)
+// toCloudResourceModel maps cloudResourceModelV2 onto the current (v4)
 // CloudResourceModel. The rename (EnableLineageTracking/EnableLogIngestion
 // carry across unchanged as LineageTrackingEnabled/AggregatedLogsEnabled -
 // same boolean value, new field/attribute name) is a pure rename, not a drop.
-// Timeouts is a genuine gap this struct has no source for (PR2, additive -
-// v2 state predates it entirely), so it is always initialized null here
-// rather than carried from m, same reasoning as cloudResourceModelV1's own
-// conversion above - found by inspection while merging PR2+PR3, not part of
-// either PR's own conflicting lines (this whole function is new in PR3, so
-// git had nothing to flag it against).
+// is_default is dropped, same reasoning as cloudResourceModelV1's own
+// conversion above (this function's output must target the CURRENT live
+// schema directly). Timeouts is a genuine gap this struct has no source for
+// (PR2, additive - v2 state predates it entirely), so it is always
+// initialized null here rather than carried from m, same reasoning as
+// cloudResourceModelV1's own conversion above - found by inspection while
+// merging PR2+PR3, not part of either PR's own conflicting lines (this whole
+// function is new in PR3, so git had nothing to flag it against).
 func (m cloudResourceModelV2) toCloudResourceModel() CloudResourceModel {
 	return CloudResourceModel{
 		ID:                     m.ID,
@@ -730,7 +738,6 @@ func (m cloudResourceModelV2) toCloudResourceModel() CloudResourceModel {
 		ObjectStorage:          m.ObjectStorage,
 		FileStorage:            m.FileStorage,
 		IsEmptyCloud:           m.IsEmptyCloud,
-		IsDefault:              m.IsDefault,
 		CloudResourceID:        m.CloudResourceID,
 		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
 	}
@@ -1242,4 +1249,522 @@ func upgradeCloudResourceStateV2toV3(ctx context.Context, req resource.UpgradeSt
 	newState := priorState.toCloudResourceModel()
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
+}
+
+// cloudResourceModelV3 is a frozen copy of CloudResourceModel exactly as it
+// stood between the enable_lineage_tracking/enable_log_ingestion rename
+// (v2->v3, PR3) and the is_default removal (v3->v4, this release): still
+// carries IsDefault, which the live CloudResourceModel no longer does.
+// Exists solely so UpgradeState can decode v3 state; do not evolve it going
+// forward - it is a historical snapshot, not a second copy of the live
+// model.
+type cloudResourceModelV3 struct {
+	ID                     types.String `tfsdk:"id"`
+	Name                   types.String `tfsdk:"name"`
+	CloudProvider          types.String `tfsdk:"cloud_provider"`
+	ComputeStack           types.String `tfsdk:"compute_stack"`
+	Region                 types.String `tfsdk:"region"`
+	IsPrivateCloud         types.Bool   `tfsdk:"is_private_cloud"`
+	AutoAddUser            types.Bool   `tfsdk:"auto_add_user"`
+	Credentials            types.String `tfsdk:"credentials"`
+	LineageTrackingEnabled types.Bool   `tfsdk:"lineage_tracking_enabled"`
+	AggregatedLogsEnabled  types.Bool   `tfsdk:"aggregated_logs_enabled"`
+
+	AWSConfig        types.Object `tfsdk:"aws_config"`
+	GCPConfig        types.Object `tfsdk:"gcp_config"`
+	AzureConfig      types.Object `tfsdk:"azure_config"`
+	KubernetesConfig types.Object `tfsdk:"kubernetes_config"`
+
+	ObjectStorage types.Object `tfsdk:"object_storage"`
+	FileStorage   types.Object `tfsdk:"file_storage"`
+
+	IsEmptyCloud    types.Bool   `tfsdk:"is_empty_cloud"`
+	IsDefault       types.Bool   `tfsdk:"is_default"`
+	CloudResourceID types.String `tfsdk:"cloud_resource_id"`
+
+	Timeouts timeouts.Value `tfsdk:"timeouts"`
+}
+
+// toCloudResourceModel maps cloudResourceModelV3 onto the current (v4)
+// CloudResourceModel, dropping IsDefault - removed from the live schema
+// because it mirrored volatile org-level state (which cloud is the org
+// default) as a per-cloud Computed bool with no safe plan-modifier story.
+// The org default is correctly and safely observable today via the
+// anyscale_cloud/anyscale_clouds data sources' own is_default (same
+// auth-independent GET /clouds path the resource used), so nothing is lost -
+// see CHANGELOG.md for the full rationale and migration note. Nothing to
+// migrate for the dropped field itself: is_default was Computed-only and
+// always overwritten from the API on the very next Read regardless of
+// whatever a prior provider version last wrote, so dropping it here loses no
+// user intent, only a value the API would have refreshed away anyway.
+func (m cloudResourceModelV3) toCloudResourceModel() CloudResourceModel {
+	return CloudResourceModel{
+		ID:                     m.ID,
+		Name:                   m.Name,
+		CloudProvider:          m.CloudProvider,
+		ComputeStack:           m.ComputeStack,
+		Region:                 m.Region,
+		IsPrivateCloud:         m.IsPrivateCloud,
+		AutoAddUser:            m.AutoAddUser,
+		Credentials:            m.Credentials,
+		LineageTrackingEnabled: m.LineageTrackingEnabled,
+		AggregatedLogsEnabled:  m.AggregatedLogsEnabled,
+		AWSConfig:              m.AWSConfig,
+		GCPConfig:              m.GCPConfig,
+		AzureConfig:            m.AzureConfig,
+		KubernetesConfig:       m.KubernetesConfig,
+		ObjectStorage:          m.ObjectStorage,
+		FileStorage:            m.FileStorage,
+		IsEmptyCloud:           m.IsEmptyCloud,
+		CloudResourceID:        m.CloudResourceID,
+		Timeouts:               m.Timeouts,
+	}
+}
+
+// upgradeCloudResourceStateV3toV4 drops is_default (removed in favor of the
+// already-shipped, auth-independent anyscale_cloud/anyscale_clouds data
+// sources' own is_default as the recommended way to observe the org
+// default) and carries every other field through unchanged. Decodes into
+// cloudResourceModelV3 (not CloudResourceModel directly) because v3's real
+// stored schema still declares is_default - decoding straight into the now
+// fieldless CloudResourceModel produces a hard "Object defines fields not
+// found in struct" error, same failure mode upgradeCloudResourceStateV1toV2
+// documents for enable_system_cluster.
+func upgradeCloudResourceStateV3toV4(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	if req.State == nil {
+		resp.Diagnostics.AddError(
+			"Missing Prior State",
+			"State upgrade from version 3 requires prior state data, but none was provided. This is a bug in the provider; please report it.",
+		)
+		return
+	}
+
+	var priorState cloudResourceModelV3
+	resp.Diagnostics.Append(req.State.Get(ctx, &priorState)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	newState := priorState.toCloudResourceModel()
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
+}
+
+// cloudResourceSchemaV3 is a frozen copy of anyscale_cloud's schema exactly
+// as shipped between the enable_lineage_tracking/enable_log_ingestion
+// rename (v2->v3, PR3) and the is_default removal (v3->v4, this release):
+// identical in structure to the live schema, plus the is_default attribute
+// the v4 schema no longer declares. Exists solely so UpgradeState can decode
+// v3 state; do not evolve it going forward - see cloudResourceSchemaV0's doc
+// comment for why only attribute names, types, and block-vs-attribute
+// structure matter here, not Optional/Computed/Default/PlanModifiers/Validators.
+func cloudResourceSchemaV3() *schema.Schema {
+	return &schema.Schema{
+		Version:             3,
+		MarkdownDescription: "Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).",
+
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The unique identifier of the cloud.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"name": schema.StringAttribute{
+				Required:            true,
+				MarkdownDescription: "The name of the cloud.",
+				PlanModifiers: []planmodifier.String{
+					cloudNameImmutablePlanModifier{},
+				},
+			},
+
+			"cloud_provider": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"compute_stack": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Compute stack type: VM or K8S.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+				Validators: []validator.String{
+					stringvalidator.OneOf("VM", "K8S"),
+				},
+			},
+
+			"region": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "The region where the cloud is deployed.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"is_private_cloud": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				MarkdownDescription: "Whether to register this cloud as private.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
+			},
+
+			"auto_add_user": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				MarkdownDescription: "Whether to automatically add users to this cloud.",
+			},
+
+			"credentials": schema.StringAttribute{
+				Optional:            true,
+				Sensitive:           true,
+				MarkdownDescription: "Cloud credentials.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+
+			"lineage_tracking_enabled": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				MarkdownDescription: "Whether to enable lineage tracking for this cloud.",
+			},
+
+			"aggregated_logs_enabled": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				MarkdownDescription: "Whether to enable aggregated log ingestion for this cloud.",
+			},
+
+			"is_empty_cloud": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this cloud was created without embedded resource configuration.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			"is_default": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether this cloud is the organization's default cloud.",
+			},
+
+			"cloud_resource_id": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this cloud's default resource was registered.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+		},
+
+		Blocks: map[string]schema.Block{
+			"aws_config": schema.SingleNestedBlock{
+				MarkdownDescription: "AWS-specific configuration.",
+				Attributes: map[string]schema.Attribute{
+					"vpc_id": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"subnet_ids": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						PlanModifiers: []planmodifier.List{
+							awsSubnetIDsSemanticEqualPlanModifier{},
+							listplanmodifier.RequiresReplace(),
+						},
+					},
+					"subnet_ids_to_az": schema.MapAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						PlanModifiers: []planmodifier.Map{
+							awsSubnetIDsToAZSemanticEqualPlanModifier{},
+							mapplanmodifier.RequiresReplace(),
+						},
+					},
+					"security_group_ids": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
+						},
+					},
+					"controlplane_iam_role_arn": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"dataplane_iam_role_arn": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"cluster_instance_profile_id": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"external_id": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"memorydb_cluster_name": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"memorydb_cluster_arn": schema.StringAttribute{
+						Optional: true,
+						Computed: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"memorydb_cluster_endpoint": schema.StringAttribute{
+						Optional: true,
+						Computed: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+				},
+			},
+
+			"gcp_config": schema.SingleNestedBlock{
+				MarkdownDescription: "GCP-specific configuration.",
+				Attributes: map[string]schema.Attribute{
+					"project_id": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"host_project_id": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"provider_name": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"vpc_name": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"subnet_names": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
+						},
+					},
+					"controlplane_service_account_email": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"dataplane_service_account_email": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"firewall_policy_names": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
+						},
+					},
+					"memorystore_instance_name": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"memorystore_endpoint": schema.StringAttribute{
+						Optional: true,
+						Computed: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+				},
+			},
+
+			"azure_config": schema.SingleNestedBlock{
+				MarkdownDescription: "Azure-specific configuration.",
+				Attributes: map[string]schema.Attribute{
+					"tenant_id": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+				},
+			},
+
+			"kubernetes_config": schema.SingleNestedBlock{
+				MarkdownDescription: "Kubernetes-specific configuration.",
+				Attributes: map[string]schema.Attribute{
+					"anyscale_operator_iam_identity": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"zones": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.RequiresReplace(),
+						},
+					},
+					"redis_endpoint": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRoot("aws_config").AtName("memorydb_cluster_endpoint"),
+								path.MatchRoot("gcp_config").AtName("memorystore_endpoint"),
+							),
+						},
+					},
+				},
+			},
+
+			"object_storage": schema.SingleNestedBlock{
+				MarkdownDescription: "Object storage configuration.",
+				Attributes: map[string]schema.Attribute{
+					"bucket_name": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							bucketNameSemanticEqualPlanModifier{},
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"region": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							regionSemanticEqualPlanModifier{},
+						},
+					},
+					"endpoint": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+				},
+			},
+
+			"file_storage": schema.SingleNestedBlock{
+				MarkdownDescription: "File storage configuration.",
+				Attributes: map[string]schema.Attribute{
+					"file_storage_id": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+					},
+					"mount_path": schema.StringAttribute{
+						Optional: true,
+						Computed: true,
+						Default:  stringdefault.StaticString(fileStorageDefaultMountPath),
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRoot("file_storage").AtName("persistent_volume_claim"),
+								path.MatchRoot("file_storage").AtName("csi_ephemeral_volume_driver"),
+							),
+						},
+					},
+					"persistent_volume_claim": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRoot("file_storage").AtName("csi_ephemeral_volume_driver"),
+								path.MatchRoot("file_storage").AtName("mount_path"),
+							),
+						},
+					},
+					"csi_ephemeral_volume_driver": schema.StringAttribute{
+						Optional: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.RequiresReplace(),
+						},
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRoot("file_storage").AtName("persistent_volume_claim"),
+								path.MatchRoot("file_storage").AtName("mount_path"),
+							),
+						},
+					},
+					"mount_targets": schema.ListNestedAttribute{
+						Optional: true,
+						Computed: true,
+						PlanModifiers: []planmodifier.List{
+							listplanmodifier.UseStateForUnknown(),
+							listplanmodifier.RequiresReplace(),
+						},
+						NestedObject: schema.NestedAttributeObject{
+							Attributes: map[string]schema.Attribute{
+								"address": schema.StringAttribute{
+									Optional: true,
+								},
+								"zone": schema.StringAttribute{
+									Optional: true,
+								},
+							},
+						},
+					},
+				},
+			},
+			"timeouts": timeouts.Block(context.Background(), timeouts.Opts{
+				Create: true,
+			}),
+		},
+	}
 }

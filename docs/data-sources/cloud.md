@@ -78,7 +78,7 @@ output "cloud_external_id" {
 - `created_at` (String) Timestamp when the cloud was created.
 - `creator_id` (String) The ID of the user who created the cloud.
 - `external_id` (String) The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.
-- `is_default` (Boolean) Whether this is the default cloud for the organization.
+- `is_default` (Boolean) Whether this cloud is the organization's default cloud. Computed as a direct comparison against the org's default-cloud pointer for this specific cloud only - no fallback substitution based on what else the caller can see. Contrast the `anyscale_clouds` (plural) data source's own `is_default`, which can substitute a different cloud when the caller cannot see the org's actual default - see that data source's description before relying on its `is_default` for this same question.
 - `is_empty_cloud` (Boolean) Whether this is an empty cloud (created without embedded resource configuration).
 - `is_k8s` (Boolean) Whether this cloud uses Kubernetes.
 - `is_private_cloud` (Boolean) Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.

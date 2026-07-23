@@ -181,11 +181,6 @@ output "cloud_name" {
   description = "The name of the cloud"
 }
 
-output "cloud_is_default" {
-  value       = anyscale_cloud.aws_example.is_default
-  description = "Whether this cloud is the organization's default cloud (read-only, managed by Anyscale)"
-}
-
 output "is_empty_cloud" {
   value       = anyscale_cloud.empty.is_empty_cloud
   description = "Whether the cloud is empty (no embedded configuration)"

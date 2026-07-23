@@ -73,7 +73,6 @@ type CloudResourceModel struct {
 
 	// Computed fields
 	IsEmptyCloud    types.Bool   `tfsdk:"is_empty_cloud"`
-	IsDefault       types.Bool   `tfsdk:"is_default"`
 	CloudResourceID types.String `tfsdk:"cloud_resource_id"`
 
 	Timeouts timeouts.Value `tfsdk:"timeouts"`
@@ -141,7 +140,21 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 		// The plural anyscale_clouds data source (which matched the
 		// backend's own is_aggregated_logs_enabled before this rename) also
 		// adopts aggregated_logs_enabled here, for the same reason.
-		Version:             3,
+		// v4: is_default removed. It mirrored volatile org-level state
+		// (which cloud is the org default) as a per-cloud Computed bool with
+		// no safe plan-modifier story - either it stays unpinned (correct,
+		// but shows known-after-apply noise whenever any other attribute on
+		// the same cloud genuinely updates) or it gets pinned via
+		// UseStateForUnknown (eliminates the noise, but a live resource.Test
+		// confirmed this causes a real "Provider produced inconsistent
+		// result after apply" crash if the org default flips out of band
+		// while a concurrent update to the same cloud is in flight). The
+		// value is still correctly and safely observable via the
+		// anyscale_cloud/anyscale_clouds data sources' own is_default (the
+		// same auth-independent GET /clouds path this resource used) - see
+		// resource_cloud_upgrade.go's v3->v4 UpgradeState and CHANGELOG.md
+		// for the full rationale and migration note.
+		Version:             4,
 		MarkdownDescription: "Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).",
 
 		Attributes: map[string]schema.Attribute{
@@ -244,14 +257,9 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				},
 			},
 
-			"is_default": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this cloud is the organization's default cloud. Read-only: which cloud is the org default is managed by Anyscale (e.g. via the console or CLI), not by this resource, and there is no API this resource can call to set or change it. Deliberately has no plan modifier, unlike `is_empty_cloud`/`cloud_resource_id` above: the org default can move to a different cloud out of band at any time, so pinning this to the prior state (via `UseStateForUnknown`) would risk a `Provider produced inconsistent result after apply` error if the default changed between plan and apply. Terraform reflects whichever cloud is the current org default on every refresh, so drift here is expected and simply means the default moved - it is not a bug.",
-			},
-
 			"cloud_resource_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this cloud's default resource was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). Populated on both this all-in-one pattern and the multi-resource `anyscale_cloud_resource` pattern. Stable for the life of the cloud - unlike `is_default` above, it does not move out of band, so the provider pins it to the prior state between applies.",
+				MarkdownDescription: "The unique cloud resource ID assigned by Anyscale when this cloud's default resource was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). Populated on both this all-in-one pattern and the multi-resource `anyscale_cloud_resource` pattern. Stable for the life of the cloud - it does not move out of band, so the provider pins it to the prior state between applies.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -999,19 +1007,6 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		plan.CloudResourceID = types.StringNull()
 	}
 
-	// Initialize IsDefault to a known placeholder so the intermediate
-	// State.Set below (persisted before any interruptible step) never saves
-	// an unknown value - Terraform errors on that regardless of whether a
-	// later step succeeds. false is just a safe placeholder here, not a
-	// claim about backend behavior (whether a fresh org auto-designates its
-	// first/only cloud as default is unverified) - readCloudState below
-	// always overwrites it from the real API response in both the
-	// empty-cloud and all-in-one paths, so this only matters if a later step
-	// fails and this partial state is what gets left behind.
-	if plan.IsDefault.IsUnknown() {
-		plan.IsDefault = types.BoolValue(false)
-	}
-
 	// compute_stack may still be unknown here (e.g. omitted on an empty cloud).
 	// The create response already reports the backend's resolved value, so use
 	// it directly instead of guessing - the partial state saved below then
@@ -1753,13 +1748,6 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	state.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
 	state.LineageTrackingEnabled = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
 	state.AggregatedLogsEnabled = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
-
-	// is_default is genuinely mutable out of band (the org default can move to
-	// a different cloud via the console/CLI), so unlike the Computed fields
-	// backfilled below it is set here, unconditionally, on every read - never
-	// pinned or made sticky. See the schema MarkdownDescription for why this
-	// attribute deliberately has no plan modifier.
-	state.IsDefault = types.BoolValue(cloudResp.Result.IsDefault)
 
 	// C3 v2: backfill ONLY the Computed fields (is_empty_cloud,
 	// cloud_resource_id) from the cloud's resources. Config blocks

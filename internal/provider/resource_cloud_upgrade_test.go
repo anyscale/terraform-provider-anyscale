@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -430,8 +431,8 @@ func TestCloudResourceStateUpgradeV2toV3_RenamesLineageLogFields(t *testing.T) {
 	if v3SchemaResp.Diagnostics.HasError() {
 		t.Fatalf("failed to build v3 (current) schema: %v", v3SchemaResp.Diagnostics)
 	}
-	if v3SchemaResp.Schema.Version != 3 {
-		t.Fatalf("current schema Version = %d, want 3 (bumped for the lineage/log rename)", v3SchemaResp.Schema.Version)
+	if v3SchemaResp.Schema.Version != 4 {
+		t.Fatalf("current schema Version = %d, want 4 (bumped for the lineage/log rename at v3, then again for the is_default removal at v4)", v3SchemaResp.Schema.Version)
 	}
 	if _, present := v3SchemaResp.Schema.Attributes["enable_lineage_tracking"]; present {
 		t.Fatal("current schema still declares enable_lineage_tracking - it should be fully renamed")
@@ -558,5 +559,120 @@ func TestCloudResourceStateUpgradeV2toV3_RenamesLineageLogFields_FalseValues(t *
 	}
 	if v3.AggregatedLogsEnabled.ValueBool() {
 		t.Error("AggregatedLogsEnabled = true, want false (must carry the prior explicit-false value, not flip it)")
+	}
+}
+
+// TestCloudResourceStateUpgradeV3toV4_DropsIsDefault is the drop-and-carry
+// proof for is_default's removal: seeds a real, non-default value (true,
+// not the zero-value false a bug could hide behind) into is_default on a v3
+// state fixture, drives the real production v3->v4 upgrader, and asserts
+// every OTHER field carries through unchanged - proving this is a clean
+// drop, not a silent corruption of anything else. There is nothing to assert
+// about is_default surviving in the decoded v4 struct: the current
+// CloudResourceModel has no such field at all, so any attempt to reference
+// one would fail to compile - the absence is enforced by the type system,
+// not a runtime check. Same discipline as
+// TestCloudResourceStateUpgradeV1toV2_DropsEnableSystemCluster.
+func TestCloudResourceStateUpgradeV3toV4_DropsIsDefault(t *testing.T) {
+	ctx := context.Background()
+
+	awsConfig := types.ObjectValueMust(awsConfigAttrTypes(), map[string]attr.Value{
+		"vpc_id":                      types.StringValue("vpc-v3v4"),
+		"subnet_ids":                  types.ListNull(types.StringType),
+		"subnet_ids_to_az":            types.MapValueMust(types.StringType, map[string]attr.Value{"subnet-1": types.StringValue("us-east-2a")}),
+		"security_group_ids":          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("sg-v3v4")}),
+		"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::123456789012:role/control-v3v4"),
+		"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::123456789012:role/data-v3v4"),
+		"cluster_instance_profile_id": types.StringNull(),
+		"external_id":                 types.StringValue("ext-id-v3v4"),
+		"memorydb_cluster_name":       types.StringNull(),
+		"memorydb_cluster_arn":        types.StringNull(),
+		"memorydb_cluster_endpoint":   types.StringNull(),
+	})
+
+	v3 := cloudResourceModelV3{
+		ID:                     types.StringValue("cld_v3v4"),
+		Name:                   types.StringValue("v3-to-v4-cloud"),
+		CloudProvider:          types.StringValue("AWS"),
+		ComputeStack:           types.StringValue("VM"),
+		Region:                 types.StringValue("us-east-2"),
+		IsPrivateCloud:         types.BoolValue(false),
+		AutoAddUser:            types.BoolValue(true),
+		Credentials:            types.StringValue("cred-placeholder"),
+		LineageTrackingEnabled: types.BoolValue(true),
+		AggregatedLogsEnabled:  types.BoolValue(false),
+		AWSConfig:              awsConfig,
+		GCPConfig:              types.ObjectNull(gcpConfigAttrTypes()),
+		AzureConfig:            types.ObjectNull(azureConfigAttrTypes()),
+		KubernetesConfig:       types.ObjectNull(kubernetesConfigAttrTypes()),
+		ObjectStorage:          types.ObjectNull(objectStorageAttrTypes()),
+		FileStorage:            types.ObjectNull(fileStorageAttrTypes()),
+		IsEmptyCloud:           types.BoolValue(false),
+		IsDefault:              types.BoolValue(true), // real, non-default value - proves a genuine drop, not a lucky zero-value
+		CloudResourceID:        types.StringValue("cldrsrc_v3v4"),
+		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+	}
+
+	r := &CloudResource{}
+	upgraders := r.UpgradeState(ctx)
+	upgrader, ok := upgraders[3]
+	if !ok {
+		t.Fatalf("UpgradeState() has no entry for schema version 3 - the v3->v4 upgrader is missing")
+	}
+
+	v3Schema := cloudResourceSchemaV3()
+	priorState := &tfsdk.State{
+		Schema: *v3Schema,
+		Raw:    tftypes.NewValue(v3Schema.Type().TerraformType(ctx), nil),
+	}
+	if diags := priorState.Set(ctx, &v3); diags.HasError() {
+		t.Fatalf("failed to build v3 prior state fixture: %v", diags)
+	}
+
+	var v4SchemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &v4SchemaResp)
+	if v4SchemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build v4 (current) schema: %v", v4SchemaResp.Diagnostics)
+	}
+	if v4SchemaResp.Schema.Version != 4 {
+		t.Fatalf("current schema Version = %d, want 4 (bumped for the is_default removal)", v4SchemaResp.Schema.Version)
+	}
+	if _, present := v4SchemaResp.Schema.Attributes["is_default"]; present {
+		t.Fatal("current schema still declares is_default - it should be fully removed")
+	}
+
+	req := resource.UpgradeStateRequest{State: priorState}
+	resp := &resource.UpgradeStateResponse{
+		State: tfsdk.State{
+			Schema: v4SchemaResp.Schema,
+			Raw:    tftypes.NewValue(v4SchemaResp.Schema.Type().TerraformType(ctx), nil),
+		},
+	}
+	upgrader.StateUpgrader(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("upgradeCloudResourceStateV3toV4() diagnostics: %v", resp.Diagnostics)
+	}
+
+	var v4 CloudResourceModel
+	if diags := resp.State.Get(ctx, &v4); diags.HasError() {
+		t.Fatalf("failed to decode upgraded v4 state: %v", diags)
+	}
+
+	if v4.Name.ValueString() != "v3-to-v4-cloud" {
+		t.Errorf("Name = %v, want unchanged", v4.Name.ValueString())
+	}
+	if v4.LineageTrackingEnabled.ValueBool() != true {
+		t.Errorf("LineageTrackingEnabled = %v, want unchanged (true)", v4.LineageTrackingEnabled.ValueBool())
+	}
+	if v4.CloudResourceID.ValueString() != "cldrsrc_v3v4" {
+		t.Errorf("CloudResourceID = %v, want unchanged", v4.CloudResourceID.ValueString())
+	}
+
+	var awsModel AWSConfigModel
+	if diags := v4.AWSConfig.As(ctx, &awsModel, basetypes.ObjectAsOptions{}); diags.HasError() {
+		t.Fatalf("failed to decode upgraded AWSConfig: %v", diags)
+	}
+	if awsModel.VPCID.ValueString() != "vpc-v3v4" {
+		t.Errorf("AWSConfig.VPCID = %v, want unchanged", awsModel.VPCID.ValueString())
 	}
 }

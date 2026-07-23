@@ -103,7 +103,6 @@ themselves, so the ongoing cost here is the VPC/NAT/S3 infrastructure itself, no
 |--------|-------------|
 | `cloud_id` | ID of the created Anyscale cloud |
 | `cloud_name` | Name of the created Anyscale cloud |
-| `cloud_is_default` | Whether this cloud is the organization's default cloud (read-only, managed by Anyscale, can change out of band) |
 | `basic_project_id` / `basic_project_name` / `basic_project_directory` | Identifiers for the `basic` project created on this cloud |
 | `basic_project_datasource_lookup_id` | The same project's ID, read back through the `anyscale_project` data source rather than the resource |
 | `all_project_ids` / `all_project_names` | Every project on this cloud, via the `anyscale_projects` data source |

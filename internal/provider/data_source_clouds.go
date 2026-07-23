@@ -105,6 +105,19 @@ func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 		Computed:            true,
 		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Renamed from is_aggregated_logs_enabled in this release for uniform <noun>_enabled naming with lineage_tracking_enabled - see CHANGELOG.md for the migration note.",
 	}
+	// Deliberately NOT shared with the singular anyscale_cloud data source via
+	// cloudSharedAttributes, despite the identical field name: the two are
+	// computed differently on the backend. The singular's GET /clouds/{id}
+	// checks this specific cloud directly. This plural list endpoint instead
+	// resolves ONE default-cloud candidate for the whole request through a
+	// fallback chain (org default, then the caller's last-used cloud, then
+	// the first cloud the caller can see) and stamps that single result onto
+	// every row - so a caller who cannot see the org's real default cloud can
+	// see a DIFFERENT cloud marked is_default here.
+	itemAttributes["is_default"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this cloud is the organization's default cloud. Unlike the singular `anyscale_cloud` data source's `is_default`, this is not a direct per-cloud comparison: the backend resolves one default-cloud candidate for the whole list request through a fallback chain (the org's real default, then the caller's last-used cloud, then the first cloud the caller can see) and marks that one cloud's row `is_default = true` across the response. If the caller cannot see whichever cloud is the org's actual default, a different cloud in this list can read `is_default = true` even though it is not the real org default. Do not use this field to determine which cloud is the org default - use the `anyscale_cloud` data source's `is_default` for a specific cloud, which has no such fallback.",
+	}
 
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information. The per-cloud `cloud_resource_id` is deliberately omitted here to avoid an extra API call per cloud in the list - use the `anyscale_cloud` data source or the `anyscale_cloud`/`anyscale_cloud_resource` resources to look it up.",
