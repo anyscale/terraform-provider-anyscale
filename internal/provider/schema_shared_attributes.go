@@ -56,7 +56,7 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 		},
 		"is_default": schema.BoolAttribute{
 			Computed:            true,
-			MarkdownDescription: "Whether this is the default cloud for the organization.",
+			MarkdownDescription: "Whether this cloud is the organization's default cloud. Computed as a direct comparison against the org's default-cloud pointer for this specific cloud only - no fallback substitution based on what else the caller can see. Contrast the `anyscale_clouds` (plural) data source's own `is_default`, which can substitute a different cloud when the caller cannot see the org's actual default - see that data source's description before relying on its `is_default` for this same question.",
 		},
 		"is_private_cloud": schema.BoolAttribute{
 			Computed:            true,

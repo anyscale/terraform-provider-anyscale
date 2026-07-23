@@ -93,7 +93,7 @@ Read-Only:
 - `creator_id` (String) The ID of the user who created the cloud.
 - `external_id` (String) The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.
 - `id` (String) The unique identifier of the cloud.
-- `is_default` (Boolean) Whether this is the default cloud for the organization.
+- `is_default` (Boolean) Whether this cloud is the organization's default cloud. Unlike the singular `anyscale_cloud` data source's `is_default`, this is not a direct per-cloud comparison: the backend resolves one default-cloud candidate for the whole list request through a fallback chain (the org's real default, then the caller's last-used cloud, then the first cloud the caller can see) and marks that one cloud's row `is_default = true` across the response. If the caller cannot see whichever cloud is the org's actual default, a different cloud in this list can read `is_default = true` even though it is not the real org default. Do not use this field to determine which cloud is the org default - use the `anyscale_cloud` data source's `is_default` for a specific cloud, which has no such fallback.
 - `is_k8s` (Boolean) Whether this cloud uses Kubernetes.
 - `is_private_cloud` (Boolean) Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.
 - `lineage_tracking_enabled` (Boolean) Whether lineage tracking is enabled for this cloud.
