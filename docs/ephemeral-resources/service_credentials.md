@@ -4,14 +4,14 @@ page_title: "anyscale_service_credentials Ephemeral Resource - terraform-provide
 subcategory: ""
 description: |-
   Fetches live authentication credentials for a running anyscale_service without ever writing them to Terraform state or plan output - the defining property of an ephemeral resource. This is different from a Sensitive attribute on a regular resource or data source, which is still persisted to state in plaintext regardless of the Sensitive marking; use this ephemeral resource instead whenever the value must never land in state at all. Requires Terraform 1.10 or later - ephemeral resources are a Terraform Core / Plugin Framework primitive with no earlier-version fallback.
-  Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). auth_token and secondary_auth_token are null whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. Unlike anyscale_system_cluster_credentials, this resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.
+  Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). auth_token and secondary_auth_token are null whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. This resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.
 ---
 
 # anyscale_service_credentials (Ephemeral Resource)
 
 Fetches live authentication credentials for a running `anyscale_service` without ever writing them to Terraform state or plan output - the defining property of an ephemeral resource. This is different from a `Sensitive` attribute on a regular resource or data source, which is still persisted to state in plaintext regardless of the `Sensitive` marking; use this ephemeral resource instead whenever the value must never land in state at all. Requires Terraform 1.10 or later - ephemeral resources are a Terraform Core / Plugin Framework primitive with no earlier-version fallback.
 
-Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). `auth_token` and `secondary_auth_token` are `null` whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. Unlike `anyscale_system_cluster_credentials`, this resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.
+Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). `auth_token` and `secondary_auth_token` are `null` whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. This resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.
 
 ## Example Usage
 

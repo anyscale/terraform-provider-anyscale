@@ -8,6 +8,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-testing/echoprovider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
@@ -15,14 +19,37 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 )
 
+// protoV6ProviderFactoriesWithEcho extends this package's standard ProtoV6ProviderFactories
+// (helpers.go) with the echoprovider.NewProviderServer() "echo" provider (both protocol 6, no
+// muxing needed). An ephemeral resource acceptance test needs this instead of the plain anyscale-
+// only factories, since asserting on an ephemeral resource's Open output requires capturing it
+// into a real managed resource's state first. See the "Echo Provider Pattern" section of
+// .claude/skills/provider-test-patterns/references/ephemeral.md.
+var protoV6ProviderFactoriesWithEcho = map[string]func() (tfprotov6.ProviderServer, error){
+	"anyscale": providerserver.NewProtocol6WithError(provider.NewFramework("test")()),
+	"echo":     echoprovider.NewProviderServer(),
+}
+
+// jsonStringOrNull renders s as a quoted JSON string, or the literal JSON null if s is nil. Used
+// by every mock HTTP handler in this file so that a null case always emits an explicit
+// "field": null in the raw response body rather than omitting the key - the test plan's hard rule
+// (.crystl/quest/PR1-TEST-PLAN.md): omitting the key is the exact false-green shape that shipped
+// the mount_targets bug (v0.15.2 era), since a mock missing a field can pass against broken
+// parsing code and prove nothing.
+func jsonStringOrNull(s *string) string {
+	if s == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%q", *s)
+}
+
 // mockServiceCredentialsServer is a stateful httptest server serving only GET
 // /api/v2/services-v2/{service_id}, the sole endpoint anyscale_service_credentials' Open calls
 // (getServiceByID, service_helpers.go - shared with resource_service.go's own wait loop and
 // Create/Read/Update/Delete). Any OTHER service_id path 404s with the real backend's wire shape,
 // proving the unknown-service-id case surfaces a genuine error through Open rather than a
-// silently-swallowed null (see ephemeral_service_credentials.go's Open doc comment on why this is
-// deliberately NOT the same "expected empty state" treatment system_cluster_credentials gives a
-// cloud with no System Cluster).
+// silently-swallowed null (see ephemeral_service_credentials.go's Open doc comment for why a 404
+// here is a real error, not an expected empty state).
 type mockServiceCredentialsServer struct {
 	mu sync.Mutex
 
@@ -110,10 +137,9 @@ resource "echo" %q {}
 // anyscale_service_credentials, covering every scenario in the locked test plan
 // (.crystl/quest/PR1-TEST-PLAN.md): bearer auth enabled (case 1), disabled (case 2), a token
 // rotation in progress (case 3), and an unknown service_id surfacing a genuine error rather than
-// a silent null (case 4). Unlike anyscale_system_cluster_credentials, this resource adds no
-// diagnostic of its own - bearer-enabled is not independently-tracked state here, the API's own
-// null-vs-non-null is the signal - so only value assertions are needed; no direct-Open-call
-// helper is required here (contrast the sibling file's openSystemClusterCredentialsDirect).
+// a silent null (case 4). This resource adds no diagnostic of its own - bearer-enabled is not
+// independently-tracked state here, the API's own null-vs-non-null is the signal - so only value
+// assertions are needed; no direct-Open-call helper is required here.
 func TestAccServiceCredentialsEphemeralResource(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -188,10 +214,9 @@ func TestAccServiceCredentialsEphemeralResource(t *testing.T) {
 		})
 	})
 
-	// UnknownServiceIDErrors: deliberately different from every system_cluster_credentials case -
-	// an unrecognized service_id has no "expected empty state" interpretation (a service GET 404 is
-	// keyed by the service's own id, a genuine not-found), so Open must let the real error through
-	// rather than returning null.
+	// UnknownServiceIDErrors: an unrecognized service_id has no "expected empty state"
+	// interpretation (a service GET 404 is keyed by the service's own id, a genuine not-found), so
+	// Open must let the real error through rather than returning null.
 	t.Run("UnknownServiceIDErrors", func(t *testing.T) {
 		serviceID := "svc_sccred_registered"
 		baseURL := "https://svc-registered.example.com"

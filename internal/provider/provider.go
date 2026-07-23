@@ -152,11 +152,10 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 }
 
 // EphemeralResources defines the ephemeral resources implemented in the provider. This is the
-// provider's first use of the primitive - see ephemeral_system_cluster_credentials.go's doc
-// comment for the pattern both resources here follow.
+// provider's first use of the primitive - see ephemeral_service_credentials.go's doc comment for
+// the pattern.
 func (p *AnyscaleProvider) EphemeralResources(ctx context.Context) []func() ephemeral.EphemeralResource {
 	return []func() ephemeral.EphemeralResource{
-		NewSystemClusterCredentialsEphemeralResource,
 		NewServiceCredentialsEphemeralResource,
 	}
 }

@@ -1026,9 +1026,8 @@ func TestCloudLineageLogNamingRenamed(t *testing.T) {
 }
 
 // TestEphemeralCredentialsSensitiveAttributesAreMarkedSensitive pins the Sensitive contract for
-// this provider's two ephemeral resources' secret outputs (anyscale_system_cluster_credentials'
-// workload_service_url_auth, anyscale_service_credentials' auth_token and
-// secondary_auth_token).
+// this provider's ephemeral resource's secret outputs (anyscale_service_credentials' auth_token
+// and secondary_auth_token).
 //
 // No existing schema-contract test anywhere in this file asserted .Sensitive before this one -
 // every case above only ever asserts Optional/Computed - not even for this provider's two other
@@ -1044,7 +1043,6 @@ func TestEphemeralCredentialsSensitiveAttributesAreMarkedSensitive(t *testing.T)
 		ephemeralResource ephemeral.EphemeralResource
 		attribute         string
 	}{
-		{NewSystemClusterCredentialsEphemeralResource(), "workload_service_url_auth"},
 		{NewServiceCredentialsEphemeralResource(), "auth_token"},
 		{NewServiceCredentialsEphemeralResource(), "secondary_auth_token"},
 	}

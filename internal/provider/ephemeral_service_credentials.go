@@ -15,9 +15,9 @@ var (
 	_ ephemeral.EphemeralResourceWithConfigure = &ServiceCredentialsEphemeralResource{}
 )
 
-// NewServiceCredentialsEphemeralResource creates a new Service credentials ephemeral resource,
-// mirroring anyscale_system_cluster_credentials' pattern (ephemeral_system_cluster_credentials.go,
-// this provider's first ephemeral resource).
+// NewServiceCredentialsEphemeralResource creates a new Service credentials ephemeral resource -
+// this provider's first ephemeral resource: Open-only (no Renew/Close), fetching a live secret
+// fresh on every read and never persisting it to Terraform state or plan output.
 func NewServiceCredentialsEphemeralResource() ephemeral.EphemeralResource {
 	return &ServiceCredentialsEphemeralResource{}
 }
@@ -43,7 +43,7 @@ func (e *ServiceCredentialsEphemeralResource) Schema(ctx context.Context, req ep
 	resp.Schema = schema.Schema{
 		MarkdownDescription: `Fetches live authentication credentials for a running ` + "`anyscale_service`" + ` without ever writing them to Terraform state or plan output - the defining property of an ephemeral resource. This is different from a ` + "`Sensitive`" + ` attribute on a regular resource or data source, which is still persisted to state in plaintext regardless of the ` + "`Sensitive`" + ` marking; use this ephemeral resource instead whenever the value must never land in state at all. Requires Terraform 1.10 or later - ephemeral resources are a Terraform Core / Plugin Framework primitive with no earlier-version fallback.
 
-Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). ` + "`auth_token`" + ` and ` + "`secondary_auth_token`" + ` are ` + "`null`" + ` whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. Unlike ` + "`anyscale_system_cluster_credentials`" + `, this resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.`,
+Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). ` + "`auth_token`" + ` and ` + "`secondary_auth_token`" + ` are ` + "`null`" + ` whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. This resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.`,
 		Attributes: map[string]schema.Attribute{
 			"service_id": schema.StringAttribute{
 				Required:            true,
@@ -88,11 +88,10 @@ func (e *ServiceCredentialsEphemeralResource) Configure(ctx context.Context, req
 // resource_service.go's wait loop and Create/Read/Update/Delete - see service_helpers.go) and
 // surfaces auth_token/secondary_auth_token directly from the wire response.
 //
-// Deliberate asymmetry from the system_cluster ephemeral resource: an unknown service_id IS a real
-// error here (a service GET 404 is keyed by the service's own id - a genuine not-found, unlike a
-// cloud with no System Cluster, which is an expected empty state), and bearer-enabled is not a
-// condition this resource tracks or gates on independently - a null token is whatever the API
-// returns, passed through with no added diagnostic.
+// An unknown service_id IS a real error here (a service GET 404 is keyed by the service's own
+// id - a genuine not-found), and bearer-enabled is not a condition this resource tracks or gates
+// on independently - a null token is whatever the API returns, passed through with no added
+// diagnostic.
 func (e *ServiceCredentialsEphemeralResource) Open(ctx context.Context, req ephemeral.OpenRequest, resp *ephemeral.OpenResponse) {
 	var config ServiceCredentialsEphemeralResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
