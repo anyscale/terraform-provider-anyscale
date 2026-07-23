@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: The documented minimum Terraform version is now a single, consistent >= 1.10 across CLAUDE.md, the README, and every example, matching the real floor required by the anyscale_service_credentials ephemeral resource.
-```

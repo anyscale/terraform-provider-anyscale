@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-07-23
+
+### New Ephemeral Resources
+
+- ephemeral-resource/anyscale_service_credentials: Fetch a running Service's live auth token without ever writing it to state.
+
+### Changed
+
+- provider: The documented minimum Terraform version is now a single, consistent >= 1.10 across CLAUDE.md, the README, and every example, matching the real floor required by the anyscale_service_credentials ephemeral resource.
+
 ## [0.19.0] - 2026-07-23
 
 ### Breaking Changes
@@ -862,7 +872,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.20.0
 [0.19.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.19.0
 [0.18.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.18.1
 [0.18.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.18.0
