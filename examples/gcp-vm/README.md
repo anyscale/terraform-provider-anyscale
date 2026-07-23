@@ -46,7 +46,7 @@ for other cases like this.
 
 ## Prerequisites
 
-- Terraform >= 1.9
+- Terraform >= 1.10
 - GCP credentials with permission to create a new project under `root_folder_number`, associate it
   with `billing_account_id`, and create VPCs, service accounts, and GCS buckets within it (e.g.
   `gcloud auth application-default login`) - plus permission to create Filestore and Memorystore

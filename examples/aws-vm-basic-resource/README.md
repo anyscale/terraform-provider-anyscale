@@ -54,7 +54,7 @@ configs above.
 
 ## Prerequisites
 
-- Terraform >= 1.9
+- Terraform >= 1.10
 - AWS credentials with permission to create VPCs, IAM roles, and S3 buckets
 - Anyscale credentials - either:
   - `export ANYSCALE_CLI_TOKEN="your-token"`, or

@@ -27,7 +27,7 @@ it first.
 
 ## What you'll need
 
-- Terraform >= 1.9
+- Terraform >= 1.10
 - AWS credentials with permission to create VPCs, IAM roles, and S3 buckets (this guide provisions
   all three - it doesn't attach to infrastructure you already have)
 - An Anyscale API token - set `ANYSCALE_CLI_TOKEN`, or run `anyscale login` to populate

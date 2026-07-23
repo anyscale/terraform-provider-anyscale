@@ -52,7 +52,7 @@ names.
 
 ## Prerequisites
 
-- Terraform >= 1.9
+- Terraform >= 1.10
 - AWS credentials with permission to create VPCs, IAM roles, and S3 buckets - and, if you turn on
   the feature toggles, EFS file systems and MemoryDB clusters too
 - Anyscale credentials - either:

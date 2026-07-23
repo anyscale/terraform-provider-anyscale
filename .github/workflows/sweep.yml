@@ -23,12 +23,13 @@ jobs:
         # not need to be: those pin 1.15.0+ because terraform init under
         # dev_overrides 404s for an unpublished provider source below that version
         # (see ci.yml's Setup Terraform step). The sweeper only calls the Anyscale
-        # API directly, no plan/apply, so it never hits that path. This specific
-        # version has no documented reason behind it beyond never having needed to
-        # change -- fine to leave as is or bump independently of the other two files.
+        # API directly, no plan/apply, so it never hits that path. Aligned to the
+        # documented compatibility floor (CLAUDE.md) as of this fix, not because the
+        # sweeper needs it -- fine to leave as is or bump independently of the other
+        # two files.
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          terraform_version: "1.9.8"
+          terraform_version: "1.10.0"
           terraform_wrapper: false
 
       - name: Run Sweep

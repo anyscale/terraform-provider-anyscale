@@ -25,7 +25,7 @@ and Terraform state compatibility may change before the first stable release.
 
 We welcome bug reports and feedback as the provider evolves toward a stable v1.0 release.
 
-This beta provider requires Terraform v1.8 or newer.
+This beta provider requires Terraform v1.10 or newer.
 
 ```hcl
 terraform {

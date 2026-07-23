@@ -51,7 +51,7 @@ docs](https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-clust
 
 ## Prerequisites
 
-- Terraform >= 1.0
+- Terraform >= 1.10
 - An Azure subscription, and credentials Terraform can use (e.g. `az login`)
 - Anyscale credentials - either:
   - `export ANYSCALE_CLI_TOKEN="your-token"`, or

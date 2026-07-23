@@ -33,7 +33,7 @@ bring-your-own-cluster example would help.
 
 ## Prerequisites
 
-- Terraform >= 1.0
+- Terraform >= 1.10
 - GCP credentials with permission to create VPCs, GKE clusters, service accounts, and GCS
   buckets (e.g. `gcloud auth application-default login`)
 - Anyscale credentials - either:

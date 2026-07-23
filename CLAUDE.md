@@ -98,7 +98,10 @@ Two constraints shape every fix here:
 - Avoid panics / fatal logs.
 
 ### Compatibility targets
-- Terraform >= 1.6
+- Terraform >= 1.10 - the floor required by this provider's Ephemeral Resources adoption
+  (`anyscale_service_credentials`), currently its highest real requirement. Verify this number
+  against the provider's actual adopted primitives before citing it elsewhere - it moves if a
+  higher-floor primitive (e.g. Actions, requiring 1.14) is adopted and shipped.
 - Current `terraform-plugin-framework` version used by the repo
 
 ## Local Dev Workflow (Canonical: Makefile)
@@ -194,6 +197,89 @@ both: design confirmed on paper before it was confirmed against anything real. R
 specifics before citing this precedent as still-accurate; this note describes what happened, not a
 permanent property of this fix.
 
+## Framework-First Principle: Prefer Native Primitives Over Ad-Hoc Patterns
+
+When a behavior can be expressed through a terraform-plugin-framework or Terraform Core native
+primitive, prefer it over a hand-rolled equivalent. The framework's primitives carry semantics
+Core and downstream tooling already understand; an ad-hoc reimplementation reproduces the
+mechanism but loses the contract (and usually the edge cases). Reach for the native primitive
+first:
+
+- **Ephemeral Resources** (TF 1.10+) — for API-returned secrets that must never land in state.
+  Do NOT surface a live credential as a Sensitive Computed attribute (Sensitive does not keep it
+  out of state); omit it or surface it through an ephemeral resource. Adopted 2026-07-23:
+  `anyscale_service_credentials` (`auth_token`/`secondary_auth_token`).
+- **Write-only arguments** (TF 1.11+) — for input secrets that should not persist in state.
+  Converting an EXISTING Sensitive-but-in-state argument to write-only is a breaking
+  state-behavior change; adding a NEW write-only argument is additive. Not yet adopted here.
+- **Actions** (TF 1.14+) — for imperative, ad-hoc side-effects outside a resource's declarative
+  lifecycle. Layer an Action ON a resource; never bend declarative CRUD to carry an imperative
+  verb. Model Actions 1:1 to real backend operations; do not synthesize composite verbs (e.g. a
+  "restart" with no backend endpoint) whose failure modes Terraform cannot reason about.
+  `anyscale_system_cluster_terminate` was fully designed, built, and real-infra confirmed
+  2026-07-23, then DEFERRED (not shipped) rather than bumping the documented floor to 1.14 for
+  one action — see `docs/deferred/actions-adoption/README.md` for the preserved work and the
+  revisit steps.
+- **timeouts{} block** — per-operation timeouts over an ad-hoc duration attribute (the v0.19.0
+  precedent: schema + state upgrader + mutation-proven tests + internal migration note).
+- **Plan modifiers / Default / state upgraders / validators** — over imperative fix-ups in CRUD.
+
+### Expose a surface only for a real end-user consumption path
+
+Before adding a new provider surface for a value the API happens to return, verify there is an
+actual end-user consumption path — trace the backend AND the CLI AND the public SDK AND (for
+anything console-adjacent) the web UI, not just "the API returns it" or "it's shaped like a
+credential." `anyscale_system_cluster_credentials` (`workload_service_url_auth`) was designed,
+built, and real-infra confirmed before this check caught that the value is browser cookie-auth
+plumbing consumed solely by the Anyscale console's own Ray-dashboard UI — not the CLI (which
+reads only `status` from the same endpoint), not the public SDK (which doesn't ship the
+describe-response model at all), no backend re-consumer. It was removed before merge. Contrast
+`anyscale_service_credentials`'s `auth_token`: unambiguously end-user-facing (the CLI prints a
+ready-to-use `curl -H "Authorization: Bearer <token>"` command and has dedicated token add/delete
+commands) — that one shipped.
+
+### Document the version floor and preview status on the page itself
+
+`tfplugindocs` auto-renders a compatibility badge ONLY for write-only attributes (the "Terraform
+1.11 and later" note); it renders NO equivalent banner on an Ephemeral Resource or Action doc
+page. Any new ephemeral resource or action MUST hand-write its Terraform version floor — and,
+for an Action, its current framework preview/stable status — into its own top-level
+`MarkdownDescription`, or a reader lands on the page with zero indication a floor even applies.
+
+### Don't demonstrate auto-triggering a destructive Action
+
+An example for a destructive Action (e.g. a terminate) should show the standalone
+`terraform apply -invoke=action.<type>.<name>` form, not a `lifecycle.action_trigger` block that
+auto-wires it to another resource's lifecycle event — the latter is a real, supported mechanism,
+but modeling it as the canonical example risks a copy-pasted config that destroys something the
+user didn't mean to trigger yet.
+
+### Version-floor discipline (verify at design time — do not assume)
+
+Native primitives raise the Terraform version required TO USE THEM. Whether that pushes the
+provider's globally documented floor, or stays a per-feature callout on top of an unchanged
+floor, is a real policy call, not something to assume either way — confirm the exact number
+against the framework source/CHANGELOG for each primitive, and confirm with the user whether it
+gates the global floor or stays additive. See "Compatibility targets" above for the current
+number and CHANGELOG.md for how it got there.
+
+### Extend the tooling to the new primitive, don't work around it
+
+When a new framework primitive doesn't fit existing tooling built before it existed, extend the
+tooling rather than force the primitive into the nearest existing category. Precedent: the
+changelog-fragment type list (`tools/changelog-build/fragment.go`) had only `new-resource` and
+`new-data-source`; filing an Ephemeral Resource's fragment under `new-resource` would have
+rendered it under "New Resources" and misled a reader into trying a `resource` block that doesn't
+exist for that type. Added `new-ephemeral-resource` and `new-action` as real first-class types
+instead. Same instinct applies to the doc-callout and CI-shard-naming gaps immediately above.
+
+### Sweep for remaining ad-hoc patterns
+
+When touching a resource, check whether an ad-hoc pattern it uses now has a framework-native
+replacement (hand-rolled timeout, imperative side-effect wedged into Update, secret held
+Sensitive-in-state, manual state migration). Prefer migrating it — under the same
+breaking-vs-additive and Gate discipline above — over extending the ad-hoc pattern.
+
 ## Terraform Local Testing (dev_overrides)
 
 This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provider binary.
@@ -237,6 +323,7 @@ terraform apply
 ### Verifying test strength and CI execution
 - **Prove a "mutation-proof" test actually catches its regression.** If a test is meant to guard a specific behavior (e.g. a nullable field mapping to `null` not `""`, or a length guard preventing a panic), do not accept it on code review alone — temporarily introduce the regression, confirm the test FAILS, then revert (byte-diff clean). A test that would still pass against the broken code is not protecting anything.
 - **New acceptance tests must match their CI shard's name regex, or they are silently skipped.** CI runs acceptance tests in two name-sharded jobs (see `.github/workflows/ci.yml`): `acctest-data` selects `^TestAcc[A-Za-z]+DataSource` and `acctest-resource` selects `^TestAcc[A-Za-z]+Resource`. A test whose name does not match its shard's regex neither runs nor fails — it simply never executes. Name new acctests accordingly (e.g. `TestAcc<Thing>DataSource_<Case>`), and confirm they genuinely RUN (not SKIP) by reading the shard's job log, not just trusting the green checkmark.
+- **This extends to newer primitives too.** An Ephemeral Resource's acceptance test still runs through `resource.Test`/`TestStep` exactly like a regular resource (via the `echoprovider` pattern), so its Go test function name must still end in the literal word `Resource` to land in the `acctest-resource` shard (e.g. `TestAcc<Thing>EphemeralResource`, not a more literal but shard-blind name like `TestAccEphemeral<Thing>`). An Action has no acceptance-test tooling in `terraform-plugin-testing` at all today — only a Go-level unit test against a mocked client is possible — so it must NOT carry a `TestAcc` prefix, since that prefix means "shard-gated real acceptance test" everywhere else in this repo, and a unit test wearing it would misrepresent its own coverage.
 - **Prove an import-recovery fix with the create-then-import shape.** The right `resource.Test` for "import must not force a spurious diff/replace" is: (1) Create to establish real applied state; (2) an `ImportState` step with `ImportStateVerify: true` against a backend/mock that returns MORE than the config declared, with the recovered block/attribute NOT in `ImportStateVerifyIgnore` (so recovered state is asserted to match the created state); (3) a re-apply step asserting the plan is a no-op (`plancheck.ExpectResourceAction(name, plancheck.ResourceActionNoop)`). A cold-import-only test (no preceding Create) cannot use `ImportStateVerify` — only the weaker `ImportStateCheck`. Critically, **the mock/fixture MUST include the backend-derived field the fix concerns**: the v0.15.2 `mount_targets` import test passed only because its mock omitted `mount_targets` entirely — that omission is exactly why the bug shipped green.
 - **Never mutate a shared protected test fixture during real-infra validation.** The static cloud fixture and its IAM role/trust policy are shared across runs; for throwaway real-infra checks, stand up a dedicated, narrowly-scoped IAM role (same attached policies, a fresh trust policy scoped to a new `external_id`) and tear it down afterward — do not touch the fixture's own role even temporarily.
 
