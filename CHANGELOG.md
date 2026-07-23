@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-07-23
+
+### Breaking Changes
+
+- resource/anyscale_cloud_resource: `status` is removed; it duplicated `operator_status` (identical value, always null for VM cloud resources) and is superseded by it. To migrate, replace any reference to `status` (outputs, interpolations) with `operator_status`; existing state auto-migrates on your next plan, no manual state surgery is needed.
+- resource/anyscale_service: `rollout_timeout` is removed in favor of a standard `timeouts { create, update, delete }` block, and its default also drops from 45m to 30m; if you had a customized value (including relying on the old 45m default specifically), set it explicitly in the new block, since an existing value is not carried forward automatically on upgrade and silently resolves to the new 30m default otherwise.
+- resource/anyscale_system_cluster: `start_timeout` is removed in favor of `timeouts { create }`; if you had a customized value, set it explicitly in the new block, since an existing value is not carried forward automatically on upgrade and silently resolves to the unchanged 20m default otherwise.
+- resource/anyscale_container_image_build: `build_timeout` is removed in favor of `timeouts { create, update }`; if you had a customized value, set it explicitly in the new block, since an existing value is not carried forward automatically on upgrade and silently resolves to the unchanged 30m default otherwise.
+- resource/anyscale_cloud: `enable_lineage_tracking` is renamed to `lineage_tracking_enabled` and `enable_log_ingestion` is renamed to `aggregated_logs_enabled`; to migrate, update both attribute names (and any output/interpolation references to the old names) in your configuration - existing state migrates automatically on your next plan, no re-import needed. The singular `anyscale_cloud` data source gets the same rename.
+- data-source/anyscale_clouds: `is_aggregated_logs_enabled` is renamed to `aggregated_logs_enabled` for naming consistency with the resource and singular data source; update any output/interpolation references to the old name. `lineage_tracking_enabled` on this data source is unchanged.
+
+### Added
+
+- resource/anyscale_cloud: Add an optional `timeouts { create }` block to configure how long to wait for the cloud to become ready; omitting it preserves the existing 30m behavior.
+- resource/anyscale_cloud_resource: Add an optional `timeouts { create }` block to configure how long to wait for the cloud resource to become ready; omitting it preserves the existing 30m behavior.
+
+### Fixed
+
+- resource/anyscale_container_image_build: fix a "provider produced invalid result" error on an Update that only changes the build timeout; the short-circuit path was skipping a refresh, leaving Computed fields Unknown after apply - it now re-reads the build before setting state, mirroring anyscale_service's existing pattern for the same class of bug.
+
 ## [0.18.1] - 2026-07-22
 
 ### Fixed
@@ -842,7 +862,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.19.0
 [0.18.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.18.1
 [0.18.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.18.0
 [0.17.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.17.0
