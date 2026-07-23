@@ -51,7 +51,7 @@ func TestParseFragmentContent_MultipleBlocksPerFile(t *testing.T) {
 }
 
 func TestParseFragmentContent_NewEphemeralResourceAndNewActionTypes(t *testing.T) {
-	content := "```\nrelease-note:new-ephemeral-resource\nephemeral-resource/anyscale_system_cluster_credentials: Fetch a live System Cluster workload auth token without ever writing it to state.\n```\n\n```\nrelease-note:new-action\naction/anyscale_system_cluster_terminate: Terminate a System Cluster's underlying compute imperatively.\n```\n"
+	content := "```\nrelease-note:new-ephemeral-resource\nephemeral-resource/anyscale_service_credentials: Fetch a running Service's live auth token without ever writing it to state.\n```\n\n```\nrelease-note:new-action\naction/anyscale_system_cluster_terminate: Terminate a System Cluster's underlying compute imperatively.\n```\n"
 	entries, err := parseFragmentContent("210.txt", content)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
