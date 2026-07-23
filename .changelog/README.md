@@ -49,23 +49,31 @@ the same `.changelog/<PR#>.txt`. Nothing else may appear in the file outside a f
 
 Types render into `CHANGELOG.md` in this fixed order:
 
-| type              | section            | when to use it                                                        |
-|-------------------|--------------------|------------------------------------------------------------------------|
-| `breaking-change` | Breaking Changes   | Forces a config change, a plan diff, or a resource replacement.        |
-| `new-resource`    | New Resources      | A new `resource` block.                                                |
-| `new-data-source` | New Data Sources   | A new `data` block.                                                    |
-| `added`           | Added              | A new attribute or capability on something that already exists.       |
-| `changed`         | Changed            | Existing behavior changed, non-breaking.                               |
-| `deprecated`      | Deprecated         | Still works today, but will be removed later.                          |
-| `removed`         | Removed            | Something is gone — and removing it has zero user-visible effect.      |
-| `fixed`           | Fixed              | A bug fix.                                                              |
-| `security`        | Security           | A security-relevant fix or hardening change.                           |
+| type                       | section                  | when to use it                                                        |
+|----------------------------|--------------------------|------------------------------------------------------------------------|
+| `breaking-change`          | Breaking Changes         | Forces a config change, a plan diff, or a resource replacement.        |
+| `new-resource`             | New Resources            | A new `resource` block.                                                |
+| `new-data-source`          | New Data Sources         | A new `data` block.                                                    |
+| `new-ephemeral-resource`   | New Ephemeral Resources  | A new `ephemeral` block — never written to plan or state.              |
+| `new-action`               | New Actions              | A new `action` block — an imperative operation, not a managed lifecycle. |
+| `added`                    | Added                    | A new attribute or capability on something that already exists.       |
+| `changed`                  | Changed                  | Existing behavior changed, non-breaking.                               |
+| `deprecated`               | Deprecated               | Still works today, but will be removed later.                          |
+| `removed`                  | Removed                  | Something is gone — and removing it has zero user-visible effect.      |
+| `fixed`                    | Fixed                    | A bug fix.                                                              |
+| `security`                 | Security                 | A security-relevant fix or hardening change.                           |
 
 A few boundaries that trip people up:
 
 - **New resource/data source vs. `added`.** A brand new `anyscale_thing` resource is
   `new-resource`, never `added` — `added` is for growing something that already exists (a new
   attribute on an existing resource, for example), not for the resource itself.
+- **`new-resource`/`new-data-source` vs. `new-ephemeral-resource`/`new-action`.** These are
+  different HCL block types with different mechanics, not different names for the same thing — an
+  Ephemeral Resource (`ephemeral "anyscale_thing" "x" {}`) is never written to plan or state, and an
+  Action (`action "anyscale_thing" "x" {}`) is an imperative side-effect with no managed lifecycle
+  at all. Filing either under `new-resource` would render it under "New Resources" and mislead a
+  reader into trying a `resource` block that doesn't exist for that type.
 - **`breaking-change` vs. `removed`.** Breaking-ness is always explicit, never inferred from the
   type. If removing something forces anyone to touch their config, re-run `terraform plan` and see
   a diff, or triggers a replace — that's `breaking-change` with migration text, not `removed`.
@@ -109,6 +117,22 @@ resource/anyscale_service: Manage Anyscale Services.
 ```
 release-note:new-data-source
 data-source/anyscale_project: Look up an existing Anyscale project by name or ID.
+```
+`````
+
+**New ephemeral resource**
+`````
+```
+release-note:new-ephemeral-resource
+ephemeral-resource/anyscale_system_cluster_credentials: Fetch a System Cluster's live workload auth token without ever writing it to state.
+```
+`````
+
+**New action**
+`````
+```
+release-note:new-action
+action/anyscale_system_cluster_terminate: Terminate a System Cluster's underlying compute imperatively.
 ```
 `````
 
