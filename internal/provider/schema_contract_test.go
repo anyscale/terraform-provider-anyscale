@@ -8,6 +8,8 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	dsschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
+	ephschema "github.com/hashicorp/terraform-plugin-framework/ephemeral/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -61,6 +63,19 @@ func datasourceSchemaOf(t *testing.T, d datasource.DataSource) dsschema.Schema {
 	t.Helper()
 	resp := &datasource.SchemaResponse{}
 	d.Schema(context.Background(), datasource.SchemaRequest{}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Schema() returned diagnostics: %s", resp.Diagnostics)
+	}
+	return resp.Schema
+}
+
+// ephemeralSchemaOf is schemaOf's ephemeral-resource analogue. ephemeral/schema.Schema is yet
+// another distinct Go type from resource/schema.Schema and datasource/schema.Schema even where
+// structurally identical, so it needs its own helper too.
+func ephemeralSchemaOf(t *testing.T, e ephemeral.EphemeralResource) ephschema.Schema {
+	t.Helper()
+	resp := &ephemeral.SchemaResponse{}
+	e.Schema(context.Background(), ephemeral.SchemaRequest{}, resp)
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("Schema() returned diagnostics: %s", resp.Diagnostics)
 	}
@@ -1008,4 +1023,48 @@ func TestCloudLineageLogNamingRenamed(t *testing.T) {
 			t.Error("anyscale_clouds (plural) must declare clouds[].aggregated_logs_enabled - renamed from is_aggregated_logs_enabled")
 		}
 	})
+}
+
+// TestEphemeralCredentialsSensitiveAttributesAreMarkedSensitive pins the Sensitive contract for
+// this provider's two ephemeral resources' secret outputs (anyscale_system_cluster_credentials'
+// workload_service_url_auth, anyscale_service_credentials' auth_token and
+// secondary_auth_token).
+//
+// No existing schema-contract test anywhere in this file asserted .Sensitive before this one -
+// every case above only ever asserts Optional/Computed - not even for this provider's two other
+// existing Sensitive fields (registry_login_secret on the container-image-registry resources;
+// the cloud resource's own credentials attribute). Backfilling those is left out here: they are
+// spread across several resource versions, including resource_cloud_upgrade.go's PriorSchema
+// functions (cloudResourceSchemaV0/V1/...), which return raw *schema.Schema values for
+// UpgradeState rather than a resource.Resource with its own Schema() method - schemaOf (and this
+// test's own ephemeralSchemaOf) cannot call into those directly, so covering them needs a
+// different, dedicated helper and its own investigation. Out of scope here; left as a follow-up.
+func TestEphemeralCredentialsSensitiveAttributesAreMarkedSensitive(t *testing.T) {
+	cases := []struct {
+		ephemeralResource ephemeral.EphemeralResource
+		attribute         string
+	}{
+		{NewSystemClusterCredentialsEphemeralResource(), "workload_service_url_auth"},
+		{NewServiceCredentialsEphemeralResource(), "auth_token"},
+		{NewServiceCredentialsEphemeralResource(), "secondary_auth_token"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(fmt.Sprintf("%T/%s", tc.ephemeralResource, tc.attribute), func(t *testing.T) {
+			s := ephemeralSchemaOf(t, tc.ephemeralResource)
+			attr, ok := s.Attributes[tc.attribute]
+			if !ok {
+				t.Fatalf("attribute %q not found in schema", tc.attribute)
+			}
+			strAttr, ok := attr.(ephschema.StringAttribute)
+			if !ok {
+				t.Fatalf("attribute %q is not an ephemeral schema.StringAttribute (got %T)", tc.attribute, attr)
+			}
+			if !strAttr.Sensitive {
+				t.Errorf("%q must be Sensitive: true - it is a live bearer credential and must never be "+
+					"displayed in plain CLI plan/apply output or logs", tc.attribute)
+			}
+		})
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -13,7 +14,10 @@ import (
 )
 
 // Ensure AnyscaleProvider satisfies various provider interfaces.
-var _ provider.Provider = &AnyscaleProvider{}
+var (
+	_ provider.Provider                       = &AnyscaleProvider{}
+	_ provider.ProviderWithEphemeralResources = &AnyscaleProvider{}
+)
 
 // AnyscaleProvider defines the provider implementation for the Framework.
 type AnyscaleProvider struct {
@@ -123,9 +127,10 @@ func (p *AnyscaleProvider) Configure(ctx context.Context, req provider.Configure
 	// definition, not three.
 	client := NewClientWithToken(apiURL, token)
 
-	// Make the client available to resources and data sources
+	// Make the client available to resources, data sources, and ephemeral resources
 	resp.DataSourceData = client
 	resp.ResourceData = client
+	resp.EphemeralResourceData = client
 }
 
 // Resources defines the resources implemented in the provider.
@@ -143,6 +148,16 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewContainerImageRegistryResource,
 		NewServiceResource,
 		NewSystemClusterResource,
+	}
+}
+
+// EphemeralResources defines the ephemeral resources implemented in the provider. This is the
+// provider's first use of the primitive - see ephemeral_system_cluster_credentials.go's doc
+// comment for the pattern both resources here follow.
+func (p *AnyscaleProvider) EphemeralResources(ctx context.Context) []func() ephemeral.EphemeralResource {
+	return []func() ephemeral.EphemeralResource{
+		NewSystemClusterCredentialsEphemeralResource,
+		NewServiceCredentialsEphemeralResource,
 	}
 }
 
