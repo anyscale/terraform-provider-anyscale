@@ -88,7 +88,7 @@ someone's configuration drifted, with no chance to review it first. To rename a 
 recreate it deliberately.
 
 The other mutable fields on `anyscale_cloud` — `auto_add_user`, `lineage_tracking_enabled`, and
-`is_aggregated_logs_enabled` — update in place normally; each is backed by its own dedicated API
+`aggregated_logs_enabled` — update in place normally; each is backed by its own dedicated API
 endpoint, called only when its value actually changes. (`enable_system_cluster` was removed in
 v0.18.0 — System Cluster support is now the dedicated `anyscale_system_cluster` resource instead of
 a config flag; see its [migration note](../resources/cloud.md) if you're still on an older
@@ -160,13 +160,18 @@ A few concepts are named differently depending on which resource or data source 
 
 Lineage tracking and log ingestion used to be a second case here: the `anyscale_cloud` resource and the
 singular `anyscale_cloud` data source called these `enable_lineage_tracking` and `enable_log_ingestion`,
-while the plural `anyscale_clouds` data source already used the backend's own field names,
-`lineage_tracking_enabled` and `is_aggregated_logs_enabled`. This is now unified: the resource and
-singular data source were renamed to match the plural (and the backend's own field and API parameter
-names) — a breaking change for any configuration that set or referenced the old names. Existing state
-migrates automatically the next time Terraform reads it, with no `terraform import` required; update
-your configuration and any output references (`anyscale_cloud.example.enable_lineage_tracking` etc.) to
-the new names. See CHANGELOG.md for the release this shipped in.
+while the plural `anyscale_clouds` data source called them `lineage_tracking_enabled` and
+`is_aggregated_logs_enabled` (matching the backend's own field names at the time). This is now unified
+across all three surfaces on `lineage_tracking_enabled` and `aggregated_logs_enabled` — a uniform
+`<noun>_enabled` shape. `lineage_tracking_enabled` only required renaming the resource and singular data
+source, to match what the plural already used. `aggregated_logs_enabled` is a rename on **all three**
+surfaces, including the plural: `is_aggregated_logs_enabled` was the lone `is_`-prefixed name once the
+other two settled on the uniform shape, so it was dropped there too rather than left as a mismatch. This
+is a breaking change for any configuration that set or referenced the old names on any of the three
+surfaces. Existing state migrates automatically the next time Terraform reads it, with no
+`terraform import` required; update your configuration and any output references
+(`anyscale_cloud.example.enable_lineage_tracking`, `data.anyscale_clouds.example.clouds[0].is_aggregated_logs_enabled`,
+etc.) to the new names. See CHANGELOG.md for the release this shipped in.
 
 ## Deprecated and removed attributes
 

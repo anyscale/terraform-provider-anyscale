@@ -84,6 +84,7 @@ output "cloud_versions_and_external_ids" {
 
 Read-Only:
 
+- `aggregated_logs_enabled` (Boolean) Whether aggregated log ingestion is enabled for this cloud. Renamed from is_aggregated_logs_enabled in this release for uniform <noun>_enabled naming with lineage_tracking_enabled - see CHANGELOG.md for the migration note.
 - `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
 - `availability_zones` (List of String) The availability zones considered for this cloud.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
@@ -92,7 +93,6 @@ Read-Only:
 - `creator_id` (String) The ID of the user who created the cloud.
 - `external_id` (String) The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.
 - `id` (String) The unique identifier of the cloud.
-- `is_aggregated_logs_enabled` (Boolean) Whether aggregated log ingestion is enabled for this cloud.
 - `is_default` (Boolean) Whether this is the default cloud for the organization.
 - `is_k8s` (Boolean) Whether this cloud uses Kubernetes.
 - `is_private_cloud` (Boolean) Whether this cloud is registered as private (see the `anyscale_cloud` resource's `is_private_cloud` for the full explanation). A self-asserted value with no backend verification of actual VPN/PrivateLink connectivity - not a guarantee that private connectivity is actually configured or reachable.

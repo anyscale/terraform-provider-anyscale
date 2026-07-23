@@ -355,3 +355,208 @@ func TestCloudResourceStateUpgradeV1toV2_DropsEnableSystemCluster(t *testing.T) 
 		t.Errorf("AWSConfig.VPCID = %v, want unchanged", awsModel.VPCID.ValueString())
 	}
 }
+
+// TestCloudResourceStateUpgradeV2toV3_RenamesLineageLogFields is the
+// load-bearing proof for PR3's rename: seeds real, non-default values
+// (true, not the zero-value false a bug could hide behind) into the
+// OLD-named fields on a v2 state fixture, drives the real production
+// v2->v3 upgrader, and asserts the NEW-named fields carry those exact
+// values through - proving the rename is a value-preserving map, not a
+// silent drop-and-reset. Unrelated fields (name, aws_config) are checked
+// too, same discipline as every other upgrade test in this file.
+func TestCloudResourceStateUpgradeV2toV3_RenamesLineageLogFields(t *testing.T) {
+	ctx := context.Background()
+
+	awsConfig := types.ObjectValueMust(awsConfigAttrTypes(), map[string]attr.Value{
+		"vpc_id":                      types.StringValue("vpc-namingv2v3"),
+		"subnet_ids":                  types.ListNull(types.StringType),
+		"subnet_ids_to_az":            types.MapValueMust(types.StringType, map[string]attr.Value{"subnet-1": types.StringValue("us-east-2a")}),
+		"security_group_ids":          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("sg-namingv2v3")}),
+		"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::123456789012:role/control-namingv2v3"),
+		"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::123456789012:role/data-namingv2v3"),
+		"cluster_instance_profile_id": types.StringNull(),
+		"external_id":                 types.StringValue("ext-id-namingv2v3"),
+		"memorydb_cluster_name":       types.StringNull(),
+		"memorydb_cluster_arn":        types.StringNull(),
+		"memorydb_cluster_endpoint":   types.StringNull(),
+	})
+
+	// THE reproducing shape: both booleans set to their NON-default value
+	// (true) - a fixture left at the zero-value (false) would pass even
+	// against a completely broken rename-map (both old and new names
+	// default to false, so a bug that drops the value entirely would be
+	// indistinguishable from a correct rename). true is the value that
+	// actually exercises the map.
+	v2 := cloudResourceModelV2{
+		ID:                    types.StringValue("cld_namingv2v3"),
+		Name:                  types.StringValue("naming-v2-to-v3"),
+		CloudProvider:         types.StringValue("AWS"),
+		ComputeStack:          types.StringValue("VM"),
+		Region:                types.StringValue("us-east-2"),
+		IsPrivateCloud:        types.BoolValue(false),
+		AutoAddUser:           types.BoolValue(true),
+		Credentials:           types.StringValue("cred-placeholder"),
+		EnableLineageTracking: types.BoolValue(true),
+		EnableLogIngestion:    types.BoolValue(true),
+		AWSConfig:             awsConfig,
+		GCPConfig:             types.ObjectNull(gcpConfigAttrTypes()),
+		AzureConfig:           types.ObjectNull(azureConfigAttrTypes()),
+		KubernetesConfig:      types.ObjectNull(kubernetesConfigAttrTypes()),
+		ObjectStorage:         types.ObjectNull(objectStorageAttrTypes()),
+		FileStorage:           types.ObjectNull(fileStorageAttrTypes()),
+		IsEmptyCloud:          types.BoolValue(false),
+		IsDefault:             types.BoolValue(false),
+		CloudResourceID:       types.StringValue("cldrsrc_namingv2v3"),
+	}
+
+	r := &CloudResource{}
+	upgraders := r.UpgradeState(ctx)
+	upgrader, ok := upgraders[2]
+	if !ok {
+		t.Fatalf("UpgradeState() has no entry for schema version 2 - the v2->v3 rename upgrader is missing")
+	}
+
+	v2Schema := cloudResourceSchemaV2()
+	priorState := &tfsdk.State{
+		Schema: *v2Schema,
+		Raw:    tftypes.NewValue(v2Schema.Type().TerraformType(ctx), nil),
+	}
+	if diags := priorState.Set(ctx, &v2); diags.HasError() {
+		t.Fatalf("failed to build v2 prior state fixture: %v", diags)
+	}
+
+	var v3SchemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &v3SchemaResp)
+	if v3SchemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build v3 (current) schema: %v", v3SchemaResp.Diagnostics)
+	}
+	if v3SchemaResp.Schema.Version != 3 {
+		t.Fatalf("current schema Version = %d, want 3 (bumped for the lineage/log rename)", v3SchemaResp.Schema.Version)
+	}
+	if _, present := v3SchemaResp.Schema.Attributes["enable_lineage_tracking"]; present {
+		t.Fatal("current schema still declares enable_lineage_tracking - it should be fully renamed")
+	}
+	if _, present := v3SchemaResp.Schema.Attributes["enable_log_ingestion"]; present {
+		t.Fatal("current schema still declares enable_log_ingestion - it should be fully renamed")
+	}
+
+	req := resource.UpgradeStateRequest{State: priorState}
+	resp := &resource.UpgradeStateResponse{
+		State: tfsdk.State{
+			Schema: v3SchemaResp.Schema,
+			Raw:    tftypes.NewValue(v3SchemaResp.Schema.Type().TerraformType(ctx), nil),
+		},
+	}
+	upgrader.StateUpgrader(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("upgradeCloudResourceStateV2toV3() diagnostics: %v", resp.Diagnostics)
+	}
+
+	var v3 CloudResourceModel
+	if diags := resp.State.Get(ctx, &v3); diags.HasError() {
+		t.Fatalf("failed to decode upgraded v3 state: %v", diags)
+	}
+
+	// THE load-bearing assertions: the renamed fields must carry the OLD
+	// fields' real (true) values, not silently reset to false/zero-value.
+	if !v3.LineageTrackingEnabled.ValueBool() {
+		t.Error("LineageTrackingEnabled = false, want true (must carry the prior enable_lineage_tracking value across the rename)")
+	}
+	if !v3.AggregatedLogsEnabled.ValueBool() {
+		t.Error("AggregatedLogsEnabled = false, want true (must carry the prior enable_log_ingestion value across the rename)")
+	}
+
+	if v3.Name.ValueString() != "naming-v2-to-v3" {
+		t.Errorf("Name = %v, want unchanged", v3.Name.ValueString())
+	}
+	if v3.AutoAddUser.ValueBool() != true {
+		t.Errorf("AutoAddUser = %v, want unchanged (true)", v3.AutoAddUser.ValueBool())
+	}
+
+	var awsModel AWSConfigModel
+	if diags := v3.AWSConfig.As(ctx, &awsModel, basetypes.ObjectAsOptions{}); diags.HasError() {
+		t.Fatalf("failed to decode upgraded AWSConfig: %v", diags)
+	}
+	if awsModel.VPCID.ValueString() != "vpc-namingv2v3" {
+		t.Errorf("AWSConfig.VPCID = %v, want unchanged", awsModel.VPCID.ValueString())
+	}
+}
+
+// TestCloudResourceStateUpgradeV2toV3_RenamesLineageLogFields_FalseValues
+// covers the inverse of the primary test above: both OLD fields explicitly
+// false (not merely omitted/zero-valued by accident of Go's own zero value,
+// but a real, deliberate false written into state) must still carry through
+// as false, not accidentally flip to true or null. A rename-map bug that
+// only checks "is old field truthy" (rather than reading its actual value)
+// would pass the primary test's true-case but fail this one.
+func TestCloudResourceStateUpgradeV2toV3_RenamesLineageLogFields_FalseValues(t *testing.T) {
+	ctx := context.Background()
+
+	v2 := cloudResourceModelV2{
+		ID:                    types.StringValue("cld_namingv2v3_false"),
+		Name:                  types.StringValue("naming-v2-to-v3-false"),
+		CloudProvider:         types.StringValue("AWS"),
+		ComputeStack:          types.StringValue("VM"),
+		Region:                types.StringValue("us-east-2"),
+		IsPrivateCloud:        types.BoolValue(false),
+		AutoAddUser:           types.BoolValue(false),
+		Credentials:           types.StringNull(),
+		EnableLineageTracking: types.BoolValue(false),
+		EnableLogIngestion:    types.BoolValue(false),
+		AWSConfig:             types.ObjectNull(awsConfigAttrTypes()),
+		GCPConfig:             types.ObjectNull(gcpConfigAttrTypes()),
+		AzureConfig:           types.ObjectNull(azureConfigAttrTypes()),
+		KubernetesConfig:      types.ObjectNull(kubernetesConfigAttrTypes()),
+		ObjectStorage:         types.ObjectNull(objectStorageAttrTypes()),
+		FileStorage:           types.ObjectNull(fileStorageAttrTypes()),
+		IsEmptyCloud:          types.BoolValue(false),
+		IsDefault:             types.BoolValue(false),
+		CloudResourceID:       types.StringValue("cldrsrc_namingv2v3_false"),
+	}
+
+	r := &CloudResource{}
+	upgraders := r.UpgradeState(ctx)
+	upgrader, ok := upgraders[2]
+	if !ok {
+		t.Fatalf("UpgradeState() has no entry for schema version 2 - the v2->v3 rename upgrader is missing")
+	}
+
+	v2Schema := cloudResourceSchemaV2()
+	priorState := &tfsdk.State{
+		Schema: *v2Schema,
+		Raw:    tftypes.NewValue(v2Schema.Type().TerraformType(ctx), nil),
+	}
+	if diags := priorState.Set(ctx, &v2); diags.HasError() {
+		t.Fatalf("failed to build v2 prior state fixture: %v", diags)
+	}
+
+	var v3SchemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &v3SchemaResp)
+	if v3SchemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build v3 (current) schema: %v", v3SchemaResp.Diagnostics)
+	}
+
+	req := resource.UpgradeStateRequest{State: priorState}
+	resp := &resource.UpgradeStateResponse{
+		State: tfsdk.State{
+			Schema: v3SchemaResp.Schema,
+			Raw:    tftypes.NewValue(v3SchemaResp.Schema.Type().TerraformType(ctx), nil),
+		},
+	}
+	upgrader.StateUpgrader(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("upgradeCloudResourceStateV2toV3() diagnostics: %v", resp.Diagnostics)
+	}
+
+	var v3 CloudResourceModel
+	if diags := resp.State.Get(ctx, &v3); diags.HasError() {
+		t.Fatalf("failed to decode upgraded v3 state: %v", diags)
+	}
+
+	if v3.LineageTrackingEnabled.ValueBool() {
+		t.Error("LineageTrackingEnabled = true, want false (must carry the prior explicit-false value, not flip it)")
+	}
+	if v3.AggregatedLogsEnabled.ValueBool() {
+		t.Error("AggregatedLogsEnabled = true, want false (must carry the prior explicit-false value, not flip it)")
+	}
+}

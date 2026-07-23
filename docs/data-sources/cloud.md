@@ -69,6 +69,7 @@ output "cloud_external_id" {
 
 ### Read-Only
 
+- `aggregated_logs_enabled` (Boolean) Whether aggregated log ingestion is enabled for this cloud. Uniform `<noun>_enabled` naming with its sibling `lineage_tracking_enabled` - a previous provider version called this `enable_log_ingestion` on this data source and the `anyscale_cloud` resource, then briefly `is_aggregated_logs_enabled` (matching the backend's own field name and the plural `anyscale_clouds` data source at the time) before settling here. See CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
 - `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
 - `availability_zones` (List of String) The availability zones considered for this cloud.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
@@ -77,7 +78,6 @@ output "cloud_external_id" {
 - `created_at` (String) Timestamp when the cloud was created.
 - `creator_id` (String) The ID of the user who created the cloud.
 - `external_id` (String) The external ID associated with this cloud, used for cross-account trust relationships. Null if not set.
-- `is_aggregated_logs_enabled` (Boolean) Whether aggregated log ingestion is enabled for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_log_ingestion` on both this data source and the `anyscale_cloud` resource; `log_ingestion` was a name this provider invented that never existed backend-side. See CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
 - `is_default` (Boolean) Whether this is the default cloud for the organization.
 - `is_empty_cloud` (Boolean) Whether this is an empty cloud (created without embedded resource configuration).
 - `is_k8s` (Boolean) Whether this cloud uses Kubernetes.

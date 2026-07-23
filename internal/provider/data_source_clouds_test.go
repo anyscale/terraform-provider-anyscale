@@ -192,55 +192,55 @@ func TestCloudsDataSourceRead_NoFilterReturnsAll(t *testing.T) {
 // TestCloudSummaryMapping tests mapping API response to CloudSummaryModel
 func TestCloudSummaryMapping(t *testing.T) {
 	apiCloud := struct {
-		ID                      string
-		Name                    string
-		Provider                string
-		ComputeStack            string
-		Region                  string
-		Status                  string
-		State                   string
-		CreatedAt               string
-		CreatorID               string
-		IsDefault               bool
-		IsK8s                   bool
-		IsPrivateCloud          bool
-		AutoAddUser             bool
-		LineageTrackingEnabled  bool
-		IsAggregatedLogsEnabled bool
+		ID                     string
+		Name                   string
+		Provider               string
+		ComputeStack           string
+		Region                 string
+		Status                 string
+		State                  string
+		CreatedAt              string
+		CreatorID              string
+		IsDefault              bool
+		IsK8s                  bool
+		IsPrivateCloud         bool
+		AutoAddUser            bool
+		LineageTrackingEnabled bool
+		AggregatedLogsEnabled  bool
 	}{
-		ID:                      "cld_abc",
-		Name:                    "production",
-		Provider:                "AWS",
-		ComputeStack:            "VM",
-		Region:                  "us-west-2",
-		Status:                  "ready",
-		State:                   "ACTIVE",
-		CreatedAt:               "2024-01-01T00:00:00Z",
-		CreatorID:               "user_123",
-		IsDefault:               true,
-		IsK8s:                   false,
-		IsPrivateCloud:          false,
-		AutoAddUser:             true,
-		LineageTrackingEnabled:  true,
-		IsAggregatedLogsEnabled: true,
+		ID:                     "cld_abc",
+		Name:                   "production",
+		Provider:               "AWS",
+		ComputeStack:           "VM",
+		Region:                 "us-west-2",
+		Status:                 "ready",
+		State:                  "ACTIVE",
+		CreatedAt:              "2024-01-01T00:00:00Z",
+		CreatorID:              "user_123",
+		IsDefault:              true,
+		IsK8s:                  false,
+		IsPrivateCloud:         false,
+		AutoAddUser:            true,
+		LineageTrackingEnabled: true,
+		AggregatedLogsEnabled:  true,
 	}
 
 	model := CloudSummaryModel{
-		ID:                      types.StringValue(apiCloud.ID),
-		Name:                    types.StringValue(apiCloud.Name),
-		CloudProvider:           types.StringValue(apiCloud.Provider),
-		ComputeStack:            types.StringValue(apiCloud.ComputeStack),
-		Region:                  types.StringValue(apiCloud.Region),
-		Status:                  types.StringValue(apiCloud.Status),
-		State:                   types.StringValue(apiCloud.State),
-		CreatedAt:               types.StringValue(apiCloud.CreatedAt),
-		CreatorID:               types.StringValue(apiCloud.CreatorID),
-		IsDefault:               types.BoolValue(apiCloud.IsDefault),
-		IsK8s:                   types.BoolValue(apiCloud.IsK8s),
-		IsPrivateCloud:          types.BoolValue(apiCloud.IsPrivateCloud),
-		AutoAddUser:             types.BoolValue(apiCloud.AutoAddUser),
-		LineageTrackingEnabled:  types.BoolValue(apiCloud.LineageTrackingEnabled),
-		IsAggregatedLogsEnabled: types.BoolValue(apiCloud.IsAggregatedLogsEnabled),
+		ID:                     types.StringValue(apiCloud.ID),
+		Name:                   types.StringValue(apiCloud.Name),
+		CloudProvider:          types.StringValue(apiCloud.Provider),
+		ComputeStack:           types.StringValue(apiCloud.ComputeStack),
+		Region:                 types.StringValue(apiCloud.Region),
+		Status:                 types.StringValue(apiCloud.Status),
+		State:                  types.StringValue(apiCloud.State),
+		CreatedAt:              types.StringValue(apiCloud.CreatedAt),
+		CreatorID:              types.StringValue(apiCloud.CreatorID),
+		IsDefault:              types.BoolValue(apiCloud.IsDefault),
+		IsK8s:                  types.BoolValue(apiCloud.IsK8s),
+		IsPrivateCloud:         types.BoolValue(apiCloud.IsPrivateCloud),
+		AutoAddUser:            types.BoolValue(apiCloud.AutoAddUser),
+		LineageTrackingEnabled: types.BoolValue(apiCloud.LineageTrackingEnabled),
+		AggregatedLogsEnabled:  types.BoolValue(apiCloud.AggregatedLogsEnabled),
 	}
 
 	// Verify all fields

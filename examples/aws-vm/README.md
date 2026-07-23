@@ -33,7 +33,7 @@ names.
   scoped to `anyscale_org_id` + `anyscale_external_id`), and a data-plane role attached to the Ray
   cluster nodes themselves
 - An empty `anyscale_cloud.primary` shell - just `name` (`var.cloud_name`), `is_private_cloud`, and
-  `auto_add_user`, plus `lineage_tracking_enabled` and `is_aggregated_logs_enabled` hardcoded to
+  `auto_add_user`, plus `lineage_tracking_enabled` and `aggregated_logs_enabled` hardcoded to
   `true` (fixed in this example, not exposed as variables). It deliberately has no `aws_config`,
   `object_storage`, or `file_storage` block of its own - that's what makes it "empty," and it's why
   the `is_empty_cloud` output below reads `true`

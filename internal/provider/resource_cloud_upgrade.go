@@ -319,32 +319,32 @@ type cloudResourceModelV1 struct {
 // (PR2, additive - no prior state ever had a value for it, so it is always
 // initialized null here rather than carried from m), and renames
 // EnableLineageTracking/EnableLogIngestion to LineageTrackingEnabled/
-// IsAggregatedLogsEnabled (values carry across unchanged under the new field
+// AggregatedLogsEnabled (values carry across unchanged under the new field
 // names - see cloudResourceModelV2.toCloudResourceModel() for the same rename
 // applied one version later) - together the only differences between this
 // struct and the current (v3) CloudResourceModel.
 func (m cloudResourceModelV1) toCloudResourceModel() CloudResourceModel {
 	return CloudResourceModel{
-		ID:                      m.ID,
-		Name:                    m.Name,
-		CloudProvider:           m.CloudProvider,
-		ComputeStack:            m.ComputeStack,
-		Region:                  m.Region,
-		IsPrivateCloud:          m.IsPrivateCloud,
-		AutoAddUser:             m.AutoAddUser,
-		Credentials:             m.Credentials,
-		LineageTrackingEnabled:  m.EnableLineageTracking,
-		IsAggregatedLogsEnabled: m.EnableLogIngestion,
-		AWSConfig:               m.AWSConfig,
-		GCPConfig:               m.GCPConfig,
-		AzureConfig:             m.AzureConfig,
-		KubernetesConfig:        m.KubernetesConfig,
-		ObjectStorage:           m.ObjectStorage,
-		FileStorage:             m.FileStorage,
-		IsEmptyCloud:            m.IsEmptyCloud,
-		IsDefault:               m.IsDefault,
-		CloudResourceID:         m.CloudResourceID,
-		Timeouts:                timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+		ID:                     m.ID,
+		Name:                   m.Name,
+		CloudProvider:          m.CloudProvider,
+		ComputeStack:           m.ComputeStack,
+		Region:                 m.Region,
+		IsPrivateCloud:         m.IsPrivateCloud,
+		AutoAddUser:            m.AutoAddUser,
+		Credentials:            m.Credentials,
+		LineageTrackingEnabled: m.EnableLineageTracking,
+		AggregatedLogsEnabled:  m.EnableLogIngestion,
+		AWSConfig:              m.AWSConfig,
+		GCPConfig:              m.GCPConfig,
+		AzureConfig:            m.AzureConfig,
+		KubernetesConfig:       m.KubernetesConfig,
+		ObjectStorage:          m.ObjectStorage,
+		FileStorage:            m.FileStorage,
+		IsEmptyCloud:           m.IsEmptyCloud,
+		IsDefault:              m.IsDefault,
+		CloudResourceID:        m.CloudResourceID,
+		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
 	}
 }
 
@@ -672,7 +672,7 @@ func upgradeCloudResourceStateV1toV2(ctx context.Context, req resource.UpgradeSt
 // stood between the enable_system_cluster removal (v1->v2, PR #197) and the
 // enable_lineage_tracking/enable_log_ingestion rename (v2->v3, this release):
 // still EnableLineageTracking/EnableLogIngestion under their original tfsdk
-// tags, rather than the renamed LineageTrackingEnabled/IsAggregatedLogsEnabled
+// tags, rather than the renamed LineageTrackingEnabled/AggregatedLogsEnabled
 // the live CloudResourceModel uses from v3 onward. Exists solely so
 // UpgradeState can decode v2 state; do not evolve it going forward - it is a
 // historical snapshot, not a second copy of the live model.
@@ -703,7 +703,7 @@ type cloudResourceModelV2 struct {
 
 // toCloudResourceModel maps cloudResourceModelV2 onto the current (v3)
 // CloudResourceModel. The rename (EnableLineageTracking/EnableLogIngestion
-// carry across unchanged as LineageTrackingEnabled/IsAggregatedLogsEnabled -
+// carry across unchanged as LineageTrackingEnabled/AggregatedLogsEnabled -
 // same boolean value, new field/attribute name) is a pure rename, not a drop.
 // Timeouts is a genuine gap this struct has no source for (PR2, additive -
 // v2 state predates it entirely), so it is always initialized null here
@@ -713,33 +713,33 @@ type cloudResourceModelV2 struct {
 // git had nothing to flag it against).
 func (m cloudResourceModelV2) toCloudResourceModel() CloudResourceModel {
 	return CloudResourceModel{
-		ID:                      m.ID,
-		Name:                    m.Name,
-		CloudProvider:           m.CloudProvider,
-		ComputeStack:            m.ComputeStack,
-		Region:                  m.Region,
-		IsPrivateCloud:          m.IsPrivateCloud,
-		AutoAddUser:             m.AutoAddUser,
-		Credentials:             m.Credentials,
-		LineageTrackingEnabled:  m.EnableLineageTracking,
-		IsAggregatedLogsEnabled: m.EnableLogIngestion,
-		AWSConfig:               m.AWSConfig,
-		GCPConfig:               m.GCPConfig,
-		AzureConfig:             m.AzureConfig,
-		KubernetesConfig:        m.KubernetesConfig,
-		ObjectStorage:           m.ObjectStorage,
-		FileStorage:             m.FileStorage,
-		IsEmptyCloud:            m.IsEmptyCloud,
-		IsDefault:               m.IsDefault,
-		CloudResourceID:         m.CloudResourceID,
-		Timeouts:                timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
+		ID:                     m.ID,
+		Name:                   m.Name,
+		CloudProvider:          m.CloudProvider,
+		ComputeStack:           m.ComputeStack,
+		Region:                 m.Region,
+		IsPrivateCloud:         m.IsPrivateCloud,
+		AutoAddUser:            m.AutoAddUser,
+		Credentials:            m.Credentials,
+		LineageTrackingEnabled: m.EnableLineageTracking,
+		AggregatedLogsEnabled:  m.EnableLogIngestion,
+		AWSConfig:              m.AWSConfig,
+		GCPConfig:              m.GCPConfig,
+		AzureConfig:            m.AzureConfig,
+		KubernetesConfig:       m.KubernetesConfig,
+		ObjectStorage:          m.ObjectStorage,
+		FileStorage:            m.FileStorage,
+		IsEmptyCloud:           m.IsEmptyCloud,
+		IsDefault:              m.IsDefault,
+		CloudResourceID:        m.CloudResourceID,
+		Timeouts:               timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType})},
 	}
 }
 
 // cloudResourceSchemaV2 is a frozen copy of anyscale_cloud's schema exactly
 // as shipped between the enable_system_cluster removal (v1->v2, PR #197) and
 // the enable_lineage_tracking/enable_log_ingestion ->
-// lineage_tracking_enabled/is_aggregated_logs_enabled rename (v2->v3, this
+// lineage_tracking_enabled/aggregated_logs_enabled rename (v2->v3, this
 // release): identical in structure to cloudResourceSchemaV1 minus
 // enable_system_cluster (already removed by the v1->v2 upgrade), and still
 // declaring enable_lineage_tracking/enable_log_ingestion under their
@@ -1209,11 +1209,13 @@ func cloudResourceSchemaV2() *schema.Schema {
 }
 
 // upgradeCloudResourceStateV2toV3 renames enable_lineage_tracking and
-// enable_log_ingestion to the backend's own field names,
-// lineage_tracking_enabled and is_aggregated_logs_enabled - the same names
-// the plural anyscale_clouds data source already used before this release
-// (see the live schema's Version 3 MarkdownDescription note and CHANGELOG for
-// the full rationale). Unlike upgradeCloudResourceStateV0toV1 and
+// enable_log_ingestion to lineage_tracking_enabled and
+// aggregated_logs_enabled - a uniform <noun>_enabled shape shared with the
+// plural anyscale_clouds data source, which also renames its own
+// is_aggregated_logs_enabled to aggregated_logs_enabled as part of this same
+// release for cross-surface consistency (see the live schema's Version 3
+// MarkdownDescription note and CHANGELOG for the full rationale). Unlike
+// upgradeCloudResourceStateV0toV1 and
 // upgradeCloudResourceStateV1toV2 (both drops), this is a pure rename: no
 // value is lost, both booleans carry across unchanged under their new names -
 // see cloudResourceModelV2.toCloudResourceModel(). Decodes into

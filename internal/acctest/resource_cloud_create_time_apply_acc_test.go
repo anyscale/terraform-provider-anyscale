@@ -13,11 +13,11 @@ import (
 
 // mockCloudCreateTimeServer is a stateful mock proving the Create-time mutable-field
 // bug: a freshly created cloud always starts with auto_add_user/lineage_tracking_enabled/
-// is_aggregated_logs_enabled false (traced against the real backend's CreateCloud Pydantic
+// aggregated_logs_enabled false (traced against the real backend's CreateCloud Pydantic
 // model, which declares the first two Field(False) and omits the third entirely - a fresh
 // cloud has no log-ingestion config at all until the update endpoint below is called at
 // least once). Before the fix, Create() never called that update endpoint, so config
-// is_aggregated_logs_enabled = true would apply cleanly in the plan but the
+// aggregated_logs_enabled = true would apply cleanly in the plan but the
 // immediately-following readCloudState would read back the untouched false default,
 // producing "Provider produced inconsistent result after apply" on the very first apply.
 // This mock tracks whether the update endpoint was actually called and what value it was
@@ -42,7 +42,7 @@ func newMockCloudCreateTimeServer(t *testing.T) (*httptest.Server, *mockCloudCre
 		w.WriteHeader(http.StatusOK)
 		switch r.Method {
 		case http.MethodPost:
-			// A freshly created cloud always starts with is_aggregated_logs_enabled
+			// A freshly created cloud always starts with aggregated_logs_enabled
 			// false, regardless of what the Terraform config asks for - CreateCloud
 			// has no field for it at all. Any non-default value MUST come from the
 			// update endpoint below, never from this response.
@@ -138,18 +138,18 @@ func (s *mockCloudCreateTimeServer) snapshot() (putCalled, putValue bool) {
 	return s.logIngestionPutCalled, s.logIngestionPutValue
 }
 
-// TestAccCloudResource_IsAggregatedLogsEnabled_AppliesAtCreate is the fail-without-fix
+// TestAccCloudResource_AggregatedLogsEnabled_AppliesAtCreate is the fail-without-fix
 // regression guard for the Create-time mutable-field bug: setting
-// is_aggregated_logs_enabled = true in the very first apply must actually call the update
+// aggregated_logs_enabled = true in the very first apply must actually call the update
 // endpoint during Create() (not just Update()), and the resulting state must stay consistent
 // with what was configured. Before the fix, Create() never called updateMutableFields at all,
-// so this mock (which always starts a fresh cloud at is_aggregated_logs_enabled=false,
+// so this mock (which always starts a fresh cloud at aggregated_logs_enabled=false,
 // matching the real backend) would make Terraform Core reject the apply outright with
 // "Provider produced inconsistent result after apply" - the exact class of bug the
 // collaborator base_role fix was built around, on a different resource and field. Confirmed
 // by reverting the fix locally and rerunning: this test goes red with a real
 // inconsistent-result apply error, not just a failed assertion.
-func TestAccCloudResource_IsAggregatedLogsEnabled_AppliesAtCreate(t *testing.T) {
+func TestAccCloudResource_AggregatedLogsEnabled_AppliesAtCreate(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	server, mockServer := newMockCloudCreateTimeServer(t)
@@ -161,7 +161,7 @@ resource "anyscale_cloud" "test" {
   cloud_provider             = "AWS"
   compute_stack              = "VM"
   region                     = "us-east-2"
-  is_aggregated_logs_enabled = true
+  aggregated_logs_enabled = true
 
   aws_config {
     vpc_id             = "vpc-realct123"
@@ -187,10 +187,10 @@ resource "anyscale_cloud" "test" {
 			{
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceAddr, "is_aggregated_logs_enabled", "true"),
+					resource.TestCheckResourceAttr(resourceAddr, "aggregated_logs_enabled", "true"),
 				),
 				// The headline consistency gate: if Create() silently skipped applying
-				// is_aggregated_logs_enabled, the immediately-following readCloudState
+				// aggregated_logs_enabled, the immediately-following readCloudState
 				// would have read back false, and Terraform Core itself would reject the
 				// apply before this plan check ever ran - ExpectEmptyPlan here is a
 				// secondary confirmation that nothing drifts on top of that.
@@ -205,7 +205,7 @@ resource "anyscale_cloud" "test" {
 
 	putCalled, putValue := mockServer.snapshot()
 	if !putCalled {
-		t.Fatal("update_customer_aggregated_logs_config was never called during Create - is_aggregated_logs_enabled = true in the initial config must apply at Create time, not only on a later Update")
+		t.Fatal("update_customer_aggregated_logs_config was never called during Create - aggregated_logs_enabled = true in the initial config must apply at Create time, not only on a later Update")
 	}
 	if !putValue {
 		t.Errorf("update_customer_aggregated_logs_config was called with is_enabled=false, want true to match the configured value")

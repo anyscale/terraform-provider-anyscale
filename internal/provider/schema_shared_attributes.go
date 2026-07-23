@@ -14,12 +14,14 @@ import (
 // have no counterpart to share against.
 // is_k8s is identical text on both sides (DS-CLOUD-4) but stays defined directly on each
 // DS's own Schema function rather than hoisted here, matching how the plural already had it.
-// lineage_tracking_enabled/is_aggregated_logs_enabled are a similar case as of this
+// lineage_tracking_enabled/aggregated_logs_enabled are a similar case as of this
 // provider's naming-unification rename (see CHANGELOG.md): the anyscale_cloud resource and
 // this singular data source previously called them enable_lineage_tracking/
-// enable_log_ingestion, while the plural anyscale_clouds data source always used the
-// backend's own field names - now identical in name/type/text on both sides too, but not yet
-// folded into this shared map; each side still defines them separately (see
+// enable_log_ingestion, while the plural anyscale_clouds data source called the second one
+// is_aggregated_logs_enabled (matching the backend's own field name at the time) - all
+// three surfaces now use the same uniform <noun>_enabled names, identical in
+// name/type/text on both sides too, but not yet folded into this shared map; each side
+// still defines them separately (see
 // data_source_cloud.go and data_source_clouds.go) to keep that rename's diff scoped to the
 // rename itself. A future cleanup could hoist them here like the rest of this map.
 func cloudSharedAttributes() map[string]schema.Attribute {

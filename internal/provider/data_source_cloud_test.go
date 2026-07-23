@@ -12,7 +12,7 @@ import (
 
 // TestReadCloudIntoModel_MapsFromResponseNotConstant is a regression test for
 // change C1: data_source_cloud.go used to hardcode auto_add_user,
-// lineage_tracking_enabled, is_aggregated_logs_enabled, is_empty_cloud to
+// lineage_tracking_enabled, aggregated_logs_enabled, is_empty_cloud to
 // false and cloud_resource_id to null, regardless of what the API returned. Each case
 // below sets the mocked API to the OPPOSITE of the old hardcoded value, so
 // this test fails against the pre-fix implementation.
@@ -58,8 +58,8 @@ func TestReadCloudIntoModel_MapsFromResponseNotConstant(t *testing.T) {
 		if !config.LineageTrackingEnabled.ValueBool() {
 			t.Error("LineageTrackingEnabled = false, want true (from response)")
 		}
-		if !config.IsAggregatedLogsEnabled.ValueBool() {
-			t.Error("IsAggregatedLogsEnabled = false, want true (from response)")
+		if !config.AggregatedLogsEnabled.ValueBool() {
+			t.Error("AggregatedLogsEnabled = false, want true (from response)")
 		}
 		if config.IsEmptyCloud.ValueBool() {
 			t.Error("IsEmptyCloud = true, want false (cloud has a resource)")

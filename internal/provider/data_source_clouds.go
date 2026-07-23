@@ -42,21 +42,21 @@ type CloudsDataSourceModel struct {
 
 // CloudSummaryModel represents a cloud in the list.
 type CloudSummaryModel struct {
-	ID                      types.String `tfsdk:"id"`
-	Name                    types.String `tfsdk:"name"`
-	CloudProvider           types.String `tfsdk:"cloud_provider"`
-	ComputeStack            types.String `tfsdk:"compute_stack"`
-	Region                  types.String `tfsdk:"region"`
-	Status                  types.String `tfsdk:"status"`
-	State                   types.String `tfsdk:"state"`
-	CreatedAt               types.String `tfsdk:"created_at"`
-	CreatorID               types.String `tfsdk:"creator_id"`
-	IsDefault               types.Bool   `tfsdk:"is_default"`
-	IsK8s                   types.Bool   `tfsdk:"is_k8s"`
-	IsPrivateCloud          types.Bool   `tfsdk:"is_private_cloud"`
-	AutoAddUser             types.Bool   `tfsdk:"auto_add_user"`
-	LineageTrackingEnabled  types.Bool   `tfsdk:"lineage_tracking_enabled"`
-	IsAggregatedLogsEnabled types.Bool   `tfsdk:"is_aggregated_logs_enabled"`
+	ID                     types.String `tfsdk:"id"`
+	Name                   types.String `tfsdk:"name"`
+	CloudProvider          types.String `tfsdk:"cloud_provider"`
+	ComputeStack           types.String `tfsdk:"compute_stack"`
+	Region                 types.String `tfsdk:"region"`
+	Status                 types.String `tfsdk:"status"`
+	State                  types.String `tfsdk:"state"`
+	CreatedAt              types.String `tfsdk:"created_at"`
+	CreatorID              types.String `tfsdk:"creator_id"`
+	IsDefault              types.Bool   `tfsdk:"is_default"`
+	IsK8s                  types.Bool   `tfsdk:"is_k8s"`
+	IsPrivateCloud         types.Bool   `tfsdk:"is_private_cloud"`
+	AutoAddUser            types.Bool   `tfsdk:"auto_add_user"`
+	LineageTrackingEnabled types.Bool   `tfsdk:"lineage_tracking_enabled"`
+	AggregatedLogsEnabled  types.Bool   `tfsdk:"aggregated_logs_enabled"`
 
 	// DS-CLOUD-5 (Phase B), via cloudSharedAttributes.
 	AvailabilityZones types.List   `tfsdk:"availability_zones"`
@@ -84,19 +84,26 @@ func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 		Computed:            true,
 		MarkdownDescription: "Whether this cloud uses Kubernetes.",
 	}
-	// Same backend fields the singular anyscale_cloud data source (and the anyscale_cloud
-	// resource) now also call lineage_tracking_enabled/is_aggregated_logs_enabled - both
-	// previously called these enable_lineage_tracking/enable_log_ingestion instead; this
-	// plural data source always used the backend's own names. See CHANGELOG.md and
-	// schema_shared_attributes.go's cloudSharedAttributes doc comment for the
-	// naming-unification history.
+	// Uniform <noun>_enabled naming, shared with the singular anyscale_cloud
+	// data source and the anyscale_cloud resource. lineage_tracking_enabled
+	// already matched this plural data source's pre-existing name (both
+	// previously called it enable_lineage_tracking on the resource/singular
+	// DS). aggregated_logs_enabled is a rename on THIS plural data source
+	// too, as of this release - it previously matched the backend's own
+	// is_aggregated_logs_enabled (the resource/singular DS instead called it
+	// enable_log_ingestion), but the backend-exact name became the lone
+	// is_-prefixed outlier once the other two surfaces unified on
+	// <noun>_enabled, so all three surfaces adopt aggregated_logs_enabled
+	// together in this same release. See CHANGELOG.md and
+	// schema_shared_attributes.go's cloudSharedAttributes doc comment for
+	// the naming-unification history.
 	itemAttributes["lineage_tracking_enabled"] = schema.BoolAttribute{
 		Computed:            true,
 		MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
 	}
-	itemAttributes["is_aggregated_logs_enabled"] = schema.BoolAttribute{
+	itemAttributes["aggregated_logs_enabled"] = schema.BoolAttribute{
 		Computed:            true,
-		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
+		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Renamed from is_aggregated_logs_enabled in this release for uniform <noun>_enabled naming with lineage_tracking_enabled - see CHANGELOG.md for the migration note.",
 	}
 
 	resp.Schema = schema.Schema{
@@ -231,19 +238,19 @@ func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values, c
 			// currently never observes a real empty value - kept for defensive
 			// parity with the singular DS's identical guard, and so both DS behave
 			// the same way if that ever changes.
-			Status:                  stringOrNull(cloud.Status),
-			State:                   stringOrNull(cloud.State),
-			CreatedAt:               types.StringValue(cloud.CreatedAt),
-			CreatorID:               types.StringValue(cloud.CreatorID),
-			IsDefault:               types.BoolValue(cloud.IsDefault),
-			IsK8s:                   types.BoolValue(cloud.IsK8s),
-			IsPrivateCloud:          types.BoolValue(cloud.IsPrivateCloud),
-			AutoAddUser:             types.BoolValue(cloud.AutoAddUser),
-			LineageTrackingEnabled:  types.BoolValue(cloud.LineageTrackingEnabled),
-			IsAggregatedLogsEnabled: types.BoolValue(cloud.IsAggregatedLogsEnabled),
-			AvailabilityZones:       azList,
-			Version:                 types.StringValue(cloud.Version),
-			ExternalID:              types.StringPointerValue(cloud.ExternalID),
+			Status:                 stringOrNull(cloud.Status),
+			State:                  stringOrNull(cloud.State),
+			CreatedAt:              types.StringValue(cloud.CreatedAt),
+			CreatorID:              types.StringValue(cloud.CreatorID),
+			IsDefault:              types.BoolValue(cloud.IsDefault),
+			IsK8s:                  types.BoolValue(cloud.IsK8s),
+			IsPrivateCloud:         types.BoolValue(cloud.IsPrivateCloud),
+			AutoAddUser:            types.BoolValue(cloud.AutoAddUser),
+			LineageTrackingEnabled: types.BoolValue(cloud.LineageTrackingEnabled),
+			AggregatedLogsEnabled:  types.BoolValue(cloud.IsAggregatedLogsEnabled),
+			AvailabilityZones:      azList,
+			Version:                types.StringValue(cloud.Version),
+			ExternalID:             types.StringPointerValue(cloud.ExternalID),
 		}
 		allClouds = append(allClouds, cloudModel)
 	}
