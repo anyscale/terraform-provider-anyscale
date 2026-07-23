@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -16,6 +17,7 @@ import (
 // Ensure AnyscaleProvider satisfies various provider interfaces.
 var (
 	_ provider.Provider                       = &AnyscaleProvider{}
+	_ provider.ProviderWithActions            = &AnyscaleProvider{}
 	_ provider.ProviderWithEphemeralResources = &AnyscaleProvider{}
 )
 
@@ -127,10 +129,11 @@ func (p *AnyscaleProvider) Configure(ctx context.Context, req provider.Configure
 	// definition, not three.
 	client := NewClientWithToken(apiURL, token)
 
-	// Make the client available to resources, data sources, and ephemeral resources
+	// Make the client available to resources, data sources, ephemeral resources, and actions
 	resp.DataSourceData = client
 	resp.ResourceData = client
 	resp.EphemeralResourceData = client
+	resp.ActionData = client
 }
 
 // Resources defines the resources implemented in the provider.
@@ -157,6 +160,14 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 func (p *AnyscaleProvider) EphemeralResources(ctx context.Context) []func() ephemeral.EphemeralResource {
 	return []func() ephemeral.EphemeralResource{
 		NewServiceCredentialsEphemeralResource,
+	}
+}
+
+// Actions defines the actions implemented in the provider. This is the provider's first use of
+// the primitive - see action_system_cluster_terminate.go's doc comment for the pattern.
+func (p *AnyscaleProvider) Actions(ctx context.Context) []func() action.Action {
+	return []func() action.Action{
+		NewSystemClusterTerminateAction,
 	}
 }
 
