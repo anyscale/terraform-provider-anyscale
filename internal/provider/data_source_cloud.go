@@ -37,20 +37,23 @@ type CloudDataSourceModel struct {
 	Name types.String `tfsdk:"name"`
 
 	// Computed outputs
-	CloudProvider         types.String `tfsdk:"cloud_provider"`
-	Region                types.String `tfsdk:"region"`
-	Status                types.String `tfsdk:"status"`
-	State                 types.String `tfsdk:"state"`
-	IsEmptyCloud          types.Bool   `tfsdk:"is_empty_cloud"`
-	CloudResourceID       types.String `tfsdk:"cloud_resource_id"`
-	AutoAddUser           types.Bool   `tfsdk:"auto_add_user"`
-	EnableLineageTracking types.Bool   `tfsdk:"enable_lineage_tracking"`
-	EnableLogIngestion    types.Bool   `tfsdk:"enable_log_ingestion"`
+	CloudProvider          types.String `tfsdk:"cloud_provider"`
+	Region                 types.String `tfsdk:"region"`
+	Status                 types.String `tfsdk:"status"`
+	State                  types.String `tfsdk:"state"`
+	IsEmptyCloud           types.Bool   `tfsdk:"is_empty_cloud"`
+	CloudResourceID        types.String `tfsdk:"cloud_resource_id"`
+	AutoAddUser            types.Bool   `tfsdk:"auto_add_user"`
+	LineageTrackingEnabled types.Bool   `tfsdk:"lineage_tracking_enabled"`
+	AggregatedLogsEnabled  types.Bool   `tfsdk:"aggregated_logs_enabled"`
 
 	// C2: parity with the plural anyscale_clouds data source's per-item
-	// fields. Names deliberately kept as-is (not renamed to match the
-	// plural's lineage_tracking_enabled/is_aggregated_logs_enabled) - see
-	// CLOUD-SYNC-DESIGN.md C7, renaming an existing attribute is breaking.
+	// fields. lineage_tracking_enabled/aggregated_logs_enabled above were
+	// the odd ones out here until this provider's naming-unification rename -
+	// this singular data source (and the anyscale_cloud resource) previously
+	// called them enable_lineage_tracking/enable_log_ingestion, while the
+	// plural anyscale_clouds data source always used the backend's own names.
+	// Now identical on both sides; see CHANGELOG.md for the migration note.
 	ComputeStack   types.String `tfsdk:"compute_stack"`
 	CreatedAt      types.String `tfsdk:"created_at"`
 	CreatorID      types.String `tfsdk:"creator_id"`
@@ -92,16 +95,20 @@ func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 		Computed:            true,
 		MarkdownDescription: "The unique cloud resource ID assigned by Anyscale for this cloud's default resource. This is what you pass to the Anyscale operator during installation for a K8S cloud. Null for a genuinely empty cloud (no resources attached yet).",
 	}
-	// C7: same backend field as the plural's lineage_tracking_enabled/is_aggregated_logs_enabled,
-	// kept under these names since renaming a shipped attribute is breaking. See
-	// CLOUD-SYNC-DESIGN.md C7 and schema_shared_attributes.go's cloudSharedAttributes doc.
-	attributes["enable_lineage_tracking"] = schema.BoolAttribute{
+	// Uniform attribute name with the plural anyscale_clouds data source's
+	// own lineage_tracking_enabled/aggregated_logs_enabled - this data
+	// source (and the anyscale_cloud resource) previously called these
+	// enable_lineage_tracking/enable_log_ingestion, while the plural data
+	// source called the second one is_aggregated_logs_enabled; see
+	// CHANGELOG.md and schema_shared_attributes.go's cloudSharedAttributes
+	// doc comment for the naming-unification history.
+	attributes["lineage_tracking_enabled"] = schema.BoolAttribute{
 		Computed:            true,
-		MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
+		MarkdownDescription: "Whether lineage tracking is enabled for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_lineage_tracking` on both this data source and the `anyscale_cloud` resource; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
 	}
-	attributes["enable_log_ingestion"] = schema.BoolAttribute{
+	attributes["aggregated_logs_enabled"] = schema.BoolAttribute{
 		Computed:            true,
-		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
+		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Uniform `<noun>_enabled` naming with its sibling `lineage_tracking_enabled` - a previous provider version called this `enable_log_ingestion` on this data source and the `anyscale_cloud` resource, then briefly `is_aggregated_logs_enabled` (matching the backend's own field name and the plural `anyscale_clouds` data source at the time) before settling here. See CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
 	}
 	// DS-CLOUD-4: parity with the plural's is_k8s. Schema-only shared text (not
 	// hoisted into cloudSharedAttributes, since the plural's own copy is
@@ -245,8 +252,8 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 
 	// Cloud-level boolean settings come straight off the cloud payload.
 	config.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
-	config.EnableLineageTracking = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
-	config.EnableLogIngestion = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
+	config.LineageTrackingEnabled = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
+	config.AggregatedLogsEnabled = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
 
 	// C2: parity fields with the plural anyscale_clouds data source - mapped
 	// the same unconditional way plural's fetchClouds does, so the two

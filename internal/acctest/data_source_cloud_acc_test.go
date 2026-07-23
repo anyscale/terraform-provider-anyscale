@@ -85,23 +85,23 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 
 // TestAccCloudDataSource_MatchesResourceState is an acceptance-level regression
 // test for change C1: data_source_cloud.go used to hardcode auto_add_user,
-// enable_lineage_tracking, enable_log_ingestion, is_empty_cloud to false and
-// cloud_resource_id to null regardless of the real cloud. Unit tests can prove
-// the mapping function is correct in isolation, but only a real resource+data
-// source pair proves the data source's Read genuinely converges with the
-// resource's own state over the real API - which is the actual acceptance
-// criterion ("data source == resource state, by id AND by name").
+// lineage_tracking_enabled, aggregated_logs_enabled, is_empty_cloud to
+// false and cloud_resource_id to null regardless of the real cloud. Unit tests
+// can prove the mapping function is correct in isolation, but only a real
+// resource+data source pair proves the data source's Read genuinely converges
+// with the resource's own state over the real API - which is the actual
+// acceptance criterion ("data source == resource state, by id AND by name").
 //
 // Uses the empty-cloud pattern (no aws_config) so it creates a real cloud via
 // the API without requiring real AWS/GCP infra. auto_add_user and
-// enable_log_ingestion are set to true via a separate Update step (step 2),
-// not at Create (step 1): Create()'s POST /clouds request does not send these
-// fields at all today (a distinct, separately-reported gap - see quest chat)
-// - only Update() does. Routing through Update keeps this test scoped to C1
-// (data-source read mapping) instead of also depending on that unrelated
-// create-time gap being fixed.
+// aggregated_logs_enabled are set to true via a separate Update step (step
+// 2), not at Create (step 1): Create()'s POST /clouds request does not send
+// these fields at all today (a distinct, separately-reported gap - see quest
+// chat) - only Update() does. Routing through Update keeps this test scoped
+// to C1 (data-source read mapping) instead of also depending on that
+// unrelated create-time gap being fixed.
 //
-// enable_lineage_tracking is deliberately left at its false default and
+// lineage_tracking_enabled is deliberately left at its false default and
 // excluded from the true-value assertions: this test org's Anyscale
 // organization does not have lineage tracking enabled as a feature, so
 // PUT .../lineage_tracking_enabled legitimately 403s here regardless of
@@ -137,19 +137,19 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Resource itself has the non-default values we configured.
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "auto_add_user", "true"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "enable_lineage_tracking", "false"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "enable_log_ingestion", "true"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "lineage_tracking_enabled", "false"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "aggregated_logs_enabled", "true"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "is_empty_cloud", "true"),
 					// By-id data source converges with resource state for all 5 fields.
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "auto_add_user", "anyscale_cloud.test", "auto_add_user"),
-					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "enable_lineage_tracking", "anyscale_cloud.test", "enable_lineage_tracking"),
-					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "enable_log_ingestion", "anyscale_cloud.test", "enable_log_ingestion"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "lineage_tracking_enabled", "anyscale_cloud.test", "lineage_tracking_enabled"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "aggregated_logs_enabled", "anyscale_cloud.test", "aggregated_logs_enabled"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "is_empty_cloud", "anyscale_cloud.test", "is_empty_cloud"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_id", "cloud_resource_id", "anyscale_cloud.test", "cloud_resource_id"),
 					// By-name data source converges with resource state for all 5 fields.
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "auto_add_user", "anyscale_cloud.test", "auto_add_user"),
-					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "enable_lineage_tracking", "anyscale_cloud.test", "enable_lineage_tracking"),
-					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "enable_log_ingestion", "anyscale_cloud.test", "enable_log_ingestion"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "lineage_tracking_enabled", "anyscale_cloud.test", "lineage_tracking_enabled"),
+					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "aggregated_logs_enabled", "anyscale_cloud.test", "aggregated_logs_enabled"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "is_empty_cloud", "anyscale_cloud.test", "is_empty_cloud"),
 					resource.TestCheckResourceAttrPair("data.anyscale_cloud.by_name", "cloud_resource_id", "anyscale_cloud.test", "cloud_resource_id"),
 				),
@@ -281,12 +281,12 @@ data "anyscale_cloud" "test" {
 func testAccCloudDataSourceConfig_matchesResourceState(cloudName string, enabled bool) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
-  name                    = "%s"
-  cloud_provider          = "AWS"
-  region                  = "us-east-2"
-  auto_add_user           = %t
-  enable_lineage_tracking = false
-  enable_log_ingestion    = %t
+  name                       = "%s"
+  cloud_provider             = "AWS"
+  region                     = "us-east-2"
+  auto_add_user              = %t
+  lineage_tracking_enabled   = false
+  aggregated_logs_enabled = %t
 }
 
 data "anyscale_cloud" "by_id" {

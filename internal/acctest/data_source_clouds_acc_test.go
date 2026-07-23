@@ -187,7 +187,7 @@ func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.0.is_k8s"),
 					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.0.auto_add_user"),
 					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.0.lineage_tracking_enabled"),
-					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.0.is_aggregated_logs_enabled"),
+					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.0.aggregated_logs_enabled"),
 				),
 			},
 		},

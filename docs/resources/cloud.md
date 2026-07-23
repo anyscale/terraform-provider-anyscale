@@ -21,10 +21,10 @@ resource "anyscale_cloud" "aws_example" {
   compute_stack  = "VM"
 
   # Cloud-level settings
-  auto_add_user           = false
-  enable_lineage_tracking = false
-  enable_log_ingestion    = false
-  is_private_cloud        = false
+  auto_add_user            = false
+  lineage_tracking_enabled = false
+  aggregated_logs_enabled  = false
+  is_private_cloud         = false
 
   # AWS-specific configuration
   aws_config {
@@ -216,18 +216,18 @@ output "is_empty_cloud" {
 
 ### Optional
 
+- `aggregated_logs_enabled` (Boolean) Whether to enable aggregated log ingestion for this cloud. Uniform `<noun>_enabled` naming with its sibling `lineage_tracking_enabled` - a previous provider version called this `enable_log_ingestion` on the resource and singular `anyscale_cloud` data source, then briefly `is_aggregated_logs_enabled` (matching the backend's own field name and the plural `anyscale_clouds` data source at the time) before settling here; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
 - `auto_add_user` (Boolean) Whether to automatically add users to this cloud.
 - `aws_config` (Block, Optional) AWS-specific configuration. Required when cloud_provider is AWS and using all-in-one pattern. See the [Anyscale AWS cloud configuration documentation](https://docs.anyscale.com/clouds/aws/configure) for the full set of resources Anyscale expects (VPC, subnets, IAM roles, security groups) and how they map to the fields below. (see [below for nested schema](#nestedblock--aws_config))
 - `azure_config` (Block, Optional) Azure-specific configuration. Required when cloud_provider is AZURE. Azure clouds are Kubernetes-only (AKS) - Anyscale does not support Azure VM clouds, so compute_stack must be "K8S"; setting azure_config with any other compute_stack is a plan-time error. Unlike aws_config/gcp_config, this has a single field: AKS setup creates no VNet/subnet resources of its own, and real authentication is operator workload-identity federation (see kubernetes_config.anyscale_operator_iam_identity), not network or IAM-role wiring. (see [below for nested schema](#nestedblock--azure_config))
 - `cloud_provider` (String) Cloud provider: AWS, GCP, or AZURE. Auto-detected from aws_config/gcp_config/azure_config, or defaults to AWS for empty clouds. AWS and GCP support both VM and K8S compute stacks; AZURE supports K8S only (AKS) - Anyscale does not support Azure VM clouds, and setting azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported by this provider.
 - `compute_stack` (String) Compute stack type: VM or K8S. Required when using embedded config (aws_config, gcp_config, or kubernetes_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).
 - `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using the multi-resource cloud pattern (empty cloud + cloud_resource).
-- `enable_lineage_tracking` (Boolean) Whether to enable lineage tracking for this cloud.
-- `enable_log_ingestion` (Boolean) Whether to enable aggregated log ingestion for this cloud.
 - `file_storage` (Block, Optional) File storage configuration (EFS, Filestore, etc.). If omitted, Anyscale falls back to using the object storage bucket for shared storage. On GCP, Filestore is optional and not created by default, and must be in the same region as the cloud's VPC when used. Recovered automatically when importing an existing cloud/resource, whenever the live resource actually has one configured. See the [Anyscale shared storage documentation](https://docs.anyscale.com/storage/shared) for how this is used across a cluster. (see [below for nested schema](#nestedblock--file_storage))
 - `gcp_config` (Block, Optional) GCP-specific configuration. Required when cloud_provider is GCP and using all-in-one pattern. See the [Anyscale GCP cloud configuration documentation](https://docs.anyscale.com/clouds/gcp/configure) for the full set of resources Anyscale expects (VPC, subnets, service accounts, firewall policies) and how they map to the fields below. (see [below for nested schema](#nestedblock--gcp_config))
 - `is_private_cloud` (Boolean) Whether to register this cloud as private - the Terraform equivalent of the Anyscale CLI's `anyscale cloud register --private-network` flag, which places Ray clusters in private subnets. This is a self-asserted flag, not a verified connectivity check: the value you set here is sent to the API as-is, and neither the provider nor the Anyscale backend validates, configures, or provisions any VPN or PrivateLink connectivity because of it. Setting `true` without real private connectivity already in place will not fail at plan or apply time - it only means private clusters may end up unreachable, which is your own responsibility to arrange separately, not something this attribute gates. Changing this value after creation requires replacement: the backend itself has no route to update an existing cloud's `is_private_cloud`, so there's no in-place alternative to fall back on.
 - `kubernetes_config` (Block, Optional) Kubernetes-specific configuration. Required when compute_stack is K8S. See the [Anyscale Kubernetes documentation](https://docs.anyscale.com/clouds/kubernetes) for cluster requirements and how these fields map to the Anyscale Operator installation. (see [below for nested schema](#nestedblock--kubernetes_config))
+- `lineage_tracking_enabled` (Boolean) Whether to enable lineage tracking for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_lineage_tracking` on both the resource and the singular `anyscale_cloud` data source; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
 - `object_storage` (Block, Optional) Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). Recovered automatically when importing an existing cloud/resource, whenever the live resource actually has one configured. See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP, [Azure Blob/ADLS](https://docs.anyscale.com/clouds/azure/storage) for Azure. (see [below for nested schema](#nestedblock--object_storage))
 - `region` (String) The region where the cloud is deployed. Auto-detected from config or defaults to us-east-1 for empty clouds. For AWS, Anyscale does not support the China or GovCloud partitions.
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))

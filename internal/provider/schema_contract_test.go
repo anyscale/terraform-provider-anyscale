@@ -901,3 +901,111 @@ func TestCloudResourceStatusRemoved(t *testing.T) {
 		t.Error("operator_status must remain Computed - status removal must not regress its sibling attribute")
 	}
 }
+
+// TestCloudLineageLogNamingRenamed pins PR3 (PR3-NAMING-PLAN.md, as revised
+// by the user's naming nitpick mid-session): all three surfaces - the
+// resource, the singular anyscale_cloud data source, AND the plural
+// anyscale_clouds data source - unify on lineage_tracking_enabled and
+// aggregated_logs_enabled. lineage_tracking_enabled already matched across
+// all three before this PR (only the resource/singular DS renamed it, from
+// enable_lineage_tracking). aggregated_logs_enabled is a genuine rename on
+// ALL THREE surfaces: the resource/singular DS previously called it
+// enable_log_ingestion, and the plural DS previously called it
+// is_aggregated_logs_enabled (matching the backend's own field name at the
+// time) - the is_-prefix was dropped for uniform <noun>_enabled naming with
+// its sibling, so the plural is NOT exempt this time, unlike the original
+// PR3 design.
+func TestCloudLineageLogNamingRenamed(t *testing.T) {
+	t.Run("anyscale_cloud resource", func(t *testing.T) {
+		s := schemaOf(t, &CloudResource{})
+
+		if _, present := s.Attributes["enable_lineage_tracking"]; present {
+			t.Error("enable_lineage_tracking must be fully removed from anyscale_cloud - renamed to lineage_tracking_enabled")
+		}
+		if _, present := s.Attributes["enable_log_ingestion"]; present {
+			t.Error("enable_log_ingestion must be fully removed from anyscale_cloud - renamed to aggregated_logs_enabled")
+		}
+		if _, present := s.Attributes["is_aggregated_logs_enabled"]; present {
+			t.Error("is_aggregated_logs_enabled must not exist on anyscale_cloud - the settled name is aggregated_logs_enabled (no is_ prefix, uniform with lineage_tracking_enabled)")
+		}
+
+		lineage, ok := s.Attributes["lineage_tracking_enabled"].(schema.BoolAttribute)
+		if !ok {
+			t.Fatalf("lineage_tracking_enabled is not a schema.BoolAttribute (got %T)", s.Attributes["lineage_tracking_enabled"])
+		}
+		if !lineage.Optional || !lineage.Computed {
+			t.Error("lineage_tracking_enabled must remain Optional+Computed (it is a real input with a Default, not a pure output) - same contract as the old enable_lineage_tracking")
+		}
+
+		logs, ok := s.Attributes["aggregated_logs_enabled"].(schema.BoolAttribute)
+		if !ok {
+			t.Fatalf("aggregated_logs_enabled is not a schema.BoolAttribute (got %T)", s.Attributes["aggregated_logs_enabled"])
+		}
+		if !logs.Optional || !logs.Computed {
+			t.Error("aggregated_logs_enabled must remain Optional+Computed - same contract as the old enable_log_ingestion")
+		}
+	})
+
+	t.Run("anyscale_cloud data source (singular)", func(t *testing.T) {
+		resp := &datasource.SchemaResponse{}
+		(&CloudDataSource{}).Schema(context.Background(), datasource.SchemaRequest{}, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("failed to build anyscale_cloud data source schema: %v", resp.Diagnostics)
+		}
+
+		if _, present := resp.Schema.Attributes["enable_lineage_tracking"]; present {
+			t.Error("enable_lineage_tracking must be fully removed from the anyscale_cloud data source")
+		}
+		if _, present := resp.Schema.Attributes["enable_log_ingestion"]; present {
+			t.Error("enable_log_ingestion must be fully removed from the anyscale_cloud data source")
+		}
+		if _, present := resp.Schema.Attributes["is_aggregated_logs_enabled"]; present {
+			t.Error("is_aggregated_logs_enabled must not exist on the anyscale_cloud data source - the settled name is aggregated_logs_enabled")
+		}
+
+		lineage, ok := resp.Schema.Attributes["lineage_tracking_enabled"].(dsschema.BoolAttribute)
+		if !ok {
+			t.Fatalf("lineage_tracking_enabled is not a dsschema.BoolAttribute (got %T)", resp.Schema.Attributes["lineage_tracking_enabled"])
+		}
+		if !lineage.Computed {
+			t.Error("lineage_tracking_enabled must remain Computed on the data source (a pure output there, unlike the resource)")
+		}
+
+		if _, ok := resp.Schema.Attributes["aggregated_logs_enabled"].(dsschema.BoolAttribute); !ok {
+			t.Fatalf("aggregated_logs_enabled is not a dsschema.BoolAttribute (got %T)", resp.Schema.Attributes["aggregated_logs_enabled"])
+		}
+	})
+
+	t.Run("anyscale_clouds data source (plural)", func(t *testing.T) {
+		// lineage_tracking_enabled was ALREADY this name on the plural before
+		// PR3 - unaffected either way. aggregated_logs_enabled is a genuine
+		// rename here too (was is_aggregated_logs_enabled) - this differs
+		// from PR3's original design (which left the plural alone), per the
+		// user's naming nitpick: the is_-prefix became the lone outlier once
+		// the resource/singular DS settled on aggregated_logs_enabled instead
+		// of mirroring the backend's is_-prefixed name.
+		resp := &datasource.SchemaResponse{}
+		(&CloudsDataSource{}).Schema(context.Background(), datasource.SchemaRequest{}, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("failed to build anyscale_clouds data source schema: %v", resp.Diagnostics)
+		}
+
+		// Verified directly against data_source_clouds.go: the per-item
+		// attributes live under "clouds" (a ListNestedAttribute) ->
+		// NestedObject.Attributes, not top-level on the data source's own
+		// schema - confirmed by reading the real source, not guessed.
+		cloudsAttr, ok := resp.Schema.Attributes["clouds"].(dsschema.ListNestedAttribute)
+		if !ok {
+			t.Fatalf("clouds is not a dsschema.ListNestedAttribute (got %T)", resp.Schema.Attributes["clouds"])
+		}
+		if _, ok := cloudsAttr.NestedObject.Attributes["lineage_tracking_enabled"]; !ok {
+			t.Error("anyscale_clouds (plural) must keep clouds[].lineage_tracking_enabled - unchanged, it already used this name before PR3")
+		}
+		if _, present := cloudsAttr.NestedObject.Attributes["is_aggregated_logs_enabled"]; present {
+			t.Error("anyscale_clouds (plural) must no longer declare clouds[].is_aggregated_logs_enabled - renamed to aggregated_logs_enabled for cross-surface uniformity")
+		}
+		if _, ok := cloudsAttr.NestedObject.Attributes["aggregated_logs_enabled"]; !ok {
+			t.Error("anyscale_clouds (plural) must declare clouds[].aggregated_logs_enabled - renamed from is_aggregated_logs_enabled")
+		}
+	})
+}
