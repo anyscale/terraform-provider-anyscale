@@ -212,14 +212,17 @@ first:
 - **Write-only arguments** (TF 1.11+) — for input secrets that should not persist in state.
   Converting an EXISTING Sensitive-but-in-state argument to write-only is a breaking
   state-behavior change; adding a NEW write-only argument is additive. Not yet adopted here.
-- **Actions** (TF 1.14+) — for imperative, ad-hoc side-effects outside a resource's declarative
-  lifecycle. Layer an Action ON a resource; never bend declarative CRUD to carry an imperative
-  verb. Model Actions 1:1 to real backend operations; do not synthesize composite verbs (e.g. a
-  "restart" with no backend endpoint) whose failure modes Terraform cannot reason about.
-  `anyscale_system_cluster_terminate` was fully designed, built, and real-infra confirmed
-  2026-07-23, then DEFERRED (not shipped) rather than bumping the documented floor to 1.14 for
-  one action — see `docs/deferred/actions-adoption/README.md` for the preserved work and the
-  revisit steps.
+- **Actions** (TF 1.14+; framework compatibility status is genuinely ambiguous as of
+  `terraform-plugin-framework` v1.19.0 — its introducing CHANGELOG entry called it "technical
+  preview... until Terraform 1.14 is generally available," that condition has since been met, but
+  no later entry formally promotes it to GA either; re-check before relying on either label) — for
+  imperative, ad-hoc side-effects outside a resource's declarative lifecycle. Layer an Action ON a
+  resource; never bend declarative CRUD to carry an imperative verb. Model Actions 1:1 to real
+  backend operations; do not synthesize composite verbs (e.g. a "restart" with no backend
+  endpoint) whose failure modes Terraform cannot reason about. `anyscale_system_cluster_terminate`
+  was fully designed, built, and real-infra confirmed 2026-07-23, then DEFERRED (not shipped)
+  rather than bumping the documented floor to 1.14 for one action — see
+  `docs/deferred/actions-adoption/README.md` for the preserved work and the revisit steps.
 - **timeouts{} block** — per-operation timeouts over an ad-hoc duration attribute (the v0.19.0
   precedent: schema + state upgrader + mutation-proven tests + internal migration note).
 - **Plan modifiers / Default / state upgraders / validators** — over imperative fix-ups in CRUD.

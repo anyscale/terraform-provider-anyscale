@@ -28,10 +28,20 @@ rejection of Actions as a pattern, and the code is kept ready for exactly that.
   link to a managed resource. `action/schema.StringAttribute` supports neither `Computed` nor
   `Sensitive` at all (hardcoded `false` in the framework source) — an action's schema can only
   ever describe practitioner-supplied input, never an output.
-  - Actions are gated at Terraform 1.14+, but the framework's own documentation still describes
-    the Action API as a **technical preview** as of this provider's framework version, even
-    though its shape has had no breaking changes across several framework releases. Re-check
-    this status before shipping — it may have changed to GA by the time this is revisited.
+  - Actions are gated at Terraform 1.14+. Re-verified 2026-07-23 (not just restated from the
+    original trace): `terraform-plugin-framework` v1.19.0's CHANGELOG has exactly one statement on
+    this — the entry introducing `action{}` (v1.16.0) calls it "technical preview... offered
+    without compatibility promises until Terraform 1.14 is generally available." TF 1.14 has since
+    reached GA (this repo's own CI tooling already runs 1.15.7), so that stated exit condition is
+    now met — but no later framework CHANGELOG entry through v1.19.0 contains a formal "Actions are
+    now GA" promotion, and the current `ProviderWithActions` doc comment (`provider/provider.go`)
+    has dropped the preview language entirely, stating plainly only "Actions are supported in
+    Terraform version 1.14 and later." Read together: the framework's own signal is ambiguous
+    right now, genuinely between preview and GA, not simply "still preview." The API shape itself
+    has had no breaking changes across every release from 1.16 through 1.19 either way. **Re-check
+    the current framework CHANGELOG/release notes again at revisit time** — don't carry this exact
+    paragraph forward as settled fact; it describes a specific, dated re-verification, not a
+    permanent status.
   - `terraform-plugin-testing` v1.16.0 has **no acceptance-test support for actions** (no
     `ActionInvoke` `TestStep` type) — only Go-level unit testing of `Invoke` against a mocked
     client is possible today. Re-check this too; if acceptance-test tooling for actions ships
