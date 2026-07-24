@@ -30,6 +30,7 @@ func TestNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapType{ElemType: types.Float64Type},
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
+					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -45,6 +46,7 @@ func TestNodeConfigToAPI(t *testing.T) {
 					),
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
+					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -68,6 +70,7 @@ func TestNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapType{ElemType: types.Float64Type},
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
+					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -77,6 +80,7 @@ func TestNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapNull(types.Float64Type),
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
+					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringValue(`{"disk_size": 100, "enable_monitoring": true}`),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -179,6 +183,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapType{ElemType: types.Float64Type},
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
+					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -192,6 +197,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapNull(types.Float64Type),
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
+					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -219,6 +225,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapType{ElemType: types.Float64Type},
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
+					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -232,6 +239,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapNull(types.Float64Type),
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
+					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -259,6 +267,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapType{ElemType: types.Float64Type},
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
+					"required_labels":          types.MapType{ElemType: types.StringType},
 					"advanced_instance_config": types.StringType,
 					"flags":                    types.StringType,
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -272,6 +281,7 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"resources":                types.MapNull(types.Float64Type),
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
+					"required_labels":          types.MapNull(types.StringType),
 					"advanced_instance_config": types.StringNull(),
 					"flags":                    types.StringNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -505,6 +515,7 @@ func TestWorkerNameDefaulting(t *testing.T) {
 			"resources":                types.MapType{ElemType: types.Float64Type},
 			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
+			"required_labels":          types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -518,6 +529,7 @@ func TestWorkerNameDefaulting(t *testing.T) {
 			"resources":                types.MapNull(types.Float64Type),
 			"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 			"labels":                   types.MapNull(types.StringType),
+			"required_labels":          types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
 			"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -568,6 +580,7 @@ func TestRequiredResourcesConversion(t *testing.T) {
 			"resources":                types.MapType{ElemType: types.Float64Type},
 			"required_resources":       requiredResourcesObj.Type(ctx),
 			"labels":                   types.MapType{ElemType: types.StringType},
+			"required_labels":          types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -577,6 +590,7 @@ func TestRequiredResourcesConversion(t *testing.T) {
 			"resources":                types.MapNull(types.Float64Type),
 			"required_resources":       requiredResourcesObj,
 			"labels":                   types.MapNull(types.StringType),
+			"required_labels":          types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
 			"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -607,8 +621,12 @@ func TestRequiredResourcesConversion(t *testing.T) {
 	if reqResMap["cpu"] != int64(16) {
 		t.Errorf("required_resources.cpu = %v, want 16", reqResMap["cpu"])
 	}
-	if reqResMap["memory"] != "64Gi" {
-		t.Errorf("required_resources.memory = %v, want '64Gi'", reqResMap["memory"])
+	// F2: the real API only accepts an integer byte count - "64Gi" must be
+	// parsed to bytes before it reaches the request, not passed through as
+	// the literal unit string (which the backend 422s on).
+	const wantMemoryBytes = int64(64) << 30
+	if reqResMap["memory"] != wantMemoryBytes {
+		t.Errorf("required_resources.memory = %v, want %d (64Gi parsed to bytes)", reqResMap["memory"], wantMemoryBytes)
 	}
 	if reqResMap["gpu"] != int64(4) {
 		t.Errorf("required_resources.gpu = %v, want 4", reqResMap["gpu"])
@@ -646,6 +664,7 @@ func TestCloudDeploymentConversion(t *testing.T) {
 			"resources":                types.MapType{ElemType: types.Float64Type},
 			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
+			"required_labels":          types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
 			"cloud_deployment":         cloudDepObj.Type(ctx),
@@ -655,6 +674,7 @@ func TestCloudDeploymentConversion(t *testing.T) {
 			"resources":                types.MapNull(types.Float64Type),
 			"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 			"labels":                   types.MapNull(types.StringType),
+			"required_labels":          types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
 			"cloud_deployment":         cloudDepObj,
@@ -666,15 +686,32 @@ func TestCloudDeploymentConversion(t *testing.T) {
 		t.Fatalf("nodeConfigToAPI() error = %v", err)
 	}
 
-	// Verify cloud_deployment was converted
-	cloudDep, ok := got["cloud_deployment"]
+	// F1: cloud_deployment has no top-level field on the real API's node
+	// model - it must be nested inside this node's flags, or the backend
+	// 422s ("extra fields not permitted") on every single create, which is
+	// exactly what this test previously locked in without ever exercising
+	// against the real API (live-confirmed, G1g).
+	if _, wrongLocation := got["cloud_deployment"]; wrongLocation {
+		t.Fatal("nodeConfigToAPI() wrote cloud_deployment as a top-level sibling key; it must be nested inside flags instead")
+	}
+
+	flagsVal, ok := got["flags"]
 	if !ok {
-		t.Fatal("nodeConfigToAPI() missing cloud_deployment")
+		t.Fatal("nodeConfigToAPI() missing flags")
+	}
+	flagsMap, ok := flagsVal.(map[string]interface{})
+	if !ok {
+		t.Fatalf("flags is not a map, got %T", flagsVal)
+	}
+
+	cloudDep, ok := flagsMap["cloud_deployment"]
+	if !ok {
+		t.Fatal("nodeConfigToAPI() missing flags[\"cloud_deployment\"]")
 	}
 
 	cloudDepMap, ok := cloudDep.(map[string]interface{})
 	if !ok {
-		t.Fatalf("cloud_deployment is not a map, got %T", cloudDep)
+		t.Fatalf("flags[\"cloud_deployment\"] is not a map, got %T", cloudDep)
 	}
 
 	// Verify fields
@@ -699,6 +736,7 @@ func TestNodeLabelsConversion(t *testing.T) {
 			"resources":                types.MapType{ElemType: types.Float64Type},
 			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
+			"required_labels":          types.MapType{ElemType: types.StringType},
 			"advanced_instance_config": types.StringType,
 			"flags":                    types.StringType,
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
@@ -714,6 +752,7 @@ func TestNodeLabelsConversion(t *testing.T) {
 					"team":        types.StringValue("ml-platform"),
 				},
 			),
+			"required_labels":          types.MapNull(types.StringType),
 			"advanced_instance_config": types.StringNull(),
 			"flags":                    types.StringNull(),
 			"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
@@ -777,11 +816,12 @@ func TestCommonNodeFieldsToAPI_HeadWorkerParity(t *testing.T) {
 	// Call twice - simulating a head call and a worker call with the same inputs - and confirm
 	// byte-identical output plus no shared-map aliasing (mutating one result must not affect
 	// the other).
-	headResult, err := commonNodeFieldsToAPI(ctx, resources, requiredResources, labels, advancedInstanceConfig, cloudDeployment, flags)
+	noRequiredLabels := types.MapNull(types.StringType)
+	headResult, err := commonNodeFieldsToAPI(ctx, resources, requiredResources, labels, noRequiredLabels, advancedInstanceConfig, cloudDeployment, flags)
 	if err != nil {
 		t.Fatalf("commonNodeFieldsToAPI() (head call) unexpected error = %v", err)
 	}
-	workerResult, err := commonNodeFieldsToAPI(ctx, resources, requiredResources, labels, advancedInstanceConfig, cloudDeployment, flags)
+	workerResult, err := commonNodeFieldsToAPI(ctx, resources, requiredResources, labels, noRequiredLabels, advancedInstanceConfig, cloudDeployment, flags)
 	if err != nil {
 		t.Fatalf("commonNodeFieldsToAPI() (worker call) unexpected error = %v", err)
 	}
@@ -812,11 +852,21 @@ func TestCommonNodeFieldsToAPI_HeadWorkerParity(t *testing.T) {
 	if adv, ok := headResult["advanced_configurations_json"].(map[string]interface{}); !ok || adv["disk_size"] != float64(100) {
 		t.Errorf("advanced_configurations_json = %v, want disk_size=100", headResult["advanced_configurations_json"])
 	}
-	if cd, ok := headResult["cloud_deployment"].(map[string]interface{}); !ok || cd["provider"] != "aws" || cd["region"] != "us-east-2" {
-		t.Errorf("cloud_deployment = %v, want provider=aws region=us-east-2", headResult["cloud_deployment"])
+	// F1: cloud_deployment has no top-level field on the real API's node
+	// model - it must be nested inside flags, alongside the user's own flags,
+	// or the backend 422s on it.
+	if _, wrongLocation := headResult["cloud_deployment"]; wrongLocation {
+		t.Error("commonNodeFieldsToAPI() wrote cloud_deployment as a top-level sibling key; it must be nested inside flags instead")
 	}
-	if fl, ok := headResult["flags"].(map[string]interface{}); !ok || fl["custom_flag"] != true {
-		t.Errorf("flags = %v, want custom_flag=true", headResult["flags"])
+	fl, ok := headResult["flags"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("flags = %v, want a map", headResult["flags"])
+	}
+	if fl["custom_flag"] != true {
+		t.Errorf("flags = %v, want custom_flag=true", fl)
+	}
+	if cd, ok := fl["cloud_deployment"].(map[string]interface{}); !ok || cd["provider"] != "aws" || cd["region"] != "us-east-2" {
+		t.Errorf("flags[\"cloud_deployment\"] = %v, want provider=aws region=us-east-2", fl["cloud_deployment"])
 	}
 }
 
@@ -831,14 +881,14 @@ func TestCommonNodeFieldsToAPI_FlagsParseErrorPropagates(t *testing.T) {
 	nullStr := types.StringNull()
 
 	t.Run("invalid flags JSON errors", func(t *testing.T) {
-		_, err := commonNodeFieldsToAPI(ctx, nullMap, nullObj, types.MapNull(types.StringType), nullStr, nullObj, types.StringValue("not valid json"))
+		_, err := commonNodeFieldsToAPI(ctx, nullMap, nullObj, types.MapNull(types.StringType), types.MapNull(types.StringType), nullStr, nullObj, types.StringValue("not valid json"))
 		if err == nil {
 			t.Fatal("commonNodeFieldsToAPI() expected an error for invalid flags JSON, got nil")
 		}
 	})
 
 	t.Run("invalid advanced_instance_config JSON is silently skipped, not an error", func(t *testing.T) {
-		result, err := commonNodeFieldsToAPI(ctx, nullMap, nullObj, types.MapNull(types.StringType), types.StringValue("not valid json"), nullObj, nullStr)
+		result, err := commonNodeFieldsToAPI(ctx, nullMap, nullObj, types.MapNull(types.StringType), types.MapNull(types.StringType), types.StringValue("not valid json"), nullObj, nullStr)
 		if err != nil {
 			t.Fatalf("commonNodeFieldsToAPI() unexpected error = %v (advanced_instance_config parse failures are silently skipped, matching the original)", err)
 		}
