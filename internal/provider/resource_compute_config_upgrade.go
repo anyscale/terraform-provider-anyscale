@@ -229,6 +229,13 @@ func upgradeNodeV0toV1(ctx context.Context, v0Node types.Object, attrTypes map[s
 			reqAttrs[k] = v
 		}
 		reqAttrs["cpu_architecture"] = types.StringNull()
+		// memory's type changed from a plain string to MemoryQuantityType
+		// (the F2 follow-up crash fix) - v0's persisted value is still a
+		// plain types.String, so re-wrap it rather than pass it through
+		// unchanged, or types.ObjectValue below rejects the type mismatch.
+		if oldMemory, ok := physAttrs["memory"].(types.String); ok {
+			reqAttrs["memory"] = MemoryQuantityValue{StringValue: oldMemory}
+		}
 
 		reqObj, reqDiags := types.ObjectValue(requiredResourcesAttrTypes(), reqAttrs)
 		diags.Append(reqDiags...)

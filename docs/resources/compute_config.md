@@ -110,7 +110,7 @@ output "compute_config_id" {
 - `advanced_instance_config` (Dynamic) Advanced instance configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.
 - `auto_select_worker_config` (Boolean) Defaults to `false`. If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from `worker_nodes`. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into `worker_nodes` in Terraform state.
 - `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time, since this resource cannot detect that change from a `cloud_name` lookup at plan time without a network call.
-- `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`.
+- `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`. Computed (matching `cloud_id`'s own shape) because import reverse-resolves it from `cloud_id` regardless of which selector the config uses - a plain Optional attribute would force it back to null on the very next plan for a `cloud_id`-only config, since Core requires a non-Computed attribute's state to equal config exactly.
 - `cloud_resource` (String) The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.
 - `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Defaults to `false`. Recommended for production services.
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
@@ -167,7 +167,7 @@ Optional:
 - `cpu` (Number) Number of CPUs to allocate.
 - `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
 - `gpu` (Number) Number of GPUs to allocate.
-- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
+- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.
 - `tpu` (Number) Number of TPUs to allocate.
 - `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
 
@@ -229,7 +229,7 @@ Optional:
 - `cpu` (Number) Number of CPUs to allocate.
 - `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
 - `gpu` (Number) Number of GPUs to allocate.
-- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
+- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.
 - `tpu` (Number) Number of TPUs to allocate.
 - `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
 
@@ -276,7 +276,7 @@ Optional:
 - `cpu` (Number) Number of CPUs to allocate.
 - `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
 - `gpu` (Number) Number of GPUs to allocate.
-- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
+- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.
 - `tpu` (Number) Number of TPUs to allocate.
 - `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
 
@@ -324,7 +324,7 @@ Optional:
 - `cpu` (Number) Number of CPUs to allocate.
 - `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
 - `gpu` (Number) Number of GPUs to allocate.
-- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
+- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.
 - `tpu` (Number) Number of TPUs to allocate.
 - `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
 

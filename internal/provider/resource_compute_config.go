@@ -109,13 +109,13 @@ type NodeConfigModel struct {
 // physical_resources key outright (see resource_compute_config_upgrade.go for
 // migrating prior state that still has it).
 type RequiredResourcesModel struct {
-	CPU             types.Int64  `tfsdk:"cpu"`
-	Memory          types.String `tfsdk:"memory"`
-	GPU             types.Int64  `tfsdk:"gpu"`
-	Accelerator     types.String `tfsdk:"accelerator"`
-	TPU             types.Int64  `tfsdk:"tpu"`
-	TPUHosts        types.Int64  `tfsdk:"tpu_hosts"`
-	CPUArchitecture types.String `tfsdk:"cpu_architecture"`
+	CPU             types.Int64         `tfsdk:"cpu"`
+	Memory          MemoryQuantityValue `tfsdk:"memory"`
+	GPU             types.Int64         `tfsdk:"gpu"`
+	Accelerator     types.String        `tfsdk:"accelerator"`
+	TPU             types.Int64         `tfsdk:"tpu"`
+	TPUHosts        types.Int64         `tfsdk:"tpu_hosts"`
+	CPUArchitecture types.String        `tfsdk:"cpu_architecture"`
 }
 
 // CloudDeploymentModel describes cloud deployment selector.
@@ -233,8 +233,12 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 			},
 			"cloud_name": schema.StringAttribute{
 				Optional:            true,
-				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see cloud_id.",
-				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`.",
+				Computed:            true,
+				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see cloud_id. Computed (matching cloud_id's own shape) because import reverse-resolves it from cloud_id regardless of which selector the config uses - a plain Optional attribute would force it back to null on the very next plan for a cloud_id-only config, since Core requires a non-Computed attribute's state to equal config exactly.",
+				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`. Computed (matching `cloud_id`'s own shape) because import reverse-resolves it from `cloud_id` regardless of which selector the config uses - a plain Optional attribute would force it back to null on the very next plan for a `cloud_id`-only config, since Core requires a non-Computed attribute's state to equal config exactly.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"cloud_resource": schema.StringAttribute{
 				Optional:            true,
@@ -460,8 +464,9 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 				},
 				"memory": schema.StringAttribute{
 					Optional:            true,
-					Description:         "Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., '4Gi', '1024Mi').",
-					MarkdownDescription: "Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).",
+					CustomType:          MemoryQuantityType{},
+					Description:         "Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., '4Gi', '1024Mi'). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.",
+					MarkdownDescription: "Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.",
 				},
 				"gpu": schema.Int64Attribute{
 					Optional:            true,
@@ -1080,6 +1085,20 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		plan.CloudID = types.StringValue(cloudID)
 	}
 
+	// cloud_name is now Optional+Computed (see the schema comment for why),
+	// so a cloud_id-only config leaves it Unknown at plan time on a fresh
+	// Create (UseStateForUnknown only has a prior state to fall back on
+	// starting with Update). Left unresolved, Core rejects the apply for
+	// leaving a Computed attribute Unknown. Resolve it eagerly only when we
+	// already resolved a cloud_name ourselves above; otherwise settle it to
+	// null rather than spending an extra reverse-lookup API call at every
+	// Create/Update - the same best-effort tolerance ImportState's own
+	// reverse lookup already uses, and consistent with region's "null if the
+	// API doesn't report one" precedent elsewhere in this schema.
+	if plan.CloudName.IsUnknown() {
+		plan.CloudName = types.StringNull()
+	}
+
 	// Build the API request
 	tflog.Debug(ctx, "Building compute config request", map[string]any{
 		"cloud_id": cloudID,
@@ -1216,7 +1235,14 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 				return nil, ""
 			}
 			if workerConfig != nil {
-				if nameAttr, ok := workerNodeObj.Attributes()["name"].(types.String); ok && nameAttr.IsNull() {
+				// F5 follow-up: a fresh Create leaves an omitted name UNKNOWN,
+				// not null (UseNonNullStateForUnknown has no prior state yet
+				// to fall back on) - IsNull() alone missed that case, so a
+				// worker whose name we're about to default (see
+				// workerNodeConfigToAPI above) was never recorded as
+				// defaulted here either, and disambiguateDefaultedWorkerNames
+				// never got a chance to rename it on collision.
+				if nameAttr, ok := workerNodeObj.Attributes()["name"].(types.String); ok && (nameAttr.IsNull() || nameAttr.IsUnknown()) {
 					defaultedNameIndices = append(defaultedNameIndices, len(workerConfigs))
 				}
 				workerConfigs = append(workerConfigs, workerConfig)
@@ -1699,6 +1725,14 @@ func maskNodeFromPrior(ctx context.Context, apiNode types.Object, priorNode type
 			masked["resources"] = restoreMapKeyCasing(ctx, apiResources, priorResources)
 		}
 	}
+
+	// required_resources.memory's crash (config "4Gi" vs state's parsed byte
+	// count on a non-Computed string) is fixed at the TYPE level instead of
+	// here - see MemoryQuantityType/MemoryQuantityValue's StringSemanticEquals
+	// (memory_quantity_type.go). That fixes Create/Update/Read AND cold
+	// import uniformly, which a mask-to-prior fix here could not: import has
+	// no prior to mask against, so a masking-only fix would still leave a
+	// "4Gi"-configured resource re-diffing after import.
 
 	obj, objDiags := types.ObjectValue(apiNode.AttributeTypes(ctx), masked)
 	diags.Append(objDiags...)
@@ -2345,8 +2379,15 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 	config["instance_type"] = instanceType
 
 	// Add worker-specific fields with API translations
-	// Name: Default to instance type if not provided (per CLI behavior)
-	if !worker.Name.IsNull() {
+	// Name: Default to instance type if not provided (per CLI behavior).
+	// F5 follow-up crash: on a fresh Create, an omitted name is UNKNOWN (the
+	// UseNonNullStateForUnknown plan modifier has no prior state yet to fall
+	// back on), not null - checking IsNull() alone let Unknown fall through
+	// to worker.Name.ValueString(), which silently returns "" for an unknown
+	// value. Two same-instance_type workers with no name both went out as
+	// literally empty string, never recognized as ones we defaulted, so
+	// disambiguateDefaultedWorkerNames never got a chance to run at all.
+	if !worker.Name.IsNull() && !worker.Name.IsUnknown() {
 		config["name"] = worker.Name.ValueString()
 	} else {
 		config["name"] = instanceType
@@ -2577,7 +2618,7 @@ func requiredResourcesObjectType() types.ObjectType {
 func requiredResourcesAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"cpu":              types.Int64Type,
-		"memory":           types.StringType,
+		"memory":           MemoryQuantityType{},
 		"gpu":              types.Int64Type,
 		"accelerator":      types.StringType,
 		"tpu":              types.Int64Type,
@@ -2687,11 +2728,11 @@ func apiRequiredResourcesToTerraform(ctx context.Context, apiPR map[string]inter
 		cpu = types.Int64Value(int64(c))
 	}
 
-	memory := types.StringNull()
+	memory := MemoryQuantityValueNull()
 	if m, ok := apiPR["memory"].(float64); ok {
-		memory = types.StringValue(fmt.Sprintf("%d", int64(m)))
+		memory = NewMemoryQuantityValue(fmt.Sprintf("%d", int64(m)))
 	} else if m, ok := apiPR["memory"].(string); ok {
-		memory = types.StringValue(m)
+		memory = NewMemoryQuantityValue(m)
 	}
 
 	gpu := types.Int64Null()

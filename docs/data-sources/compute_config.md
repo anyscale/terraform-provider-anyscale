@@ -142,7 +142,7 @@ Read-Only:
 - `cpu` (Number) Number of CPUs allocated.
 - `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
 - `gpu` (Number) Number of GPUs allocated.
-- `memory` (String) Amount of memory allocated.
+- `memory` (String) Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`.
 - `tpu` (Number) Number of TPUs allocated.
 - `tpu_hosts` (Number) Number of TPU hosts.
 
@@ -186,7 +186,7 @@ Read-Only:
 - `cpu` (Number) Number of CPUs allocated.
 - `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
 - `gpu` (Number) Number of GPUs allocated.
-- `memory` (String) Amount of memory allocated.
+- `memory` (String) Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`.
 - `tpu` (Number) Number of TPUs allocated.
 - `tpu_hosts` (Number) Number of TPU hosts.
 
@@ -227,7 +227,7 @@ Read-Only:
 - `cpu` (Number) Number of CPUs allocated.
 - `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
 - `gpu` (Number) Number of GPUs allocated.
-- `memory` (String) Amount of memory allocated.
+- `memory` (String) Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`.
 - `tpu` (Number) Number of TPUs allocated.
 - `tpu_hosts` (Number) Number of TPU hosts.
 
@@ -271,6 +271,6 @@ Read-Only:
 - `cpu` (Number) Number of CPUs allocated.
 - `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
 - `gpu` (Number) Number of GPUs allocated.
-- `memory` (String) Amount of memory allocated.
+- `memory` (String) Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`.
 - `tpu` (Number) Number of TPUs allocated.
 - `tpu_hosts` (Number) Number of TPU hosts.
