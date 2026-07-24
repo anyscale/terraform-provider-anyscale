@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_system_cluster: Fix a race on a cloud's first-ever enable where Create could silently skip starting the System Cluster, leaving it stuck Terminated with no error; Create now waits for the enable to fully propagate before requesting a start.
+```

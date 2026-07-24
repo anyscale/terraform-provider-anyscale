@@ -72,6 +72,70 @@ func enableSystemCluster(ctx context.Context, client *Client, cloudID string, en
 	return err
 }
 
+// defaultEnabledPropagationTimeout bounds waitForSystemClusterEnabled. The
+// commit gap it waits out is two back-to-back DB transactions completing on
+// the backend - a sub-second operation in the healthy case - so this is
+// deliberately much shorter than the create timeout that follows it; if
+// is_enabled hasn't propagated within this window, something beyond the
+// known race is wrong and Create should fail loudly rather than silently
+// eat most of its real timeout budget waiting on a gap that isn't closing.
+const defaultEnabledPropagationTimeout = 30 * time.Second
+
+// enabledPropagationPollInterval is short (this is a sub-second-scale gap
+// being waited out, not a multi-minute cluster startup) - unexported so
+// tests can drive it down further via the WithTiming variant.
+const enabledPropagationPollInterval = 1 * time.Second
+
+// waitForSystemClusterEnabled polls describeSystemWorkload(startCluster=false)
+// until is_enabled reads back true, closing the two-transaction commit gap a
+// cloud's FIRST-EVER enable writes across (update_system_cluster_config
+// commits the config row, then a SEPARATE transaction stamps
+// cloud.system_cluster_config_id - a read landing between those two commits
+// sees the config as absent and falls back to a feature-flag default of
+// false). Calling describe with startCluster=false here is safe even before
+// a cluster exists: the create-on-read hazard only fires once is_enabled
+// itself reads true (see the package doc comment) - while this loop still
+// sees false, it is a plain, side-effect-free status check.
+//
+// This closes the race for Create's very next call (describe with
+// startCluster=true): by construction, that call only happens after this
+// function returns nil, i.e. after is_enabled has been observed true.
+func waitForSystemClusterEnabled(ctx context.Context, client *Client, cloudID string, timeout time.Duration) error {
+	return waitForSystemClusterEnabledWithTiming(ctx, client, cloudID, timeout, enabledPropagationPollInterval)
+}
+
+// waitForSystemClusterEnabledWithTiming is waitForSystemClusterEnabled with
+// the poll interval also exposed, so tests can prove this without paying
+// real wall-clock time. Production code should call
+// waitForSystemClusterEnabled instead.
+func waitForSystemClusterEnabledWithTiming(ctx context.Context, client *Client, cloudID string, timeout, interval time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		result, err := describeSystemWorkload(ctx, client, cloudID, false)
+		if err != nil {
+			return err
+		}
+		if result.IsEnabled {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"timed out after %s waiting for cloud %s's system cluster config to report enabled - "+
+					"the enable request may not have been processed; this is unrelated to whether the cluster itself has started",
+				timeout, cloudID,
+			)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
 // describeSystemWorkload calls POST /api/v2/system_workload/{cloud_id}/describe.
 //
 // startCluster is always an explicit, required parameter - the backend defaults it to TRUE if
@@ -281,8 +345,24 @@ func waitForSystemClusterState(ctx context.Context, client *Client, cloudID, tar
 // waitForBuildDigestWithTiming's tolerate-and-continue settle-wait style: a stuck/erroring
 // System Cluster start is exactly the kind of thing Terraform must fail loudly on, not paper
 // over.
+//
+// Backstop (the fix's second half, alongside waitForSystemClusterEnabled closing the gap
+// before Create's first start call): a FRESH create's very first poll normally observes
+// Terminated once (create-on-read completes synchronously; the StartingUp transition does
+// not - confirmed live), then moves on. If Terminated is instead observed on a
+// SECOND consecutive poll, that is no longer the expected one-off - it means the start
+// request this function's caller believed it sent never actually took (e.g. a is_enabled
+// read landing back in a false window despite waitForSystemClusterEnabled, or any other
+// transient miss of the same shape), so this loop re-issues describeSystemWorkload with
+// startCluster=true exactly ONCE to retry it, then resumes normal startCluster=false
+// polling. Deliberately not unconditional/repeated: the race this backstops is a one-time
+// commit-gap miss, not a recurring condition, and retrying indefinitely would just mask a
+// genuinely stuck cluster behind repeated start requests instead of eventually timing out
+// on it.
 func waitForSystemClusterStateWithTiming(ctx context.Context, client *Client, cloudID, target string, timeout, interval time.Duration) (*DescribeSystemWorkloadResult, error) {
 	deadline := time.Now().Add(timeout)
+	consecutiveTerminated := 0
+	restarted := false
 
 	for {
 		result, err := describeSystemWorkload(ctx, client, cloudID, false)
@@ -313,6 +393,22 @@ func waitForSystemClusterStateWithTiming(ctx context.Context, client *Client, cl
 				"status":   status,
 				"target":   target,
 			})
+		}
+
+		if status == "Terminated" {
+			consecutiveTerminated++
+		} else {
+			consecutiveTerminated = 0
+		}
+
+		if consecutiveTerminated >= 2 && !restarted {
+			tflog.Warn(ctx, "System cluster still Terminated after the expected one-off create-on-read observation; re-issuing start", map[string]any{
+				"cloud_id": cloudID,
+			})
+			restarted = true
+			if _, err := describeSystemWorkload(ctx, client, cloudID, true); err != nil {
+				return result, fmt.Errorf("re-issue system cluster start for cloud %s: %w", cloudID, err)
+			}
 		}
 
 		if time.Now().After(deadline) {

@@ -125,12 +125,16 @@ func (r *SystemClusterResource) Configure(ctx context.Context, req resource.Conf
 	r.client = client
 }
 
-// Create ensures the System Cluster is enabled and running: enable-then-start
-// (order-dependent, per assayer's Q5 trace - starting a disabled cluster is a
-// silent no-op), persist state immediately once cluster_id is known (before
-// the poll, so a later timeout/failure never orphans a real backend cluster
-// with zero Terraform record - mirrors resource_service.go's Create), then
-// poll to Running.
+// Create ensures the System Cluster is enabled and running: enable, wait for
+// that enable to actually propagate, THEN start. Both orderings matter:
+// starting a disabled cluster is a silent no-op, and starting immediately
+// after enable with no propagation check can ALSO silently no-op even when
+// is_enabled will shortly read true - a cloud's first-ever enable commits
+// across two separate backend transactions, and a start request landing in
+// that gap reads the pre-commit false value. Persist state immediately once
+// cluster_id is known (before the poll, so a later timeout/failure never
+// orphans a real backend cluster with zero Terraform record - mirrors
+// resource_service.go's Create), then poll to Running.
 func (r *SystemClusterResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan SystemClusterResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -149,6 +153,12 @@ func (r *SystemClusterResource) Create(ctx context.Context, req resource.CreateR
 	tflog.Info(ctx, "Enabling System Cluster", map[string]any{"cloud_id": cloudID})
 	if err := enableSystemCluster(ctx, r.client, cloudID, true); err != nil {
 		AddAPIError(&resp.Diagnostics, "enable system cluster", err)
+		return
+	}
+
+	tflog.Info(ctx, "Waiting for System Cluster enable to propagate", map[string]any{"cloud_id": cloudID})
+	if err := waitForSystemClusterEnabled(ctx, r.client, cloudID, defaultEnabledPropagationTimeout); err != nil {
+		AddAPIError(&resp.Diagnostics, "wait for system cluster enable to propagate", err)
 		return
 	}
 

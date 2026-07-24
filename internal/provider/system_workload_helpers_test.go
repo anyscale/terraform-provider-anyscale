@@ -289,12 +289,19 @@ func TestWaitForSystemClusterStateWithTiming_ContextCancelled(t *testing.T) {
 }
 
 // TestWaitForSystemClusterStateWithTiming_AlwaysPassesStartClusterFalse is AC17, the
-// MUTATION-PROOF assertion: every single poll this loop issues must send start_cluster=false on
-// the wire, never true or omitted (the router defaults a missing start_cluster to true - a loop
-// that ever sends true or omits it would silently re-request a start on that tick). This has
-// been verified mutation-proof by hand: temporarily changing the describeSystemWorkload call
-// inside waitForSystemClusterStateWithTiming from `false` to `true` makes this test fail exactly
-// as expected (asserting "false", got "true"), then the change was reverted byte-for-byte.
+// MUTATION-PROOF assertion: every poll this loop issues while the cluster is transitioning
+// normally must send start_cluster=false on the wire, never true or omitted (the router defaults
+// a missing start_cluster to true - a loop that ever sends true or omits it would silently
+// re-request a start on that tick). This has been verified mutation-proof by hand: temporarily
+// changing the describeSystemWorkload call inside waitForSystemClusterStateWithTiming from
+// `false` to `true` makes this test fail exactly as expected (asserting "false", got "true"),
+// then the change was reverted byte-for-byte.
+//
+// Scoped deliberately to a scenario that never sees Terminated twice in a row: the backstop
+// added alongside waitForSystemClusterEnabled DOES intentionally send start_cluster=true again
+// if Terminated persists past its expected one-off first-poll appearance (see
+// TestWaitForSystemClusterStateWithTiming_BackstopReissuesStartOnPersistedTerminated) - that is
+// a deliberate, separate exception to the invariant this test asserts, not a contradiction of it.
 func TestWaitForSystemClusterStateWithTiming_AlwaysPassesStartClusterFalse(t *testing.T) {
 	server, mock := newSystemClusterStatePollTestServer(t, []string{"StartingUp", "StartingUp", "Running"})
 	client := NewClientWithToken(server.URL, "test-token")
@@ -529,5 +536,171 @@ func TestFindSystemWorkloadCluster_Paginates(t *testing.T) {
 	}
 	if requests != 2 {
 		t.Errorf("requests = %d, want 2 (one per page)", requests)
+	}
+}
+
+// isEnabledPollTestServer is a stateful describe_system_workload mock returning is_enabled[n] on
+// the nth request (clamped once exhausted), for waitForSystemClusterEnabled tests - distinct from
+// systemClusterMockServer above since that one never sets is_enabled at all (always its bool
+// zero-value, false), which would make it useless for asserting is_enabled transitions.
+type isEnabledPollTestServer struct {
+	mu           sync.Mutex
+	isEnabled    []bool
+	requestCount int32
+}
+
+func newIsEnabledPollTestServer(t *testing.T, isEnabled []bool) (*httptest.Server, *isEnabledPollTestServer) {
+	t.Helper()
+	s := &isEnabledPollTestServer{isEnabled: isEnabled}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		idx := int(s.requestCount)
+		if idx >= len(s.isEnabled) {
+			idx = len(s.isEnabled) - 1
+		}
+		s.requestCount++
+		enabled := s.isEnabled[idx]
+		s.mu.Unlock()
+
+		result := DescribeSystemWorkloadResult{IsEnabled: enabled}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(DescribeSystemWorkloadResponse{Result: result})
+	}))
+	t.Cleanup(server.Close)
+	return server, s
+}
+
+func (s *isEnabledPollTestServer) requests() int32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requestCount
+}
+
+// TestWaitForSystemClusterEnabledWithTiming_SettlesTrue proves the happy path: polls until
+// is_enabled reads true, then returns nil - the commit-gap window closing within the timeout.
+func TestWaitForSystemClusterEnabledWithTiming_SettlesTrue(t *testing.T) {
+	server, mock := newIsEnabledPollTestServer(t, []bool{false, false, true})
+	client := NewClientWithToken(server.URL, "test-token")
+
+	err := waitForSystemClusterEnabledWithTiming(context.Background(), client, "cld_gap", 200*time.Millisecond, 5*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := mock.requests(); got < 3 {
+		t.Errorf("requests = %d, want at least 3 (2 false polls before true)", got)
+	}
+}
+
+// TestWaitForSystemClusterEnabledWithTiming_TimesOut proves this has its own bounded timeout,
+// independent of the create-timeout used for the Running wait - a commit gap that never closes
+// must not hang Create() forever.
+func TestWaitForSystemClusterEnabledWithTiming_TimesOut(t *testing.T) {
+	server, mock := newIsEnabledPollTestServer(t, []bool{false})
+	client := NewClientWithToken(server.URL, "test-token")
+
+	start := time.Now()
+	err := waitForSystemClusterEnabledWithTiming(context.Background(), client, "cld_stuck_gap", 17*time.Millisecond, 5*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("err = nil, want a timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("err = %q, want it to mention timing out", err.Error())
+	}
+	if mock.requests() == 0 {
+		t.Error("requests = 0, want at least one poll before timing out")
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("elapsed = %s, want well under 500ms (timeout=17ms, interval=5ms)", elapsed)
+	}
+}
+
+// TestWaitForSystemClusterEnabledWithTiming_ContextCancelled mirrors
+// TestWaitForSystemClusterStateWithTiming_ContextCancelled - an already-cancelled context must
+// stop the wait promptly, not spend the full interval polling.
+func TestWaitForSystemClusterEnabledWithTiming_ContextCancelled(t *testing.T) {
+	server, _ := newIsEnabledPollTestServer(t, []bool{false})
+	client := NewClientWithToken(server.URL, "test-token")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err := waitForSystemClusterEnabledWithTiming(ctx, client, "cld_cancel_gap", 5*time.Second, 2*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("err = nil, want context.Canceled")
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("elapsed = %s, want well under 500ms", elapsed)
+	}
+}
+
+// TestWaitForSystemClusterStateWithTiming_BackstopReissuesStartOnPersistedTerminated is the
+// mutation-relevant proof for the fix's second half: Terminated appearing ONCE (the normal
+// create-on-read first-poll shape) must NOT trigger a re-issued start, but Terminated persisting
+// on a SECOND consecutive poll must - this is exactly the live-repro signature confirmed on real
+// EKS (unfixed: stuck at Terminated indefinitely; the backstop exists to recover from that
+// instead of waiting out the full timeout).
+func TestWaitForSystemClusterStateWithTiming_BackstopReissuesStartOnPersistedTerminated(t *testing.T) {
+	server, mock := newSystemClusterStatePollTestServer(t, []string{"Terminated", "Terminated", "StartingUp", "Running"})
+	client := NewClientWithToken(server.URL, "test-token")
+
+	result, err := waitForSystemClusterStateWithTiming(context.Background(), client, "cld_backstop", systemClusterStateRunning, 200*time.Millisecond, 5*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil || result.Status == nil || *result.Status != "Running" {
+		t.Fatalf("result = %+v, want Status Running", result)
+	}
+
+	_, values := mock.snapshot()
+	if len(values) < 4 {
+		t.Fatalf("only %d call(s) recorded, want at least 4 (2 regular polls + 1 backstop re-issue + 1 more regular poll) to check the backstop fired", len(values))
+	}
+	// The backstop re-issues start as a SEPARATE, additional call once it detects persistence -
+	// it does not change the CURRENT poll's own start_cluster value. So the two regular polls
+	// that observe Terminated (indices 0 and 1) both stay false; the backstop's own extra call
+	// (index 2, immediately following poll 2) is the one and only true.
+	if values[0] != "false" {
+		t.Errorf("call #1 (poll) start_cluster=%q, want \"false\" - the first Terminated observation is expected and must not trigger a re-issue", values[0])
+	}
+	if values[1] != "false" {
+		t.Errorf("call #2 (poll) start_cluster=%q, want \"false\" - the poll call itself never carries start_cluster=true, only the backstop's own extra call does", values[1])
+	}
+	if values[2] != "true" {
+		t.Errorf("call #3 (backstop re-issue) start_cluster=%q, want \"true\" - two consecutive Terminated observations must trigger exactly one re-issued start call", values[2])
+	}
+	// No further re-issues once the backstop has fired once (call 4 onward must be false) - the
+	// backstop is one-shot per Create()/Update() call.
+	for i := 3; i < len(values); i++ {
+		if values[i] != "false" {
+			t.Errorf("call #%d start_cluster=%q, want \"false\" - the backstop must not re-issue more than once", i+1, values[i])
+		}
+	}
+}
+
+// TestWaitForSystemClusterStateWithTiming_SingleTerminatedIsQuiet proves the flip side: a lone
+// Terminated observation (the documented normal create-on-read shape) must NOT trigger the
+// backstop - only PERSISTED Terminated (two or more consecutive) does. Complements
+// TestWaitForSystemClusterStateWithTiming_TerminatedThenRunningIsQuiet (which already proves no
+// warning log fires) by asserting the wire-level start_cluster value directly.
+func TestWaitForSystemClusterStateWithTiming_SingleTerminatedIsQuiet(t *testing.T) {
+	server, mock := newSystemClusterStatePollTestServer(t, []string{"Terminated", "StartingUp", "Running"})
+	client := NewClientWithToken(server.URL, "test-token")
+
+	_, err := waitForSystemClusterStateWithTiming(context.Background(), client, "cld_single_terminated", systemClusterStateRunning, 200*time.Millisecond, 5*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, values := mock.snapshot()
+	for i, v := range values {
+		if v != "false" {
+			t.Errorf("poll #%d start_cluster=%q, want \"false\" - a single Terminated observation must not trigger the backstop", i+1, v)
+		}
 	}
 }
