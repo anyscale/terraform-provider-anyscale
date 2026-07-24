@@ -135,14 +135,11 @@ The top-level `flags`/`advanced_instance_config` pair is the only write-only exc
 every other attribute — including the per-node pair above, plus `min_resources`, `max_resources`,
 `enable_cross_zone_scaling`, and `auto_select_worker_config` — participates in normal drift detection.
 
-Neither field is truly free-form: `advanced_instance_config` is validated server-side against something
-close to the real cloud provider's instance-launch request shape — on AWS, specifically the EC2
-`RunInstancesInput` shape, which rejects any key that isn't a real field there — and `flags` only accepts a
-fixed, specific set of recognized key names; an arbitrary custom key is rejected outright, not passed
-through silently. The arbitrariness `advanced_instance_config` actually supports is structural (nesting
-depth and shape — maps, lists, and scalars can nest freely), not content (the keys still have to be real
-fields the cloud provider's launch API recognizes). Supply values shaped the way each is actually
-validated, not arbitrary keys.
+Neither field is truly free-form: `flags` only accepts a fixed set of recognized keys (an unrecognized one
+is rejected, not passed through), and `advanced_instance_config` is validated server-side against something
+close to the real cloud provider's instance-launch request shape — on AWS, the EC2 `RunInstancesInput`
+shape. The arbitrariness it supports is structural (nesting depth and shape — maps, lists, and scalars can
+nest freely), not content: the keys still have to be real fields that shape recognizes.
 
 ## Targeting more than one cloud resource: `additional_resources`
 
@@ -151,7 +148,10 @@ A compute config normally targets a single cloud resource: the top-level `head_n
 which one — or the cloud's primary resource if you don't. `additional_resources` lets ONE compute config
 also cover other cloud resources on the same cloud, each with its own independent `head_node`/
 `worker_nodes`/etc., without changing anything about the common single-resource case: an existing config
-that never sets `additional_resources` behaves byte-identically to before this attribute existed.
+that never sets `additional_resources` behaves byte-identically to before this attribute existed. Each
+entry's own `worker_nodes` gets the same [name-uniqueness handling](#worker-group-names-must-be-unique)
+described above, independently per entry — a name defaulted or disambiguated in one entry has no effect on
+any other.
 
 Each `additional_resources` entry is required to set `cloud_resource` — unlike the top-level attribute,
 this is how the provider tells entries apart, so it can't default to "the primary resource" the way the
