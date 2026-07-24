@@ -35,10 +35,17 @@ import (
 type f3NotFoundMockServer struct {
 	mu     sync.Mutex
 	record map[string]any
-	// nextGetStatus, when non-zero, overrides the next GET's response with
-	// this status instead of the normal 200 - simulates the config
+	// nextGetStatus, when non-zero, overrides EVERY subsequent GET's response
+	// with this status instead of the normal 200 - simulates the config
 	// disappearing (404) or a transient backend failure (500) between the
-	// initial apply and a later refresh.
+	// initial apply and a later refresh. Deliberately STICKY (not reset after
+	// one read): a single non-PlanOnly TestStep triggers more than one GET
+	// (an internal refresh during plan, then another during apply), and a
+	// resource that is genuinely gone stays gone across all of them - a
+	// one-shot override that silently reverts to 200 on the second read
+	// doesn't match real backend behavior and previously masked this test's
+	// own pass/fail result (it produced "empty refresh plan" instead of
+	// proving removal, since the second GET saw the record as still present).
 	nextGetStatus int
 }
 
@@ -68,7 +75,6 @@ func newF3NotFoundMockServer(t *testing.T) (*httptest.Server, *f3NotFoundMockSer
 		case r.Method == http.MethodGet:
 			state.mu.Lock()
 			override := state.nextGetStatus
-			state.nextGetStatus = 0
 			record := state.record
 			state.mu.Unlock()
 
