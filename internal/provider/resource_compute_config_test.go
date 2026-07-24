@@ -340,60 +340,6 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 	}
 }
 
-// TestMarketTypeTranslation specifically tests the market type translation logic
-func TestMarketTypeTranslation(t *testing.T) {
-	tests := []struct {
-		name                     string
-		marketType               string
-		expectedUseSpot          bool
-		expectedFallbackOnDemand bool
-	}{
-		{
-			name:                     "ON_DEMAND translates to no spot",
-			marketType:               "ON_DEMAND",
-			expectedUseSpot:          false,
-			expectedFallbackOnDemand: false,
-		},
-		{
-			name:                     "SPOT translates to spot without fallback",
-			marketType:               "SPOT",
-			expectedUseSpot:          true,
-			expectedFallbackOnDemand: false,
-		},
-		{
-			name:                     "PREFER_SPOT translates to spot with fallback",
-			marketType:               "PREFER_SPOT",
-			expectedUseSpot:          true,
-			expectedFallbackOnDemand: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the translation logic from workerNodeConfigToAPI
-			var useSpot, fallbackToOnDemand bool
-			switch tt.marketType {
-			case "SPOT":
-				useSpot = true
-				fallbackToOnDemand = false
-			case "PREFER_SPOT":
-				useSpot = true
-				fallbackToOnDemand = true
-			case "ON_DEMAND":
-				useSpot = false
-				fallbackToOnDemand = false
-			}
-
-			if useSpot != tt.expectedUseSpot {
-				t.Errorf("market type %s: use_spot = %v, want %v", tt.marketType, useSpot, tt.expectedUseSpot)
-			}
-			if fallbackToOnDemand != tt.expectedFallbackOnDemand {
-				t.Errorf("market type %s: fallback_to_ondemand = %v, want %v", tt.marketType, fallbackToOnDemand, tt.expectedFallbackOnDemand)
-			}
-		})
-	}
-}
-
 // TestDynamicToInterfaceConversion tests the real DynamicToInterface function
 // (framework_helpers.go) against types.Dynamic shapes matching how Terraform
 // actually represents flags/advanced_instance_config HCL object literals -

@@ -45,9 +45,26 @@ type mockComputeConfigServer struct {
 	mu       sync.Mutex
 	versions map[string]int64          // name -> latest version minted
 	records  map[string]map[string]any // config_id -> stored "result" body
+
+	// createRequests captures the raw config object (pre-normalization) sent
+	// on every Create/Update POST, in call order. Used by the single-resource
+	// snapshot-diff regression test to assert the wire request shape never
+	// changes for a plain single-resource config, independent of anything
+	// this mock server does to the response.
+	createRequests []map[string]any
 }
 
 func newMockComputeConfigServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server, _ := newMockComputeConfigServerWithState(t)
+	return server
+}
+
+// newMockComputeConfigServerWithState is newMockComputeConfigServer but also
+// returns the underlying state, for tests (e.g. the snapshot-diff regression)
+// that need to inspect what the provider actually sent, not just drive a
+// plan/apply cycle through the response side.
+func newMockComputeConfigServerWithState(t *testing.T) (*httptest.Server, *mockComputeConfigServer) {
 	t.Helper()
 	state := &mockComputeConfigServer{
 		versions: make(map[string]int64),
@@ -71,7 +88,7 @@ func newMockComputeConfigServer(t *testing.T) *httptest.Server {
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	return server
+	return server, state
 }
 
 func (s *mockComputeConfigServer) handleCreate(t *testing.T, w http.ResponseWriter, r *http.Request) {
@@ -93,6 +110,7 @@ func (s *mockComputeConfigServer) handleCreate(t *testing.T, w http.ResponseWrit
 	s.mu.Lock()
 	s.versions[req.Name]++
 	version := s.versions[req.Name]
+	s.createRequests = append(s.createRequests, req.Config)
 	s.mu.Unlock()
 
 	configID := fmt.Sprintf("cpt_mock_%s_v%d", req.Name, version)
