@@ -199,11 +199,11 @@ pass a separate cloud selector to disambiguate. Importing a `config_id` that's a
 immediately with a clear error, rather than importing a resource that the next refresh would just remove
 again.
 
-If your configuration uses `cloud_name` rather than `cloud_id`, import resolves it too: the recovered
-`cloud_id` is reverse-looked-up to its name on a best-effort basis, so a matching configuration plans clean
-right away instead of showing the one-time null-to-configured diff `cloud_name` would otherwise produce.
-This lookup can fail silently (a network error, or a since-removed cloud); if it does, `cloud_name` stays
-null after import, the same as without this lookup, and you'll see that one-time diff instead.
+Import also reverse-looks-up `cloud_name` from the recovered `cloud_id`, on a best-effort basis, regardless
+of which one your configuration actually sets: `cloud_name` is Optional+Computed (like `cloud_id` itself),
+so a recovered value never conflicts with a `cloud_id`-only configuration, and a `cloud_name`-based
+configuration plans clean right away instead of needing a one-time diff to catch up. This lookup can fail
+silently (a network error, or a since-removed cloud) — if it does, `cloud_name` is simply left null.
 
 After import, everything is recovered directly from that version, including the fields that stay masked on
 an ordinary refresh: `flags` and `advanced_instance_config` (top-level and per-node), `resources`,
