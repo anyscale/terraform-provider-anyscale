@@ -125,6 +125,71 @@ resource "anyscale_compute_config" "test" {
 	})
 }
 
+// F5, additional_resources call site: the disambiguation-index-building loop
+// in additionalResourceToDeploymentConfig (compute_config_helpers.go) is a
+// SEPARATE copy of the primary path's loop above - only the leaf
+// workerNodeConfigToAPI/disambiguateDefaultedWorkerNames functions are
+// shared, not the surrounding "is this index eligible" logic itself (forge's
+// finding, confirmed against the real code: my own earlier sweep missed this
+// second call site by re-deriving via a fresh grep of resource_compute_
+// config.go rather than re-checking the additional_resources file I'd
+// already read - see the ad-hoc-mock/grep-sweep memory notes). This test is
+// the permanent regression proof for that second call site specifically -
+// without it, only the primary path's fix is covered by committed CI-gated
+// acctests; the additional_resources path's fix would have no acceptance
+// coverage beyond forge's own scratch (deleted) verification.
+func TestAccComputeConfigResource_AdditionalResourcesDuplicateDerivedWorkerNamesGetUniqueSuffix_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	server := newMockComputeConfigServer(t)
+	name := "cc-f5-additional-resources-suffix"
+
+	config := testAccProviderBlock(server.URL) + `
+resource "anyscale_compute_config" "test" {
+  name           = "` + name + `"
+  cloud_id       = "cld_mock_cc"
+  cloud_resource = "resource-primary"
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+
+  additional_resources = [
+    {
+      cloud_resource = "resource-secondary"
+      head_node = {
+        instance_type = "m5.large"
+      }
+      worker_nodes = [
+        {
+          instance_type = "m5.xlarge"
+          min_nodes     = 0
+          max_nodes     = 1
+        },
+        {
+          instance_type = "m5.xlarge"
+          min_nodes     = 0
+          max_nodes     = 1
+        }
+      ]
+    }
+  ]
+}
+`
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "additional_resources.0.worker_nodes.0.name", "m5.xlarge"),
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "additional_resources.0.worker_nodes.1.name", "m5.xlarge-2"),
+				),
+			},
+		},
+	})
+}
+
 // F6: worker_nodes reordered by the backend must resolve back to the
 // user's configured order, so a pure backend-side reorder never diffs.
 func TestAccComputeConfigResource_WorkerOrderMatchesConfiguredOrder_MockServer(t *testing.T) {
