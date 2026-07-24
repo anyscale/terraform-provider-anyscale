@@ -191,6 +191,8 @@ func upgradeComputeConfigStateV0toV1(ctx context.Context, req resource.UpgradeSt
 		LastModifiedAt:         priorState.LastModifiedAt,
 		HeadNode:               upgradedHeadNode,
 		WorkerNodes:            upgradedWorkerNodes,
+		// Option C: new in this version, nothing to migrate.
+		AdditionalResources: types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()}),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
@@ -233,6 +235,10 @@ func upgradeNodeV0toV1(ctx context.Context, v0Node types.Object, attrTypes map[s
 		requiredResources = reqObj
 	}
 	newAttrs["required_resources"] = requiredResources
+
+	// A1: required_labels is new in this schema version too - nothing to
+	// migrate for it either, same as cpu_architecture/idle_termination_minutes.
+	newAttrs["required_labels"] = types.MapNull(types.StringType)
 
 	newObj, objDiags := types.ObjectValue(attrTypes, newAttrs)
 	diags.Append(objDiags...)

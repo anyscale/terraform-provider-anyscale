@@ -3,9 +3,12 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -30,6 +33,7 @@ import (
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ resource.Resource = &ComputeConfigResource{}
 var _ resource.ResourceWithImportState = &ComputeConfigResource{}
+var _ resource.ResourceWithValidateConfig = &ComputeConfigResource{}
 
 // NewComputeConfigResource returns a new compute config resource.
 func NewComputeConfigResource() resource.Resource {
@@ -62,8 +66,30 @@ type ComputeConfigResourceModel struct {
 	Version                types.Int64   `tfsdk:"version"`
 	CreatedAt              types.String  `tfsdk:"created_at"`
 	LastModifiedAt         types.String  `tfsdk:"last_modified_at"`
-	HeadNode               types.Object  `tfsdk:"head_node"`    // Single NodeConfigModel
-	WorkerNodes            types.List    `tfsdk:"worker_nodes"` // List of WorkerNodeConfigModel
+	HeadNode               types.Object  `tfsdk:"head_node"`            // Single NodeConfigModel
+	WorkerNodes            types.List    `tfsdk:"worker_nodes"`         // List of WorkerNodeConfigModel
+	AdditionalResources    types.List    `tfsdk:"additional_resources"` // List of AdditionalResourceModel (Option C)
+}
+
+// AdditionalResourceModel describes one additional_resources entry (Option
+// C): the per-entry node-config core, keyed by cloud_resource. Deliberately
+// does NOT embed NodeConfigModel the way WorkerNodeConfigModel does - the
+// shared fields here (zones/min_resources/max_resources/
+// enable_cross_zone_scaling/auto_select_worker_config) are the TOP-LEVEL
+// cluster-level fields' shape, not NodeConfigModel's per-node fields (this
+// entry has its OWN head_node/worker_nodes, which is where NodeConfigModel
+// actually applies).
+type AdditionalResourceModel struct {
+	CloudResource          types.String `tfsdk:"cloud_resource"`
+	Zones                  types.List   `tfsdk:"zones"`
+	MinResources           types.Map    `tfsdk:"min_resources"`
+	MaxResources           types.Map    `tfsdk:"max_resources"`
+	EnableCrossZoneScaling types.Bool   `tfsdk:"enable_cross_zone_scaling"`
+	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string, not Dynamic (nested in a list)
+	Flags                  types.String `tfsdk:"flags"`                    // JSON string, not Dynamic (nested in a list)
+	AutoSelectWorkerConfig types.Bool   `tfsdk:"auto_select_worker_config"`
+	HeadNode               types.Object `tfsdk:"head_node"`    // Single NodeConfigModel
+	WorkerNodes            types.List   `tfsdk:"worker_nodes"` // List of WorkerNodeConfigModel
 }
 
 // NodeConfigModel describes a node configuration.
@@ -72,6 +98,7 @@ type NodeConfigModel struct {
 	Resources              types.Map    `tfsdk:"resources"`                // Map of Float64
 	RequiredResources      types.Object `tfsdk:"required_resources"`       // RequiredResourcesModel
 	Labels                 types.Map    `tfsdk:"labels"`                   // Map of String
+	RequiredLabels         types.Map    `tfsdk:"required_labels"`          // Map of String
 	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string
 	Flags                  types.String `tfsdk:"flags"`                    // JSON string
 	CloudDeployment        types.Object `tfsdk:"cloud_deployment"`         // CloudDeploymentModel
@@ -320,6 +347,85 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 					Attributes: workerNodeConfigAttributes(),
 				},
 			},
+			"additional_resources": schema.ListNestedAttribute{
+				Optional:            true,
+				Description:         "Additional cloud resources this compute config should also be able to launch clusters on, beyond the primary one described by the top-level attributes. Each entry is a full, independent deployment configuration keyed by cloud_resource. Omit this entirely for the common single-resource case - the top-level attributes are unaffected either way.",
+				MarkdownDescription: "Additional cloud resources this compute config should also be able to launch clusters on, beyond the primary one described by the top-level attributes (`zones`, `min_resources`, `max_resources`, `enable_cross_zone_scaling`, `advanced_instance_config`, `flags`, `auto_select_worker_config`, `head_node`, `worker_nodes`). Each entry is a full, independent deployment configuration keyed by `cloud_resource`. Omit this entirely for the common single-resource case - the top-level attributes are unaffected either way, and existing single-resource configs remain byte-identical.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: additionalResourceAttributes(),
+				},
+			},
+		},
+	}
+}
+
+// additionalResourceAttributes returns the schema attributes for one
+// additional_resources entry: the per-entry node-config core (Option C) -
+// everything from the top-level schema EXCEPT the shared cluster-level
+// fields (cloud_id/cloud_name, idle_termination_minutes,
+// maximum_uptime_minutes), which stay top-level and apply to every entry.
+func additionalResourceAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"cloud_resource": schema.StringAttribute{
+			Required:            true,
+			Description:         "The cloud resource this entry targets. Must be unique across additional_resources, and distinct from the top-level cloud_resource when that is also explicitly set (validated at plan time). If the top-level cloud_resource is left unset, this is not checked against the cloud's implicit default resource, and a collision would only surface as a backend error at apply.",
+			MarkdownDescription: "The cloud resource this entry targets. Must be unique across `additional_resources`, and distinct from the top-level `cloud_resource` when that is also explicitly set (validated at plan time). If the top-level `cloud_resource` is left unset, this is not checked against the cloud's implicit default resource, and a collision would only surface as a backend error at apply.",
+		},
+		"zones": schema.ListAttribute{
+			ElementType:         types.StringType,
+			Optional:            true,
+			Description:         "Availability zones to consider for this entry. Defaults to all zones in the cloud's region.",
+			MarkdownDescription: "Availability zones to consider for this entry. Defaults to all zones in the cloud's region.",
+		},
+		"min_resources": schema.MapAttribute{
+			ElementType:         types.Float64Type,
+			Optional:            true,
+			Description:         "Total minimum logical resources across all nodes launched on this entry's cloud resource.",
+			MarkdownDescription: "Total minimum logical resources across all nodes launched on this entry's cloud resource.",
+		},
+		"max_resources": schema.MapAttribute{
+			ElementType:         types.Float64Type,
+			Optional:            true,
+			Description:         "Total maximum logical resources across all nodes launched on this entry's cloud resource.",
+			MarkdownDescription: "Total maximum logical resources across all nodes launched on this entry's cloud resource.",
+		},
+		"enable_cross_zone_scaling": schema.BoolAttribute{
+			Optional:            true,
+			Computed:            true,
+			Default:             booldefault.StaticBool(false),
+			Description:         "Allow instances launched on this entry's cloud resource to run across multiple zones. Defaults to false.",
+			MarkdownDescription: "Allow instances launched on this entry's cloud resource to run across multiple zones. Defaults to `false`.",
+		},
+		"advanced_instance_config": schema.StringAttribute{
+			Optional:            true,
+			Description:         "Advanced instance configurations for this entry, passed through to the cloud provider, as a JSON string. Use jsonencode() for HCL objects. Unlike the top-level advanced_instance_config, this can't be a native/dynamic value: additional_resources is a list, and Terraform doesn't support a dynamic type nested inside a list.",
+			MarkdownDescription: "Advanced instance configurations for this entry, passed through to the cloud provider, as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `advanced_instance_config`, this can't be a native/dynamic value: `additional_resources` is a list, and Terraform doesn't support a dynamic type nested inside a list.",
+		},
+		"flags": schema.StringAttribute{
+			Optional:            true,
+			Description:         "Advanced cluster-level flags for this entry, as a JSON string. Use jsonencode() for HCL objects. Unlike the top-level flags, this can't be a native/dynamic value, for the same reason as advanced_instance_config above.",
+			MarkdownDescription: "Advanced cluster-level flags for this entry, as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value, for the same reason as `advanced_instance_config` above.",
+		},
+		"auto_select_worker_config": schema.BoolAttribute{
+			Optional:            true,
+			Computed:            true,
+			Default:             booldefault.StaticBool(false),
+			Description:         "If set to true, worker node groups for this entry are chosen automatically based on workload, instead of from this entry's worker_nodes.",
+			MarkdownDescription: "If set to true, worker node groups for this entry are chosen automatically based on workload, instead of from this entry's `worker_nodes`.",
+		},
+		"head_node": schema.SingleNestedAttribute{
+			Required:            true,
+			Description:         "Configuration for the head node launched on this entry's cloud resource.",
+			MarkdownDescription: "Configuration for the head node launched on this entry's cloud resource.",
+			Attributes:          nodeConfigAttributes(),
+		},
+		"worker_nodes": schema.ListNestedAttribute{
+			Optional:            true,
+			Description:         "Configuration for the worker nodes launched on this entry's cloud resource. If not provided, this entry has no worker nodes (head node only).",
+			MarkdownDescription: "Configuration for the worker nodes launched on this entry's cloud resource. If not provided, this entry has no worker nodes (head node only).",
+			NestedObject: schema.NestedAttributeObject{
+				Attributes: workerNodeConfigAttributes(),
+			},
 		},
 	}
 }
@@ -389,6 +495,12 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 			Optional:            true,
 			Description:         "Labels to associate the node with for scheduling purposes.",
 			MarkdownDescription: "Labels to associate the node with for scheduling purposes.",
+		},
+		"required_labels": schema.MapAttribute{
+			ElementType:         types.StringType,
+			Optional:            true,
+			Description:         "Required labels that must be present on the node for scheduling purposes. Only 'ray.io/accelerator-type' and 'ray.io/tpu-topology' are supported. Setting an accelerator type requires a matching GPU or TPU count in required_resources.",
+			MarkdownDescription: "Required labels that must be present on the node for scheduling purposes. Only `ray.io/accelerator-type` and `ray.io/tpu-topology` are supported - any other key is rejected. Setting `ray.io/accelerator-type` to a non-TPU value requires `required_resources.gpu` to be set (> 0); setting it to a TPU value (starting with `TPU`) requires `required_resources.tpu` and `required_resources.tpu_hosts` (both > 0) plus a `ray.io/tpu-topology` value here or in `labels`.",
 		},
 		"advanced_instance_config": schema.StringAttribute{
 			Optional:            true,
@@ -495,6 +607,441 @@ func (r *ComputeConfigResource) Configure(ctx context.Context, req resource.Conf
 	}
 
 	r.client = client
+}
+
+// customResourceNamedSlots are the resource-map keys the API models as
+// dedicated numeric fields (matching resourceMapToAPI's own cpu/gpu/memory/
+// object_store_memory split) - these accept fractional values. Every other
+// key is a "custom resource" the backend stores as a whole integer (F4).
+var customResourceNamedSlots = map[string]struct{}{
+	"cpu": {}, "gpu": {}, "memory": {}, "object_store_memory": {},
+}
+
+// validMarketTypes are the market_type values the backend/SDK actually
+// understand (V3); anything else silently falls through to ON_DEMAND today
+// with no default case to catch it (resource_compute_config.go's own
+// market_type switch has none).
+var validMarketTypes = map[string]struct{}{
+	"ON_DEMAND": {}, "SPOT": {}, "PREFER_SPOT": {},
+}
+
+// ValidateConfig runs the compute_config-specific plan-time checks the
+// backend doesn't reliably enforce for us: F4 (hard - the backend truncates
+// a fractional custom resource amount, and since these are plain Optional
+// Map(Float64) attributes, Terraform Core's own post-apply consistency check
+// then crashes the apply on the resulting config-vs-state mismatch, live-
+// confirmed; a plan-time warning cannot prevent that crash, so this one must
+// reject), V1 (hard - the backend already 422s this, so this is free
+// hardening, just earlier and clearer), V2/V3 (warning - the backend accepts
+// both today, so a hard reject here would newly break a currently-applying
+// config; see approved-design.md's validator classification).
+func (r *ComputeConfigResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data ComputeConfigResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// F4 is scoped to per-node resources only (the confirmed crash case,
+	// below) - min_resources/max_resources already fail cleanly today on a
+	// fractional value (a real 422, just a more technical message than
+	// ideal; assayer's live adjacency check), so they are deliberately left
+	// out of scope here rather than guessed at with the wrong constraint
+	// shape (min/max_resources appears to require whole numbers even for
+	// named slots like CPU, unlike per-node resources).
+
+	if !data.HeadNode.IsNull() && !data.HeadNode.IsUnknown() {
+		var headNode NodeConfigModel
+		headDiags := data.HeadNode.As(ctx, &headNode, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(headDiags...)
+		if !headDiags.HasError() {
+			resp.Diagnostics.Append(validateNodeConfig(ctx, path.Root("head_node"), headNode)...)
+		}
+	}
+
+	// Option C: cloud_resource identifies a deployment_configs entry - the
+	// top-level cloud_resource and every additional_resources[].cloud_resource
+	// must all be distinct, or a read-back could not tell the entries apart
+	// either (splitDeploymentConfigsForRead matches by this exact name).
+	// additional_resources is new in this same release, so no existing config
+	// could already rely on a duplicate slipping through - a hard error here
+	// is non-breaking by the same test F4 used once its "currently succeeds"
+	// premise turned out false.
+	resp.Diagnostics.Append(validateCloudResourceUniqueness(ctx, data)...)
+
+	if data.WorkerNodes.IsNull() || data.WorkerNodes.IsUnknown() {
+		return
+	}
+
+	// F5: track every worker's EFFECTIVE name (explicit if set, else the
+	// instance_type it would default to) so a collision warning covers both
+	// shapes: (a) 2+ unnamed workers that would derive the identical default
+	// - disambiguateDefaultedWorkerNames auto-fixes this one, this just
+	// explains it happened; (b) 2+ workers with the SAME EXPLICIT name (or
+	// an explicit name that happens to match another worker's default) -
+	// nothing auto-fixes this one (renaming a user's explicit value would
+	// misrepresent config-vs-state, the same rule F4's crash taught us), so
+	// a plan-time warning is the ONLY place this ever surfaces: the backend
+	// silently stores both (live-confirmed) and Ray's name-keyed autoscaler
+	// dict would shadow one of them at cluster launch with no error anywhere.
+	type effectiveNameUser struct {
+		explicit bool
+	}
+	effectiveNames := map[string][]effectiveNameUser{}
+
+	for i, workerValue := range data.WorkerNodes.Elements() {
+		workerObj, ok := workerValue.(types.Object)
+		if !ok {
+			continue
+		}
+		var worker WorkerNodeConfigModel
+		workerDiags := workerObj.As(ctx, &worker, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(workerDiags...)
+		if workerDiags.HasError() {
+			continue
+		}
+
+		workerPath := path.Root("worker_nodes").AtListIndex(i)
+		resp.Diagnostics.Append(validateNodeConfig(ctx, workerPath, worker.NodeConfigModel)...)
+		resp.Diagnostics.Append(validateWorkerNodeBounds(workerPath, worker.MinNodes, worker.MaxNodes)...)
+		resp.Diagnostics.Append(validateMarketType(workerPath, worker.MarketType)...)
+
+		switch {
+		case !worker.Name.IsNull() && !worker.Name.IsUnknown():
+			name := worker.Name.ValueString()
+			effectiveNames[name] = append(effectiveNames[name], effectiveNameUser{explicit: true})
+		case !worker.InstanceType.IsNull() && !worker.InstanceType.IsUnknown():
+			name := worker.InstanceType.ValueString()
+			effectiveNames[name] = append(effectiveNames[name], effectiveNameUser{explicit: false})
+		}
+	}
+
+	for name, users := range effectiveNames {
+		if len(users) < 2 {
+			continue
+		}
+		anyExplicit := false
+		for _, u := range users {
+			if u.explicit {
+				anyExplicit = true
+				break
+			}
+		}
+		if anyExplicit {
+			resp.Diagnostics.AddAttributeWarning(
+				path.Root("worker_nodes"),
+				"Multiple Worker Groups Share the Same Name",
+				fmt.Sprintf(
+					"%d worker groups would resolve to the name %q, at least one of them explicitly configured. This provider does NOT rename an explicitly-set worker name, and the backend accepts duplicate names without error - but the cluster autoscaler indexes worker groups by name, so only one of these is likely to actually run. Give each worker group a distinct name to avoid this.",
+					len(users), name,
+				),
+			)
+		} else {
+			resp.Diagnostics.AddAttributeWarning(
+				path.Root("worker_nodes"),
+				"Multiple Worker Groups Would Derive the Same Name",
+				fmt.Sprintf(
+					"%d worker groups use instance_type %q and leave name unset. Each would otherwise derive the identical default name (the instance_type itself), which the backend's cluster autoscaler indexes by name - this provider automatically appends a disambiguating suffix (e.g. \"-2\") to keep them distinct, but setting explicit, distinct names is recommended for clarity.",
+					len(users), name,
+				),
+			)
+		}
+	}
+}
+
+// validateCloudResourceUniqueness ensures the top-level cloud_resource and
+// every additional_resources[].cloud_resource are pairwise distinct (Option
+// C): each cloud_resource identifies a single deployment_configs entry, so a
+// duplicate would be genuinely ambiguous - both at the backend (which entry
+// "wins") and in this provider's own read-back matching.
+func validateCloudResourceUniqueness(ctx context.Context, data ComputeConfigResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	users := map[string][]path.Path{}
+	if !data.CloudResource.IsNull() && !data.CloudResource.IsUnknown() {
+		if name := data.CloudResource.ValueString(); name != "" {
+			users[name] = append(users[name], path.Root("cloud_resource"))
+		}
+	}
+
+	if !data.AdditionalResources.IsNull() && !data.AdditionalResources.IsUnknown() {
+		for i, entryValue := range data.AdditionalResources.Elements() {
+			entryObj, ok := entryValue.(types.Object)
+			if !ok {
+				continue
+			}
+			var entry AdditionalResourceModel
+			entryDiags := entryObj.As(ctx, &entry, basetypes.ObjectAsOptions{})
+			diags.Append(entryDiags...)
+			if entryDiags.HasError() {
+				continue
+			}
+			if entry.CloudResource.IsNull() || entry.CloudResource.IsUnknown() {
+				continue
+			}
+			if name := entry.CloudResource.ValueString(); name != "" {
+				entryPath := path.Root("additional_resources").AtListIndex(i).AtName("cloud_resource")
+				users[name] = append(users[name], entryPath)
+			}
+		}
+	}
+
+	for name, paths := range users {
+		if len(paths) < 2 {
+			continue
+		}
+		for _, p := range paths {
+			diags.AddAttributeError(
+				p,
+				"Duplicate cloud_resource",
+				fmt.Sprintf(
+					"cloud_resource %q is used by %d entries (the top-level cloud_resource and/or additional_resources). Each cloud_resource identifies a single deployment configuration and may be used by at most one entry - give each a distinct cloud_resource.",
+					name, len(paths),
+				),
+			)
+		}
+	}
+
+	return diags
+}
+
+// validateNodeConfig runs the checks shared by head_node and each
+// worker_nodes element.
+func validateNodeConfig(ctx context.Context, nodePath path.Path, node NodeConfigModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	diags.Append(validateWholeNumberCustomResources(nodePath.AtName("resources"), node.Resources)...)
+	diags.Append(validateInstanceTypeXORRequiredResources(nodePath, node.InstanceType, node.RequiredResources)...)
+	diags.Append(validateRequiredLabels(ctx, nodePath, node.RequiredLabels, node.Labels, node.RequiredResources)...)
+	return diags
+}
+
+// allowedRequiredLabelKeys mirrors the backend's own ALLOWED_REQUIRED_LABEL_KEYS
+// constant (compute_templates.py) - the only two keys the API accepts here.
+var allowedRequiredLabelKeys = map[string]struct{}{
+	"ray.io/accelerator-type": {},
+	"ray.io/tpu-topology":     {},
+}
+
+// validateRequiredLabels implements A1's GPU/TPU cross-validation, mirroring
+// the backend's own root_validators (check_required_labels_keys,
+// check_gpu_accelerator_consistency, check_tpu_accelerator_consistency) so a
+// misconfigured required_labels value fails at plan time with the same
+// actionable message, rather than waiting for the apply-time 422. This is a
+// HARD error: required_labels is a brand new attribute with no existing
+// usage through this provider to protect, so there is no currently-applying
+// config this could break.
+func validateRequiredLabels(ctx context.Context, nodePath path.Path, requiredLabels types.Map, labels types.Map, requiredResources types.Object) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if requiredLabels.IsNull() || requiredLabels.IsUnknown() {
+		return diags
+	}
+
+	elements := requiredLabels.Elements()
+
+	var unsupportedKeys []string
+	for key := range elements {
+		if _, ok := allowedRequiredLabelKeys[key]; !ok {
+			unsupportedKeys = append(unsupportedKeys, key)
+		}
+	}
+	if len(unsupportedKeys) > 0 {
+		sort.Strings(unsupportedKeys)
+		diags.AddAttributeError(
+			nodePath.AtName("required_labels"),
+			"Unsupported required_labels Key",
+			fmt.Sprintf(
+				"required_labels has unsupported key(s): %s. Only \"ray.io/accelerator-type\" and \"ray.io/tpu-topology\" are supported.",
+				strings.Join(unsupportedKeys, ", "),
+			),
+		)
+		return diags // further checks below assume only allowed keys are present
+	}
+
+	acceleratorType := stringFromMap(elements, "ray.io/accelerator-type")
+	if acceleratorType == "" {
+		acceleratorType = stringFromMap(labels.Elements(), "ray.io/accelerator-type")
+	}
+	if acceleratorType == "" {
+		return diags
+	}
+
+	var reqRes RequiredResourcesModel
+	if !requiredResources.IsNull() && !requiredResources.IsUnknown() {
+		reqResDiags := requiredResources.As(ctx, &reqRes, basetypes.ObjectAsOptions{})
+		diags.Append(reqResDiags...)
+		if reqResDiags.HasError() {
+			return diags
+		}
+	}
+
+	if strings.HasPrefix(strings.ToUpper(acceleratorType), "TPU") {
+		var missing []string
+		if reqRes.TPU.IsNull() || reqRes.TPU.ValueInt64() <= 0 {
+			missing = append(missing, "required_resources.tpu (> 0)")
+		}
+		if reqRes.TPUHosts.IsNull() || reqRes.TPUHosts.ValueInt64() <= 0 {
+			missing = append(missing, "required_resources.tpu_hosts (> 0)")
+		}
+		hasTopology := stringFromMap(elements, "ray.io/tpu-topology") != "" || stringFromMap(labels.Elements(), "ray.io/tpu-topology") != ""
+		if !hasTopology {
+			missing = append(missing, "ray.io/tpu-topology (in required_labels or labels)")
+		}
+		if len(missing) > 0 {
+			diags.AddAttributeError(
+				nodePath.AtName("required_labels"),
+				"Incomplete TPU Configuration",
+				fmt.Sprintf(
+					"required_labels sets ray.io/accelerator-type to %q, a TPU accelerator type, but is missing: %s.",
+					acceleratorType, strings.Join(missing, ", "),
+				),
+			)
+		}
+		return diags
+	}
+
+	if reqRes.GPU.IsNull() || reqRes.GPU.ValueInt64() <= 0 {
+		diags.AddAttributeError(
+			nodePath.AtName("required_labels"),
+			"Missing GPU Count for Accelerator Type",
+			fmt.Sprintf(
+				"required_labels sets ray.io/accelerator-type to %q, which requires required_resources.gpu to be set to a value greater than 0.",
+				acceleratorType,
+			),
+		)
+	}
+	return diags
+}
+
+// stringFromMap returns the string value of key in elements, or "" if absent,
+// null, or unknown.
+func stringFromMap(elements map[string]attr.Value, key string) string {
+	v, ok := elements[key]
+	if !ok {
+		return ""
+	}
+	strVal, ok := v.(types.String)
+	if !ok || strVal.IsNull() || strVal.IsUnknown() {
+		return ""
+	}
+	return strVal.ValueString()
+}
+
+// validateWholeNumberCustomResources implements F4: reject a non-integer
+// value on any resource-map key the backend doesn't treat as a named numeric
+// slot.
+func validateWholeNumberCustomResources(mapPath path.Path, resources types.Map) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if resources.IsNull() || resources.IsUnknown() {
+		return diags
+	}
+
+	for key, value := range resources.Elements() {
+		floatVal, ok := value.(types.Float64)
+		if !ok || floatVal.IsNull() || floatVal.IsUnknown() {
+			continue
+		}
+		if _, isNamedSlot := customResourceNamedSlots[strings.ToLower(key)]; isNamedSlot {
+			continue
+		}
+
+		v := floatVal.ValueFloat64()
+		if v == math.Trunc(v) {
+			continue
+		}
+
+		diags.AddAttributeError(
+			mapPath.AtMapKey(key),
+			"Custom Resource Amount Must Be a Whole Number",
+			fmt.Sprintf(
+				"The backend stores custom resource amounts as whole integers, so %g would be silently truncated to %d - which Terraform Core then rejects as an inconsistent result after apply, since %v is a plain (non-Computed) attribute. Use a whole number instead (e.g. %d).",
+				v, int64(math.Trunc(v)), mapPath, int64(math.Trunc(v)),
+			),
+		)
+	}
+	return diags
+}
+
+// validateWorkerNodeBounds implements V1: max_nodes must be at least 1 and at
+// least min_nodes. The backend already 422s both violations today, so this is
+// free hardening - a HARD error, not a warning.
+func validateWorkerNodeBounds(workerPath path.Path, minNodes, maxNodes types.Int64) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if maxNodes.IsNull() || maxNodes.IsUnknown() {
+		return diags
+	}
+
+	max := maxNodes.ValueInt64()
+	if max < 1 {
+		diags.AddAttributeError(
+			workerPath.AtName("max_nodes"),
+			"Invalid max_nodes",
+			fmt.Sprintf("max_nodes must be at least 1, got %d.", max),
+		)
+		return diags
+	}
+
+	if minNodes.IsNull() || minNodes.IsUnknown() {
+		return diags
+	}
+	if min := minNodes.ValueInt64(); max < min {
+		diags.AddAttributeError(
+			workerPath.AtName("max_nodes"),
+			"Invalid max_nodes",
+			fmt.Sprintf("max_nodes (%d) must be greater than or equal to min_nodes (%d).", max, min),
+		)
+	}
+	return diags
+}
+
+// validateInstanceTypeXORRequiredResources implements V2 as a WARNING: the
+// backend accepts both instance_type and required_resources set today
+// (live-confirmed - it stores both side-by-side with no deterministic
+// preference), so rejecting this outright would newly break a
+// currently-applying config. instance_type == "custom" is the documented
+// pairing with required_resources, not a conflict.
+func validateInstanceTypeXORRequiredResources(nodePath path.Path, instanceType types.String, requiredResources types.Object) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	hasInstanceType := !instanceType.IsNull() && !instanceType.IsUnknown() &&
+		instanceType.ValueString() != "" && instanceType.ValueString() != "custom"
+	hasRequiredResources := !requiredResources.IsNull() && !requiredResources.IsUnknown()
+
+	if hasInstanceType && hasRequiredResources {
+		diags.AddAttributeWarning(
+			nodePath.AtName("required_resources"),
+			"instance_type and required_resources Both Set",
+			fmt.Sprintf(
+				"Both instance_type (%q) and required_resources are set on %v. The backend stores both values side-by-side; which one actually governs node selection at cluster launch is not deterministic. Set only one to avoid ambiguity - use required_resources with instance_type left unset (or set to \"custom\") for a free pod shape, or set instance_type alone otherwise.",
+				instanceType.ValueString(), nodePath,
+			),
+		)
+	}
+	return diags
+}
+
+// validateMarketType implements V3 as a WARNING: the wire has no market_type
+// field at all (only use_spot/fallback_to_ondemand booleans our own switch
+// computes), so an unrecognized value here is a provider-side gap, not
+// something the backend could ever reject - it silently falls through to
+// ON_DEMAND today. Warning, not error: this config applies successfully
+// today, so rejecting it would be a breaking change.
+func validateMarketType(workerPath path.Path, marketType types.String) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if marketType.IsNull() || marketType.IsUnknown() {
+		return diags
+	}
+
+	v := marketType.ValueString()
+	if _, ok := validMarketTypes[v]; ok {
+		return diags
+	}
+
+	diags.AddAttributeWarning(
+		workerPath.AtName("market_type"),
+		"Unrecognized market_type",
+		fmt.Sprintf("market_type %q is not recognized (expected one of ON_DEMAND, SPOT, PREFER_SPOT). It will be silently treated as ON_DEMAND.", v),
+	)
+	return diags
 }
 
 // buildComputeConfigRequest builds the API request body for creating/updating a compute config.
@@ -647,6 +1194,14 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 	if !plan.WorkerNodes.IsNull() {
 		workerNodeElements := plan.WorkerNodes.Elements()
 		workerConfigs := make([]map[string]interface{}, 0, len(workerNodeElements))
+		// F5: indices into workerConfigs whose "name" we derived ourselves
+		// (the user left it unset) - these are the only ones safe to rename
+		// on a collision. A name the user set explicitly must reach the API
+		// unchanged, or Terraform Core would reject the apply the same way
+		// it rejects F4's fractional custom_resources (config != state on a
+		// non-Computed... well, name IS Computed, but UseNonNullStateForUnknown
+		// means an explicitly-configured value still must survive verbatim).
+		var defaultedNameIndices []int
 
 		for _, workerNodeValue := range workerNodeElements {
 			workerNodeObj, ok := workerNodeValue.(types.Object)
@@ -661,9 +1216,14 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 				return nil, ""
 			}
 			if workerConfig != nil {
+				if nameAttr, ok := workerNodeObj.Attributes()["name"].(types.String); ok && nameAttr.IsNull() {
+					defaultedNameIndices = append(defaultedNameIndices, len(workerConfigs))
+				}
 				workerConfigs = append(workerConfigs, workerConfig)
 			}
 		}
+
+		disambiguateDefaultedWorkerNames(workerConfigs, defaultedNameIndices)
 
 		if len(workerConfigs) > 0 {
 			createConfig.WorkerNodeTypes = workerConfigs
@@ -683,7 +1243,38 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		deploymentConfig.CloudDeployment = plan.CloudResource.ValueString()
 	}
 
-	createConfig.DeploymentConfigs = []cloudDeploymentComputeConfig{deploymentConfig}
+	deploymentConfigs := []cloudDeploymentComputeConfig{deploymentConfig}
+
+	// Option C: additional_resources - each entry becomes its own
+	// deployment_configs entry alongside the primary one above. The current
+	// Create path already unconditionally sends a one-entry deployment_configs
+	// list (the primary, built above) for every single-resource config, so
+	// this EXTENDS that existing mechanism rather than introducing it - the
+	// common (no additional_resources) case is unaffected.
+	if !plan.AdditionalResources.IsNull() {
+		for _, entryValue := range plan.AdditionalResources.Elements() {
+			entryObj, ok := entryValue.(types.Object)
+			if !ok {
+				AddConfigError(diags, "Invalid additional_resources Entry", "Expected types.Object for additional_resources entry")
+				return nil, ""
+			}
+			var entry AdditionalResourceModel
+			entryDiags := entryObj.As(ctx, &entry, basetypes.ObjectAsOptions{})
+			diags.Append(entryDiags...)
+			if entryDiags.HasError() {
+				return nil, ""
+			}
+
+			additionalDeploymentConfig, err := additionalResourceToDeploymentConfig(ctx, entry)
+			if err != nil {
+				AddConfigError(diags, "Failed to Convert additional_resources Entry", err.Error())
+				return nil, ""
+			}
+			deploymentConfigs = append(deploymentConfigs, additionalDeploymentConfig)
+		}
+	}
+
+	createConfig.DeploymentConfigs = deploymentConfigs
 
 	createRequest := &computeTemplateRequest{
 		Name:       plan.Name.ValueString(),
@@ -804,7 +1395,39 @@ func populateComputedFieldsFromResponse(
 		plan.MaximumUptimeMinutes = types.Int64Null()
 	}
 
-	eff := resolveEffectiveComputeConfig(configData)
+	// Option C: same primary/additional split Read uses, but matched against
+	// the PLAN's own cloud_resource/additional_resources as "prior" instead of
+	// state - this is the resource's first apply (Create) or a brand-new
+	// version (Update), so there is no state to lean on yet, same reasoning as
+	// priorHeadNode/priorWorkerNodes above. cloud_resource is Required on
+	// additional_resources, so the plan always has a real name to match each
+	// response entry against - no ambiguity the way a stale/absent state
+	// value could introduce.
+	var eff effectiveComputeConfig
+	if len(configData.DeploymentConfigs) <= 1 {
+		eff = resolveEffectiveComputeConfig(configData)
+		plan.AdditionalResources = types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()})
+	} else {
+		priorByName := additionalResourcesToPriorMap(ctx, plan.AdditionalResources, diags)
+		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(configData.DeploymentConfigs, plan.CloudResource.ValueString(), priorByName)
+		if !ok {
+			// F7: this provider only ever sends entries with a real
+			// cloud_deployment name (buildComputeConfigRequest always sets
+			// one), so an unnamed entry coming back here means the backend
+			// itself returned a shape we don't understand - surface it loudly
+			// rather than guess.
+			AddConfigError(diags, "Ambiguous Multi-Resource Compute Config",
+				"The API response has multiple deployment_configs entries, but at least one has no cloud_deployment name, so this provider cannot determine which entry is primary versus which are additional_resources.")
+			return
+		}
+		eff = resolveEffectiveComputeConfigWithOverride(configData, primaryEntry)
+		// forImport=false: the plan already has each entry's real
+		// advanced_instance_config/flags (they are plain Optional attributes,
+		// not write-only), so carry them forward from the matched prior
+		// exactly like head_node/worker_nodes' sub-attributes do, rather than
+		// re-deriving from the response.
+		plan.AdditionalResources = buildAdditionalResourcesList(ctx, additionalEntries, priorByName, false, diags)
+	}
 
 	if eff.HeadNodeType != nil {
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, eff.HeadNodeType)
@@ -842,6 +1465,10 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	priorWorkerNodes := state.WorkerNodes
 	priorMinResources := state.MinResources
 	priorMaxResources := state.MaxResources
+	// Option C: prior cloud_resource/additional_resources, used to match
+	// deployment_configs entries back to their roles on a multi-resource read.
+	priorCloudResourceForSplit := state.CloudResource.ValueString()
+	priorAdditionalResources := state.AdditionalResources
 
 	// Use ConfigID for API lookup (version-specific ID)
 	// Fall back to ID if ConfigID is not set (for backwards compatibility or import)
@@ -851,16 +1478,23 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Make API call to get compute config
+	// F3: StatusNotFound is deliberately NOT in the accepted list - a genuine
+	// 404 must come back as an error (wrapped in ErrNotFound by
+	// DoRequestRaw), not a "successful" zero-valued response, or this Read
+	// would silently do nothing for a config deleted out of band (bug A).
 	apiResult, err := DoRequestAndParse[computeTemplateResponse](
 		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", lookupID), nil,
-		http.StatusOK, http.StatusNotFound,
+		http.StatusOK,
 	)
 	if err != nil {
-		if apiResult == nil {
+		if errors.Is(err, ErrNotFound) {
 			log.Printf("[WARN] Compute config not found, removing from state: config_id=%s", lookupID)
 			resp.State.RemoveResource(ctx)
 			return
 		}
+		// F3 (bug B): anything other than a genuine 404 - a transient 500, a
+		// network error, a permission loss - must surface as a diagnostic,
+		// not silently remove an otherwise-healthy resource from state.
 		AddAPIError(&resp.Diagnostics, "read compute config", err)
 		return
 	}
@@ -919,7 +1553,31 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		state.MaximumUptimeMinutes = types.Int64Null()
 	}
 
-	eff := resolveEffectiveComputeConfig(configData)
+	// Option C: 0 or 1 deployment_configs entries is the common single-resource
+	// case, resolved exactly as before this fix - byte-identical, untouched.
+	// 2+ entries means additional_resources is in play: figure out which entry
+	// is primary (by name against prior state, not position - the backend's
+	// response order is not guaranteed) and flatten the rest into
+	// additional_resources.
+	var eff effectiveComputeConfig
+	if len(configData.DeploymentConfigs) <= 1 {
+		eff = resolveEffectiveComputeConfig(configData)
+		state.AdditionalResources = types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()})
+	} else {
+		priorByName := additionalResourcesToPriorMap(ctx, priorAdditionalResources, &resp.Diagnostics)
+		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(configData.DeploymentConfigs, priorCloudResourceForSplit, priorByName)
+		if !ok {
+			// F7: an entry with no cloud_deployment name can't be placed as
+			// either primary or additional - surface a loud diagnostic rather
+			// than silently landing on partial/misleading state.
+			AddConfigError(&resp.Diagnostics, "Ambiguous Multi-Resource Compute Config",
+				fmt.Sprintf("Compute config %q has multiple deployment_configs entries, but at least one has no cloud_deployment name, so this provider cannot determine which entry is primary versus which are additional_resources. This shape is not supported for read - only entries with a resolvable cloud_deployment name can be represented.", lookupID))
+			return
+		}
+		eff = resolveEffectiveComputeConfigWithOverride(configData, primaryEntry)
+		state.AdditionalResources = buildAdditionalResourcesList(ctx, additionalEntries, priorByName, false, &resp.Diagnostics)
+	}
+
 	if eff.CloudDeployment != "" {
 		state.CloudResource = types.StringValue(eff.CloudDeployment)
 	}
@@ -1024,7 +1682,7 @@ func maskNodeFromPrior(ctx context.Context, apiNode types.Object, priorNode type
 		masked[k] = v
 	}
 
-	for _, name := range []string{"resources", "required_resources", "labels", "advanced_instance_config", "flags", "cloud_deployment"} {
+	for _, name := range []string{"resources", "required_resources", "labels", "required_labels", "advanced_instance_config", "flags", "cloud_deployment"} {
 		if prior, ok := priorAttrs[name]; ok && prior != nil && prior.IsNull() {
 			if apiVal, ok := masked[name]; ok {
 				masked[name] = nullValueOf(apiVal)
@@ -1091,6 +1749,15 @@ func maskWorkerNodesFromPrior(ctx context.Context, apiWorkers types.List, priorW
 	if priorWorkers.IsNull() || priorWorkers.IsUnknown() || apiWorkers.IsNull() {
 		return apiWorkers
 	}
+
+	// F6: reorder the API's response to match prior state's order BY NAME
+	// before pairing elements positionally below - the backend does not
+	// promise to echo worker order back (and Ray's own scheduler is
+	// name-keyed, not order-sensitive, so it has no reason to), so a plain
+	// index pairing would both mismatch which prior element masks which API
+	// element AND leave state in whatever order the API happened to return,
+	// showing a spurious diff against the user's own configured order.
+	apiWorkers = reorderWorkersToMatchPrior(ctx, apiWorkers, priorWorkers)
 
 	apiElems := apiWorkers.Elements()
 	priorElems := priorWorkers.Elements()
@@ -1283,9 +1950,37 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import accepts the version-specific config ID (e.g., "cpt_xxx")
-	// We set it as config_id, and Read will populate id (name) from the API response
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), req.ID)...)
+	// A2/GAP-4: classify the import id BEFORE any API call - the backend
+	// returns the IDENTICAL "not found" response for a malformed id and a
+	// well-formed-but-nonexistent one (live-confirmed), so a distinct
+	// "malformed" diagnostic can only come from client-side classification,
+	// never from inspecting the API response after the fact.
+	kind, name, version := classifyComputeConfigImportID(req.ID)
+
+	configID := req.ID
+	switch kind {
+	case importIDKindMalformed:
+		AddConfigError(&resp.Diagnostics, "Unrecognized Import ID",
+			fmt.Sprintf("%q is not a recognized compute config import id. Use the version-specific config_id (e.g. `cpt_abc123`) or `name:version` (e.g. `my-compute-config:3`).", req.ID))
+		return
+	case importIDKindNameVersion:
+		resolvedID, err := resolveComputeConfigImportID(ctx, r.client, name, version)
+		if err != nil {
+			AddAPIError(&resp.Diagnostics, "resolve compute config name:version", err)
+			return
+		}
+		if resolvedID == "" {
+			AddConfigError(&resp.Diagnostics, "Compute Config Not Found",
+				fmt.Sprintf("No compute config named %q exists at version %d.", name, version))
+			return
+		}
+		configID = resolvedID
+	}
+
+	// Import accepts the version-specific config ID (e.g., "cpt_xxx"), or a
+	// name:version resolved to one just above (A2). We set it as config_id,
+	// and Read will populate id (name) from the API response.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), configID)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -1302,14 +1997,15 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 	// CC11: this fetch doubles as an early, clear rejection of importing an
 	// already-archived config, instead of importing a phantom that Read would
 	// silently remove on the very next refresh.
+	// F3: StatusNotFound deliberately excluded, same reasoning as Read - see there.
 	apiResult, err := DoRequestAndParse[computeTemplateResponse](
-		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", req.ID), nil,
-		http.StatusOK, http.StatusNotFound,
+		ctx, r.client, "GET", fmt.Sprintf("/api/v2/compute_templates/%s", configID), nil,
+		http.StatusOK,
 	)
 	if err != nil {
-		if apiResult == nil {
+		if errors.Is(err, ErrNotFound) {
 			AddConfigError(&resp.Diagnostics, "Compute Config Not Found",
-				fmt.Sprintf("No compute config exists with ID %q.", req.ID))
+				fmt.Sprintf("No compute config exists with ID %q. Find the correct config_id via the anyscale_compute_config data source or `anyscale compute-config get <name>`.", configID))
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "import compute config", err)
@@ -1319,11 +2015,46 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 	resultData := apiResult.Result
 	if resultData.ArchivedAt != "" {
 		AddConfigError(&resp.Diagnostics, "Compute Config Archived",
-			fmt.Sprintf("Compute config %q has been archived and cannot be imported.", req.ID))
+			fmt.Sprintf("Compute config %q has been archived and cannot be imported. If you intended a different, non-archived version, look up available versions via the anyscale_compute_config data source's `versions` attribute or the CLI, and import that version's config_id instead.", configID))
 		return
 	}
 
-	eff := resolveEffectiveComputeConfig(resultData.Config)
+	// Option C: same primary/additional split as Read (see the comment there),
+	// but with no prior state at all to match against - every entry is
+	// "unmatched", so the deterministic fallback (first entry in response
+	// order = primary, rest = additional, name-sorted) decides the split for a
+	// cold multi-resource import. There is no signal in an import ID alone
+	// that could indicate which entry the user intends as top-level; this is
+	// a disclosed limitation, not an oversight.
+	var eff effectiveComputeConfig
+	if len(resultData.Config.DeploymentConfigs) <= 1 {
+		eff = resolveEffectiveComputeConfig(resultData.Config)
+	} else {
+		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(resultData.Config.DeploymentConfigs, "", nil)
+		if !ok {
+			AddConfigError(&resp.Diagnostics, "Ambiguous Multi-Resource Compute Config",
+				fmt.Sprintf("Compute config %q has multiple deployment_configs entries, but at least one has no cloud_deployment name, so this provider cannot determine which entry is primary versus which are additional_resources. This shape is not supported for import - only entries with a resolvable cloud_deployment name can be represented.", configID))
+			return
+		}
+		eff = resolveEffectiveComputeConfigWithOverride(resultData.Config, primaryEntry)
+
+		// CC12 applies per-entry too: recover each additional entry's own
+		// flags/advanced_instance_config directly from the API here, exactly
+		// once - ordinary Read never refreshes them (see the NOTE below), so
+		// import is the only unambiguous chance for these entries just like it
+		// is for the primary/top-level ones.
+		additionalList := buildAdditionalResourcesList(ctx, additionalEntries, nil, true, &resp.Diagnostics)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("additional_resources"), additionalList)...)
+	}
+
+	// A3: the wire has no cloud-name field, only cloud_id - reverse-resolve
+	// it here so a cloud_name-based config doesn't show a benign but real
+	// null->configured diff on the very first plan after import. Best-effort:
+	// if the lookup fails, cloud_name is simply left unset (null), the same
+	// "not critical" tolerance the data source's equivalent lookup uses.
+	if cloudName, ok := resolveCloudIDToName(ctx, r.client, resultData.Config.CloudID); ok {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_name"), types.StringValue(cloudName))...)
+	}
 
 	// Top-level flags: recover everything except the keys that surface as
 	// their own attributes (min_resources, max_resources, cross-zone
@@ -1432,7 +2163,7 @@ func resourceMapToAPI(resources types.Map) map[string]interface{} {
 // Only the flags parse failure is a hard error, matching the original two copies' behavior -
 // advanced_instance_config's parse failure is silently skipped there too, not an inconsistency
 // introduced here.
-func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredResources types.Object, labels types.Map, advancedInstanceConfig types.String, cloudDeployment types.Object, flags types.String) (map[string]interface{}, error) {
+func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredResources types.Object, labels types.Map, requiredLabels types.Map, advancedInstanceConfig types.String, cloudDeployment types.Object, flags types.String) (map[string]interface{}, error) {
 	config := map[string]interface{}{}
 
 	if resourcesMap := resourceMapToAPI(resources); len(resourcesMap) > 0 {
@@ -1450,7 +2181,14 @@ func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredRes
 				requiredResourcesMap["cpu"] = reqRes.CPU.ValueInt64()
 			}
 			if !reqRes.Memory.IsNull() {
-				requiredResourcesMap["memory"] = reqRes.Memory.ValueString()
+				// F2: the real API only accepts an integer byte count, even
+				// though our schema documents (and the SDK accepts) a
+				// Kubernetes-style unit string like "4Gi".
+				memoryBytes, err := parseMemoryToBytes(reqRes.Memory.ValueString())
+				if err != nil {
+					return nil, err
+				}
+				requiredResourcesMap["memory"] = memoryBytes
 			}
 			if !reqRes.GPU.IsNull() {
 				requiredResourcesMap["gpu"] = reqRes.GPU.ValueInt64()
@@ -1488,6 +2226,20 @@ func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredRes
 		}
 	}
 
+	// A1: required_labels - same conversion shape as labels.
+	if !requiredLabels.IsNull() {
+		requiredLabelsMap := make(map[string]interface{})
+		elements := requiredLabels.Elements()
+		for key, value := range elements {
+			if strVal, ok := value.(types.String); ok && !strVal.IsNull() {
+				requiredLabelsMap[key] = strVal.ValueString()
+			}
+		}
+		if len(requiredLabelsMap) > 0 {
+			config["required_labels"] = requiredLabelsMap
+		}
+	}
+
 	// Add advanced_instance_config (JSON string) - map to API field name
 	if !advancedInstanceConfig.IsNull() && advancedInstanceConfig.ValueString() != "" {
 		var advancedConfig map[string]interface{}
@@ -1496,6 +2248,19 @@ func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredRes
 		}
 	}
 
+	flagsMap := map[string]interface{}{}
+	if !flags.IsNull() && flags.ValueString() != "" {
+		if err := json.Unmarshal([]byte(flags.ValueString()), &flagsMap); err != nil {
+			return nil, err
+		}
+	}
+
+	// F1: cloud_deployment has no top-level field on the real API's node
+	// model (ComputeNodeType) - it must be nested inside this node's flags
+	// under the literal key "cloud_deployment", matching how the backend and
+	// our own flatten (apiCloudDeploymentToTerraform) already read it back.
+	// Setting it as a config[...] sibling instead 422s ("extra fields not
+	// permitted") every single time, live-confirmed (G1g).
 	if !cloudDeployment.IsNull() {
 		var cloudDep CloudDeploymentModel
 		diags := cloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
@@ -1516,15 +2281,8 @@ func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredRes
 			}
 
 			if len(cloudDepMap) > 0 {
-				config["cloud_deployment"] = cloudDepMap
+				flagsMap["cloud_deployment"] = cloudDepMap
 			}
-		}
-	}
-
-	flagsMap := map[string]interface{}{}
-	if !flags.IsNull() && flags.ValueString() != "" {
-		if err := json.Unmarshal([]byte(flags.ValueString()), &flagsMap); err != nil {
-			return nil, err
 		}
 	}
 
@@ -1547,7 +2305,7 @@ func nodeConfigToAPI(ctx context.Context, nodeObj types.Object) (map[string]inte
 		return nil, fmt.Errorf("failed to convert node config: %v", diags)
 	}
 
-	config, err := commonNodeFieldsToAPI(ctx, node.Resources, node.RequiredResources, node.Labels, node.AdvancedInstanceConfig, node.CloudDeployment, node.Flags)
+	config, err := commonNodeFieldsToAPI(ctx, node.Resources, node.RequiredResources, node.Labels, node.RequiredLabels, node.AdvancedInstanceConfig, node.CloudDeployment, node.Flags)
 	if err != nil {
 		return nil, err
 	}
@@ -1570,7 +2328,7 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 		return nil, fmt.Errorf("failed to convert worker node config: %v", diags)
 	}
 
-	config, err := commonNodeFieldsToAPI(ctx, worker.Resources, worker.RequiredResources, worker.Labels, worker.AdvancedInstanceConfig, worker.CloudDeployment, worker.Flags)
+	config, err := commonNodeFieldsToAPI(ctx, worker.Resources, worker.RequiredResources, worker.Labels, worker.RequiredLabels, worker.AdvancedInstanceConfig, worker.CloudDeployment, worker.Flags)
 	if err != nil {
 		return nil, err
 	}
@@ -1658,6 +2416,14 @@ func commonNodeAttrsFromAPI(ctx context.Context, apiMap map[string]interface{}) 
 		labels = labelsMap
 	}
 
+	// A1: required_labels - same shape/handling as labels.
+	requiredLabels := types.MapNull(types.StringType)
+	if reqLbl, ok := apiMap["required_labels"].(map[string]interface{}); ok {
+		reqLabelsMap, reqLabelsDiags := InterfaceMapToString(ctx, reqLbl)
+		diags.Append(reqLabelsDiags...)
+		requiredLabels = reqLabelsMap
+	}
+
 	// Extract advanced_instance_config from advanced_configurations_json
 	advancedInstanceConfig := types.StringNull()
 	if advConfig := getAdvancedConfigJSON(apiMap); advConfig != nil {
@@ -1698,6 +2464,7 @@ func commonNodeAttrsFromAPI(ctx context.Context, apiMap map[string]interface{}) 
 		"resources":                resources,
 		"required_resources":       requiredResources,
 		"labels":                   labels,
+		"required_labels":          requiredLabels,
 		"advanced_instance_config": advancedInstanceConfig,
 		"flags":                    flagsStr,
 		"cloud_deployment":         cloudDeployment,
@@ -1834,6 +2601,7 @@ func nodeConfigAttrTypes() map[string]attr.Type {
 		"resources":                types.MapType{ElemType: types.Float64Type},
 		"required_resources":       requiredResourcesObjectType(),
 		"labels":                   types.MapType{ElemType: types.StringType},
+		"required_labels":          types.MapType{ElemType: types.StringType},
 		"advanced_instance_config": types.StringType,
 		"flags":                    types.StringType,
 		"cloud_deployment":         cloudDeploymentObjectType(),
@@ -1849,6 +2617,23 @@ func workerNodeConfigAttrTypes() map[string]attr.Type {
 	attrs["max_nodes"] = types.Int64Type
 	attrs["market_type"] = types.StringType
 	return attrs
+}
+
+// additionalResourceAttrTypes returns the attr.Type shape matching
+// AdditionalResourceModel (Option C's additional_resources entry).
+func additionalResourceAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"cloud_resource":            types.StringType,
+		"zones":                     types.ListType{ElemType: types.StringType},
+		"min_resources":             types.MapType{ElemType: types.Float64Type},
+		"max_resources":             types.MapType{ElemType: types.Float64Type},
+		"enable_cross_zone_scaling": types.BoolType,
+		"advanced_instance_config":  types.StringType,
+		"flags":                     types.StringType,
+		"auto_select_worker_config": types.BoolType,
+		"head_node":                 types.ObjectType{AttrTypes: nodeConfigAttrTypes()},
+		"worker_nodes":              types.ListType{ElemType: types.ObjectType{AttrTypes: workerNodeConfigAttrTypes()}},
+	}
 }
 
 // apiResourcesToTerraformMap converts API resources to Terraform Map of Float64

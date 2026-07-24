@@ -233,6 +233,11 @@ func dataSourceNodeAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			MarkdownDescription: "Labels associated with the node for scheduling purposes.",
 		},
+		"required_labels": schema.MapAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.",
+		},
 		"advanced_instance_config": schema.StringAttribute{
 			Computed:            true,
 			MarkdownDescription: "Advanced instance configuration passed through to the cloud provider, as a JSON string.",
@@ -622,6 +627,12 @@ type computeConfigSearchResult struct {
 	CreatedAt string  `json:"created_at"`
 	Anonymous bool    `json:"anonymous"`
 	Version   float64 `json:"version"`
+	// Config.CloudID is only used by A2's ambiguous-name-across-clouds check
+	// (resolveComputeConfigImportID) - every other caller of this struct
+	// ignores it.
+	Config struct {
+		CloudID string `json:"cloud_id"`
+	} `json:"config"`
 }
 
 // decodeComputeConfigSearchPage decodes one page of a cluster_computes/search response.

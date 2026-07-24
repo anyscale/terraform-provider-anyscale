@@ -101,6 +101,7 @@ Read-Only:
 - `flags` (String) Node-level flags, as a JSON string.
 - `instance_type` (String) Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP).
 - `labels` (Map of String) Labels associated with the node for scheduling purposes.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.
 - `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--head_node--required_resources))
 - `resources` (Map of Number) Logical resources available on this node.
 
@@ -144,6 +145,7 @@ Read-Only:
 - `max_nodes` (Number) Maximum number of nodes of this type.
 - `min_nodes` (Number) Minimum number of nodes of this type kept running.
 - `name` (String) Unique name of this worker group.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.
 - `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
 - `resources` (Map of Number) Logical resources available on this node.
 
