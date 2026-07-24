@@ -38,6 +38,11 @@ Terraform's point of view — no plan-time replacement. The previous version is 
 archived when this happens; it stays in your organization's compute config history, superseded but not
 deleted. Only destroying or replacing the resource archives a version.
 
+Archiving is scoped to the whole `(name, cloud_id)` lineage, not just the one version Terraform happens to
+be tracking: destroying or replacing this resource archives **every** version under that name, including any
+version a teammate or the CLI/console created out-of-band that Terraform never knew about. There is no way
+to archive a single version in isolation — archiving a name always takes its entire history with it.
+
 If a compute config is archived outside Terraform — through the Anyscale CLI or web console — the next
 `plan` or `apply` detects this and removes it from state, the same as any other resource that
 disappears out from under Terraform; it then plans to create it fresh rather than erroring.
@@ -84,6 +89,28 @@ and it's easy to reach for the wrong one:
 
 They aren't interchangeable, and setting one doesn't imply anything about the other.
 
+## Worker group names must be unique
+
+The compute config itself tolerates two worker groups sharing the same `name` — both are stored and read
+back as distinct entries, nothing merges or is lost at the Terraform/API layer. The risk is downstream: the
+cluster's own autoscaler organizes worker groups by name, and a name genuinely cannot exist twice there, so
+at cluster launch, whichever duplicate-named group is processed last would shadow the other — you configure
+two worker groups and only ever get one running, with no error anywhere. This provider cannot verify that
+part directly (it would require launching a real cluster), so treat it as a real, not just theoretical, risk.
+
+Leaving `name` unset on two or more `worker_nodes` entries that share the same `instance_type` is the case
+this provider actively protects you from: each unnamed entry would otherwise derive the identical default
+name (the `instance_type` itself). The provider automatically appends a disambiguating suffix (`-2`, `-3`,
+and so on) to keep unset names distinct, and warns at plan time when it does so. Setting explicit, distinct
+names is still recommended for clarity, but omitting them no longer risks a silent collision.
+
+~> **Warning:** explicitly setting the *same* `name` on two different `worker_nodes` entries — typically by
+mistake, such as a copy-pasted block — is not auto-corrected. The provider never overwrites a name you set
+yourself, since silently changing a value you explicitly configured would misrepresent your own
+configuration back to you. It does warn you at plan time when this happens (naming the colliding worker
+groups and explaining why), but the plan still proceeds — give every worker group its own distinct name
+rather than relying on the warning as a substitute for fixing it.
+
 ## `flags` and `advanced_instance_config`: write-only at the top level, masked per-node
 
 `flags` and `advanced_instance_config` each appear in two places, and Terraform tracks the two
@@ -98,11 +125,11 @@ placements differently — this split is the part that isn't obvious from the sc
   value the API is free to re-represent differently than you wrote it — not an oversight.
 - **The per-node `flags` and `advanced_instance_config`, nested inside `head_node` and each
   `worker_nodes` entry, are not write-only.** They are *masked*, exactly like the other per-node
-  fields (`resources`, `required_resources`, `labels`, `cloud_deployment`): the provider keeps them
-  null in state while you leave them unset, but reads the API's value back once you set them — so a
-  per-node value you configure participates in ordinary drift detection, and can show a diff if the
-  API normalizes it differently than you wrote. Import is the one case where the per-node pair behaves
-  differently from those other four masked fields; see [Importing an existing compute
+  fields (`resources`, `required_resources`, `labels`, `required_labels`, `cloud_deployment`): the
+  provider keeps them null in state while you leave them unset, but reads the API's value back once
+  you set them — so a per-node value you configure participates in ordinary drift detection, and can
+  show a diff if the API normalizes it differently than you wrote. All of them, per-node and top-level
+  alike, are recovered on import; see [Importing an existing compute
   config](#importing-an-existing-compute-config) below.
 
 The top-level `flags`/`advanced_instance_config` pair is the only write-only exception in the schema:
@@ -110,42 +137,96 @@ every other attribute — including the per-node pair above, plus `min_resources
 `enable_cross_zone_scaling`, and `auto_select_worker_config` — participates in normal drift detection.
 
 Neither field is truly free-form: `advanced_instance_config` is validated server-side against something
-close to the real cloud provider's instance-launch request shape, and `flags` only accepts a fixed,
-specific set of recognized key names — an arbitrary custom key is rejected outright, not passed through
-silently. Supply values shaped the way each is actually validated, not arbitrary keys.
+close to the real cloud provider's instance-launch request shape — on AWS, specifically the EC2
+`RunInstancesInput` shape, which rejects any key that isn't a real field there — and `flags` only accepts a
+fixed, specific set of recognized key names; an arbitrary custom key is rejected outright, not passed
+through silently. The arbitrariness `advanced_instance_config` actually supports is structural (nesting
+depth and shape — maps, lists, and scalars can nest freely), not content (the keys still have to be real
+fields the cloud provider's launch API recognizes). Supply values shaped the way each is actually
+validated, not arbitrary keys.
+
+## Targeting more than one cloud resource: `additional_resources`
+
+A compute config normally targets a single cloud resource: the top-level `head_node`, `worker_nodes`,
+`zones`, and related attributes describe that one deployment, and `cloud_resource` (if you set it) says
+which one — or the cloud's primary resource if you don't. `additional_resources` lets ONE compute config
+also cover other cloud resources on the same cloud, each with its own independent `head_node`/
+`worker_nodes`/etc., without changing anything about the common single-resource case: an existing config
+that never sets `additional_resources` behaves byte-identically to before this attribute existed.
+
+Each `additional_resources` entry is required to set `cloud_resource` — unlike the top-level attribute,
+this is how the provider tells entries apart, so it can't default to "the primary resource" the way the
+top-level one can. `cloud_resource` must be unique across every entry, and distinct from the top-level
+`cloud_resource` when that is also explicitly set; this is validated at plan time. One real limit on that
+validation: if you leave the top-level `cloud_resource` unset (targeting the cloud's implicit primary
+resource), the provider has no way to know that resource's name without an extra network call, so it
+can't check an `additional_resources` entry against it — a collision there only surfaces as a backend
+error at apply, not a plan-time diagnostic.
+
+Like `head_node`/`worker_nodes`, each entry's `advanced_instance_config` and `flags` are JSON-encoded
+strings rather than native/dynamic values — `additional_resources` is a list, and Terraform doesn't support
+a dynamic type nested inside a list, the same constraint that already applies per-node.
+
+On refresh, entries are matched back to your configuration by `cloud_resource` name, not by position — this
+protects against the backend echoing entries back in a different order than you configured, the same
+reorder-stability `worker_nodes` has. Reordering `additional_resources` entries in your own `.tf` file still
+shows as a plan diff, same as reordering `worker_nodes` does — that's normal, correct behavior for an
+ordered list whose content you actually changed, not something either mechanism hides.
+
+One current limitation worth knowing: a cold import of a multi-resource compute config has no signal for
+which entry you intend as the top-level (primary) one versus which belong in `additional_resources`. The
+split after import is deterministic — the first entry in the API's response order becomes top-level, the
+rest become `additional_resources` sorted by `cloud_resource` name — but that's an arbitrary resolution, not
+one based on your intent. Check the import result against what you expect before relying on it.
+
+The `anyscale_compute_config` data source also exposes `additional_resources`, reported the same unmasked
+way it reports every other node attribute — with no prior configuration to match entries against, an
+unresolvable shape produces the same clear diagnostic the resource uses rather than silently showing only
+one entry.
 
 ## Importing an existing compute config
 
-Import takes the version-specific `config_id` (for example `cpt_abc123`), not `name` — find it via the
-`anyscale_compute_config` data source's `config_id` attribute, or `anyscale compute-config get <name>`
-in the CLI (see the [Anyscale compute-config CLI documentation](https://docs.anyscale.com/reference/cli/compute-config#compute-config-cli)).
-Importing a `config_id` that's already archived fails immediately with a clear error,
-rather than importing a resource that the next refresh would just remove again.
+Import accepts either the version-specific `config_id` (for example `cpt_abc123`) or a `name:version`
+string (for example `my-compute-config:3`) — never a bare `name`. Find either via the
+`anyscale_compute_config` data source's `config_id`/`name_version` attributes, or `anyscale compute-config
+get <name>` in the CLI (see the [Anyscale compute-config CLI documentation](https://docs.anyscale.com/reference/cli/compute-config#compute-config-cli)).
 
-After import, `id`, `name`, `version`, `instance_type`, and a few other node fields are recovered
-directly from that version. Two different things happen to the *rest* of `head_node`/`worker_nodes`,
-and it's worth knowing which is which:
+A `name:version` string is resolved to its `config_id` at import time and then behaves identically to
+importing by `config_id` directly — both pin the exact version you specify. A bare `name` with no version
+is rejected: there's no way to pin an exact version from a name alone, since a name resolves to whatever
+the latest version happens to be at the moment you ask. If a `name:version` matches more than one cloud,
+import fails with a clear error asking you to use `config_id` instead — `terraform import` has no way to
+pass a separate cloud selector to disambiguate. Importing a `config_id` that's already archived fails
+immediately with a clear error, rather than importing a resource that the next refresh would just remove
+again.
 
-- **`flags` and `advanced_instance_config` — top-level, and the same two nested inside `head_node` and
-  every `worker_nodes` entry — are recovered from the API and populated into state.** For the
-  write-only top-level pair, import is the one place they're ever read back at all; for the per-node
-  pair, it's the one case that sets them apart from the other masked per-node fields below, which
-  import leaves null. Either way, import is the only moment there's no prior configuration to preserve,
-  so there's nothing ambiguous about populating them from what's actually there. A matching
-  configuration plans clean right after import; omitting one of these that the backend actually has
-  shows an honest diff wanting to remove it, instead of silently dropping it on some later, unrelated
-  apply.
-- **`resources`, `required_resources`, `labels`, and `cloud_deployment` are not recovered — they're left
-  null**, the same way they'd read as unconfigured on an ordinary refresh. If the compute config you're
-  importing sets any of these, add them to your `.tf` yourself; until you do, they'll plan as unset
-  rather than reflecting what the backend actually has.
+If your configuration uses `cloud_name` rather than `cloud_id`, import resolves it too: the recovered
+`cloud_id` is reverse-looked-up to its name on a best-effort basis, so a matching configuration plans clean
+right away instead of showing the one-time null-to-configured diff `cloud_name` would otherwise produce.
+This lookup can fail silently (a network error, or a cloud that's since been removed) — if it does,
+`cloud_name` is simply left null after import, the same as it would be without this lookup, and you'll see
+that one-time diff on your first post-import plan instead.
+
+After import, everything is recovered directly from that version — `id`, `name`, `version`,
+`instance_type`, and every other node field, including the ones that stay masked on an ordinary refresh:
+`flags` and `advanced_instance_config` (top-level and per-node), `resources`, `required_resources`,
+`labels`, `required_labels`, and `cloud_deployment`. Import is the only moment there's no prior
+configuration to preserve, so there's nothing ambiguous about populating all of them from what's actually
+there — a matching configuration plans clean right after import, and omitting a field the backend actually
+has shows an honest diff wanting to remove it, instead of silently dropping it on some later, unrelated
+apply.
+
+This is different from what these same fields do on an *ordinary* refresh, where they stay masked (null
+while unconfigured, real-and-diffable once you set them) rather than recovered unconditionally — see the
+write-only/masked section above for why. Import gets to populate all of them unconditionally because it's
+the one case with no prior configuration to protect: there's nothing to accidentally overwrite.
 
 ## The data source's node topology is unmasked
 
 The `anyscale_compute_config` data source exposes `zones`, `head_node`, and `worker_nodes` too, but
 reports them differently than the resource does: with no masking at all. Every sub-attribute — including
-`resources`, `required_resources`, `labels`, and `cloud_deployment` — always reflects exactly what the
-API returns.
+`resources`, `required_resources`, `labels`, `required_labels`, and `cloud_deployment` — always reflects
+exactly what the API returns.
 
 This is intentional, not an inconsistency with the resource's behavior described above: masking exists
 specifically to stop a *resource's* plan from drifting toward values you never configured. A data source
