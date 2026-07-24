@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-07-24
+
+### Breaking Changes
+
+- resource/anyscale_cloud: is_default is removed - this cloud-level attribute reflected an org-wide setting that can change out of band at any time, which produced either stale values or a perpetual plan diff depending on how it was modeled. To migrate, read is_default from the anyscale_cloud data source instead (data.anyscale_cloud.<name>.is_default, auth-independent) - do not substitute the anyscale_organization data source's default_cloud_id or the anyscale_clouds plural data source's own is_default, both of which have known correctness gaps for this specific question. Existing state auto-migrates to drop the removed field on your next plan via the v3 to v4 upgrader; no re-import needed.
+
+### New Resources
+
+- resource/anyscale_organization_default_cloud: Manage which cloud is the organization's default. Requires an organization-owner-scoped token; declare at most one per organization.
+
+### Fixed
+
+- resource/anyscale_system_cluster: Fix a race on a cloud's first-ever enable where Create could silently skip starting the System Cluster, leaving it stuck Terminated with no error; Create now waits for the enable to fully propagate before requesting a start.
+
 ## [0.20.0] - 2026-07-23
 
 ### New Ephemeral Resources
@@ -872,7 +886,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.21.0
 [0.20.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.20.0
 [0.19.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.19.0
 [0.18.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.18.1
