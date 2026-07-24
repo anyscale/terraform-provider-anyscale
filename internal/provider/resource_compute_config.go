@@ -1408,8 +1408,8 @@ func populateComputedFieldsFromResponse(
 		eff = resolveEffectiveComputeConfig(configData)
 		plan.AdditionalResources = types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()})
 	} else {
-		priorByName := additionalResourcesToPriorMap(ctx, plan.AdditionalResources, diags)
-		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(configData.DeploymentConfigs, plan.CloudResource.ValueString(), priorByName)
+		priorByName, priorOrder := additionalResourcesToPriorMap(ctx, plan.AdditionalResources, diags)
+		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(configData.DeploymentConfigs, plan.CloudResource.ValueString(), priorByName, priorOrder)
 		if !ok {
 			// F7: this provider only ever sends entries with a real
 			// cloud_deployment name (buildComputeConfigRequest always sets
@@ -1564,8 +1564,8 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		eff = resolveEffectiveComputeConfig(configData)
 		state.AdditionalResources = types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()})
 	} else {
-		priorByName := additionalResourcesToPriorMap(ctx, priorAdditionalResources, &resp.Diagnostics)
-		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(configData.DeploymentConfigs, priorCloudResourceForSplit, priorByName)
+		priorByName, priorOrder := additionalResourcesToPriorMap(ctx, priorAdditionalResources, &resp.Diagnostics)
+		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(configData.DeploymentConfigs, priorCloudResourceForSplit, priorByName, priorOrder)
 		if !ok {
 			// F7: an entry with no cloud_deployment name can't be placed as
 			// either primary or additional - surface a loud diagnostic rather
@@ -2030,7 +2030,7 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 	if len(resultData.Config.DeploymentConfigs) <= 1 {
 		eff = resolveEffectiveComputeConfig(resultData.Config)
 	} else {
-		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(resultData.Config.DeploymentConfigs, "", nil)
+		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(resultData.Config.DeploymentConfigs, "", nil, nil)
 		if !ok {
 			AddConfigError(&resp.Diagnostics, "Ambiguous Multi-Resource Compute Config",
 				fmt.Sprintf("Compute config %q has multiple deployment_configs entries, but at least one has no cloud_deployment name, so this provider cannot determine which entry is primary versus which are additional_resources. This shape is not supported for import - only entries with a resolvable cloud_deployment name can be represented.", configID))

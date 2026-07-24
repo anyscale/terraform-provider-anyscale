@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -779,6 +778,7 @@ func splitDeploymentConfigsForRead(
 	entries []cloudDeploymentComputeConfig,
 	priorCloudResource string,
 	priorAdditionalResources map[string]*AdditionalResourceModel,
+	priorAdditionalOrder []string,
 ) (primary cloudDeploymentComputeConfig, additional []cloudDeploymentComputeConfig, ok bool) {
 	if len(entries) <= 1 {
 		if len(entries) == 1 {
@@ -828,24 +828,98 @@ func splitDeploymentConfigsForRead(
 		return cloudDeploymentComputeConfig{}, nil, false
 	}
 
-	sort.Slice(additionalEntries, func(i, j int) bool {
-		return additionalEntries[i].CloudDeployment < additionalEntries[j].CloudDeployment
-	})
+	// additional_resources is a plain (non-Computed) list: Terraform Core
+	// requires the final state to preserve list ORDER exactly wherever the
+	// value isn't allowed to just change on its own. Sorting here instead of
+	// matching prior order would manufacture a spurious diff on every Read
+	// whose config order isn't already alphabetical by cloud_resource - and
+	// for Create/Update, where "prior" is the plan's own order, it would
+	// outright crash apply with "provider produced inconsistent result",
+	// the exact class of bug this quest started by chasing down (F4).
+	additionalEntries = reorderDeploymentConfigsToMatchPrior(additionalEntries, priorAdditionalOrder)
 
 	return *primaryEntry, additionalEntries, true
 }
 
+// reorderDeploymentConfigsToMatchPrior reorders the "additional" bucket
+// (role classification already decided by the caller) to match
+// priorAdditionalOrder - the order cloud_resource names appeared in prior's
+// additional_resources list - mirroring reorderWorkersToMatchPrior's
+// match-by-name-or-bail idiom for worker_nodes (F6). For Read/ImportState,
+// "prior" is state's previous additional_resources, so this stops a
+// BACKEND response-order change from becoming a spurious plan diff. For
+// Create/Update, "prior" is the PLAN's own additional_resources (see
+// populateComputedFieldsFromResponse), so this is what keeps the final
+// state's order identical to what was planned - required for a non-Computed
+// list attribute, not just cosmetic.
+//
+// A user's OWN reorder of additional_resources in their .tf is NOT
+// suppressed by this, same as worker_nodes/F6 - that is expected, ordinary
+// List-attribute diffing, not something either mechanism tries to hide.
+//
+// Falls back to entries unchanged (natural collection order: prior-matched
+// entries in response order, then genuinely new ones) on any ambiguity - a
+// duplicate cloud_resource on either side, or an entry with no resolvable
+// name - never guesses. cloud_resource uniqueness is enforced by
+// validateCloudResourceUniqueness, so a duplicate should not occur in
+// practice; the fallback exists for defense (e.g. state written by a
+// pre-uniqueness-check version of this provider), matching
+// reorderWorkersToMatchPrior's own defensive fallback.
+func reorderDeploymentConfigsToMatchPrior(entries []cloudDeploymentComputeConfig, priorOrder []string) []cloudDeploymentComputeConfig {
+	if len(entries) == 0 || len(priorOrder) == 0 {
+		return entries
+	}
+
+	byName := make(map[string]cloudDeploymentComputeConfig, len(entries))
+	for _, e := range entries {
+		if e.CloudDeployment == "" {
+			return entries
+		}
+		if _, dup := byName[e.CloudDeployment]; dup {
+			return entries
+		}
+		byName[e.CloudDeployment] = e
+	}
+
+	priorSeen := make(map[string]struct{}, len(priorOrder))
+	for _, name := range priorOrder {
+		if _, dup := priorSeen[name]; dup {
+			return entries
+		}
+		priorSeen[name] = struct{}{}
+	}
+
+	reordered := make([]cloudDeploymentComputeConfig, 0, len(entries))
+	placed := make(map[string]struct{}, len(entries))
+	for _, name := range priorOrder {
+		if e, ok := byName[name]; ok {
+			reordered = append(reordered, e)
+			placed[name] = struct{}{}
+		}
+	}
+	for _, e := range entries {
+		if _, ok := placed[e.CloudDeployment]; !ok {
+			reordered = append(reordered, e)
+		}
+	}
+
+	return reordered
+}
+
 // additionalResourcesToPriorMap decodes a state additional_resources list
-// into a map keyed by cloud_resource name, for splitDeploymentConfigsForRead's
-// matching and for looking up each entry's own prior when flattening it back.
-// An entry with an empty cloud_resource is skipped - not reachable for
-// anything this provider itself wrote, since cloud_resource is Required in
-// the additional_resources schema, but defends against a decode of a
-// corrupted/hand-edited state file rather than panicking on one.
-func additionalResourcesToPriorMap(ctx context.Context, list types.List, diags *diag.Diagnostics) map[string]*AdditionalResourceModel {
+// into a map keyed by cloud_resource name (for splitDeploymentConfigsForRead's
+// matching and for looking up each entry's own prior when flattening it back)
+// and a slice of those same names in their ORIGINAL LIST ORDER, for
+// reorderDeploymentConfigsToMatchPrior. An entry with an empty cloud_resource
+// is skipped - not reachable for anything this provider itself wrote, since
+// cloud_resource is Required in the additional_resources schema, but defends
+// against a decode of a corrupted/hand-edited state file rather than
+// panicking on one.
+func additionalResourcesToPriorMap(ctx context.Context, list types.List, diags *diag.Diagnostics) (map[string]*AdditionalResourceModel, []string) {
 	result := map[string]*AdditionalResourceModel{}
+	var order []string
 	if list.IsNull() || list.IsUnknown() {
-		return result
+		return result, order
 	}
 
 	for _, v := range list.Elements() {
@@ -861,9 +935,10 @@ func additionalResourcesToPriorMap(ctx context.Context, list types.List, diags *
 		}
 		modelCopy := model
 		result[name] = &modelCopy
+		order = append(order, name)
 	}
 
-	return result
+	return result, order
 }
 
 // buildAdditionalResourcesList converts the "additional" (non-primary)
