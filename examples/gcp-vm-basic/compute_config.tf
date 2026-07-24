@@ -208,9 +208,8 @@ resource "anyscale_compute_config" "simple" {
 #         accelerator = "T4"
 #       }
 #
-#       # required_labels works the same way for these keys and is checked
-#       # first if both are set - use it instead of labels when the value is
-#       # actually required for scheduling, not just informational
+#       # required_labels works the same way here (checked first if both are
+#       # set) - use it when the value is actually required, not advisory
 #       labels = {
 #         "ray.io/accelerator-type" = "T4"
 #       }
@@ -246,8 +245,8 @@ resource "anyscale_compute_config" "simple" {
 #       }
 #
 #       # TPU labels for node selector derivation - required_labels works the
-#       # same way for these two keys (checked first if both are set); use it
-#       # instead of labels when the value must be present, not just advisory
+#       # same way here (checked first if both are set); use it when the
+#       # value must be present, not advisory
 #       labels = {
 #         "ray.io/accelerator-type" = "TPU-V6E"
 #         "ray.io/tpu-topology"     = "2x2"
