@@ -418,14 +418,13 @@ func resolveComputeConfigImportID(ctx context.Context, client *Client, name stri
 	return results[0].ID, nil
 }
 
-// resolveCloudIDToName implements A3: the wire has no cloud-name field
-// (only cloud_id), so a cloud_name-based config gets a benign one-time
-// null->configured diff on the very first plan after import unless
-// ImportState reverse-resolves it here. Best-effort: returns ("", false) on
+// resolveCloudIDToName implements A3: the wire has no cloud-name field (only
+// cloud_id), so ImportState reverse-resolves it here regardless of which
+// selector the config uses - cloud_name is Optional+Computed for exactly
+// this reason (see its schema comment). Best-effort: returns ("", false) on
 // any failure (network error, unexpected status, or a genuinely gone cloud)
 // rather than blocking the import - the same "not critical" tolerance the
-// data source's own equivalent lookup already uses, just recovered once here
-// at import time instead of every Read.
+// data source's own equivalent lookup already uses.
 func resolveCloudIDToName(ctx context.Context, client *Client, cloudID string) (string, bool) {
 	if cloudID == "" {
 		return "", false
@@ -780,8 +779,7 @@ func splitDeploymentConfigsForRead(
 	// matching prior order would manufacture a spurious diff on every Read
 	// whose config order isn't already alphabetical by cloud_resource - and
 	// for Create/Update, where "prior" is the plan's own order, it would
-	// outright crash apply with "provider produced inconsistent result",
-	// the exact class of bug this quest started by chasing down (F4).
+	// outright crash apply with "provider produced inconsistent result".
 	additionalEntries = reorderDeploymentConfigsToMatchPrior(additionalEntries, priorAdditionalOrder)
 
 	return *primaryEntry, additionalEntries, true

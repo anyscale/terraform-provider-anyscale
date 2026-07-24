@@ -650,10 +650,10 @@ func (r *ComputeConfigResource) ValidateConfig(ctx context.Context, req resource
 	// F4 is scoped to per-node resources only (the confirmed crash case,
 	// below) - min_resources/max_resources already fail cleanly today on a
 	// fractional value (a real 422, just a more technical message than
-	// ideal; assayer's live adjacency check), so they are deliberately left
-	// out of scope here rather than guessed at with the wrong constraint
-	// shape (min/max_resources appears to require whole numbers even for
-	// named slots like CPU, unlike per-node resources).
+	// ideal), so they are deliberately left out of scope here rather than
+	// guessed at with the wrong constraint shape (min/max_resources appears
+	// to require whole numbers even for named slots like CPU, unlike
+	// per-node resources).
 
 	if !data.HeadNode.IsNull() && !data.HeadNode.IsUnknown() {
 		var headNode NodeConfigModel
@@ -664,14 +664,7 @@ func (r *ComputeConfigResource) ValidateConfig(ctx context.Context, req resource
 		}
 	}
 
-	// Option C: cloud_resource identifies a deployment_configs entry - the
-	// top-level cloud_resource and every additional_resources[].cloud_resource
-	// must all be distinct, or a read-back could not tell the entries apart
-	// either (splitDeploymentConfigsForRead matches by this exact name).
-	// additional_resources is new in this same release, so no existing config
-	// could already rely on a duplicate slipping through - a hard error here
-	// is non-breaking by the same test F4 used once its "currently succeeds"
-	// premise turned out false.
+	// Option C (see validateCloudResourceUniqueness).
 	resp.Diagnostics.Append(validateCloudResourceUniqueness(ctx, data)...)
 
 	if data.WorkerNodes.IsNull() || data.WorkerNodes.IsUnknown() {
@@ -1109,12 +1102,12 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		CloudID: cloudID,
 	}
 
-	// CC2: top-level only, same as the Read side -- never per-deployment.
-	// Guard on IsUnknown too, not just IsNull: both attributes are
-	// Optional+Computed with UseStateForUnknown and no static Default, so an
-	// omitted value is Unknown (not Null) whenever there is no prior state to
-	// carry forward (i.e. on Create). Sending ValueInt64() of an Unknown value
-	// would marshal a meaningless 0 instead of just omitting the field.
+	// CC2 (see effectiveComputeConfig). Guard on IsUnknown too, not just
+	// IsNull: both attributes are Optional+Computed with UseStateForUnknown
+	// and no static Default, so an omitted value is Unknown (not Null)
+	// whenever there is no prior state to carry forward (i.e. on Create).
+	// Sending ValueInt64() of an Unknown value would marshal a meaningless 0
+	// instead of just omitting the field.
 	if !plan.IdleTerminationMinutes.IsNull() && !plan.IdleTerminationMinutes.IsUnknown() {
 		idleMinutes := plan.IdleTerminationMinutes.ValueInt64()
 		createConfig.IdleTerminationMinutes = &idleMinutes
@@ -1216,10 +1209,10 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		// F5: indices into workerConfigs whose "name" we derived ourselves
 		// (the user left it unset) - these are the only ones safe to rename
 		// on a collision. A name the user set explicitly must reach the API
-		// unchanged, or Terraform Core would reject the apply the same way
-		// it rejects F4's fractional custom_resources (config != state on a
-		// non-Computed... well, name IS Computed, but UseNonNullStateForUnknown
-		// means an explicitly-configured value still must survive verbatim).
+		// unchanged: name is Optional+Computed with UseNonNullStateForUnknown,
+		// which still requires an explicitly-configured value to survive
+		// verbatim, so silently renaming one would hit the same Core
+		// rejection as F4's fractional custom_resources.
 		var defaultedNameIndices []int
 
 		for _, workerNodeValue := range workerNodeElements {
@@ -1403,13 +1396,13 @@ func populateComputedFieldsFromResponse(
 	plan *ComputeConfigResourceModel,
 	diags *diag.Diagnostics,
 ) {
-	// CC2: top-level only, same as the Read side -- never per-deployment.
-	// Explicit else-Null (not just "leave it"), mirroring Read exactly: both
-	// attributes are Optional+Computed+UseStateForUnknown with no Default, so
-	// an Unknown left unresolved here (e.g. a defensive nil from the API that
-	// should not happen given the backend's own idle default, but costs
-	// nothing to handle) would hit the identical "Provider produced
-	// inconsistent result after apply" this function exists to prevent.
+	// CC2 (see effectiveComputeConfig). Explicit else-Null (not just "leave
+	// it"), mirroring Read exactly: both attributes are
+	// Optional+Computed+UseStateForUnknown with no Default, so an Unknown
+	// left unresolved here (e.g. a defensive nil from the API that should
+	// not happen given the backend's own idle default, but costs nothing to
+	// handle) would hit the identical "Provider produced inconsistent result
+	// after apply" this function exists to prevent.
 	if configData.IdleTerminationMinutes != nil {
 		plan.IdleTerminationMinutes = types.Int64Value(*configData.IdleTerminationMinutes)
 	} else {
@@ -1564,10 +1557,9 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		state.CloudID = types.StringValue(configData.CloudID)
 	}
 
-	// CC2: idle_termination_minutes/maximum_uptime_minutes are TOP-LEVEL config
-	// fields only -- the API never places them on a per-deployment override,
-	// unlike flags/head_node/worker_nodes below, so they are read directly off
-	// configData rather than through resolveEffectiveComputeConfig.
+	// CC2 (see effectiveComputeConfig): read directly off configData rather
+	// than through resolveEffectiveComputeConfig, unlike flags/head_node/
+	// worker_nodes below.
 	if configData.IdleTerminationMinutes != nil {
 		state.IdleTerminationMinutes = types.Int64Value(*configData.IdleTerminationMinutes)
 	} else {
@@ -1784,13 +1776,9 @@ func maskWorkerNodesFromPrior(ctx context.Context, apiWorkers types.List, priorW
 		return apiWorkers
 	}
 
-	// F6: reorder the API's response to match prior state's order BY NAME
-	// before pairing elements positionally below - the backend does not
-	// promise to echo worker order back (and Ray's own scheduler is
-	// name-keyed, not order-sensitive, so it has no reason to), so a plain
-	// index pairing would both mismatch which prior element masks which API
-	// element AND leave state in whatever order the API happened to return,
-	// showing a spurious diff against the user's own configured order.
+	// F6 (see reorderWorkersToMatchPrior): reorder by name before pairing
+	// elements positionally below, or a plain index pairing would mismatch
+	// which prior element masks which API element.
 	apiWorkers = reorderWorkersToMatchPrior(ctx, apiWorkers, priorWorkers)
 
 	apiElems := apiWorkers.Elements()
@@ -1984,11 +1972,7 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// A2/GAP-4: classify the import id BEFORE any API call - the backend
-	// returns the IDENTICAL "not found" response for a malformed id and a
-	// well-formed-but-nonexistent one (live-confirmed), so a distinct
-	// "malformed" diagnostic can only come from client-side classification,
-	// never from inspecting the API response after the fact.
+	// A2/GAP-4 (see classifyComputeConfigImportID): classify BEFORE any API call.
 	kind, name, version := classifyComputeConfigImportID(req.ID)
 
 	configID := req.ID
@@ -2081,11 +2065,7 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("additional_resources"), additionalList)...)
 	}
 
-	// A3: the wire has no cloud-name field, only cloud_id - reverse-resolve
-	// it here so a cloud_name-based config doesn't show a benign but real
-	// null->configured diff on the very first plan after import. Best-effort:
-	// if the lookup fails, cloud_name is simply left unset (null), the same
-	// "not critical" tolerance the data source's equivalent lookup uses.
+	// A3 (see resolveCloudIDToName).
 	if cloudName, ok := resolveCloudIDToName(ctx, r.client, resultData.Config.CloudID); ok {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_name"), types.StringValue(cloudName))...)
 	}
@@ -2119,11 +2099,10 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 	// GAP-3: resources/required_resources/labels/required_labels/node
 	// cloud_deployment recover here too, unmasked, the same as
 	// flags/advanced_instance_config above - these are NOT ambiguous the way
-	// maskNodeFromPrior's nulling exists to handle. Live-confirmed (assayer,
-	// G1b/G1b-2 plus a follow-up node cloud_deployment check): the backend
-	// never auto-fills any of these five fields when omitted - a freshly
-	// created config that never set them reads back with them null, no
-	// invented default - so recovering whatever the API actually returns
+	// maskNodeFromPrior's nulling exists to handle. Live-confirmed: the
+	// backend never auto-fills any of these five fields when omitted - a
+	// freshly created config that never set them reads back with them null,
+	// no invented default - so recovering whatever the API actually returns
 	// cannot mistake a backend-invented value for a real one. A config that
 	// DID set them now imports to complete state instead of a null that
 	// silently drops what the user configured.
@@ -2198,7 +2177,7 @@ func resourceMapToAPI(resources types.Map) map[string]interface{} {
 // workerNodeConfigToAPI: resources, required_resources, labels, advanced_configurations_json,
 // cloud_deployment, and flags. Each caller merges the returned map with its own node-type-
 // specific fields (name/instance_type for head; name/instance_type/min_workers/max_workers/
-// use_spot/fallback_to_ondemand for worker) - see workbench #7.
+// use_spot/fallback_to_ondemand for worker).
 //
 // Returns a fresh map per call (never shared/aliased between head and worker conversions).
 // Only the flags parse failure is a hard error, matching the original two copies' behavior -
@@ -2301,7 +2280,7 @@ func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredRes
 	// under the literal key "cloud_deployment", matching how the backend and
 	// our own flatten (apiCloudDeploymentToTerraform) already read it back.
 	// Setting it as a config[...] sibling instead 422s ("extra fields not
-	// permitted") every single time, live-confirmed (G1g).
+	// permitted") every single time.
 	if !cloudDeployment.IsNull() {
 		var cloudDep CloudDeploymentModel
 		diags := cloudDeployment.As(ctx, &cloudDep, basetypes.ObjectAsOptions{})
@@ -2432,7 +2411,7 @@ func workerNodeConfigToAPI(ctx context.Context, workerObj types.Object) (map[str
 // stripped out), and cloud_deployment (extracted from flags, per CLI behavior). Returns a fresh
 // attr.Value map per call; each caller merges in its own node-type-specific fields (none for
 // head; name/min_nodes/max_nodes/market_type for worker) before building its final
-// types.Object - see workbench #7.
+// types.Object.
 func commonNodeAttrsFromAPI(ctx context.Context, apiMap map[string]interface{}) (map[string]attr.Value, diag.Diagnostics) {
 	var diags diag.Diagnostics
 

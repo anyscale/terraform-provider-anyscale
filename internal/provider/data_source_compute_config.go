@@ -517,8 +517,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		}
 	}
 
-	// idle_termination_minutes/maximum_uptime_minutes are top-level config
-	// fields only, same as the resource -- never per-deployment, so read
+	// CC2 (see effectiveComputeConfig in resource_compute_config.go): read
 	// straight off configData rather than through resolveEffectiveComputeConfig.
 	if configData.IdleTerminationMinutes != nil {
 		config.IdleTerminationMinutes = types.Int64Value(*configData.IdleTerminationMinutes)
