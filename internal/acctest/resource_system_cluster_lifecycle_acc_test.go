@@ -21,6 +21,20 @@ import (
 // returns Terminated immediately (StartingUp is genuinely async), then two
 // more polls advance StartingUp -> Running, proving the resource actually
 // loops rather than trusting a single call.
+//
+// is_enabled is always reported true (line ~140) - this mock's Create path
+// never exercises the enable-propagation commit gap the real fix closes
+// (that requires a genuine two-transaction backend race no mock can
+// meaningfully simulate; see the real EKS-based verification instead). What
+// this mock DOES need to reflect correctly is the fix's other visible
+// change to the call shape: Create now issues one leading
+// describe(start_cluster=false) (waitForSystemClusterEnabled's check)
+// before the real describe(start_cluster=true). startRequested gates the
+// state-progression counter so that leading check doesn't consume a
+// Terminated->StartingUp->Running poll slot meant for the real progression
+// after start - it's checking a different thing (is_enabled) than the
+// progression polls are (status), and a real backend would not conflate
+// the two either.
 type mockSystemClusterServer struct {
 	mu sync.Mutex
 
@@ -30,7 +44,8 @@ type mockSystemClusterServer struct {
 	describeStartCalls []bool // one entry per describe call, value = the start_cluster query param
 	terminateCalled    bool
 
-	describePollCount int32 // advances the state machine on each describe(start_cluster=false) call
+	startRequested    bool  // true once the first describe(start_cluster=true) has been seen
+	describePollCount int32 // advances the state machine on each POST-start describe(start_cluster=false) call
 }
 
 func newMockSystemClusterServer(t *testing.T) (*httptest.Server, *mockSystemClusterServer) {
@@ -114,14 +129,19 @@ func newMockSystemClusterServer(t *testing.T) (*httptest.Server, *mockSystemClus
 
 		s.mu.Lock()
 		s.describeStartCalls = append(s.describeStartCalls, startCluster)
+		if startCluster {
+			s.startRequested = true
+		}
+		postStartPoll := !startCluster && s.startRequested
 		s.mu.Unlock()
 
 		var status string
-		if startCluster {
+		switch {
+		case startCluster:
 			// Real observed behavior (AC26 live smoke test): the create-time
 			// start call returns Terminated immediately; StartingUp is async.
 			status = "Terminated"
-		} else {
+		case postStartPoll:
 			n := atomic.AddInt32(&s.describePollCount, 1)
 			switch n {
 			case 1:
@@ -129,6 +149,14 @@ func newMockSystemClusterServer(t *testing.T) (*httptest.Server, *mockSystemClus
 			default:
 				status = "Running"
 			}
+		default:
+			// A describe(start_cluster=false) call before start has ever been
+			// requested - this is waitForSystemClusterEnabled's own
+			// pre-start check, not a progression poll. Nothing has been
+			// created yet, so there is no real status to report; Terminated
+			// is a reasonable placeholder and this mock's is_enabled=true
+			// (below) is the only field that call actually reads.
+			status = "Terminated"
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -270,19 +298,33 @@ func TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning(t *testin
 	// across the whole test (Create + the no-op re-apply) - a second apply
 	// that changes nothing must never re-issue a start.
 	startTrueCount := 0
-	for _, sc := range describeStartCalls {
+	startCallIndex := -1
+	for i, sc := range describeStartCalls {
 		if sc {
 			startTrueCount++
+			startCallIndex = i
 		}
 	}
 	if startTrueCount != 1 {
-		t.Errorf("describe was called with start_cluster=true %d times, want exactly 1 (Create only, never re-issued on the no-op re-apply)", startTrueCount)
+		t.Fatalf("describe was called with start_cluster=true %d times, want exactly 1 (Create only, never re-issued on the no-op re-apply)", startTrueCount)
+	}
+
+	// The fix's own ordering guarantee: Create must wait for enable to
+	// propagate (a describe(start_cluster=false) checking is_enabled) BEFORE
+	// issuing the real start. This mock's is_enabled is always true, so
+	// waitForSystemClusterEnabled's poll loop returns after exactly one
+	// call - the real start must be the SECOND describe call overall, not
+	// the first, or Create has regressed to starting before confirming the
+	// enable actually took effect (the exact race this fix closes).
+	if len(describeStartCalls) < 2 || describeStartCalls[0] != false || startCallIndex != 1 {
+		t.Errorf("expected describe call #0 = start_cluster=false (the enable-propagation check) followed by describe call #1 = start_cluster=true (the real start); got sequence %v with the true call at index %d - Create must wait for enable to propagate before starting", describeStartCalls, startCallIndex)
 	}
 
 	// AC17-adjacent (resource-level correctness): every OTHER describe call
-	// (the polls) must have passed start_cluster=false.
+	// (the enable-propagation check, plus the polls) must have passed
+	// start_cluster=false.
 	for i, sc := range describeStartCalls {
-		if i == 0 {
+		if i == startCallIndex {
 			continue // the one legitimate start_cluster=true call, asserted above
 		}
 		if sc {
