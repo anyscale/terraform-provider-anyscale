@@ -1,4 +1,0 @@
-```
-release-note:breaking-change
-resource/anyscale_cloud: is_default is removed - this cloud-level attribute reflected an org-wide setting that can change out of band at any time, which produced either stale values or a perpetual plan diff depending on how it was modeled. To migrate, read is_default from the anyscale_cloud data source instead (data.anyscale_cloud.<name>.is_default, auth-independent) - do not substitute the anyscale_organization data source's default_cloud_id or the anyscale_clouds plural data source's own is_default, both of which have known correctness gaps for this specific question. Existing state auto-migrates to drop the removed field on your next plan via the v3 to v4 upgrader; no re-import needed.
-```
