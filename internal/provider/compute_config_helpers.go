@@ -486,7 +486,10 @@ func additionalResourceToDeploymentConfig(ctx context.Context, entry AdditionalR
 				return deploymentConfig, fmt.Errorf("failed to convert additional_resources worker node: %w", err)
 			}
 			if workerConfig != nil {
-				if nameAttr, ok := workerNodeObj.Attributes()["name"].(types.String); ok && nameAttr.IsNull() {
+				// F5 follow-up: same IsUnknown gap as the primary path's copy
+				// of this logic (resource_compute_config.go) - a fresh
+				// Create leaves an omitted name Unknown, not null.
+				if nameAttr, ok := workerNodeObj.Attributes()["name"].(types.String); ok && (nameAttr.IsNull() || nameAttr.IsUnknown()) {
 					defaultedNameIndices = append(defaultedNameIndices, len(workerConfigs))
 				}
 				workerConfigs = append(workerConfigs, workerConfig)

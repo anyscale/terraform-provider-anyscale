@@ -556,7 +556,7 @@ func TestRequiredResourcesConversion(t *testing.T) {
 	requiredResourcesObj := types.ObjectValueMust(
 		map[string]attr.Type{
 			"cpu":              types.Int64Type,
-			"memory":           types.StringType,
+			"memory":           MemoryQuantityType{},
 			"gpu":              types.Int64Type,
 			"accelerator":      types.StringType,
 			"tpu":              types.Int64Type,
@@ -565,7 +565,7 @@ func TestRequiredResourcesConversion(t *testing.T) {
 		},
 		map[string]attr.Value{
 			"cpu":              types.Int64Value(16),
-			"memory":           types.StringValue("64Gi"),
+			"memory":           NewMemoryQuantityValue("64Gi"),
 			"gpu":              types.Int64Value(4),
 			"accelerator":      types.StringValue("A100"),
 			"tpu":              types.Int64Null(),
@@ -790,12 +790,12 @@ func TestCommonNodeFieldsToAPI_HeadWorkerParity(t *testing.T) {
 	})
 	requiredResources := types.ObjectValueMust(
 		map[string]attr.Type{
-			"cpu": types.Int64Type, "memory": types.StringType, "gpu": types.Int64Type,
+			"cpu": types.Int64Type, "memory": MemoryQuantityType{}, "gpu": types.Int64Type,
 			"accelerator": types.StringType, "tpu": types.Int64Type, "tpu_hosts": types.Int64Type,
 			"cpu_architecture": types.StringType,
 		},
 		map[string]attr.Value{
-			"cpu": types.Int64Value(8), "memory": types.StringValue("32Gi"), "gpu": types.Int64Value(1),
+			"cpu": types.Int64Value(8), "memory": NewMemoryQuantityValue("32Gi"), "gpu": types.Int64Value(1),
 			"accelerator": types.StringValue("nvidia-tesla-v100"), "tpu": types.Int64Null(), "tpu_hosts": types.Int64Null(),
 			"cpu_architecture": types.StringValue("x86_64"),
 		},

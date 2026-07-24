@@ -231,7 +231,7 @@ func dataSourceNodeAttributes() map[string]schema.Attribute {
 			MarkdownDescription: "Explicit hardware requirements for custom instance types (free pod shapes).",
 			Attributes: map[string]schema.Attribute{
 				"cpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of CPUs allocated."},
-				"memory":           schema.StringAttribute{Computed: true, MarkdownDescription: "Amount of memory allocated."},
+				"memory":           schema.StringAttribute{Computed: true, CustomType: MemoryQuantityType{}, MarkdownDescription: "Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`."},
 				"gpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of GPUs allocated."},
 				"accelerator":      schema.StringAttribute{Computed: true, MarkdownDescription: "Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`)."},
 				"tpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of TPUs allocated."},
