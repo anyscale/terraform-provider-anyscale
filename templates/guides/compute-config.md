@@ -95,8 +95,8 @@ The compute config itself tolerates two worker groups sharing the same `name` �
 back as distinct entries, nothing merges or is lost at the Terraform/API layer. The risk is downstream: the
 cluster's own autoscaler organizes worker groups by name, and a name genuinely cannot exist twice there, so
 at cluster launch, whichever duplicate-named group is processed last would shadow the other — you configure
-two worker groups and only ever get one running, with no error anywhere. This provider cannot verify that
-part directly (it would require launching a real cluster), so treat it as a real, not just theoretical, risk.
+two worker groups and only ever get one running, with no error anywhere. This provider can't verify that
+directly without launching a real cluster — treat it as real, not theoretical.
 
 Leaving `name` unset on two or more `worker_nodes` entries that share the same `instance_type` is the case
 this provider actively protects you from: each unnamed entry would otherwise derive the identical default
@@ -105,11 +105,10 @@ and so on) to keep unset names distinct, and warns at plan time when it does so.
 names is still recommended for clarity, but omitting them no longer risks a silent collision.
 
 ~> **Warning:** explicitly setting the *same* `name` on two different `worker_nodes` entries — typically by
-mistake, such as a copy-pasted block — is not auto-corrected. The provider never overwrites a name you set
-yourself, since silently changing a value you explicitly configured would misrepresent your own
-configuration back to you. It does warn you at plan time when this happens (naming the colliding worker
-groups and explaining why), but the plan still proceeds — give every worker group its own distinct name
-rather than relying on the warning as a substitute for fixing it.
+mistake, such as a copy-pasted block — is not auto-corrected. The provider never overwrites an explicit
+name, since silently changing a value you configured would misrepresent your own configuration back to
+you. It warns at plan time (naming the colliding worker groups and why), but the plan still proceeds —
+give each worker group its own distinct name rather than treating the warning as a fix.
 
 ## `flags` and `advanced_instance_config`: write-only at the top level, masked per-node
 
@@ -136,14 +135,11 @@ The top-level `flags`/`advanced_instance_config` pair is the only write-only exc
 every other attribute — including the per-node pair above, plus `min_resources`, `max_resources`,
 `enable_cross_zone_scaling`, and `auto_select_worker_config` — participates in normal drift detection.
 
-Neither field is truly free-form: `advanced_instance_config` is validated server-side against something
-close to the real cloud provider's instance-launch request shape — on AWS, specifically the EC2
-`RunInstancesInput` shape, which rejects any key that isn't a real field there — and `flags` only accepts a
-fixed, specific set of recognized key names; an arbitrary custom key is rejected outright, not passed
-through silently. The arbitrariness `advanced_instance_config` actually supports is structural (nesting
-depth and shape — maps, lists, and scalars can nest freely), not content (the keys still have to be real
-fields the cloud provider's launch API recognizes). Supply values shaped the way each is actually
-validated, not arbitrary keys.
+Neither field is truly free-form: `flags` only accepts a fixed set of recognized keys (an unrecognized one
+is rejected, not passed through), and `advanced_instance_config` is validated server-side against something
+close to the real cloud provider's instance-launch request shape — on AWS, the EC2 `RunInstancesInput`
+shape. The arbitrariness it supports is structural (nesting depth and shape — maps, lists, and scalars can
+nest freely), not content: the keys still have to be real fields that shape recognizes.
 
 ## Targeting more than one cloud resource: `additional_resources`
 
@@ -152,7 +148,10 @@ A compute config normally targets a single cloud resource: the top-level `head_n
 which one — or the cloud's primary resource if you don't. `additional_resources` lets ONE compute config
 also cover other cloud resources on the same cloud, each with its own independent `head_node`/
 `worker_nodes`/etc., without changing anything about the common single-resource case: an existing config
-that never sets `additional_resources` behaves byte-identically to before this attribute existed.
+that never sets `additional_resources` behaves byte-identically to before this attribute existed. Each
+entry's own `worker_nodes` gets the same [name-uniqueness handling](#worker-group-names-must-be-unique)
+described above, independently per entry — a name defaulted or disambiguated in one entry has no effect on
+any other.
 
 Each `additional_resources` entry is required to set `cloud_resource` — unlike the top-level attribute,
 this is how the provider tells entries apart, so it can't default to "the primary resource" the way the
@@ -200,21 +199,18 @@ pass a separate cloud selector to disambiguate. Importing a `config_id` that's a
 immediately with a clear error, rather than importing a resource that the next refresh would just remove
 again.
 
-If your configuration uses `cloud_name` rather than `cloud_id`, import resolves it too: the recovered
-`cloud_id` is reverse-looked-up to its name on a best-effort basis, so a matching configuration plans clean
-right away instead of showing the one-time null-to-configured diff `cloud_name` would otherwise produce.
-This lookup can fail silently (a network error, or a cloud that's since been removed) — if it does,
-`cloud_name` is simply left null after import, the same as it would be without this lookup, and you'll see
-that one-time diff on your first post-import plan instead.
+Import also reverse-looks-up `cloud_name` from the recovered `cloud_id`, on a best-effort basis, regardless
+of which one your configuration actually sets: `cloud_name` is Optional+Computed (like `cloud_id` itself),
+so a recovered value never conflicts with a `cloud_id`-only configuration, and a `cloud_name`-based
+configuration plans clean right away instead of needing a one-time diff to catch up. This lookup can fail
+silently (a network error, or a since-removed cloud) — if it does, `cloud_name` is simply left null.
 
-After import, everything is recovered directly from that version — `id`, `name`, `version`,
-`instance_type`, and every other node field, including the ones that stay masked on an ordinary refresh:
-`flags` and `advanced_instance_config` (top-level and per-node), `resources`, `required_resources`,
-`labels`, `required_labels`, and `cloud_deployment`. Import is the only moment there's no prior
-configuration to preserve, so there's nothing ambiguous about populating all of them from what's actually
-there — a matching configuration plans clean right after import, and omitting a field the backend actually
-has shows an honest diff wanting to remove it, instead of silently dropping it on some later, unrelated
-apply.
+After import, everything is recovered directly from that version, including the fields that stay masked on
+an ordinary refresh: `flags` and `advanced_instance_config` (top-level and per-node), `resources`,
+`required_resources`, `labels`, `required_labels`, and `cloud_deployment`. Import is the only moment with
+no prior configuration to preserve, so populating all of them from what's actually there is unambiguous —
+a matching configuration plans clean right after import, and omitting a field the backend actually has
+shows an honest diff wanting to remove it, instead of silently dropping it on some later, unrelated apply.
 
 This is different from what these same fields do on an *ordinary* refresh, where they stay masked (null
 while unconfigured, real-and-diffable once you set them) rather than recovered unconditionally — see the
