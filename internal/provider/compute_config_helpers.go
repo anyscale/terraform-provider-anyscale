@@ -138,67 +138,6 @@ func userFlagsFrom(flags map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// importAmbiguousNodeFields are head_node/worker_nodes sub-attributes
-// ImportState cannot recover unambiguously: there is no prior state yet to
-// tell "the user never configured this" apart from "the API auto-filled it",
-// the same ambiguity maskNodeFromPrior resolves against a real prior by
-// nulling. flags and advanced_instance_config are deliberately excluded --
-// CC12 recovers those from the API instead, since ordinary Read never reads
-// them back on any later refresh, so import is the only unambiguous chance.
-var importAmbiguousNodeFields = []string{"resources", "required_resources", "labels", "required_labels", "cloud_deployment"}
-
-// nullAmbiguousImportFields nulls importAmbiguousNodeFields on a freshly
-// converted API node object, leaving flags/advanced_instance_config (and
-// instance_type and any worker-specific fields) at their real API values.
-func nullAmbiguousImportFields(ctx context.Context, apiNode types.Object, diags *diag.Diagnostics) types.Object {
-	if apiNode.IsNull() || apiNode.IsUnknown() {
-		return apiNode
-	}
-
-	apiAttrs := apiNode.Attributes()
-	masked := make(map[string]attr.Value, len(apiAttrs))
-	for k, v := range apiAttrs {
-		masked[k] = v
-	}
-
-	for _, name := range importAmbiguousNodeFields {
-		if v, ok := masked[name]; ok {
-			masked[name] = nullValueOf(v)
-		}
-	}
-
-	obj, objDiags := types.ObjectValue(apiNode.AttributeTypes(ctx), masked)
-	diags.Append(objDiags...)
-	return obj
-}
-
-// nullAmbiguousImportFieldsList applies nullAmbiguousImportFields elementwise
-// to a worker_nodes list, mirroring maskWorkerNodesFromPrior's shape.
-func nullAmbiguousImportFieldsList(ctx context.Context, workers types.List, diags *diag.Diagnostics) types.List {
-	if workers.IsNull() || workers.IsUnknown() {
-		return workers
-	}
-
-	elems := workers.Elements()
-	if len(elems) == 0 {
-		return workers
-	}
-
-	masked := make([]attr.Value, 0, len(elems))
-	for _, v := range elems {
-		obj, ok := v.(types.Object)
-		if !ok {
-			masked = append(masked, v)
-			continue
-		}
-		masked = append(masked, nullAmbiguousImportFields(ctx, obj, diags))
-	}
-
-	listVal, listDiags := types.ListValue(workers.ElementType(ctx), masked)
-	diags.Append(listDiags...)
-	return listVal
-}
-
 // memoryUnitMultipliers maps the Kubernetes-quantity-style unit suffixes our
 // schema documentation promises ("4Gi", "1024Mi") to their byte multiplier.
 // Binary (power-of-1024) suffixes use a trailing "i"; decimal (power-of-1000)
@@ -712,12 +651,16 @@ func apiDeploymentConfigToAdditionalResource(ctx context.Context, entry cloudDep
 		attrs["flags"] = priorEntry.Flags
 	}
 
+	// GAP-3 applies per-entry too: at import (forImport), recover
+	// resources/required_resources/labels/required_labels/cloud_deployment
+	// unmasked, same as the top-level ImportState now does - see the GAP-3
+	// comment there for why these are safe to recover rather than null.
 	if entry.HeadNodeType != nil {
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, entry.HeadNodeType)
 		diags.Append(headNodeDiags...)
 		if !headNodeDiags.HasError() {
 			if forImport {
-				attrs["head_node"] = nullAmbiguousImportFields(ctx, headNodeObj, &diags)
+				attrs["head_node"] = headNodeObj
 			} else {
 				attrs["head_node"] = maskNodeFromPrior(ctx, headNodeObj, priorHeadNode, &diags)
 			}
@@ -733,7 +676,7 @@ func apiDeploymentConfigToAdditionalResource(ctx context.Context, entry cloudDep
 		diags.Append(workerDiags...)
 		if !workerDiags.HasError() {
 			if forImport {
-				attrs["worker_nodes"] = nullAmbiguousImportFieldsList(ctx, workerNodesList, &diags)
+				attrs["worker_nodes"] = workerNodesList
 			} else {
 				attrs["worker_nodes"] = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, &diags)
 			}

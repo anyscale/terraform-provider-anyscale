@@ -2080,15 +2080,23 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 	// Per-node flags/advanced_instance_config: apiNodeTypeToTerraform and
 	// apiWorkerNodeTypeToTerraform already extract these from the live API
 	// response as real values -- Read only ever loses them via
-	// maskNodeFromPrior, which nulls them because prior state was null. Seed
-	// full node objects here, but null the OTHER ambiguous sub-attributes
-	// (resources, required_resources, labels, cloud_deployment) that Read
-	// would still want to treat as unconfigured absent a real prior to check.
+	// maskNodeFromPrior, which nulls them because prior state was null.
+	//
+	// GAP-3: resources/required_resources/labels/required_labels/node
+	// cloud_deployment recover here too, unmasked, the same as
+	// flags/advanced_instance_config above - these are NOT ambiguous the way
+	// maskNodeFromPrior's nulling exists to handle. Live-confirmed (assayer,
+	// G1b/G1b-2 plus a follow-up node cloud_deployment check): the backend
+	// never auto-fills any of these five fields when omitted - a freshly
+	// created config that never set them reads back with them null, no
+	// invented default - so recovering whatever the API actually returns
+	// cannot mistake a backend-invented value for a real one. A config that
+	// DID set them now imports to complete state instead of a null that
+	// silently drops what the user configured.
 	if eff.HeadNodeType != nil {
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, eff.HeadNodeType)
 		resp.Diagnostics.Append(headNodeDiags...)
 		if !resp.Diagnostics.HasError() {
-			headNodeObj = nullAmbiguousImportFields(ctx, headNodeObj, &resp.Diagnostics)
 			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("head_node"), headNodeObj)...)
 		}
 	}
@@ -2101,7 +2109,6 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
 		resp.Diagnostics.Append(workerNodesDiags...)
 		if !resp.Diagnostics.HasError() {
-			workerNodesList = nullAmbiguousImportFieldsList(ctx, workerNodesList, &resp.Diagnostics)
 			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("worker_nodes"), workerNodesList)...)
 		}
 	}
