@@ -94,18 +94,11 @@ func newCloudNamePaginationMockServer(t *testing.T, page1Clouds []map[string]any
 
 func (s *cloudNamePaginationMockServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name          string  `json:"name"`
-		ParentCloudID string  `json:"parent_cloud_id"`
-		Description   *string `json:"description"`
+		Name          string `json:"name"`
+		ParentCloudID string `json:"parent_cloud_id"`
+		Description   string `json:"description"`
 	}
-	body := map[string]any{}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if v, ok := body["name"].(string); ok {
-		req.Name = v
-	}
-	if v, ok := body["parent_cloud_id"].(string); ok {
-		req.ParentCloudID = v
-	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	s.mu.Lock()
 	s.nextSeq++
@@ -113,7 +106,7 @@ func (s *cloudNamePaginationMockServer) handleCreate(w http.ResponseWriter, r *h
 	result := map[string]any{
 		"id":                 id,
 		"name":               req.Name,
-		"description":        "",
+		"description":        req.Description,
 		"parent_cloud_id":    req.ParentCloudID,
 		"creator_id":         "user_mock_creator",
 		"created_at":         "2026-01-01T00:00:00Z",
