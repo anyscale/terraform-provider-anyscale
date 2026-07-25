@@ -199,11 +199,16 @@ pass a separate cloud selector to disambiguate. Importing a `config_id` that's a
 immediately with a clear error, rather than importing a resource that the next refresh would just remove
 again.
 
-Import also reverse-looks-up `cloud_name` from the recovered `cloud_id`, on a best-effort basis, regardless
-of which one your configuration actually sets: `cloud_name` is Optional+Computed (like `cloud_id` itself),
-so a recovered value never conflicts with a `cloud_id`-only configuration, and a `cloud_name`-based
-configuration plans clean right away instead of needing a one-time diff to catch up. This lookup can fail
-silently (a network error, or a since-removed cloud) — if it does, `cloud_name` is simply left null.
+One current limitation worth knowing: import does not reverse-look-up `cloud_name` from the recovered
+`cloud_id` — `cloud_name` stays plain Optional, and nothing populates it during import. A `cloud_id`-only
+configuration is unaffected and plans clean right away. A `cloud_name`-based configuration shows a one-time
+diff on the first plan after import instead: state has no `cloud_name` yet, so the plan proposes setting it
+to match your configuration — safe and expected, the same as establishing any other value import didn't
+populate. Every plan after that is clean, indefinitely. This is a deliberate trade-off, not an oversight:
+making `cloud_name` Computed to close this gap was tried and reverted, because config genuinely omitting
+`cloud_name` and config genuinely dropping it are indistinguishable from state alone, and only one behavior
+can win — see the section above on switching between `cloud_id` and `cloud_name`, which is the guarantee
+this protects.
 
 After import, everything is recovered directly from that version, including the fields that stay masked on
 an ordinary refresh: `flags` and `advanced_instance_config` (top-level and per-node), `resources`,
