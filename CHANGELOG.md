@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-07-25
+
+### Added
+
+- resource/anyscale_compute_config: add `required_labels` for GPU/TPU-aware node scheduling labels, with the same cross-validation the backend applies (previously a real, working API field this provider silently dropped).
+- data-source/anyscale_compute_config: add `required_labels` for parity with the resource.
+- resource/anyscale_compute_config: `terraform import` now also accepts a `name:version` identifier (in addition to the existing version-specific ID) - it resolves to the exact requested version, and reports a clear diagnostic if the name is ambiguous across more than one cloud.
+- resource/anyscale_compute_config: add an optional `additional_resources` block to configure a compute config across more than one `anyscale_cloud_resource` on the same cloud - the existing top-level fields continue to describe the primary resource unchanged, so no existing configuration is affected.
+- data-source/anyscale_compute_config: add a computed `additional_resources` block for read parity with the resource, so looking up a multi-resource compute config no longer silently returns only its primary resource.
+- resource/anyscale_compute_config: importing a compute config now also recovers `resources`, `required_resources`, `labels`, `required_labels`, and each node's `cloud_deployment` into state instead of leaving them null - a configuration that already set these plans clean right after import instead of showing a diff.
+
+### Fixed
+
+- resource/anyscale_compute_config: `head_node.cloud_deployment` and `worker_nodes[].cloud_deployment` now actually take effect - a bug in the request shape meant the backend rejected any config that set this, so it has never worked; it is nested correctly now.
+- resource/anyscale_compute_config: `required_resources.memory` now fully supports the unit-string format already documented (e.g. `4Gi`, `1024Mi`) end to end - previously the backend rejected it outright with a 422 (the only format that ever worked was a raw byte integer); after converting it client-side, apply itself would then crash with an opaque Terraform Core "provider produced inconsistent result after apply" error, since state ended up holding the parsed byte count instead of the value you typed. Both are fixed: the unit string is parsed correctly for the backend, and state now preserves your original value with no crash, on create, update, and import.
+- resource/anyscale_compute_config: a compute config that was deleted outside Terraform is now correctly detected and removed from state on the next refresh, instead of appearing perfectly healthy forever. This self-heals automatically on your next `plan`/`apply` - no action needed.
+- resource/anyscale_compute_config: a transient error while refreshing (a `500`, a network blip) no longer silently removes a healthy resource from state - it now surfaces as a normal error instead of being misread as "not found." Going forward this needs no action. NOTE (narrow migration caveat): if a past transient error already wiped a resource from your state before upgrading, that resource is gone from state but still exists on the backend, and Read cannot refresh something that isn't there - a plain plan would try to *create* a new one rather than restore the original. If you saw an unexpected create for a resource you know still exists, `terraform import` the original `config_id` instead of letting it create a duplicate.
+- resource/anyscale_compute_config: importing a nonexistent or malformed ID now fails with a clear diagnostic instead of silently creating an empty phantom resource. NOTE (does not self-heal, migration text): if you already imported a bad ID under the old behavior, that resource has nothing valid backing it - the fix only changes your *next* import attempt. Remove the existing phantom with `terraform state rm`; there is nothing to re-import.
+- resource/anyscale_compute_config: two worker node groups (including within `additional_resources`) that both omit `name` and share the same `instance_type` are now given distinct derived names on create or when a new worker group is added, and a genuine name collision (explicit, user-set duplicate names) now surfaces a plan-time warning - previously both silently derived the identical name, which risked one worker group being silently dropped by the underlying cluster scheduler with no error anywhere. NOTE (does not self-heal, for migration text): this prevents new collisions going forward; it cannot retroactively fix a collision already baked into an existing applied state (by that point the duplicated name is indistinguishable from a real explicit name) - if you suspect this affected you before upgrading, give the affected worker groups distinct explicit names and apply, rather than expecting it to resolve itself.
+- resource/anyscale_compute_config: reordering `worker_nodes` or `additional_resources` entries in your configuration (with names/cloud_resource unchanged) no longer produces a plan diff - order was never meaningful to the backend, and the provider now reflects that instead of treating a reorder as a change.
+- resource/anyscale_compute_config: `worker_nodes[].max_nodes` values less than 1 or less than `min_nodes` now fail with a clear error at plan time instead of an opaque backend error at apply time - the backend has always rejected this combination, so no currently-working configuration is affected.
+- resource/anyscale_compute_config: setting both `instance_type` and `required_resources` on the same node now surfaces a warning explaining that this is ambiguous and undetermined which one governs at runtime, instead of silently accepting both with no indication. Existing configurations that set both keep applying exactly as before - this only adds a warning.
+- resource/anyscale_compute_config: an unrecognized `worker_nodes[].market_type` value now surfaces a warning naming the value and stating that it is being treated as `ON_DEMAND`, instead of silently falling back with no indication anything was wrong. Existing configurations with an unrecognized value keep applying exactly as before - this only adds a warning.
+- resource/anyscale_compute_config: a `custom_resources` amount with a fractional part (e.g. `2.5`) is now rejected with a clear error at plan time - previously this crashed at apply time with an opaque Terraform Core "provider produced inconsistent result after apply" error, since the backend silently stores only whole numbers. Round to a whole number to fix. Not a breaking change: nothing with this shape applies successfully today (it crashes), so nothing working is affected.
+
 ## [0.21.0] - 2026-07-24
 
 ### Breaking Changes
@@ -886,7 +911,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.22.0
 [0.21.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.21.0
 [0.20.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.20.0
 [0.19.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.19.0
