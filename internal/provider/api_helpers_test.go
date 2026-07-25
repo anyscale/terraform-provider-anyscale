@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -173,6 +174,29 @@ func TestDoRequestRaw(t *testing.T) {
 		_, err := DoRequestRaw(ctx, client, "GET", "/test", nil)
 		if err == nil {
 			t.Fatal("expected error for 500 status, got nil")
+		}
+	})
+
+	t.Run("404 not listed as expected satisfies errors.Is(ErrNotFound) and preserves the legacy verbatim phrase", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error": {"detail": "not found"}}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithToken(server.URL, "test-token")
+
+		_, err := DoRequestRaw(ctx, client, "GET", "/test", nil)
+		if err == nil {
+			t.Fatal("expected error for 404 status, got nil")
+		}
+
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err: %v", err)
+		}
+
+		if !strings.Contains(err.Error(), "unexpected status 404") {
+			t.Errorf("expected error text to contain the verbatim legacy phrase \"unexpected status 404\" (string-matching callers and at least one acceptance test anchor on this exact phrase, not just the digits), got: %v", err)
 		}
 	})
 }
