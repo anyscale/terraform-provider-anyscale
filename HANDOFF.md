@@ -1,8 +1,30 @@
 # HANDOFF — terraform-provider-anyscale
 
-_Last updated: 2026-07-24 (Compute Config Import & SDK Parity — implementation, real-infra
-acceptance testing, and integration all complete; ready to push pending one final comment
-cleanup)_
+_Last updated: 2026-07-25 (Compute Config Import & SDK Parity — merged as PR #215 (e582fe7) and
+shipped in released version v0.22.0; a post-push CI regression was found and fixed same-day
+before merge. Release independently verified: published body, checksums, GPG signature, and
+Terraform Registry pickup all confirmed clean.)_
+
+## Post-push incident (fixed before merge, shipped clean in v0.22.0)
+
+PR #215's first push (20a977c) introduced a real, provider-wide regression missed by every
+pre-push review: the new `ErrNotFound` sentinel (added for compute_config's own 404 handling)
+changed `DoRequestRaw`'s 404 error text from `"unexpected status 404: ..."` to `"resource not
+found: ..."`. Six already-shipped, unrelated call sites - `resource_service.go` (x2),
+`data_source_project.go`, `data_source_service.go`, `resource_cloud_resource.go`, and
+`resource_project.go` - detected 404s via `strings.Contains(err.Error(), "404")` and silently
+stopped recognizing real 404s once the digits disappeared from the text. CI caught it (two
+pre-existing service tests went red), not any design or code review.
+
+**Fixed same-day, CI green on the fix commit (a287b5d):** restore the exact legacy phrase
+verbatim inside the wrapped error - `fmt.Errorf("%w: unexpected status %d: %s", ErrNotFound,
+status, body)` - so `errors.Is(err, ErrNotFound)`, the bare `"404"` substring, and the
+phrase-anchored `UnknownServiceIDErrors` test assertion are all satisfied at once, with zero
+edits to any of the 6 call sites. Landed with a permanent guard test
+(`TestDoRequestRaw`'s new 404 subtest, asserting both properties, mutation-proven against the
+wrong `"(HTTP 404)"`-only wording that was tried and rejected first). No changelog fragment
+needed - the regression never reached a released version. Full incident detail in
+`.crystl/quest/DRAFT-changelog-fragments.txt`'s Resolution-history section.
 
 ## Current Status
 
@@ -129,21 +151,33 @@ real ordering-crash bug (alphabetical sort of a non-Computed list) before it eve
 
 ## Next Work
 
-**This PR:** one final comment-cleanliness pass (removing quest-process narration - agent names,
-gate IDs, commit hashes - and one stale example comment, from architect's final re-review), zero
-behavior change. Then tfp-shipwright pushes `brent/compute-config-cleanup` -> `main` as one PR;
-adds the real `.changelog/<PR#>.txt` in a follow-up commit once the PR number exists. User merges
-after CI is green - no shard self-merges.
+**This PR: DONE.** Merged as `e582fe7` on `main`, released as `v0.22.0` (2026-07-25) - GitHub
+Release verified published (not draft/prerelease), body byte-matches `CHANGELOG.md`'s `[0.22.0]`
+section, all 9 signed assets present with checksums and GPG signature independently re-verified,
+Terraform Registry confirmed serving `0.22.0` as latest.
 
-**Backlog / fast-follow (this week, explicit user direction):** cloud_id/cloud_name breaking
+**Backlog / fast-follow #1 (this week, explicit user direction):** cloud_id/cloud_name breaking
 redesign. Direction sketched by forge: `cloud_name` stays `Optional+Computed` (fixes the plain
 `cloud_id` import case that drove A3), and a config that drops an explicit `cloud_name` in favor
 of `cloud_id` no longer auto-clears it automatically - a disclosed, intentional
 `release-note:breaking-change` with migration text, the opposite trade-off from what CC3b protects
 today. Needs its own design pass, implementation, a real CC3b-equivalent test proving the *new*
-intended behavior, and full re-validation - not a quick patch on top of tonight's PR. Full context
-(why A3 was reverted, the exact plan-modifier tension, the three real acceptance-test findings)
-lives in `approved-design.md`'s CC3b section and this entry.
+intended behavior, and full re-validation - not a quick patch. Full context (why A3 was reverted,
+the exact plan-modifier tension, the three real acceptance-test findings) lives in
+`approved-design.md`'s CC3b section and this entry.
+
+**Backlog / fast-follow #2 (added by architect after the post-push 404 incident):** migrate the
+6 legacy `strings.Contains(err.Error(), "404")` call sites - `resource_service.go` (x2),
+`data_source_project.go`, `data_source_service.go`, `resource_cloud_resource.go`,
+`resource_project.go` - to `errors.Is(err, ErrNotFound)`, the sentinel's actual intended purpose
+and the correct long-term end state (this release's fix, "Option B," restored the legacy error
+text verbatim so all 6 sites keep working unchanged - a deliberate, scoped, non-breaking fix
+under CI-red pressure, not the final architecture). Requires per-site tracing that every error
+path at each of the 6 sites genuinely flows through `DoRequestRaw` before converting it - the
+one thing that made rushing this into #215 risky (a site whose error comes from elsewhere would
+silently stop detecting 404s under a naive migration). Not urgent - today's fix is safe and
+tested - but worth doing deliberately rather than leaving fragile string-matching as the
+permanent state now that a real sentinel exists.
 
 ## Per-Hero Status
 
