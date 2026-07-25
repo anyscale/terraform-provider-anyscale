@@ -91,7 +91,7 @@ resource "anyscale_compute_config" "test" {
 	result := runTerraformValidate(t, binDir, resourceHCL)
 
 	// This must NOT be a hard error - the backend accepts both fields set
-	// side-by-side (assayer live-confirmed), so rejecting it would be a real
+	// side-by-side (live-confirmed), so rejecting it would be a real
 	// behavior change against a config that applies successfully today.
 	for _, d := range result.Diagnostics {
 		if d.Severity == "error" {

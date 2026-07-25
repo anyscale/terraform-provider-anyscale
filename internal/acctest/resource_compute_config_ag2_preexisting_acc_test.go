@@ -1,7 +1,7 @@
 package acctest
 
-// AG-2 (compute-config-import-parity quest, L0/L7): every existing compute_config
-// import test seeds its own fixture inside the same test function that then
+// Every existing compute_config import test seeds its own fixture inside
+// the same test function that then
 // imports it - none proves import of a compute config that is genuinely
 // pre-existing, created entirely outside that test's own Terraform lifecycle.
 // This closes that gap using CreateEphemeralComputeConfig, which hits the raw

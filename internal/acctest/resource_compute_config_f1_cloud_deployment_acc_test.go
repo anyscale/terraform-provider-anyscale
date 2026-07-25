@@ -1,10 +1,9 @@
 package acctest
 
-// F1 regression (compute-config-import-parity quest): node-level
-// cloud_deployment used to be written to the WRONG wire location - a
-// top-level sibling key on the node's config map - which the real backend
-// rejects outright with a 422 "extra fields not permitted" (assayer G1g live
-// confirm). The fix nests it inside that node's flags dict instead, matching
+// F1 regression: node-level cloud_deployment used to be written to the
+// WRONG wire location - a top-level sibling key on the node's config map -
+// which the real backend rejects outright with a 422 "extra fields not
+// permitted". The fix nests it inside that node's flags dict instead, matching
 // the SDK/backend/our-own-flatten's actual expectation. This proves the fix
 // with a mock server that MIRRORS the real backend's strictness: it 422s if
 // cloud_deployment ever arrives at the wrong (top-level) location, so this
@@ -52,9 +51,9 @@ func newF1CloudDeploymentMockServer(t *testing.T) *httptest.Server {
 			}
 
 			// The real backend's strictness this mock mirrors: cloud_deployment
-			// as a TOP-LEVEL key on the node is REJECTED, matching the live 422
-			// "extra fields not permitted" G1g found. A regression here must
-			// fail exactly the way a real create would.
+			// as a TOP-LEVEL key on the node is REJECTED with a 422 "extra
+			// fields not permitted". A regression here must fail exactly the
+			// way a real create would.
 			if _, wrongLocation := headNode["cloud_deployment"]; wrongLocation {
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				_ = json.NewEncoder(w).Encode(map[string]any{

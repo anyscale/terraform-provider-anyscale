@@ -1,7 +1,7 @@
 package acctest
 
-// AG-1 (compute-config-import-parity quest, L0/L7): the missing "retain the
-// exact intended version" proof. Existing tests prove config_id changes
+// The missing "retain the exact intended version" proof. Existing tests
+// prove config_id changes
 // across versions and that the data source's versions list enumerates every
 // version, but nothing imports an OLDER, non-latest config_id while a NEWER
 // version of the same name also exists and checks that the OLDER version's

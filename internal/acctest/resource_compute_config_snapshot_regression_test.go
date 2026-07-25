@@ -1,18 +1,18 @@
 package acctest
 
-// This file guards the byte-identical contract from the compute-config-import-
-// parity quest's Option C design (approved-design.md): a plain single-resource
-// anyscale_compute_config config (no additional_resources block) must send the
-// EXACT SAME create/update request shape after the multi-resource generalization
-// as it did before. Per the design doc, that claim is an acceptance GATE proven
-// by a real request snapshot, not a source-read assumption - this is that gate.
+// This file guards the byte-identical contract from the Option C design
+// (approved-design.md): a plain single-resource anyscale_compute_config
+// config (no additional_resources block) must send the EXACT SAME
+// create/update request shape after the multi-resource generalization as it
+// did before. Per the design doc, that claim is an acceptance GATE proven by
+// a real request snapshot, not a source-read assumption - this is that gate.
 //
-// The captured shape asserted below was taken from the actual request this mock
-// server received BEFORE any Option C / F1-F7 changes landed (compute-config-
-// import-parity quest, L7). If a future change to expand/nodeConfigToAPI/
-// resource_compute_config.go's Create legitimately needs to alter this shape,
-// this test must fail loudly first - update it deliberately, with the reason
-// written down, not by silently loosening the assertion.
+// The captured shape asserted below was taken from the actual request this
+// mock server received BEFORE any Option C / F1-F7 changes landed. If a
+// future change to expand/nodeConfigToAPI/resource_compute_config.go's
+// Create legitimately needs to alter this shape, this test must fail loudly
+// first - update it deliberately, with the reason written down, not by
+// silently loosening the assertion.
 
 import (
 	"encoding/json"
