@@ -76,7 +76,7 @@ func newF3NotFoundMockServer(t *testing.T) (*httptest.Server, *f3NotFoundMockSer
 
 			if override == http.StatusNotFound {
 				w.WriteHeader(http.StatusNotFound)
-				// The REAL error-shaped body assayer captured live (G1e) -
+				// The real error-shaped body the backend actually returns -
 				// well-formed JSON with an "error" key, not an empty/broken
 				// body, which is exactly what let bug A/B happen in the
 				// first place (json.Unmarshal succeeds on it).

@@ -1,20 +1,18 @@
 package acctest
 
-// GAP-3 regression (compute-config-import-parity quest, extends AG-2): import
-// must recover resources/required_resources/labels/required_labels/node
-// cloud_deployment from the real API instead of leaving them null
-// (nullAmbiguousImportFields et al, now deleted by forge - c3e8a96). Safety
-// for this was live-confirmed across several rounds this quest (assayer's
-// G1b/G1b-2/G1c/G1g-corrected/G1h checks): each of these 5 fields comes back
-// null when never set (nothing to lose by recovering) and round-trips
-// byte-for-byte when genuinely set (nothing invented by recovering). This
-// extends AG-2's shape (a genuinely pre-existing, out-of-band fixture, not
-// self-seeded by a preceding Create in this same test) rather than narrowing
-// the existing ImportStateVerifyIgnore lists in resource_compute_config_
-// acc_test.go / _lifecycle_acc_test.go - per forge, those ignores cover a
-// SEPARATE, still-standing reason (API-normalized instance_type-derived
-// defaults with no prior state to mask against) that GAP-3 does not touch,
-// so a dedicated explicit-values case is the correct shape, not a shared one.
+// GAP-3 regression (extends AG-2): import must recover resources/
+// required_resources/labels/required_labels/node cloud_deployment from the
+// real API instead of leaving them null. Live-confirmed: each of these 5
+// fields comes back null when never set (nothing to lose by recovering) and
+// round-trips byte-for-byte when genuinely set (nothing invented by
+// recovering). This extends AG-2's shape (a genuinely pre-existing,
+// out-of-band fixture, not self-seeded by a preceding Create in this same
+// test) rather than narrowing the existing ImportStateVerifyIgnore lists in
+// resource_compute_config_acc_test.go / _lifecycle_acc_test.go - those
+// ignores cover a SEPARATE, still-standing reason (API-normalized
+// instance_type-derived defaults with no prior state to mask against) that
+// GAP-3 does not touch, so a dedicated explicit-values case is the correct
+// shape, not a shared one.
 
 import (
 	"bytes"

@@ -229,10 +229,10 @@ resource "anyscale_compute_config" "test" {
 				PreConfig: func() {
 					// Simulate the backend returning the SAME two workers in
 					// the OPPOSITE order on the next Read - a real, if
-					// unlikely, scenario per forge's confirmation that order
-					// is not backend-meaningful (free to differ across
-					// requests). Reverses the stored record's own
-					// deployment_configs[0].worker_node_types in place.
+					// unlikely, scenario: order is not backend-meaningful
+					// (free to differ across requests). Reverses the stored
+					// record's own deployment_configs[0].worker_node_types in
+					// place.
 					state.mu.Lock()
 					for _, record := range state.records {
 						cfg, _ := record["config"].(map[string]any)

@@ -1,16 +1,13 @@
 package acctest
 
-// Option C / F7 regression (compute-config-import-parity quest): the new
-// additional_resources multi-resource support. splitDeploymentConfigsForRead
-// matches N deployment_configs entries back to (primary, additional[]) by
-// cloud_resource NAME against prior state, not position or response order
-// (the backend's response order isn't guaranteed - forge's trace + assayer's
-// own earlier live confirmation that order is merely echoed, not backend-
-// meaningful).
+// Option C / F7 regression: the new additional_resources multi-resource
+// support. splitDeploymentConfigsForRead matches N deployment_configs
+// entries back to (primary, additional[]) by cloud_resource NAME against
+// prior state, not position or response order - the backend's response
+// order isn't guaranteed, it's merely echoed, not backend-meaningful.
 //
-// IMPORTANT construction note from forge (implementer), who hit this
-// building their own scratch unit test: a 2-entry response can make a
-// completely broken ("first entry becomes primary" / no real name-matching)
+// IMPORTANT construction note: a 2-entry response can make a completely
+// broken ("first entry becomes primary" / no real name-matching)
 // implementation pass BY COINCIDENCE, if the mock happens to return entries
 // in an order where the naive fallback still lands on the right answer. This
 // test deliberately uses a genuinely WRONG-first-entry response (a real
@@ -195,8 +192,7 @@ resource "anyscale_compute_config" "test" {
 // SOURCE, not just the resource - a multi-resource config looked up via the
 // data source previously (silently, no diagnostic) returned only the
 // primary entry, the exact silent-truncation problem F7 was scoped to kill,
-// just on the surface F7's original scope didn't touch (scribe's find,
-// architect's GAP A ruling, forge's same-day fix in fa01b0f). The DS has no
+// just on a surface F7's original scope didn't touch. The DS has no
 // prior state to match against (a fresh lookup every time), so this asserts
 // the deterministic cold-lookup fallback (first entry = primary, rest =
 // name-sorted additional) rather than a specific configured order.
