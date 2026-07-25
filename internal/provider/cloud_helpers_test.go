@@ -200,6 +200,48 @@ func TestResolveCloudNameToID(t *testing.T) {
 		}
 	})
 
+	t.Run("name past page 1 is found (B1 mutation-proof regression guard)", func(t *testing.T) {
+		// ResolveCloudNameToID used to read only page 1 of GET /api/v2/clouds
+		// via a single unpaginated request - in an org whose cloud list
+		// exceeds one page, a valid name past page 1 resolved to "not found".
+		// A single-page mock cannot fail against that bug (it would be a
+		// placebo); this fixture is genuinely 2 pages, mirroring
+		// TestFindCloudByName_PagesBeyondFirstPage (data_source_cloud_test.go),
+		// the same fix already proven for the singular data source.
+		requestCount := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.WriteHeader(http.StatusOK)
+
+			if requestCount == 1 {
+				_, _ = w.Write([]byte(`{
+					"results": [{"id": "cld_1", "name": "other-cloud", "created_at": "2024-01-01T00:00:00Z"}],
+					"metadata": {"next_paging_token": "page2"}
+				}`))
+				return
+			}
+
+			_, _ = w.Write([]byte(`{
+				"results": [{"id": "cld_2", "name": "target-cloud", "created_at": "2024-01-01T00:00:00Z"}],
+				"metadata": {"next_paging_token": null}
+			}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithToken(server.URL, "test-token")
+
+		cloudID, err := ResolveCloudNameToID(ctx, client, "target-cloud")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cloudID != "cld_2" {
+			t.Errorf("ResolveCloudNameToID(target-cloud) = %q, want cld_2 (found on page 2)", cloudID)
+		}
+		if requestCount != 2 {
+			t.Errorf("expected 2 requests (one per page), got %d", requestCount)
+		}
+	})
+
 	t.Run("case sensitive matching", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
