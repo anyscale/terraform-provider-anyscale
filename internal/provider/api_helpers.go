@@ -14,16 +14,17 @@ import (
 )
 
 // ErrNotFound is a sentinel DoRequestRaw/DoRequestAndParse wrap into their
-// returned error whenever the real HTTP response status is 404, regardless
-// of whether http.StatusNotFound is in the caller's expectedStatuses.
-// Callers that need to tell "genuinely gone" apart from any other failure
-// (a transient 500, a network error, a permission loss) should check
-// errors.Is(err, ErrNotFound) rather than either (a) listing StatusNotFound
-// as an expected/accepted status - that makes a 404 look like success, not
-// an error, and (b) inspecting the returned *T for nil/zero-valued fields -
-// DoRequestAndParse returns a non-nil *T pointing at a zero-valued struct
-// whenever a JSON body simply doesn't match T's shape, which a 404 error
-// body never does, so that's indistinguishable from "found but empty."
+// returned error whenever the real HTTP response status is 404 AND
+// http.StatusNotFound is NOT in the caller's expectedStatuses (a 404 the
+// caller does list as expected/accepted is returned as a normal, non-error
+// response instead). Callers that need to tell "genuinely gone" apart from
+// any other failure (a transient 500, a network error, a permission loss)
+// should check errors.Is(err, ErrNotFound) rather than either (a) listing
+// StatusNotFound as an expected/accepted status - that makes a 404 look like
+// success, not an error, and (b) inspecting the returned *T for nil/zero-valued
+// fields - DoRequestAndParse returns a non-nil *T pointing at a zero-valued
+// struct whenever a JSON body simply doesn't match T's shape, which a 404
+// error body never does, so that's indistinguishable from "found but empty."
 var ErrNotFound = errors.New("resource not found")
 
 // DoRequestAndParse performs an HTTP request, reads and closes the response body,

@@ -54,15 +54,6 @@ func AddConfigError(diags *diag.Diagnostics, summary string, detail string) {
 	diags.AddError(summary, detail)
 }
 
-// AddConfigWarning adds a diagnostic warning for a configuration shape that is
-// accepted today (so the plan/apply proceeds) but resolves to a non-obvious or
-// previously-silent behavior. Use this instead of AddConfigError when the goal
-// is to surface a clear diagnostic without rejecting a config that currently
-// applies successfully - see CHANGELOG.md's breaking-change definition.
-func AddConfigWarning(diags *diag.Diagnostics, summary string, detail string) {
-	diags.AddWarning(summary, detail)
-}
-
 // extractAPIErrorDetail pulls the backend's own error detail message out of an
 // error produced by DoRequestRaw/DoRequestAndParse (formatted as "unexpected
 // status %d: %s", where %s is the raw response body), so a caller can present

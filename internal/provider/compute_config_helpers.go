@@ -51,7 +51,7 @@ func resolveEffectiveComputeConfig(configData computeTemplateConfig) effectiveCo
 }
 
 // resolveEffectiveComputeConfigWithOverride is resolveEffectiveComputeConfig's
-// Option C (multi-resource) sibling: applies overrideEntry as the "primary"
+// multi-resource sibling: applies overrideEntry as the "primary"
 // override instead of unconditionally using index 0. Callers use this once
 // splitDeploymentConfigsForRead has determined - by name against prior state,
 // not by position - which of 2+ deployment_configs entries is primary, since
@@ -153,7 +153,7 @@ var memoryUnitSuffixes = []struct {
 var memoryPlainNumberPattern = regexp.MustCompile(`^\d+(\.\d+)?$`)
 
 // parseMemoryToBytes converts a required_resources.memory value to the plain
-// integer byte count the real API requires (F2: the API 422s on a unit string
+// integer byte count the real API requires (the API 422s on a unit string
 // like "4Gi" even though our own schema documents that format, matching the
 // SDK's _parse_memory_string convention). A bare number (with or without a
 // decimal point) is treated as already-bytes and passed through unchanged.
@@ -210,7 +210,7 @@ func workerNodeName(v attr.Value) (string, bool) {
 	return nameAttr.ValueString(), true
 }
 
-// reorderWorkersToMatchPrior implements F6: reorders apiWorkers to match
+// reorderWorkersToMatchPrior reorders apiWorkers to match
 // priorWorkers' order by matching each element's "name" attribute, so a
 // worker_nodes list whose backend-returned order differs from the user's own
 // configured order doesn't show a spurious diff (worker order is not
@@ -220,10 +220,10 @@ func workerNodeName(v attr.Value) (string, bool) {
 //
 // Reorders ONLY when every name is unique within apiWorkers AND within
 // priorWorkers individually (the uniqueness guard, matching the same
-// principle F5 uses for name derivation) - on any collision or unmatchable
-// (null/unknown) name on either side, this returns apiWorkers completely
-// unchanged rather than guess at a pairing, falling back to the API's own
-// order exactly as before this fix.
+// principle disambiguateDefaultedWorkerNames uses for name derivation) - on
+// any collision or unmatchable (null/unknown) name on either side, this
+// returns apiWorkers completely unchanged rather than guess at a pairing,
+// falling back to the API's own order exactly as before this fix.
 func reorderWorkersToMatchPrior(ctx context.Context, apiWorkers types.List, priorWorkers types.List) types.List {
 	apiElems := apiWorkers.Elements()
 	priorElems := priorWorkers.Elements()
@@ -281,8 +281,8 @@ func reorderWorkersToMatchPrior(ctx context.Context, apiWorkers types.List, prio
 	return listVal
 }
 
-// disambiguateDefaultedWorkerNames implements F5: two worker groups sharing
-// an instance_type that both leave name unset would otherwise derive the
+// disambiguateDefaultedWorkerNames handles the case where two worker groups
+// sharing an instance_type both leave name unset and would otherwise derive the
 // identical instance_type-based default (workerNodeConfigToAPI), colliding
 // in the backend's name-keyed available_node_types dict at cluster launch.
 // Storage itself tolerates the duplicate (live-confirmed), so this is a
@@ -332,7 +332,7 @@ func disambiguateDefaultedWorkerNames(workers []map[string]interface{}, defaulte
 }
 
 // nameVersionImportIDPattern validates the name portion of a name:version
-// import id (A2/GAP-4) AFTER the caller has already confirmed the whole
+// import id AFTER the caller has already confirmed the whole
 // string contains exactly one colon - mirrors the CLI's own grammar
 // (parse_cluster_compute_name_version, cluster_compute.py:59-61): the name
 // may contain spaces but never a colon, and the version is a positive
@@ -342,7 +342,7 @@ func disambiguateDefaultedWorkerNames(workers []map[string]interface{}, defaulte
 var nameVersionImportIDPattern = regexp.MustCompile(`^([^\s:]+(?:\s+[^\s:]+)*):([1-9][0-9]*)$`)
 
 // computeConfigImportIDKind classifies a terraform import id for
-// anyscale_compute_config (A2/GAP-4).
+// anyscale_compute_config.
 type computeConfigImportIDKind int
 
 const (
@@ -351,7 +351,7 @@ const (
 	importIDKindMalformed
 )
 
-// classifyComputeConfigImportID implements A2/GAP-4's client-side id
+// classifyComputeConfigImportID performs client-side id
 // classification, run BEFORE any API call: the backend gives a malformed id
 // and a well-formed-but-nonexistent one the IDENTICAL "not found" response
 // (live-confirmed), so a distinct "malformed" diagnostic can only come from
@@ -378,7 +378,7 @@ func classifyComputeConfigImportID(id string) (kind computeConfigImportIDKind, n
 }
 
 // resolveComputeConfigImportID resolves a name:version-shaped import id to
-// its cpt_ config_id via the compute_templates search endpoint (A2/GAP-4).
+// its cpt_ config_id via the compute_templates search endpoint.
 // Unlike findComputeConfigByName (which silently picks the most recent
 // match on a name collision - the right behavior for a plain "give me the
 // latest" data source lookup), this ERRORS on an ambiguous match across more
@@ -418,7 +418,7 @@ func resolveComputeConfigImportID(ctx context.Context, client *Client, name stri
 }
 
 // additionalResourceToDeploymentConfig converts one additional_resources
-// entry (Option C) into a deployment_configs wire entry, mirroring
+// entry into a deployment_configs wire entry, mirroring
 // buildComputeConfigRequest's own per-entry folding (zones->AllowedAZs,
 // min/max_resources+cross-zone-scaling folded into flags) - but reads
 // advanced_instance_config/flags as JSON STRINGS rather than Dynamic, since
@@ -464,7 +464,7 @@ func additionalResourceToDeploymentConfig(ctx context.Context, entry AdditionalR
 				return deploymentConfig, fmt.Errorf("failed to convert additional_resources worker node: %w", err)
 			}
 			if workerConfig != nil {
-				// F5 follow-up: same IsUnknown gap as the primary path's copy
+				// Same IsUnknown gap as the primary path's copy
 				// of this logic (resource_compute_config.go) - a fresh
 				// Create leaves an omitted name Unknown, not null.
 				if nameAttr, ok := workerNodeObj.Attributes()["name"].(types.String); ok && (nameAttr.IsNull() || nameAttr.IsUnknown()) {
@@ -529,7 +529,7 @@ func additionalResourceToDeploymentConfig(ctx context.Context, entry AdditionalR
 }
 
 // apiDeploymentConfigToAdditionalResource converts one deployment_configs
-// wire entry into an additional_resources types.Object (Option C), unfolding
+// wire entry into an additional_resources types.Object, unfolding
 // the same flags-encoded fields (min_resources/max_resources/cross-zone
 // scaling) the top-level Read path unfolds, and masking node fields against
 // a prior entry the same way maskNodeFromPrior does for head_node/worker_nodes.
@@ -632,9 +632,9 @@ func apiDeploymentConfigToAdditionalResource(ctx context.Context, entry cloudDep
 		attrs["flags"] = priorEntry.Flags
 	}
 
-	// GAP-3 applies per-entry too: at import (forImport), recover
+	// This recovery applies per-entry too: at import (forImport), recover
 	// resources/required_resources/labels/required_labels/cloud_deployment
-	// unmasked, same as the top-level ImportState now does - see the GAP-3
+	// unmasked, same as the top-level ImportState now does - see the
 	// comment there for why these are safe to recover rather than null.
 	if entry.HeadNodeType != nil {
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, entry.HeadNodeType)
@@ -677,23 +677,24 @@ type additionalResourceRolePrior struct {
 	entry     *AdditionalResourceModel // nil for the primary role
 }
 
-// splitDeploymentConfigsForRead implements Option C's read-side matching
-// (F7): when a compute config has more than one deployment_configs entry,
-// splits them into (primary, additional) by matching each entry's
+// splitDeploymentConfigsForRead performs the read-side matching: when a
+// compute config has more than one deployment_configs entry, it splits
+// them into (primary, additional) by matching each entry's
 // cloud_deployment name against PRIOR STATE (top-level cloud_resource, plus
 // each additional_resources entry's own cloud_resource) - robust to peer
-// reordering by the backend, the same idiom F6 uses for worker_nodes.
-// cloud_resource names are inherently unique (anyscale_cloud_resource keeps
-// them unique per cloud), so unlike F6's worker-name case, no uniqueness
-// GUARD is needed here - only an ok=false result when an entry cannot be
-// placed at all.
+// reordering by the backend, the same idiom reorderWorkersToMatchPrior uses
+// for worker_nodes. cloud_resource names are inherently unique
+// (anyscale_cloud_resource keeps them unique per cloud), so unlike
+// reorderWorkersToMatchPrior's worker-name case, no uniqueness GUARD is
+// needed here - only an ok=false result when an entry cannot be placed at
+// all.
 //
 // Unmatched entries (new since last apply, or a cold import/first read with
 // no prior state at all) are assigned deterministically: the first such
 // entry (in the response's own order) becomes primary if none matched yet,
 // the rest become additional (name-sorted for stable diffs).
 //
-// Returns ok=false (F7: caller should emit a loud diagnostic rather than
+// Returns ok=false (caller should emit a loud diagnostic rather than
 // silently guess) only when an entry's cloud_deployment name is itself
 // empty - a shape this provider's own Create/Update never produces (every
 // entry we send always sets cloud_deployment), so this should only occur
@@ -768,7 +769,7 @@ func splitDeploymentConfigsForRead(
 // (role classification already decided by the caller) to match
 // priorAdditionalOrder - the order cloud_resource names appeared in prior's
 // additional_resources list - mirroring reorderWorkersToMatchPrior's
-// match-by-name-or-bail idiom for worker_nodes (F6). For Read/ImportState,
+// match-by-name-or-bail idiom for worker_nodes. For Read/ImportState,
 // "prior" is state's previous additional_resources, so this stops a
 // BACKEND response-order change from becoming a spurious plan diff. For
 // Create/Update, "prior" is the PLAN's own additional_resources (see
@@ -777,7 +778,7 @@ func splitDeploymentConfigsForRead(
 // list attribute, not just cosmetic.
 //
 // A user's OWN reorder of additional_resources in their .tf is NOT
-// suppressed by this, same as worker_nodes/F6 - that is expected, ordinary
+// suppressed by this, same as worker_nodes - that is expected, ordinary
 // List-attribute diffing, not something either mechanism tries to hide.
 //
 // Falls back to entries unchanged (natural collection order: prior-matched

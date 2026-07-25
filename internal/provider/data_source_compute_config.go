@@ -73,7 +73,7 @@ type ComputeConfigDataSourceModel struct {
 	HeadNode    types.Object `tfsdk:"head_node"`
 	WorkerNodes types.List   `tfsdk:"worker_nodes"`
 
-	// Option C: multi-resource parity with the resource. Computed-only,
+	// Multi-resource parity with the resource. Computed-only,
 	// same shape as AdditionalResourceModel - see additionalResourceAttrTypes.
 	AdditionalResources types.List `tfsdk:"additional_resources"`
 }
@@ -283,7 +283,7 @@ func dataSourceWorkerNodeAttributes() map[string]schema.Attribute {
 }
 
 // dataSourceAdditionalResourceAttributes mirrors the resource's
-// additionalResourceAttributes shape (Option C), Computed-only - same
+// additionalResourceAttributes shape, Computed-only - same
 // reasoning as dataSourceNodeAttributes above. advanced_instance_config and
 // flags stay String (not Dynamic) for the same reason as the resource:
 // additional_resources is a list, and Terraform doesn't support a dynamic
@@ -532,16 +532,14 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	// DS-CC-3: explicit stringOrNull, same reasoning as created_at/last_modified_at above.
 	config.Region = stringOrNull(configData.Region)
 
-	// Option C: a data source lookup has no prior state at all (always a
-	// cold read), so - like ImportState - every deployment_configs entry is
-	// "unmatched": the deterministic fallback (first in API response order =
-	// primary, rest = additional, name-sorted... no, name-MATCHED order is
-	// irrelevant here since there is no prior to match against; see
-	// splitDeploymentConfigsForRead) decides the split. F7 applies here too:
-	// before this fix, a multi-resource config silently returned only the
-	// first entry with no signal at all that anything was dropped - the
-	// exact silent-truncation failure mode F7 was scoped to prevent, just on
-	// this surface instead of the resource's.
+	// A data source lookup has no prior state at all (always a cold read),
+	// so - like ImportState - every deployment_configs entry is "unmatched":
+	// the deterministic fallback in splitDeploymentConfigsForRead (first in
+	// API response order becomes primary, the rest become additional,
+	// name-sorted) decides the split. This also closes a silent-truncation
+	// gap on this surface: previously, a multi-resource config looked up via
+	// the data source silently returned only the first entry with no signal
+	// at all that anything was dropped.
 	var eff effectiveComputeConfig
 	if len(configData.DeploymentConfigs) <= 1 {
 		eff = resolveEffectiveComputeConfig(configData)
