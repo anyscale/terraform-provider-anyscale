@@ -31,6 +31,7 @@ func computeConfigDataSourceLookupFixture(id string) ComputeConfigDataSourceMode
 		MaxResources:           types.MapNull(types.Float64Type),
 		Flags:                  types.DynamicNull(),
 		AdvancedInstanceConfig: types.DynamicNull(),
+		AdditionalResources:    types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()}),
 	}
 }
 

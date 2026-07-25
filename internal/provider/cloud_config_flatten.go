@@ -397,10 +397,9 @@ const fileStorageDefaultMountPath = "/mnt/shared"
 
 // flattenFileStorage populates file_storage from the API's FileStorage.
 //
-// L2: mount_path is Optional+Computed with a static Default, unlike CC12's
-// purely-Optional ambiguous fields (compute_config_helpers.go's
-// nullAmbiguousImportFields) - nulling it here is NOT the safe move the way
-// it is for a plain Optional field. ImportStateVerify runs directly against
+// L2: mount_path is Optional+Computed with a static Default, unlike a plain
+// Optional field recovered on import - nulling it here is NOT the safe move
+// the way it is for a plain Optional field. ImportStateVerify runs directly against
 // whatever this function writes, with no intervening plan (Defaults are a
 // PlanResourceChange-only mechanism - terraform-plugin-framework's
 // TransformDefaults, internal/fwschemadata/data_default.go - never invoked

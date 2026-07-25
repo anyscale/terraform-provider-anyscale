@@ -65,7 +65,7 @@ func AddConfigError(diags *diag.Diagnostics, summary string, detail string) {
 // Every AnyscaleHTTPException (which every raised detail in this provider's
 // traced 403s/400s is) goes through this handler - it is not a bare top-level
 // {"detail": "..."}, which would silently under-parse to an empty Detail and
-// fall through to the raw wrapper every time (caught in review before ship).
+// fall through to the raw wrapper every time.
 //
 // Falls back to the full wrapped error text if the body isn't this shape.
 // Preferred over per-message string-matching: it surfaces every distinct

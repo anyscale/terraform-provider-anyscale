@@ -4,6 +4,104 @@ Dated engineering-journal entries, newest first. One entry per quest/session.
 
 ---
 
+## 2026-07-24 — Terraform Compute Config Import & SDK Parity
+
+**Goal.** Make `anyscale_compute_config` import reliably (exact version retained, complete
+state, no-op plan after import), bring it to full parity with the supported Python SDK models,
+and turn unsupported/misconfigured shapes into clear diagnostics instead of silent data loss.
+Party: tfp-architect (design/contract/coordination), tfp-forge (SDK research +
+implementation), tfp-assayer (API discovery, live verification, tests), tfp-scribe (docs),
+tfp-shipwright (compat/changelog/release, integration).
+
+**Base.** All branches started from `main @ 606672a` (v0.20.0-era, 5 commits behind
+`origin/main`'s actual `v0.21.0 @ 76fc6e8` at kickoff — confirmed none of those 5 commits
+touch compute_config, so no impact on this quest's own work).
+
+**Process.** An 11-level emergent questline (L0 Rally through L10 Verify), each level gated on
+the whole party completing before advancing. A recurring, now-documented tooling quirk: the
+party.json roster captured stale internal aliases (`tfp-shipwright-2`, `ranger`) instead of real
+shard names at questline-start, requiring a `CRYSTL_SHARD=<alias>` override on every
+`quest_level complete` call for the affected two shards — caught in L0, workaround adopted
+party-wide immediately.
+
+**L0-L3 findings (parity matrix + import identity contract + semantics).** Full detail in
+`.crystl/quest/design/{parity-matrix,import-identity-contract,semantics-normalization}.md`
+(shared quest state, not in this repo). Headlines:
+- Canonical identity stays `config_id` (`cpt_` id, one immutable version) — already satisfied
+  "retain exact version" as-is; import gains an *additional* `name:version` accepted form
+  (colon-count discriminator, `cpt_` ids proven colon-free — safe, no ambiguity).
+- Two real, previously-unknown live bugs found via actual API calls, not inference: (1) a
+  node-level `cloud_deployment` write-path bug meant that attribute has *never* worked (backend
+  422s the wrong wire location, fixed by nesting in `flags`); (2) Read/ImportState's
+  not-found handling had two bugs, not one — a genuinely-deleted config looked healthy forever,
+  **and** any transient 500/network error silently wiped a *healthy* resource from state (the
+  second, "bug B," was the more alarming one, found via careful code tracing after a live check).
+- `worker_nodes` List-vs-Set decision: kept as a **List** (no SchemaVersion bump) rather than
+  switching to a Set — a Set would have risked silently *merging* two structurally-identical
+  worker groups (real data loss), so the fix is a Read-side `reorderWorkersToMatchPrior` (name
+  match + uniqueness-guard fallback to positional on any collision), the same zero-risk idiom
+  later reused for the multi-resource feature's own ordering.
+- `custom_resources` fractional-value handling went through three framings before landing: first
+  assumed silent-truncation (would've been a `changed`/Tier-2 note), then briefly ruled
+  warning-only-non-breaking, then finally **hard plan-time error, still non-breaking** once a
+  real `terraform apply` proved it actually *crashes* today (`provider produced inconsistent
+  result after apply` — nothing currently works with this shape, so rejecting it early breaks
+  nothing). Documented as a cautionary tale against assuming severity without a live check.
+
+**L4 — the user's one real call.** `MultiResourceComputeConfig` (a real, experimental,
+`customer_hosted_only` SDK model our provider had never touched) was headed for DEFER, on the
+assumption `customer_hosted_only` meant untestable on our hosted static test cloud. **The user
+corrected this directly**: customer-hosted means a cloud registered via `cloud register` — the
+exact path this provider's own `anyscale_cloud`/`anyscale_cloud_resource` resources already
+drive — so it *is* testable, and the user chose **IMPLEMENT**. Landed as **Option C**: the
+existing top-level fields keep meaning exactly one thing (the primary `anyscale_cloud_resource`'s
+config, byte-identical to today for every existing single-resource user) plus a new optional
+`additional_resources` list block for any further cloud resources on the same cloud — chosen
+over a wholly separate resource type specifically to avoid import ambiguity (which type would
+own a given `cpt_` id?) and a destroy/recreate path to convert single-to-multi.
+
+**Two near-misses caught during implementation/integration, both corrected before anything
+shipped:**
+1. **A second live-crash bug, self-inflicted and self-caught.** Forge's first cut of
+   `additional_resources` ordering used an alphabetical sort — a fresh instance of the exact
+   crash class the `custom_resources` bug had just taught the party to watch for (Terraform Core
+   requires a non-Computed list's applied state to match the plan's order exactly). Found via
+   architect's own review question ("stable, or a real gap?") before it ever reached a review
+   comment; fixed by mirroring the proven `reorderWorkersToMatchPrior` idiom instead of
+   reinventing.
+2. **A confirmed-safe fix silently fell out of the numbered agenda.** GAP-3 (recovering
+   `resources`/`required_resources`/`labels`/`required_labels`/node `cloud_deployment` on import
+   instead of leaving them null) was verified safe at L1/L3 but simply wasn't present in the L4
+   fix-agenda lock, with no recorded reject/defer decision anywhere — a scribe catch during
+   final docs writing. Architect ruled ADD IT once flagged; forge implemented it same-session.
+   Recorded here as a concrete instance of why "reconcile the full handoff set before declaring
+   done" matters — a real, wanted fix can drop out silently between two consolidation passes
+   with nobody deciding to cut it.
+
+**Integration (this entry's tail).** All four lanes committed locally to their own
+`crystl/tfp-*` branches (forge 3 commits, scribe 1, assayer 1) with zero file-ownership overlap.
+tfp-shipwright assembled `brent/compute-config-cleanup` off *current* `origin/main` (v0.21.0),
+merged all three cleanly (no conflicts), and ran the mandatory combined `make docs` regen —
+which caught a real, otherwise-invisible bug: scribe's substantial guide rewrite had landed on
+the **generated** `docs/guides/compute-config.md` output rather than its `templates/guides/`
+source, so the regen was about to silently clobber it. Fixed by porting the content into the
+template and re-verifying a stable, zero-diff second regen plus a clean `make docs-validate`.
+Combined `build`/`fmt`/`lint`/`test`/`vet` all green — the first real tests-against-real-
+implementation run of this quest. **Status as of this entry: integration branch built and
+locally validated; holding for architect's L10 review of the combined diff, assayer's real-infra
+multi-resource acceptance case (dedicated 2-`cloud_resource` cloud, 24h teardown), and only then
+push + open one PR to `main` (not yet pushed).** No SchemaVersion bump anywhere in the whole
+agenda; recommended a single MINOR release.
+
+**Reusable lesson for future quests.** The `docs/guides/*.md` vs `templates/guides/*.md`
+generated-vs-source relationship is exactly the same trap the resource/data-source doc pages
+already avoid (their content lives in schema `MarkdownDescription` + `templates/`, never the
+generated `docs/`), but nothing had previously called it out for the guide pages specifically
+before this quest hit it. Any future guide edit belongs in `templates/guides/`.
+
+
+---
+
 ## 2026-07-22 — System Cluster Support (kickoff)
 
 **Goal.** Implement Terraform support for Anyscale System Clusters. Initial scope: let

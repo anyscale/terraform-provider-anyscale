@@ -191,6 +191,8 @@ func upgradeComputeConfigStateV0toV1(ctx context.Context, req resource.UpgradeSt
 		LastModifiedAt:         priorState.LastModifiedAt,
 		HeadNode:               upgradedHeadNode,
 		WorkerNodes:            upgradedWorkerNodes,
+		// Option C: new in this version, nothing to migrate.
+		AdditionalResources: types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()}),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
@@ -227,12 +229,23 @@ func upgradeNodeV0toV1(ctx context.Context, v0Node types.Object, attrTypes map[s
 			reqAttrs[k] = v
 		}
 		reqAttrs["cpu_architecture"] = types.StringNull()
+		// memory's type changed from a plain string to MemoryQuantityType
+		// (the F2 follow-up crash fix) - v0's persisted value is still a
+		// plain types.String, so re-wrap it rather than pass it through
+		// unchanged, or types.ObjectValue below rejects the type mismatch.
+		if oldMemory, ok := physAttrs["memory"].(types.String); ok {
+			reqAttrs["memory"] = MemoryQuantityValue{StringValue: oldMemory}
+		}
 
 		reqObj, reqDiags := types.ObjectValue(requiredResourcesAttrTypes(), reqAttrs)
 		diags.Append(reqDiags...)
 		requiredResources = reqObj
 	}
 	newAttrs["required_resources"] = requiredResources
+
+	// A1: required_labels is new in this schema version too - nothing to
+	// migrate for it either, same as cpu_architecture/idle_termination_minutes.
+	newAttrs["required_labels"] = types.MapNull(types.StringType)
 
 	newObj, objDiags := types.ObjectValue(attrTypes, newAttrs)
 	diags.Append(objDiags...)

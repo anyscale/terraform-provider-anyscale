@@ -70,6 +70,7 @@ output "compute_config_zones" {
 
 ### Read-Only
 
+- `additional_resources` (Attributes List) Additional cloud resources this compute config can also launch clusters on, beyond the primary one described by the top-level attributes (`zones`, `min_resources`, `max_resources`, `enable_cross_zone_scaling`, `advanced_instance_config`, `flags`, `auto_select_worker_config`, `head_node`, `worker_nodes`), matching the resource's `additional_resources` attribute. Empty for the common single-resource case. (see [below for nested schema](#nestedatt--additional_resources))
 - `advanced_instance_config` (Dynamic) Cluster-level advanced instance configuration passed through to the cloud provider, matching the resource's top-level `advanced_instance_config` attribute. Distinct from the per-node `advanced_instance_config` under `head_node`/`worker_nodes` above, which is a JSON string rather than a structured value. Null if the compute config sets none.
 - `auto_select_worker_config` (Boolean) Whether worker node groups are automatically selected based on workload.
 - `cloud_resource` (String) The name of the cloud resource this compute config targets, matching the resource's `cloud_resource` attribute. Null if the compute config targets the cloud's primary resource rather than a specific named one - the API never backfills this to the primary resource's name, so null is the only value a primary-resource compute config ever reports here.
@@ -91,6 +92,107 @@ output "compute_config_zones" {
 - `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. (see [below for nested schema](#nestedatt--worker_nodes))
 - `zones` (List of String) Availability zones considered for this cluster.
 
+<a id="nestedatt--additional_resources"></a>
+### Nested Schema for `additional_resources`
+
+Read-Only:
+
+- `advanced_instance_config` (String) Advanced instance configurations for this entry, as a JSON string.
+- `auto_select_worker_config` (Boolean) Whether worker node groups for this entry are chosen automatically based on workload.
+- `cloud_resource` (String) The cloud resource this entry targets, matching the resource's `additional_resources[].cloud_resource` attribute.
+- `enable_cross_zone_scaling` (Boolean) Whether instances launched on this entry's cloud resource can run across multiple zones.
+- `flags` (String) Advanced cluster-level flags for this entry, as a JSON string.
+- `head_node` (Attributes) Configuration for the head node launched on this entry's cloud resource. (see [below for nested schema](#nestedatt--additional_resources--head_node))
+- `max_resources` (Map of Number) Total maximum logical resources across all nodes launched on this entry's cloud resource.
+- `min_resources` (Map of Number) Total minimum logical resources across all nodes launched on this entry's cloud resource.
+- `worker_nodes` (Attributes List) Configuration for the worker nodes launched on this entry's cloud resource. (see [below for nested schema](#nestedatt--additional_resources--worker_nodes))
+- `zones` (List of String) Availability zones considered for this entry.
+
+<a id="nestedatt--additional_resources--head_node"></a>
+### Nested Schema for `additional_resources.head_node`
+
+Read-Only:
+
+- `advanced_instance_config` (String) Advanced instance configuration passed through to the cloud provider, as a JSON string.
+- `cloud_deployment` (Attributes) Cloud deployment selectors for this node. (see [below for nested schema](#nestedatt--additional_resources--head_node--cloud_deployment))
+- `flags` (String) Node-level flags, as a JSON string.
+- `instance_type` (String) Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP).
+- `labels` (Map of String) Labels associated with the node for scheduling purposes.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--additional_resources--head_node--required_resources))
+- `resources` (Map of Number) Logical resources available on this node.
+
+<a id="nestedatt--additional_resources--head_node--cloud_deployment"></a>
+### Nested Schema for `additional_resources.head_node.cloud_deployment`
+
+Read-Only:
+
+- `id` (String) The target cloud resource's ID.
+- `machine_pool` (String) Machine pool name.
+- `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
+- `region` (String) Cloud provider region, e.g., `us-west-2`.
+
+
+<a id="nestedatt--additional_resources--head_node--required_resources"></a>
+### Nested Schema for `additional_resources.head_node.required_resources`
+
+Read-Only:
+
+- `accelerator` (String) Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).
+- `cpu` (Number) Number of CPUs allocated.
+- `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
+- `gpu` (Number) Number of GPUs allocated.
+- `memory` (String) Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`.
+- `tpu` (Number) Number of TPUs allocated.
+- `tpu_hosts` (Number) Number of TPU hosts.
+
+
+
+<a id="nestedatt--additional_resources--worker_nodes"></a>
+### Nested Schema for `additional_resources.worker_nodes`
+
+Read-Only:
+
+- `advanced_instance_config` (String) Advanced instance configuration passed through to the cloud provider, as a JSON string.
+- `cloud_deployment` (Attributes) Cloud deployment selectors for this node. (see [below for nested schema](#nestedatt--additional_resources--worker_nodes--cloud_deployment))
+- `flags` (String) Node-level flags, as a JSON string.
+- `instance_type` (String) Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP).
+- `labels` (Map of String) Labels associated with the node for scheduling purposes.
+- `market_type` (String) ON_DEMAND, SPOT, or PREFER_SPOT.
+- `max_nodes` (Number) Maximum number of nodes of this type.
+- `min_nodes` (Number) Minimum number of nodes of this type kept running.
+- `name` (String) Unique name of this worker group.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--additional_resources--worker_nodes--required_resources))
+- `resources` (Map of Number) Logical resources available on this node.
+
+<a id="nestedatt--additional_resources--worker_nodes--cloud_deployment"></a>
+### Nested Schema for `additional_resources.worker_nodes.cloud_deployment`
+
+Read-Only:
+
+- `id` (String) The target cloud resource's ID.
+- `machine_pool` (String) Machine pool name.
+- `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
+- `region` (String) Cloud provider region, e.g., `us-west-2`.
+
+
+<a id="nestedatt--additional_resources--worker_nodes--required_resources"></a>
+### Nested Schema for `additional_resources.worker_nodes.required_resources`
+
+Read-Only:
+
+- `accelerator` (String) Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).
+- `cpu` (Number) Number of CPUs allocated.
+- `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
+- `gpu` (Number) Number of GPUs allocated.
+- `memory` (String) Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`.
+- `tpu` (Number) Number of TPUs allocated.
+- `tpu_hosts` (Number) Number of TPU hosts.
+
+
+
+
 <a id="nestedatt--head_node"></a>
 ### Nested Schema for `head_node`
 
@@ -101,6 +203,7 @@ Read-Only:
 - `flags` (String) Node-level flags, as a JSON string.
 - `instance_type` (String) Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP).
 - `labels` (Map of String) Labels associated with the node for scheduling purposes.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.
 - `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--head_node--required_resources))
 - `resources` (Map of Number) Logical resources available on this node.
 
@@ -124,7 +227,7 @@ Read-Only:
 - `cpu` (Number) Number of CPUs allocated.
 - `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
 - `gpu` (Number) Number of GPUs allocated.
-- `memory` (String) Amount of memory allocated.
+- `memory` (String) Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`.
 - `tpu` (Number) Number of TPUs allocated.
 - `tpu_hosts` (Number) Number of TPU hosts.
 
@@ -144,6 +247,7 @@ Read-Only:
 - `max_nodes` (Number) Maximum number of nodes of this type.
 - `min_nodes` (Number) Minimum number of nodes of this type kept running.
 - `name` (String) Unique name of this worker group.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.
 - `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
 - `resources` (Map of Number) Logical resources available on this node.
 
@@ -167,6 +271,6 @@ Read-Only:
 - `cpu` (Number) Number of CPUs allocated.
 - `cpu_architecture` (String) CPU architecture, e.g. `x86_64` or `arm64`.
 - `gpu` (Number) Number of GPUs allocated.
-- `memory` (String) Amount of memory allocated.
+- `memory` (String) Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`.
 - `tpu` (Number) Number of TPUs allocated.
 - `tpu_hosts` (Number) Number of TPU hosts.

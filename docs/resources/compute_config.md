@@ -106,10 +106,11 @@ output "compute_config_id" {
 
 ### Optional
 
+- `additional_resources` (Attributes List) Additional cloud resources this compute config should also be able to launch clusters on, beyond the primary one described by the top-level attributes (`zones`, `min_resources`, `max_resources`, `enable_cross_zone_scaling`, `advanced_instance_config`, `flags`, `auto_select_worker_config`, `head_node`, `worker_nodes`). Each entry is a full, independent deployment configuration keyed by `cloud_resource`. Omit this entirely for the common single-resource case - the top-level attributes are unaffected either way, and existing single-resource configs remain byte-identical. (see [below for nested schema](#nestedatt--additional_resources))
 - `advanced_instance_config` (Dynamic) Advanced instance configurations for this compute config to pass to the cloud provider when launching instances. Supports nested objects and mixed types.
 - `auto_select_worker_config` (Boolean) Defaults to `false`. If set to true, worker node groups are chosen at cluster launch time from an organization-level pool that Anyscale manages outside this compute config, instead of from `worker_nodes`. This pool is not tailored to a specific workload, is empty by default for organizations that have not configured one (in which case the cluster still launches with no worker nodes even though this is true), and its chosen node groups are never written back into `worker_nodes` in Terraform state.
 - `cloud_id` (String) The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time, since this resource cannot detect that change from a `cloud_name` lookup at plan time without a network call.
-- `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`.
+- `cloud_name` (String) The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`. Importing a `cloud_name`-based config by `config_id` shows a one-time, self-healing null->name diff on the first plan after import (this attribute is not recovered from `cloud_id`) - see the [Compute Config guide](../guides/compute-config.md) for the full explanation.
 - `cloud_resource` (String) The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.
 - `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Defaults to `false`. Recommended for production services.
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
@@ -142,6 +143,7 @@ Optional:
 - `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--head_node--cloud_deployment))
 - `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
 - `labels` (Map of String) Labels to associate the node with for scheduling purposes.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes. Only `ray.io/accelerator-type` and `ray.io/tpu-topology` are supported - any other key is rejected. Setting `ray.io/accelerator-type` to a non-TPU value requires `required_resources.gpu` to be set (> 0); setting it to a TPU value (starting with `TPU`) requires `required_resources.tpu` and `required_resources.tpu_hosts` (both > 0) plus a `ray.io/tpu-topology` value here or in `labels`.
 - `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--head_node--required_resources))
 - `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.
 
@@ -165,9 +167,119 @@ Optional:
 - `cpu` (Number) Number of CPUs to allocate.
 - `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
 - `gpu` (Number) Number of GPUs to allocate.
-- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
+- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.
 - `tpu` (Number) Number of TPUs to allocate.
 - `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
+
+
+
+<a id="nestedatt--additional_resources"></a>
+### Nested Schema for `additional_resources`
+
+Required:
+
+- `cloud_resource` (String) The cloud resource this entry targets. Must be unique across `additional_resources`, and distinct from the top-level `cloud_resource` when that is also explicitly set (validated at plan time). If the top-level `cloud_resource` is left unset, this is not checked against the cloud's implicit default resource, and a collision would only surface as a backend error at apply.
+- `head_node` (Attributes) Configuration for the head node launched on this entry's cloud resource. (see [below for nested schema](#nestedatt--additional_resources--head_node))
+
+Optional:
+
+- `advanced_instance_config` (String) Advanced instance configurations for this entry, passed through to the cloud provider, as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `advanced_instance_config`, this can't be a native/dynamic value: `additional_resources` is a list, and Terraform doesn't support a dynamic type nested inside a list.
+- `auto_select_worker_config` (Boolean) If set to true, worker node groups for this entry are chosen automatically based on workload, instead of from this entry's `worker_nodes`.
+- `enable_cross_zone_scaling` (Boolean) Allow instances launched on this entry's cloud resource to run across multiple zones. Defaults to `false`.
+- `flags` (String) Advanced cluster-level flags for this entry, as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value, for the same reason as `advanced_instance_config` above.
+- `max_resources` (Map of Number) Total maximum logical resources across all nodes launched on this entry's cloud resource.
+- `min_resources` (Map of Number) Total minimum logical resources across all nodes launched on this entry's cloud resource.
+- `worker_nodes` (Attributes List) Configuration for the worker nodes launched on this entry's cloud resource. If not provided, this entry has no worker nodes (head node only). (see [below for nested schema](#nestedatt--additional_resources--worker_nodes))
+- `zones` (List of String) Availability zones to consider for this entry. Defaults to all zones in the cloud's region.
+
+<a id="nestedatt--additional_resources--head_node"></a>
+### Nested Schema for `additional_resources.head_node`
+
+Required:
+
+- `instance_type` (String) Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP). Use `custom` when `required_resources` is provided.
+
+Optional:
+
+- `advanced_instance_config` (String) Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `advanced_instance_config`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
+- `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--additional_resources--head_node--cloud_deployment))
+- `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
+- `labels` (Map of String) Labels to associate the node with for scheduling purposes.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes. Only `ray.io/accelerator-type` and `ray.io/tpu-topology` are supported - any other key is rejected. Setting `ray.io/accelerator-type` to a non-TPU value requires `required_resources.gpu` to be set (> 0); setting it to a TPU value (starting with `TPU`) requires `required_resources.tpu` and `required_resources.tpu_hosts` (both > 0) plus a `ray.io/tpu-topology` value here or in `labels`.
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--additional_resources--head_node--required_resources))
+- `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.
+
+<a id="nestedatt--additional_resources--head_node--cloud_deployment"></a>
+### Nested Schema for `additional_resources.head_node.cloud_deployment`
+
+Optional:
+
+- `id` (String) The target cloud resource's ID. Unlike the top-level `cloud_resource` attribute (which takes a name), this is matched by ID.
+- `machine_pool` (String) Machine pool name.
+- `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
+- `region` (String) Cloud provider region, e.g., `us-west-2`.
+
+
+<a id="nestedatt--additional_resources--head_node--required_resources"></a>
+### Nested Schema for `additional_resources.head_node.required_resources`
+
+Optional:
+
+- `accelerator` (String) Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).
+- `cpu` (Number) Number of CPUs to allocate.
+- `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
+- `gpu` (Number) Number of GPUs to allocate.
+- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.
+- `tpu` (Number) Number of TPUs to allocate.
+- `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
+
+
+
+<a id="nestedatt--additional_resources--worker_nodes"></a>
+### Nested Schema for `additional_resources.worker_nodes`
+
+Required:
+
+- `instance_type` (String) Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP). Use `custom` when `required_resources` is provided.
+
+Optional:
+
+- `advanced_instance_config` (String) Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `advanced_instance_config`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
+- `cloud_deployment` (Attributes) Cloud deployment selectors for this node; one or more selectors may be passed to target a specific deployment. (see [below for nested schema](#nestedatt--additional_resources--worker_nodes--cloud_deployment))
+- `flags` (String) Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.
+- `labels` (Map of String) Labels to associate the node with for scheduling purposes.
+- `market_type` (String) The type of instances to use: `ON_DEMAND` (standard pricing), `SPOT` (discounted, interruptible), or `PREFER_SPOT` (prefer spot with on-demand fallback).
+- `max_nodes` (Number) Maximum number of nodes of this type that can be running in the cluster.
+- `min_nodes` (Number) Minimum number of nodes of this type that will be kept running in the cluster.
+- `name` (String) Unique name of this worker group. Defaults to the worker's `instance_type` when not set.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes. Only `ray.io/accelerator-type` and `ray.io/tpu-topology` are supported - any other key is rejected. Setting `ray.io/accelerator-type` to a non-TPU value requires `required_resources.gpu` to be set (> 0); setting it to a TPU value (starting with `TPU`) requires `required_resources.tpu` and `required_resources.tpu_hosts` (both > 0) plus a `ray.io/tpu-topology` value here or in `labels`.
+- `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--additional_resources--worker_nodes--required_resources))
+- `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.
+
+<a id="nestedatt--additional_resources--worker_nodes--cloud_deployment"></a>
+### Nested Schema for `additional_resources.worker_nodes.cloud_deployment`
+
+Optional:
+
+- `id` (String) The target cloud resource's ID. Unlike the top-level `cloud_resource` attribute (which takes a name), this is matched by ID.
+- `machine_pool` (String) Machine pool name.
+- `provider` (String) Cloud provider name, e.g., `aws` or `gcp`.
+- `region` (String) Cloud provider region, e.g., `us-west-2`.
+
+
+<a id="nestedatt--additional_resources--worker_nodes--required_resources"></a>
+### Nested Schema for `additional_resources.worker_nodes.required_resources`
+
+Optional:
+
+- `accelerator` (String) Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`).
+- `cpu` (Number) Number of CPUs to allocate.
+- `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
+- `gpu` (Number) Number of GPUs to allocate.
+- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.
+- `tpu` (Number) Number of TPUs to allocate.
+- `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
+
 
 
 
@@ -188,6 +300,7 @@ Optional:
 - `max_nodes` (Number) Maximum number of nodes of this type that can be running in the cluster.
 - `min_nodes` (Number) Minimum number of nodes of this type that will be kept running in the cluster.
 - `name` (String) Unique name of this worker group. Defaults to the worker's `instance_type` when not set.
+- `required_labels` (Map of String) Required labels that must be present on the node for scheduling purposes. Only `ray.io/accelerator-type` and `ray.io/tpu-topology` are supported - any other key is rejected. Setting `ray.io/accelerator-type` to a non-TPU value requires `required_resources.gpu` to be set (> 0); setting it to a TPU value (starting with `TPU`) requires `required_resources.tpu` and `required_resources.tpu_hosts` (both > 0) plus a `ray.io/tpu-topology` value here or in `labels`.
 - `required_resources` (Attributes) Explicit hardware requirements for custom instance types (free pod shapes). (see [below for nested schema](#nestedatt--worker_nodes--required_resources))
 - `resources` (Map of Number) The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.
 
@@ -211,7 +324,7 @@ Optional:
 - `cpu` (Number) Number of CPUs to allocate.
 - `cpu_architecture` (String) CPU architecture to select, e.g. `x86_64` or `arm64`. Defaults to `x86_64` when unset.
 - `gpu` (Number) Number of GPUs to allocate.
-- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`).
+- `memory` (String) Amount of memory to allocate. Can be specified as bytes (int) or as a string with units (e.g., `4Gi`, `1024Mi`). State may show this in either form (a plain byte count after import, or your own unit-string on the next apply) - both are treated as the same value, so this never produces a plan diff on its own.
 - `tpu` (Number) Number of TPUs to allocate.
 - `tpu_hosts` (Number) Number of TPU hosts (for `anyscale/tpu_hosts` custom resource).
 
@@ -226,4 +339,10 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 # Find it via `anyscale compute-config get <name>` or the anyscale_compute_config
 # data source's `config_id` attribute.
 terraform import anyscale_compute_config.example cpt_abc123
+
+# Or import using name:version - resolved to the matching config_id at import
+# time, then behaves identically to importing by config_id. The name must not
+# contain a colon. If it matches more than one cloud, import by config_id
+# instead and specify which cloud you mean.
+terraform import anyscale_compute_config.example my-compute-config:3
 ```

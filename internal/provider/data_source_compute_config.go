@@ -72,6 +72,10 @@ type ComputeConfigDataSourceModel struct {
 	Zones       types.List   `tfsdk:"zones"`
 	HeadNode    types.Object `tfsdk:"head_node"`
 	WorkerNodes types.List   `tfsdk:"worker_nodes"`
+
+	// Multi-resource parity with the resource. Computed-only,
+	// same shape as AdditionalResourceModel - see additionalResourceAttrTypes.
+	AdditionalResources types.List `tfsdk:"additional_resources"`
 }
 
 // Metadata returns the data source type name.
@@ -195,6 +199,13 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 					Attributes: dataSourceWorkerNodeAttributes(),
 				},
 			},
+			"additional_resources": schema.ListNestedAttribute{
+				Computed:            true,
+				MarkdownDescription: "Additional cloud resources this compute config can also launch clusters on, beyond the primary one described by the top-level attributes (`zones`, `min_resources`, `max_resources`, `enable_cross_zone_scaling`, `advanced_instance_config`, `flags`, `auto_select_worker_config`, `head_node`, `worker_nodes`), matching the resource's `additional_resources` attribute. Empty for the common single-resource case.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: dataSourceAdditionalResourceAttributes(),
+				},
+			},
 		},
 	}
 }
@@ -220,7 +231,7 @@ func dataSourceNodeAttributes() map[string]schema.Attribute {
 			MarkdownDescription: "Explicit hardware requirements for custom instance types (free pod shapes).",
 			Attributes: map[string]schema.Attribute{
 				"cpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of CPUs allocated."},
-				"memory":           schema.StringAttribute{Computed: true, MarkdownDescription: "Amount of memory allocated."},
+				"memory":           schema.StringAttribute{Computed: true, CustomType: MemoryQuantityType{}, MarkdownDescription: "Amount of memory allocated. The API only stores a raw byte count, so this reports that count as a string rather than reconstructing a unit-string like `4Gi`."},
 				"gpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of GPUs allocated."},
 				"accelerator":      schema.StringAttribute{Computed: true, MarkdownDescription: "Type of accelerator (e.g., `T4`, `L4`, `A100`, `H100`, `TPU-V6E`)."},
 				"tpu":              schema.Int64Attribute{Computed: true, MarkdownDescription: "Number of TPUs allocated."},
@@ -232,6 +243,11 @@ func dataSourceNodeAttributes() map[string]schema.Attribute {
 			ElementType:         types.StringType,
 			Computed:            true,
 			MarkdownDescription: "Labels associated with the node for scheduling purposes.",
+		},
+		"required_labels": schema.MapAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.",
 		},
 		"advanced_instance_config": schema.StringAttribute{
 			Computed:            true,
@@ -264,6 +280,64 @@ func dataSourceWorkerNodeAttributes() map[string]schema.Attribute {
 	attrs["max_nodes"] = schema.Int64Attribute{Computed: true, MarkdownDescription: "Maximum number of nodes of this type."}
 	attrs["market_type"] = schema.StringAttribute{Computed: true, MarkdownDescription: "ON_DEMAND, SPOT, or PREFER_SPOT."}
 	return attrs
+}
+
+// dataSourceAdditionalResourceAttributes mirrors the resource's
+// additionalResourceAttributes shape, Computed-only - same
+// reasoning as dataSourceNodeAttributes above. advanced_instance_config and
+// flags stay String (not Dynamic) for the same reason as the resource:
+// additional_resources is a list, and Terraform doesn't support a dynamic
+// type nested inside one.
+func dataSourceAdditionalResourceAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"cloud_resource": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "The cloud resource this entry targets, matching the resource's `additional_resources[].cloud_resource` attribute.",
+		},
+		"zones": schema.ListAttribute{
+			ElementType:         types.StringType,
+			Computed:            true,
+			MarkdownDescription: "Availability zones considered for this entry.",
+		},
+		"min_resources": schema.MapAttribute{
+			ElementType:         types.Float64Type,
+			Computed:            true,
+			MarkdownDescription: "Total minimum logical resources across all nodes launched on this entry's cloud resource.",
+		},
+		"max_resources": schema.MapAttribute{
+			ElementType:         types.Float64Type,
+			Computed:            true,
+			MarkdownDescription: "Total maximum logical resources across all nodes launched on this entry's cloud resource.",
+		},
+		"enable_cross_zone_scaling": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether instances launched on this entry's cloud resource can run across multiple zones.",
+		},
+		"advanced_instance_config": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Advanced instance configurations for this entry, as a JSON string.",
+		},
+		"flags": schema.StringAttribute{
+			Computed:            true,
+			MarkdownDescription: "Advanced cluster-level flags for this entry, as a JSON string.",
+		},
+		"auto_select_worker_config": schema.BoolAttribute{
+			Computed:            true,
+			MarkdownDescription: "Whether worker node groups for this entry are chosen automatically based on workload.",
+		},
+		"head_node": schema.SingleNestedAttribute{
+			Computed:            true,
+			MarkdownDescription: "Configuration for the head node launched on this entry's cloud resource.",
+			Attributes:          dataSourceNodeAttributes(),
+		},
+		"worker_nodes": schema.ListNestedAttribute{
+			Computed:            true,
+			MarkdownDescription: "Configuration for the worker nodes launched on this entry's cloud resource.",
+			NestedObject: schema.NestedAttributeObject{
+				Attributes: dataSourceWorkerNodeAttributes(),
+			},
+		},
+	}
 }
 
 // Configure adds the provider configured client to the data source.
@@ -443,8 +517,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		}
 	}
 
-	// idle_termination_minutes/maximum_uptime_minutes are top-level config
-	// fields only, same as the resource -- never per-deployment, so read
+	// CC2 (see effectiveComputeConfig in resource_compute_config.go): read
 	// straight off configData rather than through resolveEffectiveComputeConfig.
 	if configData.IdleTerminationMinutes != nil {
 		config.IdleTerminationMinutes = types.Int64Value(*configData.IdleTerminationMinutes)
@@ -459,7 +532,32 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	// DS-CC-3: explicit stringOrNull, same reasoning as created_at/last_modified_at above.
 	config.Region = stringOrNull(configData.Region)
 
-	eff := resolveEffectiveComputeConfig(configData)
+	// A data source lookup has no prior state at all (always a cold read),
+	// so - like ImportState - every deployment_configs entry is "unmatched":
+	// the deterministic fallback in splitDeploymentConfigsForRead (first in
+	// API response order becomes primary, the rest become additional,
+	// name-sorted) decides the split. This also closes a silent-truncation
+	// gap on this surface: previously, a multi-resource config looked up via
+	// the data source silently returned only the first entry with no signal
+	// at all that anything was dropped.
+	var eff effectiveComputeConfig
+	if len(configData.DeploymentConfigs) <= 1 {
+		eff = resolveEffectiveComputeConfig(configData)
+		config.AdditionalResources = types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()})
+	} else {
+		primaryEntry, additionalEntries, ok := splitDeploymentConfigsForRead(configData.DeploymentConfigs, "", nil, nil)
+		if !ok {
+			AddConfigError(&resp.Diagnostics, "Ambiguous Multi-Resource Compute Config",
+				fmt.Sprintf("Compute config %q has multiple deployment_configs entries, but at least one has no cloud_deployment name, so this provider cannot determine which entry is primary versus which are additional_resources. This shape is not supported - only entries with a resolvable cloud_deployment name can be represented.", configID))
+			return
+		}
+		eff = resolveEffectiveComputeConfigWithOverride(configData, primaryEntry)
+		// forImport=true: a data source lookup has no prior config to defer
+		// to (same reasoning as flags/advanced_instance_config below already
+		// documents for the top-level case), so each additional entry's own
+		// flags/advanced_instance_config are recovered directly from the API.
+		config.AdditionalResources = buildAdditionalResourcesList(ctx, additionalEntries, nil, true, &resp.Diagnostics)
+	}
 
 	config.EnableCrossZoneScaling = types.BoolValue(false)
 	if eff.Flags != nil {
@@ -622,6 +720,12 @@ type computeConfigSearchResult struct {
 	CreatedAt string  `json:"created_at"`
 	Anonymous bool    `json:"anonymous"`
 	Version   float64 `json:"version"`
+	// Config.CloudID is only used by A2's ambiguous-name-across-clouds check
+	// (resolveComputeConfigImportID) - every other caller of this struct
+	// ignores it.
+	Config struct {
+		CloudID string `json:"cloud_id"`
+	} `json:"config"`
 }
 
 // decodeComputeConfigSearchPage decodes one page of a cluster_computes/search response.
