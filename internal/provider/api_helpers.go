@@ -94,7 +94,12 @@ func DoRequestRaw(
 	// Check status code
 	if !isStatusExpected(httpResp.StatusCode, expectedStatuses) {
 		if httpResp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, string(bodyBytes))
+			// Reuse the exact pre-sentinel phrasing ("unexpected status 404: ...")
+			// verbatim, not just a bare "404" digit - several call sites (and one
+			// ephemeral-resource test) pre-date this sentinel and match on that
+			// specific phrase, not only its presence. errors.Is(err, ErrNotFound)
+			// still works via %w regardless of the trailing text.
+			return nil, fmt.Errorf("%w: unexpected status %d: %s", ErrNotFound, httpResp.StatusCode, string(bodyBytes))
 		}
 		return nil, fmt.Errorf("unexpected status %d: %s", httpResp.StatusCode, string(bodyBytes))
 	}
