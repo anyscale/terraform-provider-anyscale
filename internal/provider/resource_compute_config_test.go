@@ -632,11 +632,11 @@ func TestCloudDeploymentConversion(t *testing.T) {
 		t.Fatalf("nodeConfigToAPI() error = %v", err)
 	}
 
-	// F1: cloud_deployment has no top-level field on the real API's node
+	// cloud_deployment has no top-level field on the real API's node
 	// model - it must be nested inside this node's flags, or the backend
 	// 422s ("extra fields not permitted") on every single create, which is
 	// exactly what this test previously locked in without ever exercising
-	// against the real API (live-confirmed, G1g).
+	// against the real API.
 	if _, wrongLocation := got["cloud_deployment"]; wrongLocation {
 		t.Fatal("nodeConfigToAPI() wrote cloud_deployment as a top-level sibling key; it must be nested inside flags instead")
 	}
