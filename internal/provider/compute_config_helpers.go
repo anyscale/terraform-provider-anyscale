@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -418,27 +417,6 @@ func resolveComputeConfigImportID(ctx context.Context, client *Client, name stri
 	return results[0].ID, nil
 }
 
-// resolveCloudIDToName implements A3: the wire has no cloud-name field
-// (only cloud_id), so a cloud_name-based config gets a benign one-time
-// null->configured diff on the very first plan after import unless
-// ImportState reverse-resolves it here. Best-effort: returns ("", false) on
-// any failure (network error, unexpected status, or a genuinely gone cloud)
-// rather than blocking the import - the same "not critical" tolerance the
-// data source's own equivalent lookup already uses, just recovered once here
-// at import time instead of every Read.
-func resolveCloudIDToName(ctx context.Context, client *Client, cloudID string) (string, bool) {
-	if cloudID == "" {
-		return "", false
-	}
-	cloudResp, err := DoRequestAndParse[CloudResponse](
-		ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK,
-	)
-	if err != nil || cloudResp.Result.Name == "" {
-		return "", false
-	}
-	return cloudResp.Result.Name, true
-}
-
 // additionalResourceToDeploymentConfig converts one additional_resources
 // entry (Option C) into a deployment_configs wire entry, mirroring
 // buildComputeConfigRequest's own per-entry folding (zones->AllowedAZs,
@@ -780,8 +758,7 @@ func splitDeploymentConfigsForRead(
 	// matching prior order would manufacture a spurious diff on every Read
 	// whose config order isn't already alphabetical by cloud_resource - and
 	// for Create/Update, where "prior" is the plan's own order, it would
-	// outright crash apply with "provider produced inconsistent result",
-	// the exact class of bug this quest started by chasing down (F4).
+	// outright crash apply with "provider produced inconsistent result".
 	additionalEntries = reorderDeploymentConfigsToMatchPrior(additionalEntries, priorAdditionalOrder)
 
 	return *primaryEntry, additionalEntries, true
