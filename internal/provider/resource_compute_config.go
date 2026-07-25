@@ -233,12 +233,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 			},
 			"cloud_name": schema.StringAttribute{
 				Optional:            true,
-				Computed:            true,
-				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see cloud_id. Computed (matching cloud_id's own shape) because import reverse-resolves it from cloud_id regardless of which selector the config uses - a plain Optional attribute would force it back to null on the very next plan for a cloud_id-only config, since Core requires a non-Computed attribute's state to equal config exactly.",
-				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`. Computed (matching `cloud_id`'s own shape) because import reverse-resolves it from `cloud_id` regardless of which selector the config uses - a plain Optional attribute would force it back to null on the very next plan for a `cloud_id`-only config, since Core requires a non-Computed attribute's state to equal config exactly.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see cloud_id. Importing a cloud_name-based config by config_id shows a one-time, self-healing null->name diff on the first plan after import (this attribute is not recovered from cloud_id): making it Computed to close that gap was tried and reverted, since a droppable Optional input can't satisfy both 'stay put when config omits it' and 'clear when config drops it' under any single plan modifier - confirmed empirically, not just assumed.",
+				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`. Importing a `cloud_name`-based config by `config_id` shows a one-time, self-healing null->name diff on the first plan after import (this attribute is not recovered from `cloud_id`) - see the [Compute Config guide](../guides/compute-config.md) for the full explanation.",
 			},
 			"cloud_resource": schema.StringAttribute{
 				Optional:            true,
@@ -1076,20 +1072,6 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		}
 		cloudID = resolvedID
 		plan.CloudID = types.StringValue(cloudID)
-	}
-
-	// cloud_name is now Optional+Computed (see the schema comment for why),
-	// so a cloud_id-only config leaves it Unknown at plan time on a fresh
-	// Create (UseStateForUnknown only has a prior state to fall back on
-	// starting with Update). Left unresolved, Core rejects the apply for
-	// leaving a Computed attribute Unknown. Resolve it eagerly only when we
-	// already resolved a cloud_name ourselves above; otherwise settle it to
-	// null rather than spending an extra reverse-lookup API call at every
-	// Create/Update - the same best-effort tolerance ImportState's own
-	// reverse lookup already uses, and consistent with region's "null if the
-	// API doesn't report one" precedent elsewhere in this schema.
-	if plan.CloudName.IsUnknown() {
-		plan.CloudName = types.StringNull()
 	}
 
 	// Build the API request
@@ -2065,10 +2047,21 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("additional_resources"), additionalList)...)
 	}
 
-	// A3 (see resolveCloudIDToName).
-	if cloudName, ok := resolveCloudIDToName(ctx, r.client, resultData.Config.CloudID); ok {
-		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_name"), types.StringValue(cloudName))...)
-	}
+	// A3 (cloud_name reverse-lookup on import) was tried and reverted: it
+	// made cloud_name Optional+Computed to absorb import's unconditional
+	// recovery, but a droppable Optional input can't satisfy both "stay
+	// put when config never mentions it" (the cloud_id-only import case)
+	// AND "clear when config explicitly drops it" (CC3b's documented,
+	// shipped-since-v0.2.0 switching-selectors guarantee) under any single
+	// plan modifier - confirmed empirically, not just reasoned about: with
+	// no modifier at all, the cloud_id-only case still passed (Core already
+	// carries forward an omitted Computed attribute by default) but CC3b's
+	// drop-to-null case still failed identically, proving the tension is
+	// inherent to Optional+Computed on a droppable input, not caused by the
+	// specific modifier choice. cloud_name is back to pure Optional
+	// (pre-A3): importing a cloud_name-based config by config_id shows a
+	// one-time, self-healing null->name diff on the first plan, a
+	// documented limitation rather than two live regressions.
 
 	// Top-level flags: recover everything except the keys that surface as
 	// their own attributes (min_resources, max_resources, cross-zone

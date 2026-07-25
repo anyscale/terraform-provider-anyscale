@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -416,26 +415,6 @@ func resolveComputeConfigImportID(ctx context.Context, client *Client, name stri
 	}
 
 	return results[0].ID, nil
-}
-
-// resolveCloudIDToName implements A3: the wire has no cloud-name field (only
-// cloud_id), so ImportState reverse-resolves it here regardless of which
-// selector the config uses - cloud_name is Optional+Computed for exactly
-// this reason (see its schema comment). Best-effort: returns ("", false) on
-// any failure (network error, unexpected status, or a genuinely gone cloud)
-// rather than blocking the import - the same "not critical" tolerance the
-// data source's own equivalent lookup already uses.
-func resolveCloudIDToName(ctx context.Context, client *Client, cloudID string) (string, bool) {
-	if cloudID == "" {
-		return "", false
-	}
-	cloudResp, err := DoRequestAndParse[CloudResponse](
-		ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK,
-	)
-	if err != nil || cloudResp.Result.Name == "" {
-		return "", false
-	}
-	return cloudResp.Result.Name, true
 }
 
 // additionalResourceToDeploymentConfig converts one additional_resources
