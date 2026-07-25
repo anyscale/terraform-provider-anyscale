@@ -1,9 +1,7 @@
 package acctest
 
-// F3 regression (compute-config-import-parity quest): the confirmed 404
-// bug had TWO distinct, opposite-direction symptoms (assayer G1e live +
-// source trace; shipwright's independent confirmation; architect's
-// DoRequestAndParse trace) -
+// F3 regression: the 404 handling bug had two distinct, opposite-direction
+// symptoms -
 //   - bug A: DoRequestAndParse lists StatusNotFound as ACCEPTED, so a genuine
 //     404 decodes to (zero-struct, nil-err) and the "not found -> remove"
 //     branch never fires - a deleted compute config looks perfectly healthy
@@ -15,10 +13,10 @@ package acctest
 // The fix is a typed ErrNotFound sentinel (api_helpers.go) so Read/ImportState
 // can tell "genuinely not found" apart from "some other error" instead of
 // using apiResult==nil as a proxy for both. This file proves both directions
-// with a mock server that returns the REAL error-shaped 404 body assayer
-// captured live ({"error":{"detail":"Could not find entity with id ..."}})
-// for the genuine-404 case, and a real 500 for the transient case - not an
-// idealized empty response either mock could get away with echoing.
+// with a mock server that returns the real error-shaped 404 body
+// ({"error":{"detail":"Could not find entity with id ..."}}) for the
+// genuine-404 case, and a real 500 for the transient case - not an idealized
+// empty response either mock could get away with echoing.
 
 import (
 	"encoding/json"
@@ -38,14 +36,12 @@ type f3NotFoundMockServer struct {
 	// nextGetStatus, when non-zero, overrides EVERY subsequent GET's response
 	// with this status instead of the normal 200 - simulates the config
 	// disappearing (404) or a transient backend failure (500) between the
-	// initial apply and a later refresh. Deliberately STICKY (not reset after
-	// one read): a single non-PlanOnly TestStep triggers more than one GET
-	// (an internal refresh during plan, then another during apply), and a
-	// resource that is genuinely gone stays gone across all of them - a
-	// one-shot override that silently reverts to 200 on the second read
-	// doesn't match real backend behavior and previously masked this test's
-	// own pass/fail result (it produced "empty refresh plan" instead of
-	// proving removal, since the second GET saw the record as still present).
+	// initial apply and a later refresh. Deliberately sticky (not reset after
+	// one read): a single non-PlanOnly TestStep triggers more than one GET (a
+	// refresh during plan, then another during apply), and a resource that is
+	// genuinely gone stays gone across all of them - a one-shot override that
+	// silently reverts to 200 on the second read doesn't match real backend
+	// behavior.
 	nextGetStatus int
 }
 

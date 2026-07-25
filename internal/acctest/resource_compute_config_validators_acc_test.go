@@ -1,31 +1,30 @@
 package acctest
 
-// Regression tests for the compute-config-import-parity quest's validator
-// agenda (approved-design.md V1-V3, F4). Each of these is a plan-time
-// ConfigValidator with no backend dependency, so `terraform validate` against
-// a freshly-built binary (reusing buildProviderBinaryForCLICheck/
-// runTerraformValidate/tfValidateJSON from warning_diagnostics_acc_test.go) is
-// the right tool - same reasoning as that file's own header comment:
-// resource.Test's reattach path does not reliably surface warning-level
-// diagnostics, and none of these four need a real API call to validate.
+// Regression tests for the compute-config validator agenda (V1-V3, F4). Each
+// of these is a plan-time ConfigValidator with no backend dependency, so
+// `terraform validate` against a freshly-built binary (reusing
+// buildProviderBinaryForCLICheck/runTerraformValidate/tfValidateJSON from
+// warning_diagnostics_acc_test.go) is the right tool - same reasoning as that
+// file's own header comment: resource.Test's reattach path does not reliably
+// surface warning-level diagnostics, and none of these four need a real API
+// call to validate.
 //
-// Final severity ruling (quest chat, all evidence-gated):
+// Severity ruling:
 //   - V1 max_nodes >= 1 / >= min_nodes: HARD error (backend already 422s this
 //     today; the client validator is free hardening, non-breaking).
 //   - V2 instance_type + required_resources both set: WARNING (backend
-//     accepts both side-by-side with no deterministic preference - assayer
-//     live-confirmed; redundant but discoverable in the user's own config).
+//     accepts both side-by-side with no deterministic preference, live-
+//     confirmed; redundant but discoverable in the user's own config).
 //   - V3 unrecognized market_type string: WARNING (backend has no market_type
 //     field at all; our own missing switch default silently coerced to
 //     ON_DEMAND - discoverable, low-stakes).
-//   - F4 fractional custom_resources: HARD error (escalated from an initial
-//     warning-floor lean after assayer found a real apply against this
+//   - F4 fractional custom_resources: HARD error. A real apply against this
 //     crashes Terraform Core outright - "provider produced inconsistent
 //     result after apply" - since custom_resources is backend-typed as a
-//     plain integer and gets silently truncated (2.5 -> 2) before the
-//     Core consistency check ever runs. A plan-time reject replaces a
-//     confusing crash with a clear diagnostic; nothing that works today is
-//     broken, so this is Fixed/non-breaking despite being a hard validator).
+//     plain integer and gets silently truncated (2.5 -> 2) before the Core
+//     consistency check ever runs. A plan-time reject replaces a confusing
+//     crash with a clear diagnostic; nothing that works today is broken, so
+//     this is Fixed/non-breaking despite being a hard validator.
 
 import (
 	"fmt"

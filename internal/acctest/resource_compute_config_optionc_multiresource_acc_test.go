@@ -217,6 +217,17 @@ resource "anyscale_compute_config" "seed" {
   head_node = {
     instance_type = "m5.large"
   }
+
+  # The mock's stored deployment_configs is mutated directly below to
+  # simulate the DS's target looking multi-resource from a fresh lookup's
+  # perspective - since the mock has no separate identity for "the record
+  # this resource manages" vs "the record the DS looks up," that mutation
+  # also changes what THIS resource's own next Read sees. ignore_changes
+  # keeps the seed resource stable (it's a fixture, not under test here) so
+  # the mutation only affects the DS's independent lookup.
+  lifecycle {
+    ignore_changes = [additional_resources]
+  }
 }
 
 data "anyscale_compute_config" "test" {

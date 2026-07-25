@@ -1,24 +1,22 @@
 package acctest
 
-// F5/F6 regression (compute-config-import-parity quest): worker-group name
-// uniqueness and order stability. Two worker groups sharing an instance_type
-// with BOTH names left unset used to both derive the identical default name
-// (the instance_type itself) - tolerated by the compute_templates storage
-// layer (assayer live-confirmed no collision there), but a real risk once
-// Ray's name-keyed autoscaler dict is built from it (forge's source trace).
-// F5 makes the derivation unique (deterministic "-2" suffix, client-side,
-// before the request is ever sent) and warns. F6 makes a worker_nodes list
-// whose backend-returned order differs from the user's own configured order
-// resolve back to the CONFIGURED order (by name match, with a uniqueness
-// guard), so pure reordering never causes a spurious diff.
+// F5/F6 regression: worker-group name uniqueness and order stability. Two
+// worker groups sharing an instance_type with BOTH names left unset used to
+// both derive the identical default name (the instance_type itself) -
+// tolerated by the compute_templates storage layer, but a real risk once
+// Ray's name-keyed autoscaler dict is built from it. F5 makes the derivation
+// unique (deterministic "-2" suffix, client-side, before the request is ever
+// sent) and warns. F6 makes a worker_nodes list whose backend-returned order
+// differs from the user's own configured order resolve back to the
+// configured order (by name match, with a uniqueness guard), so pure
+// reordering never causes a spurious diff.
 //
 // These reuse newMockComputeConfigServerWithState (resource_compute_config_
 // lifecycle_acc_test.go), NOT a bespoke mock: that shared mock's
 // applyServerNormalization already replicates the real backend defaulting an
-// EMPTY worker name to its instance_type (confirmed necessary while building
-// this file - an ad-hoc mock that just echoes the request verbatim does not
-// reproduce this and made an early draft of this test fail for the wrong
-// reason, an empty string rather than the real pre-fix collision).
+// EMPTY worker name to its instance_type - an ad-hoc mock that just echoes
+// the request verbatim does not reproduce this, and would fail for the wrong
+// reason (an empty string rather than the real pre-fix collision).
 
 import (
 	"strings"
@@ -127,17 +125,11 @@ resource "anyscale_compute_config" "test" {
 
 // F5, additional_resources call site: the disambiguation-index-building loop
 // in additionalResourceToDeploymentConfig (compute_config_helpers.go) is a
-// SEPARATE copy of the primary path's loop above - only the leaf
+// separate copy of the primary path's loop above - only the leaf
 // workerNodeConfigToAPI/disambiguateDefaultedWorkerNames functions are
-// shared, not the surrounding "is this index eligible" logic itself (forge's
-// finding, confirmed against the real code: my own earlier sweep missed this
-// second call site by re-deriving via a fresh grep of resource_compute_
-// config.go rather than re-checking the additional_resources file I'd
-// already read - see the ad-hoc-mock/grep-sweep memory notes). This test is
-// the permanent regression proof for that second call site specifically -
-// without it, only the primary path's fix is covered by committed CI-gated
-// acctests; the additional_resources path's fix would have no acceptance
-// coverage beyond forge's own scratch (deleted) verification.
+// shared, not the surrounding "is this index eligible" logic itself. This is
+// the permanent regression proof for that second call site: without it, only
+// the primary path's fix has committed CI-gated coverage.
 func TestAccComputeConfigResource_AdditionalResourcesDuplicateDerivedWorkerNamesGetUniqueSuffix_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 

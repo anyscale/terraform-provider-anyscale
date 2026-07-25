@@ -1,13 +1,23 @@
 package acctest
 
-// F2 regression (compute-config-import-parity quest): required_resources.memory
-// is documented as accepting a unit-string like "4Gi", but the real backend
-// only accepts a plain integer byte count and 422s on a unit-suffixed string
-// (assayer live confirm). The fix parses the unit string client-side before
-// sending, matching what the Python SDK already does. This proves it with a
-// mock server that mirrors the real backend's strictness (rejects anything
-// that isn't a bare integer for memory), so a regression back to sending the
-// raw string fails the same way a live create would.
+// F2 regression: required_resources.memory is documented as accepting a
+// unit-string like "4Gi", but the real backend only accepts a plain integer
+// byte count and 422s on a unit-suffixed string. The fix parses the unit
+// string client-side before sending, matching what the Python SDK already
+// does. This proves it with a mock server that mirrors the real backend's
+// strictness (rejects anything that isn't a bare integer for memory), so a
+// regression back to sending the raw string fails the same way a live create
+// would.
+//
+// State must show the user's own "4Gi", not the API's raw byte-count echo:
+// the API can never return anything but a number, and this field is a plain
+// (non-Computed) string, so a naive implementation crashes apply the same
+// way F4's custom_resources did ("provider produced inconsistent result
+// after apply", config "4Gi" vs. state "4294967296"). The fix
+// (MemoryQuantityType/MemoryQuantityValue, StringSemanticEquals comparing
+// parsed byte counts) keeps the planned "4Gi" in state instead of adopting
+// the differently-formatted-but-equal value the wire returned - the check
+// below asserts that directly, not the byte count.
 
 import (
 	"encoding/json"
@@ -46,9 +56,9 @@ func newF2MemoryParseMockServer(t *testing.T) *httptest.Server {
 			reqRes, _ := headNode["required_resources"].(map[string]any)
 			memVal, present := reqRes["memory"]
 
-			// Mirrors the real backend's strictness (assayer G1g/live: "value
-			// is not a valid integer" on a unit-suffixed string like "4Gi").
-			// A JSON number decodes to float64 here; a JSON string does not.
+			// Mirrors the real backend's strictness ("value is not a valid
+			// integer" on a unit-suffixed string like "4Gi"). A JSON number
+			// decodes to float64 here; a JSON string does not.
 			if present {
 				if _, isNumber := memVal.(float64); !isNumber {
 					w.WriteHeader(http.StatusUnprocessableEntity)
@@ -115,22 +125,23 @@ resource "anyscale_compute_config" "test" {
 }
 `, name)
 
-	const expectedBytes = "4294967296" // 4 * 1024^3, the documented "4Gi" contract
-
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
+				// No ExpectNonEmptyPlan: resource.Test's default post-apply
+				// re-plan must also come back empty, which is the actual
+				// SemanticEquals proof - a plain mask-to-prior fix would pass
+				// the attribute check below but still crash or perpetually
+				// diff on this implicit second plan.
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// The schema attribute stays a string round-trippable
-					// against the user's own "4Gi" - the parsed byte count is
-					// what actually goes over the wire (asserted by the mock
-					// server's own strictness above), not necessarily what
-					// state displays. This asserts state shows the value the
-					// mock echoed back (parsed bytes as an integer string),
-					// proving the wire request really was numeric bytes.
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.required_resources.memory", expectedBytes),
+					// State must show the user's own "4Gi", not the mock's
+					// byte-count echo - that's what MemoryQuantityType's
+					// SemanticEquals buys: the framework keeps the planned
+					// value in state instead of adopting the differently-
+					// formatted-but-equal one the wire returned.
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.required_resources.memory", "4Gi"),
 				),
 			},
 		},
