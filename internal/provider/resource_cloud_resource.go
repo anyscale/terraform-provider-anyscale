@@ -728,6 +728,17 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
+	// cloud_id is Optional+Computed (unlike cloud_name, which is Optional
+	// only), so omitting it from config leaves it Unknown here, not Null -
+	// checking IsNull() alone would miss the "config sets neither" case
+	// entirely and fall through to an empty-string cloudID below, sending a
+	// create request with no cloud at all.
+	if (plan.CloudID.IsNull() || plan.CloudID.IsUnknown()) && plan.CloudName.IsNull() {
+		AddConfigError(&resp.Diagnostics, "Cloud Reference Required",
+			"Either 'cloud_id' or 'cloud_name' must be specified to create a cloud resource.")
+		return
+	}
+
 	// Resolve cloud_name to cloud_id if needed
 	cloudID := plan.CloudID.ValueString()
 	if (plan.CloudID.IsNull() || plan.CloudID.IsUnknown()) && !plan.CloudName.IsNull() {
