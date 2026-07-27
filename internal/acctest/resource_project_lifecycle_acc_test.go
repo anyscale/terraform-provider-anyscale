@@ -383,9 +383,6 @@ resource "anyscale_project" "test" {
 				ResourceName:      "anyscale_project.test",
 				ImportState:       true,
 				ImportStateVerify: true,
-				ImportStateVerifyIgnore: []string{
-					"cloud_name", // input-only alias for cloud_id; API stores only parent_cloud_id
-				},
 			},
 		},
 	})

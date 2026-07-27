@@ -67,139 +67,6 @@ func diagsContainSummary(diags diag.Diagnostics, summary string) bool {
 	return false
 }
 
-// newProjectCreateTestServer serves the endpoints ProjectResource.Create needs
-// for a successful create-then-read cycle: optionally GET /api/v2/clouds (for
-// cloud_name resolution), POST /api/v2/projects, then GET
-// /api/v2/projects/{id} (Create always reads back after creating).
-func newProjectCreateTestServer(t *testing.T, cloudID, cloudName string) *httptest.Server {
-	t.Helper()
-	const projectID = "prj_test123"
-
-	respond := func(w http.ResponseWriter, status int) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(ProjectResponse{Result: ProjectResult{
-			ID:            projectID,
-			Name:          "test-project",
-			ParentCloudID: strPtr(cloudID),
-			CreatedAt:     "2024-01-01T00:00:00Z",
-			IsDefault:     false,
-			DirectoryName: "test-project-dir",
-		}})
-	}
-
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/clouds" && cloudName != "":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(CloudsListResponse{
-				Results: []CloudResult{{ID: cloudID, Name: cloudName, CreatedAt: "2024-01-01T00:00:00Z"}},
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/projects":
-			respond(w, http.StatusCreated)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/"+projectID:
-			respond(w, http.StatusOK)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-}
-
-// TestProjectResourceCreate_CloudReferenceValidation replaces the old
-// TestCloudReferenceValidation, which re-implemented the cloud_id/cloud_name
-// branching inline instead of calling Create(). This drives the real Create()
-// method for all four cases; the two error cases also prove the validation
-// short-circuits before any HTTP call (the mock server fails the test if hit).
-func TestProjectResourceCreate_CloudReferenceValidation(t *testing.T) {
-	t.Run("neither cloud_id nor cloud_name set", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			t.Errorf("unexpected request %s %s: validation must short-circuit before any API call", r.Method, r.URL.String())
-			w.WriteHeader(http.StatusInternalServerError)
-		}))
-		defer server.Close()
-
-		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
-		_, diags := runProjectResourceCreate(t, r, ProjectResourceModel{
-			Name:          types.StringValue("test-project"),
-			Collaborators: []ProjectCollaboratorModel{},
-		})
-
-		if !diags.HasError() {
-			t.Fatal("expected a diagnostic error, got none")
-		}
-		if !diagsContainSummary(diags, "Cloud Reference Required") {
-			t.Errorf("expected 'Cloud Reference Required' diagnostic, got: %v", diags)
-		}
-	})
-
-	t.Run("both cloud_id and cloud_name set", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			t.Errorf("unexpected request %s %s: validation must short-circuit before any API call", r.Method, r.URL.String())
-			w.WriteHeader(http.StatusInternalServerError)
-		}))
-		defer server.Close()
-
-		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
-		_, diags := runProjectResourceCreate(t, r, ProjectResourceModel{
-			Name:          types.StringValue("test-project"),
-			CloudID:       types.StringValue("cld_123"),
-			CloudName:     types.StringValue("my-cloud"),
-			Collaborators: []ProjectCollaboratorModel{},
-		})
-
-		if !diags.HasError() {
-			t.Fatal("expected a diagnostic error, got none")
-		}
-		if !diagsContainSummary(diags, "Conflicting Cloud Reference") {
-			t.Errorf("expected 'Conflicting Cloud Reference' diagnostic, got: %v", diags)
-		}
-	})
-
-	t.Run("cloud_id only succeeds and is preserved", func(t *testing.T) {
-		server := newProjectCreateTestServer(t, "cld_123", "")
-		defer server.Close()
-
-		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
-		result, diags := runProjectResourceCreate(t, r, ProjectResourceModel{
-			Name:          types.StringValue("test-project"),
-			CloudID:       types.StringValue("cld_123"),
-			Collaborators: []ProjectCollaboratorModel{},
-		})
-		if diags.HasError() {
-			t.Fatalf("unexpected error: %v", diags)
-		}
-		if result.CloudID.ValueString() != "cld_123" {
-			t.Errorf("cloud_id = %q, want %q", result.CloudID.ValueString(), "cld_123")
-		}
-		if !result.CloudName.IsNull() {
-			t.Errorf("cloud_name should stay null when cloud_id was used, got %q", result.CloudName.ValueString())
-		}
-	})
-
-	t.Run("cloud_name only resolves and is preserved over cloud_id", func(t *testing.T) {
-		server := newProjectCreateTestServer(t, "cld_456", "my-cloud")
-		defer server.Close()
-
-		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
-		result, diags := runProjectResourceCreate(t, r, ProjectResourceModel{
-			Name:          types.StringValue("test-project"),
-			CloudName:     types.StringValue("my-cloud"),
-			Collaborators: []ProjectCollaboratorModel{},
-		})
-		if diags.HasError() {
-			t.Fatalf("unexpected error: %v", diags)
-		}
-		if result.CloudName.ValueString() != "my-cloud" {
-			t.Errorf("cloud_name = %q, want %q (should stay as configured)", result.CloudName.ValueString(), "my-cloud")
-		}
-		if !result.CloudID.IsNull() {
-			t.Errorf("cloud_id should stay null when cloud_name was used (API's parent_cloud_id must not overwrite it), got %q", result.CloudID.ValueString())
-		}
-	})
-}
-
 // TestProjectResourceCreate_RequestBody replaces the old
 // TestProjectCreateRequestStructure, which only checked that a hand-built
 // CreateProjectRequest{} struct literal held the fields it was given -- a
@@ -442,9 +309,6 @@ func TestProjectResourceReadProject(t *testing.T) {
 		if model.CloudID.ValueString() != "cld_789" {
 			t.Errorf("cloud_id = %q, want %q", model.CloudID.ValueString(), "cld_789")
 		}
-		if !model.CloudName.IsNull() {
-			t.Errorf("cloud_name should stay null, got %q", model.CloudName.ValueString())
-		}
 		if model.CreatorID.ValueString() != "user_789" {
 			t.Errorf("creator_id = %q, want %q", model.CreatorID.ValueString(), "user_789")
 		}
@@ -462,27 +326,7 @@ func TestProjectResourceReadProject(t *testing.T) {
 		}
 	})
 
-	t.Run("cloud_name in config is preserved, cloud_id left untouched", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			serveFullProject(w)
-		}))
-		defer server.Close()
-
-		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
-		model := &ProjectResourceModel{CloudName: types.StringValue("my-cloud")}
-		if err := r.readProject(context.Background(), projectID, model); err != nil {
-			t.Fatalf("readProject returned error: %v", err)
-		}
-
-		if model.CloudName.ValueString() != "my-cloud" {
-			t.Errorf("cloud_name = %q, want %q", model.CloudName.ValueString(), "my-cloud")
-		}
-		if !model.CloudID.IsNull() {
-			t.Errorf("cloud_id should stay untouched (null) when cloud_name drives the config, got %q", model.CloudID.ValueString())
-		}
-	})
-
-	t.Run("import: both null, cloud_id populated from API", func(t *testing.T) {
+	t.Run("import: cloud_id populated from API", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			serveFullProject(w)
 		}))
@@ -496,9 +340,6 @@ func TestProjectResourceReadProject(t *testing.T) {
 
 		if model.CloudID.ValueString() != "cld_789" {
 			t.Errorf("cloud_id = %q, want %q (must be populated from the API on import)", model.CloudID.ValueString(), "cld_789")
-		}
-		if !model.CloudName.IsNull() {
-			t.Error("cloud_name should stay null on import")
 		}
 	})
 
@@ -568,17 +409,12 @@ func TestProjectResourceReadProject(t *testing.T) {
 	// t.Run("cloud_id is null when parent_cloud_id is null") is the resource-side
 	// DS-PROJ-1 mutation-proof regression guard. Same bug as the two data
 	// sources: ProjectResult.ParentCloudID is a plain string, so a nil API
-	// parent_cloud_id silently decodes to "" before readProject ever runs, and
-	// line 676 (model.CloudID = types.StringValue(result.ParentCloudID)) writes
-	// that "" straight into state. The two existing CloudID.IsNull() checks in
-	// this file (the cloud_name subtest above) cover an unrelated case - cloud_id
-	// deliberately left unset when cloud_name drives the config - not a null
-	// parent_cloud_id from the API. Uses a raw JSON body since ParentCloudID's
-	// current type cannot express JSON null in a struct literal fixture. This
-	// currently FAILS (cloud_id comes back "" not null), which is the
-	// mutation-proof evidence. Must pass once ParentCloudID is *string +
-	// StringPointerValue on all three call sites (both data sources and this
-	// resource), which the shared struct's type change forces together.
+	// parent_cloud_id could silently decode to "" before readProject ever runs
+	// and get written straight into state as a non-null empty string instead
+	// of null. Uses a raw JSON body since ParentCloudID's current type cannot
+	// express JSON null in a struct literal fixture. Proves readProject uses
+	// types.StringPointerValue (not types.StringValue) for cloud_id, matching
+	// the two data sources' own ParentCloudID handling.
 	t.Run("cloud_id is null when parent_cloud_id is null", func(t *testing.T) {
 		const noCloudProjectID = "prj_no_cloud"
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
