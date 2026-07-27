@@ -1,0 +1,19 @@
+```
+release-note:fixed
+provider: `cloud_name` now resolves correctly against every page of an organization's cloud list, instead of only the first - affects `anyscale_compute_config`, `anyscale_project`, and `anyscale_cloud_resource` as a resource argument, plus the `anyscale_compute_config`, `anyscale_project`, `anyscale_projects`, `anyscale_service`, and `anyscale_services` data sources as a filter; previously a valid `cloud_name` past page one failed with "no cloud found" even though `data.anyscale_cloud` already resolved the same name correctly.
+```
+
+```
+release-note:fixed
+provider: when two clouds share the same `cloud_name`, resolving that name - as a resource argument or a data source filter - now picks the most recently created cloud, matching `data.anyscale_cloud`'s existing behavior; previously it silently picked whichever cloud happened to appear on the first page of results, which could point a resource or lookup at a cloud you did not choose with no error or plan diff to reveal it.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud_resource: omitting both `cloud_id` and `cloud_name` now fails with a clear error at apply time; previously it silently sent a create request with no cloud at all.
+```
+
+```
+release-note:changed
+provider: The front-page Quick Start now resolves its cloud by name through the anyscale_cloud data source and passes the result to cloud_id, instead of setting cloud_name directly.
+```
