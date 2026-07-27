@@ -59,9 +59,8 @@ type CloudResourceResource struct {
 
 // CloudResourceResourceModel describes the resource data model.
 type CloudResourceResourceModel struct {
-	// Parent reference - can specify either cloud_id or cloud_name
-	CloudID   types.String `tfsdk:"cloud_id"`
-	CloudName types.String `tfsdk:"cloud_name"`
+	// Parent reference
+	CloudID types.String `tfsdk:"cloud_id"`
 
 	// Resource identity
 	Name types.String `tfsdk:"name"`
@@ -181,16 +180,8 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 
 			// ─── Parent Reference ─────────────────────────────────
 			"cloud_id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The cloud ID to attach this resource to. Either `cloud_id` or `cloud_name` can be specified.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"cloud_name": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The cloud name to attach this resource to. Either `cloud_id` or `cloud_name` can be specified. If provided, will be resolved to cloud_id.",
+				Required:            true,
+				MarkdownDescription: "The cloud ID to attach this resource to. To reference a cloud by name instead of by id, look it up with the [`anyscale_cloud` data source](../data-sources/cloud.md) (`cloud_id = data.anyscale_cloud.example.id`).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -728,33 +719,9 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	// cloud_id is Optional+Computed (unlike cloud_name, which is Optional
-	// only), so omitting it from config leaves it Unknown here, not Null -
-	// checking IsNull() alone would miss the "config sets neither" case
-	// entirely and fall through to an empty-string cloudID below, sending a
-	// create request with no cloud at all.
-	if (plan.CloudID.IsNull() || plan.CloudID.IsUnknown()) && plan.CloudName.IsNull() {
-		AddConfigError(&resp.Diagnostics, "Cloud Reference Required",
-			"Either 'cloud_id' or 'cloud_name' must be specified to create a cloud resource.")
-		return
-	}
-
-	// Resolve cloud_name to cloud_id if needed
+	// cloud_id is Required now (cloud_name removed) - Terraform Core already
+	// guarantees a concrete value here.
 	cloudID := plan.CloudID.ValueString()
-	if (plan.CloudID.IsNull() || plan.CloudID.IsUnknown()) && !plan.CloudName.IsNull() {
-		cloudName := plan.CloudName.ValueString()
-		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
-
-		resolvedID, err := ResolveCloudNameToID(ctx, r.client, cloudName)
-		if err != nil {
-			AddConfigError(&resp.Diagnostics,
-				"Cloud Name Resolution Failed",
-				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()))
-			return
-		}
-		cloudID = resolvedID
-		plan.CloudID = types.StringValue(cloudID)
-	}
 
 	region := plan.Region.ValueString()
 	computeStack := plan.ComputeStack.ValueString()

@@ -83,13 +83,14 @@ type cloudResourceResourceModelV1 struct {
 	ID types.String `tfsdk:"id"`
 }
 
-// toCloudResourceResourceModel drops Status and initializes Timeouts null
-// (PR2, additive - no prior state ever had a value for it) - the only
-// differences between this struct and the current (v2) CloudResourceResourceModel.
+// toCloudResourceResourceModel drops Status, drops CloudName (R1: removed
+// from the current model entirely - a prior state that set it loses that
+// value here the same way any real current-schema state does), and
+// initializes Timeouts null (PR2, additive - no prior state ever had a
+// value for it).
 func (m cloudResourceResourceModelV1) toCloudResourceResourceModel() CloudResourceResourceModel {
 	return CloudResourceResourceModel{
 		CloudID:          m.CloudID,
-		CloudName:        m.CloudName,
 		Name:             m.Name,
 		CloudProvider:    m.CloudProvider,
 		ComputeStack:     m.ComputeStack,
