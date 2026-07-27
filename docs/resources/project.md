@@ -13,14 +13,19 @@ Manages an Anyscale Project. Projects organize workspaces and resources within a
 ## Example Usage
 
 ```terraform
-# Basic project, scoped to a cloud by name
+# Look up an existing cloud by name, then create a project scoped to it -
+# for a cloud you don't also manage in this configuration
+data "anyscale_cloud" "by_name" {
+  name = "my-terraform-cloud"
+}
+
 resource "anyscale_project" "example" {
   name        = "my-team-project"
-  cloud_name  = "my-terraform-cloud"
+  cloud_id    = data.anyscale_cloud.by_name.id
   description = "Workspaces and jobs for the data team"
 }
 
-# Project scoped by cloud_id instead, with collaborators managed in-place
+# Project scoped by a literal cloud_id, with collaborators managed in-place
 resource "anyscale_project" "with_collaborators" {
   name        = "shared-research-project"
   cloud_id    = "cld_abc123"

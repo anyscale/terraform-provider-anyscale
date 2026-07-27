@@ -30,13 +30,6 @@ resource "anyscale_project" "basic" {
 #   }
 # }
 
-# Project using cloud_name instead of cloud_id
-resource "anyscale_project" "by_cloud_name" {
-  name        = "${var.cloud_name}-cloudname-project"
-  cloud_name  = anyscale_cloud.primary.name
-  description = "Project referencing cloud by name"
-}
-
 # Data source example: Look up a project by name
 data "anyscale_project" "basic_lookup" {
   name     = anyscale_project.basic.name
@@ -50,8 +43,5 @@ data "anyscale_projects" "all_in_cloud" {
   cloud_id         = anyscale_cloud.primary.id
   include_defaults = false
 
-  depends_on = [
-    anyscale_project.basic,
-    anyscale_project.by_cloud_name,
-  ]
+  depends_on = [anyscale_project.basic]
 }
