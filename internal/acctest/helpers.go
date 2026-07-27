@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -227,54 +228,84 @@ func validateCloudExists(cloudID string) bool {
 	return resp.StatusCode == 200
 }
 
-// resolveCloudNameToID resolves a cloud name to its ID by querying the API
+// resolveCloudNameToID resolves a cloud name to its ID by querying the API.
+//
+// Paginates across every page of GET /api/v2/clouds, not just the first -
+// this used to read only page 1, so once an org's cloud list exceeded one
+// page, a valid name resolved to "no cloud found" (the same bug class fixed
+// in the provider's own ResolveCloudNameToID, cloud_helpers.go). This
+// function resolves ANYSCALE_TEST_CLOUD_NAME and the default pinned fixture
+// name (tfp-test-aws-useast1-STATIC) at runtime, so the failure mode here is
+// "the entire acceptance suite can no longer find its own fixture" the day
+// the test org's cloud list crosses a page boundary - worth the extra
+// diligence over a typical test-helper bug. Deliberately keeps the exact
+// local most-recent tiebreak and duplicate-warning log below unchanged
+// (rather than delegating to the provider package's PickMostRecentMatch) -
+// only the pagination gap is being closed here.
 func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 	client, err := GetTestClient()
 	if err != nil {
 		return "", fmt.Errorf("failed to get test client: %w", err)
 	}
 
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse clouds response: %w", err)
-	}
-
-	// Find matching cloud(s) - if multiple exist, use the most recent
+	// Find matching cloud(s) across every page - if multiple exist, use the most recent
 	var matchedCloudID string
 	var latestCreatedAt string
 	matchCount := 0
 
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			matchCount++
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
+	pagingToken := ""
+	for {
+		path := "/api/v2/clouds"
+		if pagingToken != "" {
+			path = fmt.Sprintf("%s?paging_token=%s", path, url.QueryEscape(pagingToken))
+		}
+
+		resp, err := client.DoRequest(context.Background(), "GET", path, nil)
+		if err != nil {
+			return "", fmt.Errorf("failed to list clouds: %w", err)
+		}
+
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("failed to read response: %w", err)
+		}
+
+		var cloudsResp struct {
+			Results []struct {
+				ID        string `json:"id"`
+				Name      string `json:"name"`
+				CreatedAt string `json:"created_at"`
+			} `json:"results"`
+			Metadata struct {
+				NextPagingToken *string `json:"next_paging_token"`
+			} `json:"metadata"`
+		}
+
+		if err := json.Unmarshal(body, &cloudsResp); err != nil {
+			return "", fmt.Errorf("failed to parse clouds response: %w", err)
+		}
+
+		for _, cloud := range cloudsResp.Results {
+			if cloud.Name == cloudName {
+				matchCount++
+				if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
+					matchedCloudID = cloud.ID
+					latestCreatedAt = cloud.CreatedAt
+				}
 			}
 		}
+
+		if cloudsResp.Metadata.NextPagingToken == nil || *cloudsResp.Metadata.NextPagingToken == "" {
+			break
+		}
+		pagingToken = *cloudsResp.Metadata.NextPagingToken
 	}
 
 	if matchedCloudID == "" {

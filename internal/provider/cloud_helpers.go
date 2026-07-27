@@ -227,20 +227,25 @@ func validateSubnetIDsSupported(computeStack string, awsConfig *AWSConfigModel) 
 func ResolveCloudNameToID(ctx context.Context, client *Client, cloudName string) (string, error) {
 	tflog.Debug(ctx, "Resolving cloud name to ID", map[string]any{"cloud_name": cloudName})
 
-	// Fetch all clouds
-	cloudsResp, err := DoRequestAndParse[CloudsListResponse](
-		ctx,
-		client,
-		"GET",
-		"/api/v2/clouds",
-		nil,
+	// Across every page of GET /api/v2/clouds, not just the first - mirrors
+	// CloudDataSource.findCloudByName (data_source_cloud.go), which already hit
+	// and fixed the identical bug: a valid name resolved to "not found" once an
+	// org's cloud list exceeded one page.
+	results, err := PaginatedRequest(ctx, client, "/api/v2/clouds", nil,
+		func(body []byte) ([]CloudResult, *string, error) {
+			var cloudsResp CloudsListResponse
+			if err := json.Unmarshal(body, &cloudsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
+			}
+			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
+		},
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
 
 	// Find matching cloud(s), picking the most recently created on a name collision
-	matchedCloudID := PickMostRecentMatch(ctx, "cloud", cloudName, cloudsResp.Results,
+	matchedCloudID := PickMostRecentMatch(ctx, "cloud", cloudName, results,
 		func(c CloudResult) bool { return c.Name == cloudName },
 		func(c CloudResult) string { return c.ID },
 		func(c CloudResult) string { return c.CreatedAt },
