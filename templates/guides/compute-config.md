@@ -57,20 +57,22 @@ This is safe by construction: if the compute config you're renaming is currently
 cluster, the archive step fails with a clear error instead of proceeding, rather than silently tearing
 anything down. Simply retry once it's no longer in use.
 
-`cloud_id` and `cloud_name` are also part of the resource's identity, but behave differently on
-purpose. Changing which cloud a compute config actually points at is not `RequiresReplace`: instead,
-`apply` fails with an explicit error ("Compute Config Cloud Is Immutable") telling you to replace the
-resource deliberately — `terraform apply -replace` against this resource, or `terraform taint` it
-first — rather than proceeding automatically. Switching how you *express* the same cloud — for example,
-from `cloud_name` to the `cloud_id` it already resolves to — isn't a real change, and plans clean either
-way.
+`cloud_id` is also part of the resource's identity, but behaves differently on purpose. Changing
+which cloud a compute config actually points at is not `RequiresReplace`: instead, `apply` fails with
+an explicit error ("Compute Config Cloud Is Immutable") telling you to replace the resource
+deliberately — `terraform apply -replace` against this resource, or `terraform taint` it first —
+rather than proceeding automatically.
 
-This asymmetry is intentional, not an inconsistency: a `name` change is always detectable purely from
-your configuration and prior state, so Terraform can safely auto-replace. Whether a `cloud_id`/
-`cloud_name` change actually points at a different cloud can't always be determined without resolving
-`cloud_name` to an ID, which a plan-time check can't safely do — so this heavier, rarer operation gets a
-deliberate two-step instead of an automatic one. Both are equally safe against orphaning the old compute
-config; they just surface the choice to you at different points.
+This asymmetry is intentional, not an inconsistency: an in-place cloud change has no per-field update
+on the backend, so applying it would silently create a new version under the new cloud while leaving
+the old version's cloud unmanaged and orphaned — the same failure mode a rename would have if it
+didn't already replace. Requiring a deliberate replace instead of an automatic one gives you a chance
+to notice and confirm before that happens, rather than losing track of the old version's cloud.
+
+`cloud_id` is `Required` — there's no name-based alternative on this resource. If you only know the
+cloud by name, resolve it once with the [`anyscale_cloud`](../data-sources/cloud.md) data source and
+pass its `id` through: `cloud_id = data.anyscale_cloud.this.id`. If you also manage the cloud with
+Terraform, reference it directly instead: `cloud_id = anyscale_cloud.primary.id`.
 
 ## `resources` versus `required_resources`
 
@@ -198,17 +200,6 @@ import fails with a clear error asking you to use `config_id` instead — `terra
 pass a separate cloud selector to disambiguate. Importing a `config_id` that's already archived fails
 immediately with a clear error, rather than importing a resource that the next refresh would just remove
 again.
-
-One current limitation worth knowing: import does not reverse-look-up `cloud_name` from the recovered
-`cloud_id` — `cloud_name` stays plain Optional, and nothing populates it during import. A `cloud_id`-only
-configuration is unaffected and plans clean right away. A `cloud_name`-based configuration shows a one-time
-diff on the first plan after import instead: state has no `cloud_name` yet, so the plan proposes setting it
-to match your configuration — safe and expected, the same as establishing any other value import didn't
-populate. Every plan after that is clean, indefinitely. This is a deliberate trade-off, not an oversight:
-making `cloud_name` Computed to close this gap was tried and reverted, because config genuinely omitting
-`cloud_name` and config genuinely dropping it are indistinguishable from state alone, and only one behavior
-can win — see the section above on switching between `cloud_id` and `cloud_name`, which is the guarantee
-this protects.
 
 After import, everything is recovered directly from that version, including the fields that stay masked on
 an ordinary refresh: `flags` and `advanced_instance_config` (top-level and per-node), `resources`,

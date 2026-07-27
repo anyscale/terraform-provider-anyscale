@@ -286,6 +286,11 @@ func TestComputeConfigStateUpgradeV0toV1(t *testing.T) {
 	t.Run("unrelated top-level fields pass through unchanged", func(t *testing.T) {
 		headNode := buildV0NodeObject(t, "m5.large", types.ObjectNull(physicalResourcesAttrTypesV0()))
 		v0Model := minimalV0Model(t, headNode, types.ListNull(types.ObjectType{AttrTypes: workerNodeAttrTypesV0()}))
+		// cloud_name is set on the v0 fixture (a real v0 state could have it)
+		// specifically to prove the upgrade does not error or panic on a
+		// populated value it no longer has anywhere to put - cloud_name was
+		// removed from the current model entirely (R1), so there is nothing
+		// to assert it upgraded TO, only that upgrading FROM it is safe.
 		v0Model.CloudName = types.StringValue("my-cloud")
 		v0Model.Zones = types.ListValueMust(types.StringType, []attr.Value{types.StringValue("us-west-2a")})
 		v0Model.EnableCrossZoneScaling = types.BoolValue(true)
@@ -297,9 +302,6 @@ func TestComputeConfigStateUpgradeV0toV1(t *testing.T) {
 		}
 		if v1Model.CloudID.ValueString() != v0Model.CloudID.ValueString() {
 			t.Errorf("CloudID = %v, want %v", v1Model.CloudID, v0Model.CloudID)
-		}
-		if v1Model.CloudName.ValueString() != "my-cloud" {
-			t.Errorf("CloudName = %v, want my-cloud", v1Model.CloudName)
 		}
 		if !v1Model.EnableCrossZoneScaling.ValueBool() {
 			t.Error("EnableCrossZoneScaling = false, want true (must pass through unchanged)")

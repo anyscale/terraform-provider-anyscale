@@ -45,9 +45,9 @@ func AddJSONError(diags *diag.Diagnostics, operation string, dataType string, er
 //
 // Example usage:
 //
-//	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
-//	    AddConfigError(&resp.Diagnostics, "Cloud Reference Required",
-//	        "Either 'cloud_id' or 'cloud_name' must be specified.")
+//	if plan.SomeRequiredField.IsNull() {
+//	    AddConfigError(&resp.Diagnostics, "Required Field Missing",
+//	        "SomeRequiredField must be specified.")
 //	    return
 //	}
 func AddConfigError(diags *diag.Diagnostics, summary string, detail string) {

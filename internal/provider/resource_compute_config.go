@@ -52,7 +52,6 @@ type ComputeConfigResourceModel struct {
 	NameVersion            types.String  `tfsdk:"name_version"` // Formatted as "name:version" for use with Anyscale APIs
 	Name                   types.String  `tfsdk:"name"`
 	CloudID                types.String  `tfsdk:"cloud_id"`
-	CloudName              types.String  `tfsdk:"cloud_name"`
 	CloudResource          types.String  `tfsdk:"cloud_resource"` // Target specific cloud resource within a cloud
 	Zones                  types.List    `tfsdk:"zones"`          // List of String
 	MinResources           types.Map     `tfsdk:"min_resources"`  // Map of Float64
@@ -226,15 +225,9 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				},
 			},
 			"cloud_id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				Description:         "The ID of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time, since this resource cannot detect that change from a cloud_name lookup at plan time without a network call.",
-				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time, since this resource cannot detect that change from a `cloud_name` lookup at plan time without a network call.",
-			},
-			"cloud_name": schema.StringAttribute{
-				Optional:            true,
-				Description:         "The name of the Anyscale cloud to use for launching clusters. Either cloud_id or cloud_name must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see cloud_id. Importing a cloud_name-based config by config_id shows a one-time, self-healing null->name diff on the first plan after import (this attribute is not recovered from cloud_id): making it Computed to close that gap was tried and reverted, since a droppable Optional input can't satisfy both 'stay put when config omits it' and 'clear when config drops it' under any single plan modifier - confirmed empirically, not just assumed.",
-				MarkdownDescription: "The name of the Anyscale cloud to use for launching clusters. Either `cloud_id` or `cloud_name` must be specified. If provided, will be resolved to cloud_id. The cloud is immutable once set; see `cloud_id`. Importing a `cloud_name`-based config by `config_id` shows a one-time, self-healing null->name diff on the first plan after import (this attribute is not recovered from `cloud_id`) - see the [Compute Config guide](../guides/compute-config.md) for the full explanation.",
+				Required:            true,
+				Description:         "The ID of the Anyscale cloud to use for launching clusters. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time. To reference a cloud by name instead of by id, look it up with the anyscale_cloud data source (cloud_id = data.anyscale_cloud.example.id).",
+				MarkdownDescription: "The ID of the Anyscale cloud to use for launching clusters. The cloud is immutable once set: changing it to a genuinely different cloud is rejected at apply time. To reference a cloud by name instead of by id, look it up with the [`anyscale_cloud` data source](../data-sources/cloud.md) (`cloud_id = data.anyscale_cloud.example.id`).",
 			},
 			"cloud_resource": schema.StringAttribute{
 				Optional:            true,
@@ -362,8 +355,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 // additionalResourceAttributes returns the schema attributes for one
 // additional_resources entry: the per-entry node-config core -
 // everything from the top-level schema EXCEPT the shared cluster-level
-// fields (cloud_id/cloud_name, idle_termination_minutes,
-// maximum_uptime_minutes), which stay top-level and apply to every entry.
+// fields (cloud_id, idle_termination_minutes, maximum_uptime_minutes),
+// which stay top-level and apply to every entry.
 func additionalResourceAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
 		"cloud_resource": schema.StringAttribute{
@@ -1046,34 +1039,10 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 	plan *ComputeConfigResourceModel,
 	diags *diag.Diagnostics,
 ) (*computeTemplateRequest, string) {
-	// Validate that either cloud_id or cloud_name is provided
-	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
-		AddConfigError(
-			diags,
-			"Missing Required Attribute",
-			"Either 'cloud_id' or 'cloud_name' must be specified.",
-		)
-		return nil, ""
-	}
-
-	// Resolve cloud_name to cloud_id if needed
+	// cloud_id is Required now (cloud_name removed) - no presence validation
+	// or name-to-id resolution needed, Terraform Core already guarantees a
+	// concrete value here.
 	cloudID := plan.CloudID.ValueString()
-	if (plan.CloudID.IsNull() || plan.CloudID.IsUnknown()) && !plan.CloudName.IsNull() {
-		cloudName := plan.CloudName.ValueString()
-		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
-
-		resolvedID, err := ResolveCloudNameToID(ctx, r.client, cloudName)
-		if err != nil {
-			AddConfigError(
-				diags,
-				"Cloud Name Resolution Failed",
-				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()),
-			)
-			return nil, ""
-		}
-		cloudID = resolvedID
-		plan.CloudID = types.StringValue(cloudID)
-	}
 
 	// Build the API request
 	tflog.Debug(ctx, "Building compute config request", map[string]any{
@@ -1839,9 +1808,7 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		"old_version":   state.Version.ValueInt64(),
 	})
 
-	// Build the request using the same helper as Create. This also resolves
-	// plan.CloudID to its effective value below, whether the user configured
-	// cloud_id or cloud_name directly.
+	// Build the request using the same helper as Create.
 	updateRequest, _ := r.buildComputeConfigRequest(ctx, &plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -1852,13 +1819,8 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 	// no per-field PATCH here, so an in-place cloud change would silently
 	// create a new version under the NEW cloud while leaving the old
 	// version's cloud unmanaged and unaware anything moved -- the same shape
-	// of orphan CC3a fixes for renames, just not detectable at plan time,
-	// since only an apply-time lookup can resolve what cloud_name resolves
-	// to. buildComputeConfigRequest has already resolved plan.CloudID to its
-	// effective value above (whether the user configured cloud_id or
-	// cloud_name), so this comparison also correctly does NOT fire when a
-	// user merely switches which of the two attributes they reference the
-	// same cloud by -- the resolved ID is identical either way.
+	// of orphan CC3a fixes for renames, just not detectable at plan time
+	// (only an apply-time comparison catches it).
 	if !state.CloudID.IsNull() && plan.CloudID.ValueString() != state.CloudID.ValueString() {
 		AddConfigError(&resp.Diagnostics,
 			"Compute Config Cloud Is Immutable",
@@ -2047,22 +2009,6 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 		additionalList := buildAdditionalResourcesList(ctx, additionalEntries, nil, true, &resp.Diagnostics)
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("additional_resources"), additionalList)...)
 	}
-
-	// A cloud_name reverse-lookup on import was tried and reverted: it
-	// made cloud_name Optional+Computed to absorb import's unconditional
-	// recovery, but a droppable Optional input can't satisfy both "stay
-	// put when config never mentions it" (the cloud_id-only import case)
-	// AND "clear when config explicitly drops it" (CC3b's documented,
-	// shipped-since-v0.2.0 switching-selectors guarantee) under any single
-	// plan modifier - confirmed empirically, not just reasoned about: with
-	// no modifier at all, the cloud_id-only case still passed (Core already
-	// carries forward an omitted Computed attribute by default) but CC3b's
-	// drop-to-null case still failed identically, proving the tension is
-	// inherent to Optional+Computed on a droppable input, not caused by the
-	// specific modifier choice. cloud_name is back to pure Optional:
-	// importing a cloud_name-based config by config_id shows a
-	// one-time, self-healing null->name diff on the first plan, a
-	// documented limitation rather than two live regressions.
 
 	// Top-level flags: recover everything except the keys that surface as
 	// their own attributes (min_resources, max_resources, cross-zone

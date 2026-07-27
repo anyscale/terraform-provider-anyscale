@@ -54,7 +54,6 @@ func TestAccProjectResource_Basic(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"cloud_name", // input-only alias for cloud_id; project API stores only parent_cloud_id
 					// F13: import now recovers the real collaborator list,
 					// which always includes the API's auto-added
 					// creator-owner even though this config never declares a
@@ -179,36 +178,6 @@ func TestAccProjectResource_DescriptionOmittedSurvivesUpdate(t *testing.T) {
 	})
 }
 
-func TestAccProjectResource_WithCloudName(t *testing.T) {
-	t.Parallel()
-	SkipIfNotAcceptanceTest(t)
-
-	cloudName := GetTestCloudName(t)
-
-	projectName := UniqueName(t, "project-cloudname")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
-		Steps: []resource.TestStep{
-			{
-				Config: testAccProjectResourceWithCloudNameConfig(cloudName, projectName),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_project.test", "name", projectName),
-					resource.TestCheckResourceAttr("anyscale_project.test", "cloud_name", cloudName),
-					testAccCheckProjectExistsInAPI("anyscale_project.test"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-		},
-	})
-}
-
 func TestAccProjectResource_WithCollaborators(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -313,16 +282,6 @@ resource "anyscale_project" "test" {
   description = "%s"
 }
 `, projectName, cloudID, description)
-}
-
-func testAccProjectResourceWithCloudNameConfig(cloudName, projectName string) string {
-	return fmt.Sprintf(`
-resource "anyscale_project" "test" {
-  name        = "%s"
-  cloud_name  = "%s"
-  description = "Test project using cloud_name"
-}
-`, projectName, cloudName)
 }
 
 func testAccProjectResourceWithCollaboratorsConfig(cloudID, projectName, email1, email2 string) string {

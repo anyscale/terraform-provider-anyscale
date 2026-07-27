@@ -190,36 +190,6 @@ func TestAccComputeConfigResource_InconsistentResultRegressions(t *testing.T) {
 	})
 }
 
-func TestAccComputeConfigResource_WithCloudName(t *testing.T) {
-	t.Parallel()
-	SkipIfNotAcceptanceTest(t)
-
-	cloudName := GetComputeConfigCloudName(t)
-	configName := UniqueName(t, "compute-config-cloudname")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/api/v2/compute_templates/%s", "result.archived_at"), // compute configs archive (not delete) -> poll archived_at, not 404
-		Steps: []resource.TestStep{
-			{
-				Config: testAccComputeConfigResourceConfig_withCloudName(configName, cloudName),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "id"),
-					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "cloud_id"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.large"),
-					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-		},
-	})
-}
-
 // testAccComputeConfigImportStateIdFunc returns the config_id for import (not name)
 // The compute config API requires the version-specific config_id (e.g., "cpt_xxx") for lookup
 func testAccComputeConfigImportStateIdFunc(resourceName string) resource.ImportStateIdFunc {
@@ -393,19 +363,6 @@ resource "anyscale_compute_config" "test" {
   ]
 }
 `, name, cloudID, headInstanceType, workerInstanceType)
-}
-
-func testAccComputeConfigResourceConfig_withCloudName(name, cloudName string) string {
-	return fmt.Sprintf(`
-resource "anyscale_compute_config" "test" {
-  name       = "%s"
-  cloud_name = "%s"
-
-  head_node = {
-    instance_type = "m5.large"
-  }
-}
-`, name, cloudName)
 }
 
 // TestAccComputeConfigResource_Update tests that updating a compute config

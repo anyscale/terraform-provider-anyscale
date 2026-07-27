@@ -42,9 +42,8 @@ type ProjectResourceModel struct {
 	// Identity
 	ID types.String `tfsdk:"id"`
 
-	// Cloud reference - mutually exclusive
-	CloudID   types.String `tfsdk:"cloud_id"`
-	CloudName types.String `tfsdk:"cloud_name"`
+	// Cloud reference
+	CloudID types.String `tfsdk:"cloud_id"`
 
 	// Core attributes
 	Name                   types.String `tfsdk:"name"`
@@ -89,17 +88,10 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 				},
 			},
 
-			// Cloud reference (mutually exclusive)
+			// Cloud reference
 			"cloud_id": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The cloud ID for this project. Either `cloud_id` or `cloud_name` must be specified. If configured with cloud_id and a later refresh finds the backend reports no associated cloud (an inconsistent state), this reads as null rather than an empty string.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"cloud_name": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The cloud name for this project. Either `cloud_id` or `cloud_name` must be specified. Resolved to a cloud ID once, to create the project; unlike the `anyscale_project` data source, that resolved ID is never written back to the `cloud_id` attribute, which stays null in state when the project is configured via `cloud_name`.",
+				Required:            true,
+				MarkdownDescription: "The cloud ID for this project. If a later refresh finds the backend reports no associated cloud (an inconsistent state), this reads as null rather than an empty string. To reference a cloud by name instead of by id, look it up with the [`anyscale_cloud` data source](../data-sources/cloud.md) (`cloud_id = data.anyscale_cloud.example.id`).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -229,34 +221,9 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	// Validate cloud reference
-	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
-		AddConfigError(&resp.Diagnostics, "Cloud Reference Required",
-			"Either 'cloud_id' or 'cloud_name' must be specified to create a project.")
-		return
-	}
-
-	if !plan.CloudID.IsNull() && !plan.CloudName.IsNull() {
-		AddConfigError(&resp.Diagnostics, "Conflicting Cloud Reference",
-			"Cannot specify both 'cloud_id' and 'cloud_name'. Please provide only one.")
-		return
-	}
-
-	// Resolve cloud_name to cloud_id if needed (for API call only, don't modify plan)
+	// cloud_id is Required now (cloud_name removed) - Terraform Core already
+	// guarantees a concrete value here.
 	cloudID := plan.CloudID.ValueString()
-	if plan.CloudID.IsNull() && !plan.CloudName.IsNull() {
-		cloudName := plan.CloudName.ValueString()
-		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
-
-		resolvedID, err := ResolveCloudNameToID(ctx, r.client, cloudName)
-		if err != nil {
-			AddConfigError(&resp.Diagnostics, "Cloud Name Resolution Failed",
-				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()))
-			return
-		}
-		cloudID = resolvedID
-		// Don't set plan.CloudID here - keep cloud_name in state
-	}
 
 	// Build create request
 	desc := plan.Description.ValueString()
@@ -669,20 +636,16 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 	model.ID = types.StringValue(result.ID)
 	model.Name = types.StringValue(result.Name)
 
-	// Handle cloud reference based on what user provided:
-	// - If cloud_name was provided: keep it, don't set cloud_id
-	// - If cloud_id was provided OR this is import (both null): set cloud_id from API
-	// DS-PROJ-1: parent_cloud_id is genuinely nullable server-side. Safe here:
-	// a cloud_name-configured project never enters this branch (CloudID stays
-	// null before and after); a healthy cloud_id-configured project has a
-	// stable non-null ParentCloudID every read, so this is a no-op change for
-	// it too. Only the anomalous case (cloud_id configured, backend returns a
-	// null parent_cloud_id) newly reads back null instead of "" - and that
-	// case cannot be constructed through Terraform at all, since
-	// parent_cloud_id is required on create.
-	if model.CloudName.IsNull() {
-		model.CloudID = types.StringPointerValue(result.ParentCloudID)
-	}
+	// DS-PROJ-1: parent_cloud_id is genuinely nullable server-side in
+	// principle, but cloud_id is Required on this resource (cloud_name
+	// removed, R1), so every config has a concrete value on create and this
+	// is a stable non-null refresh in practice. types.StringPointerValue
+	// rather than types.StringValue defensively handles the case the
+	// backend ever does report a null parent_cloud_id on an existing
+	// project (reads as null rather than an empty string, per the schema
+	// description) - this cannot currently be constructed through
+	// Terraform, since parent_cloud_id is required on create.
+	model.CloudID = types.StringPointerValue(result.ParentCloudID)
 
 	model.Description = types.StringPointerValue(result.Description)
 	model.CreatorID = types.StringPointerValue(result.CreatorID)

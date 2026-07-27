@@ -10,34 +10,24 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// TestAccCloudResourceResource_BothNullCloudSelectorRejected is the
-// mutation-proof regression guard for design doc B2 (design doc:
-// .crystl/quest/design/cloud-selector-design.md): before forge's fix,
-// anyscale_cloud_resource had no validation requiring one of cloud_id or
-// cloud_name, so omitting both silently sent a create request with an empty
-// cloud instead of failing with a clear diagnostic.
+// TestAccCloudResourceResource_BothNullCloudSelectorRejected was originally
+// the mutation-proof regression guard for design doc B2: before forge's B2
+// fix (6b270c8), anyscale_cloud_resource had no validation requiring
+// cloud_id or cloud_name, so omitting both silently sent a create request
+// with an empty cloud instead of failing with a clear diagnostic. B2 added
+// a runtime AddConfigError guard (Create()'s first check) to close that.
 //
-// Confirmed failing-first (2026-07-25) against pre-B2 main. The mock
-// deliberately has no real add_resource handler, only a catch-all that
-// t.Errorf's and 500s, so this test's specific pre-fix failure mode is that
-// catch-all firing on a genuine PUT /api/v2/clouds/add_resource with an
-// empty cloud, surfaced as "API Request Failed ... unexpected status 500" -
-// not the "Cloud Reference Required" diagnostic this test expects. That is
-// the point: without the guard, Create() proceeds all the way to a real
-// backend call with an empty cloud instead of stopping at plan-adjacent
-// config validation, exactly what B2 describes ("sends a create request
-// with an empty cloud instead of erroring"). A real backend might behave
-// differently on an empty cloud_id (accept it, 400 it, or something else) -
-// this test does not depend on that, it only needs to prove the provider
-// itself never stops the request before it goes out.
-//
-// Confirmed passing against forge's landed fix (6b270c8), which adds an
-// AddConfigError guard as the very first check on cloud_id/cloud_name in
-// Create - before the cloud_name-resolution branch and before any HTTP call
-// - matching the canonical error_helpers.go wording ("Cloud Reference
-// Required" / "Either 'cloud_id' or 'cloud_name' must be specified...").
-// Mutation-proven with the normal break-and-revert cycle on the fixed code,
-// byte-diff clean.
+// R1 (the cloud_name removal, design doc: .crystl/quest/design/
+// cloud-selector-design.md) subsequently made cloud_id Required and deleted
+// cloud_name from this resource entirely - confirmed by grep, B2's own
+// AddConfigError guard code is gone, not just unreachable. Schema-level
+// Required now enforces strictly more than B2's runtime check did: Core
+// itself rejects a config omitting cloud_id at plan time, before the
+// provider is ever invoked, which structurally cannot regress back to
+// "silently sends an empty cloud" the way an ad-hoc runtime check could
+// have. Retargeted this test onto that guarantee rather than deleting it -
+// confirmed failing against a mutated schema (Required flipped back to
+// Optional) and passing against the real one, byte-diff clean revert.
 func TestAccCloudResourceResource_BothNullCloudSelectorRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -76,7 +66,7 @@ resource "anyscale_cloud_resource" "test" {
 		Steps: []resource.TestStep{
 			{
 				Config:      config,
-				ExpectError: regexp.MustCompile(`(?s)Cloud Reference Required.*Either 'cloud_id' or 'cloud_name' must be specified`),
+				ExpectError: regexp.MustCompile(`(?s)Missing required argument.*"cloud_id" is required`),
 			},
 		},
 	})
