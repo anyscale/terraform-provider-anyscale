@@ -10,5 +10,5 @@ resource/anyscale_project: `cloud_name` is removed and `cloud_id` is now require
 
 ```
 release-note:breaking-change
-resource/anyscale_cloud_resource: `cloud_name` is removed and `cloud_id` is now required; update your configuration to use `cloud_id` (via the `anyscale_cloud` data source if you only know the cloud by name, or a direct reference if you manage the cloud with Terraform); existing state that already has `cloud_name` set is not migrated, so remove such a resource with `terraform state rm` and re-import it by `cloud_id`. This supersedes 0.23.0's both-null guard: omitting the cloud entirely is still rejected, but now at plan time by Terraform Core's own required-argument check instead of at apply time.
+resource/anyscale_cloud_resource: `cloud_name` is removed and `cloud_id` is now required; update your configuration to use `cloud_id` (via the `anyscale_cloud` data source if you only know the cloud by name, or a direct reference if you manage the cloud with Terraform); existing state that already has `cloud_name` set is not migrated, so remove such a resource with `terraform state rm` and re-import it by `cloud_id`. Omitting the cloud entirely is rejected at plan time by Terraform Core's required-argument check.
 ```
