@@ -170,12 +170,14 @@ func upgradeComputeConfigStateV0toV1(ctx context.Context, req resource.UpgradeSt
 	}
 
 	newState := ComputeConfigResourceModel{
-		ID:                     priorState.ID,
-		ConfigID:               priorState.ConfigID,
-		NameVersion:            priorState.NameVersion,
-		Name:                   priorState.Name,
-		CloudID:                priorState.CloudID,
-		CloudName:              priorState.CloudName,
+		ID:          priorState.ID,
+		ConfigID:    priorState.ConfigID,
+		NameVersion: priorState.NameVersion,
+		Name:        priorState.Name,
+		CloudID:     priorState.CloudID,
+		// priorState.CloudName is deliberately dropped: cloud_name was removed
+		// from the current model entirely (R1), so a v0 state that set it
+		// loses that value on upgrade the same way any real v1 state does.
 		CloudResource:          priorState.CloudResource,
 		Zones:                  priorState.Zones,
 		MinResources:           priorState.MinResources,
