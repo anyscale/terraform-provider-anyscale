@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-07-27
+
+### Breaking Changes
+
+- resource/anyscale_compute_config: `cloud_name` is removed and `cloud_id` is now required; update your configuration to use `cloud_id` (via the `anyscale_cloud` data source if you only know the cloud by name, or a direct reference if you manage the cloud with Terraform); existing state that already has `cloud_name` set is not migrated, so remove such a resource with `terraform state rm` and re-import it by `cloud_id`.
+- resource/anyscale_project: `cloud_name` is removed and `cloud_id` is now required; update your configuration to use `cloud_id` (via the `anyscale_cloud` data source if you only know the cloud by name, or a direct reference if you manage the cloud with Terraform); existing state that already has `cloud_name` set is not migrated, so remove such a resource with `terraform state rm` and re-import it by `cloud_id`.
+- resource/anyscale_cloud_resource: `cloud_name` is removed and `cloud_id` is now required; update your configuration to use `cloud_id` (via the `anyscale_cloud` data source if you only know the cloud by name, or a direct reference if you manage the cloud with Terraform); existing state that already has `cloud_name` set is not migrated, so remove such a resource with `terraform state rm` and re-import it by `cloud_id`. Omitting the cloud entirely is rejected at plan time by Terraform Core's required-argument check.
+
+### Changed
+
+- provider: The front-page Quick Start now resolves its cloud by name through the anyscale_cloud data source and passes the result to cloud_id, instead of setting cloud_name directly.
+
+### Fixed
+
+- provider: `cloud_name` now resolves correctly against every page of an organization's cloud list, instead of only the first - affects the `anyscale_compute_config`, `anyscale_project`, `anyscale_projects`, `anyscale_service`, and `anyscale_services` data sources; previously a valid `cloud_name` past page one failed with "no cloud found" even though `data.anyscale_cloud` already resolved the same name correctly.
+- provider: when two clouds share the same `cloud_name`, resolving that name as a data source filter now picks the most recently created cloud, matching `data.anyscale_cloud`'s existing behavior; previously it silently picked whichever cloud happened to appear on the first page of results, which could point a lookup at a cloud you did not choose with no error or plan diff to reveal it.
+
 ## [0.22.0] - 2026-07-25
 
 ### Added
@@ -911,7 +928,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.23.0
 [0.22.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.22.0
 [0.21.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.21.0
 [0.20.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.20.0
