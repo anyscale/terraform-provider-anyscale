@@ -1,0 +1,4 @@
+```
+release-note:breaking-change
+data-source/anyscale_user: Removed `user_group_ids` - it queried every user group in the organization with no membership filter, so it returned the same full list for every user rather than the groups they actually belong to; there is no replacement attribute. Remove any reference to it from your configuration.
+```

@@ -74,25 +74,6 @@ func TestAccUserDataSource_CloudAccess(t *testing.T) {
 	})
 }
 
-func TestAccUserDataSource_UserGroups(t *testing.T) {
-	t.Parallel()
-	SkipIfNotAcceptanceTest(t)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccUserDataSourceConfig_basic(),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// Check user_group_ids list exists (may be empty as feature is not fully implemented)
-					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "user_group_ids.#"),
-				),
-			},
-		},
-	})
-}
-
 func TestAccUserDataSource_WithCloudReference(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -138,7 +119,6 @@ func TestAccUserDataSource_MultipleFields(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organization_ids.#"),
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organizations.#"),
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "cloud_ids.#"),
-					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "user_group_ids.#"),
 				),
 			},
 		},

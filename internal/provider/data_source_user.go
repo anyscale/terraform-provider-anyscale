@@ -42,9 +42,6 @@ type UserDataSourceModel struct {
 
 	// Cloud access
 	CloudIDs types.List `tfsdk:"cloud_ids"`
-
-	// User groups (placeholder for future implementation)
-	UserGroupIDs types.List `tfsdk:"user_group_ids"`
 }
 
 // OrganizationModel describes an organization in the user data.
@@ -119,11 +116,6 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 				ElementType:         types.StringType,
 				Computed:            true,
 				MarkdownDescription: "List of cloud IDs the user has access to.",
-			},
-			"user_group_ids": schema.ListAttribute{
-				ElementType:         types.StringType,
-				Computed:            true,
-				MarkdownDescription: "List of user group IDs the user belongs to. Null if the group list couldn't be determined (a transient failure fetching it, which also emits a warning). Empty if the user genuinely belongs to no groups.",
 			},
 		},
 	}
@@ -261,54 +253,6 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		return
 	}
 	state.CloudIDs = cloudIDsList
-
-	// DS-USER-3: GET /api/v2/user_groups genuinely paginates (traced against
-	// product backend/server/api/product/routers/user_groups_router.py
-	// list_user_groups: required PagingContext, ListResponse[UserGroup]) - the
-	// previous inline comment claiming it was confirmed non-paginated was
-	// stale/wrong, and reading only page 1 silently truncated user_group_ids
-	// for any org with more than one page of groups. Now paginated like every
-	// other list endpoint in the provider.
-	userGroups, err := PaginatedRequest(
-		ctx, d.client, "/api/v2/user_groups", nil,
-		func(body []byte) ([]struct {
-			ID string `json:"id"`
-		}, *string, error) {
-			var listResp struct {
-				Results []struct {
-					ID string `json:"id"`
-				} `json:"results"`
-				Metadata struct {
-					NextPagingToken *string `json:"next_paging_token"`
-				} `json:"metadata"`
-			}
-			if err := json.Unmarshal(body, &listResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to unmarshal user groups: %w", err)
-			}
-			return listResp.Results, listResp.Metadata.NextPagingToken, nil
-		},
-	)
-	if err != nil {
-		// Kept as a warning-and-null-list rather than AddAPIError: user_group_ids
-		// remains a light-weight, best-effort field on this data source (unlike
-		// the required organizations/clouds fetches above). Degrades the same way
-		// for any failure - transport, status, or parse - rather than only some,
-		// since that three-way split was never a deliberate design (architect
-		// decision, data-source-sync quest).
-		tflog.Warn(ctx, "Failed to fetch user groups, returning null", map[string]any{"error": err.Error()})
-		state.UserGroupIDs = types.ListNull(types.StringType)
-	} else {
-		userGroupIDs := make([]string, len(userGroups))
-		for i, group := range userGroups {
-			userGroupIDs[i] = group.ID
-		}
-		userGroupIDsList, diags := types.ListValueFrom(ctx, types.StringType, userGroupIDs)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		state.UserGroupIDs = userGroupIDsList
-	}
 
 	tflog.Info(ctx, "Successfully retrieved user info", map[string]any{
 		"user_id":    userResp.Result.ID,

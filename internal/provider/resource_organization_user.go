@@ -498,8 +498,7 @@ func (r *OrganizationUserResource) findUserByID(ctx context.Context, identityID 
 // ext/v0 pagination lesson: new information needs a real endpoint change, not
 // just new struct fields.
 //
-// additional_roles is tri-state (mirrors the existing user_group_ids pattern in
-// data_source_user.go): populated = real roles, empty = queried and genuinely
+// additional_roles is tri-state: populated = real roles, empty = queried and genuinely
 // none (a flag-off org returns this cleanly, confirmed empirically - assayer -
 // not an error), nil = could not be determined at all. This function returns
 // nil specifically (never a list) whenever it cannot query the singular GET,
