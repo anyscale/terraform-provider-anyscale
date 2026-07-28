@@ -220,7 +220,7 @@ Minimal example showing just the `anyscale_cloud_resource` resource configuratio
 
 #### [resources/anyscale_cloud_user_role](./resources/anyscale_cloud_user_role/)
 
-Minimal example showing the `anyscale_cloud_user_role` resource - grants a Phase 2B RBAC role (`project_viewer`, `compute_config_viewer`, `workload_operator`, or the shared `owner`/`writer`/`collaborator` values) on a cloud, keyed by email.
+Minimal example showing the `anyscale_cloud_user_role` resource - grants an RBAC role (`project_viewer`, `compute_config_viewer`, `workload_operator`, or the shared `owner`/`writer`/`collaborator` values) on a cloud, keyed by email.
 
 **Use this when**: You want to grant one of the restricted cloud roles that have no console UI and no other interface today.
 
