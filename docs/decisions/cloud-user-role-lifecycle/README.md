@@ -13,7 +13,7 @@ durable subset: the parts a future maintainer actually needs before touching thi
 
 ## Why Create is two ordered API calls, not one
 
-There is no Anyscale endpoint that both grants a Phase 2B role and establishes the underlying
+There is no Anyscale endpoint that both grants an RBAC role and establishes the underlying
 cloud membership a later `destroy` needs in order to revoke it. Two separate APIs exist, and
 between them they cover the full lifecycle but neither covers it alone:
 

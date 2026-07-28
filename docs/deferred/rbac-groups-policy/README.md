@@ -24,7 +24,7 @@ both:
 1. **The group path cannot express the roles this redesign was prompted by (decisive).** The
    policy API's role vocabulary is per resource type and narrower than the per-user APIs:
    `policy cloud: write | readonly`, `policy project: owner | write | readonly`,
-   `policy organization: owner | collaborator`. None of the Phase 2B roles —
+   `policy organization: owner | collaborator`. None of the restricted cloud roles —
    `project_viewer`, `compute_config_viewer`, `workload_operator` — are assignable to a group at
    all. The group/policy path and the new per-user-roles path are disjoint. A group cannot be
    granted the very roles the user asked to model. Whoever revisits this should treat "can the

@@ -10,7 +10,7 @@ resource/anyscale_organization_user: The destroy warning is stronger about `terr
 
 ```
 release-note:new-resource
-resource/anyscale_cloud_user_role: Manage a user's Phase 2B RBAC role on a cloud (base_role plus optional deny_roles) - project_viewer, compute_config_viewer, and workload_operator were previously unreachable through this provider and have no console UI at all. Read this resource's own documentation before first use: once someone already holds cloud access granted outside Terraform, whether this resource inherits that through import or layers its own Create on top of it, the resulting role assignment can never be destroyed through this resource - there is no way to detect this ahead of time, so it surfaces only as a failed destroy pointing at terraform state rm as the only clean exit.
+resource/anyscale_cloud_user_role: Manage a user's RBAC role on a cloud (base_role plus optional deny_roles) - `project_viewer`, `compute_config_viewer`, and `workload_operator` were previously unreachable through this provider. Read this resource's own documentation before first use: once someone already holds cloud access granted outside Terraform, whether this resource inherits that through import or layers its own Create on top of it, the resulting role assignment can never be destroyed through this resource - there is no way to detect this ahead of time, so it surfaces only as a failed destroy pointing at terraform state rm as the only clean exit.
 ```
 
 ```
