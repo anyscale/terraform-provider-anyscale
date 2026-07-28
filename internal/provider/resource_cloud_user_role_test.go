@@ -625,6 +625,25 @@ func TestCloudUserRoleDelete_UnrepairableStateGetsExplanatoryDiagnosticNotRawPas
 	// Deliberately no cloudPermissions entry - the H22/G8 trap state: a role
 	// exists with no bootstrap-created membership edge.
 
+	// PLACEBO GUARD, not a redundant check (architect ruling, correcting an
+	// earlier standalone-delete proposal from assayer): the assertion below
+	// only proves the diagnostic CONTAINS the explanatory phrases. It says
+	// nothing about whether the mock's own RAW error text already happens to
+	// contain them - a different, independent fact. If this exact fixture
+	// string ever drifted to include wording like "state rm" or "granted
+	// outside Terraform" (a careless copy-paste from a real API message,
+	// say), a regressed raw-passthrough implementation would produce a
+	// diagnostic that still contains the phrase by accident, and the
+	// assertion below would pass vacuously - this test would become a silent
+	// placebo without anyone touching its own logic. This precondition is
+	// what keeps that from happening: it fails loudly if the fixture itself
+	// ever starts overlapping with what only the real wrapping logic should
+	// be adding.
+	mockRawDetail := fmt.Sprintf("User with identity %s is not a member of clouds: {%s}.", "ide_orphan", "cld_test")
+	if strings.Contains(mockRawDetail, "granted outside Terraform") || strings.Contains(mockRawDetail, "state rm") {
+		t.Fatal("precondition failed: this mock's raw 404 text already contains wording the real explanatory diagnostic is supposed to add - the test below would no longer prove anything if this fires")
+	}
+
 	state := CloudUserRoleResourceModel{
 		ID:         types.StringValue("cld_test/orphan@example.com"),
 		CloudID:    types.StringValue("cld_test"),
