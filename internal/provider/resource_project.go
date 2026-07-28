@@ -759,6 +759,25 @@ func (r *ProjectResource) getCollaborators(ctx context.Context, projectID string
 // behavior of treating it as nothing further to do.
 const projectCollaboratorAlreadyHasPermissionsDetailSubstring = "already has permissions for this project"
 
+// projectCollaboratorSelfModifyDetailSubstring is the exact 400 detail the
+// per-collaborator PUT returns when its target is the calling identity
+// itself (confirmed live via a real acceptance test: a project's
+// auto-added creator-owner declaring themselves as a collaborator hits
+// this on the authoritative follow-up write - see createOneCollaborator's
+// compare-then-write guard, which avoids the call entirely for the common
+// case where the declared value already matches, and only reaches this
+// path when a real change is being requested for one's own identity,
+// which the API forbids). Same class of restriction
+// resource_cloud_user_role.go already names explicitly for cloud roles
+// (cloudUserRoleSelfModifyDetailSubstring) - matching that file's own
+// documented fragility: this is a message-text substring match, not a typed
+// error, so a backend wording change silently stops matching. Deliberately
+// omits the leading word ("Cannot") since the real observed text
+// capitalizes it only because it starts the sentence - anchoring past that
+// word keeps the match independent of sentence-initial capitalization,
+// unlike a naive lowercase copy of the whole phrase would be.
+const projectCollaboratorSelfModifyDetailSubstring = "alter your own role"
+
 // createCollaborators creates each of collaborators as an authoritative permission grant, ONE AT
 // A TIME - never batched into a single batch_create call. The backend validates every entry in a
 // batch_create request before writing anything (project_collaborators_service.py's
@@ -785,25 +804,28 @@ func (r *ProjectResource) createCollaborators(ctx context.Context, projectID, cr
 	// 409 many times in one call, and re-paging per conflict would be wasteful.
 	var existing []ProjectCollaboratorModel
 	var existingLoaded bool
-	resolveIdentityID := func(email string) (string, error) {
+	resolveExisting := func(email string) (existingProjectCollaborator, error) {
 		if !existingLoaded {
 			var err error
 			existing, err = r.getCollaborators(ctx, projectID)
 			if err != nil {
-				return "", fmt.Errorf("failed to look up existing collaborators: %w", err)
+				return existingProjectCollaborator{}, fmt.Errorf("failed to look up existing collaborators: %w", err)
 			}
 			existingLoaded = true
 		}
 		for _, c := range existing {
 			if strings.EqualFold(c.Email.ValueString(), email) {
-				return c.IdentityID.ValueString(), nil
+				return existingProjectCollaborator{
+					IdentityID:      c.IdentityID.ValueString(),
+					PermissionLevel: c.PermissionLevel.ValueString(),
+				}, nil
 			}
 		}
-		return "", fmt.Errorf("email %s was reported as already having permissions, but was not found in a follow-up read of this project's collaborators", email)
+		return existingProjectCollaborator{}, fmt.Errorf("email %s was reported as already having permissions, but was not found in a follow-up read of this project's collaborators", email)
 	}
 
 	for _, collab := range collaborators {
-		if err := r.createOneCollaborator(ctx, projectID, createdAt, collab, resolveIdentityID); err != nil {
+		if err := r.createOneCollaborator(ctx, projectID, createdAt, collab, resolveExisting); err != nil {
 			return fmt.Errorf("failed to create collaborators: %w", err)
 		}
 	}
@@ -814,6 +836,14 @@ func (r *ProjectResource) createCollaborators(ctx context.Context, projectID, cr
 	})
 
 	return nil
+}
+
+// existingProjectCollaborator is what createOneCollaborator's 409 path resolves an email to: the
+// identity_id the authoritative PUT is keyed on, plus the permission_level they ALREADY hold, so
+// the caller can compare declared-vs-actual before deciding whether a write is needed at all.
+type existingProjectCollaborator struct {
+	IdentityID      string
+	PermissionLevel string
 }
 
 // createOneCollaborator creates a single collaborator via batch_create with a one-element array
@@ -831,17 +861,30 @@ func (r *ProjectResource) createCollaborators(ctx context.Context, projectID, cr
 // exclusion list).
 //
 // A 409 matching projectCollaboratorAlreadyHasPermissionsDetailSubstring (e.g. re-declaring the
-// creator, auto-added as owner at project creation) is expected, but is NOT treated as "nothing
-// more to do": this resolves the target's identity_id and follows up with an authoritative PUT
-// (updateCollaboratorPermission) so the declared permission_level actually takes effect. Without
-// this follow-up, re-declaring an existing collaborator at a different level than they currently
-// hold would silently never apply the change - confirmed via a real resource.Test run, where it
-// instead surfaces later as a confusing "provider produced inconsistent result after apply". Any
-// OTHER error returns immediately (fail-fast), matching this file's existing toUpdate/toRemove loop
-// convention - no rollback of collaborators already created earlier in the same createCollaborators
-// call, since each one is exactly the real, wanted state the config asked for.
+// creator, auto-added as owner at project creation) is expected, and is resolved as one of three
+// outcomes - COMPARE THEN WRITE, never write unconditionally:
+//
+//  1. declared permission_level == what they already hold -> nothing to apply, no PUT issued. This
+//     is not just an optimisation: a real acceptance test proved the naive always-PUT version fails
+//     here specifically when the target is the caller's own identity (see case 3), so this case
+//     must be detected BEFORE attempting a write, not left to the API to no-op.
+//  2. declared != existing, target is a different identity -> authoritative PUT
+//     (updateCollaboratorPermission), same as before. Without this, re-declaring an existing
+//     collaborator at a different level than they currently hold would silently never apply the
+//     change - confirmed via a real resource.Test run, where it instead surfaces later as a
+//     confusing "provider produced inconsistent result after apply".
+//  3. declared != existing, target IS the caller's own identity -> the PUT is attempted (this is a
+//     real, declared, wanted change, so the asymmetric rule requires trying it, not skipping it
+//     silently) and the API refuses it (self-modification is blocked project-side too, matching
+//     resource_cloud_user_role.go's H23 restriction at cloud scope) - surfaced as a hard error with
+//     an explicit diagnostic naming self-modification, modeled on that file's own wording, never
+//     swallowed as success.
+//
+// Any OTHER error returns immediately (fail-fast), matching this file's existing toUpdate/toRemove
+// loop convention - no rollback of collaborators already created earlier in the same
+// createCollaborators call, since each one is exactly the real, wanted state the config asked for.
 func (r *ProjectResource) createOneCollaborator(
-	ctx context.Context, projectID, createdAt string, collab ProjectCollaboratorModel, resolveIdentityID func(email string) (string, error),
+	ctx context.Context, projectID, createdAt string, collab ProjectCollaboratorModel, resolveExisting func(email string) (existingProjectCollaborator, error),
 ) error {
 	email := collab.Email.ValueString()
 	permissionLevel := collab.PermissionLevel.ValueString()
@@ -869,7 +912,7 @@ func (r *ProjectResource) createOneCollaborator(
 				http.StatusNoContent,
 				http.StatusCreated,
 				// Deliberately NOT accepting http.StatusConflict any more - it must
-				// surface as a real error so the authoritative-write fallback below
+				// surface as a real error so the compare-then-write fallback below
 				// actually runs. See the doc comment above.
 			)
 		},
@@ -892,17 +935,35 @@ func (r *ProjectResource) createOneCollaborator(
 		return fmt.Errorf("failed to create collaborator %s: %w", email, err)
 	}
 
-	tflog.Info(ctx, "Collaborator already had permissions; applying the declared permission_level authoritatively", map[string]any{
-		"project_id": projectID,
-		"email":      email,
-	})
-
-	identityID, resolveErr := resolveIdentityID(email)
+	// existingEmail is matched via strings.EqualFold inside resolveExisting - keep that; a casing
+	// difference reading as not-found here would incorrectly attempt a PUT that was never needed.
+	existingCollab, resolveErr := resolveExisting(email)
 	if resolveErr != nil {
 		return fmt.Errorf("collaborator %s already has permissions, but %w", email, resolveErr)
 	}
 
-	if err := r.updateCollaboratorPermission(ctx, projectID, identityID, permissionLevel); err != nil {
+	if existingCollab.PermissionLevel == permissionLevel {
+		// Outcome 1: nothing to apply. Deliberately checked before ever attempting the PUT - see
+		// the doc comment above for why this must be pre-empted, not left to the API to no-op.
+		tflog.Info(ctx, "Collaborator already has the declared permission_level; no write needed", map[string]any{
+			"project_id":       projectID,
+			"email":            email,
+			"permission_level": permissionLevel,
+		})
+		return nil
+	}
+
+	// Outcomes 2 and 3: a real change is being requested. Attempt it - the asymmetric rule
+	// requires trying to apply something the config declared, never silently skipping it - and
+	// let the specific self-modify detection below decide how the resulting error is presented.
+	if err := r.updateCollaboratorPermission(ctx, projectID, existingCollab.IdentityID, permissionLevel); err != nil {
+		writeDetail := extractAPIErrorDetail(err)
+		if strings.Contains(writeDetail, projectCollaboratorSelfModifyDetailSubstring) {
+			return fmt.Errorf(
+				"collaborator %s already has permissions at a different level than declared, and applying the change failed: %s\n\nThis collaborator's email resolves to the identity Terraform is currently authenticated as. The Anyscale API does not allow changing your own role on this project - have another project owner apply this configuration instead",
+				email, writeDetail,
+			)
+		}
 		return fmt.Errorf("collaborator %s already had permissions, and applying the declared permission_level failed: %w", email, err)
 	}
 
