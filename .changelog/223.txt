@@ -1,0 +1,4 @@
+```
+release-note:new-resource
+resource/anyscale_cloud_user_role: Manage a user's Phase 2B RBAC role on a cloud (`base_role` plus optional `deny_roles`) - `project_viewer`, `compute_config_viewer`, and `workload_operator` were previously unreachable through this provider and have no console UI at all.
+```
