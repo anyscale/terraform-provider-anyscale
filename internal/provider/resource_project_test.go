@@ -910,14 +910,43 @@ func TestCreateCollaborators_403Retry(t *testing.T) {
 		}
 	})
 
-	t.Run("a 409 (already has permissions) is an immediate success, never retried", func(t *testing.T) {
+	t.Run("a 409 (already has permissions) is never retried, and triggers an authoritative follow-up write", func(t *testing.T) {
+		// Regression coverage for the 409-swallow fix: a 409 here is expected
+		// (re-declaring someone who already has permissions - the auto-added
+		// creator-owner is the common real case) but must not be treated as
+		// "nothing more to do" the way it used to be - the declared
+		// permission_level has to actually be applied via a follow-up PUT,
+		// resolving identity_id from a real read of this project's
+		// collaborators (no per-email lookup endpoint exists).
 		const projectID = "prj_collab_409_recent"
-		var requestCount int
+		const identityID = "ident_existing"
+		var postCount, getCount, putCount int
+		var putBody []byte
+
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"detail":"already has permissions"}`))
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/batch_create"):
+				postCount++
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"detail":"User with email user1@example.com already has permissions for this project."}`))
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/collaborators/users"):
+				getCount++
+				listResp := ProjectCollaboratorListResponse{Results: []ProjectCollaboratorResult{{
+					ID:              identityID,
+					PermissionLevel: "readonly",
+				}}}
+				listResp.Results[0].Value.ID = "usr_existing"
+				listResp.Results[0].Value.Email = "user1@example.com"
+				_ = json.NewEncoder(w).Encode(listResp)
+			case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/collaborators/"+identityID):
+				putCount++
+				putBody, _ = io.ReadAll(r.Body)
+				w.WriteHeader(http.StatusOK)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
 		}))
 		defer server.Close()
 
@@ -925,10 +954,23 @@ func TestCreateCollaborators_403Retry(t *testing.T) {
 		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
 
 		if err != nil {
-			t.Fatalf("expected a 409 to be treated as success (already has permissions), got: %v", err)
+			t.Fatalf("expected the 409 to be handled via an authoritative follow-up write, got: %v", err)
 		}
-		if requestCount != 1 {
-			t.Fatalf("a 409 must never be retried, expected exactly 1 request, got %d", requestCount)
+		if postCount != 1 {
+			t.Fatalf("a 409 must never be retried, expected exactly 1 batch_create request, got %d", postCount)
+		}
+		if getCount != 1 {
+			t.Fatalf("expected exactly 1 identity-resolution read after the 409, got %d", getCount)
+		}
+		if putCount != 1 {
+			t.Fatalf("expected exactly 1 authoritative PUT after the 409, got %d", putCount)
+		}
+		var update ProjectCollaboratorUpdateRequest
+		if err := json.Unmarshal(putBody, &update); err != nil {
+			t.Fatalf("failed to parse the PUT body: %v", err)
+		}
+		if update.PermissionLevel != "owner" {
+			t.Fatalf("expected the PUT to carry the declared permission_level %q, got %q", "owner", update.PermissionLevel)
 		}
 	})
 
@@ -990,6 +1032,103 @@ func TestCreateCollaborators_403Retry(t *testing.T) {
 		}
 		if bodyLengths[0] != bodyLengths[1] || bodyLengths[1] != bodyLengths[2] {
 			t.Errorf("expected identical body length on every attempt, got %v", bodyLengths)
+		}
+	})
+
+	t.Run("a 409 whose existing permission_level already matches the declared one issues no PUT at all", func(t *testing.T) {
+		// Regression guard for a real acceptance-test failure: TestAccProjectResource_WithUserDataSource
+		// declares the CI token's own identity as owner, matching what project auto-add already set -
+		// compare-then-write must detect this BEFORE attempting a PUT, since attempting one for a
+		// self-target 400s even when the value would not have actually changed anything.
+		const projectID = "prj_collab_409_matching_value"
+		const identityID = "ident_matching"
+		var putCount int
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/batch_create"):
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"detail":"User with email user1@example.com already has permissions for this project."}`))
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/collaborators/users"):
+				listResp := ProjectCollaboratorListResponse{Results: []ProjectCollaboratorResult{{
+					ID:              identityID,
+					PermissionLevel: "owner", // matches testCollaborators' declared "owner" below
+				}}}
+				listResp.Results[0].Value.ID = "usr_matching"
+				listResp.Results[0].Value.Email = "user1@example.com"
+				_ = json.NewEncoder(w).Encode(listResp)
+			case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/collaborators/"+identityID):
+				putCount++
+				w.WriteHeader(http.StatusOK)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
+
+		if err != nil {
+			t.Fatalf("expected a matching value to be a clean no-op, got: %v", err)
+		}
+		if putCount != 0 {
+			t.Fatalf("expected NO PUT when the declared value already matches reality, got %d", putCount)
+		}
+	})
+
+	t.Run("a 409 whose existing permission_level differs and target is self surfaces a named self-modify error, never a swallow", func(t *testing.T) {
+		// Regression guard for the same real acceptance-test failure, the other half: when the
+		// declared value genuinely differs for one's own identity, the PUT must still be attempted
+		// (the asymmetric rule forbids silently skipping something declared) and its 400 must surface
+		// as a clear, named diagnostic - never swallowed as success, and never a raw passthrough.
+		const projectID = "prj_collab_409_self_modify"
+		const identityID = "ident_self"
+		var putCount int
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/batch_create"):
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"detail":"User with email user1@example.com already has permissions for this project."}`))
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/collaborators/users"):
+				listResp := ProjectCollaboratorListResponse{Results: []ProjectCollaboratorResult{{
+					ID:              identityID,
+					PermissionLevel: "readonly", // differs from testCollaborators' declared "owner" below
+				}}}
+				listResp.Results[0].Value.ID = "usr_self"
+				listResp.Results[0].Value.Email = "user1@example.com"
+				_ = json.NewEncoder(w).Encode(listResp)
+			case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/collaborators/"+identityID):
+				putCount++
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"detail":"Cannot alter your own role"}}`))
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+
+		r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
+
+		if err == nil {
+			t.Fatal("expected a hard error for a differing self-modify attempt, got none (this would be the exact swallow the asymmetric rule forbids)")
+		}
+		if putCount != 1 {
+			t.Fatalf("expected exactly 1 PUT attempt (a real change was declared, so it must be tried), got %d", putCount)
+		}
+		// Deliberately NOT asserting on "own role" alone - the raw API detail text already
+		// contains that phrase verbatim, so that assertion would pass even against a bare
+		// passthrough with no enrichment at all (confirmed: this exact assertion mistake was
+		// caught by mutation-testing this very test against the pre-fix code, which passed it).
+		// Assert on the ADDED diagnostic language instead, which only the real fix produces.
+		if !strings.Contains(err.Error(), "have another project owner apply this configuration instead") {
+			t.Fatalf("expected the error to be enriched with the named self-modification diagnostic, not just a raw passthrough of the API error, got: %v", err)
 		}
 	})
 }
