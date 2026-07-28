@@ -1,7 +1,7 @@
 # Send an invitation to a new user. Every invitation grants default collaborator access once
 # accepted -- there's no permission_level argument here, because the invitations API has no way
 # to set one at invite time. To grant a different level (e.g. owner), invite the user, wait for
-# them to accept, then manage their permission_level with the anyscale_organization_collaborator
+# them to accept, then manage their permission_level with the anyscale_organization_user
 # resource (import-only -- see its own example, or organization_user_workflow for the lifecycle).
 resource "anyscale_organization_invitation" "new_user" {
   email = "newuser@example.com"

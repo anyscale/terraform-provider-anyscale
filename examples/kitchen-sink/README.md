@@ -1,8 +1,9 @@
 # Kitchen Sink Example
 
 Every resource and data source this provider registers, wired together into one comprehensive,
-multi-cloud configuration - with one deliberate exception: the `anyscale_service` resource (see
-below). This absorbs what used to be a separate `multi-resource-cloud-basic`
+multi-cloud configuration - with two deliberate exceptions: the `anyscale_service` resource and
+the `anyscale_cloud_user_role` resource, both explained below. This absorbs what used to be a
+separate `multi-resource-cloud-basic`
 example (multiple resource deployments on one cloud) as one piece of a larger build, so it is now
 the single place to see the whole provider surface working together. Use the other, smaller
 examples in this directory for a focused look at any one piece.
@@ -62,13 +63,22 @@ falling back to a sane default; see the [Compute Config guide](../../docs/guides
 | `anyscale_project.a` | A project scoped to Cloud A |
 | `anyscale_project.b` | A project scoped to Cloud B |
 | `anyscale_organization_invitation` | **Opt-in.** Zero instances unless you set `var.invite_email`; see below |
-| `anyscale_organization_collaborator` | Shown, not applied — see the note below |
+| `anyscale_organization_user` | Shown, not applied — see the note below |
 
-`anyscale_organization_collaborator` is import-only (no `Create`) and manages an *existing* org
+`anyscale_organization_user` is import-only (no `Create`) and manages an *existing* org
 member's permissions, so it can't be part of a one-shot `apply` the way everything above is. It's
 included, commented out, in `organization.tf` with the import command you'd run once a real member
 exists. See [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) for the
 full invite -> wait -> import -> manage lifecycle.
+
+`anyscale_cloud_user_role` is deliberately excluded from every runnable file in this example, not
+merely shown and not applied like `anyscale_organization_user` above. It has no safe placeholder
+value, since it requires the email of a real, existing org member: a fake email fails at apply, a
+real one silently changes that person's cloud access as a side effect of someone running this
+example. It's also the one resource in this provider where `destroy` can legitimately fail, not
+something to land in a config people apply and destroy routinely to smoke test everything else.
+See [`examples/resources/anyscale_cloud_user_role`](../resources/anyscale_cloud_user_role/) for a
+worked standalone example instead.
 
 **Data sources (all 13 registered by the provider):** `anyscale_cloud`, `anyscale_clouds`,
 `anyscale_compute_config`, `anyscale_container_image`, `anyscale_container_images`,
@@ -188,6 +198,6 @@ terraform apply
 - [aws-eks-basic](../aws-eks-basic/) — the module wiring this example's shared VPC/EKS cluster is
   based on, in isolation
 - [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) — the invite/
-  import lifecycle for `anyscale_organization_collaborator`
+  import lifecycle for `anyscale_organization_user`
 - Any `examples/resources/anyscale_*` or `examples/data-sources/anyscale_*` directory for a
   minimal, single-resource look at one schema in isolation

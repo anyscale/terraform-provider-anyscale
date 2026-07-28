@@ -2,7 +2,7 @@
 #
 # This is a walkthrough, not a single-shot apply: steps 2 and 3 depend on a real person
 # accepting an email invitation (seconds to days, and it happens outside Terraform entirely),
-# and anyscale_organization_collaborator only supports import, never direct creation. Both are
+# and anyscale_organization_user only supports import, never direct creation. Both are
 # left commented out below so a fresh copy of this file applies cleanly (it only sends
 # invitations) instead of failing on parts that cannot succeed yet. Uncomment and apply again as
 # you move through each step.
@@ -48,19 +48,19 @@ output "invitation_expires_at" {
 #
 # output "user_identity_id" {
 #   value       = data.anyscale_organization_user.accepted_user.id
-#   description = "Use this ID to import the collaborator resource in step 3"
+#   description = "Use this ID to import the organization_user resource in step 3"
 # }
 
-# Step 3: Manage the accepted member's permissions. anyscale_organization_collaborator has no
+# Step 3: Manage the accepted member's permissions. anyscale_organization_user has no
 # Create, only Import -- applying it fresh (as opposed to importing it first) always fails with a
 # "Direct Creation Not Supported" error, by design. Once step 2 has given you the identity_id:
 #
-#   terraform import anyscale_organization_collaborator.new_member <identity_id>
+#   terraform import anyscale_organization_user.new_member <identity_id>
 #
 # Then uncomment the block below and apply again to manage their permission_level over time
 # (e.g. change "collaborator" to "owner" to promote, or back to demote):
 #
-# resource "anyscale_organization_collaborator" "new_member" {
+# resource "anyscale_organization_user" "new_member" {
 #   permission_level = "collaborator"
 #
 #   lifecycle {
@@ -70,18 +70,18 @@ output "invitation_expires_at" {
 # }
 #
 # output "managed_user_email" {
-#   value       = anyscale_organization_collaborator.new_member.email
-#   description = "Email of the managed collaborator"
+#   value       = anyscale_organization_user.new_member.email
+#   description = "Email of the managed member"
 # }
 #
 # output "managed_user_permission" {
-#   value       = anyscale_organization_collaborator.new_member.permission_level
+#   value       = anyscale_organization_user.new_member.permission_level
 #   description = "Current permission level"
 # }
 
 # Example: Invite multiple users at once. Every invitation still grants only default
 # collaborator access -- if "lead@example.com" should end up as an owner, that happens in step 3
-# (via anyscale_organization_collaborator), after they accept, same as any other promotion.
+# (via anyscale_organization_user), after they accept, same as any other promotion.
 resource "anyscale_organization_invitation" "team_members" {
   for_each = toset([
     "dev1@example.com",

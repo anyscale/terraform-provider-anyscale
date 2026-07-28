@@ -13,7 +13,7 @@ import (
 // cloud's resources, and Read() removes the resource from state on a
 // not-found - so a resource whose name only appears past page 1 would be
 // phantom-deleted from state, the same severity class task d35713ef fixed
-// for organization_collaborator.
+// for organization_user (née organization_collaborator).
 func TestReadCloudResource_PagesBeyondFirstPage(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

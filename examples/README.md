@@ -159,7 +159,7 @@ you haven't used yet.
   multi-resource cloud, instead of always landing on the primary
 - The attribute-reference dependency ordering a data source needs to safely read back a resource
   created earlier in the same apply, instead of 404ing on a first apply
-- Why `anyscale_organization_collaborator` (import-only) and the `anyscale_service` resource
+- Why `anyscale_organization_user` (import-only) and the `anyscale_service` resource
   (deliberately not declared here - see the kitchen-sink README) are called out explicitly rather
   than silently applied, and why the invitation email and existing-service lookup are both opt-in
   variables rather than forced on every apply
@@ -218,6 +218,12 @@ Minimal example showing just the `anyscale_cloud_resource` resource configuratio
 
 **Use this when**: You want a simple, focused example of the `anyscale_cloud_resource` resource.
 
+#### [resources/anyscale_cloud_user_role](./resources/anyscale_cloud_user_role/)
+
+Minimal example showing the `anyscale_cloud_user_role` resource - grants an RBAC role (`project_viewer`, `compute_config_viewer`, `workload_operator`, or the shared `owner`/`writer`/`collaborator` values) on a cloud, keyed by email.
+
+**Use this when**: You want to grant one of the restricted cloud roles that have no console UI and no other interface today.
+
 #### [resources/anyscale_compute_config](./resources/anyscale_compute_config/)
 
 Minimal example showing just the `anyscale_compute_config` resource configuration.
@@ -242,10 +248,10 @@ Minimal example showing just the `anyscale_project` resource configuration.
 
 **Use this when**: You want a simple, focused example of the `anyscale_project` resource.
 
-#### [resources/anyscale_organization_collaborator](./resources/anyscale_organization_collaborator/)
+#### [resources/anyscale_organization_user](./resources/anyscale_organization_user/)
 
-Minimal example showing the `anyscale_organization_collaborator` resource — import-only, since
-collaborators can't be created directly through the API.
+Minimal example showing the `anyscale_organization_user` resource — import-only, since
+members can't be created directly through the API.
 
 **Use this when**: You want to manage an existing org member's role through Terraform.
 
@@ -258,7 +264,7 @@ Minimal example showing just the `anyscale_organization_invitation` resource con
 #### [resources/organization_user_workflow](./resources/organization_user_workflow/)
 
 A walkthrough (not a single-shot apply) chaining invite → wait for acceptance → import → manage,
-since `anyscale_organization_collaborator` only supports import and the wait between invite and
+since `anyscale_organization_user` only supports import and the wait between invite and
 acceptance happens outside Terraform entirely.
 
 **Use this when**: You want to see how the invitation and collaborator resources fit together

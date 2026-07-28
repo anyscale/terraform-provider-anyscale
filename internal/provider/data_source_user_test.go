@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,25 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
-
-// pathFailingRoundTripper simulates a genuine transport-level failure (DNS,
-// connection refused, timeout - anything below the HTTP status-code layer)
-// for one specific path, while delegating every other request to a real
-// http.RoundTripper. httptest.Server can only simulate bad status codes or
-// malformed bodies from within a handler that still completes a real HTTP
-// response; a transport failure has to be injected at the RoundTripper level
-// instead, since by definition no HTTP response is ever received.
-type pathFailingRoundTripper struct {
-	failPath string
-	next     http.RoundTripper
-}
-
-func (rt pathFailingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Path == rt.failPath {
-		return nil, errors.New("simulated transport failure: connection reset by peer")
-	}
-	return rt.next.RoundTrip(req)
-}
 
 // userOrganizationObjectType mirrors the object type Read() builds inline via
 // types.ListValueFrom for the "organizations" attribute.
@@ -74,7 +54,6 @@ func runUserDataSourceRead(t *testing.T, d *UserDataSource) (UserDataSourceModel
 		OrganizationIDs: types.ListNull(types.StringType),
 		Organizations:   types.ListNull(userOrganizationObjectType()),
 		CloudIDs:        types.ListNull(types.StringType),
-		UserGroupIDs:    types.ListNull(types.StringType),
 	}
 
 	state := tfsdk.State{Schema: schemaResp.Schema}
@@ -102,10 +81,10 @@ func runUserDataSourceRead(t *testing.T, d *UserDataSource) (UserDataSourceModel
 }
 
 // userInfoMockServer builds an httptest server that serves the given userinfo
-// and user_groups JSON bodies (both already-JSON-encoded strings) for
-// /api/v2/userinfo, /api/v2/clouds, and /api/v2/user_groups respectively -
-// the three endpoints UserDataSource.Read calls.
-func userInfoMockServer(t *testing.T, userInfoJSON, cloudsJSON, userGroupsJSON string) *httptest.Server {
+// and clouds JSON bodies (both already-JSON-encoded strings) for
+// /api/v2/userinfo and /api/v2/clouds respectively - the two endpoints
+// UserDataSource.Read calls.
+func userInfoMockServer(t *testing.T, userInfoJSON, cloudsJSON string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -115,8 +94,6 @@ func userInfoMockServer(t *testing.T, userInfoJSON, cloudsJSON, userGroupsJSON s
 			_, _ = fmt.Fprint(w, userInfoJSON)
 		case "/api/v2/clouds":
 			_, _ = fmt.Fprint(w, cloudsJSON)
-		case "/api/v2/user_groups":
-			_, _ = fmt.Fprint(w, userGroupsJSON)
 		default:
 			t.Errorf("unexpected request path: %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -148,9 +125,8 @@ func TestUserDataSourceRead_FieldMapping(t *testing.T) {
 		}
 	}`
 	cloudsJSON := `{"results": [{"id": "cld_1"}, {"id": "cld_2"}, {"id": "cld_3"}], "metadata": {"next_paging_token": null}}`
-	userGroupsJSON := `{"results": [{"id": "grp_1"}], "metadata": {"next_paging_token": null}}`
 
-	server := userInfoMockServer(t, userInfoJSON, cloudsJSON, userGroupsJSON)
+	server := userInfoMockServer(t, userInfoJSON, cloudsJSON)
 	defer server.Close()
 
 	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
@@ -189,14 +165,6 @@ func TestUserDataSourceRead_FieldMapping(t *testing.T) {
 	}
 	if len(cloudIDs) != 3 {
 		t.Errorf("CloudIDs count = %d, want 3", len(cloudIDs))
-	}
-
-	var userGroupIDs []string
-	if diags := result.UserGroupIDs.ElementsAs(context.Background(), &userGroupIDs, false); diags.HasError() {
-		t.Fatalf("failed to decode user_group_ids: %v", diags)
-	}
-	if len(userGroupIDs) != 1 || userGroupIDs[0] != "grp_1" {
-		t.Errorf("UserGroupIDs = %v, want [grp_1]", userGroupIDs)
 	}
 
 	type orgOut struct {
@@ -246,7 +214,7 @@ func TestUserDataSourceRead_NullDefaultCloudID(t *testing.T) {
 		}
 	}`
 
-	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse, emptyCloudsResponse)
+	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse)
 	defer server.Close()
 
 	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
@@ -292,7 +260,7 @@ func TestUserDataSourceRead_NullOrganizationPermissionLevel(t *testing.T) {
 		}
 	}`
 
-	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse, emptyCloudsResponse)
+	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse)
 	defer server.Close()
 
 	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
@@ -303,155 +271,6 @@ func TestUserDataSourceRead_NullOrganizationPermissionLevel(t *testing.T) {
 
 	if !result.OrganizationPermissionLevel.IsNull() {
 		t.Errorf("organization_permission_level = %#v, want null for a nil API value, got a non-null value (likely \"\")", result.OrganizationPermissionLevel)
-	}
-}
-
-// TestUserDataSourceRead_UserGroupIDsPagesBeyondFirstPage is the DS-USER-3
-// mutation-proof regression guard. Read() fetches /api/v2/user_groups via a
-// single raw DoRequest call rather than PaginatedRequest, and an inline
-// comment in the production code claims (incorrectly - the real endpoint's
-// response does carry a next_paging_token field) that the endpoint is
-// non-paginated. A user group past page 1 is silently dropped. This currently
-// FAILS - the mock's second page is never requested - which is the
-// mutation-proof evidence. Must pass once Read() pages through
-// /api/v2/user_groups via PaginatedRequest.
-func TestUserDataSourceRead_UserGroupIDsPagesBeyondFirstPage(t *testing.T) {
-	userInfoJSON := `{
-		"result": {
-			"id": "usr_abc123",
-			"email": "user@example.com",
-			"name": "John Doe",
-			"username": "johndoe",
-			"organization_permission_level": "owner",
-			"organization_ids": ["org_1"],
-			"organizations": [
-				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": null}
-			]
-		}
-	}`
-
-	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		switch r.URL.Path {
-		case "/api/v2/userinfo":
-			_, _ = fmt.Fprint(w, userInfoJSON)
-		case "/api/v2/clouds":
-			_, _ = fmt.Fprint(w, emptyCloudsResponse)
-		case "/api/v2/user_groups":
-			requestCount++
-			if requestCount == 1 {
-				_, _ = fmt.Fprint(w, `{"results": [{"id": "grp_1"}], "metadata": {"next_paging_token": "page2"}}`)
-				return
-			}
-			_, _ = fmt.Fprint(w, `{"results": [{"id": "grp_2"}], "metadata": {"next_paging_token": null}}`)
-		default:
-			t.Errorf("unexpected request path: %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}
-	result, diags := runUserDataSourceRead(t, d)
-	if diags.HasError() {
-		t.Fatalf("unexpected error: %v", diags)
-	}
-
-	var userGroupIDs []string
-	if diags := result.UserGroupIDs.ElementsAs(context.Background(), &userGroupIDs, false); diags.HasError() {
-		t.Fatalf("failed to decode user_group_ids: %v", diags)
-	}
-	if len(userGroupIDs) != 2 {
-		t.Fatalf("UserGroupIDs = %v, want 2 groups across both pages (grp_1, grp_2)", userGroupIDs)
-	}
-	if requestCount != 2 {
-		t.Errorf("expected 2 requests to /api/v2/user_groups (one per page), got %d", requestCount)
-	}
-}
-
-// TestUserDataSourceRead_UserGroupsTransportFailureDegradesGracefully locks in
-// the architect-decided behavior for a user_group_ids fetch failure: ANY
-// failure (transport, bad status, or unmarshal) now degrades to a null list
-// with a warning rather than failing the whole anyscale_user read, since
-// PaginatedRequest bundles all three into a single error path. This is a
-// deliberate broadening from the pre-fix code, which used to hard-fail the
-// entire read via AddError specifically for a transport-level failure (the
-// DoRequest error case), and only soft-degraded for a bad status code or a
-// parse failure - decided 2026-07-13: the old two-tier split was an
-// unintentional artifact of checking err separately from status code, not a
-// deliberate design, and null (could-not-determine) is a more correct
-// degraded value than the old empty list (zero groups) regardless.
-//
-// This specifically exercises the transport-failure branch, which none of
-// the other user_groups tests do (they all get a real HTTP response, good or
-// bad) - a genuine transport failure never produces an HTTP response at all,
-// so it has to be injected via a custom RoundTripper rather than an
-// httptest.Server handler. Proves both halves of the decision: (1) the read
-// as a whole succeeds with no error, and (2) every other field still
-// populates normally - only user_group_ids degrades.
-func TestUserDataSourceRead_UserGroupsTransportFailureDegradesGracefully(t *testing.T) {
-	userInfoJSON := `{
-		"result": {
-			"id": "usr_abc123",
-			"email": "user@example.com",
-			"name": "John Doe",
-			"username": "johndoe",
-			"organization_permission_level": "owner",
-			"organization_ids": ["org_1"],
-			"organizations": [
-				{"id": "org_1", "name": "Org One", "public_identifier": "org-one", "default_cloud_id": "cld_1"}
-			]
-		}
-	}`
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		switch r.URL.Path {
-		case "/api/v2/userinfo":
-			_, _ = fmt.Fprint(w, userInfoJSON)
-		case "/api/v2/clouds":
-			_, _ = fmt.Fprint(w, `{"results": [{"id": "cld_1"}], "metadata": {"next_paging_token": null}}`)
-		default:
-			t.Errorf("unexpected request path reaching the real server (user_groups should have failed at the transport layer): %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	client := NewClientWithToken(server.URL, "test-token")
-	client.HTTPClient = &http.Client{
-		Transport: pathFailingRoundTripper{
-			failPath: "/api/v2/user_groups",
-			next:     http.DefaultTransport,
-		},
-	}
-
-	d := &UserDataSource{client: client}
-	result, diags := runUserDataSourceRead(t, d)
-	if diags.HasError() {
-		t.Fatalf("Read() should succeed overall despite the user_groups transport failure, got error: %v", diags)
-	}
-
-	if !result.UserGroupIDs.IsNull() {
-		t.Errorf("user_group_ids = %#v, want null after a transport failure (degrade-gracefully, not an empty list)", result.UserGroupIDs)
-	}
-
-	// Every other field must still populate normally - only user_group_ids degrades.
-	if got := result.ID.ValueString(); got != "usr_abc123" {
-		t.Errorf("ID = %q, want usr_abc123 (rest of the read must not be affected)", got)
-	}
-	if got := result.Email.ValueString(); got != "user@example.com" {
-		t.Errorf("Email = %q, want user@example.com", got)
-	}
-	var cloudIDs []string
-	if diags := result.CloudIDs.ElementsAs(context.Background(), &cloudIDs, false); diags.HasError() {
-		t.Fatalf("failed to decode cloud_ids: %v", diags)
-	}
-	if len(cloudIDs) != 1 || cloudIDs[0] != "cld_1" {
-		t.Errorf("CloudIDs = %v, want [cld_1]", cloudIDs)
 	}
 }
 
@@ -476,7 +295,7 @@ func TestUserDataSourceRead_EmptyOrganizationsGuard(t *testing.T) {
 		}
 	}`
 
-	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse, emptyCloudsResponse)
+	server := userInfoMockServer(t, userInfoJSON, emptyCloudsResponse)
 	defer server.Close()
 
 	d := &UserDataSource{client: NewClientWithToken(server.URL, "test-token")}

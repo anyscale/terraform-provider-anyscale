@@ -117,7 +117,7 @@ variable "invite_email" {
   default     = ""
 }
 
-# Only referenced inside organization.tf's commented-out anyscale_organization_collaborator block
+# Only referenced inside organization.tf's commented-out anyscale_organization_user block
 # (import-only, so it can't be live code) -- not unused, just not wired into anything tflint can see
 # until you uncomment it.
 # tflint-ignore: terraform_unused_declarations

@@ -1087,7 +1087,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 	// Read calls this and removes the resource from state on a "not found", so
 	// a resource whose name only appears past page 1 would otherwise be
 	// phantom-deleted from state - the same bug class task d35713ef fixed for
-	// organization_collaborator.
+	// organization_user (née organization_collaborator).
 	results, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {

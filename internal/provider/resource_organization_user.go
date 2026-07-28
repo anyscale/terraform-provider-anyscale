@@ -23,23 +23,30 @@ import (
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                = &OrganizationCollaboratorResource{}
-	_ resource.ResourceWithConfigure   = &OrganizationCollaboratorResource{}
-	_ resource.ResourceWithImportState = &OrganizationCollaboratorResource{}
+	_ resource.Resource                = &OrganizationUserResource{}
+	_ resource.ResourceWithConfigure   = &OrganizationUserResource{}
+	_ resource.ResourceWithImportState = &OrganizationUserResource{}
 )
 
-// NewOrganizationCollaboratorResource creates a new organization collaborator resource.
-func NewOrganizationCollaboratorResource() resource.Resource {
-	return &OrganizationCollaboratorResource{}
+// NewOrganizationUserResource creates a new organization user resource.
+func NewOrganizationUserResource() resource.Resource {
+	return &OrganizationUserResource{}
 }
 
-// OrganizationCollaboratorResource defines the resource implementation.
-type OrganizationCollaboratorResource struct {
+// OrganizationUserResource defines the resource implementation. It manages an
+// existing organization member's permissions - see the schema
+// MarkdownDescription for why this resource is import-only and named
+// symmetrically with the anyscale_organization_user/anyscale_organization_users
+// data sources rather than "collaborator": the API's own vocabulary
+// (organization_collaborators) is preserved in the shared request/response
+// types and helpers below, since it accurately names the backend concept
+// those are shared with the data sources against.
+type OrganizationUserResource struct {
 	client *Client
 }
 
-// OrganizationCollaboratorResourceModel describes the resource data model.
-type OrganizationCollaboratorResourceModel struct {
+// OrganizationUserResourceModel describes the resource data model.
+type OrganizationUserResourceModel struct {
 	// Identity
 	ID types.String `tfsdk:"id"` // identity_id
 
@@ -61,26 +68,26 @@ type OrganizationCollaboratorResourceModel struct {
 }
 
 // Metadata returns the resource type name.
-func (r *OrganizationCollaboratorResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_organization_collaborator"
+func (r *OrganizationUserResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_organization_user"
 }
 
 // Schema defines the schema for the resource.
-func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages an existing Anyscale Organization Collaborator's permissions.\n\n" +
-			"~> **Warning:** Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate `DELETE` against the Anyscale API. There is no undo; the user would need to be re-invited and re-accept to regain access. This also happens on any `terraform destroy` that reaches this resource, including as part of tearing down a larger configuration. If you only want Terraform to stop managing a collaborator without removing their access, use `terraform state rm` instead of `terraform destroy`. This is a heavier operation than destroying an `anyscale_organization_invitation` - once accepted, an invitation and its resulting membership are separate objects, and only this resource's destroy actually revokes access.\n\n" +
+		MarkdownDescription: "Manages an existing Anyscale Organization member's permissions.\n\n" +
+			"~> **Warning:** Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate `DELETE` against the Anyscale API, and it happens on any `terraform destroy` that reaches this resource, including as part of tearing down a larger configuration or a failed apply elsewhere in the same run. There is no undo; the user would need to be re-invited and re-accept to regain access. If you only want Terraform to stop managing a member without removing their access, use `terraform state rm` instead of `terraform destroy` - do this before running destroy on any configuration that contains this resource if that is not the outcome you want. This is a heavier operation than destroying an `anyscale_organization_invitation` - once accepted, an invitation and its resulting membership are separate objects, and only this resource's destroy actually revokes access.\n\n" +
 			"**Important:** This resource cannot create new users. Users must first be added to the organization through:\n" +
 			"1. An accepted `anyscale_organization_invitation`, or\n" +
 			"2. SCIM provisioning\n\n" +
 			"Once a user exists in the organization, import them using `terraform import` to manage their permissions.\n\n" +
-			"**Example Import:**\n```\nterraform import anyscale_organization_collaborator.user <identity_id>\n```\n\n" +
-			"**Directory-synced organizations:** If your organization manages permissions via directory sync (the Policy API), this resource cannot manage collaborators at all - any `terraform apply` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.",
+			"**Example Import:**\n```\nterraform import anyscale_organization_user.user <identity_id>\n```\n\n" +
+			"**Directory-synced organizations:** If your organization manages permissions via directory sync (the Policy API), this resource cannot manage members at all - any `terraform apply` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The unique identity ID of the collaborator. Used for import.",
+				MarkdownDescription: "The unique identity ID of the organization member. Used for import.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -88,7 +95,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 
 			"permission_level": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The permission level for this collaborator. Must be either `owner` or `collaborator`.",
+				MarkdownDescription: "The permission level for this member. Must be either `owner` or `collaborator`.",
 				Validators: []validator.String{
 					stringvalidator.OneOf("owner", "collaborator"),
 				},
@@ -96,7 +103,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 
 			"email": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The email address of the collaborator.",
+				MarkdownDescription: "The email address of the organization member.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -104,7 +111,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 
 			"user_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The user ID of the collaborator.",
+				MarkdownDescription: "The user ID of the organization member.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -112,7 +119,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 
 			"name": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The name of the collaborator.",
+				MarkdownDescription: "The name of the organization member.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -120,7 +127,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 
 			"created_at": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "Timestamp when the collaborator was added to the organization. Write-once: set on import and never re-read afterward, since the API has returned different values for it across reads for the same collaborator.",
+				MarkdownDescription: "Timestamp when the member was added to the organization. Write-once: set on import and never re-read afterward, since the API has returned different values for it across reads.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -128,7 +135,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 
 			"base_role": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The collaborator's base role in the organization (`owner` or `collaborator`). `permission_level` above remains the field you set to change it; the two always agree since the backend derives `base_role` from `permission_level` on every read (not the reverse).",
+				MarkdownDescription: "The member's base role in the organization (`owner` or `collaborator`). `permission_level` above remains the field you set to change it; the two always agree since the backend derives `base_role` from `permission_level` on every read (not the reverse).",
 				// Deliberately no UseStateForUnknown: base_role is derived from
 				// the same underlying role permission_level writes, so it
 				// legitimately changes whenever permission_level does. Freezing
@@ -141,7 +148,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 			"additional_roles": schema.ListAttribute{
 				ElementType:         types.StringType,
 				Computed:            true,
-				MarkdownDescription: "Additional restriction (deny) roles applied on top of this collaborator's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Read-only: the Anyscale API endpoint that manages these roles is feature-gated and returns HTTP 501 in most organizations, so Terraform cannot set them - this attribute exists for visibility and drift detection only. Three states: populated means the collaborator genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a collaborator with no `user_id` (the query is `user_id`-keyed). Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.",
+				MarkdownDescription: "Additional restriction (deny) roles applied on top of this member's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Read-only: the Anyscale API endpoint that manages these roles is feature-gated and returns HTTP 501 in most organizations, so Terraform cannot set them - this attribute exists for visibility and drift detection only. Three states: populated means the member genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a member with no `user_id` (the query is `user_id`-keyed). Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.",
 				// UseStateForUnknown is safe here (unlike base_role above):
 				// alter_collaborator never touches the SpiceDB-managed groups
 				// additional_roles comes from, and assayer proved live (real
@@ -158,7 +165,7 @@ func (r *OrganizationCollaboratorResource) Schema(ctx context.Context, req resou
 }
 
 // Configure adds the provider configured client to the resource.
-func (r *OrganizationCollaboratorResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *OrganizationUserResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -176,10 +183,10 @@ func (r *OrganizationCollaboratorResource) Configure(ctx context.Context, req re
 }
 
 // Create returns an error directing users to use the invitation resource or import.
-func (r *OrganizationCollaboratorResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+func (r *OrganizationUserResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	resp.Diagnostics.AddError(
 		"Direct Creation Not Supported",
-		"Organization collaborators cannot be created directly through the API.\n\n"+
+		"Organization members cannot be created directly through the API.\n\n"+
 			"To add a new user to your organization:\n"+
 			"1. Use the 'anyscale_organization_invitation' resource to send an invitation:\n"+
 			"   resource \"anyscale_organization_invitation\" \"new_user\" {\n"+
@@ -190,16 +197,16 @@ func (r *OrganizationCollaboratorResource) Create(ctx context.Context, req resou
 			"   data \"anyscale_organization_user\" \"new_user\" {\n"+
 			"     email = \"user@example.com\"\n"+
 			"   }\n\n"+
-			"4. Import the collaborator to manage their permissions:\n"+
-			"   terraform import anyscale_organization_collaborator.new_user <identity_id>\n\n"+
+			"4. Import the member to manage their permissions:\n"+
+			"   terraform import anyscale_organization_user.new_user <identity_id>\n\n"+
 			"Alternatively, if the user already exists in your organization (e.g., via SCIM),\n"+
 			"you can import them directly using their identity_id.",
 	)
 }
 
-// Read reads the current state of an organization collaborator.
-func (r *OrganizationCollaboratorResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state OrganizationCollaboratorResourceModel
+// Read reads the current state of an organization member.
+func (r *OrganizationUserResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state OrganizationUserResourceModel
 
 	// Read current state
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -209,24 +216,24 @@ func (r *OrganizationCollaboratorResource) Read(ctx context.Context, req resourc
 
 	identityID := state.ID.ValueString()
 
-	tflog.Info(ctx, "Reading organization collaborator", map[string]interface{}{
+	tflog.Info(ctx, "Reading organization user", map[string]interface{}{
 		"identity_id": identityID,
 	})
 
 	// Fetch collaborator from API
-	collaborator, err := r.findCollaboratorByID(ctx, identityID)
+	collaborator, err := r.findUserByID(ctx, identityID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
-			// Collaborator was removed outside of Terraform
-			tflog.Warn(ctx, "Collaborator not found, removing from state", map[string]interface{}{
+			// Member was removed outside of Terraform
+			tflog.Warn(ctx, "Organization user not found, removing from state", map[string]interface{}{
 				"identity_id": identityID,
 			})
 			resp.State.RemoveResource(ctx)
 			return
 		}
 		resp.Diagnostics.AddError(
-			"Error reading collaborator",
-			fmt.Sprintf("Could not read collaborator %s: %s", identityID, err.Error()),
+			"Error reading organization user",
+			fmt.Sprintf("Could not read organization user %s: %s", identityID, err.Error()),
 		)
 		return
 	}
@@ -234,7 +241,7 @@ func (r *OrganizationCollaboratorResource) Read(ctx context.Context, req resourc
 	// Update state with API data. created_at is intentionally NOT refreshed
 	// here - see the schema doc string; the API has returned different values
 	// for it across reads, and it's treated as write-once (set on import only).
-	resp.Diagnostics.Append(applyCollaboratorIdentityFields(ctx, &state, collaborator)...)
+	resp.Diagnostics.Append(applyUserIdentityFields(ctx, &state, collaborator)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -244,14 +251,14 @@ func (r *OrganizationCollaboratorResource) Read(ctx context.Context, req resourc
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// applyCollaboratorIdentityFields copies the identity and role fields that are
-// safe to refresh from the API (email, user_id, name, base_role,
-// additional_roles) into model. created_at is deliberately excluded and must be
-// set separately only where appropriate (import) - see the schema doc string
-// and task 4745d9fb: the API has returned different created_at values across
-// reads for the same collaborator, so re-syncing it from Read/Update causes
-// "Provider produced inconsistent result after apply".
-func applyCollaboratorIdentityFields(ctx context.Context, model *OrganizationCollaboratorResourceModel, collaborator *OrganizationCollaboratorResult) diag.Diagnostics {
+// applyUserIdentityFields copies the identity and role fields that are safe to
+// refresh from the API (email, user_id, name, base_role, additional_roles)
+// into model. created_at is deliberately excluded and must be set separately
+// only where appropriate (import) - see the schema doc string and task
+// 4745d9fb: the API has returned different created_at values across reads for
+// the same member, so re-syncing it from Read/Update causes "Provider
+// produced inconsistent result after apply".
+func applyUserIdentityFields(ctx context.Context, model *OrganizationUserResourceModel, collaborator *OrganizationCollaboratorResult) diag.Diagnostics {
 	model.Email = types.StringValue(collaborator.Email)
 
 	if collaborator.UserID != nil && *collaborator.UserID != "" {
@@ -277,9 +284,9 @@ func applyCollaboratorIdentityFields(ctx context.Context, model *OrganizationCol
 	return diags
 }
 
-// Update updates an organization collaborator's permission level.
-func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, state OrganizationCollaboratorResourceModel
+// Update updates an organization member's permission level.
+func (r *OrganizationUserResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state OrganizationUserResourceModel
 
 	// Read plan and state
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -290,7 +297,7 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 
 	identityID := state.ID.ValueString()
 
-	tflog.Info(ctx, "Updating organization collaborator", map[string]interface{}{
+	tflog.Info(ctx, "Updating organization user", map[string]interface{}{
 		"identity_id":          identityID,
 		"old_permission_level": state.PermissionLevel.ValueString(),
 		"new_permission_level": plan.PermissionLevel.ValueString(),
@@ -305,32 +312,32 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error marshaling request",
-			fmt.Sprintf("Could not marshal collaborator update request: %s", err.Error()),
+			fmt.Sprintf("Could not marshal organization user update request: %s", err.Error()),
 		)
 		return
 	}
 
 	// Send update request. The response body isn't parsed into anything - the resource re-reads
-	// current state via findCollaboratorByID right after, so only the status code matters here.
+	// current state via findUserByID right after, so only the status code matters here.
 	if _, err := DoRequestRaw(
 		ctx, r.client, "PUT", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), reqBody,
 		http.StatusOK, http.StatusNoContent,
 	); err != nil {
-		resp.Diagnostics.AddError("Could Not Update Collaborator's Permission Level", collaboratorErrorDiagnosticDetail(err))
+		resp.Diagnostics.AddError("Could Not Update Organization User's Permission Level", collaboratorErrorDiagnosticDetail(err))
 		return
 	}
 
-	tflog.Info(ctx, "Updated organization collaborator", map[string]interface{}{
+	tflog.Info(ctx, "Updated organization user", map[string]interface{}{
 		"identity_id":      identityID,
 		"permission_level": plan.PermissionLevel.ValueString(),
 	})
 
 	// Read back to get current state
-	collaborator, err := r.findCollaboratorByID(ctx, identityID)
+	collaborator, err := r.findUserByID(ctx, identityID)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Error reading updated collaborator",
-			fmt.Sprintf("Could not read collaborator after update: %s", err.Error()),
+			"Error reading updated organization user",
+			fmt.Sprintf("Could not read organization user after update: %s", err.Error()),
 		)
 		return
 	}
@@ -338,10 +345,10 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 	// Update plan with latest data. created_at is intentionally left as
 	// req.Plan.Get already resolved it (UseStateForUnknown -> the prior state
 	// value) rather than overwritten here - the API has returned different
-	// created_at values across reads for the same collaborator, and
-	// overwriting it caused "Provider produced inconsistent result after
-	// apply" on a bare permission_level change (task 4745d9fb).
-	resp.Diagnostics.Append(applyCollaboratorIdentityFields(ctx, &plan, collaborator)...)
+	// created_at values across reads for the same member, and overwriting it
+	// caused "Provider produced inconsistent result after apply" on a bare
+	// permission_level change (task 4745d9fb).
+	resp.Diagnostics.Append(applyUserIdentityFields(ctx, &plan, collaborator)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -350,9 +357,9 @@ func (r *OrganizationCollaboratorResource) Update(ctx context.Context, req resou
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// Delete removes a collaborator from the organization.
-func (r *OrganizationCollaboratorResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state OrganizationCollaboratorResourceModel
+// Delete removes a member from the organization.
+func (r *OrganizationUserResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state OrganizationUserResourceModel
 
 	// Read current state
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -362,44 +369,44 @@ func (r *OrganizationCollaboratorResource) Delete(ctx context.Context, req resou
 
 	identityID := state.ID.ValueString()
 
-	tflog.Info(ctx, "Removing organization collaborator", map[string]interface{}{
+	tflog.Info(ctx, "Removing organization user", map[string]interface{}{
 		"identity_id":  identityID,
 		"email_domain": getEmailDomain(state.Email.ValueString()),
 	})
 
-	// Delete the collaborator - treat 404 as success (already removed)
+	// Delete the member - treat 404 as success (already removed)
 	_, err := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
 	if err != nil {
-		resp.Diagnostics.AddError("Could Not Remove Collaborator", collaboratorErrorDiagnosticDetail(err))
+		resp.Diagnostics.AddError("Could Not Remove Organization User", collaboratorErrorDiagnosticDetail(err))
 		return
 	}
 
-	tflog.Info(ctx, "Removed organization collaborator", map[string]interface{}{
+	tflog.Info(ctx, "Removed organization user", map[string]interface{}{
 		"identity_id": identityID,
 	})
 }
 
-// ImportState imports an existing collaborator by identity_id.
-func (r *OrganizationCollaboratorResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+// ImportState imports an existing organization member by identity_id.
+func (r *OrganizationUserResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Import by identity_id
 	identityID := req.ID
 
-	tflog.Info(ctx, "Importing organization collaborator", map[string]interface{}{
+	tflog.Info(ctx, "Importing organization user", map[string]interface{}{
 		"identity_id": identityID,
 	})
 
-	// Fetch collaborator to validate it exists
-	collaborator, err := r.findCollaboratorByID(ctx, identityID)
+	// Fetch member to validate it exists
+	collaborator, err := r.findUserByID(ctx, identityID)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Error importing collaborator",
-			fmt.Sprintf("Could not find collaborator with identity_id %s: %s\n\n"+
+			"Error importing organization user",
+			fmt.Sprintf("Could not find organization member with identity_id %s: %s\n\n"+
 				"Tip: Use the anyscale_organization_user data source to find the identity_id:\n"+
 				"  data \"anyscale_organization_user\" \"example\" {\n"+
 				"    email = \"user@example.com\"\n"+
 				"  }\n\n"+
-				"Then import using: terraform import anyscale_organization_collaborator.example <identity_id>",
+				"Then import using: terraform import anyscale_organization_user.example <identity_id>",
 				identityID, err.Error()),
 		)
 		return
@@ -424,7 +431,7 @@ func (r *OrganizationCollaboratorResource) ImportState(ctx context.Context, req 
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), *collaborator.Name)...)
 	}
 
-	tflog.Info(ctx, "Imported organization collaborator", map[string]interface{}{
+	tflog.Info(ctx, "Imported organization user", map[string]interface{}{
 		"identity_id":      identityID,
 		"email":            collaborator.Email,
 		"permission_level": collaborator.PermissionLevel,
@@ -438,7 +445,10 @@ func (r *OrganizationCollaboratorResource) ImportState(ctx context.Context, req 
 // first, so a collaborator past page 1 is never mistaken for missing or
 // silently dropped from a list. extraParams, if non-nil, is merged in
 // alongside the page-size param (e.g. a server-side email or name filter);
-// pass nil for an unfiltered listing.
+// pass nil for an unfiltered listing. Shared with the organization_user(s)
+// data sources - kept named after the API's own organization_collaborators
+// vocabulary rather than this resource's organization_user name, since both
+// consumers are calling the same backend concept.
 func listAllOrganizationCollaborators(ctx context.Context, client *Client, extraParams url.Values) ([]OrganizationCollaboratorResult, error) {
 	params := url.Values{"count": []string{"50"}}
 	for k, v := range extraParams {
@@ -457,13 +467,13 @@ func listAllOrganizationCollaborators(ctx context.Context, client *Client, extra
 	)
 }
 
-// findCollaboratorByID fetches a collaborator by identity_id. The API has no
-// direct GET-by-identity_id endpoint for a single collaborator, so this lists
-// and filters for identity lookup, then hydrates the real role fields
-// separately (see hydrateCollaboratorRoles) - identity lookup and role
-// hydration are different concerns per architect ruling 1, and only the second
-// one needs to move off the list endpoint.
-func (r *OrganizationCollaboratorResource) findCollaboratorByID(ctx context.Context, identityID string) (*OrganizationCollaboratorResult, error) {
+// findUserByID fetches an organization member by identity_id. The API has no
+// direct GET-by-identity_id endpoint for a single member, so this lists and
+// filters for identity lookup, then hydrates the real role fields separately
+// (see hydrateCollaboratorRoles) - identity lookup and role hydration are
+// different concerns per architect ruling 1, and only the second one needs to
+// move off the list endpoint.
+func (r *OrganizationUserResource) findUserByID(ctx context.Context, identityID string) (*OrganizationCollaboratorResult, error) {
 	collaborators, err := listAllOrganizationCollaborators(ctx, r.client, nil)
 	if err != nil {
 		return nil, err
@@ -476,7 +486,7 @@ func (r *OrganizationCollaboratorResource) findCollaboratorByID(ctx context.Cont
 		}
 	}
 
-	return nil, fmt.Errorf("collaborator not found")
+	return nil, fmt.Errorf("organization user not found")
 }
 
 // hydrateCollaboratorRoles enriches a list-derived OrganizationCollaboratorResult
@@ -488,8 +498,7 @@ func (r *OrganizationCollaboratorResource) findCollaboratorByID(ctx context.Cont
 // ext/v0 pagination lesson: new information needs a real endpoint change, not
 // just new struct fields.
 //
-// additional_roles is tri-state (mirrors the existing user_group_ids pattern in
-// data_source_user.go): populated = real roles, empty = queried and genuinely
+// additional_roles is tri-state: populated = real roles, empty = queried and genuinely
 // none (a flag-off org returns this cleanly, confirmed empirically - assayer -
 // not an error), nil = could not be determined at all. This function returns
 // nil specifically (never a list) whenever it cannot query the singular GET,
@@ -570,13 +579,13 @@ func additionalRolesToList(ctx context.Context, additionalRoles []string) (types
 // The one case that gets more than clean presentation: a directory-synced
 // organization manages permissions via the Policy API instead, and the error
 // text says so - that's the highest-value case to get right, since it means
-// this resource cannot work at all for that collaborator, so a hint pointing
-// at the actual tool is appended.
+// this resource cannot work at all for that member, so a hint pointing at the
+// actual tool is appended.
 func collaboratorErrorDiagnosticDetail(err error) string {
 	detail := extractAPIErrorDetail(err)
 
 	if strings.Contains(detail, "Policy API") {
-		return fmt.Sprintf("%s\n\nThis organization's collaborator permissions are managed outside Terraform. Use 'anyscale policy set' to manage this collaborator instead of this resource. See https://docs.anyscale.com/reference/cli/policy#policy-cli for details.", detail)
+		return fmt.Sprintf("%s\n\nThis organization's member permissions are managed outside Terraform. Use 'anyscale policy set' to manage this member instead of this resource. See https://docs.anyscale.com/reference/cli/policy#policy-cli for details.", detail)
 	}
 
 	return detail
