@@ -95,7 +95,7 @@ output "user_additional_roles" {
 
 ### Required
 
-- `permission_level` (String, Deprecated) The permission level for this collaborator. Must be either `owner` or `collaborator`. Deprecated in favor of `base_role` plus `additional_roles` below, which reflect this provider's current role vocabulary - but this remains the only *writable* field on this resource, since the richer role-write path is feature-flag gated and returns HTTP 501 in most organizations. Continue setting this to change a member's access; treat `base_role`/`additional_roles` as read-only visibility into that same underlying role, not an alternative way to set it.
+- `permission_level` (String) The permission level for this member. Must be either `owner` or `collaborator`.
 
 ### Read-Only
 

@@ -95,8 +95,7 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 
 			"permission_level": schema.StringAttribute{
 				Required:            true,
-				DeprecationMessage:  "permission_level is deprecated in favor of base_role plus additional_roles below, which reflect this repo's current role vocabulary. It remains the only writable field on this resource: the richer base_role/additional_roles write path exists on the API but is feature-flag gated and returns HTTP 501 in most organizations, so this provider does not build on it. Continue using permission_level to change a member's access; base_role and additional_roles are read-only visibility into the same underlying role.",
-				MarkdownDescription: "The permission level for this collaborator. Must be either `owner` or `collaborator`. Deprecated in favor of `base_role` plus `additional_roles` below, which reflect this provider's current role vocabulary - but this remains the only *writable* field on this resource, since the richer role-write path is feature-flag gated and returns HTTP 501 in most organizations. Continue setting this to change a member's access; treat `base_role`/`additional_roles` as read-only visibility into that same underlying role, not an alternative way to set it.",
+				MarkdownDescription: "The permission level for this member. Must be either `owner` or `collaborator`.",
 				Validators: []validator.String{
 					stringvalidator.OneOf("owner", "collaborator"),
 				},

@@ -5,5 +5,5 @@ resource/anyscale_organization_collaborator: Renamed to `anyscale_organization_u
 
 ```
 release-note:changed
-resource/anyscale_organization_user: `permission_level` now carries an explicit schema-level deprecation (visible as a `(String, Deprecated)` marker and a `terraform plan`-time warning, in addition to its existing description text) pointing at `base_role`/`additional_roles`, and the destroy warning is stronger about `terraform destroy` evicting a real person from the organization - no behavior change, docs only.
+resource/anyscale_organization_user: The destroy warning is stronger about `terraform destroy` evicting a real person from the organization, including on a `destroy` that merely reaches this resource as part of a larger or failed apply - no behavior change, docs only.
 ```
