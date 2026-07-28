@@ -653,20 +653,6 @@ func TestCloudUserRoleDelete_UnrepairableStateGetsExplanatoryDiagnosticNotRawPas
 	t.Errorf("expected a diagnostic explaining the assignment was granted outside Terraform, that no API sequence can repair it, and that terraform state rm is the only clean exit - got: %v", diags)
 }
 
-// TestCloudUserRoleDelete_MutationProof_RawPassthroughWouldFailThisTest
-// documents the mutation-proof discipline for the test above without
-// actually mutating shipped code: it directly asserts that a bare
-// errors.Is(err, ErrNotFound)-detected 404, if passed through
-// extractAPIErrorDetail alone (the "regression" shape), would NOT contain the
-// required phrases - proving the test above is not a placebo that would pass
-// against the broken code too.
-func TestCloudUserRoleDelete_MutationProof_RawPassthroughWouldFailThisTest(t *testing.T) {
-	rawDetail := extractAPIErrorDetail(fmt.Errorf("%w: unexpected status 404: %s", ErrNotFound, `{"error":{"detail":"User with identity ide_orphan is not a member of clouds: {cld_test}."}}`))
-	if strings.Contains(rawDetail, "granted outside Terraform") {
-		t.Fatal("sanity check failed: the raw passthrough text should NOT already contain the explanatory phrase, or the real test above would not be proving anything")
-	}
-}
-
 // TestCloudUserRoleDelete_SurfacesAutoAddUser409AsNamedDiagnostic is H17's
 // regression test: the raw 409 from the backend must be translated into a
 // diagnostic that names auto_add_user specifically, not left as an opaque

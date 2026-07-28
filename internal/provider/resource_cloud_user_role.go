@@ -68,7 +68,7 @@ func (r *CloudUserRoleResource) Schema(ctx context.Context, req resource.SchemaR
 		MarkdownDescription: "Manages a user's Phase 2B RBAC role on an Anyscale cloud (`base_role` plus optional `deny_roles`) - a newer, richer role model than the legacy `owner`/`write`/`readonly` permission level, and currently the only way to grant `project_viewer`, `compute_config_viewer`, or `workload_operator`. These roles are not visible or settable in the Anyscale console today; this resource is the only interface to them.\n\n" +
 			"~> **Warning:** This feature is gated behind two independent, separately-controlled backend flags (one for reading roles, one for writing them) - if either is off for your organization, every operation on this resource fails, most visibly as an HTTP 501. There is no way for the provider to detect this ahead of time short of trying.\n\n" +
 			"**Create is not a single API call.** The Anyscale API has no endpoint that both grants a Phase 2B role AND establishes the underlying cloud membership a later `destroy` needs in order to revoke it - so this resource's `Create` ALWAYS makes the legacy collaborator call first, unconditionally, and only then sets the real role. This is deliberate, not an inefficiency: a version of this resource that skipped that first call when the user already appeared to be a cloud collaborator would occasionally walk someone into a role grant with no way to ever revoke it (there is no way to tell those two situations apart ahead of time - see the `email` and destroy documentation below). If the second call fails after the first succeeded, this resource rolls back what it just created rather than silently leaving unintended access in place.\n\n" +
-			"**A role assignment created outside this resource - directly through the API, or by a script - and then imported here can never be destroyed.** Terraform cannot detect this ahead of time (there is no read that distinguishes it from a healthy assignment), so `import` proceeds normally; the only place it can ever surface is a failed `destroy`, which returns a diagnostic explaining that `terraform state rm` is the only clean exit. This can never happen to a role this resource itself created, only to one it inherited via `import`.\n\n" +
+			"**A role assignment whose target already held cloud permissions from outside Terraform before this resource's `Create` ever ran can never be destroyed.** `Create` always attempts the bootstrap call described above first, but if the target already had a permissions row on this cloud (granted directly through the API, or by a script), that call fails with an expected, non-fatal 409 and `Create` proceeds without ever establishing the membership record `destroy` needs - so this condition can arise through `Create` itself, not only through `import`, whenever it is layered on top of a pre-existing out-of-band grant. Terraform cannot detect this ahead of time (there is no read that distinguishes it from a healthy assignment), so neither `Create` nor `import` refuses it; the only place it can ever surface is a failed `destroy`, which returns a diagnostic explaining that `terraform state rm` is the only clean exit.\n\n" +
 			"**Directory-synced organizations and self-role-changes are not supported** - the underlying API rejects both, and this resource surfaces the API's own error rather than retrying.\n\n" +
 			"**Example Import:**\n```\nterraform import anyscale_cloud_user_role.analyst <cloud_id>/<email>\n```",
 
@@ -384,11 +384,13 @@ func (r *CloudUserRoleResource) Update(ctx context.Context, req resource.UpdateR
 // membership edge DELETE actually requires to succeed - a role granted
 // outside Terraform through the roles endpoint alone shows up in that search
 // as an ordinary-looking record, identically to a properly bootstrapped one.
-// There is no read-only way to tell these apart ahead of time. Create can
-// never produce this state (it always bootstraps first); it only ever
-// arrives via a role granted outside Terraform and later imported. When the
-// legacy DELETE 404s, this does not pass the raw API error through - see the
-// diagnostic below for why and what to do about it.
+// There is no read-only way to tell these apart ahead of time. Create always
+// attempts the bootstrap first, but a target that already had a permissions
+// row from an out-of-band grant makes that bootstrap 409 in the same
+// "already has permissions" shape as a genuine pre-existing collaborator, so
+// Create proceeds either way and can inherit this condition too, not only
+// import. When the legacy DELETE 404s, this does not pass the raw API error
+// through - see the diagnostic below for why and what to do about it.
 func (r *CloudUserRoleResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state CloudUserRoleResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -409,8 +411,8 @@ func (r *CloudUserRoleResource) Delete(ctx context.Context, req resource.DeleteR
 			resp.Diagnostics.AddError(
 				"Cannot Destroy: No API Sequence Can Remove This Role Assignment",
 				fmt.Sprintf(
-					"This role assignment (email %s on cloud %s) was granted outside Terraform without the underlying cloud membership record its only revoke path requires - this can only happen through a role grant made directly against the API or by a script, never through this resource's own Create, which always establishes that record first before granting a role. There is no API sequence that can repair this after the fact: nothing can create the missing record retroactively, and the only revoke endpoint 404s without it, exactly as it just did. Run 'terraform state rm' on this resource instead of retrying destroy - destroy will never succeed for it.",
-					email, cloudID,
+					"This role assignment (email %s on cloud %s) is missing the underlying cloud membership record its only revoke path requires. This resource's own Create always attempts to establish that record first - but if %s already had a permissions row on this cloud from a role granted outside Terraform (directly against the API, or by a script) before this resource's Create ever ran, Create proceeds over that pre-existing row rather than failing, and this resource inherits the condition rather than causing it. There is no API sequence that can repair this after the fact: nothing can create the missing record retroactively, and the only revoke endpoint 404s without it, exactly as it just did. Run 'terraform state rm' on this resource instead of retrying destroy - destroy will never succeed for it.",
+					email, cloudID, email,
 				),
 			)
 			return
@@ -430,10 +432,12 @@ func (r *CloudUserRoleResource) Delete(ctx context.Context, req resource.DeleteR
 // the cloud collaborator search reflects the permissions row, not the
 // membership edge, so a role granted outside Terraform without ever going
 // through the bootstrap call is indistinguishable from a healthy one through
-// every available read. Pretending to detect and refuse that state would be
-// its own kind of lie; the only place that state can actually surface is a
-// failed Delete, which carries a diagnostic explaining exactly that (see
-// Delete).
+// every available read. This is not import-only: Create inherits the same
+// condition whenever its own bootstrap attempt 409s against a pre-existing
+// out-of-band permissions row (see Create and Delete's own doc comments).
+// Pretending to detect and refuse that state would be its own kind of lie;
+// the only place it can actually surface either way is a failed Delete,
+// which carries a diagnostic explaining exactly that (see Delete).
 func (r *CloudUserRoleResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	cloudID, email, err := parseCloudUserRoleID(req.ID)
 	if err != nil {
