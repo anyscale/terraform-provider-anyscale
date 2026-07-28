@@ -910,14 +910,43 @@ func TestCreateCollaborators_403Retry(t *testing.T) {
 		}
 	})
 
-	t.Run("a 409 (already has permissions) is an immediate success, never retried", func(t *testing.T) {
+	t.Run("a 409 (already has permissions) is never retried, and triggers an authoritative follow-up write", func(t *testing.T) {
+		// Regression coverage for the 409-swallow fix: a 409 here is expected
+		// (re-declaring someone who already has permissions - the auto-added
+		// creator-owner is the common real case) but must not be treated as
+		// "nothing more to do" the way it used to be - the declared
+		// permission_level has to actually be applied via a follow-up PUT,
+		// resolving identity_id from a real read of this project's
+		// collaborators (no per-email lookup endpoint exists).
 		const projectID = "prj_collab_409_recent"
-		var requestCount int
+		const identityID = "ident_existing"
+		var postCount, getCount, putCount int
+		var putBody []byte
+
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"detail":"already has permissions"}`))
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/batch_create"):
+				postCount++
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"detail":"User with email user1@example.com already has permissions for this project."}`))
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/collaborators/users"):
+				getCount++
+				listResp := ProjectCollaboratorListResponse{Results: []ProjectCollaboratorResult{{
+					ID:              identityID,
+					PermissionLevel: "readonly",
+				}}}
+				listResp.Results[0].Value.ID = "usr_existing"
+				listResp.Results[0].Value.Email = "user1@example.com"
+				_ = json.NewEncoder(w).Encode(listResp)
+			case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/collaborators/"+identityID):
+				putCount++
+				putBody, _ = io.ReadAll(r.Body)
+				w.WriteHeader(http.StatusOK)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
 		}))
 		defer server.Close()
 
@@ -925,10 +954,23 @@ func TestCreateCollaborators_403Retry(t *testing.T) {
 		err := r.createCollaborators(context.Background(), projectID, time.Now().Format(time.RFC3339), testCollaborators)
 
 		if err != nil {
-			t.Fatalf("expected a 409 to be treated as success (already has permissions), got: %v", err)
+			t.Fatalf("expected the 409 to be handled via an authoritative follow-up write, got: %v", err)
 		}
-		if requestCount != 1 {
-			t.Fatalf("a 409 must never be retried, expected exactly 1 request, got %d", requestCount)
+		if postCount != 1 {
+			t.Fatalf("a 409 must never be retried, expected exactly 1 batch_create request, got %d", postCount)
+		}
+		if getCount != 1 {
+			t.Fatalf("expected exactly 1 identity-resolution read after the 409, got %d", getCount)
+		}
+		if putCount != 1 {
+			t.Fatalf("expected exactly 1 authoritative PUT after the 409, got %d", putCount)
+		}
+		var update ProjectCollaboratorUpdateRequest
+		if err := json.Unmarshal(putBody, &update); err != nil {
+			t.Fatalf("failed to parse the PUT body: %v", err)
+		}
+		if update.PermissionLevel != "owner" {
+			t.Fatalf("expected the PUT to carry the declared permission_level %q, got %q", "owner", update.PermissionLevel)
 		}
 	})
 
