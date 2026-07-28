@@ -1,4 +1,4 @@
-# Grant a restricted Phase 2B role on a cloud. Two things worth knowing before
+# Grant a restricted role on a cloud. Two things worth knowing before
 # your first apply, both explained fully on this resource's own doc page:
 # email is the identifier you set even though the API underneath uses two
 # different IDs for granting versus revoking, and this is the one resource in
