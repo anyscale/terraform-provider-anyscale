@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.1] - 2026-07-28
+
+### Fixed
+
+- resource/anyscale_project: A `collaborator` re-declared with a different `permission_level` than they already hold on the backend - most commonly the project's auto-added creator-owner - now actually applies the declared value; previously the update was never issued and the apply failed with an opaque "Provider produced inconsistent result after apply" error instead.
+- resource/anyscale_project: Declaring a new `collaborator` alongside one who already exists on the backend - again, most commonly the auto-added creator-owner - no longer fails the apply; previously every pending collaborator was submitted in one batched request, so a single pre-existing entry anywhere in the batch caused the whole request, including entirely new collaborators, to fail with the same opaque "Provider produced inconsistent result after apply" error.
+- resource/anyscale_project: An error partway through updating collaborators no longer leaves Terraform state silently stale; state now reflects whatever collaborator changes were actually applied before the error, instead of the values from before the update began.
+
 ## [0.24.0] - 2026-07-28
 
 ### Breaking Changes
@@ -943,7 +951,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.24.1
 [0.24.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.24.0
 [0.23.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.23.0
 [0.22.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.22.0
