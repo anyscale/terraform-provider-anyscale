@@ -222,7 +222,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to automatically add users to this cloud.",
+				MarkdownDescription: "Whether to automatically add users to this cloud. Note: while enabled, destroying an anyscale_cloud_user_role assignment on this cloud will fail, since the backend refuses to leave any user without cloud access, see that resource documentation for the interaction.",
 			},
 
 			"credentials": schema.StringAttribute{
