@@ -33,15 +33,16 @@ func NewCloudUserRoleResource() resource.Resource {
 	return &CloudUserRoleResource{}
 }
 
-// CloudUserRoleResource manages a user's Phase 2B RBAC role on a cloud (design
-// doc section 4.2). Keyed on email, not user_id: this resource genuinely
-// needs three different identifiers across one lifecycle (email for the
-// legacy bootstrap POST, user_id for the roles PUT/GET, identity_id for the
-// legacy DELETE) and no single one covers all three, but email is the only
-// one that reliably resolves the other two in one call (an org-wide search by
-// email returns both identity_id and user_id; the reverse direction is weaker
-// since user_id is optional in that same response shape). user_id and
-// identity_id are therefore Computed outputs only, never practitioner inputs.
+// CloudUserRoleResource manages a user's Phase 2B RBAC role on a cloud (see
+// docs/decisions/cloud-user-role-lifecycle for the full design rationale).
+// Keyed on email, not user_id: this resource genuinely needs three different
+// identifiers across one lifecycle (email for the legacy bootstrap POST,
+// user_id for the roles PUT/GET, identity_id for the legacy DELETE) and no
+// single one covers all three, but email is the only one that reliably
+// resolves the other two in one call (an org-wide search by email returns
+// both identity_id and user_id; the reverse direction is weaker since
+// user_id is optional in that same response shape). user_id and identity_id
+// are therefore Computed outputs only, never practitioner inputs.
 type CloudUserRoleResource struct {
 	client *Client
 }
@@ -179,25 +180,16 @@ const cloudUserRoleAlreadyHasPermissionsDetailSubstring = "already has permissio
 // own identity.
 const cloudUserRoleSelfModifyDetailSubstring = "cannot modify your own role"
 
-// Create implements H21/H22's forced two-call sequence: the legacy
-// collaborator POST ALWAYS runs first, unconditionally - never skipped based
-// on a pre-check, per H22. Assayer found live that a user granted a role
-// through the roles PUT alone ends up with a permissions row but no
-// membership edge, which makes the bootstrap 409 and the eventual Delete 404 -
-// an unrepairable state (G8: confirmed live that no read distinguishes this
-// from a healthy grant, so the only safe policy is never producing it in the
-// first place). A conditional bootstrap (skip if a pre-check shows they're
-// already a collaborator) is exactly the shape of bug that produces it, so
-// this always attempts step 1 and treats ONLY its specific
-// "already has permissions for this cloud" 409 as an expected, non-fatal
-// outcome meaning membership already existed before this Create touched
-// anything. Order between the two calls remains load-bearing regardless -
-// the legacy POST has SET semantics and would clobber the role if run
-// second. If the roles PUT then fails after THIS Create established
-// membership itself, it attempts a rollback and reports plainly whether that
-// rollback succeeded, rather than ever silently leaving an unintended grant
-// in place; if the user already held membership before this Create ran, a
-// roles PUT failure never touches that pre-existing membership at all.
+// Create always runs the legacy collaborator POST first, unconditionally,
+// then the roles PUT - a conditional bootstrap is exactly what produces an
+// unrepairable resource (a role-only grant with no membership edge, so
+// Delete 404s forever after and no read can detect it ahead of time; see
+// docs/decisions/cloud-user-role-lifecycle). Step one's own "already has
+// permissions" 409 is expected, not fatal. Order matters: the legacy POST is
+// a SET and would clobber the role if run second. If the roles PUT then
+// fails after this call created membership, Create rolls back and reports
+// whether that succeeded; if membership pre-existed, a roles PUT failure
+// never touches it.
 func (r *CloudUserRoleResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan CloudUserRoleResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -375,23 +367,12 @@ func (r *CloudUserRoleResource) Update(ctx context.Context, req resource.UpdateR
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// Delete calls the legacy DELETE using the identity_id resolved and stored at
-// Create/Import time - the only revoke path (H21), since the roles API itself
-// has no delete. Surfaces the auto_add_user 409 (H17) and self-removal 403 as
-// clear, named diagnostics rather than retrying either.
-//
-// G8 (live-confirmed): the cloud collaborator search reflects the same
-// permissions row the legacy DELETE checks for existence, not the separate
-// membership edge DELETE actually requires to succeed - a role granted
-// outside Terraform through the roles endpoint alone shows up in that search
-// as an ordinary-looking record, identically to a properly bootstrapped one.
-// There is no read-only way to tell these apart ahead of time. Create always
-// attempts the bootstrap first, but a target that already had a permissions
-// row from an out-of-band grant makes that bootstrap 409 in the same
-// "already has permissions" shape as a genuine pre-existing collaborator, so
-// Create proceeds either way and can inherit this condition too, not only
-// import. When the legacy DELETE 404s, this does not pass the raw API error
-// through - see the diagnostic below for why and what to do about it.
+// Delete calls the legacy DELETE by identity_id, the only revoke path since
+// the roles API has no delete of its own. A 404 here means the unrepairable
+// state (see Create) - this returns the full explanation rather than the raw
+// error, because a bare 404 invites a retry that can never succeed (see the
+// diagnostic below). auto_add_user's 409 and self-removal's 403 also get
+// named diagnostics rather than a raw passthrough or a retry.
 func (r *CloudUserRoleResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state CloudUserRoleResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -425,20 +406,12 @@ func (r *CloudUserRoleResource) Delete(ctx context.Context, req resource.DeleteR
 	tflog.Info(ctx, "Removed cloud user role", map[string]interface{}{"cloud_id": cloudID, "email": email})
 }
 
-// ImportState imports by "cloud_id/email" - email is Required, so import must
-// populate it or the very next plan would see a Required attribute missing
-// from state, breaking the no-op-import contract. Proceeds normally, with no
-// attempt to detect whether the role has an underlying cloud membership
-// record (H22's bootstrap-vs-roles-only distinction) - G8 proved live that
-// the cloud collaborator search reflects the permissions row, not the
-// membership edge, so a role granted outside Terraform without ever going
-// through the bootstrap call is indistinguishable from a healthy one through
-// every available read. This is not import-only: Create inherits the same
-// condition whenever its own bootstrap attempt 409s against a pre-existing
-// out-of-band permissions row (see Create and Delete's own doc comments).
-// Pretending to detect and refuse that state would be its own kind of lie;
-// the only place it can actually surface either way is a failed Delete,
-// which carries a diagnostic explaining exactly that (see Delete).
+// ImportState imports by "cloud_id/email" - email is Required, so import
+// must populate it or the next plan would see it missing from state.
+// Proceeds normally with no attempt to detect the unrepairable state (see
+// Create): no read can tell it apart from a healthy grant, and refusing to
+// detect what can't be detected would be its own kind of lie. It surfaces,
+// if at all, as a failed Delete (see Delete).
 func (r *CloudUserRoleResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	cloudID, email, err := parseCloudUserRoleID(req.ID)
 	if err != nil {
