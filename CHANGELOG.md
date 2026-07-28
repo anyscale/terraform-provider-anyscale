@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-07-28
+
+### Breaking Changes
+
+- resource/anyscale_organization_collaborator: Renamed to `anyscale_organization_user` for symmetry with the existing `anyscale_organization_user`/`anyscale_organization_users` data sources; update your resource type in configuration and re-import (`terraform import anyscale_organization_user.<name> <identity_id>`) - there is no `moved` block or automatic state migration, since this resource had no existing users to migrate.
+- data-source/anyscale_user: Removed `user_group_ids` - it queried every user group in the organization with no membership filter, so it returned the same full list for every user rather than the groups they actually belong to; there is no replacement attribute. Remove any reference to it from your configuration.
+
+### New Resources
+
+- resource/anyscale_cloud_user_role: Manage a user's RBAC role on a cloud (base_role plus optional deny_roles) - `project_viewer`, `compute_config_viewer`, and `workload_operator` were previously unreachable through this provider. Read this resource's own documentation before first use: once someone already holds cloud access granted outside Terraform, whether this resource inherits that through import or layers its own Create on top of it, the resulting role assignment can never be destroyed through this resource - there is no way to detect this ahead of time, so it surfaces only as a failed destroy pointing at terraform state rm as the only clean exit.
+
+### Changed
+
+- resource/anyscale_organization_user: The destroy warning is stronger about `terraform destroy` evicting a real person from the organization, including on a `destroy` that merely reaches this resource as part of a larger or failed apply - no behavior change, docs only.
+
 ## [0.23.0] - 2026-07-27
 
 ### Breaking Changes
@@ -928,7 +943,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.24.0
 [0.23.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.23.0
 [0.22.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.22.0
 [0.21.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.21.0
