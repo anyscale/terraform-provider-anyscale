@@ -116,7 +116,7 @@ away from a 404.
   `anyscale_container_image_registry` (registered from a public registry), the two ways to get an
   image into Anyscale. See the [Container Images guide](./container-images.md).
 - **Projects and org resources** - one project per cloud, plus
-  `anyscale_organization_collaborator` shown (commented out, not applied - it's import-only, no
+  `anyscale_organization_user` shown (commented out, not applied - it's import-only, no
   `Create`, and manages an *existing* org member) alongside the invite/import lifecycle it needs;
   see [`organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/blob/main/examples/resources/organization_user_workflow/main.tf)
   for that full flow.

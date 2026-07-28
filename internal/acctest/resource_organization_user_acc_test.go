@@ -16,7 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-func TestAccOrganizationCollaboratorResource_CreateFails(t *testing.T) {
+func TestAccOrganizationUserResource_CreateFails(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	resource.Test(t, resource.TestCase{
@@ -26,7 +26,7 @@ func TestAccOrganizationCollaboratorResource_CreateFails(t *testing.T) {
 		// to verify the destroy of.
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				Config:      testAccOrganizationUserResourceConfig("collaborator"),
 				ExpectError: regexp.MustCompile("Direct Creation Not Supported"),
 			},
 		},
@@ -34,15 +34,15 @@ func TestAccOrganizationCollaboratorResource_CreateFails(t *testing.T) {
 }
 
 // warnDestructiveCollaboratorTest logs a loud, explicit warning before any
-// test that imports a real organization_collaborator via resource.Test.
+// test that imports a real organization user via resource.Test.
 //
 // resource.Test ALWAYS calls the resource's real Delete() at teardown,
 // whether the test passes or fails — CheckDestroy only controls whether
 // there's a post-destroy verification, not whether destroy itself runs. For
 // this resource, Delete() calls DELETE /api/v2/organization_collaborators/{id},
 // which genuinely removes that identity from the organization. There is no
-// undo: restoring a removed collaborator requires re-inviting and
-// re-accepting from scratch.
+// undo: restoring a removed member requires re-inviting and re-accepting from
+// scratch.
 //
 // This test class is gated behind ANYSCALE_TEST_USER_IDENTITY_ID specifically
 // so it stays opt-in, but the destructive-teardown behavior itself is not
@@ -59,7 +59,7 @@ func warnDestructiveCollaboratorTest(t *testing.T, identityID string) {
 		"ANYSCALE_TEST_USER_IDENTITY_ID at a disposable identity you can afford to lose.", identityID)
 }
 
-func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
+func TestAccOrganizationUserResource_Import(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	// This test requires an existing user identity_id
@@ -90,8 +90,8 @@ func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
 			// values directly instead, which is the documented alternative for
 			// exactly this situation.
 			{
-				Config:        testAccOrganizationCollaboratorResourceConfig("collaborator"),
-				ResourceName:  "anyscale_organization_collaborator.test",
+				Config:        testAccOrganizationUserResourceConfig("collaborator"),
+				ResourceName:  "anyscale_organization_user.test",
 				ImportState:   true,
 				ImportStateId: testIdentityID,
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
@@ -118,7 +118,7 @@ func TestAccOrganizationCollaboratorResource_Import(t *testing.T) {
 	})
 }
 
-func TestAccOrganizationCollaboratorResource_UpdatePermission(t *testing.T) {
+func TestAccOrganizationUserResource_UpdatePermission(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	// This test requires an existing user identity_id that can be safely modified
@@ -146,42 +146,42 @@ func TestAccOrganizationCollaboratorResource_UpdatePermission(t *testing.T) {
 			// skipped (no ANYSCALE_TEST_USER_IDENTITY_ID in CI) until a real
 			// identity was provided.
 			{
-				Config:             testAccOrganizationCollaboratorResourceConfig("collaborator"),
-				ResourceName:       "anyscale_organization_collaborator.test",
+				Config:             testAccOrganizationUserResourceConfig("collaborator"),
+				ResourceName:       "anyscale_organization_user.test",
 				ImportState:        true,
 				ImportStateId:      testIdentityID,
 				ImportStatePersist: true,
 			},
 			// Verify initial state
 			{
-				Config: testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				Config: testAccOrganizationUserResourceConfig("collaborator"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_organization_collaborator.test", "permission_level", "collaborator"),
-					resource.TestCheckResourceAttrSet("anyscale_organization_collaborator.test", "email"),
-					resource.TestCheckResourceAttrSet("anyscale_organization_collaborator.test", "created_at"),
+					resource.TestCheckResourceAttr("anyscale_organization_user.test", "permission_level", "collaborator"),
+					resource.TestCheckResourceAttrSet("anyscale_organization_user.test", "email"),
+					resource.TestCheckResourceAttrSet("anyscale_organization_user.test", "created_at"),
 				),
 			},
 			// Update to owner
 			{
-				Config: testAccOrganizationCollaboratorResourceConfig("owner"),
+				Config: testAccOrganizationUserResourceConfig("owner"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_organization_collaborator.test", "permission_level", "owner"),
-					testAccCheckCollaboratorPermissionInAPI("anyscale_organization_collaborator.test", "owner"),
+					resource.TestCheckResourceAttr("anyscale_organization_user.test", "permission_level", "owner"),
+					testAccCheckCollaboratorPermissionInAPI("anyscale_organization_user.test", "owner"),
 				),
 			},
 			// Update back to collaborator
 			{
-				Config: testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				Config: testAccOrganizationUserResourceConfig("collaborator"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_organization_collaborator.test", "permission_level", "collaborator"),
-					testAccCheckCollaboratorPermissionInAPI("anyscale_organization_collaborator.test", "collaborator"),
+					resource.TestCheckResourceAttr("anyscale_organization_user.test", "permission_level", "collaborator"),
+					testAccCheckCollaboratorPermissionInAPI("anyscale_organization_user.test", "collaborator"),
 				),
 			},
 		},
 	})
 }
 
-func TestAccOrganizationCollaboratorResource_Delete(t *testing.T) {
+func TestAccOrganizationUserResource_Delete(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	// This test requires a test user that can be safely removed
@@ -200,16 +200,16 @@ func TestAccOrganizationCollaboratorResource_Delete(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Import collaborator
 			{
-				Config:        testAccOrganizationCollaboratorResourceConfig("collaborator"),
-				ResourceName:  "anyscale_organization_collaborator.test",
+				Config:        testAccOrganizationUserResourceConfig("collaborator"),
+				ResourceName:  "anyscale_organization_user.test",
 				ImportState:   true,
 				ImportStateId: testIdentityID,
 			},
 			// Verify it exists
 			{
-				Config: testAccOrganizationCollaboratorResourceConfig("collaborator"),
+				Config: testAccOrganizationUserResourceConfig("collaborator"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckCollaboratorExistsInAPI("anyscale_organization_collaborator.test"),
+					testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test"),
 				),
 			},
 			// Delete by removing config
@@ -226,9 +226,9 @@ func TestAccOrganizationCollaboratorResource_Delete(t *testing.T) {
 
 // Helper functions
 
-func testAccOrganizationCollaboratorResourceConfig(permissionLevel string) string {
+func testAccOrganizationUserResourceConfig(permissionLevel string) string {
 	return fmt.Sprintf(`
-resource "anyscale_organization_collaborator" "test" {
+resource "anyscale_organization_user" "test" {
   permission_level = %[1]q
 }
 `, permissionLevel)
@@ -359,8 +359,8 @@ func collaboratorState(identityID, permissionLevel string) *terraform.State {
 			{
 				Path: []string{"root"},
 				Resources: map[string]*terraform.ResourceState{
-					"anyscale_organization_collaborator.test": {
-						Type: "anyscale_organization_collaborator",
+					"anyscale_organization_user.test": {
+						Type: "anyscale_organization_user",
 						Primary: &terraform.InstanceState{
 							ID: identityID,
 							Attributes: map[string]string{
@@ -397,7 +397,7 @@ func TestCollaboratorExistsInAPI_SucceedsWhenPresent(t *testing.T) {
 		{ID: identityID, Email: "present@example.com", PermissionLevel: "collaborator"},
 	})
 
-	if err := testAccCheckCollaboratorExistsInAPI("anyscale_organization_collaborator.test")(collaboratorState(identityID, "collaborator")); err != nil {
+	if err := testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test")(collaboratorState(identityID, "collaborator")); err != nil {
 		t.Fatalf("expected success for a collaborator present in the API list, got: %v", err)
 	}
 }
@@ -412,7 +412,7 @@ func TestCollaboratorExistsInAPI_FailsWhenAbsent(t *testing.T) {
 		{ID: "ident_someone_else", Email: "other@example.com", PermissionLevel: "collaborator"},
 	})
 
-	err := testAccCheckCollaboratorExistsInAPI("anyscale_organization_collaborator.test")(collaboratorState(identityID, "collaborator"))
+	err := testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test")(collaboratorState(identityID, "collaborator"))
 	if err == nil {
 		t.Fatal("expected an error when the collaborator is absent from the API list, got nil (this is the exact placebo behavior being fixed)")
 	}
@@ -456,7 +456,7 @@ func TestCollaboratorPermissionInAPI_FailsOnMismatch(t *testing.T) {
 		{ID: identityID, Email: "drift@example.com", PermissionLevel: "owner"},
 	})
 
-	err := testAccCheckCollaboratorPermissionInAPI("anyscale_organization_collaborator.test", "collaborator")(collaboratorState(identityID, "collaborator"))
+	err := testAccCheckCollaboratorPermissionInAPI("anyscale_organization_user.test", "collaborator")(collaboratorState(identityID, "collaborator"))
 	if err == nil {
 		t.Fatal("expected an error when state says collaborator but the API says owner, got nil")
 	}

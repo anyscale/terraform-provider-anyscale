@@ -62,9 +62,9 @@ falling back to a sane default; see the [Compute Config guide](../../docs/guides
 | `anyscale_project.a` | A project scoped to Cloud A |
 | `anyscale_project.b` | A project scoped to Cloud B |
 | `anyscale_organization_invitation` | **Opt-in.** Zero instances unless you set `var.invite_email`; see below |
-| `anyscale_organization_collaborator` | Shown, not applied — see the note below |
+| `anyscale_organization_user` | Shown, not applied — see the note below |
 
-`anyscale_organization_collaborator` is import-only (no `Create`) and manages an *existing* org
+`anyscale_organization_user` is import-only (no `Create`) and manages an *existing* org
 member's permissions, so it can't be part of a one-shot `apply` the way everything above is. It's
 included, commented out, in `organization.tf` with the import command you'd run once a real member
 exists. See [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) for the
@@ -188,6 +188,6 @@ terraform apply
 - [aws-eks-basic](../aws-eks-basic/) — the module wiring this example's shared VPC/EKS cluster is
   based on, in isolation
 - [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) — the invite/
-  import lifecycle for `anyscale_organization_collaborator`
+  import lifecycle for `anyscale_organization_user`
 - Any `examples/resources/anyscale_*` or `examples/data-sources/anyscale_*` directory for a
   minimal, single-resource look at one schema in isolation

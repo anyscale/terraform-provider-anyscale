@@ -1,5 +1,5 @@
 # Look up by email - the most common way to find a user before granting
-# them project/cloud access or importing an anyscale_organization_collaborator
+# them project/cloud access or importing an anyscale_organization_user
 data "anyscale_organization_user" "by_email" {
   email = "user@example.com"
 }
@@ -11,7 +11,7 @@ data "anyscale_organization_user" "by_user_id" {
 
 output "user_identity_id" {
   value       = data.anyscale_organization_user.by_email.id
-  description = "The identity_id, used as the import ID and id for anyscale_organization_collaborator"
+  description = "The identity_id, used as the import ID and id for anyscale_organization_user"
 }
 
 output "user_email_by_user_id" {

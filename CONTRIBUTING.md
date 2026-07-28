@@ -15,7 +15,7 @@ workflow; for building, testing, and project layout see the [README](README.md#d
    unit test for anything you need CI to enforce on every PR.
 
    The real-infra lifecycle tests for `anyscale_organization_invitation` and
-   `anyscale_organization_collaborator` have their own separate opt-in gates (unrelated to
+   `anyscale_organization_user` have their own separate opt-in gates (unrelated to
    `ANYSCALE_TEST_REAL_INFRA` above) — CI-enforced coverage for both resources comes from mocked
    `httptest`-based tests instead (see `TestAccProjectResource_WriteCollaboratorSymmetry` in
    `internal/acctest/resource_project_lifecycle_acc_test.go` for the established pattern), so a
@@ -23,9 +23,9 @@ workflow; for building, testing, and project layout see the [README](README.md#d
    mean to:
    - `ANYSCALE_TEST_INVITATIONS=1` runs the invitation resource's real create/read/delete lifecycle.
      It sends a real email invitation every run.
-   - `ANYSCALE_TEST_USER_IDENTITY_ID=<identity_id>` runs the collaborator resource's import/update
+   - `ANYSCALE_TEST_USER_IDENTITY_ID=<identity_id>` runs the organization_user resource's import/update
      lifecycle against that identity.
-   - `ANYSCALE_TEST_USER_IDENTITY_ID_DELETABLE=<identity_id>` runs the collaborator resource's delete
+   - `ANYSCALE_TEST_USER_IDENTITY_ID_DELETABLE=<identity_id>` runs the organization_user resource's delete
      lifecycle against that identity.
    - **Both identity variables genuinely remove that identity from the organization at test teardown —
      pass or fail, every run, no undo.** Point them only at a disposable identity created for this

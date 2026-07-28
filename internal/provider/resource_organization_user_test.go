@@ -14,12 +14,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestFindCollaboratorByID_PagesBeyondFirstPage is a regression test for task
-// d35713ef: findCollaboratorByID used to only look at the first page (count=50)
+// TestOrganizationUserResourceFindUserByID_PagesBeyondFirstPage is a regression test for task
+// d35713ef: OrganizationUserResource.findUserByID used to only look at the first page (count=50)
 // and return "not found" for anything beyond it, even though it had already
 // seen a next_paging_token - Read then removed such collaborators from state
 // entirely. This asserts a collaborator that only appears on page 2 is found.
-func TestFindCollaboratorByID_PagesBeyondFirstPage(t *testing.T) {
+// Named distinctly from data_source_organization_user_test.go's own
+// TestFindUserByID_PagesBeyondFirstPage, which covers a different, data-source-local lookup path.
+func TestOrganizationUserResourceFindUserByID_PagesBeyondFirstPage(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
@@ -40,11 +42,11 @@ func TestFindCollaboratorByID_PagesBeyondFirstPage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	r := &OrganizationCollaboratorResource{
+	r := &OrganizationUserResource{
 		client: NewClientWithToken(server.URL, "test-token"),
 	}
 
-	collab, err := r.findCollaboratorByID(context.Background(), "identity-2")
+	collab, err := r.findUserByID(context.Background(), "identity-2")
 	if err != nil {
 		t.Fatalf("expected to find collaborator on page 2, got error: %v", err)
 	}
@@ -59,10 +61,10 @@ func TestFindCollaboratorByID_PagesBeyondFirstPage(t *testing.T) {
 	}
 }
 
-// TestFindCollaboratorByID_NotFoundAfterAllPages confirms a genuinely absent
+// TestOrganizationUserResourceFindUserByID_NotFoundAfterAllPages confirms a genuinely absent
 // identity still returns a not-found error once every page has been checked,
 // rather than looping or erroring on the final null next_paging_token.
-func TestFindCollaboratorByID_NotFoundAfterAllPages(t *testing.T) {
+func TestOrganizationUserResourceFindUserByID_NotFoundAfterAllPages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{
@@ -72,17 +74,17 @@ func TestFindCollaboratorByID_NotFoundAfterAllPages(t *testing.T) {
 	}))
 	defer server.Close()
 
-	r := &OrganizationCollaboratorResource{
+	r := &OrganizationUserResource{
 		client: NewClientWithToken(server.URL, "test-token"),
 	}
 
-	_, err := r.findCollaboratorByID(context.Background(), "identity-does-not-exist")
+	_, err := r.findUserByID(context.Background(), "identity-does-not-exist")
 	if err == nil {
 		t.Fatal("expected a not-found error, got nil")
 	}
 }
 
-// TestApplyCollaboratorIdentityFields_NeverTouchesCreatedAt is a regression
+// TestApplyUserIdentityFields_NeverTouchesCreatedAt is a regression
 // test for task 4745d9fb: assayer confirmed live that the API returns two
 // different real created_at timestamps across reads for the same
 // collaborator. created_at is Computed+UseStateForUnknown, so the plan keeps
@@ -90,9 +92,9 @@ func TestFindCollaboratorByID_NotFoundAfterAllPages(t *testing.T) {
 // that fresh, different API value afterward, producing "Provider produced
 // inconsistent result after apply" on a bare permission_level change. This
 // mocks exactly that: two reads returning different created_at, and asserts
-// applyCollaboratorIdentityFields (what both Read and Update now call) never
+// applyUserIdentityFields (what both Read and Update now call) never
 // touches the field at all, regardless of what the API returned.
-func TestApplyCollaboratorIdentityFields_NeverTouchesCreatedAt(t *testing.T) {
+func TestApplyUserIdentityFields_NeverTouchesCreatedAt(t *testing.T) {
 	name := "Ada Lovelace"
 	firstRead := &OrganizationCollaboratorResult{
 		ID:              "identity-1",
@@ -109,13 +111,13 @@ func TestApplyCollaboratorIdentityFields_NeverTouchesCreatedAt(t *testing.T) {
 		CreatedAt:       "2026-07-06T12:00:00Z", // different from firstRead - the actual live behavior
 	}
 
-	model := &OrganizationCollaboratorResourceModel{
+	model := &OrganizationUserResourceModel{
 		CreatedAt: types.StringValue(firstRead.CreatedAt),
 	}
 
 	// Simulate import/initial state: created_at gets its one and only write here.
-	if diags := applyCollaboratorIdentityFields(context.Background(), model, firstRead); diags.HasError() {
-		t.Fatalf("applyCollaboratorIdentityFields returned unexpected errors: %v", diags)
+	if diags := applyUserIdentityFields(context.Background(), model, firstRead); diags.HasError() {
+		t.Fatalf("applyUserIdentityFields returned unexpected errors: %v", diags)
 	}
 	if model.CreatedAt.ValueString() != firstRead.CreatedAt {
 		t.Fatalf("created_at after first apply = %q, want unchanged %q", model.CreatedAt.ValueString(), firstRead.CreatedAt)
@@ -123,8 +125,8 @@ func TestApplyCollaboratorIdentityFields_NeverTouchesCreatedAt(t *testing.T) {
 
 	// Simulate the Update()/Read() read-back that used to overwrite created_at
 	// with a different value returned by the API.
-	if diags := applyCollaboratorIdentityFields(context.Background(), model, secondRead); diags.HasError() {
-		t.Fatalf("applyCollaboratorIdentityFields returned unexpected errors: %v", diags)
+	if diags := applyUserIdentityFields(context.Background(), model, secondRead); diags.HasError() {
+		t.Fatalf("applyUserIdentityFields returned unexpected errors: %v", diags)
 	}
 	if model.CreatedAt.ValueString() != firstRead.CreatedAt {
 		t.Errorf("created_at after second apply = %q, want it to stay the original %q even though the API returned %q",
@@ -137,18 +139,18 @@ func TestApplyCollaboratorIdentityFields_NeverTouchesCreatedAt(t *testing.T) {
 	}
 }
 
-// TestOrganizationCollaboratorUpdate_PreservesCreatedAtAcrossDifferingReads is
+// TestOrganizationUserUpdate_PreservesCreatedAtAcrossDifferingReads is
 // an end-to-end mocked version of the same regression, exercising the actual
 // Update method (via a mocked API returning a different created_at on the
 // post-update read) rather than just the shared helper.
-func TestOrganizationCollaboratorUpdate_PreservesCreatedAtAcrossDifferingReads(t *testing.T) {
+func TestOrganizationUserUpdate_PreservesCreatedAtAcrossDifferingReads(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		if r.Method == http.MethodPut {
 			_, _ = fmt.Fprint(w, `{}`)
 			return
 		}
-		// GET (the post-update findCollaboratorByID read-back): different
+		// GET (the post-update findUserByID read-back): different
 		// created_at than what was in prior state, same as live behavior.
 		_, _ = fmt.Fprint(w, `{
 			"results": [{"id": "identity-1", "email": "ada@example.com", "name": "Ada Lovelace", "permission_level": "owner", "created_at": "2026-07-06T12:00:00Z"}],
@@ -157,12 +159,12 @@ func TestOrganizationCollaboratorUpdate_PreservesCreatedAtAcrossDifferingReads(t
 	}))
 	defer server.Close()
 
-	r := &OrganizationCollaboratorResource{
+	r := &OrganizationUserResource{
 		client: NewClientWithToken(server.URL, "test-token"),
 	}
 
 	priorCreatedAt := "2026-01-01T00:00:00Z"
-	state := OrganizationCollaboratorResourceModel{
+	state := OrganizationUserResourceModel{
 		ID:              types.StringValue("identity-1"),
 		Email:           types.StringValue("ada@example.com"),
 		PermissionLevel: types.StringValue("collaborator"),
@@ -173,12 +175,12 @@ func TestOrganizationCollaboratorUpdate_PreservesCreatedAtAcrossDifferingReads(t
 	plan := state
 	plan.PermissionLevel = types.StringValue("owner")
 
-	collaborator, err := r.findCollaboratorByID(context.Background(), state.ID.ValueString())
+	collaborator, err := r.findUserByID(context.Background(), state.ID.ValueString())
 	if err != nil {
 		t.Fatalf("unexpected error priming the test: %v", err)
 	}
-	if diags := applyCollaboratorIdentityFields(context.Background(), &plan, collaborator); diags.HasError() {
-		t.Fatalf("applyCollaboratorIdentityFields returned unexpected errors: %v", diags)
+	if diags := applyUserIdentityFields(context.Background(), &plan, collaborator); diags.HasError() {
+		t.Fatalf("applyUserIdentityFields returned unexpected errors: %v", diags)
 	}
 
 	if plan.CreatedAt.ValueString() != priorCreatedAt {
@@ -187,9 +189,9 @@ func TestOrganizationCollaboratorUpdate_PreservesCreatedAtAcrossDifferingReads(t
 	}
 }
 
-// runOrganizationCollaboratorUpdate drives OrganizationCollaboratorResource's real Update()
+// runOrganizationUserUpdate drives OrganizationUserResource's real Update()
 // method end-to-end against state/plan models, the same pattern as runProjectResourceCreate.
-func runOrganizationCollaboratorUpdate(t *testing.T, r *OrganizationCollaboratorResource, state, plan OrganizationCollaboratorResourceModel) (OrganizationCollaboratorResourceModel, diag.Diagnostics) {
+func runOrganizationUserUpdate(t *testing.T, r *OrganizationUserResource, state, plan OrganizationUserResourceModel) (OrganizationUserResourceModel, diag.Diagnostics) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -212,10 +214,10 @@ func runOrganizationCollaboratorUpdate(t *testing.T, r *OrganizationCollaborator
 	r.Update(ctx, resource.UpdateRequest{Plan: tfPlan, State: tfState}, updateResp)
 
 	if updateResp.Diagnostics.HasError() {
-		return OrganizationCollaboratorResourceModel{}, updateResp.Diagnostics
+		return OrganizationUserResourceModel{}, updateResp.Diagnostics
 	}
 
-	var result OrganizationCollaboratorResourceModel
+	var result OrganizationUserResourceModel
 	getDiags := updateResp.State.Get(ctx, &result)
 	if getDiags.HasError() {
 		t.Fatalf("failed to decode result state: %v", getDiags)
@@ -223,9 +225,9 @@ func runOrganizationCollaboratorUpdate(t *testing.T, r *OrganizationCollaborator
 	return result, updateResp.Diagnostics
 }
 
-// runOrganizationCollaboratorDelete drives OrganizationCollaboratorResource's real Delete()
+// runOrganizationUserDelete drives OrganizationUserResource's real Delete()
 // method end-to-end against a state model.
-func runOrganizationCollaboratorDelete(t *testing.T, r *OrganizationCollaboratorResource, state OrganizationCollaboratorResourceModel) diag.Diagnostics {
+func runOrganizationUserDelete(t *testing.T, r *OrganizationUserResource, state OrganizationUserResourceModel) diag.Diagnostics {
 	t.Helper()
 	ctx := context.Background()
 
@@ -282,7 +284,7 @@ func diagsHaveCleanDetail(diags diag.Diagnostics, wantPhrase string) bool {
 	return false
 }
 
-// TestOrganizationCollaboratorResourceUpdate_ServiceAccountModify403 is the contract's C6
+// TestOrganizationUserResourceUpdate_ServiceAccountModify403 is the contract's C6
 // fail-without-fix regression test. Traced against org_invites_service.py's sibling,
 // organization_collaborators_service.py's _validate_user_for_role_change (called by
 // alter_collaborator, Update's write path): modifying a service account 403s with the exact
@@ -290,7 +292,7 @@ func diagsHaveCleanDetail(diags diag.Diagnostics, wantPhrase string) bool {
 // through the generic AddAPIError passthrough, so a Terraform user sees a raw "unexpected
 // status 403: {json}" blob instead of a clear explanation. This currently FAILS against the
 // unmodified code (proving the gap is real) and must pass once C6 lands a specific diagnostic.
-func TestOrganizationCollaboratorResourceUpdate_ServiceAccountModify403(t *testing.T) {
+func TestOrganizationUserResourceUpdate_ServiceAccountModify403(t *testing.T) {
 	const rawDetail = "You cannot modify a service account's permission level."
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -304,9 +306,9 @@ func TestOrganizationCollaboratorResourceUpdate_ServiceAccountModify403(t *testi
 	}))
 	defer server.Close()
 
-	r := &OrganizationCollaboratorResource{client: NewClientWithToken(server.URL, "test-token")}
+	r := &OrganizationUserResource{client: NewClientWithToken(server.URL, "test-token")}
 
-	state := OrganizationCollaboratorResourceModel{
+	state := OrganizationUserResourceModel{
 		ID:              types.StringValue("identity-service-account"),
 		Email:           types.StringValue("svc@example.com"),
 		PermissionLevel: types.StringValue("collaborator"),
@@ -317,7 +319,7 @@ func TestOrganizationCollaboratorResourceUpdate_ServiceAccountModify403(t *testi
 	plan := state
 	plan.PermissionLevel = types.StringValue("owner")
 
-	_, diags := runOrganizationCollaboratorUpdate(t, r, state, plan)
+	_, diags := runOrganizationUserUpdate(t, r, state, plan)
 
 	if !diags.HasError() {
 		t.Fatal("expected a diagnostic error for a service-account-modify 403, got none")
@@ -330,12 +332,12 @@ func TestOrganizationCollaboratorResourceUpdate_ServiceAccountModify403(t *testi
 	}
 }
 
-// TestOrganizationCollaboratorResourceDelete_SelfRemoval403 is C6's other fail-without-fix
+// TestOrganizationUserResourceDelete_SelfRemoval403 is C6's other fail-without-fix
 // regression test. Traced against organization_collaborators_service.py's remove_collaborator:
 // removing your own identity 403s with the exact pinned detail "You cannot remove yourself from
 // the organization." Same gap as the service-account case - today it is a raw passthrough, not a
 // specific diagnostic warning the user they targeted their own identity.
-func TestOrganizationCollaboratorResourceDelete_SelfRemoval403(t *testing.T) {
+func TestOrganizationUserResourceDelete_SelfRemoval403(t *testing.T) {
 	const rawDetail = "You cannot remove yourself from the organization."
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -349,9 +351,9 @@ func TestOrganizationCollaboratorResourceDelete_SelfRemoval403(t *testing.T) {
 	}))
 	defer server.Close()
 
-	r := &OrganizationCollaboratorResource{client: NewClientWithToken(server.URL, "test-token")}
+	r := &OrganizationUserResource{client: NewClientWithToken(server.URL, "test-token")}
 
-	state := OrganizationCollaboratorResourceModel{
+	state := OrganizationUserResourceModel{
 		ID:              types.StringValue("identity-self"),
 		Email:           types.StringValue("me@example.com"),
 		PermissionLevel: types.StringValue("owner"),
@@ -360,7 +362,7 @@ func TestOrganizationCollaboratorResourceDelete_SelfRemoval403(t *testing.T) {
 		AdditionalRoles: types.ListNull(types.StringType),
 	}
 
-	diags := runOrganizationCollaboratorDelete(t, r, state)
+	diags := runOrganizationUserDelete(t, r, state)
 
 	if !diags.HasError() {
 		t.Fatal("expected a diagnostic error for a self-removal 403, got none")
@@ -373,7 +375,7 @@ func TestOrganizationCollaboratorResourceDelete_SelfRemoval403(t *testing.T) {
 	}
 }
 
-// TestOrganizationCollaboratorResourceCreate_NoFictionalPermissionLevelReference is C7's
+// TestOrganizationUserResourceCreate_NoFictionalPermissionLevelReference is C7's
 // fail-without-fix regression test. Create() always errors (this resource is import-only) with
 // step-by-step guidance pointing at anyscale_organization_invitation - traced against both the
 // invitation resource's real schema and the backend's CreateOrganizationInvitation model
@@ -381,8 +383,8 @@ func TestOrganizationCollaboratorResourceDelete_SelfRemoval403(t *testing.T) {
 // permission_level as an attribute on an invitation block, since that argument has never existed
 // there. Following the fictional example verbatim would fail with an unsupported-argument error.
 // This doesn't need a mock server at all - Create() never makes an HTTP call before erroring.
-func TestOrganizationCollaboratorResourceCreate_NoFictionalPermissionLevelReference(t *testing.T) {
-	r := &OrganizationCollaboratorResource{}
+func TestOrganizationUserResourceCreate_NoFictionalPermissionLevelReference(t *testing.T) {
+	r := &OrganizationUserResource{}
 
 	resp := &resource.CreateResponse{}
 	r.Create(context.Background(), resource.CreateRequest{}, resp)

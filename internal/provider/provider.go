@@ -141,7 +141,7 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewCloudResource,
 		NewProjectResource,
 		NewOrganizationInvitationResource,
-		NewOrganizationCollaboratorResource,
+		NewOrganizationUserResource,
 		NewOrganizationDefaultCloudResource,
 		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
 		// NewGlobalResourceSchedulerResource,

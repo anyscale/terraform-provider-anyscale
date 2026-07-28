@@ -220,7 +220,7 @@ output "organization_default_cloud_id" {
 Look up a specific user in the organization by identity ID, user ID, or email.
 
 **Use cases:**
-- Resolve a user's `identity_id` before importing or creating an `anyscale_organization_collaborator`
+- Resolve a user's `identity_id` before importing an `anyscale_organization_user`
 - Confirm a user exists in the organization before granting project/cloud access
 
 **Example:**

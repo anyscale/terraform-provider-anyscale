@@ -172,21 +172,21 @@ func (s *mockCollaboratorLifecycleServer) isDeleted() bool {
 	return s.deleted
 }
 
-// TestAccOrganizationCollaboratorResource_Lifecycle_MockServer is the contract's T1/AC
+// TestAccOrganizationUserResource_Lifecycle_MockServer is the contract's T1/AC
 // mandatory CI-enforced lifecycle test (section 7): Import -> Read (including
 // base_role/additional_roles hydration via the singular GET) -> Update permission_level ->
 // Delete, all against a scripted mock, no env-var gating, no real identity touched. This
 // resource is import-only (Create always errors - covered separately), so the lifecycle
 // starts from Import rather than Create, matching the real-infra test's own established shape.
-func TestAccOrganizationCollaboratorResource_Lifecycle_MockServer(t *testing.T) {
+func TestAccOrganizationUserResource_Lifecycle_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mockServer := newMockCollaboratorLifecycleServer(t)
-	const resourceAddr = "anyscale_organization_collaborator.test"
+	const resourceAddr = "anyscale_organization_user.test"
 
 	configFor := func(permissionLevel string) string {
 		return testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
-resource "anyscale_organization_collaborator" "test" {
+resource "anyscale_organization_user" "test" {
   permission_level = %[1]q
 }
 `, permissionLevel)

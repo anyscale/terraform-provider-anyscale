@@ -1,0 +1,9 @@
+```
+release-note:breaking-change
+resource/anyscale_organization_collaborator: Renamed to `anyscale_organization_user` for symmetry with the existing `anyscale_organization_user`/`anyscale_organization_users` data sources; update your resource type in configuration and re-import (`terraform import anyscale_organization_user.<name> <identity_id>`) - there is no `moved` block or automatic state migration, since this resource had no existing users to migrate.
+```
+
+```
+release-note:changed
+resource/anyscale_organization_user: `permission_level` now carries an explicit schema-level deprecation (visible as a `(String, Deprecated)` marker and a `terraform plan`-time warning, in addition to its existing description text) pointing at `base_role`/`additional_roles`, and the destroy warning is stronger about `terraform destroy` evicting a real person from the organization - no behavior change, docs only.
+```
