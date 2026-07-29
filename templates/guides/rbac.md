@@ -2,7 +2,7 @@
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
 subcategory: "Behavior & Limitations"
 description: |-
-  How access control is split across anyscale_organization_user, anyscale_organization_user_role, and anyscale_cloud_access - the vocabulary differences between scopes, what "authoritative" means for each resource, the two rules the backend enforces across a cloud grant and its nested project grants, and migrating from a per-user access-management script.
+  How access control is split across anyscale_organization_user, anyscale_organization_user_role, and anyscale_cloud_access - the vocabulary differences between scopes, what "authoritative" means for each resource, why destroying anyscale_organization_user_role does not revert a person's role, the two rules the backend enforces across a cloud grant and its nested project grants, and migrating from a per-user access-management script.
 ---
 
 # RBAC: Roles Across Organizations, Clouds, and Projects
@@ -114,6 +114,38 @@ different rules, and the difference matters:
 
 This asymmetry is intentional: Terraform must never silently fail to apply something you asked for,
 but it may - and here, must - tell you plainly when it cannot undo something it never did.
+
+## Destroying `anyscale_organization_user_role`: what actually happens
+
+`terraform destroy` on this resource does **not** revert or remove the person's role the way destroying
+most resources removes the thing they manage. Read this before your first `destroy` - the behavior is
+asymmetric between the resource's two fields, and it is easy to assume wrong in either direction.
+
+**`base_role` is left exactly as it is.** Every organization member always has some `base_role` - there
+is no absent state for it to revert to, so this resource manages a value, not a grant, and destroy has
+nothing to remove, only something it could change. Reverting to a fresh-member default on destroy was
+considered and rejected: demoting an organization owner to collaborator strips their access to every
+cloud in the organization, and every organization must have at least one owner - so a destroy that
+silently reverted `base_role` could, on an org's last owner, either fail outright or leave the
+organization with nobody able to administer it. A `destroy` whose plan says "destroy 1 resource" must
+never be able to do that, so this resource does not attempt it. The person keeps whatever role they held
+at the moment of destroy, indefinitely, until someone writes a different value some other way.
+
+**`deny_roles` is different, because it genuinely has an absent state.** If your configuration declared
+`deny_roles`, destroy clears them back to empty - this resource took authority over that value, so
+destroying it releases that authority cleanly. If your configuration never declared `deny_roles`
+(leaving it at its `Optional`+`Computed` default), destroy leaves it untouched too, the same as
+`base_role` - this resource never took authority over a value it was never told to manage.
+
+**Destroy is never silent about any of this.** It emits a warning diagnostic naming the person's email
+and exactly what was left in place, so "nothing changed about this person's access" is always something
+you can see in the `terraform destroy` output, not something you have to already know to expect.
+
+Two more things worth knowing before you destroy this resource in practice: clearing a declared
+`deny_roles` on destroy goes through the same gated endpoint a write to it always uses, so a destroy can
+fail with the same feature-gate diagnostic a `deny_roles` apply can; and destroying your own role
+resource hits the same self-modification restriction every scope in this provider enforces - expect a
+clear error naming that restriction, not a silent no-op, if you try.
 
 ## Two rules the backend enforces across a cloud grant and its project grants
 
