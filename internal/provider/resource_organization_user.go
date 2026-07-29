@@ -39,10 +39,11 @@ func NewOrganizationUserResource() resource.Resource {
 // types and helpers below, since it accurately names the backend concept
 // those are shared with the data sources against.
 //
-// Role management (permission_level/base_role/additional_roles) deliberately
-// does NOT live here - it belongs to anyscale_organization_user_role. Two
-// resources writing the same org role would race each other, so this one owns
-// membership (import + destroy-evicts) and that one owns the role.
+// Role management deliberately does NOT live here - it belongs to
+// anyscale_organization_user_role, which owns the base role and the
+// organization's deny roles. Two resources writing the same org role would race
+// each other, so this one owns membership (import + destroy-evicts) and that
+// one owns the role.
 type OrganizationUserResource struct {
 	client *Client
 }
