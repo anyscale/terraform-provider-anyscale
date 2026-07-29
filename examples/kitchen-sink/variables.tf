@@ -117,17 +117,17 @@ variable "invite_email" {
   default     = ""
 }
 
-# Only referenced inside organization.tf's commented-out anyscale_organization_user block
-# (import-only, so it can't be live code) -- not unused, just not wired into anything tflint can see
-# until you uncomment it.
+# Only referenced inside organization.tf's commented-out anyscale_organization_user_role block
+# (needs a real accepted member, so it can't be live code) -- not unused, just not wired into
+# anything tflint can see until you uncomment it.
 # tflint-ignore: terraform_unused_declarations
-variable "new_member_permission_level" {
-  description = "Organization permission level for the invited member: \"collaborator\" or \"owner\"."
+variable "new_member_base_role" {
+  description = "Organization base_role for the invited member, once accepted: \"collaborator\" or \"owner\"."
   type        = string
   default     = "collaborator"
   validation {
-    condition     = contains(["collaborator", "owner"], var.new_member_permission_level)
-    error_message = "new_member_permission_level must be \"collaborator\" or \"owner\"."
+    condition     = contains(["collaborator", "owner"], var.new_member_base_role)
+    error_message = "new_member_base_role must be \"collaborator\" or \"owner\"."
   }
 }
 
