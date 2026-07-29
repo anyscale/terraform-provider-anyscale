@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -62,20 +64,6 @@ import (
 // org image deny roles override implicit permissions and therefore apply to
 // organization owners too, whereas cloud deny roles do not restrict organization
 // or project owners. Same mechanism, different blast radius.
-
-// orgUserRoleBackendDefaultBaseRole is the base role a freshly-added org member
-// actually has, confirmed by a real read of a newly-created member.
-//
-// Delete reverts to THIS value, and the distinction matters: there is a second,
-// different "default" in play - the access-management script this resource
-// replaces treats a role-unstated config entry as "writer". That one governs how
-// CONFIG is interpreted; this one governs what the BACKEND starts a member at.
-// Reverting a destroyed role to the script's default instead of the backend's
-// would leave a destroyed role MORE privileged than a brand-new member, which is
-// the wrong direction for a destroy. ("writer" is not even a legal org base role
-// - OrganizationBaseRole is owner|collaborator - so that mistake would also fail
-// on the wire, but do not rely on that as the guard.)
-const orgUserRoleBackendDefaultBaseRole = "collaborator"
 
 // SetOrganizationRolesRequest is the body for
 // PUT /api/v2/organization_collaborators/{user_id}/roles.
@@ -147,6 +135,27 @@ func orgRolesFeatureDisabled(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "unexpected status 501")
 }
 
+// orgSelfModification reports whether an error is the backend refusing to let a
+// principal change its OWN role. The API enforces this at every scope, and it is
+// invisible to mocks - no test fixture has a notion of "who am I" - so it can
+// only ever be discovered against the real API. Naming it here means the first
+// person to hit it gets an explanation rather than a bare 403.
+//
+// Matched on the backend's own detail text rather than the status, since a 403
+// here has several unrelated causes (service-account modification, support
+// users, directory-synced identities) that must not be relabelled as this one.
+func orgSelfModification(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(extractAPIErrorDetail(err)), "your own")
+}
+
+const orgSelfModificationDetail = "Anyscale does not allow a user to change their own organization role, so this " +
+	"resource cannot manage the role of the identity whose token the provider is authenticated with. Have another " +
+	"organization owner apply this change, or authenticate the provider as a different principal. Note this also " +
+	"applies on destroy when deny_roles were declared, since clearing them is itself a write to your own role."
+
 // orgRolesDisabledDetail explains a 501 in terms of what the practitioner
 // actually wrote. A raw 501 tells them nothing actionable, and the trigger is
 // never obvious from the plan: it is the presence of deny_roles, not
@@ -199,9 +208,18 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages one organization member's organization-scope role.\n\n" +
 			"This resource manages the role of a user who is **already** a member of the organization; it does " +
-			"not add or remove members. Membership is managed by `anyscale_organization_user`. Destroying this " +
-			"resource reverts the member's role to the organization default (`" + orgUserRoleBackendDefaultBaseRole +
-			"`, with no deny roles) and leaves them a member.\n\n" +
+			"not add or remove members. Membership is managed by `anyscale_organization_user`.\n\n" +
+			"### Destroying this resource does not revert `base_role`\n\n" +
+			"Destroy leaves the member at whatever `base_role` they currently have, and emits a warning naming " +
+			"them and that role. It does **not** demote them, because an organization member always has *some* " +
+			"base role - there is no \"no role\" state to return them to - and demoting an organization owner " +
+			"removes their implicit permissions across every cloud in the organization. If `deny_roles` was " +
+			"declared, destroy does clear it to empty, since an empty deny set is a real, reachable state this " +
+			"resource took authority over.\n\n" +
+			"A consequence worth stating plainly: because `email` forces replacement, **correcting a typo in " +
+			"`email` leaves the previously-named person at the role Terraform gave them**, permanently. " +
+			"Terraform destroys the old resource and creates a new one, and the destroy does not revert the " +
+			"role. Review the plan; the provider cannot distinguish a typo from a deliberate change of subject.\n\n" +
 			"**Organization roles are not cloud roles.** The vocabularies differ and the same words mean different " +
 			"things at different scopes - `collaborator` is an organization base role *and* a cloud base role with " +
 			"different meanings. See the RBAC guide before mixing them.\n\n" +
@@ -273,8 +291,27 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				// in any organization without the feature - consistency would cost the
 				// resource. The cloud roles endpoint is ungated; this one is not.
 				//
-				// No UseStateForUnknown: on a writable attribute it pins the prior value and
-				// hides real drift instead of surfacing it.
+				// UseStateForUnknown is PENDING A REAL PLAN RUN (Gate 2). Reasoning, to be
+				// confirmed or overturned by that run rather than by re-reading this:
+				//
+				// Without it, an omitted deny_roles shows "known after apply" on every plan
+				// - and omitting it is the COMMON case, since that is how a user stays off
+				// the gated endpoint. With it, the prior value carries forward and the plan
+				// is quiet.
+				//
+				// The usual objection - that pinning a writable attribute hides drift - does
+				// not apply to an Optional+Computed attribute whose config is null: null
+				// config means the user has expressed no opinion, so there is no declared
+				// value for a refreshed one to disagree with. That is inherent to
+				// Optional+Computed, not something this modifier introduces. Nor does the
+				// no-UseStateForUnknown-on-volatile-state rule bite here: org deny roles
+				// change only when an admin changes them.
+				//
+				// If the plan run shows the opposite, REMOVE this modifier - do not keep it
+				// because the reasoning above reads well.
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
+				},
 				MarkdownDescription: "Container image deny roles for the member - restrictions layered on top of " +
 					"`base_role`, never extra capability. Known values are `image_reader` (cannot create custom " +
 					"images or register external images) and `image_reader_no_base_images` (the same, and " +
@@ -334,6 +371,10 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 
 	if !denyRolesDeclared(model.DenyRoles) {
 		if err := setOrganizationPermissionLevel(ctx, r.client, identityID, model.BaseRole.ValueString()); err != nil {
+			if orgSelfModification(err) {
+				diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
+				return diags
+			}
 			diags.AddError(
 				"Could Not Set Organization Base Role",
 				collaboratorErrorDiagnosticDetail(err),
@@ -355,6 +396,10 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 				"Organization Roles API Not Enabled",
 				orgRolesDisabledDetail,
 			)
+			return diags
+		}
+		if orgSelfModification(err) {
+			diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
 			return diags
 		}
 		diags.AddError(
@@ -471,10 +516,22 @@ func (r *OrganizationUserRoleResource) Read(ctx context.Context, req resource.Re
 
 	collaborator, err := findOrgCollaboratorByEmail(ctx, r.client, state.Email.ValueString())
 	if err != nil {
-		// The member is gone from the organization. The role has no independent
-		// existence, so the resource is gone too - membership removal is out of this
-		// resource's control by design.
-		resp.State.RemoveResource(ctx)
+		// ONLY a genuine not-found removes the resource. Treating any error as
+		// "gone" would let a transient failure - a timeout, a 500, a blip during
+		// pagination - silently drop this from state, and the next apply would then
+		// re-assert the role as a create, stomping any legitimate out-of-band change
+		// with no diagnostic the user ever saw.
+		if errors.Is(err, ErrNotFound) {
+			// The member left the organization. The role has no independent existence,
+			// so the resource is gone too - membership is out of this resource's control
+			// by design.
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError(
+			"Could Not Read Organization User Role",
+			fmt.Sprintf("Failed to read the organization role for %s: %s", state.Email.ValueString(), err.Error()),
+		)
 		return
 	}
 
@@ -532,19 +589,35 @@ func (r *OrganizationUserRoleResource) Update(ctx context.Context, req resource.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-// Delete reverts the member's role to the organization default and leaves them a
-// member.
+// Delete does NOT revert base_role, and that is deliberate. It clears deny_roles
+// only if this resource ever asserted authority over them.
 //
-// There is no DELETE endpoint for organization roles - the only delete under
-// /api/v2/organization_collaborators removes the person from the organization
-// entirely. Calling that here would make this resource authoritative over
-// membership, which it deliberately is not: destroying a role must never evict a
-// human. So destroy is a WRITE back to the backend default.
+// The two fields have genuinely different object models, and destroy applies one
+// rule to both: remove what this resource GRANTED, leave what it merely CHANGED.
 //
-// The path is chosen the same way every other write is. If this resource was
-// never managing deny_roles, the ungated legacy endpoint can revert the
-// base role, and reverting through the gated endpoint instead would make destroy
-// fail in organizations where create and update both worked.
+//   - base_role has NO absent state. Every organization member always has one, so
+//     there is nothing for destroy to remove - only something it could change to a
+//     different value, which is not what destroy means. Reverting it to the
+//     fresh-member default was considered and rejected: Anyscale's docs state that
+//     demoting an organization owner strips their implicit permissions across every
+//     cloud in the organization, and an organization must always have at least one
+//     owner - so a destroy reading "destroy 1 resource" could silently remove a
+//     person's org-wide cloud access, or lock the organization out of its own
+//     administration on the last owner. Left as-is.
+//   - deny_roles DOES have a real absent state - the empty set is reachable and
+//     meaningful. If the configuration declared them, this resource took authority
+//     over that set and destroy gives it back by clearing it. If the configuration
+//     omitted them, authority was never taken and they are left untouched.
+//
+// Because base_role is left in place, destroy is NOT silent: it warns, naming the
+// person and the role left behind. A documented no-op is fine; an undisclosed one
+// is not, and a config that set base_role = owner would otherwise leave an
+// elevated privilege behind with nothing said about it.
+//
+// Clearing deny_roles requires the gated roles endpoint (it is a SET over the
+// pair, so the current base_role is sent back unchanged alongside the empty set).
+// That means destroy CAN hit the feature gate - correct, since it is the same gate
+// the create paid - and it gets the same actionable diagnostic rather than a raw 501.
 func (r *OrganizationUserRoleResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state OrganizationUserRoleResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -552,40 +625,73 @@ func (r *OrganizationUserRoleResource) Delete(ctx context.Context, req resource.
 		return
 	}
 
-	identityID := state.IdentityID.ValueString()
+	email := state.Email.ValueString()
+
+	if !denyRolesDeclared(state.DenyRoles) {
+		resp.Diagnostics.AddWarning(
+			"Organization Role Left In Place",
+			fmt.Sprintf("Left %s at base_role=%q. This resource does not revert base roles on destroy: an organization "+
+				"member always has some base role, so there is no \"no role\" state to return them to, and demoting "+
+				"them here could remove their access across every cloud in the organization. Change or remove this "+
+				"person's role explicitly if that is what you intend.", email, state.BaseRole.ValueString()),
+		)
+		return
+	}
+
 	userID := state.UserID.ValueString()
-	if identityID == "" || userID == "" {
-		var err error
-		identityID, userID, err = resolveIdentityForEmail(ctx, r.client, state.Email.ValueString())
-		if err != nil {
-			// The member is already gone; there is no role left to revert.
-			tflog.Warn(ctx, "Organization member not found on delete; nothing to revert", map[string]any{
-				"email": state.Email.ValueString(),
-			})
+	if userID == "" {
+		collaborator, err := findOrgCollaboratorByEmail(ctx, r.client, email)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			// Genuinely gone from the organization; their deny roles went with them.
+			// Disclosed in the apply output, not just the provider log - a warning
+			// nobody sees without TF_LOG is not disclosure.
+			resp.Diagnostics.AddWarning(
+				"Organization Member No Longer Exists",
+				fmt.Sprintf("%s is no longer a member of the organization, so there were no deny roles to clear.", email),
+			)
 			return
+		case err != nil:
+			// Not the same thing as being gone. Failing loudly keeps the distinction
+			// the not-found diagnostic depends on.
+			resp.Diagnostics.AddError(
+				"Could Not Resolve Organization Member On Destroy",
+				fmt.Sprintf("Failed to look up %s in order to clear their deny roles: %s", email, err.Error()),
+			)
+			return
+		case collaborator.UserID == nil || *collaborator.UserID == "":
+			// The roles endpoint is keyed by user_id, so without one there is no way
+			// to clear anything. Say so rather than failing opaquely.
+			resp.Diagnostics.AddWarning(
+				"Organization Deny Roles Could Not Be Cleared",
+				fmt.Sprintf("%s has no user ID, so their deny roles could not be cleared through this API. "+
+					"Clear them from the Anyscale console if they should not persist.", email),
+			)
+			return
+		default:
+			userID = *collaborator.UserID
 		}
 	}
 
-	if !denyRolesDeclared(state.DenyRoles) {
-		if err := setOrganizationPermissionLevel(ctx, r.client, identityID, orgUserRoleBackendDefaultBaseRole); err != nil {
-			resp.Diagnostics.AddError(
-				"Could Not Revert Organization Base Role",
-				collaboratorErrorDiagnosticDetail(err),
-			)
+	// SET over the pair: send the current base_role back unchanged so clearing the
+	// deny roles does not also rewrite the base role.
+	if err := setOrganizationRoles(ctx, r.client, userID, state.BaseRole.ValueString(), []string{}); err != nil {
+		switch {
+		case orgRolesFeatureDisabled(err):
+			resp.Diagnostics.AddError("Organization Roles API Not Enabled", orgRolesDisabledDetail)
+		case orgSelfModification(err):
+			resp.Diagnostics.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
+		default:
+			resp.Diagnostics.AddError("Could Not Clear Organization Deny Roles", collaboratorErrorDiagnosticDetail(err))
 		}
 		return
 	}
 
-	if err := setOrganizationRoles(ctx, r.client, userID, orgUserRoleBackendDefaultBaseRole, []string{}); err != nil {
-		if orgRolesFeatureDisabled(err) {
-			resp.Diagnostics.AddError("Organization Roles API Not Enabled", orgRolesDisabledDetail)
-			return
-		}
-		resp.Diagnostics.AddError(
-			"Could Not Revert Organization Roles",
-			collaboratorErrorDiagnosticDetail(err),
-		)
-	}
+	resp.Diagnostics.AddWarning(
+		"Organization Base Role Left In Place",
+		fmt.Sprintf("Cleared deny_roles for %s, but left them at base_role=%q. This resource does not revert base "+
+			"roles on destroy - see the resource documentation for why.", email, state.BaseRole.ValueString()),
+	)
 }
 
 // ImportState imports by email, matching the resource's key.
