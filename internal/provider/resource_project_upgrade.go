@@ -60,8 +60,16 @@ func (r *ProjectResource) UpgradeState(ctx context.Context) map[int64]resource.S
 // keeping it generic avoids a second copy of the collaborator model that
 // would outlive the schema it describes.
 type projectResourceModelV0 struct {
-	ID                     types.String `tfsdk:"id"`
-	CloudID                types.String `tfsdk:"cloud_id"`
+	ID      types.String `tfsdk:"id"`
+	CloudID types.String `tfsdk:"cloud_id"`
+	// CloudName existed on this resource until it was removed in v0.24.0 WITHOUT
+	// a schema-version bump. That means schema version 0 labels TWO incompatible
+	// state shapes: pre-v0.24.0 state carries cloud_name, post-v0.24.0 state does
+	// not. Declaring it here lets this upgrader decode BOTH - a state that lacks
+	// the key simply decodes it as null. Omitting it would fail to decode every
+	// project created before v0.24.0, which is the older and likely larger
+	// population. The value is discarded, same as Collaborators.
+	CloudName              types.String `tfsdk:"cloud_name"`
 	Name                   types.String `tfsdk:"name"`
 	Description            types.String `tfsdk:"description"`
 	InitialClusterConfigID types.String `tfsdk:"initial_cluster_config_id"`
@@ -73,8 +81,8 @@ type projectResourceModelV0 struct {
 	DirectoryName          types.String `tfsdk:"directory_name"`
 }
 
-// toProjectResourceModel carries every v0 field except Collaborators into the
-// current model. Written as an explicit field-by-field copy so that adding an
+// toProjectResourceModel carries every v0 field except Collaborators and
+// CloudName into the current model - both were removed from the live schema. Written as an explicit field-by-field copy so that adding an
 // attribute to ProjectResourceModel later fails to compile here rather than
 // silently upgrading to a zero value.
 func (m projectResourceModelV0) toProjectResourceModel() ProjectResourceModel {
@@ -112,6 +120,16 @@ func projectSchemaV0() *schema.Schema {
 			},
 			"cloud_id": schema.StringAttribute{
 				Required: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			// See the CloudName note on projectResourceModelV0: version 0 covers
+			// both the pre- and post-v0.24.0 shapes, because cloud_name was removed
+			// without a version bump. Optional so state written either side of that
+			// removal decodes.
+			"cloud_name": schema.StringAttribute{
+				Optional: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

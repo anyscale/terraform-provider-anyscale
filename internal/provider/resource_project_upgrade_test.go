@@ -222,3 +222,95 @@ func TestProjectStateUpgradeV0toV1_NilPriorState(t *testing.T) {
 		t.Errorf("expected a 'Missing Prior State' diagnostic, got: %v", resp.Diagnostics)
 	}
 }
+
+// TestProjectStateUpgradeV0toV1_PreV024StateWithCloudName covers the fact that
+// SCHEMA VERSION 0 LABELS TWO INCOMPATIBLE STATE SHAPES.
+//
+// cloud_name was removed from anyscale_project in v0.24.0 WITHOUT a schema
+// version bump, so state written before that release carries a cloud_name key
+// and state written after does not - both stamped version 0. The upgrader has
+// to decode either. This test drives the older of the two, which is the one an
+// upgrader written against only the current source would miss, and it is also
+// the larger population: every project created before v0.24.0.
+//
+// The sibling tests above cover the post-v0.24.0 shape (cloud_name absent,
+// decoding as null), so the pair covers both halves of version 0.
+func TestProjectStateUpgradeV0toV1_PreV024StateWithCloudName(t *testing.T) {
+	ctx := context.Background()
+
+	collaborators := types.ListValueMust(projectCollaboratorV0ObjectType(), []attr.Value{
+		types.ObjectValueMust(projectCollaboratorV0ObjectType().AttrTypes, map[string]attr.Value{
+			"email":            types.StringValue("legacy@example.com"),
+			"permission_level": types.StringValue("owner"),
+			"identity_id":      types.StringValue("ident_legacy"),
+			"user_id":          types.StringValue("usr_legacy"),
+		}),
+	})
+
+	v0 := projectResourceModelV0{
+		ID:      types.StringValue("prj_pre024"),
+		CloudID: types.StringValue("cld_pre024"),
+		// The whole point of this fixture: a real pre-v0.24.0 project resolved its
+		// cloud BY NAME, so cloud_id could even be null in that state while
+		// cloud_name carried the selector.
+		CloudName:              types.StringValue("my-legacy-cloud"),
+		Name:                   types.StringValue("project-pre-024"),
+		Description:            types.StringValue("created before cloud_name was removed"),
+		InitialClusterConfigID: types.StringNull(),
+		Collaborators:          collaborators,
+		CreatorID:              types.StringValue("usr_creator_pre024"),
+		CreatedAt:              types.StringValue("2026-01-01T00:00:00Z"),
+		LastUsedCloudID:        types.StringValue("cld_pre024"),
+		IsDefault:              types.BoolValue(false),
+		DirectoryName:          types.StringValue("project-pre-024-dir"),
+	}
+
+	r := &ProjectResource{}
+	upgrader := r.UpgradeState(ctx)[0]
+
+	v0Schema := projectSchemaV0()
+	priorState := &tfsdk.State{
+		Schema: *v0Schema,
+		Raw:    tftypes.NewValue(v0Schema.Type().TerraformType(ctx), nil),
+	}
+	// This Set is the real assertion: it fails outright if the frozen v0 schema
+	// does not declare cloud_name, which is exactly the bug this test guards.
+	if diags := priorState.Set(ctx, &v0); diags.HasError() {
+		t.Fatalf("failed to build pre-v0.24.0 v0 state fixture - the frozen v0 schema must declare cloud_name, "+
+			"because it was removed in v0.24.0 without a version bump and real state from before then carries it: %v", diags)
+	}
+
+	var currentSchema resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &currentSchema)
+
+	resp := &resource.UpgradeStateResponse{
+		State: tfsdk.State{
+			Schema: currentSchema.Schema,
+			Raw:    tftypes.NewValue(currentSchema.Schema.Type().TerraformType(ctx), nil),
+		},
+	}
+	upgrader.StateUpgrader(ctx, resource.UpgradeStateRequest{State: priorState}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("upgrading pre-v0.24.0 state must succeed, got: %v", resp.Diagnostics)
+	}
+
+	var upgraded ProjectResourceModel
+	if diags := resp.State.Get(ctx, &upgraded); diags.HasError() {
+		t.Fatalf("failed to read upgraded state: %v", diags)
+	}
+
+	// Everything that still exists must survive; cloud_name and collaborator are
+	// both dropped because neither exists on the current schema.
+	if upgraded.ID.ValueString() != "prj_pre024" {
+		t.Errorf("id = %q, want prj_pre024 - the upgrade must not lose identity", upgraded.ID.ValueString())
+	}
+	if upgraded.CloudID.ValueString() != "cld_pre024" {
+		t.Errorf("cloud_id = %q, want cld_pre024", upgraded.CloudID.ValueString())
+	}
+	if upgraded.Name.ValueString() != "project-pre-024" {
+		t.Errorf("name = %q, want project-pre-024", upgraded.Name.ValueString())
+	}
+	if upgraded.DirectoryName.ValueString() != "project-pre-024-dir" {
+		t.Errorf("directory_name = %q, want project-pre-024-dir", upgraded.DirectoryName.ValueString())
+	}
+}

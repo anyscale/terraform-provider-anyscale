@@ -25,9 +25,14 @@ resource "anyscale_project" "shared_research" {
 # be declared for someone with no cloud access, which only failed partway
 # through an apply.
 #
-# Grant project access through the cloud that owns the project instead, where
-# both are declared together. To read a project's current collaborators without
-# managing them, use the anyscale_project data source.
+# There is currently NO in-provider replacement. Project collaborators must be
+# managed outside Terraform for now - through the Anyscale console or API. A
+# resource that manages a cloud's members together with their project roles is
+# planned, but it is not part of this release, and this comment will point at it
+# once it actually ships rather than before.
+#
+# To READ a project's current collaborators without managing them, the
+# anyscale_project data source still exposes them.
 
 # Outputs
 output "project_id" {
