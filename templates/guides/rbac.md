@@ -131,9 +131,10 @@ Same rule, opposite outcomes, because an absent state exists for one and not the
 
 The sharp edges point in opposite directions too, which is exactly why a reader of only one resource's
 page tends to generalize the wrong instinct to the other: `anyscale_organization_user_role`'s destroy
-can **leave a privilege behind** - an owner stays an owner (see below). `anyscale_cloud_access`'s destroy
-can **remove access at scale**, including through a typo'd `cloud_id` that this resource has no way to
-detect (see [Typo protection](#typo-protection-what-is-guarded-and-what-genuinely-is-not), below).
+can **leave a privilege behind** - an owner stays an owner - and can even **grant new capability**, by
+lifting a declared `deny_roles` restriction (see below). `anyscale_cloud_access`'s destroy can **remove
+access at scale**, including through a typo'd `cloud_id` that this resource has no way to detect (see
+[Typo protection](#typo-protection-what-is-guarded-and-what-genuinely-is-not), below).
 
 ## Destroying `anyscale_organization_user_role`: what actually happens
 
@@ -156,6 +157,15 @@ at the moment of destroy, indefinitely, until someone writes a different value s
 destroying it releases that authority cleanly. If your configuration never declared `deny_roles`
 (leaving it at its `Optional`+`Computed` default), destroy leaves it untouched too, the same as
 `base_role` - this resource never took authority over a value it was never told to manage.
+
+**Read that clearing carefully: it is not a reduction.** `deny_roles` are restrictions, so clearing a
+declared set back to empty *increases* that person's access - the one destroy in this provider that
+grants capability rather than removing it. Destroying this resource for someone whose configuration
+declared `deny_roles = ["image_reader_no_base_images"]` lifts that restriction and lets them read
+container images they could not read before. This is deliberate and documented, not a bug - it follows
+from the same rule as everything else on this page, that destroy releases authority over what was
+declared - but it is worth stating in these words, because nothing about the word "destroy" suggests a
+grant of new access.
 
 **Destroy is never silent about any of this.** It emits a warning diagnostic naming the person's email
 and exactly what was left in place, so "nothing changed about this person's access" is always something
