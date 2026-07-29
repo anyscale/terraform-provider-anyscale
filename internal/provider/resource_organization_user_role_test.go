@@ -370,8 +370,25 @@ func runOrganizationUserRoleCreate(t *testing.T, r *OrganizationUserRoleResource
 	}
 	tfState := tfsdk.State{Schema: schemaResp.Schema}
 
+	// Build the CONFIG too, because that - not the plan - is what selects the
+	// write path. Rule: a plan value that is Null or Unknown means the config
+	// omitted the attribute; a known value means it declared it. That mapping is
+	// exact for Create, where there is no prior state for UseStateForUnknown to
+	// carry forward.
+	configModel := plan
+	if plan.DenyRoles.IsUnknown() {
+		configModel.DenyRoles = types.ListNull(types.StringType)
+	}
+	// tfsdk.Config has no Set method (only Plan and State do), so the value tree
+	// is built through a throwaway Plan and its Raw is reused.
+	configCarrier := tfsdk.Plan{Schema: schemaResp.Schema}
+	if diags := configCarrier.Set(ctx, &configModel); diags.HasError() {
+		t.Fatalf("failed to build config fixture: %v", diags)
+	}
+	tfConfig := tfsdk.Config{Schema: schemaResp.Schema, Raw: configCarrier.Raw}
+
 	createResp := &resource.CreateResponse{State: tfState}
-	r.Create(ctx, resource.CreateRequest{Plan: tfPlan}, createResp)
+	r.Create(ctx, resource.CreateRequest{Plan: tfPlan, Config: tfConfig}, createResp)
 
 	if createResp.Diagnostics.HasError() {
 		return OrganizationUserRoleResourceModel{}, createResp.Diagnostics
@@ -418,24 +435,19 @@ func runOrganizationUserRoleRead(t *testing.T, r *OrganizationUserRoleResource, 
 }
 
 // runOrganizationUserRoleDelete drives the real Delete() against a state model.
-func runOrganizationUserRoleDelete(t *testing.T, r *OrganizationUserRoleResource, state OrganizationUserRoleResourceModel) diag.Diagnostics {
+// runOrganizationUserRoleDelete drives Delete's real body.
+//
+// denyRolesDeclared is passed EXPLICITLY rather than derived from state, because
+// that is how the resource itself works: authority over deny_roles is recorded
+// in provider private state at Create/Update time and read back here. State
+// cannot answer it - deny_roles is Optional+Computed, so a refresh populates it
+// for every member whether or not the config ever declared it, which is exactly
+// the bug this seam exists to prevent regressing. The private-state type is
+// internal to the framework and cannot be constructed in a unit test, so Delete
+// reads it and delegates to this testable core.
+func runOrganizationUserRoleDelete(t *testing.T, r *OrganizationUserRoleResource, state OrganizationUserRoleResourceModel, denyRolesDeclared bool) diag.Diagnostics {
 	t.Helper()
-	ctx := context.Background()
-
-	var schemaResp resource.SchemaResponse
-	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
-	if schemaResp.Diagnostics.HasError() {
-		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
-	}
-
-	tfState := tfsdk.State{Schema: schemaResp.Schema}
-	if diags := tfState.Set(ctx, &state); diags.HasError() {
-		t.Fatalf("failed to build state fixture: %v", diags)
-	}
-
-	deleteResp := &resource.DeleteResponse{State: tfState}
-	r.Delete(ctx, resource.DeleteRequest{State: tfState}, deleteResp)
-	return deleteResp.Diagnostics
+	return r.deleteOrganizationRole(context.Background(), state, denyRolesDeclared)
 }
 
 // orgDenyRolesList builds a known deny_roles list fixture. types.ListValueMust
@@ -689,23 +701,34 @@ func TestOrganizationUserRoleRead_UsesSingularEndpointNotListForDenyRoles(t *tes
 // after "destroy 1 resource" is its own bug, so both subtests assert the
 // warning too.
 func TestOrganizationUserRoleDelete_ClearsDenyRolesAndNeverEvictsMember(t *testing.T) {
+	// NOTE both cases carry the SAME populated state.DenyRoles. That is the
+	// regression guard: deny_roles is Optional+Computed, so a refresh - which a
+	// destroy always performs first - populates it for every member regardless of
+	// whether the config ever declared it. A Delete that decides authority from
+	// state therefore clears deny roles for everyone. Only denyRolesDeclared,
+	// which comes from private state recorded at Create/Update from CONFIG,
+	// distinguishes these two cases. If the two rows differed in state as well,
+	// this test would pass against the buggy state-based implementation.
 	for _, tc := range []struct {
-		name        string
-		denyRoles   types.List
-		wantWrite   bool
-		wantWarning string
+		name              string
+		denyRoles         types.List
+		denyRolesDeclared bool
+		wantWrite         bool
+		wantWarning       string
 	}{
 		{
-			name:        "deny_roles never managed writes nothing and says so",
-			denyRoles:   types.ListNull(types.StringType),
-			wantWrite:   false,
-			wantWarning: "Organization Role Left In Place",
+			name:              "deny_roles never managed writes nothing and says so",
+			denyRoles:         orgDenyRolesList("image_reader"),
+			denyRolesDeclared: false,
+			wantWrite:         false,
+			wantWarning:       "Organization Role Left In Place",
 		},
 		{
-			name:        "deny_roles managed clears them via the gated roles endpoint",
-			denyRoles:   orgDenyRolesList("image_reader"),
-			wantWrite:   true,
-			wantWarning: "Organization Base Role Left In Place",
+			name:              "deny_roles managed clears them via the gated roles endpoint",
+			denyRoles:         orgDenyRolesList("image_reader"),
+			denyRolesDeclared: true,
+			wantWrite:         true,
+			wantWarning:       "Organization Base Role Left In Place",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -722,7 +745,7 @@ func TestOrganizationUserRoleDelete_ClearsDenyRolesAndNeverEvictsMember(t *testi
 				DenyRoles:  tc.denyRoles,
 			}
 
-			diags := runOrganizationUserRoleDelete(t, r, state)
+			diags := runOrganizationUserRoleDelete(t, r, state, tc.denyRolesDeclared)
 			if diags.HasError() {
 				t.Fatalf("unexpected error: %v", diags)
 			}
@@ -818,7 +841,11 @@ func TestOrganizationUserRoleWrite_501ProducesActionableDiagnostic(t *testing.T)
 		DenyRoles: orgDenyRolesList("image_reader"),
 	}
 
-	diags := r.writeOrganizationRole(context.Background(), &model, "ide_gated", "usr_gated")
+	// true = the configuration declared deny_roles, which is what routes this to
+	// the gated endpoint. The flag is passed explicitly rather than derived from
+	// the model: routing is decided from CONFIG, and neither the plan nor state
+	// can answer that question once UseStateForUnknown is in play.
+	diags := r.writeOrganizationRole(context.Background(), &model, "ide_gated", "usr_gated", true)
 	if !diags.HasError() {
 		t.Fatal("expected an error when the gated roles endpoint returns 501, got none")
 	}

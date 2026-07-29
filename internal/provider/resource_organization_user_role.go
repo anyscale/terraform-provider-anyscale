@@ -2,10 +2,12 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -15,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -347,16 +350,94 @@ func (r *OrganizationUserRoleResource) Configure(ctx context.Context, req resour
 	r.client = client
 }
 
-// additionalRolesDeclared reports whether the practitioner actually wrote
-// deny_roles, which is what selects the write path.
+// orgUserRoleDenyRolesDeclaredKey records, in provider private state, whether
+// the configuration declared deny_roles. Delete needs that fact and cannot
+// derive it: DeleteRequest carries no Config and no Plan, only State - and
+// state is useless for this, because deny_roles is Optional+Computed, Read
+// populates it from the backend on every refresh, and a destroy refreshes
+// first. State is therefore essentially never null by the time Delete runs, so
+// a state-based check reports "declared" for everyone and destroy clears deny
+// roles it was never given authority over.
 //
-// The Unknown check is load-bearing and is the trap in an Optional+Computed
-// attribute: when omitted on Create, the framework presents it as UNKNOWN, not
-// null. A check written as IsNull() alone reads Unknown as "declared" and would
-// route every Create onto the gated endpoint - exactly the failure the
-// Optional+Computed design exists to avoid.
-func denyRolesDeclared(l types.List) bool {
-	return !l.IsNull() && !l.IsUnknown()
+// Private state is the framework's mechanism for precisely this: provider
+// -internal data that survives into Delete. Verified against the pinned
+// framework version that Private is pre-populated on Create and Update, and on
+// Delete is seeded from the stored data rather than left empty.
+const orgUserRoleDenyRolesDeclaredKey = "deny_roles_declared"
+
+// privateStateSetter is the subset of the framework's private-state type used
+// here. An interface because the concrete type lives in an internal framework
+// package a provider cannot name.
+type privateStateSetter interface {
+	SetKey(ctx context.Context, key string, value []byte) diag.Diagnostics
+}
+
+// denyRolesDeclaredInConfig reports whether the practitioner actually wrote
+// deny_roles. This is what selects the write path.
+//
+// It reads CONFIG, never the plan. The plan is not a usable signal: with
+// UseStateForUnknown on deny_roles, a config that OMITS the attribute has the
+// prior state value carried into the plan, so a plan-based check reports
+// "declared" for an ordinary base_role-only update - routing it onto the gated
+// endpoint (which 501s in organizations without the feature, and always on
+// Azure) and rewriting deny roles that were never Terraform's to touch. Config
+// is null when omitted, regardless of any plan modifier.
+//
+// Unknown counts as DECLARED here: a deny_roles computed from another resource
+// is genuinely declared, just not yet known. This differs from the earlier
+// plan-based check, where Unknown meant "omitted on Create" - reading config
+// removes that ambiguity entirely.
+func denyRolesDeclaredInConfig(ctx context.Context, cfg tfsdk.Config) (bool, diag.Diagnostics) {
+	var denyRoles types.List
+	diags := cfg.GetAttribute(ctx, path.Root("deny_roles"), &denyRoles)
+	if diags.HasError() {
+		return false, diags
+	}
+	return !denyRoles.IsNull(), diags
+}
+
+// privateStateGetter is the read side of the same framework type.
+type privateStateGetter interface {
+	GetKey(ctx context.Context, key string) ([]byte, diag.Diagnostics)
+}
+
+// denyRolesWereDeclared reads back what Create/Update recorded.
+//
+// Defaults to FALSE when the key is absent or unreadable, and that default is
+// the safe direction: false means destroy leaves deny roles alone. A resource
+// created before this key existed, or any future case where private state does
+// not survive, therefore under-acts rather than clearing restrictions it has no
+// record of owning.
+func denyRolesWereDeclared(ctx context.Context, private privateStateGetter) bool {
+	if private == nil {
+		return false
+	}
+	raw, diags := private.GetKey(ctx, orgUserRoleDenyRolesDeclaredKey)
+	if diags.HasError() || len(raw) == 0 {
+		return false
+	}
+	var payload struct {
+		Declared bool `json:"declared"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return false
+	}
+	return payload.Declared
+}
+
+// recordDenyRolesDeclared persists the routing decision for Delete to read.
+func recordDenyRolesDeclared(ctx context.Context, private privateStateSetter, declared bool) diag.Diagnostics {
+	// The framework always populates Private on Create and Update (verified
+	// against the pinned version), but a hand-built response in a unit test does
+	// not. Tolerate nil rather than panicking so the routing can be tested
+	// directly; a nil here in production would mean the framework changed.
+	if private == nil || reflect.ValueOf(private).IsNil() {
+		return nil
+	}
+	if declared {
+		return private.SetKey(ctx, orgUserRoleDenyRolesDeclaredKey, []byte(`{"declared":true}`))
+	}
+	return private.SetKey(ctx, orgUserRoleDenyRolesDeclaredKey, []byte(`{"declared":false}`))
 }
 
 // writeOrganizationRole applies base role and (when declared) additional roles,
@@ -365,11 +446,11 @@ func denyRolesDeclared(l types.List) bool {
 // Never writes through both paths in one call: the roles endpoint is a SET over
 // the pair and would clobber a base role the legacy call had just written.
 func (r *OrganizationUserRoleResource) writeOrganizationRole(
-	ctx context.Context, model *OrganizationUserRoleResourceModel, identityID, userID string,
+	ctx context.Context, model *OrganizationUserRoleResourceModel, identityID, userID string, denyRolesDeclared bool,
 ) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	if !denyRolesDeclared(model.DenyRoles) {
+	if !denyRolesDeclared {
 		if err := setOrganizationPermissionLevel(ctx, r.client, identityID, model.BaseRole.ValueString()); err != nil {
 			if orgSelfModification(err) {
 				diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
@@ -485,7 +566,20 @@ func (r *OrganizationUserRoleResource) Create(ctx context.Context, req resource.
 	// backend that already holds it is the migration path off the access-management
 	// script, and must be an authoritative write rather than an assumption that the
 	// pre-existing value is correct.
-	resp.Diagnostics.Append(r.writeOrganizationRole(ctx, &plan, identityID, userID)...)
+	declared, declaredDiags := denyRolesDeclaredInConfig(ctx, req.Config)
+	resp.Diagnostics.Append(declaredDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(r.writeOrganizationRole(ctx, &plan, identityID, userID, declared)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Record the routing decision where Delete can read it - Delete sees neither
+	// Config nor Plan, and state cannot answer this question.
+	resp.Diagnostics.Append(recordDenyRolesDeclared(ctx, resp.Private, declared)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -569,7 +663,18 @@ func (r *OrganizationUserRoleResource) Update(ctx context.Context, req resource.
 		}
 	}
 
-	resp.Diagnostics.Append(r.writeOrganizationRole(ctx, &plan, identityID, userID)...)
+	declared, declaredDiags := denyRolesDeclaredInConfig(ctx, req.Config)
+	resp.Diagnostics.Append(declaredDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(r.writeOrganizationRole(ctx, &plan, identityID, userID, declared)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(recordDenyRolesDeclared(ctx, resp.Private, declared)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -625,17 +730,29 @@ func (r *OrganizationUserRoleResource) Delete(ctx context.Context, req resource.
 		return
 	}
 
+	// Whether this resource ever took authority over deny_roles is read from
+	// private state, not from state.DenyRoles. See orgUserRoleDenyRolesDeclaredKey
+	// for why state cannot answer it.
+	resp.Diagnostics.Append(r.deleteOrganizationRole(ctx, state, denyRolesWereDeclared(ctx, req.Private))...)
+}
+
+// deleteOrganizationRole is Delete's body, with the authority decision passed in
+// rather than read from a framework type a unit test cannot construct.
+func (r *OrganizationUserRoleResource) deleteOrganizationRole(
+	ctx context.Context, state OrganizationUserRoleResourceModel, denyRolesDeclared bool,
+) diag.Diagnostics {
+	var diags diag.Diagnostics
 	email := state.Email.ValueString()
 
-	if !denyRolesDeclared(state.DenyRoles) {
-		resp.Diagnostics.AddWarning(
+	if !denyRolesDeclared {
+		diags.AddWarning(
 			"Organization Role Left In Place",
 			fmt.Sprintf("Left %s at base_role=%q. This resource does not revert base roles on destroy: an organization "+
 				"member always has some base role, so there is no \"no role\" state to return them to, and demoting "+
 				"them here could remove their access across every cloud in the organization. Change or remove this "+
 				"person's role explicitly if that is what you intend.", email, state.BaseRole.ValueString()),
 		)
-		return
+		return diags
 	}
 
 	userID := state.UserID.ValueString()
@@ -646,28 +763,28 @@ func (r *OrganizationUserRoleResource) Delete(ctx context.Context, req resource.
 			// Genuinely gone from the organization; their deny roles went with them.
 			// Disclosed in the apply output, not just the provider log - a warning
 			// nobody sees without TF_LOG is not disclosure.
-			resp.Diagnostics.AddWarning(
+			diags.AddWarning(
 				"Organization Member No Longer Exists",
 				fmt.Sprintf("%s is no longer a member of the organization, so there were no deny roles to clear.", email),
 			)
-			return
+			return diags
 		case err != nil:
 			// Not the same thing as being gone. Failing loudly keeps the distinction
 			// the not-found diagnostic depends on.
-			resp.Diagnostics.AddError(
+			diags.AddError(
 				"Could Not Resolve Organization Member On Destroy",
 				fmt.Sprintf("Failed to look up %s in order to clear their deny roles: %s", email, err.Error()),
 			)
-			return
+			return diags
 		case collaborator.UserID == nil || *collaborator.UserID == "":
 			// The roles endpoint is keyed by user_id, so without one there is no way
 			// to clear anything. Say so rather than failing opaquely.
-			resp.Diagnostics.AddWarning(
+			diags.AddWarning(
 				"Organization Deny Roles Could Not Be Cleared",
 				fmt.Sprintf("%s has no user ID, so their deny roles could not be cleared through this API. "+
 					"Clear them from the Anyscale console if they should not persist.", email),
 			)
-			return
+			return diags
 		default:
 			userID = *collaborator.UserID
 		}
@@ -678,20 +795,22 @@ func (r *OrganizationUserRoleResource) Delete(ctx context.Context, req resource.
 	if err := setOrganizationRoles(ctx, r.client, userID, state.BaseRole.ValueString(), []string{}); err != nil {
 		switch {
 		case orgRolesFeatureDisabled(err):
-			resp.Diagnostics.AddError("Organization Roles API Not Enabled", orgRolesDisabledDetail)
+			diags.AddError("Organization Roles API Not Enabled", orgRolesDisabledDetail)
 		case orgSelfModification(err):
-			resp.Diagnostics.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
+			diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
 		default:
-			resp.Diagnostics.AddError("Could Not Clear Organization Deny Roles", collaboratorErrorDiagnosticDetail(err))
+			diags.AddError("Could Not Clear Organization Deny Roles", collaboratorErrorDiagnosticDetail(err))
 		}
-		return
+		return diags
 	}
 
-	resp.Diagnostics.AddWarning(
+	diags.AddWarning(
 		"Organization Base Role Left In Place",
 		fmt.Sprintf("Cleared deny_roles for %s, but left them at base_role=%q. This resource does not revert base "+
 			"roles on destroy - see the resource documentation for why.", email, state.BaseRole.ValueString()),
 	)
+
+	return diags
 }
 
 // ImportState imports by email, matching the resource's key.
