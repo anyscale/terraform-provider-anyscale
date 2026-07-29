@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sync"
 	"testing"
 
@@ -482,4 +483,108 @@ resource "anyscale_organization_user_role" "mock" {
 	if len(additionalRoles) != 0 {
 		t.Fatalf("expected destroy to CLEAR deny_roles even after an intervening refresh, got %v - the authority signal did not survive the refresh", additionalRoles)
 	}
+}
+
+// mockOrgUserRoleFlakyServer wraps mockOrgUserRoleServer with an
+// injectable failure on a SPECIFIC numbered call to the list endpoint, to
+// prove criterion 31: a transient (non-404) error in Read must surface as
+// a real error and leave the resource IN STATE, never silently removed the
+// way a genuine 404 does. A 404-only test would pass against the exact bug
+// (Read treating ANY error as "gone").
+//
+// Counting calls rather than arming a one-shot flag between steps is
+// deliberate: resource.Test runs its own automatic post-apply refresh
+// check after every step, which consumes list calls the test does not
+// control the timing of directly - counting sidesteps needing to guess
+// exactly which internal call that refresh maps to on any given version.
+type mockOrgUserRoleFlakyServer struct {
+	*mockOrgUserRoleServer
+	mu           sync.Mutex
+	listCalls    int
+	failOnCallNo int
+}
+
+func newMockOrgUserRoleFlakyServer(t *testing.T, failOnCallNo int) (*httptest.Server, *mockOrgUserRoleFlakyServer) {
+	t.Helper()
+	inner := &mockOrgUserRoleServer{
+		email:           "flaky-org-role-mock@example.com",
+		identityID:      "identity-flaky-mock",
+		userID:          "usr_flaky_mock",
+		baseRole:        "collaborator",
+		additionalRoles: []string{},
+	}
+	s := &mockOrgUserRoleFlakyServer{mockOrgUserRoleServer: inner, failOnCallNo: failOnCallNo}
+	server := httptest.NewServer(http.HandlerFunc(s.handleFlaky))
+	t.Cleanup(server.Close)
+	return server, s
+}
+
+func (s *mockOrgUserRoleFlakyServer) handleFlaky(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == "/api/v2/organization_collaborators" {
+		s.mu.Lock()
+		s.listCalls++
+		callNo := s.listCalls
+		s.mu.Unlock()
+		if callNo == s.failOnCallNo {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = fmt.Fprint(w, `{"error":{"detail":"simulated transient failure, not a real not-found"}}`)
+			return
+		}
+	}
+	s.handle(w, r)
+}
+
+// TestAccOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState
+// is criterion 31: a 500 (or any non-404) from Read's underlying list call
+// must produce a real Terraform error, and the resource must remain
+// recoverable in state afterward - not be silently dropped the way a
+// genuine 404 correctly is. The injected failure lands on the SECOND list
+// call (Create's own internal read-back is the first and must succeed, so
+// the resource genuinely gets created; resource.Test's own automatic
+// post-apply refresh check is the second, and that is where the 500
+// hits) - proven by: (1) the first step failing with the expected error
+// while the resource nonetheless exists (Create's apply itself succeeded
+// before the refresh-check ran), and (2) a following step, mock healthy
+// again, succeeding with a clean plan against the SAME resource rather
+// than a fresh create - which is what a wrongly-executed RemoveResource
+// would have forced instead.
+func TestAccOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	httpServer, mock := newMockOrgUserRoleFlakyServer(t, 3)
+	const addr = "anyscale_organization_user_role.mock"
+
+	config := testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
+resource "anyscale_organization_user_role" "mock" {
+  email     = %[1]q
+  base_role = "collaborator"
+}
+`, mock.email)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Create succeeds (list call #1). resource.Test's own automatic
+				// post-apply refresh then triggers list call #2, which hits the
+				// injected 500 - surfacing as this step's error, not silence.
+				Config:      config,
+				ExpectError: regexp.MustCompile(`Could Not Read Organization User Role`),
+			},
+			{
+				// Mock is healthy for every call from here on. If the earlier 500
+				// had wrongly removed the resource from state, this step would
+				// show a CREATE. It must instead be a clean no-op against the
+				// SAME resource Create actually wrote.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(addr, "base_role", "collaborator"),
+			},
+		},
+	})
 }
