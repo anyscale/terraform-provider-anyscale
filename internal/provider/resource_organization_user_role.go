@@ -294,24 +294,22 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				// in any organization without the feature - consistency would cost the
 				// resource. The cloud roles endpoint is ungated; this one is not.
 				//
-				// UseStateForUnknown is PENDING A REAL PLAN RUN (Gate 2). Reasoning, to be
-				// confirmed or overturned by that run rather than by re-reading this:
+				// UseStateForUnknown, CONFIRMED by a real plan run rather than reasoning:
+				// an omitted deny_roles otherwise shows "known after apply" on every plan,
+				// and omitting it is the common case since that is how a config stays off
+				// the gated endpoint.
 				//
-				// Without it, an omitted deny_roles shows "known after apply" on every plan
-				// - and omitting it is the COMMON case, since that is how a user stays off
-				// the gated endpoint. With it, the prior value carries forward and the plan
-				// is quiet.
+				// The usual objection - that pinning a writable attribute hides drift -
+				// does not apply to an Optional+Computed attribute whose config is null:
+				// null config means the user expressed no opinion, so there is no declared
+				// value for a refreshed one to disagree with. Nor does the
+				// no-UseStateForUnknown-on-volatile-state rule bite: org deny roles change
+				// only when an admin changes them.
 				//
-				// The usual objection - that pinning a writable attribute hides drift - does
-				// not apply to an Optional+Computed attribute whose config is null: null
-				// config means the user has expressed no opinion, so there is no declared
-				// value for a refreshed one to disagree with. That is inherent to
-				// Optional+Computed, not something this modifier introduces. Nor does the
-				// no-UseStateForUnknown-on-volatile-state rule bite here: org deny roles
-				// change only when an admin changes them.
-				//
-				// If the plan run shows the opposite, REMOVE this modifier - do not keep it
-				// because the reasoning above reads well.
+				// IMPORTANT consequence, and the source of a real bug: this makes the PLAN
+				// carry the prior value when config omits the attribute. So the plan is not
+				// a usable signal for "did the user declare this" - see
+				// denyRolesDeclaredInConfig, which reads Config for exactly that reason.
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
 				},
