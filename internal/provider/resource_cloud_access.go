@@ -3,7 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -40,9 +43,20 @@ import (
 //     that cloud's projects - anything else 422s. Split across two resources
 //     that surfaces as a confusing apply-time 422; here it is a plan-time error.
 
+// cloudAccessReadOnlyDenyRole is the cloud deny role that constrains which
+// project roles a member may hold; cloudAccessReadOnlyProjectRole is the only
+// project role compatible with it. Note the project vocabulary uses "readonly"
+// while the cloud base-role vocabulary uses "writer" not "write" - the two
+// scopes genuinely differ and are not interchangeable.
+const (
+	cloudAccessReadOnlyDenyRole    = "cloud_read_only"
+	cloudAccessReadOnlyProjectRole = "readonly"
+)
+
 var (
-	_ resource.Resource              = &CloudAccessResource{}
-	_ resource.ResourceWithConfigure = &CloudAccessResource{}
+	_ resource.Resource                   = &CloudAccessResource{}
+	_ resource.ResourceWithValidateConfig = &CloudAccessResource{}
+	_ resource.ResourceWithConfigure      = &CloudAccessResource{}
 )
 
 // NewCloudAccessResource returns a new anyscale_cloud_access resource.
@@ -254,4 +268,101 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 
 func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	resp.Diagnostics.AddError("Resource Not Implemented", cloudAccessNotWiredDetail)
+}
+
+// ValidateConfig enforces the invariants that can be checked from configuration
+// alone. The empty-member-set guard is NOT here and cannot be: it has to compare
+// config against prior state ("is the cloud currently non-empty?"), and
+// ValidateConfigRequest carries only Config. That guard lives in ModifyPlan,
+// whose request carries Config, State and Plan.
+func (r *CloudAccessResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config CloudAccessResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Unknown at validate time means a value computed from another resource; there
+	// is nothing to check yet and Terraform will validate again once it is known.
+	if config.Member.IsNull() || config.Member.IsUnknown() {
+		return
+	}
+
+	members := make(map[string]CloudAccessMemberModel, len(config.Member.Elements()))
+	resp.Diagnostics.Append(config.Member.ElementsAs(ctx, &members, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Terraform already rejects duplicate map keys, but its comparison is a
+	// case-SENSITIVE string match, so "Alice@x.com" and "alice@x.com" are two
+	// valid keys to it and one identity to Anyscale. Left alone, the second grant
+	// silently overwrites the first and the config looks like it declared two
+	// different people. Catch it here, naming BOTH spellings so the user can see
+	// which line to fix.
+	seen := make(map[string]string, len(members))
+	for email := range members {
+		folded := strings.ToLower(strings.TrimSpace(email))
+		if first, dup := seen[folded]; dup {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("member"),
+				"Duplicate Member Email",
+				fmt.Sprintf("%q and %q differ only in capitalization or surrounding whitespace, but Anyscale treats "+
+					"them as the same person. Terraform's own duplicate-key check is case-sensitive and will not "+
+					"catch this. Remove one of them.", first, email),
+			)
+			continue
+		}
+		seen[folded] = email
+	}
+
+	for email, m := range members {
+		memberPath := path.Root("member").AtMapKey(email)
+
+		// base_role is Required, so it cannot be null - but Required does not stop an
+		// empty string, which would reach the API as a role that does not exist.
+		if !m.BaseRole.IsUnknown() && strings.TrimSpace(m.BaseRole.ValueString()) == "" {
+			resp.Diagnostics.AddAttributeError(
+				memberPath.AtName("base_role"),
+				"Empty Cloud Role",
+				fmt.Sprintf("Member %q has an empty base_role. Every member of a cloud must have a role; if they "+
+					"should not have access, remove them from the member map instead.", email),
+			)
+		}
+
+		if m.Projects.IsNull() || m.Projects.IsUnknown() || m.DenyRoles.IsNull() || m.DenyRoles.IsUnknown() {
+			continue
+		}
+
+		var denyRoles []string
+		resp.Diagnostics.Append(m.DenyRoles.ElementsAs(ctx, &denyRoles, false)...)
+		var projects map[string]string
+		resp.Diagnostics.Append(m.Projects.ElementsAs(ctx, &projects, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		// A member carrying cloud_read_only can only hold readonly on this cloud's
+		// projects - the backend 422s anything else. This is genuinely a cross-field
+		// constraint spanning a member's cloud role and their project roles, which is
+		// exactly why the two live in one resource: split apart, this could only ever
+		// surface as a confusing failure partway through an apply.
+		if !slices.Contains(denyRoles, cloudAccessReadOnlyDenyRole) {
+			continue
+		}
+		for projectID, level := range projects {
+			if level == cloudAccessReadOnlyProjectRole {
+				continue
+			}
+			resp.Diagnostics.AddAttributeError(
+				memberPath.AtName("projects").AtMapKey(projectID),
+				"Project Role Conflicts With cloud_read_only",
+				fmt.Sprintf("Member %q has the %q deny role on this cloud, so they can only be granted %q on its "+
+					"projects, but project %s grants %q. Anyscale rejects this combination. Either remove %q from "+
+					"their deny_roles or lower this project role to %q.",
+					email, cloudAccessReadOnlyDenyRole, cloudAccessReadOnlyProjectRole, projectID, level,
+					cloudAccessReadOnlyDenyRole, cloudAccessReadOnlyProjectRole),
+			)
+		}
+	}
 }
