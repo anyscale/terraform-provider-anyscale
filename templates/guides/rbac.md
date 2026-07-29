@@ -22,7 +22,7 @@ migrating from a script-based user-management workflow onto this provider.
 | Scope | Resource | Manages |
 |---|---|---|
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user exists in the organization at all. Import-only - it cannot create a member, and destroying it evicts them. |
-| Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `additional_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
+| Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | Cloud and project role | [`anyscale_cloud_access`](../resources/cloud_access.md) | Every user's access to one cloud, including their access to projects inside that cloud. Authoritative over the cloud's **whole** member list. |
 | Everything, read-only | [`anyscale_organization_user_access`](../data-sources/organization_user_access.md) | A single lookup for one user's role across every scope at once. |
 
@@ -56,15 +56,15 @@ explained anywhere else in this provider's documentation today:
    `base_role = "owner"` and `deny_roles = ["cloud_read_only"]` is not "read-only" the way a project
    collaborator with `permission_level = "readonly"` is - the cloud user still holds the underlying
    `owner` role, just with reads enforced on top of it.
-4. **Organization `additional_roles` and cloud `deny_roles` are not the same mechanism, and do not even
-   point the same direction internally.** Cloud `deny_roles` is unambiguously a restriction - its only
-   value, `cloud_read_only`, narrows what a base role can do. Organization `additional_roles` is less
-   settled: `image_reader` reads as a capability grant, while `image_reader_no_base_images` reads as a
-   restriction on that same grant - two values in one field that do not agree on a direction between
-   themselves. That is exactly why this provider keeps the attribute named `additional_roles`, the
-   API's own neutral name, rather than folding it into `deny_roles` alongside the cloud attribute: a
-   name that asserts a single direction would already be wrong for one of its own two values. Check
-   this attribute's own schema description for the current, precise account of what each value does.
+4. **Organization `deny_roles` and cloud `deny_roles` are the same mechanism, and share the name
+   deliberately.** Both are a restriction layered on top of a separate base role, never a tier by
+   themselves - an organization member with `base_role = "collaborator"` and
+   `deny_roles = ["image_reader_no_base_images"]` still holds the underlying `collaborator` role, just
+   with container-image capability subtracted from it, the same shape as the cloud example above.
+   Where the two genuinely differ is blast radius, not mechanism: an organization deny role overrides
+   even an organization owner's implicit permissions, while a cloud deny role explicitly does **not**
+   restrict organization or project owners. Same name, same restriction-on-a-base-role mechanism,
+   different reach - check which scope you're granting at before assuming an owner is unaffected.
 
 None of these are hypothetical. The first real hand-written configuration for the nested cloud/project
 shape in this guide got two of them wrong on the first attempt - `permission_level = "read"` (not a
@@ -83,7 +83,7 @@ reality by hand, is to make Terraform the source of truth for who has access to 
 drift automatically.
 
 `anyscale_organization_user_role` is **not** authoritative in that sense. It manages the role of the
-one user it names - `base_role` and `additional_roles` for that person - and has no opinion about
+one user it names - `base_role` and `deny_roles` for that person - and has no opinion about
 anyone else. A person nobody wrote a resource for is invisible to it, not revoked by it. Organization
 membership follows the same rule for the same reason: Terraform evicting every organization member it
 wasn't told about is a much larger blast radius than most practitioners want by default, and the
