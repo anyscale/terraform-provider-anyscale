@@ -280,7 +280,8 @@ type ProjectResult struct {
 
 // ProjectCollaboratorListResponse for listing collaborators. Read-only: the
 // anyscale_project RESOURCE no longer manages collaborators (the collaborator
-// block was removed in v0.25.0 in favour of anyscale_cloud_access), so the
+// block was removed in v0.25.0; there is no in-provider replacement yet, so
+// project collaborators are managed through the console or API), so the
 // batch-create/update request models that went with it are gone too. The
 // anyscale_project DATA SOURCE still reports the project's collaborators, and
 // is the only consumer of this type and ProjectCollaboratorResult below.

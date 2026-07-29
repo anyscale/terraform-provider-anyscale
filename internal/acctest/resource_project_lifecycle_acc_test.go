@@ -24,8 +24,9 @@ import (
 // mock, gated only by the ordinary SkipIfNotAcceptanceTest, is the one that
 // actually runs in CI.
 //
-// v0.25.0: the collaborator block was removed from anyscale_project (project
-// access is managed through anyscale_cloud_access instead), so the
+// v0.25.0: the collaborator block was removed from anyscale_project (with no
+// in-provider replacement in that release - project collaborators are managed
+// through the console or API for now), so the
 // collaborator lifecycle test (old AC2) and the write-permission symmetry test
 // (old AC5) that used to live here are gone, along with the mock's
 // collaborator endpoints and its {owner,write,readonly} enum guard - the
