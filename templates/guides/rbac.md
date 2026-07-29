@@ -22,7 +22,7 @@ migrating from a script-based user-management workflow onto this provider.
 | Scope | Resource | Manages |
 |---|---|---|
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user exists in the organization at all. Import-only - it cannot create a member, and destroying it evicts them. |
-| Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
+| Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `additional_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | Cloud and project role | [`anyscale_cloud_access`](../resources/cloud_access.md) | Every user's access to one cloud, including their access to projects inside that cloud. Authoritative over the cloud's **whole** member list. |
 | Everything, read-only | [`anyscale_organization_user_access`](../data-sources/organization_user_access.md) | A single lookup for one user's role across every scope at once. |
 
@@ -56,11 +56,15 @@ explained anywhere else in this provider's documentation today:
    `base_role = "owner"` and `deny_roles = ["cloud_read_only"]` is not "read-only" the way a project
    collaborator with `permission_level = "readonly"` is - the cloud user still holds the underlying
    `owner` role, just with reads enforced on top of it.
-4. **Organization `deny_roles` and cloud `deny_roles` are the same mechanism** - a restriction layered
-   on a base role - and share a name, but the organization side is currently read-only (visibility
-   only; the write path is feature-gated) while the cloud side is fully writable. Two resources using
-   an identical field name with different capabilities is its own small trap: don't assume writing
-   one behaves like writing the other.
+4. **Organization `additional_roles` and cloud `deny_roles` are not the same mechanism, and do not even
+   point the same direction internally.** Cloud `deny_roles` is unambiguously a restriction - its only
+   value, `cloud_read_only`, narrows what a base role can do. Organization `additional_roles` is less
+   settled: `image_reader` reads as a capability grant, while `image_reader_no_base_images` reads as a
+   restriction on that same grant - two values in one field that do not agree on a direction between
+   themselves. That is exactly why this provider keeps the attribute named `additional_roles`, the
+   API's own neutral name, rather than folding it into `deny_roles` alongside the cloud attribute: a
+   name that asserts a single direction would already be wrong for one of its own two values. Check
+   this attribute's own schema description for the current, precise account of what each value does.
 
 None of these are hypothetical. The first real hand-written configuration for the nested cloud/project
 shape in this guide got two of them wrong on the first attempt - `permission_level = "read"` (not a
@@ -79,11 +83,19 @@ reality by hand, is to make Terraform the source of truth for who has access to 
 drift automatically.
 
 `anyscale_organization_user_role` is **not** authoritative in that sense. It manages the role of the
-one user it names - `base_role` and `deny_roles` for that person - and has no opinion about anyone
-else. A person nobody wrote a resource for is invisible to it, not revoked by it. Organization
+one user it names - `base_role` and `additional_roles` for that person - and has no opinion about
+anyone else. A person nobody wrote a resource for is invisible to it, not revoked by it. Organization
 membership follows the same rule for the same reason: Terraform evicting every organization member it
 wasn't told about is a much larger blast radius than most practitioners want by default, and the
 underlying script this provider is meant to replace only does that behind an explicit, separate flag.
+
+One field on this resource is deliberately stricter than its cloud counterpart: `base_role` is
+**required**, with no default value. A default would need to pick some role for a bare first `apply`
+against a person who already holds real access - and if that default were ever lower than what someone
+actually holds, adopting them under Terraform would silently demote them on the very first `apply`,
+with nothing unusual in the plan to catch it. Stating the role explicitly every time trades a small
+amount of config brevity for making sure a demotion, if it ever happens, is a value you typed and can
+see in the diff - never a fallback you didn't choose.
 
 Because `anyscale_cloud_access` is authoritative, and because the backend has no `DELETE` that
 removes a role without also removing the underlying cloud membership entirely, a revoke can fail in a
