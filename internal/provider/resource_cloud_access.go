@@ -56,6 +56,7 @@ const (
 var (
 	_ resource.Resource                   = &CloudAccessResource{}
 	_ resource.ResourceWithValidateConfig = &CloudAccessResource{}
+	_ resource.ResourceWithModifyPlan     = &CloudAccessResource{}
 	_ resource.ResourceWithConfigure      = &CloudAccessResource{}
 )
 
@@ -365,4 +366,76 @@ func (r *CloudAccessResource) ValidateConfig(ctx context.Context, req resource.V
 			)
 		}
 	}
+}
+
+// ModifyPlan implements the empty-member-set guard.
+//
+// This CANNOT live in ValidateConfig. The question is "would this apply empty a
+// cloud that currently has members?", which is inherently a comparison against
+// prior state, and ValidateConfigRequest carries only Config. ModifyPlan
+// receives Config, State and Plan, so it is the only hook that can ask it.
+//
+// The guard exists because an empty member map is usually an accident: a
+// for_each over a mistyped or missing upstream group renders byte-identically
+// to a deliberate purge. It is deliberately NOT satisfied by distinguishing an
+// omitted map from an empty one, since the accident produces exactly the empty
+// one - the opt-in has to live outside the data path it protects.
+func (r *CloudAccessResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// No prior state means a create: there are no members to revoke, so an empty
+	// map is harmless. No plan means a destroy, which is governed by the
+	// prevent_destroy guidance on the resource page rather than by this attribute.
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var plan CloudAccessResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// An unknown member map is computed from something not yet resolved; there is
+	// nothing to judge and Terraform will re-plan once it is known.
+	if plan.Member.IsUnknown() {
+		return
+	}
+	if len(plan.Member.Elements()) > 0 {
+		return
+	}
+
+	var state CloudAccessResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	currentCount := len(state.Member.Elements())
+	if currentCount == 0 {
+		// Already empty - emptying it again revokes nobody.
+		return
+	}
+
+	// Unknown means the value is computed and Terraform cannot confirm the opt-in
+	// at plan time. Treat that as NOT opted in: the whole point is that this
+	// decision is reviewable in the plan, and a guard that passes because its own
+	// signal is unresolved is not a guard.
+	if plan.AllowEmptyMemberSet.ValueBool() && !plan.AllowEmptyMemberSet.IsUnknown() {
+		return
+	}
+
+	cloudID := plan.CloudID.ValueString()
+	if cloudID == "" {
+		cloudID = state.CloudID.ValueString()
+	}
+
+	resp.Diagnostics.AddAttributeError(
+		path.Root("member"),
+		"Refusing To Revoke Every Member Of This Cloud",
+		fmt.Sprintf("This apply would remove all %d member(s) from cloud %s, because the member map is empty and "+
+			"this resource is authoritative over that cloud's members.\n\n"+
+			"This is usually an accident - a for_each over a mistyped or missing group produces an empty map that "+
+			"looks identical to a deliberate purge. Check the expression feeding `member` first.\n\n"+
+			"If revoking all %d member(s) is genuinely what you want, set `allow_empty_member_set = true` on this "+
+			"resource.", currentCount, cloudID, currentCount),
+	)
 }

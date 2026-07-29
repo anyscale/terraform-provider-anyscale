@@ -503,3 +503,119 @@ func TestCloudAccessValidateConfig_MemberMapShortCircuits(t *testing.T) {
 		})
 	}
 }
+
+// runCloudAccessModifyPlan drives the real ModifyPlan with a prior state and a
+// planned state, which is the only way to exercise the empty-member-set guard:
+// the question it answers ("would this empty a cloud that currently has
+// members?") needs both, and is precisely why the guard cannot live in
+// ValidateConfig.
+func runCloudAccessModifyPlan(t *testing.T, priorState, planned *CloudAccessResourceModel) diag.Diagnostics {
+	t.Helper()
+	ctx := context.Background()
+
+	r := &CloudAccessResource{}
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	rawType := schemaResp.Schema.Type().TerraformType(ctx)
+
+	build := func(m *CloudAccessResourceModel, what string) tftypes.Value {
+		if m == nil {
+			// A null raw value is how the framework represents "no prior state"
+			// (create) or "no plan" (destroy).
+			return tftypes.NewValue(rawType, nil)
+		}
+		holder := tfsdk.Plan{Schema: schemaResp.Schema, Raw: tftypes.NewValue(rawType, nil)}
+		if diags := holder.Set(ctx, m); diags.HasError() {
+			t.Fatalf("failed to build %s fixture: %v", what, diags)
+		}
+		return holder.Raw
+	}
+
+	resp := &resource.ModifyPlanResponse{}
+	r.ModifyPlan(ctx, resource.ModifyPlanRequest{
+		State: tfsdk.State{Schema: schemaResp.Schema, Raw: build(priorState, "prior state")},
+		Plan:  tfsdk.Plan{Schema: schemaResp.Schema, Raw: build(planned, "plan")},
+	}, resp)
+	return resp.Diagnostics
+}
+
+// TestCloudAccessModifyPlan_RefusesToEmptyACloudThatHasMembers covers the single
+// most destructive thing this resource can do by accident.
+//
+// The guard's whole reason for existing is that a for_each over a mistyped or
+// missing upstream group renders as an EMPTY member map, byte-identical to a
+// deliberate purge - so the opt-in is a separate boolean rather than a
+// distinction drawn from the map itself.
+func TestCloudAccessModifyPlan_RefusesToEmptyACloudThatHasMembers(t *testing.T) {
+	populated := cloudAccessMemberMap(map[string]attr.Value{
+		"alice@example.com": cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+		"bob@example.com":   cloudAccessMember("collaborator", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+	})
+	empty := cloudAccessMemberMap(map[string]attr.Value{})
+
+	emptyPlan := func(allow bool) *CloudAccessResourceModel {
+		m := cloudAccessConfigModel(empty)
+		m.AllowEmptyMemberSet = types.BoolValue(allow)
+		return &m
+	}
+	priorWithMembers := func() *CloudAccessResourceModel {
+		m := cloudAccessConfigModel(populated)
+		return &m
+	}
+
+	t.Run("emptying a populated cloud without the opt-in is refused, naming the count", func(t *testing.T) {
+		diags := runCloudAccessModifyPlan(t, priorWithMembers(), emptyPlan(false))
+
+		d := cloudAccessFindError(diags, "Refusing To Revoke Every Member Of This Cloud")
+		if d == nil {
+			t.Fatalf("expected the empty-member-set guard to refuse this plan - without it, a mistyped group name silently revokes every member of the cloud. Got: %v", diags)
+		}
+		// The count is the blast radius. "Refusing to empty member set" without it
+		// tells the user nothing about what they nearly did.
+		if !strings.Contains(d.Detail(), "2 member(s)") {
+			t.Errorf("the diagnostic must state HOW MANY members would be revoked; got detail: %s", d.Detail())
+		}
+		if !strings.Contains(d.Detail(), "cld_cloudaccesstest") {
+			t.Errorf("the diagnostic must name the cloud; got detail: %s", d.Detail())
+		}
+		if !strings.Contains(d.Detail(), "allow_empty_member_set") {
+			t.Errorf("the diagnostic must name the attribute that permits this; got detail: %s", d.Detail())
+		}
+	})
+
+	t.Run("emptying a populated cloud WITH the opt-in is allowed", func(t *testing.T) {
+		diags := runCloudAccessModifyPlan(t, priorWithMembers(), emptyPlan(true))
+		if diags.HasError() {
+			t.Fatalf("allow_empty_member_set = true is the documented way to do this deliberately; it must not be blocked. Got: %v", diags)
+		}
+	})
+
+	t.Run("creating with an empty member map is allowed - there is nobody to revoke", func(t *testing.T) {
+		// nil prior state is how the framework represents a create.
+		diags := runCloudAccessModifyPlan(t, nil, emptyPlan(false))
+		if diags.HasError() {
+			t.Fatalf("an empty member map on CREATE revokes nobody and must not be blocked. Got: %v", diags)
+		}
+	})
+
+	t.Run("a non-empty plan is never blocked", func(t *testing.T) {
+		planned := cloudAccessConfigModel(populated)
+		diags := runCloudAccessModifyPlan(t, priorWithMembers(), &planned)
+		if diags.HasError() {
+			t.Fatalf("a plan that declares members must never trip the empty-set guard. Got: %v", diags)
+		}
+	})
+
+	t.Run("destroy is not blocked by this guard", func(t *testing.T) {
+		// A nil plan is a destroy. It is governed by prevent_destroy guidance on the
+		// resource page, not by this attribute - blocking it here would make the
+		// resource impossible to remove.
+		diags := runCloudAccessModifyPlan(t, priorWithMembers(), nil)
+		if diags.HasError() {
+			t.Fatalf("destroy must not be blocked by the empty-member-set guard. Got: %v", diags)
+		}
+	})
+}
