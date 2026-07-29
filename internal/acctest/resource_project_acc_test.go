@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -48,22 +47,15 @@ func TestAccProjectResource_Basic(t *testing.T) {
 					},
 				},
 			},
-			// ImportState testing
+			// ImportState testing. Nothing is ignored: the collaborator block
+			// (removed in v0.25.0) was the one attribute import used to
+			// recover beyond what this config declares, because the API
+			// auto-adds a creator-owner collaborator to every project. With
+			// that block gone, import must reproduce the applied state exactly.
 			{
 				ResourceName:      "anyscale_project.test",
 				ImportState:       true,
 				ImportStateVerify: true,
-				ImportStateVerifyIgnore: []string{
-					// F13: import now recovers the real collaborator list,
-					// which always includes the API's auto-added
-					// creator-owner even though this config never declares a
-					// collaborator block. That's correct, honest behavior
-					// (see PROJECT-API-SYNC-DESIGN.md F13) -- this config
-					// just isn't the place asserting collaborator semantics;
-					// TestAccProjectResource_WriteCollaboratorSymmetry does
-					// that with no ignore on this attribute.
-					"collaborator",
-				},
 			},
 		},
 	})
@@ -109,117 +101,6 @@ func TestAccProjectResource_WithDescription(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("anyscale_project.test", plancheck.ResourceActionReplace),
 					},
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-		},
-	})
-}
-
-// TestAccProjectResource_DescriptionOmittedSurvivesUpdate is a regression test for
-// task 452e7154: description is Optional+Computed and, when omitted from config,
-// the framework's default proposed value for it goes unknown on ANY update to the
-// resource (not just changes to description itself). A plain RequiresReplace can't
-// tell "still omitted" apart from "changed" in that situation, so it used to force a
-// full project replace on e.g. a collaborator-only edit even though description was
-// never touched. This asserts that case is now a plain in-place update.
-func TestAccProjectResource_DescriptionOmittedSurvivesUpdate(t *testing.T) {
-	t.Parallel()
-	SkipIfNotAcceptanceTest(t)
-
-	cloudID := GetTestCloudID(t)
-
-	testEmail1 := os.Getenv("ANYSCALE_TEST_USER_EMAIL_1")
-	testEmail2 := os.Getenv("ANYSCALE_TEST_USER_EMAIL_2")
-	if testEmail1 == "" || testEmail2 == "" {
-		t.Skip("ANYSCALE_TEST_USER_EMAIL_1 and ANYSCALE_TEST_USER_EMAIL_2 not set, skipping collaborator test")
-	}
-
-	projectName := UniqueName(t, "project-desc-omit")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
-		Steps: []resource.TestStep{
-			{
-				Config: testAccProjectResourceDescriptionOmittedConfig(cloudID, projectName, testEmail1, testEmail2),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "2"),
-					resource.TestCheckResourceAttrSet("anyscale_project.test", "description"),
-					testAccCheckProjectExistsInAPI("anyscale_project.test"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-			// Collaborator-only edit, description still omitted from config: must be
-			// a plain update, never a replace, and must not perpetually diff.
-			{
-				Config: testAccProjectResourceDescriptionOmittedUpdatedConfig(cloudID, projectName, testEmail1),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "1"),
-					resource.TestCheckResourceAttrSet("anyscale_project.test", "description"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_project.test", plancheck.ResourceActionUpdate),
-					},
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-		},
-	})
-}
-
-func TestAccProjectResource_WithCollaborators(t *testing.T) {
-	t.Parallel()
-	SkipIfNotAcceptanceTest(t)
-
-	cloudID := GetTestCloudID(t)
-
-	// Note: This test requires valid test user emails
-	// Skip if not provided
-	testEmail1 := os.Getenv("ANYSCALE_TEST_USER_EMAIL_1")
-	testEmail2 := os.Getenv("ANYSCALE_TEST_USER_EMAIL_2")
-	if testEmail1 == "" || testEmail2 == "" {
-		t.Skip("ANYSCALE_TEST_USER_EMAIL_1 and ANYSCALE_TEST_USER_EMAIL_2 not set, skipping collaborator test")
-	}
-
-	projectName := UniqueName(t, "project-collab")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
-		Steps: []resource.TestStep{
-			// Create with collaborators
-			{
-				Config: testAccProjectResourceWithCollaboratorsConfig(cloudID, projectName, testEmail1, testEmail2),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_project.test", "name", projectName),
-					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "2"),
-					testAccCheckProjectExistsInAPI("anyscale_project.test"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-			// Update collaborators (remove one, add different permission)
-			{
-				Config: testAccProjectResourceWithUpdatedCollaboratorsConfig(cloudID, projectName, testEmail1),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "1"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},
@@ -282,128 +163,6 @@ resource "anyscale_project" "test" {
   description = "%s"
 }
 `, projectName, cloudID, description)
-}
-
-func testAccProjectResourceWithCollaboratorsConfig(cloudID, projectName, email1, email2 string) string {
-	return fmt.Sprintf(`
-resource "anyscale_project" "test" {
-  name        = "%s"
-  cloud_id    = "%s"
-  description = "Test project with collaborators"
-
-  collaborator {
-    email            = "%s"
-    permission_level = "owner"
-  }
-
-  collaborator {
-    email            = "%s"
-    permission_level = "write"
-  }
-}
-`, projectName, cloudID, email1, email2)
-}
-
-func testAccProjectResourceWithUpdatedCollaboratorsConfig(cloudID, projectName, email1 string) string {
-	return fmt.Sprintf(`
-resource "anyscale_project" "test" {
-  name        = "%s"
-  cloud_id    = "%s"
-  description = "Test project with collaborators"
-
-  collaborator {
-    email            = "%s"
-    permission_level = "write"
-  }
-}
-`, projectName, cloudID, email1)
-}
-
-// testAccProjectResourceDescriptionOmittedConfig deliberately has no `description`
-// argument at all: it must be left to the API-generated default, not just set to "".
-func testAccProjectResourceDescriptionOmittedConfig(cloudID, projectName, email1, email2 string) string {
-	return fmt.Sprintf(`
-resource "anyscale_project" "test" {
-  name     = "%s"
-  cloud_id = "%s"
-
-  collaborator {
-    email            = "%s"
-    permission_level = "owner"
-  }
-
-  collaborator {
-    email            = "%s"
-    permission_level = "write"
-  }
-}
-`, projectName, cloudID, email1, email2)
-}
-
-func testAccProjectResourceDescriptionOmittedUpdatedConfig(cloudID, projectName, email1 string) string {
-	return fmt.Sprintf(`
-resource "anyscale_project" "test" {
-  name     = "%s"
-  cloud_id = "%s"
-
-  collaborator {
-    email            = "%s"
-    permission_level = "write"
-  }
-}
-`, projectName, cloudID, email1)
-}
-
-func TestAccProjectResource_WithUserDataSource(t *testing.T) {
-	t.Parallel()
-	SkipIfNotAcceptanceTest(t)
-
-	cloudID := GetTestCloudID(t)
-	projectName := UniqueName(t, "project-datasource")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             NewAPIDestroyCheck("anyscale_project", "/api/v2/projects/%s"),
-		Steps: []resource.TestStep{
-			// Create project with current user as collaborator using data source
-			{
-				Config: testAccProjectResourceWithUserDataSourceConfig(cloudID, projectName),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_project.test", "name", projectName),
-					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.#", "1"),
-					resource.TestCheckResourceAttrPair(
-						"anyscale_project.test", "collaborator.0.email",
-						"data.anyscale_user.current", "email",
-					),
-					resource.TestCheckResourceAttr("anyscale_project.test", "collaborator.0.permission_level", "owner"),
-					testAccCheckProjectExistsInAPI("anyscale_project.test"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-		},
-	})
-}
-
-func testAccProjectResourceWithUserDataSourceConfig(cloudID, projectName string) string {
-	return fmt.Sprintf(`
-data "anyscale_user" "current" {}
-
-resource "anyscale_project" "test" {
-  name        = "%s"
-  cloud_id    = "%s"
-  description = "Test project using user data source"
-
-  collaborator {
-    email            = data.anyscale_user.current.email
-    permission_level = "owner"
-  }
-}
-`, projectName, cloudID)
 }
 
 // TestAccProjectResource_Disappears verifies that an out-of-band project
