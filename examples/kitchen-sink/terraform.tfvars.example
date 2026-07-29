@@ -50,7 +50,7 @@ customer_ingress_cidr_ranges = "203.0.113.0/24,198.51.100.42/32"
 
 # --- Organization: sends a REAL email if set -----------------------------------------------------
 # invite_email = "you+kitchen-sink@example.com"
-# new_member_permission_level = "collaborator" # only used once you uncomment the collaborator block
+# new_member_base_role = "collaborator" # only used once you uncomment the organization_user_role block
 
 # --- Service data sources: requires an already-running service to be meaningful ------------------
 # existing_service_name = "my-service"
