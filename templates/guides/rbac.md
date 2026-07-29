@@ -115,6 +115,26 @@ different rules, and the difference matters:
 This asymmetry is intentional: Terraform must never silently fail to apply something you asked for,
 but it may - and here, must - tell you plainly when it cannot undo something it never did.
 
+**These two resources' destroy behaviors are opposites, and it is worth holding both in mind at once
+rather than learning one page at a time.** `anyscale_cloud_access` destroy **revokes** a cloud's
+members; `anyscale_organization_user_role` destroy **leaves a person's role in place** (details below).
+Presented separately, that reads like one of them is a bug. It isn't - one rule produces both outcomes,
+applied to two different object models: a destroy removes what a resource has authority over, and only
+where an absent state actually exists for the thing it manages. `anyscale_cloud_access`'s authority is a
+cloud's member list, and "not a member of this cloud" is a real, reachable state, so destroying it
+revokes those members - removing the grants **is** removing the thing it manages.
+`anyscale_organization_user_role`'s authority is one user's role value, and there is no "no base role"
+state - every organization member always has one - so there is nothing for destroy to remove, only
+something it could change, and changing it would reach past this resource's own authority into that
+person's org-wide cloud access.
+Same rule, opposite outcomes, because an absent state exists for one and not the other.
+
+The sharp edges point in opposite directions too, which is exactly why a reader of only one resource's
+page tends to generalize the wrong instinct to the other: `anyscale_organization_user_role`'s destroy
+can **leave a privilege behind** - an owner stays an owner (see below). `anyscale_cloud_access`'s destroy
+can **remove access at scale**, including through a typo'd `cloud_id` that this resource has no way to
+detect (see [Typo protection](#typo-protection-what-is-guarded-and-what-genuinely-is-not), below).
+
 ## Destroying `anyscale_organization_user_role`: what actually happens
 
 `terraform destroy` on this resource does **not** revert or remove the person's role the way destroying
@@ -146,6 +166,15 @@ Two more things worth knowing before you destroy this resource in practice: clea
 fail with the same feature-gate diagnostic a `deny_roles` apply can; and destroying your own role
 resource hits the same self-modification restriction every scope in this provider enforces - expect a
 clear error naming that restriction, not a silent no-op, if you try.
+
+**A typo'd `email` has the same consequence, through a different path.** `email` is the value that
+identifies which person this resource manages, and changing it - including fixing a typo - replaces the
+resource: Terraform destroys the instance for the old address and creates a new one for the corrected
+one. Destroying the old instance is exactly the state-only behavior described above, so the person at
+the mistyped address keeps whatever role Terraform last gave them, indefinitely, with no automatic
+cleanup - the same way a typo'd `cloud_id` on `anyscale_cloud_access` (below) leaves you authoritatively
+managing the wrong cloud with nothing inside the resource able to tell the difference. Read
+`terraform plan` before applying an `email` change for exactly this reason.
 
 ## Two rules the backend enforces across a cloud grant and its project grants
 
