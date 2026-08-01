@@ -26,7 +26,7 @@ func TestAccOrganizationUserResource_CreateFails(t *testing.T) {
 		// to verify the destroy of.
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccOrganizationUserResourceConfig("collaborator"),
+				Config:      testAccOrganizationUserResourceConfig(),
 				ExpectError: regexp.MustCompile("Direct Creation Not Supported"),
 			},
 		},
@@ -90,7 +90,7 @@ func TestAccOrganizationUserResource_Import(t *testing.T) {
 			// values directly instead, which is the documented alternative for
 			// exactly this situation.
 			{
-				Config:        testAccOrganizationUserResourceConfig("collaborator"),
+				Config:        testAccOrganizationUserResourceConfig(),
 				ResourceName:  "anyscale_organization_user.test",
 				ImportState:   true,
 				ImportStateId: testIdentityID,
@@ -105,77 +105,16 @@ func TestAccOrganizationUserResource_Import(t *testing.T) {
 					if s.Attributes["email"] == "" {
 						return fmt.Errorf("imported email is empty, want it populated from the API")
 					}
-					if s.Attributes["permission_level"] == "" {
-						return fmt.Errorf("imported permission_level is empty, want it populated from the API")
-					}
 					if s.Attributes["created_at"] == "" {
 						return fmt.Errorf("imported created_at is empty, want it populated from the API")
 					}
+					// Role fields are deliberately NOT asserted here: this
+					// resource manages membership only, and base_role /
+					// additional_roles / permission_level live on
+					// anyscale_organization_user_role and the
+					// organization_user(s) data sources instead.
 					return nil
 				},
-			},
-		},
-	})
-}
-
-func TestAccOrganizationUserResource_UpdatePermission(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-
-	// This test requires an existing user identity_id that can be safely modified
-	testIdentityID := os.Getenv("ANYSCALE_TEST_USER_IDENTITY_ID")
-	if testIdentityID == "" {
-		t.Skip("ANYSCALE_TEST_USER_IDENTITY_ID not set, skipping update test")
-	}
-	warnDestructiveCollaboratorTest(t, testIdentityID)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		// No CheckDestroy: API has no GET-by-ID for collaborators. See
-		// warnDestructiveCollaboratorTest above — destroy DOES remove this
-		// identity from the org for real; that is not something CheckDestroy
-		// could prevent even if it verified against it.
-		Steps: []resource.TestStep{
-			// Import as collaborator. ImportStatePersist is required here: without
-			// it, an import step's result is only checked in isolation and does
-			// NOT become the "current" state subsequent steps build on — since
-			// Create() is intentionally blocked for this resource, the next step
-			// would otherwise see no existing resource and attempt to create one
-			// from Config, hitting "Direct Creation Not Supported". This went
-			// uncaught for as long as it did purely because the test always
-			// skipped (no ANYSCALE_TEST_USER_IDENTITY_ID in CI) until a real
-			// identity was provided.
-			{
-				Config:             testAccOrganizationUserResourceConfig("collaborator"),
-				ResourceName:       "anyscale_organization_user.test",
-				ImportState:        true,
-				ImportStateId:      testIdentityID,
-				ImportStatePersist: true,
-			},
-			// Verify initial state
-			{
-				Config: testAccOrganizationUserResourceConfig("collaborator"),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_organization_user.test", "permission_level", "collaborator"),
-					resource.TestCheckResourceAttrSet("anyscale_organization_user.test", "email"),
-					resource.TestCheckResourceAttrSet("anyscale_organization_user.test", "created_at"),
-				),
-			},
-			// Update to owner
-			{
-				Config: testAccOrganizationUserResourceConfig("owner"),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_organization_user.test", "permission_level", "owner"),
-					testAccCheckCollaboratorPermissionInAPI("anyscale_organization_user.test", "owner"),
-				),
-			},
-			// Update back to collaborator
-			{
-				Config: testAccOrganizationUserResourceConfig("collaborator"),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_organization_user.test", "permission_level", "collaborator"),
-					testAccCheckCollaboratorPermissionInAPI("anyscale_organization_user.test", "collaborator"),
-				),
 			},
 		},
 	})
@@ -200,14 +139,14 @@ func TestAccOrganizationUserResource_Delete(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Import collaborator
 			{
-				Config:        testAccOrganizationUserResourceConfig("collaborator"),
+				Config:        testAccOrganizationUserResourceConfig(),
 				ResourceName:  "anyscale_organization_user.test",
 				ImportState:   true,
 				ImportStateId: testIdentityID,
 			},
 			// Verify it exists
 			{
-				Config: testAccOrganizationUserResourceConfig("collaborator"),
+				Config: testAccOrganizationUserResourceConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test"),
 				),
@@ -226,12 +165,15 @@ func TestAccOrganizationUserResource_Delete(t *testing.T) {
 
 // Helper functions
 
-func testAccOrganizationUserResourceConfig(permissionLevel string) string {
-	return fmt.Sprintf(`
+// testAccOrganizationUserResourceConfig builds the resource block. It takes no
+// arguments because the resource has no writable attribute: it manages
+// membership only, and every attribute is Computed. Roles moved to
+// anyscale_organization_user_role.
+func testAccOrganizationUserResourceConfig() string {
+	return `
 resource "anyscale_organization_user" "test" {
-  permission_level = %[1]q
 }
-`, permissionLevel)
+`
 }
 
 func testAccCheckCollaboratorExistsInAPI(resourceName string) resource.TestCheckFunc {
@@ -263,50 +205,6 @@ func testAccCheckCollaboratorExistsInAPI(resourceName string) resource.TestCheck
 		}
 
 		return fmt.Errorf("collaborator %s not found in organization_collaborators list (%d entries)", identityID, len(collaborators))
-	}
-}
-
-func testAccCheckCollaboratorPermissionInAPI(resourceName string, expectedPermission string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("Not found: %s", resourceName)
-		}
-
-		// Verify the permission level in state matches expected.
-		actualPermission := rs.Primary.Attributes["permission_level"]
-		if actualPermission != expectedPermission {
-			return fmt.Errorf("expected permission %s in state, got %s", expectedPermission, actualPermission)
-		}
-
-		// Also verify the API's own value, since this check is named InAPI
-		// and a state-only comparison alone cannot tell a real update from a
-		// plan that merely looks right locally.
-		identityID := rs.Primary.ID
-		if identityID == "" {
-			return fmt.Errorf("no collaborator ID is set")
-		}
-
-		client, err := GetTestClient()
-		if err != nil {
-			return fmt.Errorf("failed to get test client: %w", err)
-		}
-
-		collaborators, err := listAllCollaboratorsForTest(context.Background(), client)
-		if err != nil {
-			return fmt.Errorf("error fetching collaborators: %w", err)
-		}
-
-		for _, c := range collaborators {
-			if c.ID == identityID {
-				if c.PermissionLevel != expectedPermission {
-					return fmt.Errorf("expected permission %s in API, got %s", expectedPermission, c.PermissionLevel)
-				}
-				return nil
-			}
-		}
-
-		return fmt.Errorf("collaborator %s not found in organization_collaborators list while checking permission", identityID)
 	}
 }
 
@@ -353,7 +251,11 @@ func listAllCollaboratorsForTest(ctx context.Context, client *provider.Client) (
 // established in helpers_checkdestroy_test.go for the same reason: these
 // TestCheckFuncs can be called directly against a fake state and a mock
 // server without ever running a real resource.Test apply.
-func collaboratorState(identityID, permissionLevel string) *terraform.State {
+//
+// Only the identity ID is modeled: the checks below key off rs.Primary.ID
+// alone, and the resource itself now carries no writable attribute (roles moved
+// to anyscale_organization_user_role).
+func collaboratorState(identityID string) *terraform.State {
 	return &terraform.State{
 		Modules: []*terraform.ModuleState{
 			{
@@ -362,10 +264,8 @@ func collaboratorState(identityID, permissionLevel string) *terraform.State {
 					"anyscale_organization_user.test": {
 						Type: "anyscale_organization_user",
 						Primary: &terraform.InstanceState{
-							ID: identityID,
-							Attributes: map[string]string{
-								"permission_level": permissionLevel,
-							},
+							ID:         identityID,
+							Attributes: map[string]string{},
 						},
 					},
 				},
@@ -397,7 +297,7 @@ func TestCollaboratorExistsInAPI_SucceedsWhenPresent(t *testing.T) {
 		{ID: identityID, Email: "present@example.com", PermissionLevel: "collaborator"},
 	})
 
-	if err := testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test")(collaboratorState(identityID, "collaborator")); err != nil {
+	if err := testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test")(collaboratorState(identityID)); err != nil {
 		t.Fatalf("expected success for a collaborator present in the API list, got: %v", err)
 	}
 }
@@ -412,7 +312,7 @@ func TestCollaboratorExistsInAPI_FailsWhenAbsent(t *testing.T) {
 		{ID: "ident_someone_else", Email: "other@example.com", PermissionLevel: "collaborator"},
 	})
 
-	err := testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test")(collaboratorState(identityID, "collaborator"))
+	err := testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test")(collaboratorState(identityID))
 	if err == nil {
 		t.Fatal("expected an error when the collaborator is absent from the API list, got nil (this is the exact placebo behavior being fixed)")
 	}
@@ -426,7 +326,7 @@ func TestCollaboratorDoesNotExist_SucceedsWhenAbsent(t *testing.T) {
 		{ID: "ident_someone_else", Email: "other@example.com", PermissionLevel: "collaborator"},
 	})
 
-	if err := testAccCheckCollaboratorDoesNotExist(identityID)(collaboratorState(identityID, "collaborator")); err != nil {
+	if err := testAccCheckCollaboratorDoesNotExist(identityID)(collaboratorState(identityID)); err != nil {
 		t.Fatalf("expected success when the collaborator is genuinely absent, got: %v", err)
 	}
 }
@@ -440,24 +340,8 @@ func TestCollaboratorDoesNotExist_FailsWhenPresent(t *testing.T) {
 		{ID: identityID, Email: "leaked@example.com", PermissionLevel: "collaborator"},
 	})
 
-	err := testAccCheckCollaboratorDoesNotExist(identityID)(collaboratorState(identityID, "collaborator"))
+	err := testAccCheckCollaboratorDoesNotExist(identityID)(collaboratorState(identityID))
 	if err == nil {
 		t.Fatal("expected an error when the collaborator is still present after destroy, got nil (this is the exact placebo behavior being fixed)")
-	}
-}
-
-// TestCollaboratorPermissionInAPI_FailsOnMismatch is the mutation proof for
-// the renamed-to-be-accurate InAPI permission check: a state attribute that
-// looks right but an API value that has actually diverged must be caught,
-// not just the state-only comparison the old version silently relied on.
-func TestCollaboratorPermissionInAPI_FailsOnMismatch(t *testing.T) {
-	const identityID = "ident_permission_drift"
-	collaboratorsListServer(t, []provider.OrganizationCollaboratorResult{
-		{ID: identityID, Email: "drift@example.com", PermissionLevel: "owner"},
-	})
-
-	err := testAccCheckCollaboratorPermissionInAPI("anyscale_organization_user.test", "collaborator")(collaboratorState(identityID, "collaborator"))
-	if err == nil {
-		t.Fatal("expected an error when state says collaborator but the API says owner, got nil")
 	}
 }

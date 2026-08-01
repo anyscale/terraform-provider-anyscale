@@ -278,18 +278,13 @@ type ProjectResult struct {
 	DirectoryName   string  `json:"directory_name"`
 }
 
-// ProjectCollaboratorBatchRequest for batch creating collaborators
-type ProjectCollaboratorBatchRequest []ProjectCollaboratorEntry
-
-// ProjectCollaboratorEntry represents a single collaborator for request
-type ProjectCollaboratorEntry struct {
-	Value struct {
-		Email string `json:"email"`
-	} `json:"value"`
-	PermissionLevel string `json:"permission_level"` // "owner", "write", "readonly"
-}
-
-// ProjectCollaboratorListResponse for listing collaborators
+// ProjectCollaboratorListResponse for listing collaborators. Read-only: the
+// anyscale_project RESOURCE no longer manages collaborators (the collaborator
+// block was removed in v0.25.0; there is no in-provider replacement yet, so
+// project collaborators are managed through the console or API), so the
+// batch-create/update request models that went with it are gone too. The
+// anyscale_project DATA SOURCE still reports the project's collaborators, and
+// is the only consumer of this type and ProjectCollaboratorResult below.
 type ProjectCollaboratorListResponse struct {
 	Results  []ProjectCollaboratorResult `json:"results"`
 	Metadata struct {
@@ -306,11 +301,6 @@ type ProjectCollaboratorResult struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	} `json:"value"`
-	PermissionLevel string `json:"permission_level"`
-}
-
-// ProjectCollaboratorUpdateRequest for updating a single collaborator's permission
-type ProjectCollaboratorUpdateRequest struct {
 	PermissionLevel string `json:"permission_level"`
 }
 

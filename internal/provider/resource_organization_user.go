@@ -8,15 +8,12 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -34,37 +31,35 @@ func NewOrganizationUserResource() resource.Resource {
 }
 
 // OrganizationUserResource defines the resource implementation. It manages an
-// existing organization member's permissions - see the schema
+// existing organization member's MEMBERSHIP only - see the schema
 // MarkdownDescription for why this resource is import-only and named
 // symmetrically with the anyscale_organization_user/anyscale_organization_users
 // data sources rather than "collaborator": the API's own vocabulary
 // (organization_collaborators) is preserved in the shared request/response
 // types and helpers below, since it accurately names the backend concept
 // those are shared with the data sources against.
+//
+// Role management deliberately does NOT live here - it belongs to
+// anyscale_organization_user_role, which owns the base role and the
+// organization's deny roles. Two resources writing the same org role would race
+// each other, so this one owns membership (import + destroy-evicts) and that
+// one owns the role.
 type OrganizationUserResource struct {
 	client *Client
 }
 
-// OrganizationUserResourceModel describes the resource data model.
+// OrganizationUserResourceModel describes the resource data model. Every field
+// is read-only: this resource has no writable attribute at all, since roles
+// moved to anyscale_organization_user_role.
 type OrganizationUserResourceModel struct {
 	// Identity
 	ID types.String `tfsdk:"id"` // identity_id
-
-	// Manageable field
-	PermissionLevel types.String `tfsdk:"permission_level"`
 
 	// Computed fields
 	Email     types.String `tfsdk:"email"`
 	UserID    types.String `tfsdk:"user_id"`
 	Name      types.String `tfsdk:"name"`
 	CreatedAt types.String `tfsdk:"created_at"`
-
-	// Current role-model visibility (read-only; see schema doc). permission_level
-	// above remains the only writable field - the /roles write endpoint is
-	// feature-gated (501 in most orgs), so these exist for visibility and drift
-	// detection only, not management.
-	BaseRole        types.String `tfsdk:"base_role"`
-	AdditionalRoles types.List   `tfsdk:"additional_roles"`
 }
 
 // Metadata returns the resource type name.
@@ -75,14 +70,15 @@ func (r *OrganizationUserResource) Metadata(ctx context.Context, req resource.Me
 // Schema defines the schema for the resource.
 func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages an existing Anyscale Organization member's permissions.\n\n" +
+		MarkdownDescription: "Manages an existing Anyscale Organization member's **membership** - that they are in the organization at all, not what they can do in it.\n\n" +
+			"-> **Roles are managed elsewhere.** This resource has no writable attributes. To set a member's role, use the `anyscale_organization_user_role` resource, which owns `base_role` and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role. To *read* a member's current role without managing it, use the `anyscale_organization_user` or `anyscale_organization_users` data source, both of which still expose `base_role` and `additional_roles`.\n\n" +
 			"~> **Warning:** Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate `DELETE` against the Anyscale API, and it happens on any `terraform destroy` that reaches this resource, including as part of tearing down a larger configuration or a failed apply elsewhere in the same run. There is no undo; the user would need to be re-invited and re-accept to regain access. If you only want Terraform to stop managing a member without removing their access, use `terraform state rm` instead of `terraform destroy` - do this before running destroy on any configuration that contains this resource if that is not the outcome you want. This is a heavier operation than destroying an `anyscale_organization_invitation` - once accepted, an invitation and its resulting membership are separate objects, and only this resource's destroy actually revokes access.\n\n" +
 			"**Important:** This resource cannot create new users. Users must first be added to the organization through:\n" +
 			"1. An accepted `anyscale_organization_invitation`, or\n" +
 			"2. SCIM provisioning\n\n" +
-			"Once a user exists in the organization, import them using `terraform import` to manage their permissions.\n\n" +
+			"Once a user exists in the organization, import them using `terraform import` to bring their membership under Terraform management.\n\n" +
 			"**Example Import:**\n```\nterraform import anyscale_organization_user.user <identity_id>\n```\n\n" +
-			"**Directory-synced organizations:** If your organization manages permissions via directory sync (the Policy API), this resource cannot manage members at all - any `terraform apply` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.",
+			"**Directory-synced organizations:** If your organization manages membership via directory sync (the Policy API), this resource cannot manage members at all - any `terraform destroy` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -90,14 +86,6 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 				MarkdownDescription: "The unique identity ID of the organization member. Used for import.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-
-			"permission_level": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The permission level for this member. Must be either `owner` or `collaborator`.",
-				Validators: []validator.String{
-					stringvalidator.OneOf("owner", "collaborator"),
 				},
 			},
 
@@ -130,34 +118,6 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 				MarkdownDescription: "Timestamp when the member was added to the organization. Write-once: set on import and never re-read afterward, since the API has returned different values for it across reads.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-
-			"base_role": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The member's base role in the organization (`owner` or `collaborator`). `permission_level` above remains the field you set to change it; the two always agree since the backend derives `base_role` from `permission_level` on every read (not the reverse).",
-				// Deliberately no UseStateForUnknown: base_role is derived from
-				// the same underlying role permission_level writes, so it
-				// legitimately changes whenever permission_level does. Freezing
-				// it to the prior value (as a first pass of this schema did)
-				// makes any real permission_level change hard-fail apply with
-				// "Provider produced inconsistent result after apply" - caught
-				// by assayer's collaborator lifecycle test.
-			},
-
-			"additional_roles": schema.ListAttribute{
-				ElementType:         types.StringType,
-				Computed:            true,
-				MarkdownDescription: "Additional restriction (deny) roles applied on top of this member's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Read-only: the Anyscale API endpoint that manages these roles is feature-gated and returns HTTP 501 in most organizations, so Terraform cannot set them - this attribute exists for visibility and drift detection only. Three states: populated means the member genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a member with no `user_id` (the query is `user_id`-keyed). Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.",
-				// UseStateForUnknown is safe here (unlike base_role above):
-				// alter_collaborator never touches the SpiceDB-managed groups
-				// additional_roles comes from, and assayer proved live (real
-				// infra, toggling permission_level owner<->collaborator through
-				// the real write path) that additional_roles holds steady the
-				// whole time. Pinning it avoids a false "(known after apply)" on
-				// this field during every permission_level update.
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.UseStateForUnknown(),
 				},
 			},
 		},
@@ -241,24 +201,23 @@ func (r *OrganizationUserResource) Read(ctx context.Context, req resource.ReadRe
 	// Update state with API data. created_at is intentionally NOT refreshed
 	// here - see the schema doc string; the API has returned different values
 	// for it across reads, and it's treated as write-once (set on import only).
-	resp.Diagnostics.Append(applyUserIdentityFields(ctx, &state, collaborator)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	state.PermissionLevel = types.StringValue(collaborator.PermissionLevel)
+	applyUserIdentityFields(&state, collaborator)
 
 	// Save updated state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// applyUserIdentityFields copies the identity and role fields that are safe to
-// refresh from the API (email, user_id, name, base_role, additional_roles)
-// into model. created_at is deliberately excluded and must be set separately
-// only where appropriate (import) - see the schema doc string and task
-// 4745d9fb: the API has returned different created_at values across reads for
-// the same member, so re-syncing it from Read/Update causes "Provider
-// produced inconsistent result after apply".
-func applyUserIdentityFields(ctx context.Context, model *OrganizationUserResourceModel, collaborator *OrganizationCollaboratorResult) diag.Diagnostics {
+// applyUserIdentityFields copies the identity fields that are safe to refresh
+// from the API (email, user_id, name) into model. created_at is deliberately
+// excluded and must be set separately only where appropriate (import) - see the
+// schema doc string and task 4745d9fb: the API has returned different created_at
+// values across reads for the same member, so re-syncing it from Read causes
+// "Provider produced inconsistent result after apply".
+//
+// The role fields this used to copy (base_role, additional_roles) are gone from
+// this resource entirely - roles are owned by anyscale_organization_user_role,
+// and the organization_user(s) data sources still expose them read-only.
+func applyUserIdentityFields(model *OrganizationUserResourceModel, collaborator *OrganizationCollaboratorResult) {
 	model.Email = types.StringValue(collaborator.Email)
 
 	if collaborator.UserID != nil && *collaborator.UserID != "" {
@@ -272,88 +231,35 @@ func applyUserIdentityFields(ctx context.Context, model *OrganizationUserResourc
 	} else {
 		model.Name = types.StringNull()
 	}
-
-	model.BaseRole = types.StringValue(collaborator.BaseRole)
-
-	// additional_roles is tri-state: nil from hydrateCollaboratorRoles means
-	// undetermined (render null), a non-nil (possibly empty) slice means the
-	// backend was actually queried (render [], never null, when genuinely
-	// none) - see hydrateCollaboratorRoles and the schema doc.
-	additionalRolesList, diags := additionalRolesToList(ctx, collaborator.AdditionalRoles)
-	model.AdditionalRoles = additionalRolesList
-	return diags
 }
 
-// Update updates an organization member's permission level.
+// Update is a deliberate no-op that copies plan into state.
+//
+// This resource has no writable attribute left: every attribute is Computed,
+// so there is nothing a practitioner can change that would produce an update
+// plan, and nothing for this method to write to the API. Role changes - the
+// only thing Update ever did here, via
+// PUT /api/v2/organization_collaborators/{identity_id} - now live on the
+// anyscale_organization_user_role resource, which owns base_role and the
+// organization's deny roles. Two resources writing the same org role would race
+// each other, hence the split.
+//
+// The method is kept because resource.Resource requires it; the framework will
+// not compile a resource without one. Copying plan -> state (rather than
+// leaving resp.State untouched) is what keeps Terraform from reporting a
+// null/inconsistent result in the event Core ever does call it.
 func (r *OrganizationUserResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, state OrganizationUserResourceModel
+	var plan OrganizationUserResourceModel
 
-	// Read plan and state
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	identityID := state.ID.ValueString()
-
-	tflog.Info(ctx, "Updating organization user", map[string]interface{}{
-		"identity_id":          identityID,
-		"old_permission_level": state.PermissionLevel.ValueString(),
-		"new_permission_level": plan.PermissionLevel.ValueString(),
+	tflog.Debug(ctx, "Update is a no-op for anyscale_organization_user; roles are managed by anyscale_organization_user_role", map[string]interface{}{
+		"identity_id": plan.ID.ValueString(),
 	})
 
-	// Create update request
-	updateReq := UpdateOrganizationCollaboratorRequest{
-		PermissionLevel: plan.PermissionLevel.ValueString(),
-	}
-
-	reqBody, err := MarshalRequestBody(updateReq)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error marshaling request",
-			fmt.Sprintf("Could not marshal organization user update request: %s", err.Error()),
-		)
-		return
-	}
-
-	// Send update request. The response body isn't parsed into anything - the resource re-reads
-	// current state via findUserByID right after, so only the status code matters here.
-	if _, err := DoRequestRaw(
-		ctx, r.client, "PUT", fmt.Sprintf("/api/v2/organization_collaborators/%s", identityID), reqBody,
-		http.StatusOK, http.StatusNoContent,
-	); err != nil {
-		resp.Diagnostics.AddError("Could Not Update Organization User's Permission Level", collaboratorErrorDiagnosticDetail(err))
-		return
-	}
-
-	tflog.Info(ctx, "Updated organization user", map[string]interface{}{
-		"identity_id":      identityID,
-		"permission_level": plan.PermissionLevel.ValueString(),
-	})
-
-	// Read back to get current state
-	collaborator, err := r.findUserByID(ctx, identityID)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error reading updated organization user",
-			fmt.Sprintf("Could not read organization user after update: %s", err.Error()),
-		)
-		return
-	}
-
-	// Update plan with latest data. created_at is intentionally left as
-	// req.Plan.Get already resolved it (UseStateForUnknown -> the prior state
-	// value) rather than overwritten here - the API has returned different
-	// created_at values across reads for the same member, and overwriting it
-	// caused "Provider produced inconsistent result after apply" on a bare
-	// permission_level change (task 4745d9fb).
-	resp.Diagnostics.Append(applyUserIdentityFields(ctx, &plan, collaborator)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Save updated state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -412,16 +318,12 @@ func (r *OrganizationUserResource) ImportState(ctx context.Context, req resource
 		return
 	}
 
-	// Set all attributes
+	// Set all attributes. Role fields (base_role/additional_roles) are
+	// deliberately not among them - they are owned by
+	// anyscale_organization_user_role, not this membership-only resource.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), identityID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("email"), collaborator.Email)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("permission_level"), collaborator.PermissionLevel)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("created_at"), collaborator.CreatedAt)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("base_role"), collaborator.BaseRole)...)
-
-	additionalRolesList, diags := additionalRolesToList(ctx, collaborator.AdditionalRoles)
-	resp.Diagnostics.Append(diags...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("additional_roles"), additionalRolesList)...)
 
 	if collaborator.UserID != nil && *collaborator.UserID != "" {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("user_id"), *collaborator.UserID)...)
@@ -432,9 +334,8 @@ func (r *OrganizationUserResource) ImportState(ctx context.Context, req resource
 	}
 
 	tflog.Info(ctx, "Imported organization user", map[string]interface{}{
-		"identity_id":      identityID,
-		"email":            collaborator.Email,
-		"permission_level": collaborator.PermissionLevel,
+		"identity_id": identityID,
+		"email":       collaborator.Email,
 	})
 }
 
