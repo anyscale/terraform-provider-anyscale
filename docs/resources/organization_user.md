@@ -3,21 +3,24 @@
 page_title: "anyscale_organization_user Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an existing Anyscale Organization member's permissions.
+  Manages an existing Anyscale Organization member's membership - that they are in the organization at all, not what they can do in it.
+  -> Roles are managed elsewhere. This resource has no writable attributes. To set a member's role, use the anyscale_organization_user_role resource, which owns base_role and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role. To read a member's current role without managing it, use the anyscale_organization_user or anyscale_organization_users data source, both of which still expose base_role and additional_roles.
   ~> Warning: Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate DELETE against the Anyscale API, and it happens on any terraform destroy that reaches this resource, including as part of tearing down a larger configuration or a failed apply elsewhere in the same run. There is no undo; the user would need to be re-invited and re-accept to regain access. If you only want Terraform to stop managing a member without removing their access, use terraform state rm instead of terraform destroy - do this before running destroy on any configuration that contains this resource if that is not the outcome you want. This is a heavier operation than destroying an anyscale_organization_invitation - once accepted, an invitation and its resulting membership are separate objects, and only this resource's destroy actually revokes access.
   Important: This resource cannot create new users. Users must first be added to the organization through:
   An accepted anyscale_organization_invitation, orSCIM provisioning
-  Once a user exists in the organization, import them using terraform import to manage their permissions.
+  Once a user exists in the organization, import them using terraform import to bring their membership under Terraform management.
   Example Import:
   
   terraform import anyscale_organization_user.user <identity_id>
   
-  Directory-synced organizations: If your organization manages permissions via directory sync (the Policy API), this resource cannot manage members at all - any terraform apply against it fails, and the error points you to the anyscale policy set command instead. See the Anyscale policy CLI documentation https://docs.anyscale.com/reference/cli/policy#policy-cli for that command.
+  Directory-synced organizations: If your organization manages membership via directory sync (the Policy API), this resource cannot manage members at all - any terraform destroy against it fails, and the error points you to the anyscale policy set command instead. See the Anyscale policy CLI documentation https://docs.anyscale.com/reference/cli/policy#policy-cli for that command.
 ---
 
 # anyscale_organization_user (Resource)
 
-Manages an existing Anyscale Organization member's permissions.
+Manages an existing Anyscale Organization member's **membership** - that they are in the organization at all, not what they can do in it.
+
+-> **Roles are managed elsewhere.** This resource has no writable attributes. To set a member's role, use the `anyscale_organization_user_role` resource, which owns `base_role` and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role. To *read* a member's current role without managing it, use the `anyscale_organization_user` or `anyscale_organization_users` data source, both of which still expose `base_role` and `additional_roles`.
 
 ~> **Warning:** Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate `DELETE` against the Anyscale API, and it happens on any `terraform destroy` that reaches this resource, including as part of tearing down a larger configuration or a failed apply elsewhere in the same run. There is no undo; the user would need to be re-invited and re-accept to regain access. If you only want Terraform to stop managing a member without removing their access, use `terraform state rm` instead of `terraform destroy` - do this before running destroy on any configuration that contains this resource if that is not the outcome you want. This is a heavier operation than destroying an `anyscale_organization_invitation` - once accepted, an invitation and its resulting membership are separate objects, and only this resource's destroy actually revokes access.
 
@@ -25,20 +28,25 @@ Manages an existing Anyscale Organization member's permissions.
 1. An accepted `anyscale_organization_invitation`, or
 2. SCIM provisioning
 
-Once a user exists in the organization, import them using `terraform import` to manage their permissions.
+Once a user exists in the organization, import them using `terraform import` to bring their membership under Terraform management.
 
 **Example Import:**
 ```
 terraform import anyscale_organization_user.user <identity_id>
 ```
 
-**Directory-synced organizations:** If your organization manages permissions via directory sync (the Policy API), this resource cannot manage members at all - any `terraform apply` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.
+**Directory-synced organizations:** If your organization manages membership via directory sync (the Policy API), this resource cannot manage members at all - any `terraform destroy` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.
 
 ## Example Usage
 
 ```terraform
-# Import an existing organization member to manage their permissions
-# First, find their identity_id using the data source:
+# anyscale_organization_user manages MEMBERSHIP only - whether someone is in the
+# organization. It has no writable attributes. To manage what a member can DO,
+# use anyscale_organization_user_role, which owns base_role and deny_roles.
+#
+# The split is deliberate: only one resource ever writes a member's role.
+
+# Find an existing member's identity_id, which is the import ID:
 data "anyscale_organization_user" "existing_user" {
   email = "user@example.com"
 }
@@ -48,59 +56,61 @@ output "existing_user_identity_id" {
   description = "The identity_id to use below with terraform import"
 }
 
-# Then import the member using:
-# terraform import anyscale_organization_user.existing_user <identity_id>
-
+# Bring an existing member under management:
+#   terraform import anyscale_organization_user.existing_user <identity_id>
+#
+# This resource cannot create members - people join by invitation (see
+# anyscale_organization_invitation). Importing one gives you eviction-as-code:
+# removing this resource from your configuration removes them from the
+# organization.
 resource "anyscale_organization_user" "existing_user" {
-  # The id field is set during import
-  # Only permission_level can be managed
-  permission_level = "collaborator"
+  # All attributes are set on import; there is nothing to configure.
 }
 
-# Manage an owner's permissions
+# Guard members whose removal would be disruptive. Destroying this resource
+# evicts a real person from the organization, and Terraform cannot tell an
+# intentional removal from an accidental one.
 resource "anyscale_organization_user" "admin" {
-  # Import with: terraform import anyscale_organization_user.admin <identity_id>
-  permission_level = "owner"
+  # terraform import anyscale_organization_user.admin <identity_id>
 
   lifecycle {
-    # Prevent accidental deletion of important users
     prevent_destroy = true
   }
 }
 
-# Output member details
+# Set the member's role with the companion resource:
+resource "anyscale_organization_user_role" "existing_user" {
+  email     = data.anyscale_organization_user.existing_user.email
+  base_role = "collaborator"
+
+  # deny_roles is omitted here, which leaves any existing container-image
+  # restrictions untouched and keeps this resource on the ungated endpoint that
+  # works in every organization. Set it - including to [] - only when you want
+  # Terraform to own that set.
+}
+
+# Read a member's current role without managing it:
 output "user_email" {
   value       = anyscale_organization_user.existing_user.email
   description = "Email address of the member"
 }
 
-output "user_permission" {
-  value       = anyscale_organization_user.existing_user.permission_level
-  description = "Current permission level"
-}
-
 output "user_base_role" {
-  value       = anyscale_organization_user.existing_user.base_role
-  description = "The member's base role - always agrees with permission_level, since permission_level is the field you set to change it"
+  value       = data.anyscale_organization_user.existing_user.base_role
+  description = "The member's organization base role, read from the data source"
 }
 
 output "user_additional_roles" {
-  value       = anyscale_organization_user.existing_user.additional_roles
-  description = "Additional restriction (deny) roles beyond the base role, if any - read-only, not manageable through Terraform"
+  value       = data.anyscale_organization_user.existing_user.additional_roles
+  description = "Container image deny roles restricting the base role, if any. The API names this field additional_roles; the anyscale_organization_user_role resource calls it deny_roles, which is what it does."
 }
 ```
 
 <!-- schema generated by tfplugindocs -->
 ## Schema
 
-### Required
-
-- `permission_level` (String) The permission level for this member. Must be either `owner` or `collaborator`.
-
 ### Read-Only
 
-- `additional_roles` (List of String) Additional restriction (deny) roles applied on top of this member's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Read-only: the Anyscale API endpoint that manages these roles is feature-gated and returns HTTP 501 in most organizations, so Terraform cannot set them - this attribute exists for visibility and drift detection only. Three states: populated means the member genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a member with no `user_id` (the query is `user_id`-keyed). Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.
-- `base_role` (String) The member's base role in the organization (`owner` or `collaborator`). `permission_level` above remains the field you set to change it; the two always agree since the backend derives `base_role` from `permission_level` on every read (not the reverse).
 - `created_at` (String) Timestamp when the member was added to the organization. Write-once: set on import and never re-read afterward, since the API has returned different values for it across reads.
 - `email` (String) The email address of the organization member.
 - `id` (String) The unique identity ID of the organization member. Used for import.

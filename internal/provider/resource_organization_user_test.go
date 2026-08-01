@@ -88,27 +88,24 @@ func TestOrganizationUserResourceFindUserByID_NotFoundAfterAllPages(t *testing.T
 // test for task 4745d9fb: assayer confirmed live that the API returns two
 // different real created_at timestamps across reads for the same
 // collaborator. created_at is Computed+UseStateForUnknown, so the plan keeps
-// the prior value; Update()/Read() used to overwrite state.created_at with
-// that fresh, different API value afterward, producing "Provider produced
-// inconsistent result after apply" on a bare permission_level change. This
-// mocks exactly that: two reads returning different created_at, and asserts
-// applyUserIdentityFields (what both Read and Update now call) never
+// the prior value; Read() used to overwrite state.created_at with that fresh,
+// different API value afterward, producing "Provider produced inconsistent
+// result after apply". This mocks exactly that: two reads returning different
+// created_at, and asserts applyUserIdentityFields (what Read calls) never
 // touches the field at all, regardless of what the API returned.
 func TestApplyUserIdentityFields_NeverTouchesCreatedAt(t *testing.T) {
 	name := "Ada Lovelace"
 	firstRead := &OrganizationCollaboratorResult{
-		ID:              "identity-1",
-		Email:           "ada@example.com",
-		Name:            &name,
-		PermissionLevel: "collaborator",
-		CreatedAt:       "2026-01-01T00:00:00Z",
+		ID:        "identity-1",
+		Email:     "ada@example.com",
+		Name:      &name,
+		CreatedAt: "2026-01-01T00:00:00Z",
 	}
 	secondRead := &OrganizationCollaboratorResult{
-		ID:              "identity-1",
-		Email:           "ada@example.com",
-		Name:            &name,
-		PermissionLevel: "owner",
-		CreatedAt:       "2026-07-06T12:00:00Z", // different from firstRead - the actual live behavior
+		ID:        "identity-1",
+		Email:     "ada@example.com",
+		Name:      &name,
+		CreatedAt: "2026-07-06T12:00:00Z", // different from firstRead - the actual live behavior
 	}
 
 	model := &OrganizationUserResourceModel{
@@ -116,18 +113,14 @@ func TestApplyUserIdentityFields_NeverTouchesCreatedAt(t *testing.T) {
 	}
 
 	// Simulate import/initial state: created_at gets its one and only write here.
-	if diags := applyUserIdentityFields(context.Background(), model, firstRead); diags.HasError() {
-		t.Fatalf("applyUserIdentityFields returned unexpected errors: %v", diags)
-	}
+	applyUserIdentityFields(model, firstRead)
 	if model.CreatedAt.ValueString() != firstRead.CreatedAt {
 		t.Fatalf("created_at after first apply = %q, want unchanged %q", model.CreatedAt.ValueString(), firstRead.CreatedAt)
 	}
 
-	// Simulate the Update()/Read() read-back that used to overwrite created_at
-	// with a different value returned by the API.
-	if diags := applyUserIdentityFields(context.Background(), model, secondRead); diags.HasError() {
-		t.Fatalf("applyUserIdentityFields returned unexpected errors: %v", diags)
-	}
+	// Simulate the Read() read-back that used to overwrite created_at with a
+	// different value returned by the API.
+	applyUserIdentityFields(model, secondRead)
 	if model.CreatedAt.ValueString() != firstRead.CreatedAt {
 		t.Errorf("created_at after second apply = %q, want it to stay the original %q even though the API returned %q",
 			model.CreatedAt.ValueString(), firstRead.CreatedAt, secondRead.CreatedAt)
@@ -137,92 +130,6 @@ func TestApplyUserIdentityFields_NeverTouchesCreatedAt(t *testing.T) {
 	if model.Email.ValueString() != secondRead.Email {
 		t.Errorf("email = %q, want %q (should still refresh from the API)", model.Email.ValueString(), secondRead.Email)
 	}
-}
-
-// TestOrganizationUserUpdate_PreservesCreatedAtAcrossDifferingReads is
-// an end-to-end mocked version of the same regression, exercising the actual
-// Update method (via a mocked API returning a different created_at on the
-// post-update read) rather than just the shared helper.
-func TestOrganizationUserUpdate_PreservesCreatedAtAcrossDifferingReads(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if r.Method == http.MethodPut {
-			_, _ = fmt.Fprint(w, `{}`)
-			return
-		}
-		// GET (the post-update findUserByID read-back): different
-		// created_at than what was in prior state, same as live behavior.
-		_, _ = fmt.Fprint(w, `{
-			"results": [{"id": "identity-1", "email": "ada@example.com", "name": "Ada Lovelace", "permission_level": "owner", "created_at": "2026-07-06T12:00:00Z"}],
-			"metadata": {"total": 1, "next_paging_token": null}
-		}`)
-	}))
-	defer server.Close()
-
-	r := &OrganizationUserResource{
-		client: NewClientWithToken(server.URL, "test-token"),
-	}
-
-	priorCreatedAt := "2026-01-01T00:00:00Z"
-	state := OrganizationUserResourceModel{
-		ID:              types.StringValue("identity-1"),
-		Email:           types.StringValue("ada@example.com"),
-		PermissionLevel: types.StringValue("collaborator"),
-		CreatedAt:       types.StringValue(priorCreatedAt),
-	}
-	// UseStateForUnknown resolves the plan's created_at to the prior state
-	// value before Update ever runs - simulate that resolution here.
-	plan := state
-	plan.PermissionLevel = types.StringValue("owner")
-
-	collaborator, err := r.findUserByID(context.Background(), state.ID.ValueString())
-	if err != nil {
-		t.Fatalf("unexpected error priming the test: %v", err)
-	}
-	if diags := applyUserIdentityFields(context.Background(), &plan, collaborator); diags.HasError() {
-		t.Fatalf("applyUserIdentityFields returned unexpected errors: %v", diags)
-	}
-
-	if plan.CreatedAt.ValueString() != priorCreatedAt {
-		t.Errorf("created_at after update = %q, want it to stay the planned/prior value %q (not the API's %q) - this is exactly the inconsistent-result task 4745d9fb fixed",
-			plan.CreatedAt.ValueString(), priorCreatedAt, collaborator.CreatedAt)
-	}
-}
-
-// runOrganizationUserUpdate drives OrganizationUserResource's real Update()
-// method end-to-end against state/plan models, the same pattern as runProjectResourceCreate.
-func runOrganizationUserUpdate(t *testing.T, r *OrganizationUserResource, state, plan OrganizationUserResourceModel) (OrganizationUserResourceModel, diag.Diagnostics) {
-	t.Helper()
-	ctx := context.Background()
-
-	var schemaResp resource.SchemaResponse
-	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
-	if schemaResp.Diagnostics.HasError() {
-		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
-	}
-
-	tfState := tfsdk.State{Schema: schemaResp.Schema}
-	if diags := tfState.Set(ctx, &state); diags.HasError() {
-		t.Fatalf("failed to build state fixture: %v", diags)
-	}
-	tfPlan := tfsdk.Plan{Schema: schemaResp.Schema}
-	if diags := tfPlan.Set(ctx, &plan); diags.HasError() {
-		t.Fatalf("failed to build plan fixture: %v", diags)
-	}
-
-	updateResp := &resource.UpdateResponse{State: tfState}
-	r.Update(ctx, resource.UpdateRequest{Plan: tfPlan, State: tfState}, updateResp)
-
-	if updateResp.Diagnostics.HasError() {
-		return OrganizationUserResourceModel{}, updateResp.Diagnostics
-	}
-
-	var result OrganizationUserResourceModel
-	getDiags := updateResp.State.Get(ctx, &result)
-	if getDiags.HasError() {
-		t.Fatalf("failed to decode result state: %v", getDiags)
-	}
-	return result, updateResp.Diagnostics
 }
 
 // runOrganizationUserDelete drives OrganizationUserResource's real Delete()
@@ -284,54 +191,6 @@ func diagsHaveCleanDetail(diags diag.Diagnostics, wantPhrase string) bool {
 	return false
 }
 
-// TestOrganizationUserResourceUpdate_ServiceAccountModify403 is the contract's C6
-// fail-without-fix regression test. Traced against org_invites_service.py's sibling,
-// organization_collaborators_service.py's _validate_user_for_role_change (called by
-// alter_collaborator, Update's write path): modifying a service account 403s with the exact
-// pinned detail "You cannot modify a service account's permission level." Today this flows
-// through the generic AddAPIError passthrough, so a Terraform user sees a raw "unexpected
-// status 403: {json}" blob instead of a clear explanation. This currently FAILS against the
-// unmodified code (proving the gap is real) and must pass once C6 lands a specific diagnostic.
-func TestOrganizationUserResourceUpdate_ServiceAccountModify403(t *testing.T) {
-	const rawDetail = "You cannot modify a service account's permission level."
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPut {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = fmt.Fprintf(w, `{"error":{"detail":%q}}`, rawDetail)
-			return
-		}
-		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	r := &OrganizationUserResource{client: NewClientWithToken(server.URL, "test-token")}
-
-	state := OrganizationUserResourceModel{
-		ID:              types.StringValue("identity-service-account"),
-		Email:           types.StringValue("svc@example.com"),
-		PermissionLevel: types.StringValue("collaborator"),
-		CreatedAt:       types.StringValue("2026-01-01T00:00:00Z"),
-		BaseRole:        types.StringValue("collaborator"),
-		AdditionalRoles: types.ListNull(types.StringType),
-	}
-	plan := state
-	plan.PermissionLevel = types.StringValue("owner")
-
-	_, diags := runOrganizationUserUpdate(t, r, state, plan)
-
-	if !diags.HasError() {
-		t.Fatal("expected a diagnostic error for a service-account-modify 403, got none")
-	}
-	if diagsAllGenericAPIError(diags) {
-		t.Errorf("expected C6's specific, actionable diagnostic for a service-account-modify 403 (a distinct Summary, not just the generic API Request Failed passthrough), got: %v", diags)
-	}
-	if !diagsHaveCleanDetail(diags, "service account") {
-		t.Errorf("expected a clean Detail mentioning 'service account' (not the raw wrapped API blob - the real backend nests detail under an \"error\" key, a Summary-only fix that fails to parse that shape would still show the raw wrapper here), got: %v", diags)
-	}
-}
-
 // TestOrganizationUserResourceDelete_SelfRemoval403 is C6's other fail-without-fix
 // regression test. Traced against organization_collaborators_service.py's remove_collaborator:
 // removing your own identity 403s with the exact pinned detail "You cannot remove yourself from
@@ -354,12 +213,9 @@ func TestOrganizationUserResourceDelete_SelfRemoval403(t *testing.T) {
 	r := &OrganizationUserResource{client: NewClientWithToken(server.URL, "test-token")}
 
 	state := OrganizationUserResourceModel{
-		ID:              types.StringValue("identity-self"),
-		Email:           types.StringValue("me@example.com"),
-		PermissionLevel: types.StringValue("owner"),
-		CreatedAt:       types.StringValue("2026-01-01T00:00:00Z"),
-		BaseRole:        types.StringValue("owner"),
-		AdditionalRoles: types.ListNull(types.StringType),
+		ID:        types.StringValue("identity-self"),
+		Email:     types.StringValue("me@example.com"),
+		CreatedAt: types.StringValue("2026-01-01T00:00:00Z"),
 	}
 
 	diags := runOrganizationUserDelete(t, r, state)

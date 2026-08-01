@@ -14,25 +14,25 @@ import (
 )
 
 // mockCollaboratorLifecycleServer is a scripted stand-in for the real
-// organization_collaborators API, tracking one mutable collaborator so a real
-// resource.Test can exercise Import -> Read -> Update -> Delete end to end,
-// including base_role/additional_roles hydration via the singular per-user GET
-// (see hydrateCollaboratorRoles), without touching real infra.
+// organization_collaborators API, tracking one collaborator so a real
+// resource.Test can exercise Import -> Read -> Delete end to end, including the
+// singular per-user GET the read path still makes (see
+// hydrateCollaboratorRoles), without touching real infra.
 //
-// listBaseRole vs singularBaseRole models a real, live-proven backend split
-// (found via an actual permission_level toggle against real infra, reverted
-// after): alter_collaborator (the only write path for permission_level) writes
-// Postgres only, never SpiceDB. The LIST endpoint's formatter derives base_role
-// fresh from Postgres every call, so it always tracks a permission_level write
-// immediately. The singular per-user GET (and search) derive base_role from
-// SpiceDB-managed groups when the read flag is on - which alter_collaborator
-// never touches - so it is a real live source of a genuinely stale value, not
-// a mock artifact invented for this test. handleUpdate below updates
-// listBaseRole (mirroring the real Postgres write) but deliberately leaves
-// singularBaseRole frozen at its original value (mirroring SpiceDB never
-// learning about the change) - this is what makes this mock strict enough to
-// have caught the original overwrite bug, rather than assuming (as an earlier,
-// too-generous version of this mock did) that the two sources always agree.
+// There is deliberately NO update handler: anyscale_organization_user manages
+// membership only and has no writable attribute, so the provider can no longer
+// issue PUT /api/v2/organization_collaborators/{identity_id} at all. Leaving
+// the route unhandled is the point - an unexpected PUT now falls through to the
+// 404 default and fails the test loudly, instead of being quietly absorbed.
+// Role writes moved to anyscale_organization_user_role and are covered there.
+//
+// listBaseRole vs singularBaseRole is kept because it models a real,
+// live-proven backend split: the LIST endpoint's formatter derives base_role
+// fresh from Postgres every call, while the singular per-user GET (and search)
+// derive it from SpiceDB-managed groups when the read flag is on. The two
+// genuinely can disagree, and keeping both fields keeps the mocked responses
+// shaped like the real ones rather than an idealized agreement the backend does
+// not actually guarantee.
 type mockCollaboratorLifecycleServer struct {
 	mu               sync.Mutex
 	identityID       string
@@ -40,8 +40,8 @@ type mockCollaboratorLifecycleServer struct {
 	email            string
 	name             string
 	permissionLevel  string
-	listBaseRole     string // Postgres-derived (LIST) - tracks permission_level writes
-	singularBaseRole string // SpiceDB-derived (singular GET) - frozen; alter_collaborator never touches SpiceDB
+	listBaseRole     string // Postgres-derived (LIST)
+	singularBaseRole string // SpiceDB-derived (singular GET)
 	additionalRoles  []string
 	createdAt        string
 	deleted          bool
@@ -76,8 +76,6 @@ func (s *mockCollaboratorLifecycleServer) handle(w http.ResponseWriter, r *http.
 		s.handleList(w)
 	case r.Method == http.MethodGet && path == "/api/v2/organization_collaborators/"+s.userID:
 		s.handleSingular(w)
-	case r.Method == http.MethodPut && path == "/api/v2/organization_collaborators/"+s.identityID:
-		s.handleUpdate(w, r)
 	case r.Method == http.MethodDelete && path == "/api/v2/organization_collaborators/"+s.identityID:
 		s.handleDelete(w)
 	default:
@@ -118,7 +116,7 @@ func (s *mockCollaboratorLifecycleServer) handleList(w http.ResponseWriter) {
 
 // handleSingular is the only handler that returns the real additionalRoles,
 // matching the real backend's read-flag-aware formatter (the path
-// hydrateCollaboratorRoles calls). Its base_role is deliberately the frozen
+// hydrateCollaboratorRoles calls). Its base_role is deliberately
 // singularBaseRole, not listBaseRole - see the type doc comment on why that
 // split is real backend behavior, not a mock artifact.
 func (s *mockCollaboratorLifecycleServer) handleSingular(w http.ResponseWriter) {
@@ -142,23 +140,6 @@ func (s *mockCollaboratorLifecycleServer) handleSingular(w http.ResponseWriter) 
 	})
 }
 
-func (s *mockCollaboratorLifecycleServer) handleUpdate(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		PermissionLevel string `json:"permission_level"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	s.permissionLevel = body.PermissionLevel
-	// Mirrors the real backend: alter_collaborator writes Postgres only, so
-	// listBaseRole (LIST's formatter, always Postgres-derived) tracks this
-	// write immediately. singularBaseRole is deliberately left untouched -
-	// alter_collaborator never calls SpiceDB, so the singular GET's
-	// SpiceDB-derived base_role stays frozen at its pre-update value, live-
-	// proven real behavior (see the type doc comment).
-	s.listBaseRole = body.PermissionLevel
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, `{}`)
-}
-
 func (s *mockCollaboratorLifecycleServer) handleDelete(w http.ResponseWriter) {
 	s.deleted = true
 	w.WriteHeader(http.StatusNoContent)
@@ -173,37 +154,45 @@ func (s *mockCollaboratorLifecycleServer) isDeleted() bool {
 }
 
 // TestAccOrganizationUserResource_Lifecycle_MockServer is the contract's T1/AC
-// mandatory CI-enforced lifecycle test (section 7): Import -> Read (including
-// base_role/additional_roles hydration via the singular GET) -> Update permission_level ->
-// Delete, all against a scripted mock, no env-var gating, no real identity touched. This
+// mandatory CI-enforced lifecycle test (section 7): Import -> Read -> Delete,
+// all against a scripted mock, no env-var gating, no real identity touched. This
 // resource is import-only (Create always errors - covered separately), so the lifecycle
 // starts from Import rather than Create, matching the real-infra test's own established shape.
+//
+// There is no Update leg any more: the resource is membership-only and exposes
+// no writable attribute, so no config change can produce an update plan. The
+// role write path it used to cover now belongs to
+// anyscale_organization_user_role and is tested there. The mock has no PUT
+// handler at all (see its doc comment), so a regression that reintroduced a
+// role write from this resource would 404 rather than pass silently.
+//
+// The role attributes are likewise not asserted here - they are no longer part
+// of this resource's state. The singular per-user GET is still exercised
+// indirectly (findUserByID hydrates through it on every read), and the
+// role-field assertions themselves live with the data sources that still
+// expose them.
 func TestAccOrganizationUserResource_Lifecycle_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mockServer := newMockCollaboratorLifecycleServer(t)
 	const resourceAddr = "anyscale_organization_user.test"
 
-	configFor := func(permissionLevel string) string {
-		return testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
+	config := testAccProviderBlock(httpServer.URL) + `
 resource "anyscale_organization_user" "test" {
-  permission_level = %[1]q
 }
-`, permissionLevel)
-	}
+`
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Import: populates identity fields plus the hydrated role fields (real
-			// additional_roles from the singular GET, not list's hardcoded-empty value).
-			// ImportStatePersist is required here - see the real-infra test's own
-			// comment on this same resource: Create() always errors (import-only),
-			// so without persisting, the next step would see no existing resource
-			// and attempt to create one from Config, hitting "Direct Creation Not
+			// Import: populates the identity fields. ImportStatePersist is
+			// required here - see the real-infra test's own comment on this same
+			// resource: Create() always errors (import-only), so without
+			// persisting, the next step would see no existing resource and
+			// attempt to create one from Config, hitting "Direct Creation Not
 			// Supported" instead of proceeding.
 			{
-				Config:             configFor("collaborator"),
+				Config:             config,
 				ResourceName:       resourceAddr,
 				ImportState:        true,
 				ImportStateId:      "identity-lifecycle-mock",
@@ -219,42 +208,32 @@ resource "anyscale_organization_user" "test" {
 					if s.Attributes["email"] != "lifecycle@example.com" {
 						return fmt.Errorf("email = %q, want %q", s.Attributes["email"], "lifecycle@example.com")
 					}
-					if s.Attributes["permission_level"] != "collaborator" {
-						return fmt.Errorf("permission_level = %q, want %q", s.Attributes["permission_level"], "collaborator")
+					if s.Attributes["user_id"] != "usr_lifecycle_mock" {
+						return fmt.Errorf("user_id = %q, want %q", s.Attributes["user_id"], "usr_lifecycle_mock")
 					}
-					if s.Attributes["base_role"] != "collaborator" {
-						return fmt.Errorf("base_role = %q, want %q", s.Attributes["base_role"], "collaborator")
+					if s.Attributes["created_at"] != "2026-01-01T00:00:00Z" {
+						return fmt.Errorf("created_at = %q, want %q", s.Attributes["created_at"], "2026-01-01T00:00:00Z")
 					}
-					if s.Attributes["additional_roles.#"] != "1" || s.Attributes["additional_roles.0"] != "image_reader" {
-						return fmt.Errorf("additional_roles = %#v, want a single element [image_reader] - hydrated from the singular GET, not list's hardcoded-empty value", s.Attributes)
+					// The role fields must NOT be present at all: they were
+					// removed from this resource, so recovering one here would
+					// mean the schema/import path regressed.
+					for _, gone := range []string{"permission_level", "base_role", "additional_roles.#"} {
+						if _, ok := s.Attributes[gone]; ok {
+							return fmt.Errorf("imported state still carries %q (= %q); roles belong to anyscale_organization_user_role, not this membership-only resource", gone, s.Attributes[gone])
+						}
 					}
 					return nil
 				},
 			},
 			// Verify the persisted import matches a plain Read/Config cycle cleanly.
 			{
-				Config: configFor("collaborator"),
+				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceAddr, "permission_level", "collaborator"),
-					resource.TestCheckResourceAttr(resourceAddr, "base_role", "collaborator"),
-					resource.TestCheckResourceAttr(resourceAddr, "additional_roles.#", "1"),
-					resource.TestCheckResourceAttr(resourceAddr, "additional_roles.0", "image_reader"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-			// Update permission_level: proves the write path AND that base_role
-			// (re-hydrated post-update) tracks the change.
-			{
-				Config: configFor("owner"),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceAddr, "permission_level", "owner"),
-					resource.TestCheckResourceAttr(resourceAddr, "base_role", "owner"),
-					resource.TestCheckResourceAttr(resourceAddr, "additional_roles.#", "1"),
-					resource.TestCheckResourceAttr(resourceAddr, "additional_roles.0", "image_reader"),
+					resource.TestCheckResourceAttr(resourceAddr, "email", "lifecycle@example.com"),
+					resource.TestCheckResourceAttr(resourceAddr, "name", "Lifecycle Test"),
+					resource.TestCheckResourceAttr(resourceAddr, "created_at", "2026-01-01T00:00:00Z"),
+					resource.TestCheckNoResourceAttr(resourceAddr, "permission_level"),
+					resource.TestCheckNoResourceAttr(resourceAddr, "base_role"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
