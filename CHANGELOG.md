@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.24.0] - 2026-07-28
 
+**Note:** this release also carries the breaking changes listed under `[0.23.0]` below. That version
+was prepared but never tagged or released, so its `cloud_name` removals first became installable
+here, in `0.24.0`. If you are upgrading from `0.22.0` or earlier, read the `[0.23.0]` section too.
+
 ### Breaking Changes
 
 - resource/anyscale_organization_collaborator: Renamed to `anyscale_organization_user` for symmetry with the existing `anyscale_organization_user`/`anyscale_organization_users` data sources; update your resource type in configuration and re-import (`terraform import anyscale_organization_user.<name> <identity_id>`) - there is no `moved` block or automatic state migration, since this resource had no existing users to migrate.
