@@ -228,8 +228,8 @@ resource "anyscale_project" "default" {
 }
 ```
 
-Once you're sharing a project with a team rather than working solo, see the [Project
-guide](./project.md) for the collaborator access model and permission levels.
+This resource does not manage who can access the project - see the [Project
+guide](./project.md) for why, and for a known timing limitation on `destroy` shortly after `apply`.
 
 ## Cleaning up
 
@@ -263,4 +263,4 @@ resource; empty the bucket yourself first rather than expecting a force-destroy 
 - [Cloud Resources guide](./cloud-resources.md) - provider support matrix, naming differences
   between resources and data sources, and known limitations
 - [Compute Config guide](./compute-config.md) - versioning model and write-only fields
-- [Project guide](./project.md) - collaborator access model and permission levels
+- [Project guide](./project.md) - collaborator block removal and known limitations
