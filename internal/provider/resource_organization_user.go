@@ -78,7 +78,7 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 			"2. SCIM provisioning\n\n" +
 			"Once a user exists in the organization, import them using `terraform import` to bring their membership under Terraform management.\n\n" +
 			"**Example Import:**\n```\nterraform import anyscale_organization_user.user <identity_id>\n```\n\n" +
-			"**Directory-synced organizations:** If your organization manages membership via directory sync (the Policy API), this resource cannot manage members at all - any `terraform destroy` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.",
+			"**Directory-synced organizations:** SCIM directory sync alone does not affect this resource - a SCIM-enabled organization with no Policy API bindings still works normally. Only an organization that has *both* enabled SCIM *and* opted into the Policy API (at least one role binding for the org, a cloud, or a project) manages membership through the Policy API instead; for that organization only, this resource cannot manage members at all - any `terraform destroy` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
