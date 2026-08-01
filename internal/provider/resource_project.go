@@ -1,9 +1,7 @@
 package provider
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -50,23 +48,12 @@ type ProjectResourceModel struct {
 	Description            types.String `tfsdk:"description"`
 	InitialClusterConfigID types.String `tfsdk:"initial_cluster_config_id"`
 
-	// Nested collaborators
-	Collaborators []ProjectCollaboratorModel `tfsdk:"collaborator"`
-
 	// Computed fields
 	CreatorID       types.String `tfsdk:"creator_id"`
 	CreatedAt       types.String `tfsdk:"created_at"`
 	LastUsedCloudID types.String `tfsdk:"last_used_cloud_id"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	DirectoryName   types.String `tfsdk:"directory_name"`
-}
-
-// ProjectCollaboratorModel represents a project collaborator.
-type ProjectCollaboratorModel struct {
-	Email           types.String `tfsdk:"email"`
-	PermissionLevel types.String `tfsdk:"permission_level"`
-	IdentityID      types.String `tfsdk:"identity_id"` // Computed
-	UserID          types.String `tfsdk:"user_id"`     // Computed
 }
 
 // Metadata returns the resource type name.
@@ -77,6 +64,12 @@ func (r *ProjectResource) Metadata(ctx context.Context, req resource.MetadataReq
 // Schema defines the schema for the resource.
 func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// Version 1: the collaborator block was removed (v0.25.0). Prior state
+		// still carries a `collaborator` attribute and cannot be marshalled
+		// against this schema without the v0 -> v1 upgrader in
+		// resource_project_upgrade.go - see that file for why every existing
+		// anyscale_project state is affected, not just ones that used the block.
+		Version:             1,
 		MarkdownDescription: "Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.",
 
 		Attributes: map[string]schema.Attribute{
@@ -163,35 +156,6 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 				},
 			},
 		},
-
-		Blocks: map[string]schema.Block{
-			"collaborator": schema.ListNestedBlock{
-				MarkdownDescription: "Collaborators with access to this project. Can be added, removed, or modified in-place.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"email": schema.StringAttribute{
-							Required:            true,
-							MarkdownDescription: "Email address of the collaborator.",
-						},
-						"permission_level": schema.StringAttribute{
-							Required:            true,
-							MarkdownDescription: "Permission level granted to the collaborator: `owner`, `write`, or `readonly`. See the [Project guide](../guides/project.md) for more on managing project collaborators.",
-							Validators: []validator.String{
-								stringvalidator.OneOf("owner", "write", "readonly"),
-							},
-						},
-						"identity_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The identity ID of the collaborator.",
-						},
-						"user_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The user ID of the collaborator.",
-						},
-					},
-				},
-			},
-		},
 	}
 }
 
@@ -270,20 +234,6 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 
 	tflog.Info(ctx, "Project created successfully", map[string]any{"project_id": projectID})
 
-	// Create collaborators if specified. createdAt uses time.Now() rather than
-	// projectResp.Result.CreatedAt: the real POST /api/v2/projects response never includes
-	// created_at (confirmed against the live API - it unmarshals to "" here, which would fail
-	// isRecentlyCreated closed and silently disable the retry below for exactly the call site it
-	// targets), and readProject (which does populate a real CreatedAt) hasn't run yet at this
-	// point. We are provably moments past actual creation either way, so time.Now() is the
-	// correct proxy - same precedent as the acctest package's testAccDeleteProjectViaAPI helper.
-	if len(plan.Collaborators) > 0 {
-		if err := r.createCollaborators(ctx, projectID, time.Now().Format(time.RFC3339), plan.Collaborators); err != nil {
-			AddAPIError(&resp.Diagnostics, "add collaborators (project created)", err)
-			// Continue to read state even if collaborators failed
-		}
-	}
-
 	// Read back full state
 	if err := r.readProject(ctx, projectID, &plan); err != nil {
 		AddAPIError(&resp.Diagnostics, "read project after create", err)
@@ -323,6 +273,14 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 }
 
 // Update updates the resource and sets the updated Terraform state on success.
+//
+// No attribute on this resource is updatable in place any more: every writable
+// attribute is RequiresReplace (or RequiresReplaceIfConfigured), and the rest
+// are Computed. Terraform Core therefore never plans an Update for this
+// resource in practice - the method exists only to satisfy resource.Resource,
+// and refreshes state from the API rather than issuing any write, so that if
+// Core ever does route an update here the resulting state still reflects
+// reality instead of a silently stale plan.
 func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state ProjectResourceModel
 
@@ -335,18 +293,7 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	projectID := state.ID.ValueString()
 
-	tflog.Info(ctx, "Updating project collaborators", map[string]any{"project_id": projectID})
-
-	// Only collaborators can be updated; other fields require replacement.
-	// On error, fall through to the read-back below rather than returning
-	// immediately - Update's resp.State is pre-seeded from PriorState by the
-	// framework, so a bare return here would silently leave state stale
-	// instead of reflecting whatever a fail-fast sync loop did manage to
-	// apply before stopping. Mirrors Create's own "continue to read state
-	// even if collaborators failed" handling just below.
-	if err := r.syncCollaborators(ctx, projectID, state.CreatedAt.ValueString(), plan.Collaborators, state.Collaborators); err != nil {
-		AddAPIError(&resp.Diagnostics, "update collaborators", err)
-	}
+	tflog.Info(ctx, "Updating project", map[string]any{"project_id": projectID})
 
 	// Read back full state
 	if err := r.readProject(ctx, projectID, &plan); err != nil {
@@ -517,8 +464,9 @@ func DeleteProjectWithRetry(ctx context.Context, client *Client, projectID, crea
 //
 // Shared core so every call site targeting this family of bug (a permission check reading a
 // just-written grant before it has propagated) uses one schedule instead of a hand-copied loop
-// per site - see DeleteProjectWithRetry and createCollaboratorsWithRetry, which share this
-// exact schedule but differ in request, accepted statuses, and exclusion list.
+// per site. DeleteProjectWithRetry is the only caller today; the parameters stay generic
+// (accepted statuses and exclusion list are the caller's, not this helper's) so a future site
+// hitting the same race reuses this schedule rather than copying it.
 func retryOn403(
 	ctx context.Context,
 	eligible bool,
@@ -576,10 +524,6 @@ func isRecentlyCreated(createdAt string, window time.Duration) bool {
 func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	projectID := req.ID
 
-	// Read the project first (with a still-empty model.Collaborators, so
-	// readProject's own gate skips fetching them here) so a bad project ID
-	// surfaces as a clean "not found" instead of an unrelated-looking
-	// collaborators-endpoint error.
 	var model ProjectResourceModel
 	if err := r.readProject(ctx, projectID, &model); err != nil {
 		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
@@ -591,31 +535,12 @@ func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportSt
 		return
 	}
 
-	// readProject only fetches collaborators when the incoming model already
-	// has some - correct for ordinary refresh, where it stops a project
-	// managed with no collaborator block from perpetually diffing against
-	// the API's auto-added creator-owner collaborator, but fatal for import:
-	// there is no prior state yet, so that heuristic can never see "was
-	// configured" and would silently drop every real collaborator, no
-	// matter how many exist. Import is the one lifecycle point where
-	// recovering them unconditionally is unambiguous - there's no prior
-	// state to confuse "recovered at import" with "never configured" (same
-	// reasoning as CC12 in resource_compute_config.go's ImportState). Fetch
-	// them explicitly here; every later refresh re-fetches them again on its
-	// own since this seeds a non-empty list into state.
-	collaborators, err := r.getCollaborators(ctx, projectID)
-	if err != nil {
-		AddAPIError(&resp.Diagnostics, "read collaborators for import", err)
-		return
-	}
-	model.Collaborators = collaborators
-
 	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
 }
 
 // Helper functions
 
-// readProject reads a project's details and collaborators into the model.
+// readProject reads a project's details into the model.
 func (r *ProjectResource) readProject(ctx context.Context, projectID string, model *ProjectResourceModel) error {
 	tflog.Debug(ctx, "Reading project", map[string]any{"project_id": projectID})
 
@@ -659,422 +584,6 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 
 	model.IsDefault = types.BoolValue(result.IsDefault)
 	model.DirectoryName = types.StringValue(result.DirectoryName)
-
-	// Only fetch collaborators if they were specified in the configuration
-	// This avoids inconsistency with auto-added creator collaborator
-	tflog.Debug(ctx, "Checking whether to fetch collaborators", map[string]any{
-		"project_id":              projectID,
-		"model_collaborators_len": len(model.Collaborators),
-	})
-
-	if len(model.Collaborators) > 0 {
-		tflog.Debug(ctx, "Fetching collaborators for project", map[string]any{
-			"project_id": projectID,
-		})
-		collaborators, err := r.getCollaborators(ctx, projectID)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to get collaborators", map[string]any{
-				"project_id": projectID,
-				"error":      err.Error(),
-			})
-			// Continue without collaborators rather than failing
-			model.Collaborators = []ProjectCollaboratorModel{}
-		} else {
-			tflog.Debug(ctx, "Successfully fetched collaborators", map[string]any{
-				"project_id": projectID,
-				"count":      len(collaborators),
-			})
-			model.Collaborators = collaborators
-		}
-	} else {
-		tflog.Debug(ctx, "Skipping collaborator fetch (none specified in config)", map[string]any{
-			"project_id": projectID,
-		})
-	}
-
-	return nil
-}
-
-// getCollaborators fetches the list of collaborators for a project.
-func (r *ProjectResource) getCollaborators(ctx context.Context, projectID string) ([]ProjectCollaboratorModel, error) {
-	tflog.Debug(ctx, "Fetching collaborators", map[string]any{
-		"project_id": projectID,
-	})
-
-	// Pages through every page rather than just the first, so a project with
-	// more collaborators than fit on one page doesn't silently drop the rest
-	// on every read/sync.
-	results, err := PaginatedRequest(
-		ctx, r.client, fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil,
-		func(body []byte) ([]ProjectCollaboratorResult, *string, error) {
-			var listResp ProjectCollaboratorListResponse
-			if err := json.Unmarshal(body, &listResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to unmarshal collaborators response: %w", err)
-			}
-			return listResp.Results, listResp.Metadata.NextPagingToken, nil
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get collaborators: %w", err)
-	}
-
-	tflog.Debug(ctx, "Parsed collaborators response", map[string]any{
-		"project_id": projectID,
-		"count":      len(results),
-	})
-
-	// Map to model
-	collaborators := make([]ProjectCollaboratorModel, 0, len(results))
-	for i, collab := range results {
-		tflog.Debug(ctx, "Mapping collaborator", map[string]any{
-			"index":            i,
-			"email":            collab.Value.Email,
-			"permission_level": collab.PermissionLevel,
-			"identity_id":      collab.ID,
-			"user_id":          collab.Value.ID,
-		})
-		collaborators = append(collaborators, ProjectCollaboratorModel{
-			Email:           types.StringValue(collab.Value.Email),
-			PermissionLevel: types.StringValue(collab.PermissionLevel),
-			IdentityID:      types.StringValue(collab.ID),
-			UserID:          types.StringValue(collab.Value.ID),
-		})
-	}
-
-	tflog.Debug(ctx, "Returning collaborators", map[string]any{
-		"project_id": projectID,
-		"count":      len(collaborators),
-	})
-
-	return collaborators, nil
-}
-
-// projectCollaboratorAlreadyHasPermissionsDetailSubstring is the exact,
-// load-bearing substring of the batch_create 409 detail when the target
-// email already has permissions for the project (traced against
-// project_collaborators_service.py's batch_create_project_collaborators:
-// "User with email {email} already has permissions for this project.").
-// This 409 is an expected, non-fatal outcome - see createOneCollaborator -
-// but it still requires an authoritative follow-up write, unlike the old
-// behavior of treating it as nothing further to do.
-const projectCollaboratorAlreadyHasPermissionsDetailSubstring = "already has permissions for this project"
-
-// projectCollaboratorSelfModifyDetailSubstring is the exact 400 detail the
-// per-collaborator PUT returns when its target is the calling identity
-// itself (confirmed live via a real acceptance test: a project's
-// auto-added creator-owner declaring themselves as a collaborator hits
-// this on the authoritative follow-up write - see createOneCollaborator's
-// compare-then-write guard, which avoids the call entirely for the common
-// case where the declared value already matches, and only reaches this
-// path when a real change is being requested for one's own identity,
-// which the API forbids). Same class of restriction
-// resource_cloud_user_role.go already names explicitly for cloud roles
-// (cloudUserRoleSelfModifyDetailSubstring) - matching that file's own
-// documented fragility: this is a message-text substring match, not a typed
-// error, so a backend wording change silently stops matching. Deliberately
-// omits the leading word ("Cannot") since the real observed text
-// capitalizes it only because it starts the sentence - anchoring past that
-// word keeps the match independent of sentence-initial capitalization,
-// unlike a naive lowercase copy of the whole phrase would be.
-const projectCollaboratorSelfModifyDetailSubstring = "alter your own role"
-
-// createCollaborators creates each of collaborators as an authoritative permission grant, ONE AT
-// A TIME - never batched into a single batch_create call. The backend validates every entry in a
-// batch_create request before writing anything (project_collaborators_service.py's
-// batch_create_project_collaborators): the moment any single email in the array already has
-// permissions, the WHOLE request 409s and nothing is written for ANY entry, not just the
-// conflicting one - confirmed both by tracing that handler and by a real resource.Test run against
-// this provider. Splitting into one call per person isolates each outcome, so one pre-existing
-// collaborator (the auto-added creator-owner is the common case - see docs/guides/project.md,
-// which recommends declaring them alongside new collaborators) can never again block creation of
-// unrelated, genuinely-new collaborators declared in the same apply.
-func (r *ProjectResource) createCollaborators(ctx context.Context, projectID, createdAt string, collaborators []ProjectCollaboratorModel) error {
-	if len(collaborators) == 0 {
-		return nil
-	}
-
-	tflog.Debug(ctx, "Creating collaborators", map[string]any{
-		"project_id": projectID,
-		"count":      len(collaborators),
-	})
-
-	// Lazily fetched and cached across this call's entries: a "declare every
-	// existing collaborator after import" apply (the pattern
-	// docs/guides/project.md recommends) can hit the already-has-permissions
-	// 409 many times in one call, and re-paging per conflict would be wasteful.
-	var existing []ProjectCollaboratorModel
-	var existingLoaded bool
-	resolveExisting := func(email string) (existingProjectCollaborator, error) {
-		if !existingLoaded {
-			var err error
-			existing, err = r.getCollaborators(ctx, projectID)
-			if err != nil {
-				return existingProjectCollaborator{}, fmt.Errorf("failed to look up existing collaborators: %w", err)
-			}
-			existingLoaded = true
-		}
-		for _, c := range existing {
-			if strings.EqualFold(c.Email.ValueString(), email) {
-				return existingProjectCollaborator{
-					IdentityID:      c.IdentityID.ValueString(),
-					PermissionLevel: c.PermissionLevel.ValueString(),
-				}, nil
-			}
-		}
-		return existingProjectCollaborator{}, fmt.Errorf("email %s was reported as already having permissions, but was not found in a follow-up read of this project's collaborators", email)
-	}
-
-	for _, collab := range collaborators {
-		if err := r.createOneCollaborator(ctx, projectID, createdAt, collab, resolveExisting); err != nil {
-			return fmt.Errorf("failed to create collaborators: %w", err)
-		}
-	}
-
-	tflog.Info(ctx, "Collaborators created successfully", map[string]any{
-		"project_id": projectID,
-		"count":      len(collaborators),
-	})
-
-	return nil
-}
-
-// existingProjectCollaborator is what createOneCollaborator's 409 path resolves an email to: the
-// identity_id the authoritative PUT is keyed on, plus the permission_level they ALREADY hold, so
-// the caller can compare declared-vs-actual before deciding whether a write is needed at all.
-type existingProjectCollaborator struct {
-	IdentityID      string
-	PermissionLevel string
-}
-
-// createOneCollaborator creates a single collaborator via batch_create with a one-element array
-// (see createCollaborators' doc comment for why this is never batched), retrying a 403 on the
-// shared capped-exponential schedule (see retryOn403) ONLY when createdAt shows the project was
-// created very recently (within recentlyCreatedRetryWindow) - same age-gated shape as
-// DeleteProjectWithRetry, same reasoning: a genuine, long-standing permission denial is
-// indistinguishable from the race by status code alone, so this must not retry every 403. This
-// targets the same backend race as delete's retry, on a different permission: the
-// collaborator-add MANAGE_IAM check and delete's DELETE check both resolve through the SAME
-// role_binding tuple that project-creation writes (confirmed against the SpiceDB schema and,
-// independently, by directly observing a real failing case's own 403->409 transition converge in
-// ~10.3s). No known collaborator-add-specific non-transient 403 message exists yet, so there is no
-// exclusion list here - every eligible 403 retries (fail-toward-retry, same principle as delete's
-// exclusion list).
-//
-// A 409 matching projectCollaboratorAlreadyHasPermissionsDetailSubstring (e.g. re-declaring the
-// creator, auto-added as owner at project creation) is expected, and is resolved as one of three
-// outcomes - COMPARE THEN WRITE, never write unconditionally:
-//
-//  1. declared permission_level == what they already hold -> nothing to apply, no PUT issued. This
-//     is not just an optimisation: a real acceptance test proved the naive always-PUT version fails
-//     here specifically when the target is the caller's own identity (see case 3), so this case
-//     must be detected BEFORE attempting a write, not left to the API to no-op.
-//  2. declared != existing, target is a different identity -> authoritative PUT
-//     (updateCollaboratorPermission), same as before. Without this, re-declaring an existing
-//     collaborator at a different level than they currently hold would silently never apply the
-//     change - confirmed via a real resource.Test run, where it instead surfaces later as a
-//     confusing "provider produced inconsistent result after apply".
-//  3. declared != existing, target IS the caller's own identity -> the PUT is attempted (this is a
-//     real, declared, wanted change, so the asymmetric rule requires trying it, not skipping it
-//     silently) and the API refuses it (self-modification is blocked project-side too, matching
-//     resource_cloud_user_role.go's H23 restriction at cloud scope) - surfaced as a hard error with
-//     an explicit diagnostic naming self-modification, modeled on that file's own wording, never
-//     swallowed as success.
-//
-// Any OTHER error returns immediately (fail-fast), matching this file's existing toUpdate/toRemove
-// loop convention - no rollback of collaborators already created earlier in the same
-// createCollaborators call, since each one is exactly the real, wanted state the config asked for.
-func (r *ProjectResource) createOneCollaborator(
-	ctx context.Context, projectID, createdAt string, collab ProjectCollaboratorModel, resolveExisting func(email string) (existingProjectCollaborator, error),
-) error {
-	email := collab.Email.ValueString()
-	permissionLevel := collab.PermissionLevel.ValueString()
-
-	entries := ProjectCollaboratorBatchRequest{{
-		Value: struct {
-			Email string `json:"email"`
-		}{Email: email},
-		PermissionLevel: permissionLevel,
-	}}
-	jsonBytes, err := json.Marshal(entries)
-	if err != nil {
-		return fmt.Errorf("failed to serialize collaborator request: %w", err)
-	}
-
-	eligible := isRecentlyCreated(createdAt, recentlyCreatedRetryWindow)
-	_, err = retryOn403(ctx, eligible, nil,
-		func() ([]byte, error) {
-			// Fresh reader each attempt - bytes.Reader is consumed after one read, so reusing a
-			// single reader across retries would silently send an empty body on attempt 2+.
-			return DoRequestRaw(
-				ctx, r.client, "POST", fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID),
-				bytes.NewReader(jsonBytes),
-				http.StatusOK,
-				http.StatusNoContent,
-				http.StatusCreated,
-				// Deliberately NOT accepting http.StatusConflict any more - it must
-				// surface as a real error so the compare-then-write fallback below
-				// actually runs. See the doc comment above.
-			)
-		},
-		func(attempt int, next time.Duration) {
-			tflog.Warn(ctx, "Add collaborator got a 403 shortly after project creation; retrying (known permission-check consistency race, same tuple as delete)", map[string]any{
-				"project_id": projectID,
-				"email":      email,
-				"attempt":    attempt,
-				"created_at": createdAt,
-				"next_wait":  next,
-			})
-		},
-	)
-	if err == nil {
-		return nil
-	}
-
-	detail := extractAPIErrorDetail(err)
-	if !strings.Contains(detail, projectCollaboratorAlreadyHasPermissionsDetailSubstring) {
-		return fmt.Errorf("failed to create collaborator %s: %w", email, err)
-	}
-
-	// existingEmail is matched via strings.EqualFold inside resolveExisting - keep that; a casing
-	// difference reading as not-found here would incorrectly attempt a PUT that was never needed.
-	existingCollab, resolveErr := resolveExisting(email)
-	if resolveErr != nil {
-		return fmt.Errorf("collaborator %s already has permissions, but %w", email, resolveErr)
-	}
-
-	if existingCollab.PermissionLevel == permissionLevel {
-		// Outcome 1: nothing to apply. Deliberately checked before ever attempting the PUT - see
-		// the doc comment above for why this must be pre-empted, not left to the API to no-op.
-		tflog.Info(ctx, "Collaborator already has the declared permission_level; no write needed", map[string]any{
-			"project_id":       projectID,
-			"email":            email,
-			"permission_level": permissionLevel,
-		})
-		return nil
-	}
-
-	// Outcomes 2 and 3: a real change is being requested. Attempt it - the asymmetric rule
-	// requires trying to apply something the config declared, never silently skipping it - and
-	// let the specific self-modify detection below decide how the resulting error is presented.
-	if err := r.updateCollaboratorPermission(ctx, projectID, existingCollab.IdentityID, permissionLevel); err != nil {
-		writeDetail := extractAPIErrorDetail(err)
-		if strings.Contains(writeDetail, projectCollaboratorSelfModifyDetailSubstring) {
-			return fmt.Errorf(
-				"collaborator %s already has permissions at a different level than declared, and applying the change failed: %s\n\nThis collaborator's email resolves to the identity Terraform is currently authenticated as. The Anyscale API does not allow changing your own role on this project - have another project owner apply this configuration instead",
-				email, writeDetail,
-			)
-		}
-		return fmt.Errorf("collaborator %s already had permissions, and applying the declared permission_level failed: %w", email, err)
-	}
-
-	return nil
-}
-
-// updateCollaboratorPermission issues the authoritative PUT
-// /api/v2/projects/{id}/collaborators/{identity_id} that sets a single collaborator's
-// permission_level - shared by syncCollaborators' toUpdate branch and
-// createOneCollaborator's already-has-permissions fallback above, so the one real update call has
-// one definition. No retry wrapper, matching this call's already-shipped behavior before this
-// helper was extracted - the new fallback caller does not get stronger error handling than the
-// normal update path already had.
-func (r *ProjectResource) updateCollaboratorPermission(ctx context.Context, projectID, identityID, permissionLevel string) error {
-	updateReq := ProjectCollaboratorUpdateRequest{PermissionLevel: permissionLevel}
-	reqBody, err := MarshalRequestBody(updateReq)
-	if err != nil {
-		return fmt.Errorf("failed to serialize update request: %w", err)
-	}
-
-	_, err = DoRequestRaw(
-		ctx, r.client, "PUT", fmt.Sprintf("/api/v2/projects/%s/collaborators/%s", projectID, identityID),
-		reqBody, http.StatusOK, http.StatusNoContent,
-	)
-	return err
-}
-
-// syncCollaborators reconciles collaborator changes between plan and state. createdAt is the
-// project's own created_at (from prior state) so a newly-added collaborator on a
-// still-recently-created project is eligible for createCollaborators' retry, same as an add at
-// create time - see createCollaborators' doc comment.
-func (r *ProjectResource) syncCollaborators(ctx context.Context, projectID, createdAt string, planned, current []ProjectCollaboratorModel) error {
-	// Maps are for O(1) lookup only - classification below iterates the
-	// original planned/current slices directly, in their original order, so
-	// which entries land before a possible fail-fast stop is deterministic
-	// across identical re-applies rather than depending on Go's randomized
-	// map iteration order.
-	planMap := make(map[string]ProjectCollaboratorModel, len(planned))
-	for _, collab := range planned {
-		planMap[collab.Email.ValueString()] = collab
-	}
-
-	currentMap := make(map[string]ProjectCollaboratorModel, len(current))
-	for _, collab := range current {
-		currentMap[collab.Email.ValueString()] = collab
-	}
-
-	// Determine adds, updates, removes
-	var toAdd []ProjectCollaboratorModel
-	var toUpdate []ProjectCollaboratorModel
-	var toRemove []ProjectCollaboratorModel
-
-	// Find adds and updates - iterate planned (not planMap) for deterministic order.
-	for _, planCollab := range planned {
-		email := planCollab.Email.ValueString()
-		if currentCollab, exists := currentMap[email]; exists {
-			// Check if permission changed
-			if currentCollab.PermissionLevel.ValueString() != planCollab.PermissionLevel.ValueString() {
-				planCollab.IdentityID = currentCollab.IdentityID // Preserve identity_id for update
-				toUpdate = append(toUpdate, planCollab)
-			}
-		} else {
-			toAdd = append(toAdd, planCollab)
-		}
-	}
-
-	// Find removes - iterate current (not currentMap) for deterministic order.
-	for _, currentCollab := range current {
-		email := currentCollab.Email.ValueString()
-		if _, exists := planMap[email]; !exists {
-			toRemove = append(toRemove, currentCollab)
-		}
-	}
-
-	// Execute changes
-	if len(toAdd) > 0 {
-		tflog.Info(ctx, "Adding collaborators", map[string]any{"count": len(toAdd)})
-		if err := r.createCollaborators(ctx, projectID, createdAt, toAdd); err != nil {
-			return fmt.Errorf("failed to add collaborators: %w", err)
-		}
-	}
-
-	for _, collab := range toUpdate {
-		tflog.Info(ctx, "Updating collaborator permission", map[string]any{
-			"email":      collab.Email.ValueString(),
-			"permission": collab.PermissionLevel.ValueString(),
-		})
-
-		if err := r.updateCollaboratorPermission(ctx, projectID, collab.IdentityID.ValueString(), collab.PermissionLevel.ValueString()); err != nil {
-			return fmt.Errorf("failed to update collaborator %s: %w", collab.Email.ValueString(), err)
-		}
-	}
-
-	for _, collab := range toRemove {
-		tflog.Info(ctx, "Removing collaborator", map[string]any{"email": collab.Email.ValueString()})
-
-		identityID := collab.IdentityID.ValueString()
-		_, err := DoRequestRaw(
-			ctx,
-			r.client,
-			"DELETE",
-			fmt.Sprintf("/api/v2/projects/%s/collaborators/%s", projectID, identityID),
-			nil,
-			http.StatusOK,
-			http.StatusNoContent,
-			http.StatusNotFound,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to remove collaborator %s: %w", collab.Email.ValueString(), err)
-		}
-	}
 
 	return nil
 }

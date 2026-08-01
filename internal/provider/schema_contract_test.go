@@ -618,12 +618,37 @@ func TestCloudMountTargetsHardenedFieldsRequireReplace(t *testing.T) {
 // validate-time, not warn, which needs the real terraform-validate flow
 // this schema-only test file cannot exercise.
 
+// TestProjectCollaboratorRemoved pins the v0.25.0 removal of
+// anyscale_project's collaborator block (project access is managed by a
+// separate resource now). Mutation-proof by construction: an incomplete
+// removal leaves the entry in Blocks (or, if someone "converted" it rather
+// than removing it, in Attributes) and fails immediately.
+//
+// The paired proof that EXISTING state survives the removal lives in
+// resource_project_upgrade_test.go - a schema-absence check alone cannot
+// catch the state-marshal failure the v0 -> v1 upgrader exists to prevent.
+func TestProjectCollaboratorRemoved(t *testing.T) {
+	s := schemaOf(t, &ProjectResource{})
+
+	if _, present := s.Blocks["collaborator"]; present {
+		t.Fatal("anyscale_project.collaborator must be fully removed (v0.25.0) - found it still declared as a block")
+	}
+	if _, present := s.Attributes["collaborator"]; present {
+		t.Fatal("anyscale_project.collaborator must be fully removed (v0.25.0), not converted to an attribute - " +
+			"found it declared in the Attributes map")
+	}
+	if s.Version != 1 {
+		t.Errorf("anyscale_project schema Version = %d, want 1 - removing collaborator changes the stored state "+
+			"shape, so the version bump and its state upgrader must ship with it", s.Version)
+	}
+}
+
 // TestProjectDescriptionRequiresReplaceIfConfigured pins task 452e7154's fix.
 // anyscale_project.description is Optional+Computed (the API auto-generates
 // a description when omitted), so a plain RequiresReplace() fires on ANY
 // change to the value — including a server-generated description changing on
-// its own, or an unrelated update (e.g. a collaborator change) that happens
-// to trigger a fresh read — forcing a full project replace nobody asked for.
+// its own, or any other update that happens to trigger a fresh read —
+// forcing a full project replace nobody asked for.
 // RequiresReplaceIfConfigured only fires when the user actually configured a
 // value, which is the correct trigger. UseStateForUnknown is required
 // alongside it so a server-assigned description stays stable across

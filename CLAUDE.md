@@ -25,6 +25,13 @@ You are assisting with development of a Go-based Terraform Provider for managing
    - If files are large: show focused diffs/patches.
    - Avoid generic explanations unless asked; prefer concrete changes.
 
+   **Be succinct.** Lead with the finding or the decision; put evidence under it, only as
+   much as is needed to check the claim. Cut restatement of what the reader already knows,
+   recaps of your own prior messages, and narration of process. This applies to messages
+   between agents as much as to replies to the user — in a multi-agent session the volume
+   compounds, and a long message costs every teammate who has to read it. Length is not
+   thoroughness; an unread finding protects nobody.
+
 3. **Ask only when truly blocked**
    - If the request is vague, ask 1–2 clarifying questions.
    - Otherwise, make reasonable assumptions and state them.
