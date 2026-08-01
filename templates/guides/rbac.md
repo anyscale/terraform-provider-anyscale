@@ -2,7 +2,7 @@
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
 subcategory: "Behavior & Limitations"
 description: |-
-  How access control is split across anyscale_organization_user, anyscale_organization_user_role, and anyscale_cloud_access - the vocabulary differences between scopes, what "authoritative" means for each resource, why destroying anyscale_organization_user_role does not revert a person's role, the two rules the backend enforces across a cloud grant and its nested project grants, and migrating from a per-user access-management script.
+  How access control is split across anyscale_organization_user, anyscale_organization_user_role, and anyscale_cloud_user_role - the vocabulary differences between scopes, what "authoritative" means for each resource, and why destroying anyscale_organization_user_role does not revert a person's role.
 ---
 
 # RBAC: Roles Across Organizations, Clouds, and Projects
@@ -10,12 +10,10 @@ description: |-
 Anyscale access control spans three scopes - organization, cloud, and project - and this provider
 manages them through more than one resource because the backend itself treats them as genuinely
 different concepts, not just different levels of the same one. This guide is the one place that
-explains the whole picture: which resource manages what, why the same word means different things
-depending on which resource you're reading, and the two rules the backend enforces that neither
-resource's own documentation can explain on its own.
+explains the whole picture: which resource manages what, and why the same word means different things
+depending on which resource you're reading.
 
-Read this before writing configuration that spans more than one scope, and especially before
-migrating from a script-based user-management workflow onto this provider.
+Read this before writing configuration that spans more than one scope.
 
 ## Which resource manages what
 
@@ -23,17 +21,11 @@ migrating from a script-based user-management workflow onto this provider.
 |---|---|---|
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user exists in the organization at all. Import-only - it cannot create a member, and destroying it evicts them. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
-| Cloud and project role | [`anyscale_cloud_access`](../resources/cloud_access.md) | Every user's access to one cloud, including their access to projects inside that cloud. Authoritative over the cloud's **whole** member list. |
-| Everything, read-only | [`anyscale_organization_user_access`](../data-sources/organization_user_access.md) | A single lookup for one user's role across every scope at once. |
+| Cloud role | [`anyscale_cloud_user_role`](../resources/cloud_user_role.md) | One user's `base_role` and `deny_roles` on one cloud. Authoritative over that one (cloud, user) pair - not over the cloud's whole member list. Gated behind two separate backend flags; see that resource's own documentation. |
 
-Two resources use the word "authoritative" and it means different things for each, which is worth
-understanding before you write either one - see [Authority](#authority-what-terraform-manages-here-actually-means),
-below.
-
-If you used `anyscale_cloud_user_role` before, it has been replaced by `anyscale_cloud_access`, not
-renamed alongside it - the schema genuinely changed shape, from one resource per user per cloud to one
-resource per cloud managing every user on it. See that resource's own migration notes for moving
-existing state over.
+Both role resources use the word "authoritative," and both mean the same thing: authoritative over the
+one row they manage, never over a whole population - see
+[Authority](#authority-what-terraform-manages-here-actually-means), below.
 
 ## The vocabulary problem
 
@@ -75,66 +67,34 @@ the same thing, on another.** Check the specific resource's schema every time.
 
 ## Authority: what "Terraform manages here" actually means
 
-`anyscale_cloud_access` is **authoritative over a cloud's entire member list.** Declare three people
-with access to a cloud, and a fourth person who was granted access some other way - through the
-console, through a script, by another team - gets **revoked** on your next `apply`. This is
-deliberate: the whole reason this resource exists, rather than a script comparing a JSON file to
-reality by hand, is to make Terraform the source of truth for who has access to a cloud and to catch
-drift automatically.
+Both role resources use the word "authoritative," and for both it means the same thing: authoritative
+over the one row they manage, never over a whole population. `anyscale_organization_user_role` is
+authoritative over one user's organization role - `base_role` and `deny_roles` for that person - and
+has no opinion about anyone else. `anyscale_cloud_user_role` is authoritative over one user's role on
+one cloud, the same shape one scope down: setting `base_role` there replaces whatever role and deny
+roles that user previously held on that cloud, and never touches any other user's access. Neither
+resource discovers or revokes anyone Terraform was not explicitly told to manage - a person nobody
+wrote a resource for is invisible to it, not evicted by it.
 
-`anyscale_organization_user_role` is **not** authoritative in that sense. It manages the role of the
-one user it names - `base_role` and `deny_roles` for that person - and has no opinion about
-anyone else. A person nobody wrote a resource for is invisible to it, not revoked by it. Organization
-membership follows the same rule for the same reason: Terraform evicting every organization member it
-wasn't told about is a much larger blast radius than most practitioners want by default, and the
-underlying script this provider is meant to replace only does that behind an explicit, separate flag.
+Both resources make the same design choice for the same reason: `base_role` is **required**, with no
+default value. A default would need to pick some role for a bare first `apply` against a person who
+already holds real access - and if that default were ever lower than what someone actually holds,
+adopting them under Terraform would silently demote them on the very first `apply`, with nothing
+unusual in the plan to catch it. Stating the role explicitly every time trades a small amount of
+config brevity for making sure a demotion, if it ever happens, is a value you typed and can see in the
+diff - never a fallback you didn't choose.
 
-One field on this resource is deliberately stricter than its cloud counterpart: `base_role` is
-**required**, with no default value. A default would need to pick some role for a bare first `apply`
-against a person who already holds real access - and if that default were ever lower than what someone
-actually holds, adopting them under Terraform would silently demote them on the very first `apply`,
-with nothing unusual in the plan to catch it. Stating the role explicitly every time trades a small
-amount of config brevity for making sure a demotion, if it ever happens, is a value you typed and can
-see in the diff - never a fallback you didn't choose.
+**One sharp edge is worth flagging before the details below:** `anyscale_organization_user_role`'s
+destroy can **leave a privilege behind** - an owner stays an owner - and can even **grant new
+capability**, by lifting a declared `deny_roles` restriction. Neither is a bug; both follow from the
+same rule explained next.
 
-Because `anyscale_cloud_access` is authoritative, and because the backend has no `DELETE` that
-removes a role without also removing the underlying cloud membership entirely, a revoke can fail in a
-way that has no clean retry: the person was granted access outside Terraform in a way that left no
-membership record for Terraform's revoke call to find. Two different kinds of failure follow two
-different rules, and the difference matters:
-
-- **A failed write of something your configuration declares is a hard error.** If Terraform cannot
-  grant or update a role you asked for, the apply fails. There is no best-effort here - a silently
-  unapplied grant would be a worse outcome than a loud failure.
-- **A failed revoke of something your configuration does not declare converges anyway**, with the
-  grant surfaced as an exception rather than silently dropped or endlessly retried. Check this
-  resource's own schema for exactly which attribute lists these - it is a real, `Computed` value you
-  can read in `terraform plan` output and reference from other configuration (for example, alerting
-  if it is ever non-empty), not just a warning printed to the console and forgotten.
-
-This asymmetry is intentional: Terraform must never silently fail to apply something you asked for,
-but it may - and here, must - tell you plainly when it cannot undo something it never did.
-
-**These two resources' destroy behaviors are opposites, and it is worth holding both in mind at once
-rather than learning one page at a time.** `anyscale_cloud_access` destroy **revokes** a cloud's
-members; `anyscale_organization_user_role` destroy **leaves a person's role in place** (details below).
-Presented separately, that reads like one of them is a bug. It isn't - one rule produces both outcomes,
-applied to two different object models: a destroy removes what a resource has authority over, and only
-where an absent state actually exists for the thing it manages. `anyscale_cloud_access`'s authority is a
-cloud's member list, and "not a member of this cloud" is a real, reachable state, so destroying it
-revokes those members - removing the grants **is** removing the thing it manages.
-`anyscale_organization_user_role`'s authority is one user's role value, and there is no "no base role"
-state - every organization member always has one - so there is nothing for destroy to remove, only
-something it could change, and changing it would reach past this resource's own authority into that
-person's org-wide cloud access.
-Same rule, opposite outcomes, because an absent state exists for one and not the other.
-
-The sharp edges point in opposite directions too, which is exactly why a reader of only one resource's
-page tends to generalize the wrong instinct to the other: `anyscale_organization_user_role`'s destroy
-can **leave a privilege behind** - an owner stays an owner - and can even **grant new capability**, by
-lifting a declared `deny_roles` restriction (see below). `anyscale_cloud_access`'s destroy can **remove
-access at scale**, including through a typo'd `cloud_id` that this resource has no way to detect (see
-[Typo protection](#typo-protection-what-is-guarded-and-what-genuinely-is-not), below).
+Each resource's `destroy` can also fail to fully complete, for reasons specific to its own scope -
+read each resource's own documentation rather than assuming one explains the other. See
+["Destroying `anyscale_organization_user_role`"](#destroying-anyscale_organization_user_role-what-actually-happens)
+below for the organization case, and `anyscale_cloud_user_role`'s own documentation for the cloud case
+(a role granted on top of pre-existing, out-of-band cloud access can leave that resource's `destroy`
+with no clean exit but `terraform state rm`) - the two mechanisms are unrelated.
 
 ## Destroying `anyscale_organization_user_role`: what actually happens
 
@@ -182,77 +142,7 @@ identifies which person this resource manages, and changing it - including fixin
 resource: Terraform destroys the instance for the old address and creates a new one for the corrected
 one. Destroying the old instance is exactly the state-only behavior described above, so the person at
 the mistyped address keeps whatever role Terraform last gave them, indefinitely, with no automatic
-cleanup - the same way a typo'd `cloud_id` on `anyscale_cloud_access` (below) leaves you authoritatively
-managing the wrong cloud with nothing inside the resource able to tell the difference. Read
-`terraform plan` before applying an `email` change for exactly this reason.
-
-## Two rules the backend enforces across a cloud grant and its project grants
-
-`anyscale_cloud_access` nests a member's project grants inside their cloud grant rather than managing
-projects as a separate resource, and the reason is two real backend rules that span both halves of a
-single grant - rules a practitioner cannot learn from either half's documentation alone, because
-neither half's schema mentions the other:
-
-1. **A project grant cannot exist without a cloud grant on that project's parent cloud.** The backend
-   rejects a project-level grant for someone who does not already hold cloud-level access to that
-   project's cloud. Nesting reflects this directly: there is no way to write a project grant in your
-   configuration without it living inside some cloud's member entry, so the invalid configuration
-   simply cannot be expressed.
-2. **A `cloud_read_only` deny role forces every nested project grant to `readonly`.** If a member's
-   cloud-level `deny_roles` includes `cloud_read_only`, every project `permission_level` under that
-   same member must also be `readonly` - the backend rejects anything else. Because both the cloud
-   deny role and the project permission levels live in the same resource, this is caught by Terraform
-   at `terraform plan`, before any API call - not as a failure partway through an `apply`, after other
-   grants in the same configuration have already been written.
-
-If you see a plan-time validation error naming either of these rules, it is describing a real backend
-constraint, not a provider bug - the fix is to change your configuration to match one of the two rules
-above, not to work around the error.
-
-## Migrating from a script-based access-management workflow
-
-If you currently manage cloud access with a script that reconciles a JSON file of users, groups, and
-roles against the Anyscale API, `anyscale_cloud_access` is meant to replace it, with a few differences
-worth knowing before your first `apply`:
-
-- **Groups are not a Terraform concept.** Anyscale has no API to grant a role to a group, so if your
-  source file expresses access in terms of groups, expand group membership into individual
-  per-person, per-cloud entries in your Terraform configuration (a `locals` transform, done once)
-  before writing the resource. This is the same expansion your script already does internally; moving
-  it into `locals` keeps it visible and version-controlled instead of hidden in shell logic.
-- **Email keys are matched case-insensitively at plan time.** `Bob@example.com` and `bob@example.com`
-  are treated as the same person before any API call is made, specifically so this provider does not
-  reproduce a known failure mode of comparing emails as opaque strings: silently treating the same
-  person as two different people and repeatedly removing and re-adding them.
-- **Your first `apply` against a cloud that already has real members adopts them.** You do not need
-  to grant everyone's access again from scratch; declaring the members your script already granted
-  and applying should bring existing access under Terraform's management rather than revoking and
-  recreating it. If you see unexpected revoke-then-recreate behavior on a first apply, that is worth
-  reporting - it is not the intended behavior.
-
-## Typo protection: what is guarded, and what genuinely is not
-
-Because `anyscale_cloud_access` is authoritative, a typo can mean the difference between managing
-access and silently revoking it. That risk is guarded against, but not the same way in every case -
-worth understanding precisely rather than assuming blanket protection, because one of the three shapes
-below cannot be guarded at all:
-
-- **An empty member map - for example, from a group reference that resolved to nobody because the
-  group's name was misspelled - requires an explicit, deliberate acknowledgment before Terraform will
-  apply it.** Without that acknowledgment, an apply that would reduce a cloud's member map to empty
-  fails instead of silently removing everyone. Declaring an intentionally empty cloud is still
-  possible - it just cannot happen by accident.
-- **A typo'd email address is caught by operation ordering, not by validation.** Every add and update
-  in a member map is applied before any removal. A misspelled or nonexistent email among the additions
-  or updates fails the apply - before any existing member of that cloud is removed - rather than
-  after. This is a safety property of the order operations happen in, not a check on the email itself;
-  Terraform cannot know an address is wrong until the API rejects it.
-- **A typo'd `cloud_id` cannot be guarded against inside this resource at all.** The `for_each` key is
-  what selects which cloud a resource instance manages; if that key is wrong, you are authoritatively
-  managing the wrong cloud, and nothing inside the resource can distinguish a wrong-but-valid cloud ID
-  from the right one. The real protection here is the same as for any other authoritative resource:
-  read `terraform plan` before every `apply`, and consider `lifecycle { prevent_destroy = true }` on a
-  cloud you cannot afford to have emptied by mistake.
+cleanup. Read `terraform plan` before applying an `email` change for exactly this reason.
 
 ## Known values, since role names are not enforced by this provider's schema
 

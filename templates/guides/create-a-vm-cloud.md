@@ -199,8 +199,8 @@ resource "anyscale_project" "default" {
 }
 ```
 
-Once you're sharing a project with a team rather than working solo, see the [Project
-guide](./project.md) for the collaborator access model and permission levels.
+This resource does not manage who can access the project - see the [Project
+guide](./project.md) for why, and for a known timing limitation on `destroy` shortly after `apply`.
 
 ## Cleaning up
 
