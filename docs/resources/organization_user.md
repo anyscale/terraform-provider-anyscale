@@ -3,39 +3,49 @@
 page_title: "anyscale_organization_user Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an existing Anyscale Organization member's membership - that they are in the organization at all, not what they can do in it.
-  -> Roles are managed elsewhere. This resource has no writable attributes. To set a member's role, use the anyscale_organization_user_role resource, which owns base_role and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role. To read a member's current role without managing it, use the anyscale_organization_user or anyscale_organization_users data source, both of which still expose base_role and additional_roles.
-  ~> Warning: Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate DELETE against the Anyscale API, and it happens on any terraform destroy that reaches this resource, including as part of tearing down a larger configuration or a failed apply elsewhere in the same run. There is no undo; the user would need to be re-invited and re-accept to regain access. If you only want Terraform to stop managing a member without removing their access, use terraform state rm instead of terraform destroy - do this before running destroy on any configuration that contains this resource if that is not the outcome you want. This is a heavier operation than destroying an anyscale_organization_invitation - once accepted, an invitation and its resulting membership are separate objects, and only this resource's destroy actually revokes access.
-  Important: This resource cannot create new users. Users must first be added to the organization through:
-  An accepted anyscale_organization_invitation, orSCIM provisioning
-  Once a user exists in the organization, import them using terraform import to bring their membership under Terraform management.
-  Example Import:
-  
-  terraform import anyscale_organization_user.user <identity_id>
-  
-  Directory-synced organizations: If your organization manages membership via directory sync (the Policy API), this resource cannot manage members at all - any terraform destroy against it fails, and the error points you to the anyscale policy set command instead. See the Anyscale policy CLI documentation https://docs.anyscale.com/reference/cli/policy#policy-cli for that command.
+  Declares that a person should have access to the Anyscale organization, keyed by email.
+  ~> A successful apply means access has been REQUESTED, not granted. If the person is not already a member, this sends them an invitation. Unless your organization uses SSO or SCIM, a human must still click the link in that email before they actually have access. terraform apply reporting success does not mean the person can log in. Read this resource's anyscale_organization_user data source counterpart to see where they actually are.
+  If the person is already a member, this resource adopts them: no API call, no email, no error. That makes it safe to declare people who joined before Terraform, and safe to re-apply.
+  Destroying this resource never removes a human
+  Destroy cancels only an invitation this resource sent and which is still pending. It never evicts someone who had already joined, and never evicts someone this resource adopted. Removing a person's access is a deliberate act that this resource deliberately cannot do.
+  Organization-wide limits you will hit before you expect to
+  Inviting is rate-limited by the Anyscale backend, and the limits are per organization and shared with the Anyscale console - not per configuration:
+  at most 20 pending invitations at once (default)at most 20 invitations sent per 24 hours (default)
+  Both are backend defaults that Anyscale can change per organization. A for_each onboarding 25 people will fail partway through the apply once one of them is reached, leaving the earlier invitations sent. Onboard in batches under the limit, or ask Anyscale to raise it.
+  Directory-synced (SCIM) organizations
+  If your organization has directory sync enabled and has opted into the Policy API, the Anyscale backend refuses to create invitations at all - this resource can still adopt and read existing members, but cannot add anyone, because your identity provider owns membership.
+  Both conditions are required. A SCIM-enabled organization that has no Policy API bindings still uses the per-user path and can be invited through normally.
+  -> Roles are managed separately by anyscale_organization_user_role, which owns base_role and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role.
 ---
 
 # anyscale_organization_user (Resource)
 
-Manages an existing Anyscale Organization member's **membership** - that they are in the organization at all, not what they can do in it.
+Declares that a person **should have access** to the Anyscale organization, keyed by email.
 
--> **Roles are managed elsewhere.** This resource has no writable attributes. To set a member's role, use the `anyscale_organization_user_role` resource, which owns `base_role` and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role. To *read* a member's current role without managing it, use the `anyscale_organization_user` or `anyscale_organization_users` data source, both of which still expose `base_role` and `additional_roles`.
+~> **A successful apply means access has been REQUESTED, not granted.** If the person is not already a member, this sends them an invitation. Unless your organization uses SSO or SCIM, **a human must still click the link in that email** before they actually have access. `terraform apply` reporting success does not mean the person can log in. Read this resource's `anyscale_organization_user` data source counterpart to see where they actually are.
 
-~> **Warning:** Destroying this resource removes the user from the organization entirely, not just from Terraform state — it is a real, immediate `DELETE` against the Anyscale API, and it happens on any `terraform destroy` that reaches this resource, including as part of tearing down a larger configuration or a failed apply elsewhere in the same run. There is no undo; the user would need to be re-invited and re-accept to regain access. If you only want Terraform to stop managing a member without removing their access, use `terraform state rm` instead of `terraform destroy` - do this before running destroy on any configuration that contains this resource if that is not the outcome you want. This is a heavier operation than destroying an `anyscale_organization_invitation` - once accepted, an invitation and its resulting membership are separate objects, and only this resource's destroy actually revokes access.
+If the person is **already** a member, this resource adopts them: no API call, no email, no error. That makes it safe to declare people who joined before Terraform, and safe to re-apply.
 
-**Important:** This resource cannot create new users. Users must first be added to the organization through:
-1. An accepted `anyscale_organization_invitation`, or
-2. SCIM provisioning
+### Destroying this resource never removes a human
 
-Once a user exists in the organization, import them using `terraform import` to bring their membership under Terraform management.
+Destroy cancels **only an invitation this resource sent** and which is still pending. It never evicts someone who had already joined, and never evicts someone this resource adopted. Removing a person's access is a deliberate act that this resource deliberately cannot do.
 
-**Example Import:**
-```
-terraform import anyscale_organization_user.user <identity_id>
-```
+### Organization-wide limits you will hit before you expect to
 
-**Directory-synced organizations:** If your organization manages membership via directory sync (the Policy API), this resource cannot manage members at all - any `terraform destroy` against it fails, and the error points you to the `anyscale policy set` command instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.
+Inviting is rate-limited by the Anyscale backend, and the limits are **per organization and shared with the Anyscale console** - not per configuration:
+
+- at most **20 pending invitations** at once (default)
+- at most **20 invitations sent per 24 hours** (default)
+
+Both are backend defaults that Anyscale can change per organization. A `for_each` onboarding 25 people **will fail partway through the apply** once one of them is reached, leaving the earlier invitations sent. Onboard in batches under the limit, or ask Anyscale to raise it.
+
+### Directory-synced (SCIM) organizations
+
+If your organization has directory sync enabled **and** has opted into the Policy API, the Anyscale backend refuses to create invitations at all - this resource can still adopt and read existing members, but cannot add anyone, because your identity provider owns membership.
+
+Both conditions are required. A SCIM-enabled organization that has no Policy API bindings still uses the per-user path and can be invited through normally.
+
+-> **Roles are managed separately** by `anyscale_organization_user_role`, which owns `base_role` and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role.
 
 ## Example Usage
 
@@ -109,13 +119,27 @@ output "user_additional_roles" {
 <!-- schema generated by tfplugindocs -->
 ## Schema
 
+### Required
+
+- `email` (String) Email address of the person who should have access. Matched case-insensitively against Anyscale, which stores addresses lower-cased. Changing this replaces the resource - it names a different person.
+
+### Optional
+
+- `reinvite_if_expired` (Boolean) Whether to send a new invitation when a previous one expired without being accepted. Defaults to `false`.
+
+When `false`, a lapsed invitation produces a **warning on every refresh** and no email is sent - Terraform will not silently invite someone again because an invitation aged out.
+
+Set this to `true` to have the resource issue a new invitation. Nothing is "resent": an expired invitation is dead, and this mints a **new invitation with a new link** - the link in the original email will not work, so point the recipient at the new message. It counts against the organization's daily invitation limit.
+
+Because the expiry is only noticed during a refresh, a lapsed resource with this set to `true` is removed from state during `terraform plan`/`refresh` and shown as a **create** in the resulting plan. The new invitation is sent when you apply it, not before.
+
 ### Read-Only
 
-- `created_at` (String) Timestamp when the member was added to the organization. Write-once: set on import and never re-read afterward, since the API has returned different values for it across reads.
-- `email` (String) The email address of the organization member.
-- `id` (String) The unique identity ID of the organization member. Used for import.
-- `name` (String) The name of the organization member.
-- `user_id` (String) The user ID of the organization member.
+- `created_at` (String) Timestamp when the member was added to the organization. Null while an invitation is still pending. Write-once: populated the first time the member is seen and never re-read afterward, since the API has returned different values for it across reads.
+- `id` (String) The member's email address. Same value as `email`.
+- `identity_id` (String) The identity ID of the member, once they exist. Null while an invitation is still pending. This was the resource's ID before it was re-keyed to email.
+- `name` (String) The name of the organization member. Null while an invitation is still pending.
+- `user_id` (String) The user ID of the member, once they exist. Null while an invitation is still pending, and null for identity types that do not have one.
 
 ## Import
 
