@@ -1,85 +1,60 @@
 ---
-page_title: "Project: Collaborator Access and Permission Levels"
+page_title: "Project: Collaborator Removal and Known Limitations"
 subcategory: "Behavior & Limitations"
 description: |-
-  Collaborator access model and upgrading permission_level from a prior release, for the Project resource and data sources that aren't obvious from the schema tables alone.
+  Why anyscale_project's collaborator block was removed in v0.25.0, what to do with a configuration or state that still has one, where project access is managed instead, and the brief retry delay you may see on terraform destroy shortly after apply.
 ---
 
-# Project: Collaborator Access and Permission Levels
+# Project: Collaborator Removal and Known Limitations
 
-This guide explains how collaborator access and permission levels behave for
-[`anyscale_project`](../resources/project.md) (resource), and the
-[`anyscale_project`](../data-sources/project.md) and
-[`anyscale_projects`](../data-sources/projects.md) data sources. It covers what `terraform
-import` recovers that ordinary use does not, how to move a `permission_level` of `writer` to the
-valid `write` value, and the brief retry delay you may see on `destroy` or when adding a
-`collaborator` shortly after `apply`.
+This guide covers [`anyscale_project`](../resources/project.md) behavior that isn't obvious from
+its schema table alone: what happened to the `collaborator` block it used to have, and a timing
+limitation on `terraform destroy` shortly after `terraform apply`. To *read* a project's current
+collaborators without managing them, see the [`anyscale_project` data
+source](../data-sources/project.md), which still exposes them — the plural
+[`anyscale_projects`](../data-sources/projects.md) data source does not, for performance.
 
 For a project created as part of a full cloud setup, see the [Create a VM
-Cloud](./create-a-vm-cloud.md) getting-started walkthrough; this guide is what to read next once
-you're sharing that project with a team rather than working solo.
+Cloud](./create-a-vm-cloud.md) getting-started walkthrough.
 
-## Importing an existing project
+## The `collaborator` block was removed in v0.25.0
 
-`terraform import anyscale_project.example <project_id>` recovers the project's full, current
-`collaborator` set from the API — every real collaborator, not just the ones you've declared in
-configuration so far. This includes collaborators added outside Terraform, and the collaborator the
-API automatically adds for the project's creator.
+`anyscale_project` no longer has a `collaborator` block, and this resource no longer manages project
+access at all. It was removed because a project role cannot be granted independently of a cloud
+role: the backend requires a cloud grant on the parent cloud before a project grant on a project
+under it, and revoking the cloud grant cascades to every project beneath it. Managing the two in
+separate resources let a project role be declared for someone with no cloud access, which only ever
+failed partway through an `apply` rather than at `plan` time.
 
-Every project has this creator-owner collaborator whether or not you ever write a `collaborator`
-block for it: the API adds it automatically at creation time. A project managed with no
-`collaborator` blocks at all never shows this collaborator in state during ordinary use — the
-provider only fetches collaborators when your configuration declares at least one, specifically to
-avoid a perpetual diff against a collaborator nothing in your config is managing — but import has no
-prior configuration to protect, so it surfaces every real collaborator, creator-owner included.
+**There is currently no in-provider replacement.** Project collaborators must be managed outside
+Terraform for now, through the Anyscale console or API. A resource that manages a cloud's members
+together with their project roles is planned, but it is not part of this release — this guide will
+point at it once it actually ships, not before.
 
-**After importing a project with existing collaborators, add a matching `collaborator` block for
-every collaborator that import brought into state — the creator-owner one too.** The `collaborator`
-list is authoritative: on the next `apply`, any real collaborator missing from your configuration is
-treated as one to remove, and the provider calls the API to remove their access — for the
-creator-owner collaborator, that can mean revoking the very access that created the project.
-Reconcile your configuration with the imported state before your next `apply`, not after.
+## Upgrading a configuration or state that still has a `collaborator` block
 
-If you already imported a project with real collaborators using a provider version older than
-v0.4.0, upgrading alone does not fix it: the empty `collaborator` list from that import is already
-saved in your state, and ordinary refreshes only re-fetch collaborators when state already has some
-— once it's empty, it stays empty on its own, so neither upgrading in place nor
-`terraform apply -refresh-only` recovers it. Re-import that resource to pick up the real
-collaborator set: `terraform state rm anyscale_project.<name>` followed by
-`terraform import anyscale_project.<name> <project_id>`.
+If your configuration has one or more `collaborator` blocks on an `anyscale_project` resource,
+remove them before upgrading to v0.25.0 or later. The schema no longer accepts this block, so
+Terraform rejects an un-updated configuration at `plan`/`validate` time with a schema error naming
+`collaborator`, before ever reaching the API.
 
-## Upgrading `permission_level` from `writer` to `write`
+Your **state** does not need the same manual cleanup. Every `anyscale_project` ever created carries
+a `collaborator` key in state — an empty list if you never used it — and upgrading the provider
+silently migrates that key away the first time state is read. No `terraform state rm` or re-import
+is needed, and this touches only the local state record, never real collaborator access on the
+backend.
 
-The only valid `permission_level` values on `anyscale_project`'s `collaborator` block are `owner`,
-`write`, and `readonly`. `writer` is not a valid value — it was replaced by `write` in v0.4.0 (see
-below for why this is not a disruptive change in practice).
+## Known limitation: brief delay on `terraform destroy` shortly after `terraform apply`
 
-This isn't a value that ever worked: the Anyscale API has always rejected `writer` for a project
-collaborator (`owner` and `readonly` happen to match the API and always worked, which is what made
-this easy to miss). Any `terraform apply` that tried to grant `permission_level = "writer"` either
-failed outright with an API error, or — if it somehow reached state — read back as `write` on the
-next refresh and produced a permanent plan diff. There is no working configuration this change
-disrupts; update the literal string in your configuration and re-run `terraform plan`:
-
-```terraform
-collaborator {
-  email            = "developer@example.com"
-  permission_level = "write" # was "writer"
-}
-```
-
-## Known limitation: brief delay on `terraform destroy` or adding a `collaborator` shortly after `terraform apply`
-
-Deleting a project you just created, or adding a `collaborator` to it, can occasionally retry for a
-few seconds — up to a minute and a half in rare cases — before succeeding. This targets a known backend timing
-race in the delete-time and collaborator-add permission checks, not a provider bug — a project's
-create-time permission grant can take a moment to become visible to those checks, so an operation
-within about 5 minutes of the matching apply can hit a `403 Permission denied` that would not
-reproduce a moment later. The provider retries automatically with a capped-exponential backoff —
-starting at 1 second and holding at a short cap up to a 90 second total ceiling — only for a project
-this recently created; a project that has existed longer than that surfaces any real `403`
-immediately, exactly as before this behavior was added, so a genuine permission problem is never
-masked.
+Deleting a project you just created can occasionally retry for a few seconds — up to a minute and a
+half in rare cases — before succeeding. This targets a known backend timing race in the delete-time
+permission check, not a provider bug — a project's create-time permission grant can take a moment to
+become visible to that check, so a `destroy` within about 5 minutes of the matching `apply` can hit
+a `403 Permission denied` that would not reproduce a moment later. The provider retries automatically
+with a capped-exponential backoff — starting at 1 second and holding at a short cap up to a 90 second
+total ceiling — only for a project this recently created; a project that has existed longer than
+that surfaces any real `403` immediately, exactly as before this behavior was added, so a genuine
+permission problem is never masked.
 
 With `TF_LOG` unset (the default), this is invisible — the operation just takes a few extra seconds
 before completing normally. Set `TF_LOG` to `WARN` or higher to see the retry logged explicitly. If
