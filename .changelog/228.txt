@@ -1,0 +1,14 @@
+```
+release-note:new-resource
+resource/anyscale_organization_user_role: Manage a user's organization-level role (`base_role` plus optional `deny_roles`) via a dedicated resource, keyed by email.
+```
+
+```
+release-note:breaking-change
+resource/anyscale_organization_user: `permission_level`, `base_role`, and `additional_roles` are removed; the resource is now membership-only (import and delete). Manage a user's organization-level role with the new anyscale_organization_user_role resource instead; since `permission_level` was Required, this breaks configuration and not only state, so update your configuration and re-import.
+```
+
+```
+release-note:breaking-change
+resource/anyscale_project: The `collaborator` block is removed. Every existing anyscale_project's state carries the field regardless of whether it was ever set; an automatic state upgrader drops it on upgrade, so no manual state action is needed. There is currently no in-provider replacement - project collaborators must be managed outside Terraform (Anyscale console or API) until a resource managing a cloud's members together with their project roles ships in a future release. The anyscale_project data source is unaffected and still reads collaborators.
+```
