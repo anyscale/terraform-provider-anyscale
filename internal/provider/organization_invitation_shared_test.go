@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 )
 
 // newSSOModeServer serves userinfo with a given sso_mode and records whether an
@@ -73,7 +75,8 @@ func TestCreateOrganizationInvitation_SSOModeGuard(t *testing.T) {
 			server, wasPosted := newSSOModeServer(t, tc.ssoMode)
 			client := NewClientWithToken(server.URL, "test-token")
 
-			_, err := createOrganizationInvitation(context.Background(), client, "invitee@example.com")
+			var diags diag.Diagnostics
+			_, err := createOrganizationInvitation(context.Background(), client, "invitee@example.com", &diags)
 
 			if tc.wantPosted {
 				if err != nil {
@@ -82,7 +85,20 @@ func TestCreateOrganizationInvitation_SSOModeGuard(t *testing.T) {
 				if !wasPosted() {
 					t.Errorf("sso_mode=%q must send the invitation, but no POST was made", tc.ssoMode)
 				}
+				// A SUCCESSFUL read must be silent. The warning exists for the case
+				// where the check could not run; firing it here would put a warning
+				// on every apply in every ordinary organization, and a warning that
+				// always fires is one people learn to scroll past - which costs the
+				// rare real one its only job.
+				if diags.WarningsCount() != 0 {
+					t.Errorf("sso_mode=%q read cleanly, so nothing was skipped and nothing should be warned "+
+						"about; got: %v", tc.ssoMode, diags.Warnings())
+				}
 				return
+			}
+			if diags.WarningsCount() != 0 {
+				t.Errorf("sso_mode=required is REFUSED, not skipped - the error carries the explanation and a "+
+					"warning alongside it is noise; got: %v", diags.Warnings())
 			}
 
 			if err == nil {
@@ -113,8 +129,22 @@ func TestOrganizationRequiresSSO_UnreadableDefaultsToAllowing(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	if organizationRequiresSSO(context.Background(), NewClientWithToken(server.URL, "test-token")) {
+	required, determined := organizationRequiresSSO(context.Background(), NewClientWithToken(server.URL, "test-token"))
+	if required {
 		t.Error("an unreadable userinfo must not be treated as SSO-required - a transient failure would " +
 			"otherwise block every invitation")
+	}
+	if determined {
+		t.Error("an unreadable userinfo must report the check as UNDETERMINED, so the caller can warn. " +
+			"Failing open silently gives an SSO-required org the dead-link email with no indication why")
+	}
+
+	// And the warning must actually reach the practitioner.
+	var diags diag.Diagnostics
+	_, _ = createOrganizationInvitation(context.Background(), NewClientWithToken(server.URL, "test-token"),
+		"invitee@example.com", &diags)
+	if diags.WarningsCount() == 0 {
+		t.Error("failing open must emit a WARNING - an unrun check reported as a clean pass is exactly the " +
+			"failure this guard exists to prevent")
 	}
 }

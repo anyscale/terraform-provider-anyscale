@@ -160,7 +160,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 	// The SSO guard lives in that helper so it cannot be present on one call site
 	// and missing on the other. The API only returns the invitation ID here; full
 	// details are fetched separately below via getInvitationByID.
-	invitationResult, err := createOrganizationInvitation(ctx, r.client, plan.Email.ValueString())
+	invitationResult, err := createOrganizationInvitation(ctx, r.client, plan.Email.ValueString(), &resp.Diagnostics)
 	if err != nil {
 		detail := extractAPIErrorDetail(err)
 		if strings.Contains(detail, "already a member of your organization") {

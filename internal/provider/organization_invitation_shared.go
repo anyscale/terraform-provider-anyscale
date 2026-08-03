@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 )
 
 // Shared invitation-creation path for anyscale_organization_user and
@@ -45,22 +47,33 @@ type organizationSSOInfoResponse struct {
 }
 
 // organizationRequiresSSO reports whether the authenticated token's
-// organization has sso_mode = required.
+// organization has sso_mode = required, and whether that could be determined
+// at all.
 //
-// Returns false on any failure to determine it. That direction is deliberate:
-// this guard exists to prevent a wasted email, and failing to read sso_mode is
-// not evidence the org requires SSO. Refusing to invite because a preflight
-// call failed would turn a transient error into a blocked apply, which is worse
-// than the thing being guarded against.
-func organizationRequiresSSO(ctx context.Context, client *Client) bool {
+// FAILS OPEN, BUT NOT SILENTLY. On any failure it reports "not required" so a
+// transient blip does not become a blocked apply - failing to read sso_mode is
+// not evidence the org requires SSO, and refusing on that basis is the worse
+// trade. But the caller must SAY the check did not run: otherwise a user in an
+// SSO-required org gets the dead-link email this guard exists to prevent, with
+// nothing indicating why the guard was absent. An unrun check reported as a
+// clean pass is the failure mode this whole session kept producing.
+func organizationRequiresSSO(ctx context.Context, client *Client) (required bool, determined bool) {
 	info, err := DoRequestAndParse[organizationSSOInfoResponse](
 		ctx, client, "GET", "/api/v2/userinfo", nil, http.StatusOK,
 	)
 	if err != nil || len(info.Result.Organizations) == 0 {
-		return false
+		return false, false
 	}
-	return strings.EqualFold(info.Result.Organizations[0].SSOMode, ssoModeRequired)
+	return strings.EqualFold(info.Result.Organizations[0].SSOMode, ssoModeRequired), true
 }
+
+const ssoCheckSkippedDetail = "Could not read this organization's single sign-on mode, so the check that would " +
+	"normally refuse to invite in an SSO-required organization did not run. The invitation was sent anyway - a " +
+	"failed lookup is not evidence that SSO is required, and blocking the invitation on it would turn a " +
+	"transient error into a failed apply.\n\n" +
+	"If this organization DOES require single sign-on, the emailed link will not work and the invitation " +
+	"consumed one of the organization's 20 per 24 hours. In that case have the person log in through your " +
+	"identity provider instead, and import them once they have."
 
 const ssoRequiredInviteDetail = "This organization requires single sign-on, so an invitation cannot be used: the " +
 	"Anyscale backend accepts the invitation request and sends an email, but the link in it is rejected on use " +
@@ -79,9 +92,16 @@ const ssoRequiredInviteDetail = "This organization requires single sign-on, so a
 // the POST succeeds, an email goes out, and the link cannot work. Half-working
 // is worse than refusing here because it also spends a rate-limited resource to
 // achieve nothing, and reports success while doing it.
-func createOrganizationInvitation(ctx context.Context, client *Client, email string) (*OrganizationInvitationResult, error) {
-	if organizationRequiresSSO(ctx, client) {
+func createOrganizationInvitation(
+	ctx context.Context, client *Client, email string, diags *diag.Diagnostics,
+) (*OrganizationInvitationResult, error) {
+	requiresSSO, determined := organizationRequiresSSO(ctx, client)
+	switch {
+	case requiresSSO:
 		return nil, fmt.Errorf("%s", ssoRequiredInviteDetail)
+	case !determined && diags != nil:
+		// Fail open, loudly. See organizationRequiresSSO.
+		diags.AddWarning("Single Sign-On Check Did Not Run", ssoCheckSkippedDetail)
 	}
 
 	reqBody, err := MarshalRequestBody(CreateOrganizationInvitationRequest{Email: email})

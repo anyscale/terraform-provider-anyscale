@@ -325,7 +325,7 @@ func (r *OrganizationUserResource) Create(ctx context.Context, req resource.Crea
 	// Shared with anyscale_organization_invitation: both resources POST to the
 	// same endpoint, so the SSO guard lives in one place rather than being added
 	// to whichever call site someone happens to be looking at.
-	invitation, err := createOrganizationInvitation(ctx, r.client, email)
+	invitation, err := createOrganizationInvitation(ctx, r.client, email, &resp.Diagnostics)
 	if err != nil {
 		summary, detail := invitationCreateDiagnostic(email, err)
 		resp.Diagnostics.AddError(summary, detail)
