@@ -61,6 +61,35 @@ func requireRealInfraTestUser(t *testing.T) string {
 		"member - but the role changes are real and are not rolled back beyond what destroy restores.",
 		email)
 
+	// PRECONDITION 0 - SAY WHICH ORGANIZATION THIS IS ABOUT TO TOUCH.
+	//
+	// Not an assertion, a disclosure - and it is the check that was missing when
+	// several full acceptance suites ran against an organization nobody intended,
+	// creating real clouds that outlived the run. Nothing failed: the cloud
+	// resolver falls back to a pinned name and then to auto-discovery, and BOTH
+	// SUCCEED IN ANY ORG that happens to hold a healthy cloud. It worked, so it
+	// looked correct.
+	//
+	// A token is scoped to exactly one organization and the provider has no
+	// org-selection setting, so "which org am I in" is decided entirely by which
+	// credential is in scope - ANYSCALE_CLI_TOKEN if set, otherwise
+	// ~/.anyscale/credentials.json. Those are separate channels that fall through
+	// to each other silently: an env var set to the WRONG token and an env var
+	// that is UNSET both end up somewhere that works.
+	//
+	// Printing the org name costs one request and makes that invisible choice
+	// visible at the top of the log, before anything is created. Set
+	// ANYSCALE_TEST_ORG_NAME to turn this from a disclosure into a hard assertion.
+	if org := authenticatedOrgName(t); org != "" {
+		t.Logf("REAL-INFRA TARGET ORGANIZATION: %q - confirm this is the org you intend before "+
+			"reading any result from this test", org)
+		if want := strings.TrimSpace(os.Getenv("ANYSCALE_TEST_ORG_NAME")); want != "" && !strings.EqualFold(want, org) {
+			t.Fatalf("ANYSCALE_TEST_ORG_NAME is %q but these credentials authenticate against %q. "+
+				"Refusing to mutate roles in an unintended organization - fix the token in scope "+
+				"(ANYSCALE_CLI_TOKEN takes precedence over ~/.anyscale/credentials.json).", want, org)
+		}
+	}
+
 	// PRECONDITION 1 - NEVER THE AUTHENTICATED IDENTITY.
 	//
 	// The backend refuses self-modification outright
@@ -136,6 +165,44 @@ func authenticatedEmail(t *testing.T) string {
 		return ""
 	}
 	return wrapped.Result.Email
+}
+
+// authenticatedOrgName returns the name of the single organization the current
+// credentials are scoped to, or "" if it cannot be determined.
+//
+// userinfo types organizations as a LIST, but the backend returns exactly one -
+// the token-scoped org. Indexing [0] is correct here and the length guard is
+// what keeps it from panicking rather than a hedge against multi-org tokens.
+func authenticatedOrgName(t *testing.T) string {
+	t.Helper()
+
+	client, err := GetTestClient()
+	if err != nil {
+		return ""
+	}
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/userinfo", nil)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+
+	var wrapped struct {
+		Result struct {
+			Organizations []struct {
+				Name string `json:"name"`
+			} `json:"organizations"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
+		return ""
+	}
+	if len(wrapped.Result.Organizations) == 0 {
+		return ""
+	}
+	return wrapped.Result.Organizations[0].Name
 }
 
 // liveOrgMember is the shape we care about from
