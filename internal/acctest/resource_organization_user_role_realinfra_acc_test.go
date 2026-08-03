@@ -60,7 +60,82 @@ func requireRealInfraTestUser(t *testing.T) string {
 		"It does not evict them - this resource's destroy writes a role back rather than removing a "+
 		"member - but the role changes are real and are not rolled back beyond what destroy restores.",
 		email)
+
+	// PRECONDITION 1 - NEVER THE AUTHENTICATED IDENTITY.
+	//
+	// The backend refuses self-modification outright
+	// (organization_collaborators_service.py:512, "You cannot modify your own
+	// permission level"). Pointing this test at the token's own identity produces
+	// a 403 that means "you cannot modify yourself" and looks exactly like a
+	// failed gate - i.e. it would read as "the legacy write path DOES clobber deny
+	// roles" when the write never happened at all. A false red on this gate is
+	// worse than no result, because R5 exists to decide whether an already-merged
+	// routing design is sound.
+	//
+	// This is a live hazard, not a theoretical one: the credentials in use during
+	// development authenticate as a `+`-aliased address in the same domain as the
+	// obvious fixture candidate, so the two are easy to conflate.
+	if self := authenticatedEmail(t); self != "" && strings.EqualFold(self, email) {
+		t.Fatalf("ANYSCALE_TEST_USER_EMAIL is the SAME identity these credentials authenticate as. " +
+			"The backend refuses self-modification, so this test would 403 and the failure would look " +
+			"like a real gate failure rather than a misconfiguration. Point it at a DIFFERENT member. " +
+			"(Compared case-insensitively; `+`-aliases are distinct users but easy to confuse.)")
+	}
+
+	// PRECONDITION 2 - NEVER AN OWNER.
+	//
+	// These tests declare base_role = "collaborator". Running against an owner is a
+	// real permission DOWNGRADE of a real owner account, and teardown writes back
+	// whatever the config last declared rather than the role the member started
+	// with - so the fixture would be left demoted with no restore.
+	//
+	// Checked rather than trusted: at the time of writing, every member of the
+	// development test org was an owner (7 of 7), which is exactly the state where
+	// an unguarded run does damage.
+	member := mustReadLiveOrgRole(t, email)
+	if strings.EqualFold(member.BaseRole, "owner") {
+		t.Fatalf("ANYSCALE_TEST_USER_EMAIL points at an ORGANIZATION OWNER (base_role=%q). These tests "+
+			"declare base_role=\"collaborator\", so running would DEMOTE a real owner, and teardown "+
+			"restores the declared role rather than the original - leaving them demoted. Point this at a "+
+			"collaborator-level throwaway member instead.", member.BaseRole)
+	}
+
 	return email
+}
+
+// authenticatedEmail returns the email of the identity the current credentials
+// belong to, or "" if it cannot be determined.
+//
+// Returns empty rather than failing on error: an unreadable userinfo is not
+// evidence that the fixture is safe, but it is also not evidence that it is
+// unsafe, and turning a transient lookup failure into a hard stop would block a
+// legitimate run. The owner check below is the load-bearing guard; this one
+// catches the specific self-modification confusion.
+func authenticatedEmail(t *testing.T) string {
+	t.Helper()
+
+	client, err := GetTestClient()
+	if err != nil {
+		return ""
+	}
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/userinfo", nil)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+
+	var wrapped struct {
+		Result struct {
+			Email string `json:"email"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
+		return ""
+	}
+	return wrapped.Result.Email
 }
 
 // liveOrgMember is the shape we care about from
