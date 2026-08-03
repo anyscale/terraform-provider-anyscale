@@ -140,6 +140,16 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewCloudResourceResource,
 		NewCloudResource,
 		NewCloudUserRoleResource,
+		// anyscale_cloud_access: NOT registered. Schema and plan-time validation
+		// exist (resource_cloud_access.go) - cloud_id/member/base_role/deny_roles/
+		// projects, the case-insensitive-email guard, the cloud_read_only cross-field
+		// check, and the empty-member-set revoke-safety guard are all built. The
+		// runtime does not exist yet: every CRUD method refuses unconditionally, the
+		// file makes zero API calls, and there is no ImportState. Registration is
+		// withheld until that lands, in safety order (read/import before reconcile).
+		// See docs/decisions/rbac-surface-consolidation/README.md for the design this
+		// resource implements.
+		// NewCloudAccessResource,
 		NewProjectResource,
 		NewOrganizationInvitationResource,
 		NewOrganizationUserResource,
