@@ -3,6 +3,7 @@ package acctest
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -80,9 +81,12 @@ func TestAccCloudsDataSource_FilterByRegion(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				// The known test cloud is us-east-2 - a different region must exclude it.
+				// Deliberately NOT clouds.# == 0: other people's us-west-2 clouds are
+				// legitimate and would break that. See testAccCheckCloudsListExcludesID.
 				Config: testAccCloudsDataSourceFilterByRegionConfig("us-west-2"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("data.anyscale_clouds.test", "clouds.#", "0"),
+					testAccCheckCloudsListExcludesID("data.anyscale_clouds.test", cloudID),
+					testAccCheckCloudsListAllMatch("data.anyscale_clouds.test", "region", "us-west-2"),
 				),
 			},
 			{
@@ -152,6 +156,72 @@ func testAccCheckCloudsListIncludesID(resourceName, cloudID string) resource.Tes
 			}
 		}
 		return fmt.Errorf("expected cloud %s to be present in %s's %d result(s), but it was not - the filter incorrectly excluded a matching cloud", cloudID, resourceName, count)
+	}
+}
+
+// testAccCheckCloudsListExcludesID asserts a specific cloud is NOT in the
+// results.
+//
+// This replaces the `clouds.# == "0"` assertion these negative cases used to
+// make. ASSERTING ABSENCE OF EVERYTHING IN A SHARED, MUTABLE ORG IS A TEST
+// DEFECT, not a fixture problem: "no cloud exists in us-west-2" is a claim about
+// the whole organization, it is false the moment any colleague creates one, and
+// cleaning the org only resets the clock until the next time. Both of these
+// tests were red on main for exactly that reason.
+//
+// The property the filter actually promises is narrower and permanently true:
+// a cloud that does not match must not come back. That is what is asserted here,
+// paired with testAccCheckCloudsListAllMatch below.
+func testAccCheckCloudsListExcludesID(resourceName, cloudID string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found: %s", resourceName)
+		}
+		count, err := strconv.Atoi(rs.Primary.Attributes["clouds.#"])
+		if err != nil {
+			return fmt.Errorf("failed to parse clouds.#: %w", err)
+		}
+		for i := 0; i < count; i++ {
+			if rs.Primary.Attributes[fmt.Sprintf("clouds.%d.id", i)] == cloudID {
+				return fmt.Errorf("cloud %s was returned by %s despite not matching the filter - the filter is not being applied", cloudID, resourceName)
+			}
+		}
+		return nil
+	}
+}
+
+// testAccCheckCloudsListAllMatch asserts every returned cloud has the expected
+// value for an attribute.
+//
+// This is the half that keeps these tests mutation-proof after dropping the
+// count-zero assertion. Excludes-ID alone would still pass against a filter that
+// returned an arbitrary WRONG subset, as long as it happened not to contain the
+// one cloud being named. Requiring every result to match the filter closes that:
+// a filter that is ignored entirely returns clouds in other regions and fails
+// here, whether or not the test cloud is among them.
+//
+// An empty result set passes both checks, and that is correct - "no cloud in
+// this region" is a legitimate state of a shared org, just not one worth
+// asserting.
+func testAccCheckCloudsListAllMatch(resourceName, attr, want string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found: %s", resourceName)
+		}
+		count, err := strconv.Atoi(rs.Primary.Attributes["clouds.#"])
+		if err != nil {
+			return fmt.Errorf("failed to parse clouds.#: %w", err)
+		}
+		for i := 0; i < count; i++ {
+			key := fmt.Sprintf("clouds.%d.%s", i, attr)
+			if got := rs.Primary.Attributes[key]; !strings.EqualFold(got, want) {
+				return fmt.Errorf("%s returned a cloud whose %s is %q, but the filter asked for %q (result %d of %d) - the filter is not being applied",
+					resourceName, attr, got, want, i, count)
+			}
+		}
+		return nil
 	}
 }
 
@@ -264,9 +334,17 @@ func TestAccCloudsDataSource_FilterByProviderAndRegion(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				// Correct provider, wrong region - AND semantics must still exclude it.
+				// Asserting both attributes on every result is what proves AND rather
+				// than OR: an OR-ing filter returns AWS clouds from other regions, and
+				// the region check below fails on them.
 				Config: testAccCloudsDataSourceFilterByProviderAndRegionConfig("AWS", "us-west-2"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("data.anyscale_clouds.test", "clouds.#", "0"),
+					testAccCheckCloudsListExcludesID("data.anyscale_clouds.test", cloudID),
+					// "cloud_provider", not "provider" - the schema attribute name.
+					// Caught by the helper: a wrong key reads as "" and fails loudly
+					// rather than silently matching nothing.
+					testAccCheckCloudsListAllMatch("data.anyscale_clouds.test", "cloud_provider", "AWS"),
+					testAccCheckCloudsListAllMatch("data.anyscale_clouds.test", "region", "us-west-2"),
 				),
 			},
 			{
