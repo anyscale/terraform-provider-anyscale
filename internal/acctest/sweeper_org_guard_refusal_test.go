@@ -17,7 +17,7 @@ import (
 // a subprocess test, because the guard lives in TestMain and its effect is
 // os.Exit(1) - unobservable in-process.
 //
-// WHY THIS TEST EXISTS AT ALL (tfp-assayer found the gap): a TestMain that exits
+// WHY THIS TEST EXISTS AT ALL, and it is not obvious: a TestMain that exits
 // non-zero produces ZERO "--- FAIL" lines. `go vet` passes, the exit code is 1,
 // and any reporter grepping for "--- FAIL" says "no test failures". So the
 // guard's own firing is invisible to the usual signal, and a mutation that broke
