@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-08-03
+
+### Breaking Changes
+
+- resource/anyscale_organization_user: `permission_level`, `base_role`, and `additional_roles` are removed; the resource is now membership-only (import and delete). Manage a user's organization-level role with the new anyscale_organization_user_role resource instead; since `permission_level` was Required, this breaks configuration and not only state, so update your configuration and re-import.
+- resource/anyscale_project: The `collaborator` block is removed. Every existing anyscale_project's state carries the field regardless of whether it was ever set; an automatic state upgrader drops it on upgrade, so no manual state action is needed. There is currently no in-provider replacement - project collaborators must be managed outside Terraform (Anyscale console or API) until a resource managing a cloud's members together with their project roles ships in a future release. The anyscale_project data source is unaffected and still reads collaborators.
+- resource/anyscale_organization_user: The resource now sends an invitation when the declared person is not already an organization member (previously it could only import and read existing members). It refuses to do so in an organization whose SSO mode is `required`, where the emailed link is rejected on use and sending one would consume an invitation for nothing; organizations with SSO set to `optional` are unaffected. If the organization's SSO mode cannot be read, the invitation is sent anyway and a warning reports that the check did not run. Destroying the resource cancels only an invitation it sent that is still pending - it never removes a person who had already joined.
+- resource/anyscale_organization_user: The resource is now keyed by `email` rather than the backend identity ID. `email` is Required and forces replacement; the former key is preserved as a new Computed `identity_id`. An automatic state upgrader re-keys existing state, so no manual state action is needed. `terraform import` now takes the member's EMAIL ADDRESS rather than the identity ID (`terraform import anyscale_organization_user.example user@example.com`); importing by identity ID now fails with an error naming the expected form, so any scripted or documented import command must be updated. This makes the resource declarable before the person exists in the organization - neither `identity_id` nor `user_id` exists until an invitation is accepted, so email is the only identifier stable across the whole lifecycle.
+
+### New Resources
+
+- resource/anyscale_organization_user_role: Manage a user's organization-level role (`base_role` plus optional `deny_roles`) via a dedicated resource, keyed by email.
+
+### Fixed
+
+- resource/anyscale_organization_invitation: Creating an invitation in an organization whose SSO mode is `required` now fails with an actionable error instead of sending an email whose link the backend rejects on use. Invitation creation was never SSO-gated server-side, so the apply reported success, the recipient received an unusable link, and one of the organization's 20 invitations per 24 hours was consumed for nothing. Organizations with SSO set to `optional` are unaffected. When the SSO mode cannot be read, the invitation is sent anyway with a warning that the check did not run. (Affected every release since v0.1.0, the first tagged release - the SSO guard was never present.)
+- resource/anyscale_organization_invitation: The `email` attribute's documentation stated that the casing you configure is what is kept in state. The opposite is true: a case-only change produces no plan diff and the originally-stored casing is retained. Corrected. (Published incorrectly since v0.9.0.)
+- resource/anyscale_organization_user: The resource documentation listed SCIM provisioning as a sufficient way for a user to gain organization access. SCIM alone is not sufficient - the backend path it describes requires both directory sync AND Policy API bindings. Corrected. (Published incorrectly since v0.24.0.)
+
 ## [0.24.1] - 2026-07-28
 
 ### Fixed
@@ -955,7 +974,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.24.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.25.0
 [0.24.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.24.1
 [0.24.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.24.0
 [0.23.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.23.0
