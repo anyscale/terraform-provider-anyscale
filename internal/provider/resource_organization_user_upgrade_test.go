@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -70,6 +71,12 @@ func runOrgUserUpgrade(t *testing.T, prior *tfsdk.State) (OrganizationUserResour
 // TestOrganizationUserStateUpgradeV0toV1_ReKeysToEmail is the migration's whole
 // point: v0 stored the identity_id in `id`, v1 stores the email. Without this,
 // prior state holds a key that nothing in the new Read can resolve.
+//
+// The fixture is the PRE-REMOVAL 8-attribute shape - permission_level,
+// base_role and additional_roles included - because that is what every
+// RELEASED build wrote. Those three were dropped from the schema without a
+// version bump, and the 5-attribute shape has never shipped in a tag, so this
+// is the only v0 state that actually exists in the wild.
 func TestOrganizationUserStateUpgradeV0toV1_ReKeysToEmail(t *testing.T) {
 	prior := buildOrgUserV0State(t, organizationUserResourceModelV0{
 		ID:        types.StringValue("ide_legacyidentity"),
@@ -77,6 +84,10 @@ func TestOrganizationUserStateUpgradeV0toV1_ReKeysToEmail(t *testing.T) {
 		UserID:    types.StringValue("usr_legacy"),
 		Name:      types.StringValue("Legacy User"),
 		CreatedAt: types.StringValue("2026-01-01T00:00:00Z"),
+		// The role trio, as every RELEASED v0 build carried it.
+		PermissionLevel: types.StringValue("collaborator"),
+		BaseRole:        types.StringValue("collaborator"),
+		AdditionalRoles: types.ListValueMust(types.StringType, []attr.Value{types.StringValue("image_reader")}),
 	})
 
 	upgraded, _ := runOrgUserUpgrade(t, prior)
@@ -124,6 +135,11 @@ func TestOrganizationUserStateUpgradeV0toV1_DoesNotInventTheOptIn(t *testing.T) 
 		UserID:    types.StringNull(),
 		Name:      types.StringNull(),
 		CreatedAt: types.StringValue("2026-01-01T00:00:00Z"),
+		// The post-removal shape: role trio absent. Version 0 labels BOTH, so
+		// both must decode.
+		PermissionLevel: types.StringNull(),
+		BaseRole:        types.StringNull(),
+		AdditionalRoles: types.ListNull(types.StringType),
 	})
 
 	upgraded, _ := runOrgUserUpgrade(t, prior)

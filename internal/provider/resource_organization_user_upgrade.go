@@ -63,6 +63,14 @@ type organizationUserResourceModelV0 struct {
 	UserID    types.String `tfsdk:"user_id"`
 	Name      types.String `tfsdk:"name"`
 	CreatedAt types.String `tfsdk:"created_at"`
+
+	// The role trio. These were REMOVED from the live schema without a version
+	// bump, so version 0 labels two different shapes and every RELEASED version
+	// (v0.24.1 and earlier) has them. They are declared here so v0 state decodes,
+	// and discarded on upgrade - roles moved to anyscale_organization_user_role.
+	PermissionLevel types.String `tfsdk:"permission_level"`
+	BaseRole        types.String `tfsdk:"base_role"`
+	AdditionalRoles types.List   `tfsdk:"additional_roles"`
 }
 
 // organizationUserSchemaV0 is a frozen copy of the schema exactly as it existed
@@ -70,9 +78,18 @@ type organizationUserResourceModelV0 struct {
 // evolve it alongside the live schema and do not "fix" anything that looks
 // stale in it. It is a historical snapshot.
 //
-// Note there is no cloud_name-style trap here: unlike anyscale_project, this
-// resource's attribute set was never changed without a version bump, so
-// version 0 labels exactly one shape.
+// VERSION 0 LABELS TWO SHAPES, and this schema must decode the older one.
+// permission_level, base_role and additional_roles were removed from the live
+// schema WITHOUT a version bump. Every RELEASED build - v0.24.1 and earlier -
+// still has them, and the 5-attribute shape has never shipped in a tag at all,
+// so real user state is the 8-attribute one. Freezing only the 5 attributes
+// visible in current source would fail to decode every real v0 state there is.
+//
+// This is the second instance of exactly this trap in two days (see
+// anyscale_project's cloud_name). The rule it produced: a frozen PriorSchema
+// must describe what state ACTUALLY looked like at that version, which is NOT
+// the current schema plus whatever you are removing. Check whether an earlier
+// release changed the schema without bumping the version.
 func organizationUserSchemaV0() *schema.Schema {
 	return &schema.Schema{
 		Attributes: map[string]schema.Attribute{
@@ -106,13 +123,28 @@ func organizationUserSchemaV0() *schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+
+			// Present in every released v0 build. Optional rather than Computed so
+			// state written either side of their removal decodes: a shape that lacks
+			// the key simply reads null.
+			"permission_level": schema.StringAttribute{
+				Optional: true,
+			},
+			"base_role": schema.StringAttribute{
+				Optional: true,
+			},
+			"additional_roles": schema.ListAttribute{
+				ElementType: types.StringType,
+				Optional:    true,
+			},
 		},
 	}
 }
 
 // upgradeOrganizationUserStateV0toV1 re-keys the resource: `id` becomes the
 // email that v0 state already carried, and the former identity_id moves into
-// the new `identity_id` attribute rather than being discarded.
+// the new `identity_id` attribute rather than being discarded. The role trio
+// is dropped - it moved to anyscale_organization_user_role.
 //
 // Written as an explicit field-by-field copy so that adding an attribute to
 // OrganizationUserResourceModel later fails to compile here rather than
