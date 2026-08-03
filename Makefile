@@ -104,9 +104,19 @@ test: ## Run unit tests
 # `go test ./internal/acctest/` by hand still bypasses this entirely.
 # ----------------------------------------------------------------------------
 ACCTEST_TOKEN_SERVICE ?= anyscale-tfacc
+# Overridable ONLY so the test matrix can exercise the non-macOS branch from a Mac.
+ACCTEST_KEYCHAIN_CMD ?= security
 
 define resolve_acctest_token
-	ANYSCALE_CLI_TOKEN="$$(security find-generic-password -s $(ACCTEST_TOKEN_SERVICE) -w 2>/dev/null || true)"; \
+	if ! command -v $(ACCTEST_KEYCHAIN_CMD) >/dev/null 2>&1; then \
+		if [ -z "$$ANYSCALE_CLI_TOKEN" ]; then \
+			echo "ERROR: no macOS Keychain on this platform, and ANYSCALE_CLI_TOKEN is unset." >&2; \
+			echo "       Provide it from the CI secret store. Refusing to run without a token." >&2; \
+			exit 1; \
+		fi; \
+		echo "==> No Keychain here; using ANYSCALE_CLI_TOKEN from the environment ($${#ANYSCALE_CLI_TOKEN} chars)"; \
+	else \
+	ANYSCALE_CLI_TOKEN="$$($(ACCTEST_KEYCHAIN_CMD) find-generic-password -s $(ACCTEST_TOKEN_SERVICE) -w 2>/dev/null || true)"; \
 	if [ -z "$$ANYSCALE_CLI_TOKEN" ]; then \
 		echo "ERROR: no acceptance-test token in the macOS Keychain." >&2; \
 		echo "       service: $(ACCTEST_TOKEN_SERVICE)" >&2; \
@@ -127,6 +137,7 @@ define resolve_acctest_token
 		echo "process list, which is the accepted tradeoff for not truncating." >&2; \
 		echo "" >&2; \
 		exit 1; \
+	fi; \
 	fi; \
 	export ANYSCALE_CLI_TOKEN; \
 	echo "==> Acctest token resolved from Keychain (service: $(ACCTEST_TOKEN_SERVICE), $${#ANYSCALE_CLI_TOKEN} chars)"; \
