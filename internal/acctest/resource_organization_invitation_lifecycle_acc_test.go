@@ -55,6 +55,12 @@ func (s *mockInvitationServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Path
 	switch {
+	// The SSO preflight runs before every create. Serving it with sso_mode=off
+	// is what puts these tests on the REAL allowed path: without this route the
+	// GET 404s, the guard cannot determine sso_mode, and every test below
+	// silently exercises the fail-open branch instead of the one it names.
+	case r.Method == http.MethodGet && path == "/api/v2/userinfo":
+		_, _ = fmt.Fprint(w, `{"result":{"organizations":[{"sso_mode":"off"}]}}`)
 	case r.Method == http.MethodPost && path == "/api/v2/organization_invitations":
 		s.handleCreate(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v2/organization_invitations/"):
@@ -129,6 +135,40 @@ func (s *mockInvitationServer) handleInvalidate(w http.ResponseWriter, id string
 	inv.ExpiresAt = "2020-01-01T00:00:00Z"
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = fmt.Fprint(w, `{"result":{}}`)
+}
+
+// liveInvitationCount returns how many invitations are still outstanding, i.e.
+// not expired and not accepted.
+//
+// "Live" rather than "present" is deliberate and mirrors the real backend:
+// _invalidate_invitation does not delete the row, it stamps expires_at with the
+// current time (see handleInvalidate above, and organization_invitations_dao.py's
+// list query, which filters on expires_at > now AND accepted_at IS NULL). So a
+// revoked invitation is still in the map. Counting rows rather than live rows
+// would make a revoke-then-reissue look like two invitations where the point is
+// to detect that it happened at all - and counting only map size would miss it
+// entirely if the reissue reused an id.
+func (s *mockInvitationServer) liveInvitationCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	n := 0
+	for _, inv := range s.invitations {
+		if inv.AcceptedAt != nil {
+			continue
+		}
+		expiry, err := time.Parse(time.RFC3339, inv.ExpiresAt)
+		if err != nil {
+			// An unparseable expiry is a mock bug, not a provider bug. Count it
+			// so the discrepancy surfaces rather than silently suppressing a row.
+			n++
+			continue
+		}
+		if expiry.After(time.Now()) {
+			n++
+		}
+	}
+	return n
 }
 
 // snapshot returns a copy of the invitation for the given id, safe to call
@@ -301,13 +341,108 @@ resource "anyscale_organization_invitation" "test" {
 		},
 	})
 
-	// Reaching this point without resource.Test failing the test IS the finding for
-	// I-OPEN's practical consequence: either the framework/Core tolerated the
-	// backend's forced-lowercase rewrite of a Required attribute, or (more likely,
-	// see the companion regression test below) something in the current Create()
-	// path already keeps state's email equal to the configured value despite the
-	// backend storing lowercase. If this test starts failing with "Provider
-	// produced inconsistent result after apply", that IS I-OPEN's empirical answer
-	// surfacing as a real, user-facing failure mode - do not silence it without
-	// understanding why first.
+	// I-OPEN is now CLOSED, and neither horn of the either/or this comment used to
+	// pose was quite right. Measured, not reasoned:
+	//
+	// On CREATE there is no rewrite to tolerate. caseInsensitiveEmailPlanModifier
+	// returns early while req.StateValue.IsNull(), so the planned value simply IS
+	// the configured value and the backend's lowercasing never meets it in a plan.
+	// That is why this test passes, and it is why this test alone cannot exercise
+	// the modifier's interesting branch - see
+	// TestAccOrganizationInvitationResourceCaseOnlyEmailChange below, which is the
+	// companion this comment used to promise and which did not previously exist.
+	//
+	// If this test ever starts failing with "Provider produced inconsistent result
+	// after apply", that is a real user-facing regression in Create's handling of
+	// configured casing - do not silence it without understanding why first.
+}
+
+// TestAccOrganizationInvitationResourceCaseOnlyEmailChange covers the branch the
+// test above structurally cannot reach: an email edit that changes ONLY letter
+// case, on an invitation that already exists.
+//
+// Why it needs its own test. caseInsensitiveEmailPlanModifier
+// (resource_organization_invitation.go) returns early when req.StateValue is
+// null, which is exactly the create case. Only a SECOND apply, against
+// established state, reaches the EqualFold branch where the modifier sets
+// resp.PlanValue = req.StateValue. Every casing test in this file before this
+// one was a single-step create, so that branch shipped unexercised.
+//
+// What it protects. The Anyscale API dedups invitations by lower-cased email, so
+// a case-only edit is the same invitation to the backend. Without the modifier,
+// Terraform plans delete+create - a real revoke-then-reinvite that emails the
+// person again and burns one of the org's 20 invitations per day. Mutation-proved:
+// with the EqualFold branch disabled this step fails with
+// "expected NoOp, got action(s): [delete create]".
+//
+// A note on why the assertion is a no-op rather than a state check. Terraform
+// Core permits a provider to RETAIN THE PRIOR STATE VALUE for a Required,
+// non-Computed attribute; what it forbids is inventing a new one. So after a
+// case-only edit, state legitimately keeps the ORIGINAL casing and does not adopt
+// the newly-typed casing - confirmed by real plan/apply, not inferred from the
+// framework source.
+func TestAccOrganizationInvitationResourceCaseOnlyEmailChange(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	httpServer, mock := newMockInvitationServer(t, true /* lowercaseEmail: mirrors the real backend */)
+
+	const originalCasing = "Case.Change@Example.COM"
+	const onlyCaseDiffers = "case.change@example.com"
+
+	config := func(email string) string {
+		return testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
+resource "anyscale_organization_invitation" "test" {
+  email = %[1]q
+}
+`, email)
+	}
+
+	const resourceName = "anyscale_organization_invitation.test"
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Establish real state carrying the operator's original casing.
+				Config: config(originalCasing),
+				Check:  resource.TestCheckResourceAttr(resourceName, "email", originalCasing),
+			},
+			{
+				// Case-only edit. The whole point: this must NOT plan a
+				// replacement, because to the backend it is the same invitation.
+				Config: config(onlyCaseDiffers),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// State keeps the ORIGINAL casing, not the newly-typed one.
+					// This is the modifier retaining the prior value, which Core
+					// allows.
+					resource.TestCheckResourceAttr(resourceName, "email", originalCasing),
+
+					// Independent of Terraform's own plan accounting: the backend
+					// must still hold exactly one live invitation. A delete+create
+					// would have invalidated the first and issued a second - the
+					// real-world harm being guarded against, and something a
+					// plan-level assertion alone would not notice if the provider
+					// reached the API anyway.
+					//
+					// This MUST run as a step Check rather than after resource.Test
+					// returns: the harness always destroys at the end of a test case
+					// and offers no hook to skip it, so a post-return count is
+					// necessarily 0 and would fail against correct code.
+					func(*terraform.State) error {
+						if got := mock.liveInvitationCount(); got != 1 {
+							return fmt.Errorf(
+								"expected exactly 1 live invitation after a case-only edit, got %d - "+
+									"the edit appears to have revoked and re-issued the invitation", got)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
 }

@@ -62,7 +62,9 @@ func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resourc
 		MarkdownDescription: "Manages an Anyscale Organization Invitation. This resource sends an email invitation to join an organization.\n\n" +
 			"**Note:** Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the `anyscale_organization_user` resource to manage their permissions. There is no need to remove this resource once accepted - an accepted invitation is a harmless historical record, its `status` simply reads as `accepted` from then on, and leaving it in your configuration has no side effects.\n\n" +
 			"~> **Warning:** What `terraform destroy` actually does here depends on whether the invitation was accepted. Destroying a **pending** invitation genuinely revokes it - it is invalidated immediately, and the recipient can no longer accept it. Destroying an **already-accepted** invitation has no effect on the resulting member: acceptance created a separate, independent `anyscale_organization_user` identity, and invalidating the (already-consumed) invitation record does not touch it. To remove an existing member's access, destroy their `anyscale_organization_user` resource instead - destroying this resource never does that.\n\n" +
-			"**Duplicate invitations:** Inviting an email address that is already an organization member fails with a clear error directing you to the `anyscale_organization_user` resource instead. Inviting an email address that already has a *pending* invitation does not fail - it silently invalidates the previous invitation (expiring it immediately) and creates a new one with a new `id`; a different letter-casing of the same address counts as the same recipient for this purpose. If that previous invitation is tracked elsewhere (a separate resource block, a different Terraform configuration, or state left over from a prior apply), its `status` will simply read as `expired` on the next refresh rather than surfacing an error.",
+			"**Duplicate invitations:** Inviting an email address that is already an organization member fails with a clear error directing you to the `anyscale_organization_user` resource instead. Inviting an email address that already has a *pending* invitation does not fail - it silently invalidates the previous invitation (expiring it immediately) and creates a new one with a new `id`; a different letter-casing of the same address counts as the same recipient for this purpose. If that previous invitation is tracked elsewhere (a separate resource block, a different Terraform configuration, or state left over from a prior apply), its `status` will simply read as `expired` on the next refresh rather than surfacing an error.\n\n" +
+			"**Directory-synced organizations:** Creating an invitation through this resource fails in an organization that has *both* enabled SCIM directory sync *and* opted into the Policy API (at least one role binding for the org, a cloud, or a project) - SCIM alone does not trigger this, so a SCIM-enabled organization with no Policy API bindings can still invite normally through this resource. Use `anyscale policy set` for an organization that meets both conditions instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.\n\n" +
+			"**Organizations with single sign-on required:** If your organization's SSO mode is `required`, Create refuses outright instead of sending an invitation that could never be accepted - the emailed link is rejected on use, and sending it anyway would still consume one of the organization's 20 invitations per 24 hours for nothing. Bring the person in through your identity provider instead, then track them with the `anyscale_organization_user` resource once they have logged in. When this organization's SSO mode cannot be determined at apply time, Create fails open and sends the invitation anyway, attaching a warning that names what could not run - a failed lookup is not evidence that SSO is required, and refusing on it would turn a transient error into a failed apply.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -152,32 +154,15 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	// Create request body
-	createReq := CreateOrganizationInvitationRequest{
-		Email: plan.Email.ValueString(),
-	}
-
-	reqBody, err := MarshalRequestBody(createReq)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error marshaling request",
-			fmt.Sprintf("Could not marshal invitation request: %s", err.Error()),
-		)
-		return
-	}
-
 	tflog.Info(ctx, "Creating organization invitation", map[string]interface{}{
 		"email_domain": getEmailDomain(plan.Email.ValueString()),
 	})
 
-	// Send create request. The API only returns the invitation ID here (full details are
-	// fetched separately below via getInvitationByID) - OrganizationInvitationResponse's other
-	// fields are simply left at their zero value by json.Unmarshal, which is fine since only
-	// Result.ID is read.
-	invitationResp, err := DoRequestAndParse[OrganizationInvitationResponse](
-		ctx, r.client, "POST", "/api/v2/organization_invitations", reqBody,
-		http.StatusOK, http.StatusCreated,
-	)
+	// Shared with anyscale_organization_user, which POSTs to this same endpoint.
+	// The SSO guard lives in that helper so it cannot be present on one call site
+	// and missing on the other. The API only returns the invitation ID here; full
+	// details are fetched separately below via getInvitationByID.
+	invitationResult, err := createOrganizationInvitation(ctx, r.client, plan.Email.ValueString(), &resp.Diagnostics)
 	if err != nil {
 		detail := extractAPIErrorDetail(err)
 		if strings.Contains(detail, "already a member of your organization") {
@@ -191,7 +176,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	invitationID := invitationResp.Result.ID
+	invitationID := invitationResult.ID
 	plan.ID = types.StringValue(invitationID)
 
 	tflog.Info(ctx, "Created organization invitation", map[string]interface{}{

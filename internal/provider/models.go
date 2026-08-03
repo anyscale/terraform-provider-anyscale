@@ -326,6 +326,25 @@ type OrganizationInvitationResult struct {
 	AcceptedAt     *string `json:"accepted_at"` // null if not accepted
 }
 
+// OrganizationInvitationsListResponse represents the response from
+// GET /api/v2/organization_invitations.
+//
+// Both of the backend's code paths for this endpoint - with and without an
+// email query parameter - filter on `expires_at > now() AND accepted_at IS
+// NULL` (organization_invitations_dao.find_invitation and
+// list_pending_invitations respectively), so Results only ever contains
+// PENDING invitations. An expired or accepted one is reachable only by
+// GET /api/v2/organization_invitations/{id}. That asymmetry is load-bearing
+// for the organization_user resource's read ordering; do not treat an empty
+// Results as "this address was never invited".
+type OrganizationInvitationsListResponse struct {
+	Results  []OrganizationInvitationResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
 // Organization Collaborator API Models
 
 // UpdateOrganizationCollaboratorRequest is the request body for updating a collaborator

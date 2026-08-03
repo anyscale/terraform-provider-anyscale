@@ -179,31 +179,30 @@ func TestAccOrganizationUserResource_Lifecycle_MockServer(t *testing.T) {
 
 	config := testAccProviderBlock(httpServer.URL) + `
 resource "anyscale_organization_user" "test" {
+  email = "lifecycle@example.com"
 }
 `
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Import: populates the identity fields. ImportStatePersist is
-			// required here - see the real-infra test's own comment on this same
-			// resource: Create() always errors (import-only), so without
-			// persisting, the next step would see no existing resource and
-			// attempt to create one from Config, hitting "Direct Creation Not
-			// Supported" instead of proceeding.
+			// Import by EMAIL - the resource's key since the re-key.
+			// ImportStatePersist keeps the imported state for the next step so it
+			// refreshes an existing resource rather than creating a second one.
 			{
 				Config:             config,
 				ResourceName:       resourceAddr,
 				ImportState:        true,
-				ImportStateId:      "identity-lifecycle-mock",
+				ImportStateId:      "lifecycle@example.com",
 				ImportStatePersist: true,
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected 1 imported resource, got %d", len(states))
 					}
 					s := states[0]
-					if s.Attributes["id"] != "identity-lifecycle-mock" {
-						return fmt.Errorf("id = %q, want %q", s.Attributes["id"], "identity-lifecycle-mock")
+					// id holds the EMAIL since the re-key.
+					if s.Attributes["id"] != "lifecycle@example.com" {
+						return fmt.Errorf("id = %q, want the email %q", s.Attributes["id"], "lifecycle@example.com")
 					}
 					if s.Attributes["email"] != "lifecycle@example.com" {
 						return fmt.Errorf("email = %q, want %q", s.Attributes["email"], "lifecycle@example.com")
@@ -244,9 +243,15 @@ resource "anyscale_organization_user" "test" {
 		},
 	})
 
-	// resource.Test's own teardown destroy already ran by this point (pass or
-	// fail) - the "Delete" leg of the contract's required chain.
-	if !mockServer.isDeleted() {
-		t.Fatal("expected the collaborator to be deleted from the mock after the test's teardown destroy, but it is still present")
+	// resource.Test's own teardown destroy already ran by this point, pass or
+	// fail. THIS ASSERTION IS INVERTED FROM WHAT IT USED TO BE, and the inversion
+	// is the point: before the re-key, destroying this resource evicted the human
+	// from the organization. It no longer does, and must never do so again -
+	// destroy cancels only a pending invitation this resource itself sent, and
+	// this member was adopted rather than invited. If a regression ever restores
+	// eviction, this is the assertion that catches it.
+	if mockServer.isDeleted() {
+		t.Fatal("the member was DELETED from the organization by teardown destroy - destroying this resource must " +
+			"never evict a human. Only a pending invitation this resource itself sent may be cancelled.")
 	}
 }
