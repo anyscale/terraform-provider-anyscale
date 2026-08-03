@@ -70,9 +70,34 @@ func requireRealInfraTestUser(t *testing.T) string {
 // check than one that shares the parsing code it is validating.
 type liveOrgMember struct {
 	Email           string   `json:"email"`
+	UserID          string   `json:"user_id"`
 	BaseRole        string   `json:"base_role"`
 	AdditionalRoles []string `json:"additional_roles"`
 }
+
+// WHICH ENDPOINT REPORTS DENY ROLES TRUTHFULLY - this decides whether these
+// tests mean anything, and the obvious choice is the wrong one.
+//
+// The LIST endpoint and the SINGULAR endpoint do not agree. This repo already
+// documents it (see the mock in resource_organization_user_lifecycle_acc_test.go,
+// whose handleList deliberately returns an EMPTY additional_roles while
+// handleSingular returns the real one): the list formatter derives roles fresh
+// from Postgres, the singular read derives them from SpiceDB-managed groups.
+// A LIST-based check would therefore read [] for a member who genuinely holds a
+// deny role - and R5 would report a CLOBBER THAT DID NOT HAPPEN, i.e. would
+// declare an already-merged design broken on the strength of a false empty.
+//
+// So the authoritative read is the singular one, which is also what the provider
+// itself uses (resource_organization_user.go:441).
+//
+// It is keyed on USER_ID, not identity_id - verified live: GET with an
+// identity_id returns {"error":{"detail":"Not all users in {...} found. Found 0
+// users; expected 1"}}, while the same member's user_id returns the record. That
+// is the same dual-identifier split that disqualified user_id as this resource's
+// key, showing up again on the read side.
+//
+// Both values are returned so a caller can surface a disagreement rather than
+// silently trusting one; a divergence is itself a finding worth seeing.
 
 // readLiveOrgRole fetches the member fresh from the real API, bypassing
 // Terraform state entirely. Reading through state would only tell us what the
@@ -113,12 +138,56 @@ func readLiveOrgRole(t *testing.T, email string) (member liveOrgMember, found bo
 	// EqualFold, matching the provider: the server-side email filter is a
 	// narrowing hint, not a guaranteed exact match, and the backend stores
 	// lower-cased while the env var may be typed in any casing.
+	var fromList liveOrgMember
 	for _, m := range parsed.Results {
 		if strings.EqualFold(m.Email, email) {
-			return m, true
+			fromList = m
+			found = true
+			break
 		}
 	}
-	return liveOrgMember{}, false
+	if !found {
+		return liveOrgMember{}, false
+	}
+
+	// Upgrade to the singular read, which is the one that reports deny roles
+	// truthfully. See the comment on liveOrgMember for why the list value cannot
+	// be trusted for additional_roles.
+	if fromList.UserID == "" {
+		t.Fatalf("%s has no user_id, so the authoritative singular read is unavailable - "+
+			"some identity types genuinely have none. Point ANYSCALE_TEST_USER_EMAIL at a normal "+
+			"human member rather than a service account", email)
+	}
+
+	singularResp, err := client.DoRequest(context.Background(),
+		"GET", "/api/v2/organization_collaborators/"+fromList.UserID, nil)
+	if err != nil {
+		t.Fatalf("singular read for %s failed: %s", email, err)
+	}
+	defer func() { _ = singularResp.Body.Close() }()
+
+	if singularResp.StatusCode != http.StatusOK {
+		t.Fatalf("singular read for %s returned HTTP %d", email, singularResp.StatusCode)
+	}
+
+	var wrapped struct {
+		Result liveOrgMember `json:"result"`
+	}
+	if err := json.NewDecoder(singularResp.Body).Decode(&wrapped); err != nil {
+		t.Fatalf("could not parse the singular collaborator record for %s: %s", email, err)
+	}
+
+	// Surface a list-vs-singular divergence rather than hiding it. If these ever
+	// agree-by-accident the tests still work; if they disagree, the log says so,
+	// and the singular value is the one used.
+	if len(fromList.AdditionalRoles) != len(wrapped.Result.AdditionalRoles) {
+		t.Logf("NOTE: list and singular disagree on additional_roles for this member "+
+			"(list=%v, singular=%v). Using the singular value, which is authoritative; "+
+			"the split is the known Postgres-vs-SpiceDB read difference.",
+			fromList.AdditionalRoles, wrapped.Result.AdditionalRoles)
+	}
+
+	return wrapped.Result, true
 }
 
 // mustReadLiveOrgRole is readLiveOrgRole for the callers that treat absence as a
