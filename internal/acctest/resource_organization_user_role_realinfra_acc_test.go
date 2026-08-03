@@ -80,14 +80,27 @@ func requireRealInfraTestUser(t *testing.T) string {
 	// Printing the org name costs one request and makes that invisible choice
 	// visible at the top of the log, before anything is created. Set
 	// ANYSCALE_TEST_ORG_NAME to turn this from a disclosure into a hard assertion.
-	if org := authenticatedOrgName(t); org != "" {
-		t.Logf("REAL-INFRA TARGET ORGANIZATION: %q - confirm this is the org you intend before "+
-			"reading any result from this test", org)
-		if want := strings.TrimSpace(os.Getenv("ANYSCALE_TEST_ORG_NAME")); want != "" && !strings.EqualFold(want, org) {
-			t.Fatalf("ANYSCALE_TEST_ORG_NAME is %q but these credentials authenticate against %q. "+
-				"Refusing to mutate roles in an unintended organization - fix the token in scope "+
-				"(ANYSCALE_CLI_TOKEN takes precedence over ~/.anyscale/credentials.json).", want, org)
-		}
+	org := authenticatedOrgName(t)
+	if org != "" {
+		t.Logf("REAL-INFRA TARGET ORGANIZATION: %q", org)
+	}
+
+	// MANDATORY, not opt-in. An assertion that fires only when someone remembers
+	// to set a variable is the same shape as the failure it guards against -
+	// nobody set ANYSCALE_CLI_TOKEN either, and that IS what happened. So once
+	// ANYSCALE_TEST_USER_EMAIL is set - i.e. once this test is actually going to
+	// mutate a real person's role - naming the expected organization is required.
+	want := strings.TrimSpace(os.Getenv("ANYSCALE_TEST_ORG_NAME"))
+	if want == "" {
+		t.Fatalf("ANYSCALE_TEST_USER_EMAIL is set but ANYSCALE_TEST_ORG_NAME is not. This test mutates a "+
+			"real person's organization role, so the organization must be stated rather than inherited "+
+			"from whichever credential happens to be in scope. These credentials currently authenticate "+
+			"against %q - set ANYSCALE_TEST_ORG_NAME to that if it is what you intend.", org)
+	}
+	if org != "" && !strings.EqualFold(want, org) {
+		t.Fatalf("ANYSCALE_TEST_ORG_NAME is %q but these credentials authenticate against %q. "+
+			"Refusing to mutate roles in an unintended organization - fix the token in scope "+
+			"(ANYSCALE_CLI_TOKEN takes precedence over ~/.anyscale/credentials.json).", want, org)
 	}
 
 	// PRECONDITION 1 - NEVER THE AUTHENTICATED IDENTITY.
