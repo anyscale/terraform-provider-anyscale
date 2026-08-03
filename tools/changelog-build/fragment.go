@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,6 +73,40 @@ func validTypeNames() []string {
 	names := make([]string, len(typeOrder))
 	for i, t := range typeOrder {
 		names[i] = string(t)
+	}
+	return names
+}
+
+// componentCategories is the fixed set of non-"provider" changelog component
+// prefix categories, exactly as documented in .changelog/README.md's
+// "Examples by type" section (every real example body there starts with one
+// of these, slash, then a resource/data-source/etc. name — or with the bare
+// "provider" token).
+var componentCategories = []string{"resource", "data-source", "ephemeral-resource", "action"}
+
+// componentPrefixRe matches a valid "<category>/<name>" component prefix —
+// the portion of a release-note body before its first ": ". Built from
+// componentCategories (rather than a second hardcoded pattern) so the
+// accepted categories and the error message below can't drift apart.
+//
+// The category token is matched case-sensitively, deliberately unlike the
+// release-note type check above (which lowercases rawType before the
+// lookup). The type token is fence metadata that never itself reaches
+// CHANGELOG.md — it only buckets an entry into a section. A component
+// prefix, by contrast, is copied verbatim into the rendered bullet
+// (RenderSection writes "- " + e.Text), so accepting "Resource/x" as an
+// alias of "resource/x" would let inconsistent casing reach the published
+// changelog instead of being caught here.
+var componentPrefixRe = regexp.MustCompile(`^(` + strings.Join(componentCategories, "|") + `)/\S+$`)
+
+// validComponentPrefixNames returns the full legal-prefix list, in the same
+// order .changelog/README.md documents them, for the "unrecognized changelog
+// component prefix" error message.
+func validComponentPrefixNames() []string {
+	names := make([]string, 0, len(componentCategories)+1)
+	names = append(names, "provider")
+	for _, c := range componentCategories {
+		names = append(names, c+"/<name>")
 	}
 	return names
 }
@@ -193,6 +228,18 @@ func parseFragmentContent(source, content string) ([]Entry, error) {
 		if text == "" {
 			return nil, fmt.Errorf("empty release-note:%s body", rawType)
 		}
+
+		// The component prefix is everything before the first literal ": " in
+		// text. If there's no ": " at all, the whole body stands in as the
+		// "found" prefix so the error still shows what was actually written.
+		prefix := text
+		if idx := strings.Index(text, ": "); idx != -1 {
+			prefix = text[:idx]
+		}
+		if prefix != "provider" && !componentPrefixRe.MatchString(prefix) {
+			return nil, fmt.Errorf("%s: unrecognized changelog component prefix %q (want one of: %s)", source, prefix, strings.Join(validComponentPrefixNames(), ", "))
+		}
+
 		entries = append(entries, Entry{Type: entryType, Text: text, Source: source})
 	}
 	return entries, nil

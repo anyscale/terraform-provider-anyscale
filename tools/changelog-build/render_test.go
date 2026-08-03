@@ -510,10 +510,14 @@ func TestExtract_UnknownVersionErrors(t *testing.T) {
 }
 
 func TestParseFragments_EndToEndAndDeterministicOrder(t *testing.T) {
+	// Bodies carry a "provider: " component prefix (rather than bare "fix
+	// from PR N") purely to satisfy parseFragmentContent's component-prefix
+	// validation — this test's own subject is filename-based ordering, not
+	// prefix content, so the prefix itself is incidental to what's asserted.
 	dir := t.TempDir()
-	writeFragment(t, dir, "100.txt", "```\nrelease-note:fixed\nfix from PR 100\n```\n")
-	writeFragment(t, dir, "7.txt", "```\nrelease-note:fixed\nfix from PR 7\n```\n")
-	writeFragment(t, dir, "42.txt", "```\nrelease-note:fixed\nfix from PR 42\n```\n")
+	writeFragment(t, dir, "100.txt", "```\nrelease-note:fixed\nprovider: fix from PR 100\n```\n")
+	writeFragment(t, dir, "7.txt", "```\nrelease-note:fixed\nprovider: fix from PR 7\n```\n")
+	writeFragment(t, dir, "42.txt", "```\nrelease-note:fixed\nprovider: fix from PR 42\n```\n")
 
 	entries, err := ParseFragments(dir)
 	if err != nil {
@@ -523,7 +527,7 @@ func TestParseFragments_EndToEndAndDeterministicOrder(t *testing.T) {
 		t.Fatalf("got %d entries, want 3", len(entries))
 	}
 	got := []string{entries[0].Text, entries[1].Text, entries[2].Text}
-	want := []string{"fix from PR 7", "fix from PR 42", "fix from PR 100"}
+	want := []string{"provider: fix from PR 7", "provider: fix from PR 42", "provider: fix from PR 100"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("entry %d: got %q, want %q (numeric PR order)", i, got[i], want[i])
