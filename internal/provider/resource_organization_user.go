@@ -85,6 +85,11 @@ func (r *OrganizationUserResource) Metadata(ctx context.Context, req resource.Me
 // Schema defines the schema for the resource.
 func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// v1: re-keyed from identity_id to email. See
+		// resource_organization_user_upgrade.go for the migration and why it is
+		// required rather than cosmetic.
+		Version: 1,
+
 		MarkdownDescription: "Declares that a person **should have access** to the Anyscale organization, keyed by email.\n\n" +
 			"~> **A successful apply means access has been REQUESTED, not granted.** If the person is not already a " +
 			"member, this sends them an invitation. Unless your organization uses SSO or SCIM, **a human must still " +
