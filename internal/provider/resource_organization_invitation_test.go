@@ -143,6 +143,14 @@ func TestOrganizationInvitationResourceCreate_AlreadyMemberError(t *testing.T) {
 	const alreadyMemberDetail = "User with email invitee@example.com is already a member of your organization."
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Create now preflights userinfo for the SSO guard. sso_mode "off" so this
+		// test still exercises the already-a-member path rather than the guard.
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v2/userinfo" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"result":{"organizations":[{"sso_mode":"off"}]}}`))
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v2/organization_invitations" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
