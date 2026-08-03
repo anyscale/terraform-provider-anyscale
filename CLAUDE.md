@@ -48,7 +48,7 @@ You are assisting with development of a Go-based Terraform Provider for managing
   obvious: ..."* rather than *"(X found the gap)"*.
 - **Commit messages are not private either.** This repo has `squash_merge_commit_message =
   COMMIT_MESSAGES`, so GitHub **concatenates every commit message into the squash commit body** on
-  merge. A PR with 52 commits produced a 1,583-line body on `main` carrying 15 agent references
+  merge. A PR with 60 commits produced a 1,583-line body on `main` carrying 15 agent references
   (verified at `f1b80f7`). If names slipped through anyway, they can be removed at merge time by
   hand-editing the squash body in the GitHub merge dialog — no history rewrite, no force-push.
 - **When scrubbing, match the agent names specifically — never a bare `tfp-` pattern.** The real test
