@@ -11,6 +11,18 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Sweep-target org guard. Deliberately here rather than inside each
+	// sweeper's F: there are eight registered sweepers and a ninth added later
+	// would silently miss a per-sweeper check. The dry-run flag is the cautionary
+	// precedent - it was documented as safe for months while nothing read it,
+	// because the check lived where each sweeper had to remember it (see
+	// isSweepDryRun below). One choke point cannot be forgotten.
+	if sweepRequested() {
+		if err := assertSweepTargetOrg(); err != nil {
+			fmt.Fprintf(os.Stderr, "\n[sweep] REFUSING TO SWEEP: %v\n\n", err)
+			os.Exit(1)
+		}
+	}
 	resource.TestMain(m)
 }
 

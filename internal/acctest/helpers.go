@@ -243,9 +243,29 @@ func validateCloudExists(cloudID string) bool {
 // (rather than delegating to the provider package's PickMostRecentMatch) -
 // only the pagination gap is being closed here.
 func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
+	id, matchCount, err := resolveCloudNameToIDCore(cloudName)
+	if err != nil {
+		return "", err
+	}
+	if matchCount > 1 {
+		t.Logf("Warning: Multiple clouds (%d) found with name '%s', using most recent: %s", matchCount, cloudName, id)
+	}
+	t.Logf("Resolved cloud name '%s' to ID: %s", cloudName, id)
+	return id, nil
+}
+
+// resolveCloudNameToIDCore is resolveCloudNameToID without a *testing.T, so
+// callers outside a test function can reuse the same fully-paginated lookup
+// instead of duplicating it. The sweep-target org guard in TestMain needs
+// exactly this: TestMain has no *testing.T, and a second copy of the paging
+// loop is precisely the divergence this repo has been bitten by before (a
+// body-vs-query paging mismatch silently truncating a sweep's candidate list).
+// Returns the resolved ID and how many clouds carried that name; the caller
+// decides whether a duplicate is worth logging.
+func resolveCloudNameToIDCore(cloudName string) (string, int, error) {
 	client, err := GetTestClient()
 	if err != nil {
-		return "", fmt.Errorf("failed to get test client: %w", err)
+		return "", 0, fmt.Errorf("failed to get test client: %w", err)
 	}
 
 	// Find matching cloud(s) across every page - if multiple exist, use the most recent
@@ -262,19 +282,19 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 
 		resp, err := client.DoRequest(context.Background(), "GET", path, nil)
 		if err != nil {
-			return "", fmt.Errorf("failed to list clouds: %w", err)
+			return "", 0, fmt.Errorf("failed to list clouds: %w", err)
 		}
 
 		if resp.StatusCode != 200 {
 			body, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+			return "", 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
-			return "", fmt.Errorf("failed to read response: %w", err)
+			return "", 0, fmt.Errorf("failed to read response: %w", err)
 		}
 
 		var cloudsResp struct {
@@ -289,7 +309,7 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 		}
 
 		if err := json.Unmarshal(body, &cloudsResp); err != nil {
-			return "", fmt.Errorf("failed to parse clouds response: %w", err)
+			return "", 0, fmt.Errorf("failed to parse clouds response: %w", err)
 		}
 
 		for _, cloud := range cloudsResp.Results {
@@ -309,15 +329,10 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 	}
 
 	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
+		return "", 0, fmt.Errorf("no cloud found with name '%s'", cloudName)
 	}
 
-	if matchCount > 1 {
-		t.Logf("Warning: Multiple clouds (%d) found with name '%s', using most recent: %s", matchCount, cloudName, matchedCloudID)
-	}
-
-	t.Logf("Resolved cloud name '%s' to ID: %s", cloudName, matchedCloudID)
-	return matchedCloudID, nil
+	return matchedCloudID, matchCount, nil
 }
 
 // createEphemeralTestCloud creates a minimal empty cloud for testing.
