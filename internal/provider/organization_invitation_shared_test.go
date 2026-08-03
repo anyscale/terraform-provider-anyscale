@@ -148,3 +148,84 @@ func TestOrganizationRequiresSSO_UnreadableDefaultsToAllowing(t *testing.T) {
 			"failure this guard exists to prevent")
 	}
 }
+
+// newUnreadableSSOModeServer serves the invitation POST but makes the SSO
+// preflight unreadable, so the guard takes its fail-open branch.
+//
+// The 500 is deliberate rather than a 404: a 404 is what a mock that simply
+// forgot the route returns, and this test must not be satisfiable by that
+// accident — see the doc comment on the test below.
+func newUnreadableSSOModeServer(t *testing.T) (*httptest.Server, func() bool) {
+	t.Helper()
+	var mu sync.Mutex
+	posted := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/userinfo":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = fmt.Fprint(w, `{"error":{"detail":"transient"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/organization_invitations":
+			mu.Lock()
+			posted = true
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{"result":{"id":"invite_unreadable_probe"}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprintf(w, `{"error":{"detail":"unexpected %s %s"}}`, r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, func() bool { mu.Lock(); defer mu.Unlock(); return posted }
+}
+
+// TestCreateOrganizationInvitation_SSOPreflightUnreadable covers the fail-open
+// branch DELIBERATELY.
+//
+// WHY THIS EXISTS. Until 22a58be every mock-backed invitation test reached this
+// branch BY ACCIDENT: none of those mocks served /api/v2/userinfo, so the
+// preflight 404'd and the guard fell open. Coverage was inverted — the degraded
+// path exercised by everything, the ordinary path by nothing — and 22a58be fixed
+// it by giving those mocks a real userinfo handler.
+//
+// That fix removed the incidental coverage. This test replaces it deliberately:
+// it makes userinfo unreadable explicitly, so it does not depend on a mock
+// forgetting a route.
+//
+// BOTH ASSERTIONS ARE LOAD-BEARING and they are separable. Fail-open means the
+// invitation is still sent; loudly means a warning says the check did not run.
+// A mutation that keeps the send and drops the warning leaves the action
+// byte-identical — a test asserting only "the invitation went out" passes it
+// (that is exactly what M2 demonstrated against the guard's own test). So the
+// warning is asserted, not assumed.
+func TestCreateOrganizationInvitation_SSOPreflightUnreadable(t *testing.T) {
+	server, wasPosted := newUnreadableSSOModeServer(t)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	var diags diag.Diagnostics
+	_, err := createOrganizationInvitation(context.Background(), client, "invitee@example.com", &diags)
+
+	// FAIL OPEN: a failed lookup is not evidence that SSO is required, so the
+	// invitation must still go out rather than turning a transient error into a
+	// failed apply.
+	if err != nil {
+		t.Fatalf("an unreadable SSO preflight must not block inviting, got: %v", err)
+	}
+	if !wasPosted() {
+		t.Error("an unreadable SSO preflight must still send the invitation, but no POST was made")
+	}
+
+	// LOUDLY: without this, a user in an SSO-required org gets the dead-link
+	// email the guard exists to prevent, with nothing indicating the guard did
+	// not run. Silent fail-open is indistinguishable, from the user's side, from
+	// the defect being unfixed.
+	if diags.WarningsCount() != 1 {
+		t.Fatalf("an unreadable SSO preflight must emit exactly one warning saying the check did not run; got %d: %v",
+			diags.WarningsCount(), diags.Warnings())
+	}
+	if summary := diags.Warnings()[0].Summary(); !strings.Contains(summary, "Single Sign-On") {
+		t.Errorf("the warning must name what did not run; summary was %q", summary)
+	}
+}
