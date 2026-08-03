@@ -69,6 +69,14 @@ func (s *mockOrgUserServer) handle(w http.ResponseWriter, r *http.Request) {
 	s.callLog = append(s.callLog, fmt.Sprintf("%s %s", r.Method, reqPath))
 
 	switch {
+	// The SSO preflight runs before every invitation create. Serving it with
+	// sso_mode=off is what puts these tests on the REAL allowed path: without
+	// this route the GET 404s, the guard cannot determine sso_mode, and every
+	// test here silently exercises the fail-open branch instead of the destroy
+	// behaviour it names.
+	case r.Method == http.MethodGet && reqPath == "/api/v2/userinfo":
+		_, _ = w.Write([]byte(`{"result":{"organizations":[{"sso_mode":"off"}]}}`))
+
 	case r.Method == http.MethodGet && strings.HasPrefix(reqPath, "/api/v2/organization_collaborators"):
 		s.handleCollaboratorList(w, r, reqPath)
 

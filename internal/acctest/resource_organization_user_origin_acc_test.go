@@ -94,6 +94,14 @@ func (s *mockOrganizationUserOriginServer) handle(w http.ResponseWriter, r *http
 
 	path := r.URL.Path
 	switch {
+	// The SSO preflight runs before every invitation create. Serving it with
+	// sso_mode=off is what puts these tests on the REAL allowed path: without
+	// this route the GET hits the 404 below, the guard cannot determine
+	// sso_mode, and every test in this file silently exercises the fail-open
+	// branch rather than the origin behaviour it names.
+	case r.Method == http.MethodGet && path == "/api/v2/userinfo":
+		_, _ = fmt.Fprint(w, `{"result":{"organizations":[{"sso_mode":"off"}]}}`)
+
 	case r.Method == http.MethodGet && path == "/api/v2/organization_collaborators":
 		s.handleListCollaborators(w, r)
 
