@@ -77,14 +77,87 @@ test: ## Run unit tests
 	@echo "==> Running unit tests..."
 	$(GO) test ./... -v -timeout 120s
 
+# ----------------------------------------------------------------------------
+# Acceptance-test credential resolution -- FAILS CLOSED.
+#
+# The acctest token is read from the macOS Keychain, and an empty read REFUSES to
+# run rather than falling through to a pre-set $$ANYSCALE_CLI_TOKEN or to
+# ~/.anyscale/credentials.json. That silent fall-through is the bug this exists to
+# stop, not a convenience being removed: a token is scoped to exactly one
+# organization and the provider has no org selector, so a stale credential and a
+# correct one both "work". A full suite ran against the wrong org on 2026-08-02
+# and left four real AWS clouds behind with nothing in the output to say so.
+#
+# Every part of the shape below is deliberate:
+#   - resolved INSIDE the recipe, never with := at parse time, so `make help` and
+#     every non-acctest target stay Keychain-free (no auth prompt to run `make`)
+#   - the using recipe line is @-prefixed, so the token never reaches make's echo
+#   - exported once; `go test` and any nested shell inherit it, so one ~36ms read
+#   - deliberately OVERRIDES an already-set $$ANYSCALE_CLI_TOKEN. Pointing at the
+#     wrong org is precisely the failure being prevented, so the Keychain wins
+#   - macOS-only by construction: where `security` is absent the read is empty and
+#     the target refuses loudly with instructions, which is the fail-closed path
+#
+# Scope boundary, stated so it is not over-read: this guards the `make` targets
+# only. CI does not use them (.github/workflows/ci.yml:197,210 call `go test`
+# directly, with its own correctly-scoped secret), and anyone invoking
+# `go test ./internal/acctest/` by hand still bypasses this entirely.
+# ----------------------------------------------------------------------------
+ACCTEST_TOKEN_SERVICE ?= anyscale-tfacc
+# Overridable ONLY so the test matrix can exercise the non-macOS branch from a Mac.
+ACCTEST_KEYCHAIN_CMD ?= security
+
+define resolve_acctest_token
+	if ! command -v $(ACCTEST_KEYCHAIN_CMD) >/dev/null 2>&1; then \
+		if [ -z "$$ANYSCALE_CLI_TOKEN" ]; then \
+			echo "ERROR: no macOS Keychain on this platform, and ANYSCALE_CLI_TOKEN is unset." >&2; \
+			echo "       Provide it from the CI secret store. Refusing to run without a token." >&2; \
+			exit 1; \
+		fi; \
+		echo "==> No Keychain here; using ANYSCALE_CLI_TOKEN from the environment ($${#ANYSCALE_CLI_TOKEN} chars)"; \
+	else \
+	ANYSCALE_CLI_TOKEN="$$($(ACCTEST_KEYCHAIN_CMD) find-generic-password -s $(ACCTEST_TOKEN_SERVICE) -w 2>/dev/null || true)"; \
+	if [ -z "$$ANYSCALE_CLI_TOKEN" ]; then \
+		echo "ERROR: no acceptance-test token in the macOS Keychain." >&2; \
+		echo "       service: $(ACCTEST_TOKEN_SERVICE)" >&2; \
+		echo "" >&2; \
+		echo "Refusing to run. Falling back to \$$ANYSCALE_CLI_TOKEN or" >&2; \
+		echo "~/.anyscale/credentials.json is exactly how a previous acceptance run" >&2; \
+		echo "created real clouds in the wrong organization, silently." >&2; \
+		echo "" >&2; \
+		echo "Store the token -- use this form, it is the only one that keeps a" >&2; \
+		echo "full-length token intact (the interactive -w prompt silently truncates" >&2; \
+		echo "at 128 chars via readpassphrase(3); piping to stdin stores nothing," >&2; \
+		echo "since security reads /dev/tty):" >&2; \
+		echo "" >&2; \
+		echo "  security add-generic-password -a \"\$$USER\" -s $(ACCTEST_TOKEN_SERVICE) -U -w \"\$$ANYSCALE_CLI_TOKEN\"" >&2; \
+		echo "" >&2; \
+		echo "Sourcing the value from a variable already in scope keeps the literal" >&2; \
+		echo "token out of shell history; it is briefly visible in this user's own" >&2; \
+		echo "process list, which is the accepted tradeoff for not truncating." >&2; \
+		echo "" >&2; \
+		exit 1; \
+	fi; \
+	echo "==> Acctest token resolved from Keychain (service: $(ACCTEST_TOKEN_SERVICE), $${#ANYSCALE_CLI_TOKEN} chars)"; \
+	fi; \
+	export ANYSCALE_CLI_TOKEN; \
+	if [ $${#ANYSCALE_CLI_TOKEN} -eq 128 ]; then \
+		echo "==> WARNING: token is exactly 128 chars, which is the readpassphrase(3)" >&2; \
+		echo "==>          truncation length, not a natural token length. If auth fails" >&2; \
+		echo "==>          with a 401, re-store it with the -w \"\$$VALUE\" argv form above." >&2; \
+	fi;
+endef
+
 .PHONY: testacc
-testacc: ## Run acceptance tests (requires TF_ACC=1)
+testacc: ## Run acceptance tests (requires TF_ACC=1; token from Keychain, fails closed)
 	@echo "==> Running acceptance tests..."
+	@$(resolve_acctest_token) \
 	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 120m -parallel $(PARALLEL)
 
 .PHONY: testacc-cover
-testacc-cover: ## Run acceptance tests with coverage
+testacc-cover: ## Run acceptance tests with coverage (token from Keychain, fails closed)
 	@echo "==> Running acceptance tests with coverage..."
+	@$(resolve_acctest_token) \
 	TF_ACC=1 $(GO) test ./... -v -timeout 120m -parallel $(PARALLEL) -coverprofile=coverage.out -covermode=atomic
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "==> Coverage report: coverage.html"

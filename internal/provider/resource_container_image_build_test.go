@@ -109,9 +109,8 @@ func TestResolveContainerfile(t *testing.T) {
 // real default, and an explicit value parsing correctly.
 //
 // Landed as a compile-unblocking fix while migrating this resource to
-// timeouts{} (PR2) - tfp-assayer owns the full PR2 test contract per
-// PR2-TIMEOUTS-PLAN.md and may replace or extend this with their own
-// version.
+// timeouts{} (PR2) - the full PR2 test contract is owned separately per
+// PR2-TIMEOUTS-PLAN.md and may replace or extend this.
 func TestTimeoutsCreateResolvesExpectedDuration(t *testing.T) {
 	attrTypes := map[string]attr.Type{"create": types.StringType, "update": types.StringType}
 

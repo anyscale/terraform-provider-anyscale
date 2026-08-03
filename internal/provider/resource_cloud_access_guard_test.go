@@ -17,7 +17,7 @@ import (
 // three look similar from the outside but exercise different branches.
 //
 // Kept in its own file rather than added to resource_cloud_access_test.go:
-// that file is tfp-forge's, and this session's own audit found that two
+// that file is owned by separate in-flight work, and this session's own audit found that two
 // branches independently touching one file is an integration hazard that
 // neither branch can see from inside itself.
 func TestCloudAccessModifyPlan_AlreadyEmptyStaysEmpty(t *testing.T) {

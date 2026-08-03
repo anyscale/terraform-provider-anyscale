@@ -765,7 +765,7 @@ func TestAccComputeConfigResource_K8S(t *testing.T) {
 // same backend "create-or-new-version" endpoint used for Update, which
 // silently created a brand-new config under the new name and left the old
 // one live and un-archived - a real, live-verified orphan bug (see
-// tfp-assayer's rename-orphan probe in the design discussion), not
+// the rename-orphan probe in the design discussion), not
 // hypothetical. name now carries RequiresReplace, so Terraform's own
 // destroy-then-create replace cycle runs the resource's normal Delete/Create
 // path instead: the old config gets archived (proving Delete ran on it, not

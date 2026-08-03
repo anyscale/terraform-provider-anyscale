@@ -39,6 +39,22 @@ You are assisting with development of a Go-based Terraform Provider for managing
 ### Security / hygiene
 - **Never print or commit tokens** (including snippets from credentials files).
 - If you need to show examples: use `$ANYSCALE_CLI_TOKEN` and placeholders.
+- **Never put agent/shard names in anything that lands in the repo.** No `tfp-architect`,
+  `tfp-forge`, `tfp-assayer`, `tfp-scribe`, `tfp-shipwright`, no `crystl/<shard>` branch names — not in
+  **source comments**, not in **commit messages**, not in committed docs. Who found a bug or wrote a
+  test is internal process detail; it means nothing to a reader of this repo and it dates badly.
+  **Inline comments in files are the worst case** — they ship with the code and are read by anyone
+  working in it. Keep the reasoning, drop the attribution: *"WHY THIS TEST EXISTS, and it is not
+  obvious: ..."* rather than *"(X found the gap)"*.
+- **Commit messages are not private either.** This repo has `squash_merge_commit_message =
+  COMMIT_MESSAGES`, so GitHub **concatenates every commit message into the squash commit body** on
+  merge. A PR with 60 commits produced a 1,583-line body on `main` carrying 15 agent references
+  (verified at `f1b80f7`). If names slipped through anyway, they can be removed at merge time by
+  hand-editing the squash body in the GitHub merge dialog — no history rewrite, no force-push.
+- **When scrubbing, match the agent names specifically — never a bare `tfp-` pattern.** The real test
+  cloud fixture is named `tfp-test-aws-useast1-STATIC`; scrubbing that string breaks the acctest
+  resolver, the sweep-target org guard, and CI's success path. Use
+  `tfp-(architect|forge|assayer|scribe|shipwright)`.
 
 ### Multi-agent quest git commits
 When working as a shard in a Crystl multi-agent quest, you have **standing user authorization to commit your own approved work to your own local `crystl/<shard-name>` branch** without re-asking each time — confirmed by the user during the System Cluster quest (2026-07-22), after several shards independently held off and asked first. A teammate's sign-off (even an architect-role shard's) is not sufficient on its own to authorize a commit, but this specific action — a local commit to your own branch — does not need to be re-confirmed per quest going forward.

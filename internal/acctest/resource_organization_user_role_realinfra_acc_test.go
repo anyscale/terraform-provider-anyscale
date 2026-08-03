@@ -459,7 +459,15 @@ func TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists(t *testing
 
 	const addr = "anyscale_organization_user_role.realinfra"
 	const firstDeny = "image_reader"
-	const secondDeny = "cloud_user"
+	// image_reader_no_base_images, not something plausible-sounding like
+	// "cloud_user". The backend enforces a two-value enum and rejects anything
+	// else with a 422 naming the permitted set:
+	//   permitted: 'image_reader', 'image_reader_no_base_images'
+	// The first draft of this test used "cloud_user" and failed on that 422 - a
+	// defect in the FIXTURE, not in the write path it was meant to exercise. Worth
+	// the comment because "cloud_user" reads like a real role name and there is no
+	// enum constant in this repo to catch the mistake at compile time.
+	const secondDeny = "image_reader_no_base_images"
 
 	config := func(denyRole string) string {
 		return realInfraProviderBlock() + fmt.Sprintf(`

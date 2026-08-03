@@ -243,9 +243,29 @@ func validateCloudExists(cloudID string) bool {
 // (rather than delegating to the provider package's PickMostRecentMatch) -
 // only the pagination gap is being closed here.
 func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
+	id, matchCount, err := resolveCloudNameToIDCore(cloudName)
+	if err != nil {
+		return "", err
+	}
+	if matchCount > 1 {
+		t.Logf("Warning: Multiple clouds (%d) found with name '%s', using most recent: %s", matchCount, cloudName, id)
+	}
+	t.Logf("Resolved cloud name '%s' to ID: %s", cloudName, id)
+	return id, nil
+}
+
+// resolveCloudNameToIDCore is resolveCloudNameToID without a *testing.T, so
+// callers outside a test function can reuse the same fully-paginated lookup
+// instead of duplicating it. The sweep-target org guard in TestMain needs
+// exactly this: TestMain has no *testing.T, and a second copy of the paging
+// loop is precisely the divergence this repo has been bitten by before (a
+// body-vs-query paging mismatch silently truncating a sweep's candidate list).
+// Returns the resolved ID and how many clouds carried that name; the caller
+// decides whether a duplicate is worth logging.
+func resolveCloudNameToIDCore(cloudName string) (string, int, error) {
 	client, err := GetTestClient()
 	if err != nil {
-		return "", fmt.Errorf("failed to get test client: %w", err)
+		return "", 0, fmt.Errorf("failed to get test client: %w", err)
 	}
 
 	// Find matching cloud(s) across every page - if multiple exist, use the most recent
@@ -262,19 +282,19 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 
 		resp, err := client.DoRequest(context.Background(), "GET", path, nil)
 		if err != nil {
-			return "", fmt.Errorf("failed to list clouds: %w", err)
+			return "", 0, fmt.Errorf("failed to list clouds: %w", err)
 		}
 
 		if resp.StatusCode != 200 {
 			body, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+			return "", 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
-			return "", fmt.Errorf("failed to read response: %w", err)
+			return "", 0, fmt.Errorf("failed to read response: %w", err)
 		}
 
 		var cloudsResp struct {
@@ -289,7 +309,7 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 		}
 
 		if err := json.Unmarshal(body, &cloudsResp); err != nil {
-			return "", fmt.Errorf("failed to parse clouds response: %w", err)
+			return "", 0, fmt.Errorf("failed to parse clouds response: %w", err)
 		}
 
 		for _, cloud := range cloudsResp.Results {
@@ -309,15 +329,10 @@ func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
 	}
 
 	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
+		return "", 0, fmt.Errorf("no cloud found with name '%s'", cloudName)
 	}
 
-	if matchCount > 1 {
-		t.Logf("Warning: Multiple clouds (%d) found with name '%s', using most recent: %s", matchCount, cloudName, matchedCloudID)
-	}
-
-	t.Logf("Resolved cloud name '%s' to ID: %s", cloudName, matchedCloudID)
-	return matchedCloudID, nil
+	return matchedCloudID, matchCount, nil
 }
 
 // createEphemeralTestCloud creates a minimal empty cloud for testing.
@@ -533,6 +548,40 @@ func autoDiscoverTestCloud(t *testing.T) (cloudID string, cloudName string, err 
 			return createEphemeralTestCloud(t)
 		}
 		return "", "", fmt.Errorf("no clouds found in the account (set ANYSCALE_TEST_CREATE_CLOUD=1 to auto-create)")
+	}
+
+	// MAY CREATE, MAY NOT ADOPT.
+	//
+	// Reaching this point means two things at once: the pinned fixture cloud did
+	// NOT resolve (both callers check it immediately before calling us), AND this
+	// organization already contains clouds. The pinned fixture exists only in the
+	// acctest org, so its absence is a reliable signal that we are somewhere else
+	// - and the clouds sitting here belong to whoever owns that organization.
+	//
+	// Adopting one is how four tfacc- clouds were created in a user's working org
+	// on 2026-08-02: the resolver logged "did not resolve in this org", fell
+	// through, scored a cloud, and every later test built on it. Worse, the leak
+	// self-conceals - a wrong-org run leaves tfacc- clouds behind, and tfacc-
+	// scores priority 9 below, so the NEXT run adopts the previous run's leftovers
+	// and passes, with a plausible-looking test cloud waiting for it.
+	//
+	// Creating in an EMPTY org stays allowed - that is the branch above, and it is
+	// the path CI's ANYSCALE_TEST_CREATE_CLOUD=1 exists for. Only adoption of a
+	// pre-existing cloud is refused.
+	if os.Getenv("ANYSCALE_TEST_ALLOW_CLOUD_ADOPTION") != "1" {
+		names := make([]string, 0, len(testClouds))
+		for _, c := range testClouds {
+			names = append(names, c.Name)
+		}
+		return "", "", fmt.Errorf(
+			"refusing to adopt an existing cloud: the pinned fixture %q does not exist in this "+
+				"organization, so these credentials are probably not pointed at the acctest org. "+
+				"Found %d cloud(s) here that this suite did not create: %s.\n\n"+
+				"Point ANYSCALE_CLI_TOKEN at the acctest org, or set ANYSCALE_TEST_CLOUD_ID / "+
+				"ANYSCALE_TEST_CLOUD_NAME to choose a cloud explicitly. If you genuinely mean to run "+
+				"against a cloud this suite did not create, set ANYSCALE_TEST_ALLOW_CLOUD_ADOPTION=1",
+			defaultKnownGoodCloudName, len(testClouds), strings.Join(names, ", "),
+		)
 	}
 
 	// Sort by priority (highest first), then by created_at (most recent first)
@@ -946,8 +995,8 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	// the config out-of-band and expects a non-empty plan, but the
 	// compute-config Read returns an archived config as still-present, so the
 	// disappearance is not detected ("expected non-empty plan, got empty").
-	// That needs the provider Read to treat archived_at as gone (tracked,
-	// forge lane).
+	// That needs the provider Read to treat archived_at as gone (tracked
+	// separately).
 
 	t.Logf("Found %d configured clouds for testing", len(clouds))
 	for _, c := range clouds {
