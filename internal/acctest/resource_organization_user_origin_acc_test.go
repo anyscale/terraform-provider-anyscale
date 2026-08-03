@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -322,6 +323,105 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 						return nil
 					},
 				),
+			},
+		},
+	})
+}
+
+// TestAccOrganizationUserResourceImportRoundTripPreservesCasing is criterion 1
+// for this resource: import must produce a NO-OP PLAN for a realistic config,
+// never a diff and never a replacement.
+//
+// The specific thing it pins is the casing rule. The Anyscale backend stores
+// emails lower-cased (users_dao.py lower-cases at INSERT; a live read of the
+// collaborators endpoint returned 7/7 lower-case), so an import that wrote back
+// the API's echo would put "alice@example.com" into state while the config says
+// "Alice@Example.com" - a permanent diff on a Required attribute, forever, with
+// no way for the practitioner to make it converge except by retyping their
+// config to match the backend's normalization.
+//
+// The rule is therefore: IMPORT WRITES THE EMAIL AS GIVEN IN THE IMPORT ID -
+// what the operator typed - never the API echo. That is what makes the third
+// step below a no-op rather than a diff.
+//
+// ON WHICH STEP ACTUALLY CATCHES WHAT - measured, because the obvious story is
+// wrong for this resource and a wrong story here invites a bad "simplification":
+//
+//	MUT: ImportState writes strings.ToLower(email) instead of the import ID
+//	  -> caught by STEP 2. ImportStateVerify matches by ID, and the mutation
+//	     changed the ID, so imported and created state diverge:
+//	     "Failed state verification, resource with ID alice.import@example.com not found"
+//
+//	MUT: the SHARED apply path normalizes email to the API's echo, so Create and
+//	Import agree and only the CONFIG differs - the case ImportStateVerify cannot
+//	see, since it compares imported state to created state rather than to config
+//	  -> caught by STEP 1, and NOT by my plancheck: Terraform Core's own
+//	     post-apply consistency check fires first, because email is Required and
+//	     non-Computed and Core forbids returning a value that differs from config:
+//	     "produced an unexpected new value: .email: was cty.StringVal(...)"
+//
+// So step 3 did not catch either mutation I could construct, and I could not
+// construct one it uniquely catches. It is kept because criterion 1 requires the
+// no-op plan assertion and because it is the assertion that survives a schema
+// change - the moment email became Optional+Computed, Core would stop enforcing
+// equality with config and steps 1 and 2 would both go quiet. Do not read its
+// presence as evidence that it is currently the load-bearing check; it is
+// insurance, and the comment says so rather than implying otherwise.
+//
+// The broader gap it guards against IS real elsewhere: 19 of the 23 files in this
+// repo using ImportStateVerify stop there, and the invitation resource shipped an
+// import/casing defect a passing ImportStateVerify did not see. That resource
+// differs in the way that matters - it carries a plan modifier that deliberately
+// rewrites the planned value, which Core permits, so Core's consistency check
+// does not save it the way it saves this one.
+func TestAccOrganizationUserResourceImportRoundTripPreservesCasing(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	// Deliberately mixed case, and deliberately NOT what the backend stores.
+	const operatorCasing = "Alice.Import@Example.COM"
+
+	// Seeded as an existing member so Create adopts rather than inviting, and so
+	// the import has something real to find. The mock's collaborator lookup is
+	// case-insensitive, matching findOrgCollaboratorByEmail's EqualFold.
+	httpServer, _ := newMockOrganizationUserOriginServer(t, operatorCasing)
+
+	const resourceName = "anyscale_organization_user.test"
+	config := originTestConfig(httpServer.URL, operatorCasing)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// 1. Establish real applied state.
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(resourceName, "email", operatorCasing),
+			},
+			{
+				// 2. Import by the email the operator typed, casing and all.
+				Config:            config,
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateId:     operatorCasing,
+				ImportStateVerify: true,
+				// Nothing is ignored on purpose. reinvite_if_expired has no backend
+				// representation and would normally need the R8 exemption, but
+				// ImportState sets it explicitly to false rather than leaving it
+				// null, so it round-trips honestly and does not need silencing. If
+				// this ever starts failing on that attribute, add the entry WITH a
+				// comment - an unexplained entry here is indistinguishable from
+				// someone hiding a real failure.
+			},
+			{
+				// 3. The assertion the first two cannot make: against a realistic
+				// config, the next plan is EMPTY. This is where an API-echoed
+				// lower-case email would surface as a permanent diff.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(resourceName, "email", operatorCasing),
 			},
 		},
 	})
