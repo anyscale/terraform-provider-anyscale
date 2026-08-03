@@ -152,32 +152,15 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	// Create request body
-	createReq := CreateOrganizationInvitationRequest{
-		Email: plan.Email.ValueString(),
-	}
-
-	reqBody, err := MarshalRequestBody(createReq)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error marshaling request",
-			fmt.Sprintf("Could not marshal invitation request: %s", err.Error()),
-		)
-		return
-	}
-
 	tflog.Info(ctx, "Creating organization invitation", map[string]interface{}{
 		"email_domain": getEmailDomain(plan.Email.ValueString()),
 	})
 
-	// Send create request. The API only returns the invitation ID here (full details are
-	// fetched separately below via getInvitationByID) - OrganizationInvitationResponse's other
-	// fields are simply left at their zero value by json.Unmarshal, which is fine since only
-	// Result.ID is read.
-	invitationResp, err := DoRequestAndParse[OrganizationInvitationResponse](
-		ctx, r.client, "POST", "/api/v2/organization_invitations", reqBody,
-		http.StatusOK, http.StatusCreated,
-	)
+	// Shared with anyscale_organization_user, which POSTs to this same endpoint.
+	// The SSO guard lives in that helper so it cannot be present on one call site
+	// and missing on the other. The API only returns the invitation ID here; full
+	// details are fetched separately below via getInvitationByID.
+	invitationResult, err := createOrganizationInvitation(ctx, r.client, plan.Email.ValueString())
 	if err != nil {
 		detail := extractAPIErrorDetail(err)
 		if strings.Contains(detail, "already a member of your organization") {
@@ -191,7 +174,7 @@ func (r *OrganizationInvitationResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	invitationID := invitationResp.Result.ID
+	invitationID := invitationResult.ID
 	plan.ID = types.StringValue(invitationID)
 
 	tflog.Info(ctx, "Created organization invitation", map[string]interface{}{

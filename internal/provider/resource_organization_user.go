@@ -317,23 +317,15 @@ func (r *OrganizationUserResource) Create(ctx context.Context, req resource.Crea
 	// Not a member: invite. Note the backend invalidates any pending invitation for
 	// this address and issues a fresh one, so this is safe to retry, but it does
 	// send another email and consume another unit of the daily quota.
-	reqBody, err := MarshalRequestBody(CreateOrganizationInvitationRequest{Email: email})
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Could Not Invite Organization Member",
-			fmt.Sprintf("Failed to build the invitation request for %s: %s", email, err.Error()),
-		)
-		return
-	}
 
 	tflog.Info(ctx, "Inviting organization member", map[string]any{
 		"email_domain": getEmailDomain(email),
 	})
 
-	invitationResp, err := DoRequestAndParse[OrganizationInvitationResponse](
-		ctx, r.client, "POST", "/api/v2/organization_invitations", reqBody,
-		http.StatusOK, http.StatusCreated,
-	)
+	// Shared with anyscale_organization_invitation: both resources POST to the
+	// same endpoint, so the SSO guard lives in one place rather than being added
+	// to whichever call site someone happens to be looking at.
+	invitation, err := createOrganizationInvitation(ctx, r.client, email)
 	if err != nil {
 		summary, detail := invitationCreateDiagnostic(email, err)
 		resp.Diagnostics.AddError(summary, detail)
@@ -348,14 +340,14 @@ func (r *OrganizationUserResource) Create(ctx context.Context, req resource.Crea
 
 	resp.Diagnostics.Append(writeMembershipRecord(ctx, resp.Private, organizationUserMembership{
 		Origin:       membershipOriginInvited,
-		InvitationID: invitationResp.Result.ID,
+		InvitationID: invitation.ID,
 	})...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	tflog.Info(ctx, "Invited organization member", map[string]any{
-		"invitation_id": invitationResp.Result.ID,
+		"invitation_id": invitation.ID,
 	})
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
