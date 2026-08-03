@@ -138,9 +138,9 @@ define resolve_acctest_token
 		echo "" >&2; \
 		exit 1; \
 	fi; \
+	echo "==> Acctest token resolved from Keychain (service: $(ACCTEST_TOKEN_SERVICE), $${#ANYSCALE_CLI_TOKEN} chars)"; \
 	fi; \
 	export ANYSCALE_CLI_TOKEN; \
-	echo "==> Acctest token resolved from Keychain (service: $(ACCTEST_TOKEN_SERVICE), $${#ANYSCALE_CLI_TOKEN} chars)"; \
 	if [ $${#ANYSCALE_CLI_TOKEN} -eq 128 ]; then \
 		echo "==> WARNING: token is exactly 128 chars, which is the readpassphrase(3)" >&2; \
 		echo "==>          truncation length, not a natural token length. If auth fails" >&2; \
