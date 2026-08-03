@@ -75,7 +75,7 @@ func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resourc
 
 			"email": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The email address to send the invitation to. Stored exactly as configured (the API lower-cases it internally for its own matching, but the casing you type is what's kept in state). Changing to a genuinely different email replaces the invitation; changing only its letter case does not, since the Anyscale API treats those as the same invitation.",
+				MarkdownDescription: "The email address to send the invitation to. State reflects whichever casing this resource was created or imported with, not necessarily your most-recently-applied config: the Anyscale API treats two addresses differing only in letter case as the same invitation, so a later apply that changes only casing produces no plan diff and leaves the original casing in state. Changing to a genuinely different email address does replace the invitation.",
 				PlanModifiers: []planmodifier.String{
 					caseInsensitiveEmailPlanModifier{},
 				},
