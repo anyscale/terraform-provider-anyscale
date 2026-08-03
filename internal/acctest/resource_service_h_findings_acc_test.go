@@ -1,8 +1,8 @@
 // This file is the mock-server regression suite for CONTRACT_anyscale_service_resource.md
-// section H (tfp-architect's semantic-pass findings against tfp-forge's resource_service.go).
+// section H (semantic-pass findings against resource_service.go).
 // Each test is a deliberate mutation-proof pairing with a real, currently-shipping bug or gap:
 // written to FAIL against the code as it stands when this file was authored, expected to PASS
-// once forge's corresponding fix lands - see each test's doc comment for the specific finding.
+// once the corresponding fix lands - see each test's doc comment for the specific finding.
 package acctest
 
 import (

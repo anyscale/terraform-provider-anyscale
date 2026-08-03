@@ -995,8 +995,8 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	// the config out-of-band and expects a non-empty plan, but the
 	// compute-config Read returns an archived config as still-present, so the
 	// disappearance is not detected ("expected non-empty plan, got empty").
-	// That needs the provider Read to treat archived_at as gone (tracked,
-	// forge lane).
+	// That needs the provider Read to treat archived_at as gone (tracked
+	// separately).
 
 	t.Logf("Found %d configured clouds for testing", len(clouds))
 	for _, c := range clouds {

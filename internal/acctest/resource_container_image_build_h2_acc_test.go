@@ -1,4 +1,4 @@
-// DRAFT by tfp-assayer, 2026-07-22 - PR2 (timeouts{} migration). Closes a
+// DRAFT, 2026-07-22 - PR2 (timeouts{} migration). Closes a
 // real, pre-existing coverage gap I found during the PR2 survey: unlike
 // service's well-tested H2 mechanism (TestAccServiceResource_
 // UpdateSkipsApplyWhenOnlyTimeoutChanges), NOTHING today proves
