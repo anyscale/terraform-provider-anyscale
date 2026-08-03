@@ -23,6 +23,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # actions/checkout defaults to a shallow (depth 1) clone, which
+          # brings zero tags with it. The "Changelog version headings have
+          # matching tags" step below needs every real release tag visible
+          # to `git rev-parse --verify refs/tags/v<version>`, or it can't
+          # tell a genuinely untagged heading apart from one this runner
+          # just never fetched.
+          fetch-depth: 0
+
+      - name: Fetch all tags
+        # fetch-depth: 0 alone is not reliably sufficient on its own (see the
+        # same two-step pattern in release.yml): git only auto-follows tags
+        # that point at commits the fetch refspec already covers, which is
+        # not a documented guarantee of "every tag in the repo" on top of a
+        # plain fetch-depth:0 checkout. Fetch tags explicitly so the tag
+        # check below never silently runs against an empty tag list.
+        run: git fetch --force --tags
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -65,3 +82,12 @@ jobs:
           else
             echo "No fragment for this PR (presence check already passed via skip-changelog label) -- nothing to validate."
           fi
+
+      - name: Changelog version headings have matching tags
+        # Runs unconditionally, including on a `make changelog-release`
+        # finalize PR (the `changelog/v*` branch exemption above is for the
+        # fragment-presence check only, a different concern). This check
+        # doesn't need that same exemption: CheckHeadingsTagged always skips
+        # the single topmost version heading, which is exactly the one a
+        # finalize PR just created and that has no tag yet.
+        run: go run ./tools/changelog-build -check-tags
