@@ -535,6 +535,40 @@ func autoDiscoverTestCloud(t *testing.T) (cloudID string, cloudName string, err 
 		return "", "", fmt.Errorf("no clouds found in the account (set ANYSCALE_TEST_CREATE_CLOUD=1 to auto-create)")
 	}
 
+	// MAY CREATE, MAY NOT ADOPT.
+	//
+	// Reaching this point means two things at once: the pinned fixture cloud did
+	// NOT resolve (both callers check it immediately before calling us), AND this
+	// organization already contains clouds. The pinned fixture exists only in the
+	// acctest org, so its absence is a reliable signal that we are somewhere else
+	// - and the clouds sitting here belong to whoever owns that organization.
+	//
+	// Adopting one is how four tfacc- clouds were created in a user's working org
+	// on 2026-08-02: the resolver logged "did not resolve in this org", fell
+	// through, scored a cloud, and every later test built on it. Worse, the leak
+	// self-conceals - a wrong-org run leaves tfacc- clouds behind, and tfacc-
+	// scores priority 9 below, so the NEXT run adopts the previous run's leftovers
+	// and passes, with a plausible-looking test cloud waiting for it.
+	//
+	// Creating in an EMPTY org stays allowed - that is the branch above, and it is
+	// the path CI's ANYSCALE_TEST_CREATE_CLOUD=1 exists for. Only adoption of a
+	// pre-existing cloud is refused.
+	if os.Getenv("ANYSCALE_TEST_ALLOW_CLOUD_ADOPTION") != "1" {
+		names := make([]string, 0, len(testClouds))
+		for _, c := range testClouds {
+			names = append(names, c.Name)
+		}
+		return "", "", fmt.Errorf(
+			"refusing to adopt an existing cloud: the pinned fixture %q does not exist in this "+
+				"organization, so these credentials are probably not pointed at the acctest org. "+
+				"Found %d cloud(s) here that this suite did not create: %s.\n\n"+
+				"Point ANYSCALE_CLI_TOKEN at the acctest org, or set ANYSCALE_TEST_CLOUD_ID / "+
+				"ANYSCALE_TEST_CLOUD_NAME to choose a cloud explicitly. If you genuinely mean to run "+
+				"against a cloud this suite did not create, set ANYSCALE_TEST_ALLOW_CLOUD_ADOPTION=1",
+			defaultKnownGoodCloudName, len(testClouds), strings.Join(names, ", "),
+		)
+	}
+
 	// Sort by priority (highest first), then by created_at (most recent first)
 	bestCloud := testClouds[0]
 	for _, cloud := range testClouds {
