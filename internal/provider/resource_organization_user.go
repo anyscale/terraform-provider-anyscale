@@ -92,10 +92,11 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 
 		MarkdownDescription: "Declares that a person **should have access** to the Anyscale organization, keyed by email.\n\n" +
 			"~> **A successful apply means access has been REQUESTED, not granted.** If the person is not already a " +
-			"member, this sends them an invitation. Unless your organization uses SSO or SCIM, **a human must still " +
-			"click the link in that email** before they actually have access. `terraform apply` reporting success " +
-			"does not mean the person can log in. Read this resource's `anyscale_organization_user` data source " +
-			"counterpart to see where they actually are.\n\n" +
+			"member, this sends them an invitation, and **a human must still click the link in that email** before " +
+			"they actually have access. `terraform apply` reporting success does not mean the person can log in. " +
+			"Read this resource's `anyscale_organization_user` data source counterpart to see where they actually " +
+			"are. See below for the two cases - SSO required, and directory sync with the Policy API - where this " +
+			"resource cannot create the invitation at all.\n\n" +
 			"If the person is **already** a member, this resource adopts them: no API call, no email, no error. That " +
 			"makes it safe to declare people who joined before Terraform, and safe to re-apply.\n\n" +
 			"### Destroying this resource never removes a human\n\n" +
@@ -110,6 +111,15 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 			"Both are backend defaults that Anyscale can change per organization. A `for_each` onboarding 25 people " +
 			"**will fail partway through the apply** once one of them is reached, leaving the earlier invitations " +
 			"sent. Onboard in batches under the limit, or ask Anyscale to raise it.\n\n" +
+			"### Organizations with single sign-on required\n\n" +
+			"If your organization's SSO mode is `required`, this resource refuses to create the invitation at " +
+			"all rather than send one that could never be accepted - the emailed link would be rejected on use, " +
+			"and sending it anyway would still consume one of the organization's 20 invitations per 24 hours for " +
+			"nothing. Bring the person in through your identity provider instead; once they have logged in, " +
+			"re-applying this resource adopts them like any other existing member. When this organization's SSO " +
+			"mode cannot be determined at apply time, Create fails open and sends the invitation anyway, " +
+			"attaching a warning that names what could not run - a failed lookup is not evidence that SSO is " +
+			"required, and refusing on it would turn a transient error into a failed apply.\n\n" +
 			"### Directory-synced (SCIM) organizations\n\n" +
 			"If your organization has directory sync enabled **and** has opted into the Policy API, the Anyscale " +
 			"backend refuses to create invitations at all - this resource can still adopt and read existing members, " +

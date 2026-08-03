@@ -4,7 +4,7 @@ page_title: "anyscale_organization_user Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
   Declares that a person should have access to the Anyscale organization, keyed by email.
-  ~> A successful apply means access has been REQUESTED, not granted. If the person is not already a member, this sends them an invitation. Unless your organization uses SSO or SCIM, a human must still click the link in that email before they actually have access. terraform apply reporting success does not mean the person can log in. Read this resource's anyscale_organization_user data source counterpart to see where they actually are.
+  ~> A successful apply means access has been REQUESTED, not granted. If the person is not already a member, this sends them an invitation, and a human must still click the link in that email before they actually have access. terraform apply reporting success does not mean the person can log in. Read this resource's anyscale_organization_user data source counterpart to see where they actually are. See below for the two cases - SSO required, and directory sync with the Policy API - where this resource cannot create the invitation at all.
   If the person is already a member, this resource adopts them: no API call, no email, no error. That makes it safe to declare people who joined before Terraform, and safe to re-apply.
   Destroying this resource never removes a human
   Destroy cancels only an invitation this resource sent and which is still pending. It never evicts someone who had already joined, and never evicts someone this resource adopted. Removing a person's access is a deliberate act that this resource deliberately cannot do.
@@ -12,6 +12,8 @@ description: |-
   Inviting is rate-limited by the Anyscale backend, and the limits are per organization and shared with the Anyscale console - not per configuration:
   at most 20 pending invitations at once (default)at most 20 invitations sent per 24 hours (default)
   Both are backend defaults that Anyscale can change per organization. A for_each onboarding 25 people will fail partway through the apply once one of them is reached, leaving the earlier invitations sent. Onboard in batches under the limit, or ask Anyscale to raise it.
+  Organizations with single sign-on required
+  If your organization's SSO mode is required, this resource refuses to create the invitation at all rather than send one that could never be accepted - the emailed link would be rejected on use, and sending it anyway would still consume one of the organization's 20 invitations per 24 hours for nothing. Bring the person in through your identity provider instead; once they have logged in, re-applying this resource adopts them like any other existing member. When this organization's SSO mode cannot be determined at apply time, Create fails open and sends the invitation anyway, attaching a warning that names what could not run - a failed lookup is not evidence that SSO is required, and refusing on it would turn a transient error into a failed apply.
   Directory-synced (SCIM) organizations
   If your organization has directory sync enabled and has opted into the Policy API, the Anyscale backend refuses to create invitations at all - this resource can still adopt and read existing members, but cannot add anyone, because your identity provider owns membership.
   Both conditions are required. A SCIM-enabled organization that has no Policy API bindings still uses the per-user path and can be invited through normally.
@@ -22,7 +24,7 @@ description: |-
 
 Declares that a person **should have access** to the Anyscale organization, keyed by email.
 
-~> **A successful apply means access has been REQUESTED, not granted.** If the person is not already a member, this sends them an invitation. Unless your organization uses SSO or SCIM, **a human must still click the link in that email** before they actually have access. `terraform apply` reporting success does not mean the person can log in. Read this resource's `anyscale_organization_user` data source counterpart to see where they actually are.
+~> **A successful apply means access has been REQUESTED, not granted.** If the person is not already a member, this sends them an invitation, and **a human must still click the link in that email** before they actually have access. `terraform apply` reporting success does not mean the person can log in. Read this resource's `anyscale_organization_user` data source counterpart to see where they actually are. See below for the two cases - SSO required, and directory sync with the Policy API - where this resource cannot create the invitation at all.
 
 If the person is **already** a member, this resource adopts them: no API call, no email, no error. That makes it safe to declare people who joined before Terraform, and safe to re-apply.
 
@@ -38,6 +40,10 @@ Inviting is rate-limited by the Anyscale backend, and the limits are **per organ
 - at most **20 invitations sent per 24 hours** (default)
 
 Both are backend defaults that Anyscale can change per organization. A `for_each` onboarding 25 people **will fail partway through the apply** once one of them is reached, leaving the earlier invitations sent. Onboard in batches under the limit, or ask Anyscale to raise it.
+
+### Organizations with single sign-on required
+
+If your organization's SSO mode is `required`, this resource refuses to create the invitation at all rather than send one that could never be accepted - the emailed link would be rejected on use, and sending it anyway would still consume one of the organization's 20 invitations per 24 hours for nothing. Bring the person in through your identity provider instead; once they have logged in, re-applying this resource adopts them like any other existing member. When this organization's SSO mode cannot be determined at apply time, Create fails open and sends the invitation anyway, attaching a warning that names what could not run - a failed lookup is not evidence that SSO is required, and refusing on it would turn a transient error into a failed apply.
 
 ### Directory-synced (SCIM) organizations
 
