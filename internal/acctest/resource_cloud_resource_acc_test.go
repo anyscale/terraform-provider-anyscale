@@ -671,7 +671,7 @@ resource "anyscale_cloud_resource" "test" {
   object_storage {
     // Deliberately BARE - see the detailed comment on
     // testAccCloudResourceGCPK8SConfig in resource_cloud_acc_test.go (BUG A);
-    // this must keep working once Forge's semantic-equality fix lands, not
+    // this must keep working once the semantic-equality fix lands, not
     // be dodged by switching to gs://.
     bucket_name = "tfacc-cres-gcp-bucket-%s"
   }
@@ -731,7 +731,7 @@ resource "anyscale_cloud_resource" "test" {
   object_storage {
     // Deliberately BARE - see the detailed comment on
     // testAccCloudResourceGCPK8SConfig in resource_cloud_acc_test.go (BUG A);
-    // this must keep working once Forge's semantic-equality fix lands, not
+    // this must keep working once the semantic-equality fix lands, not
     // be dodged by switching to gs://.
     bucket_name = "tfacc-cres-gcp-k8s-bucket-%s"
   }

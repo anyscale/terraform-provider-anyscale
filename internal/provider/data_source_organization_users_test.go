@@ -151,7 +151,7 @@ func TestOrganizationUsersDataSource_NonNullName(t *testing.T) {
 	}
 }
 
-// TestOrganizationUsersDataSource_FiltersForwardedAndRolesBackfilled is architect's assigned
+// TestOrganizationUsersDataSource_FiltersForwardedAndRolesBackfilled is the assigned
 // verification for the list data source's read-path fix: the email/name/is_service_account
 // filters must keep working exactly as before (list-and-filter stays primary per the ruling
 // that POST /search cannot replace it - search has no is_service_account and only a combined
@@ -159,7 +159,7 @@ func TestOrganizationUsersDataSource_NonNullName(t *testing.T) {
 // singular per-user GET (hydrateCollaboratorRoles), not list's hardcoded-empty value. This
 // currently fails to even compile against the unmodified data source - hydrateCollaboratorRoles
 // doesn't exist yet in this worktree - which is itself the fail-without-fix proof; it must
-// compile and pass once forge's fix is integrated.
+// compile and pass once the fix is integrated.
 func TestOrganizationUsersDataSource_FiltersForwardedAndRolesBackfilled(t *testing.T) {
 	var sawListParams url.Values
 

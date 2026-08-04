@@ -34,7 +34,7 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 		}
 	})
 
-	// list-vs-singular disagree on base_role - shipwright's mutation-proof catch
+	// list-vs-singular disagree on base_role - a mutation-proof catch
 	// (2026-07-15): the sub-case above uses base_role "owner" on BOTH the list
 	// input and the mocked singular response, so it cannot distinguish correct
 	// (list wins) from the original bug (singular overwrites list) - reverting
@@ -45,7 +45,7 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 	// report the LIST value, since that is the one guaranteed to agree with
 	// permission_level. Confirmed this sub-case alone fails if the old
 	// fromList.BaseRole = singular.Result.BaseRole line is restored, and passes
-	// with it removed - the mutation-proof discipline shipwright applied to the
+	// with it removed - the mutation-proof discipline applied to the
 	// suite as a whole, now applied to this specific fix.
 	t.Run("list and singular disagree on base_role - list wins", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

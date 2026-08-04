@@ -178,7 +178,8 @@ func TestGetApplicationTemplateByName_NoExactMatchAcrossAllPages(t *testing.T) {
 // A and B are built so CreatedAt-order and LastModifiedAt-order disagree: A was created
 // later but modified earlier; B was created earlier but modified later. Keying on CreatedAt
 // would pick A; this test asserts B, so it also stands as the pre-flip guard for the
-// approved CreatedAt follow-up (see .crystl/quest/spec.json's by_name_resolution contract).
+// approved follow-up that would standardize this call site on CreatedAt like the other
+// three by-name lookups.
 func TestGetApplicationTemplateByName_PicksLastModifiedAtWinner(t *testing.T) {
 	const searchName = "tfacc-dup-image"
 

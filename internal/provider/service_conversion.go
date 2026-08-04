@@ -40,8 +40,7 @@ var serviceVersionAttrTypes = map[string]attr.Type{
 // populateServiceDataSourceModel maps a ServiceResult into the singular anyscale_service data
 // source's model. Shared with the plural anyscale_services data source via
 // serviceResultToVersionModel/serviceObservabilityURLsToModel/serviceStatusChecklistToModel below,
-// since both data sources return the identical item shape (see
-// .crystl/quest/CONTRACT_anyscale_service.md).
+// since both data sources return the identical item shape.
 func populateServiceDataSourceModel(ctx context.Context, m *ServiceDataSourceModel, s *ServiceResult) diag.Diagnostics {
 	var diags diag.Diagnostics
 

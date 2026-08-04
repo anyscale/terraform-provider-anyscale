@@ -372,10 +372,10 @@ type OrganizationCollaboratorResult struct {
 
 // OrganizationCollaboratorSingularResponse represents the response from GET
 // /api/v2/organization_collaborators/{user_id} - the only read path that can
-// return a real, non-empty additional_roles (architect ruling 1; the list/GET
-// formatter hardcodes it to an empty slice unconditionally). Keyed by user_id,
-// not identity_id - some collaborators have no user_id and cannot use this path
-// at all; see hydrateCollaboratorRoles's graceful fallback.
+// return a real, non-empty additional_roles (the list/GET formatter, in
+// organizations_formatter.py, hardcodes it to an empty slice unconditionally).
+// Keyed by user_id, not identity_id - some collaborators have no user_id and
+// cannot use this path at all; see hydrateCollaboratorRoles's graceful fallback.
 type OrganizationCollaboratorSingularResponse struct {
 	Result OrganizationCollaboratorResult `json:"result"`
 }
@@ -817,8 +817,7 @@ type DecoratedSessionsListResponse struct {
 // response as of this writing - MatchesCloud checks both so the client-side cloud filter works
 // either way. State/Status are deliberately NOT modeled here at all: they are two different,
 // differently-cased enums (SessionState/ClusterStatus) from describe's own ClusterState, and
-// this provider must never surface either as System Cluster status (see architect_design in
-// the quest's decision record for the full reasoning).
+// this provider must never surface either as System Cluster status.
 type DecoratedSessionResult struct {
 	ID              string  `json:"id"`
 	CloudID         *string `json:"cloud_id"`

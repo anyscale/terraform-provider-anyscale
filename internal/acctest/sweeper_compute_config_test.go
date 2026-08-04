@@ -133,7 +133,7 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 		// (its own docstring: "Setting version to None is equivalent to
 		// setting version to -1"), the opposite of the old ext/v0 default
 		// this sweeper relied on returning every version of a name as a
-		// distinct row. Architect's sharpening: the real risk isn't just
+		// distinct row. More precisely, the real risk isn't just
 		// which row gates the sweep timer -- a leaked config whose NEWEST
 		// version was created recently would be judged too-young and KEPT
 		// even when older versions are well past the cutoff, so a config

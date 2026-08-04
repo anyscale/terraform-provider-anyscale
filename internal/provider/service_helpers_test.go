@@ -14,7 +14,8 @@ import (
 // TestEvaluateServiceState is the exhaustive, HTTP-free proof of the wait loop's state
 // classification (contract §5b): every traced ServiceEventCurrentState bucket, against both
 // possible targets (RUNNING for Create/Update, TERMINATED for Delete), plus the "anything else"
-// fail-fast default. evaluateServiceState is a pure function, so this needs no mock server at all.
+// continue-polling default. evaluateServiceState is a pure function, so this needs no mock
+// server at all.
 func TestEvaluateServiceState(t *testing.T) {
 	errMsg := "backend blew up"
 	emptyErrMsg := ""
@@ -56,16 +57,14 @@ func TestEvaluateServiceState(t *testing.T) {
 		// arrive later (e.g. a service was mid-rollout when terminate was requested).
 		{"STARTING continues (waiting for TERMINATED)", "STARTING", nil, serviceStateTerminated, false, false, ""},
 
-		// Contract §F6 (ratified, forge not yet landed as of this writing - see the
-		// pending-resync note on TestEvaluateServiceState): an unrecognized current_state is
-		// NOT a hard error. Architect's ruling deliberately chose CONTINUE over fail-fast here,
-		// since the loop is already timeout-bounded (so continuing is not an infinite poll) and
-		// the asymmetry favors it - hard-erroring on a new, benign, not-yet-modeled transitional
-		// state would break a healthy service's every apply until the provider is patched, which
-		// is not user-recoverable, whereas continuing just waits it out (or eventually times out
-		// naming the last-seen state if it truly never resolves). Production code is expected to
-		// also tflog.Warn on this branch, which a return-value table test can't observe here -
-		// that's covered separately if/when forge exposes a way to assert it.
+		// Contract §F6: an unrecognized current_state is NOT a hard error. CONTINUE was
+		// deliberately chosen over fail-fast here, since the loop is already timeout-bounded
+		// (so continuing is not an infinite poll) and the asymmetry favors it - hard-erroring on a
+		// new, benign, not-yet-modeled transitional state would break a healthy service's every
+		// apply until the provider is patched, which is not user-recoverable, whereas continuing
+		// just waits it out (or eventually times out naming the last-seen state if it truly never
+		// resolves). Production code also tflog.Warns on this branch (waitForServiceStateWithTiming,
+		// service_helpers.go), which a return-value table test can't observe here.
 		{"unrecognized state continues (does not hard-error), contract §F6", "SOME_FUTURE_STATE_NOT_YET_MODELED", nil, serviceStateRunning, false, false, ""},
 		{"empty current_state continues (does not hard-error), contract §F6", "", nil, serviceStateRunning, false, false, ""},
 	}
@@ -311,11 +310,11 @@ func TestWaitForServiceStateWithTiming_SurfacesUnhealthyAndUserErrorFailure(t *t
 }
 
 // TestWaitForServiceStateWithTiming_TimesOutOnUnrecognizedState proves the specific safety
-// argument behind contract §F6 (pending forge resync, see TestEvaluateServiceState): treating
-// an unrecognized current_state as CONTINUE instead of a hard error is only safe because the
-// timeout backstop still catches a state that genuinely never resolves. A service stuck
-// forever on some not-yet-modeled state must still fail the apply eventually (naming that
-// state), not hang past the caller's timeout.
+// argument behind contract §F6 (see TestEvaluateServiceState): treating an unrecognized
+// current_state as CONTINUE instead of a hard error is only safe because the timeout backstop
+// still catches a state that genuinely never resolves. A service stuck forever on some
+// not-yet-modeled state must still fail the apply eventually (naming that state), not hang
+// past the caller's timeout.
 func TestWaitForServiceStateWithTiming_TimesOutOnUnrecognizedState(t *testing.T) {
 	server, requestCount := serviceStatePollTestServer(t, "svc_unrecognized_stuck", []string{"SOME_FUTURE_STATE_NOT_YET_MODELED"}, nil)
 	client := NewClientWithToken(server.URL, "test-token")

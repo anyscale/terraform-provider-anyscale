@@ -266,7 +266,7 @@ func runProjectResourceDelete(t *testing.T, r *ProjectResource, state ProjectRes
 }
 
 // TestProjectResourceDelete_409Detection is the regression test for
-// shipwright's find on commit 78527ab/492de9a: Delete's 409 detection must
+// the bug found on commit 78527ab/492de9a: Delete's 409 detection must
 // match the specific "status 409" substring DoRequestRaw's error formatting
 // produces (`unexpected status %d: %s`), not a bare "409" search -- otherwise
 // an unrelated failure whose response body happens to contain that digit
@@ -321,9 +321,10 @@ func TestProjectResourceDelete_409Detection(t *testing.T) {
 // withFastRetryTiming overrides the three retry-timing vars to millisecond-scale values for the
 // duration of a test (saving and defer-restoring the real production values), so the
 // exhaust-path and multi-attempt-then-succeed subtests below run in low-single-digit
-// milliseconds instead of really sleeping for the production ~90s ceiling - per assayer's
-// test-speed note. The relative shape (ramp then cap, same doubling) is preserved exactly, just
-// scaled down, so the subtests below exercise the identical control flow as production.
+// milliseconds instead of really sleeping for the production ~90s ceiling - a deliberate
+// test-speed optimization. The relative shape (ramp then cap, same doubling) is preserved
+// exactly, just scaled down, so the subtests below exercise the identical control flow as
+// production.
 func withFastRetryTiming(t *testing.T) {
 	t.Helper()
 	origInitial, origMax, origWait := deleteProjectRetryInitialInterval, deleteProjectRetryMaxInterval, deleteProjectRetryMaxWait

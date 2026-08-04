@@ -21,7 +21,7 @@ import (
 // plan, for every existing user, independent of whether physical_resources
 // ever did anything useful.
 //
-// This is a genuine unit test, not a "fake" one: it drives forge's actual
+// This is a genuine unit test, not a "fake" one: it drives the actual
 // exported UpgradeState() map and the real upgradeComputeConfigStateV0toV1
 // function through the real tfsdk.State encode/decode path (the same
 // mechanism the Terraform Core <-> plugin protocol uses), not a hand-rolled
@@ -64,8 +64,8 @@ func workerNodeAttrTypesV0() map[string]attr.Type {
 // buildV0NodeObject builds a v0-shaped head_node object (no worker-only
 // fields). physicalResources may be types.ObjectNull(physicalResourcesAttrTypesV0())
 // (never configured) or a present-but-all-fields-null object (the one shape
-// shipwright specifically checked the backend never rejects, confirmed by
-// forge against the Platform model) - both must upgrade cleanly.
+// specifically confirmed to never be rejected by the backend, and confirmed
+// separately against the Platform model) - both must upgrade cleanly.
 func buildV0NodeObject(t *testing.T, instanceType string, physicalResources types.Object) types.Object {
 	t.Helper()
 	return buildV0NodeObjectWithTypes(t, nodeAttrTypesV0(), nil, instanceType, physicalResources)
@@ -163,7 +163,7 @@ func upgradeV0Fixture(t *testing.T, v0Model computeConfigResourceModelV0) Comput
 func TestComputeConfigStateUpgradeV0toV1(t *testing.T) {
 	t.Run("head_node physical_resources present but all-fields-null upgrades to an equally-empty required_resources", func(t *testing.T) {
 		// The one shape confirmed to survive a real create (backend rejects
-		// any non-empty physical_resources value), per shipwright's review.
+		// any non-empty physical_resources value), per review.
 		allNullPhysRes := types.ObjectValueMust(physicalResourcesAttrTypesV0(), map[string]attr.Value{
 			"cpu": types.Int64Null(), "memory": types.StringNull(), "gpu": types.Int64Null(),
 			"accelerator": types.StringNull(), "tpu": types.Int64Null(), "tpu_hosts": types.Int64Null(),
@@ -186,7 +186,7 @@ func TestComputeConfigStateUpgradeV0toV1(t *testing.T) {
 		}
 		if reqRes.IsNull() {
 			t.Error("required_resources must be an equally-empty object (all fields null), not null itself - " +
-				"this was the exact shape shipwright checked the upgrader against by hand")
+				"this was the exact shape the upgrader was checked against by hand")
 		}
 		reqAttrs := reqRes.Attributes()
 		for _, field := range []string{"cpu", "memory", "gpu", "accelerator", "tpu", "tpu_hosts"} {

@@ -16,16 +16,15 @@ import (
 // repo's established precedent for "prove a removed attribute auto-migrates
 // cleanly" (TestCloudResourceStateUpgradeV1toV2_DropsEnableSystemCluster,
 // TestCloudResourceResourceStateUpgradeV1toV2_DropsStatus,
-// TestSystemClusterResourceStateUpgradeV0toV1_DropsStartTimeout).
-// PR2-TIMEOUTS-PLAN.md calls this out explicitly as forge's own
-// responsibility to verify with a real state-upgrade test, not assume
+// TestSystemClusterResourceStateUpgradeV0toV1_DropsStartTimeout). This is
+// deliberately verified with a real state-upgrade test rather than assumed to
 // auto-migrate.
 //
-// THE reproducing shape (deliberate, per assayer's PR2-TEST-PLAN.md): prior
-// state carries rollout_timeout = "90m" - a REAL customization that is
-// neither the OLD default (45m) nor the NEW default (30m), so the assertion
-// below can only pass if the value was genuinely dropped, not by
-// coincidentally matching either default.
+// THE reproducing shape (deliberate, not incidental): prior state carries
+// rollout_timeout = "90m" - a REAL customization that is neither the OLD
+// default (45m) nor the NEW default (30m), so the assertion below can only
+// pass if the value was genuinely dropped, not by coincidentally matching
+// either default.
 func TestServiceResourceStateUpgradeV0toV1_DropsRolloutTimeout(t *testing.T) {
 	ctx := context.Background()
 

@@ -15,7 +15,7 @@ import (
 // TestManualIsDefaultFreshCloudDisagreement is a manual, real-backend
 // diagnostic (deliberately not TestAcc-prefixed - see
 // TestManualIsDefaultSingularEndpointStability's doc comment for why) probing
-// architect's "prime suspect": the singular-vs-plural is_default
+// the "prime suspect": the singular-vs-plural is_default
 // disagreement (commit 082e29f, backlog #94), but on a FRESHLY CREATED
 // cloud rather than the long-standing static fixture. That distinction
 // matters - TestManualIsDefaultSingularEndpointStability already showed the

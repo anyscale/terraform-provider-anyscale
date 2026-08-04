@@ -50,7 +50,7 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 					// the meaningful, verified-true assertion here.
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "head_node.instance_type", "m5.large"),
 
-					// CC5a acceptance (architect): the by-id lookup path must
+					// CC5a acceptance: the by-id lookup path must
 					// stay green after switching Read to the shared typed
 					// structs, not just the by-name path exercised above.
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "name", configName),
@@ -118,7 +118,7 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 }
 
 // TestAccComputeConfigDataSource_EnableCrossZoneScaling is the regression
-// test for a real, pre-existing bug shipwright found while reviewing CC5a's
+// test for a real, pre-existing bug found while reviewing CC5a's
 // diff: the data source used to look for a top-level enable_cross_zone_scaling
 // JSON key on the config that has never existed - the real value has only
 // ever lived inside flags["allow-cross-zone-autoscaling"], exactly where the

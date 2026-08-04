@@ -129,6 +129,7 @@ The original ask hypothesized stop/restart/terminate. Tracing the real backend
 `Stopped` state to represent one. Whoever revisits this should keep modeling Actions 1:1 to real
 backend operations rather than synthesizing composite verbs the backend doesn't actually support.
 
-Full design detail (the complete v1.19.0 framework trace, acceptance criteria, and the
-architect/scribe/assayer/forge review history) is in this quest's chat log and design brief;
-this file is the durable, in-repo summary meant to survive after that context is gone.
+This file is the durable, in-repo record — not a summary pointing at a fuller one. The original
+v1.19.0 framework trace, acceptance criteria, and review history behind these conclusions were
+never committed anywhere a reader can open, so treat what is written here as the whole of it and
+re-derive anything it does not state.

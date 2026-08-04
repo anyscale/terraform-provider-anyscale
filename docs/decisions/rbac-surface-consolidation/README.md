@@ -14,8 +14,8 @@ What this consolidation shipped, in one PR:
 - **New:** `anyscale_organization_user_role` — one organization member's `base_role` and
   `deny_roles`, keyed by email.
 - **Breaking:** `anyscale_organization_user` loses `permission_level`, `base_role`, and
-  `additional_roles` — role management moves to the new resource above (ruling **R1**, below).
-  These two changes shipped together deliberately: landing either half alone would put two
+  `additional_roles` — role management moves to the new resource above (the organization-role split,
+  below). These two changes shipped together deliberately: landing either half alone would put two
   resources writing the same organization role field through two different endpoints, in two
   different vocabularies, at the same time.
 - **Breaking:** `anyscale_project` loses its `collaborator` block, with a state upgrader (every
@@ -49,10 +49,11 @@ they reuse the **same** words for **different** things. Four instances, all now 
    on top of it.
 4. **Organization `deny_roles` and cloud `deny_roles` are the same mechanism and deliberately share
    the name** — both restrict a separate base role rather than constituting a tier on their own.
-   Where they genuinely differ is blast radius: an organization deny role overrides even an
+   Where their **reach** differs is blast radius: an organization deny role overrides even an
    organization owner's implicit permissions, while a cloud deny role explicitly does **not**
    restrict organization or project owners. Same mechanism, different reach — this is the point of
    the naming ruling below, and it is a reach difference, not a naming or direction mismatch.
+   (Their Terraform schema optionality also differs deliberately — see the two write paths below.)
 
 ## Authority model: cloud_access vs the per-user role resources
 
@@ -141,8 +142,8 @@ not yet live: it becomes real the moment `cloud_access`'s reconcile lands and it
 `anyscale_cloud_access`, rather than deprecated for a cycle.** A deprecation window only helps if
 both resources can coexist safely for a time, and here they cannot — leaving `cloud_user_role`
 usable alongside a registered `cloud_access` ships a silent-revoke footgun rather than a graceful
-transition. This is a second breaking change for a resource that shipped new only one release
-earlier, in v0.24.0; the changelog fragment for the removal should say plainly that the shape was
+transition. This is a second breaking change for a resource that shipped new in v0.24.0, only
+shortly before; the changelog fragment for the removal should say plainly that the shape was
 corrected against the real authority-model conflict before wide adoption, rather than left to
 harden.
 
@@ -163,13 +164,13 @@ adding to it. The OpenAPI spec is authoritative for paths, shapes, and legal val
 field means.
 
 This went through one reversal worth recording because it explains *why* the final answer is
-trusted: an earlier ruling (**D6**) had this right — `deny_roles` at both scopes, same mechanism,
+trusted: an earlier ruling had this right — `deny_roles` at both scopes, same mechanism,
 same name — but was then overturned to keep `additional_roles` at org scope, on reasoning inferred
 from the OpenAPI enum's name and description alone. That inference was wrong, confirmed once the
-real product docs (not just the spec) were checked: container image roles are deny roles. Ruling
-**R3** reversed the overturn and restored D6. The lesson generalizes beyond this one field: the spec
-is authoritative for shape, not semantics — check the actual product docs before naming a field for
-what it *means*.
+real product docs (not just the spec) were checked: container image roles are deny roles. A later
+ruling reversed the overturn and restored the earlier answer. The lesson generalizes beyond this one
+field: the spec is authoritative for shape, not semantics — check the actual product docs before
+naming a field for what it *means*.
 
 Two further points are load-bearing for anyone touching this resource:
 
@@ -216,20 +217,33 @@ than surface as a confusing apply-time failure:
 
 ## Other rulings worth citing by name
 
-Several rulings from this design are already referenced by code (**R9**, **R12**, **V8**,
-criterion 31) in `internal/acctest/resource_organization_user_role_acc_test.go` and
-`resource_organization_user_role_realinfra_acc_test.go`. They are recorded here so those references
-resolve to something:
+These are recorded so that any of them, met in code or in prose, resolves to something. The first
+group is cited by ID from committed test code; the second is referenced only from this document.
 
-- **R1** — split organization role management into its own resource
-  (`anyscale_organization_user_role`), landing in the same change as removing the role fields from
-  `anyscale_organization_user`, rather than staggering the two. Landing either alone would leave two
-  resources writing one organization role field through two endpoints at once.
+**Cited by ID from committed test code** — **R9**, **R12**, and criterion 31 in
+`internal/acctest/resource_organization_user_role_acc_test.go`, plus **V8** in
+`internal/acctest/resource_organization_user_role_realinfra_acc_test.go` (the live confirmation of
+the roles endpoint's SET semantics, described under the two write paths above):
+
 - **R9** — destroy does not revert `base_role` (no absent state exists for it — every member always
   has *some* base role, and reverting risks demoting an organization's last owner and locking out
   administration) but does clear a *declared* `deny_roles` back to empty (a real, reachable absent
   state this resource took authority over). Neither branch is silent: destroy always emits a
   warning naming what was left in place.
+- **R12** — a declared `deny_roles` cleared on destroy is not a reduction: `deny_roles` are
+  restrictions, so clearing them *increases* that person's access — the one destroy in this
+  provider that grants capability rather than removing it. State that direction explicitly; nothing
+  about the word "destroy" suggests a grant of new access.
+- **Criterion 31** — Read must remove a resource from state only on a genuine not-found; any other
+  error (a 500, a timeout) must surface as a real diagnostic. Treating every error as "gone" would
+  let a transient failure silently evict a resource from state, and the next apply would then
+  re-assert the role over whatever out-of-band change happened in the meantime.
+
+**Referenced only from this document:**
+
+- **The organization-role split** — organization role management moves into its own resource
+  (`anyscale_organization_user_role`), landing in the same change as removing the role fields from
+  `anyscale_organization_user`, rather than staggering the two.
 - **R10** — a coherence ruling: state once, in one place, why `anyscale_cloud_access` destroy
   (revokes members) and `anyscale_organization_user_role` destroy (leaves the role in place) are
   opposite-looking behaviors from the *same* rule — destroy removes what a resource has authority
@@ -237,17 +251,9 @@ resolve to something:
   an inconsistency; stated once, side by side, it is one rule applied to two different object
   models, and the sharp edges point in opposite directions (leave-a-privilege vs.
   remove-access-at-scale) on purpose.
-- **R12** — a declared `deny_roles` cleared on destroy is not a reduction: `deny_roles` are
-  restrictions, so clearing them *increases* that person's access — the one destroy in this
-  provider that grants capability rather than removing it. State that direction explicitly; nothing
-  about the word "destroy" suggests a grant of new access.
 - **Criterion 20** — `docs/guides/rbac.md` is a first-class deliverable of this design, not
   incidental documentation: it is the one place the vocabulary collisions, the authority model, and
   the migration story are all explained together.
-- **Criterion 31** — Read must remove a resource from state only on a genuine not-found; any other
-  error (a 500, a timeout) must surface as a real diagnostic. Treating every error as "gone" would
-  let a transient failure silently evict a resource from state, and the next apply would then
-  re-assert the role over whatever out-of-band change happened in the meantime.
 
 ## What depends on this document
 

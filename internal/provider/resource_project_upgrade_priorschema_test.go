@@ -26,7 +26,7 @@ var preIssue219CollaboratorObjectType = types.ObjectType{AttrTypes: map[string]a
 
 // preIssue219ProjectModel mirrors anyscale_project's schema as it existed
 // BEFORE PR #219 (73d7443) removed cloud_name - the same schema version 0,
-// per architect's finding, since #219 shipped without a SchemaVersion bump.
+// since #219 shipped without a SchemaVersion bump.
 // Identical to projectResourceModelV0 (resource_project_upgrade.go) plus the
 // one extra field that PriorSchema's frozen snapshot does NOT declare.
 type preIssue219ProjectModel struct {
@@ -144,7 +144,7 @@ func preIssue219ProjectSchema() *schema.Schema {
 	}
 }
 
-// TestProjectStateUpgradeV0toV1_PreIssue219ShapeWithCloudName is architect's
+// TestProjectStateUpgradeV0toV1_PreIssue219ShapeWithCloudName is a
 // precise check: real pre-#219 state has a cloud_name key that
 // projectSchemaV0() (the PriorSchema 74e555e's upgrader actually declares)
 // does not. Does upgradeProjectStateV0toV1 succeed against that real older

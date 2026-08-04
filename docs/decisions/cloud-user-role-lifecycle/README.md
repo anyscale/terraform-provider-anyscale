@@ -1,15 +1,10 @@
 # Design record: `anyscale_cloud_user_role`'s lifecycle
 
-**Status: shipped** (commits `83e4edd`, `c01a688`, `3af03a5`, `1e9a283`,
-`f6969c8`). This is the companion to `docs/deferred/rbac-groups-policy/README.md` — same
-investigation, same session, opposite outcome. That document preserves why a piece of this
-redesign was **not** built. This one preserves why the piece that **was** built looks the way it
-does, because the code comments explain what it does, not why the simpler, more obvious version
-does not work.
-
-This session's full design contract (`.crystl/docs/rbac-redesign-design.md`, hazards H1–H24, gates
-G1–G8) lives in a gitignored directory and will not survive past this quest. This document is the
-durable subset: the parts a future maintainer actually needs before touching this resource again.
+**Status: shipped** (PR #222, squash-merged as `4b2a8a2`, released in v0.24.0). This is the
+companion to `docs/deferred/rbac-groups-policy/README.md` — same investigation, opposite outcome.
+That document preserves why a piece of this redesign was **not** built. This one preserves why the
+piece that **was** built looks the way it does, because the code comments explain what it does, not
+why the simpler, more obvious version does not work.
 
 ## Why Create is two ordered API calls, not one
 
@@ -25,8 +20,7 @@ between them they cover the full lifecycle but neither covers it alone:
 So `Create` calls both, in order: the legacy `POST` first (establishing the membership edge
 `Delete` will need), then the roles `PUT` (setting the role Terraform actually asked for). `Update`
 touches only the second call. `Delete` uses the legacy endpoint, since that is the only one that
-has a delete at all. This is forced by the API shape, not a design preference — see H1 in the
-design contract for the full trace.
+has a delete at all. This is forced by the API shape, not a design preference.
 
 **The order is load-bearing.** The legacy `POST` writes the user's managed-group membership with
 SET semantics — if it ran *after* the roles `PUT`, it would silently clobber the role that call
@@ -49,8 +43,7 @@ source-traced:
   that state some other way.
 - That state is a trap: the bootstrap `POST` now 409s (there is a permissions row), and the legacy
   `DELETE` now 404s (there is no membership edge). **There is no API sequence that repairs it.**
-  See the table in H22 of the design contract for the full state matrix — this is the one row
-  (`permissions row: yes, membership edge: no`) that has no way out.
+  This is the one state — permissions row yes, membership edge no — with no way out.
 
 The fix is not clever: `Create` must attempt the bootstrap call **every time, unconditionally**,
 never skip it based on what a search appears to show. Skipping it is exactly what walks a user into
@@ -61,19 +54,18 @@ collaborator is expected and handled as success, not as a reason the call was un
 
 The natural instinct, once the trap above is known, is to have `import` check for it and refuse:
 if someone is being imported with a permissions row but no membership edge, tell them up front
-instead of letting a later `destroy` fail as a surprise. **This was the actual design for a period
-during this session, and it was withdrawn after being live-tested and found not to be
-buildable — not because it was a bad idea, but because there is no way to implement it.**
+instead of letting a later `destroy` fail as a surprise. **This was the actual design for a period,
+and it was withdrawn after being live-tested and found not to be buildable — not because it was a
+bad idea, but because there is no way to implement it.**
 
-This was tested directly (Gate 8 in the design contract): a role was granted through the roles
-`PUT` alone, with no bootstrap call anywhere in the sequence, on a fresh disposable cloud. The
-cloud collaborator search — the only plausible read-only probe — **returned the user anyway**, as
-a full, ordinary-looking record (identity id, user id, email, `permission_level: write`),
-indistinguishable from someone who had gone through the real bootstrap flow. The search reflects
-the *permissions row*, not the *membership edge* — and a roles-only grant writes the former without
-ever touching the latter. There is no other candidate read: the legacy `DELETE` itself
-distinguishes the two states, but only by performing the destructive act, which is not something a
-`Read` or an `Import` may do speculatively.
+This was tested directly: a role was granted through the roles `PUT` alone, with no bootstrap call
+anywhere in the sequence, on a fresh disposable cloud. The cloud collaborator search — the only
+plausible read-only probe — **returned the user anyway**, as a full, ordinary-looking record
+(identity id, user id, email, `permission_level: write`), indistinguishable from someone who had
+gone through the real bootstrap flow. The search reflects the *permissions row*, not the *membership
+edge* — and a roles-only grant writes the former without ever touching the latter. There is no other
+candidate read: the legacy `DELETE` itself distinguishes the two states, but only by performing the
+destructive act, which is not something a `Read` or an `Import` may do speculatively.
 
 So `import` proceeds normally, always. There is nothing to check. The condition can only ever
 surface later, at `destroy` time, which is the next section.
@@ -81,10 +73,10 @@ surface later, at `destroy` time, which is the next section.
 **One correction worth preserving alongside this:** the original reasoning also claimed this state
 could *only* arrive through `import`, never through this resource's own `Create` — reasoning being
 "`Create` always bootstraps first, so `Create` itself can never produce this." That claim was
-**false**, and it shipped into the first draft of the `Delete` diagnostic and the resource's
-own schema description before being caught during review of `83e4edd`. The real path: someone
-already has a permissions row from an out-of-band grant (roles `PUT` used directly, or by a
-script, outside Terraform); a practitioner then writes this resource for them; `Create`'s mandatory
+**false**, and it shipped into the first draft of the `Delete` diagnostic and the resource's own
+schema description before being caught in review. The real path: someone already has a permissions
+row from an out-of-band grant (roles `PUT` used directly, or by a script, outside Terraform); a
+practitioner then writes this resource for them; `Create`'s mandatory
 bootstrap call 409s (same shape as a genuine pre-existing collaborator — the API cannot tell the
 two apart either); `Create` correctly treats the 409 as "already a member" and proceeds; the role
 grant succeeds; the resource is created directly into the undestroyable state. **`Create` cannot
@@ -114,8 +106,8 @@ A cloud role assignment can fail to destroy for two different reasons, and they 
 they are ordered, because both live inside the same backend validation function
 (`_validate_cloud_removal`) and one branch runs before the other ever executes:
 
-1. **The missing-membership-edge check (H22's trap, above) runs first** and returns its 404 before
-   the function ever reaches the second check.
+1. **The missing-membership-edge check runs first** — the trap above, a permissions row with no
+   membership edge — and it returns its 404 before the function ever reaches the second check.
 2. **The `auto_add_user` check runs second**, and only matters if the first check passes — i.e.,
    only for a role assignment that *was* properly bootstrapped. If a cloud has `auto_add_user`
    enabled, `DELETE` returns a **409** (`Users cannot be removed from clouds which have auto add
@@ -137,7 +129,7 @@ when enabled. Confirming its 409-on-destroy interaction live would have required
 real cloud in a shared internal org containing roughly ninety other real people's accounts,
 handing out real, unrequested cloud access as a side effect of a test. That trade was declined
 deliberately: the thing being confirmed (an exact, already twice-source-traced error message) was
-low-value against a real cost (unrequested access for real people outside this quest). The
+low-value against a real cost (unrequested access for real people outside this work). The
 interaction is documented on both `anyscale_cloud` and `anyscale_cloud_user_role`, and the ordering
 finding above is what makes this an acceptable place to stop rather than a corner cut.
 
@@ -181,19 +173,19 @@ none of them work:
    collaborator). This was the actual first design. It produces the unrecoverable
    permissions-row-but-no-edge state on exactly the users it was meant to optimize for. Rejected
    after live confirmation; see "why the bootstrap must be unconditional," above.
-3. **Import detects and refuses the unrecoverable state.** This was the actual design for part of
-   this session, reversed after a live test proved no read-only signal distinguishes the bad state
-   from a healthy one. See "why import does not attempt detection," above.
+3. **Import detects and refuses the unrecoverable state.** This was the actual design for a period,
+   reversed after a live test proved no read-only signal distinguishes the bad state from a healthy
+   one. See "why import does not attempt detection," above.
 4. **Keying the resource on `user_id`.** The original schema. Replaced by `email` once the
    three-identifier lifecycle was fully mapped; see "why `email`," above.
 5. **Live-testing the `auto_add_user` 409 directly.** Considered and declined on a cost/value
-   basis specific to the shared internal org available this session, not because the interaction
+   basis specific to the shared internal org available at the time, not because the interaction
    is unimportant — it is documented on both resources regardless.
 
 ## Live evidence behind this design, and what is still source-level
 
 Per this repo's Design Verification Policy, a design is not confirmed by source-tracing and
-spec-reading alone. What was actually live-confirmed during this session against a
+spec-reading alone. What was actually live-confirmed while this resource was built, against a
 disposable cloud created and destroyed for each test (never the shared fixtures, never another
 org member's real access):
 
@@ -201,20 +193,20 @@ org member's real access):
   real 204).
 - The legacy `DELETE` 404s against exactly that state, with the real error text quoted above.
 - The cloud collaborator search returns a roles-only-granted user as an ordinary-looking record
-  (Gate 8 — the finding that killed the import-refusal design).
+  (the finding that killed the import-refusal design).
 - Self-modification is blocked on the grant side too (403), not only on revoke — previously
   unknown until tested.
 - The exact `auto_add_user` 409 text was sourced from `cloud_collaborators_service.py` directly
   (not a live call — this is the one hazard documented on source alone, per the ruling above).
 
-Everything else in this design — the API shapes, the flag-gating (H18), the legacy-read lossiness
-(H19) — was confirmed against the live OpenAPI spec and, for the pieces above, an actual live
-request/response, not inferred from documentation or assumed from a summary.
+Everything else in this design — the API shapes, the flag-gating, the legacy-read lossiness — was
+confirmed against the live OpenAPI spec and, for the pieces above, an actual live request/response,
+not inferred from documentation or assumed from a summary.
 
 ## What would simplify this, if it ever lands
 
-Two API changes were drafted this session as an external request to Anyscale (not part of this
-provider, and not preserved here since the draft itself is meant to be sent rather than kept): a
+Two API changes were drafted as an external request to Anyscale (not part of this provider, and not
+preserved here since the draft itself is meant to be sent rather than kept): a
 `DELETE` on the roles path, which would collapse this resource's two-call, non-atomic `Create` and
 its unrecoverable-state trap into a single clean call with a real revoke; and a group
 add-member/remove-member endpoint, unrelated to this resource but drafted alongside it. If a
@@ -224,12 +216,9 @@ complex path out of inertia.
 
 ## On how confident to be in this
 
-Three defects were found in this design after code was written and reviewed: a false claim about
-when the unrecoverable state can arise (this document's own correction, above), a test whose name
-claimed a protection it did not provide, and a missing documentation cross-reference. All three
-were wording, naming, or test-scoping — not logic errors, in a design whose central mechanism is a
-non-atomic, two-call, order-dependent `Create` with a state that cannot be detected or repaired
-once reached. Each was caught by someone other than the person whose work it was, reading the
-actual committed artifact rather than a summary of it. Whoever revisits this resource next should
-expect the same discipline to still find something, and should apply it themselves rather than
-trusting this document as a substitute for reading the current code.
+Three defects were found in this design after code was written, and all three were wording, naming,
+or test-scoping — not logic errors, in a design whose central mechanism is a non-atomic, two-call,
+order-dependent `Create` with a state that cannot be detected or repaired once reached. Each
+surfaced only from reading the actual committed artifact rather than a summary of it. Whoever
+revisits this resource next should expect the same discipline to still find something, and should
+apply it themselves rather than trusting this document as a substitute for reading the current code.

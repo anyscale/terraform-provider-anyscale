@@ -142,7 +142,7 @@ func rejectFieldOnK8S(computeStack string, isFieldSet bool, attrPath path.Path, 
 // being non-empty, not on compute_stack, so it runs unconditionally after the
 // K8S branch already wrote NetworkInfo from kubernetes_config.zones in the
 // same function. This is a confirmed, real overwrite (traced precisely, not
-// inferred, independently re-verified by architect): the K8S-derived zone
+// inferred, independently re-verified): the K8S-derived zone
 // list is discarded and replaced with every zone in the region, each
 // carrying the configured subnet id even though GKE never claimed those
 // extra zones or that subnet - a genuine corruption of the cloud's

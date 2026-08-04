@@ -270,7 +270,7 @@ func TestServiceDataSourceRead_ByID(t *testing.T) {
 	}
 }
 
-// TestServiceDataSourceRead_EnumWireValues is architect's AC-3: assert EXACT wire strings for
+// TestServiceDataSourceRead_EnumWireValues is AC-3: assert EXACT wire strings for
 // every enum-shaped field round-trip unchanged. This repo has shipped an enum wire-value bug
 // hidden by a skipping acctest before (a mismatched constant sent the wrong wire value); this
 // unit assertion is the load-bearing guard mentioned in that ruling, and does not depend on any
@@ -320,7 +320,7 @@ func TestServiceDataSourceRead_EnumWireValues(t *testing.T) {
 	}
 }
 
-// TestServiceDataSourceRead_NullableFields is architect's AC-2 mutation-proof guard: every
+// TestServiceDataSourceRead_NullableFields is the AC-2 mutation-proof guard: every
 // nullable field must map to Terraform null when the API sends JSON null, never to a zero value
 // like "" or 0. Uses a raw JSON body (not a Go struct literal) since a non-pointer field cannot
 // represent "absent" - this must actually exercise the null-decoding path, not just default-zero
@@ -483,7 +483,7 @@ func TestServiceDataSourceRead_ByNameNotFound(t *testing.T) {
 	}
 }
 
-// TestServiceDataSourceRead_ByNameAmbiguousErrors is the architect-ruled AC: more than one exact
+// TestServiceDataSourceRead_ByNameAmbiguousErrors asserts the ratified AC: more than one exact
 // name match across different projects must ERROR, not silently PickMostRecentMatch. Service
 // names are unique only within a project, so two projects each holding a "frontend" service is a
 // normal, expected state - silently picking the newest would let an unrelated team's later
@@ -590,15 +590,15 @@ func TestServiceDataSourceRead_HitsServicesV2Endpoint(t *testing.T) {
 }
 
 // TestServiceDataSourceRead_TransitionalNulls is the decisive, race-free proof for the DS
-// null-crash (architect's ruling): a data source must not crash on a null it can receive,
-// independent of whether that null is common (steady-state) or rare (a transitional read) -
-// provenance only affects changelog framing, not whether this must be fixed. Confirmed via a
-// real CI acceptance-test crash (TestAccServiceDataSource_ByID, "Path: service_observability_urls",
-// "Received null value") that both service_observability_urls and primary_version can be wire
-// null - mirrors a service still STARTING, before any version has ever gone healthy or any
-// dashboard URLs have been assigned. Deliberately built from a mock, not a real-infra run: real
-// infra cannot deterministically hold a service in this exact transient window long enough to
-// prove a fix, which is exactly why this crash slipped through undetected since PR 116.
+// null-crash: a data source must not crash on a null it can receive, independent of whether
+// that null is common (steady-state) or rare (a transitional read) - provenance only affects
+// changelog framing, not whether this must be fixed. Confirmed via a real CI acceptance-test
+// crash (TestAccServiceDataSource_ByID, "Path: service_observability_urls", "Received null
+// value") that both service_observability_urls and primary_version can be wire null - mirrors
+// a service still STARTING, before any version has ever gone healthy or any dashboard URLs
+// have been assigned. Deliberately built from a mock, not a real-infra run: real infra cannot
+// deterministically hold a service in this exact transient window long enough to prove a fix,
+// which is exactly why this crash slipped through undetected since PR 116.
 func TestServiceDataSourceRead_TransitionalNulls(t *testing.T) {
 	const serviceID = "service2_transitional"
 
@@ -647,10 +647,10 @@ func TestServiceDataSourceRead_TransitionalNulls(t *testing.T) {
 }
 
 // TestServiceDataSourceRead_ObservabilityURLsPresentWithNullSubfields covers the second shape
-// shipwright found on the real leaked service that caused the CI crash (service2_s9uqm8dx13usk34zbqdw4pzeix):
+// found on the real leaked service that caused the CI crash (service2_s9uqm8dx13usk34zbqdw4pzeix):
 // service_observability_urls present as an OBJECT with all 4 dashboard-URL sub-fields null, rather
 // than the whole key being null (TestServiceDataSourceRead_TransitionalNulls above). Per
-// architect's trace, this shape was never the crash itself - the 4 leaf fields were already
+// the trace, this shape was never the crash itself - the 4 leaf fields were already
 // nullable strings before this fix - so this is a no-regression confirmation, not a
 // crashes-today/passes-after mutation-proof case. Included because the real service's response
 // evolved from whole-null (the confirmed crash, while still unhealthy/starting) to this

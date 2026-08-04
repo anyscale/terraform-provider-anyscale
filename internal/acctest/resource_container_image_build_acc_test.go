@@ -82,7 +82,7 @@ RUN pip install emoji==2.15.0`
 					// timeouts needs no entry here - terraform-plugin-testing's
 					// ImportStateVerify already strips any "timeouts"/"timeouts.*"
 					// key from the comparison unconditionally (verified against the
-					// pinned v1.16.0 source by assayer).
+					// pinned v1.16.0 source).
 				},
 			},
 		},

@@ -11,16 +11,15 @@ import (
 )
 
 // TestAccCloudResourceResource_BothNullCloudSelectorRejected was originally
-// the mutation-proof regression guard for design doc B2: before forge's B2
+// the mutation-proof regression guard for B2: before B2's
 // fix (6b270c8), anyscale_cloud_resource had no validation requiring
 // cloud_id or cloud_name, so omitting both silently sent a create request
 // with an empty cloud instead of failing with a clear diagnostic. B2 added
 // a runtime AddConfigError guard (Create()'s first check) to close that.
 //
-// R1 (the cloud_name removal, design doc: .crystl/quest/design/
-// cloud-selector-design.md) subsequently made cloud_id Required and deleted
-// cloud_name from this resource entirely - confirmed by grep, B2's own
-// AddConfigError guard code is gone, not just unreachable. Schema-level
+// R1 (the cloud_name removal) subsequently made cloud_id Required and
+// deleted cloud_name from this resource entirely - confirmed by grep, B2's
+// own AddConfigError guard code is gone, not just unreachable. Schema-level
 // Required now enforces strictly more than B2's runtime check did: Core
 // itself rejects a config omitting cloud_id at plan time, before the
 // provider is ever invoked, which structurally cannot regress back to

@@ -29,8 +29,9 @@ type ServicesDataSource struct {
 	client *Client
 }
 
-// ServicesDataSourceModel describes the data source data model. See
-// .crystl/quest/CONTRACT_anyscale_service.md for the full field-scope contract.
+// ServicesDataSourceModel describes the data source data model. Which upstream fields are
+// surfaced, and why others are deliberately excluded, is documented on serviceSharedAttributes
+// in schema_shared_attributes.go.
 type ServicesDataSourceModel struct {
 	// Filter inputs (all optional)
 	NameContains types.String `tfsdk:"name_contains"`

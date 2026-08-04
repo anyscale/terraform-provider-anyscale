@@ -21,7 +21,7 @@ import (
 // would compile, hit /api/v2/compute_templates/search, get HTTP 200 back, and
 // silently paginate wrong (always page 1's worth of data, no error). This
 // test's mock is deliberately strict about where it reads pagination from,
-// and also asserts the second landmine forge found beyond the pagination
+// and also asserts the second landmine found beyond the pagination
 // transport: version and archive_status must be sent explicitly in the body,
 // or api/v2's own defaults (latest-version-only, unarchived-only) would
 // silently narrow which rows the sweeper ever sees.

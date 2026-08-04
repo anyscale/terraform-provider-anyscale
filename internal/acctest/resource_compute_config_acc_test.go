@@ -557,13 +557,13 @@ func testAccDeleteComputeConfigViaAPI(resourceName string) resource.TestCheckFun
 // TestAcc<Thing>Resource_/DataSource_ naming-gap fix that made it actually
 // selectable by CI for the first time); this one proves the same three gates against the actual
 // Anyscale API and, specifically, against a REAL per-node-shaped payload the
-// backend accepts, closing forge's stated least-confident spot: whether Go's
+// backend accepts, closing the design's least-confident spot: whether Go's
 // json.Marshal of the recovered advanced_instance_config/flags actually
 // comes back byte-identical to what a user's own jsonencode() would produce,
 // which only a real round trip through the framework can prove.
 //
-// Payload validated live against the real API by forge before this test was
-// written (see quest chat): disable_gpu_health_checks/idle_termination_seconds
+// Payload validated live against the real API before this test was
+// written: disable_gpu_health_checks/idle_termination_seconds
 // as generic top-level flags (neither is one of the three keys ImportState
 // strips out as special-cased: min_resources, max_resources,
 // allow-cross-zone-autoscaling), and a TagSpecifications-shaped
@@ -688,8 +688,8 @@ resource "anyscale_compute_config" "test" {
 				),
 			},
 			{
-				// Gate 1 + gate 3: real json.Marshal round-trip proof, forge's
-				// stated least-confident spot.
+				// Gate 1 + gate 3: real json.Marshal round-trip proof, the
+				// the design's least-confident spot.
 				Config:             configMatchingRecoveredValues,
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,

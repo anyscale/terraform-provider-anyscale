@@ -90,8 +90,8 @@ func TestCloudsDataSourceRead_NameFilterSendsCorrectQueryKey(t *testing.T) {
 
 // TestCloudsDataSourceRead_ProviderNarrowsClientSide is the DS-CLOUD-1
 // mutation-proof guard for the cloud_provider filter. The real list_clouds
-// endpoint has no provider param at all (confirmed by both architect and
-// forge's independent traces), so filtering must happen client-side over the
+// endpoint has no provider param at all (confirmed by two independent
+// traces), so filtering must happen client-side over the
 // full paginated result. The mock here simulates that reality - it returns
 // every cloud regardless of query params, exactly like the real backend
 // silently ignoring a param it does not recognize. This currently FAILS:

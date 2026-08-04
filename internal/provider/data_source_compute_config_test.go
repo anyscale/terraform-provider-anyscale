@@ -449,7 +449,7 @@ func TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions(t *testing.T)
 //
 // Per the traced backend model (ClusterComputesQuery.version,
 // backend/server/api/base/models/cluster_computes.py:244-271, confirmed
-// independently by both architect and forge): omitting the version field (or
+// independently twice): omitting the version field (or
 // sending -1) resolves to latest-version-only; version -2 is the documented
 // "do not filter by version" sentinel needed to enumerate history. This mock
 // simulates that real behavior - it only returns all 3 versions when the
@@ -506,7 +506,7 @@ func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.
 }
 
 // TestFetchComputeConfigVersions_FollowsPagingToken is DS-CC-1's other
-// mutation-proof half, flagged by forge while implementing: the test above
+// mutation-proof half, flagged while implementing: the test above
 // proves the version=-2 sentinel is sent, but its mock returns every version
 // in a single response with no next_paging_token at all, so it cannot tell
 // apart "fetches everything in one call" from "correctly follows pagination

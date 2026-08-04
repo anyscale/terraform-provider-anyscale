@@ -16,7 +16,7 @@ import (
 )
 
 // TestAccCloudAccessResourceImportRoundTrip is the Criterion 1 import proof for
-// anyscale_cloud_access, written AHEAD of the resource per the architect's
+// anyscale_cloud_access, written AHEAD of the resource per the
 // before-the-reconcile ruling. It is skipped unconditionally today: all four
 // CRUD methods return "Resource Not Implemented"
 // (resource_cloud_access.go:258-272), there is no ImportState method, and the
@@ -59,16 +59,16 @@ import (
 // returns 409 CONFLICT, "Users cannot be removed from clouds which have auto
 // add users enabled" (product backend cloud_collaborators_service.py:540-544).
 // An authoritative resource cannot function on such a cloud - it can add but
-// never revoke, which is precisely the guarantee it exists to make. The
-// architect ruled that anyscale_cloud_access must REFUSE on an
-// auto_add_user=true cloud rather than silently degrade to add-only, since
-// add-only authority is authority in name only. No assertion here because the
-// behavior is not implemented yet. Note carefully for whoever writes that
-// test: this mock's cloud object carries auto_add_user=false and its revoke
-// path never 409s, and a mock that IGNORES auto_add_user would pass happily
-// against a resource that 409s in reality - the same mock-omission shape that
-// let the mount_targets bug ship green. The auto_add_user test must set the
-// flag true on the cloud AND make the revoke path 409, or it proves nothing.
+// never revoke, which is precisely the guarantee it exists to make.
+// anyscale_cloud_access must REFUSE on an auto_add_user=true cloud rather
+// than silently degrade to add-only, since add-only authority is authority
+// in name only. No assertion here because the behavior is not implemented
+// yet. Note carefully for whoever writes that test: this mock's cloud
+// object carries auto_add_user=false and its revoke path never 409s, and a
+// mock that IGNORES auto_add_user would pass happily against a resource
+// that 409s in reality - the same mock-omission shape that let the
+// mount_targets bug ship green. The auto_add_user test must set the flag
+// true on the cloud AND make the revoke path 409, or it proves nothing.
 
 const (
 	cloudAccessMockCloudID = "cld_cloudaccess_import_mock"
@@ -258,7 +258,7 @@ func (s *mockCloudAccessServer) handleGetCloud(w http.ResponseWriter, path strin
 }
 
 func TestAccCloudAccessResourceImportRoundTrip(t *testing.T) {
-	t.Skip("anyscale_cloud_access is not yet registered or implemented (CRUD returns Not Implemented; no ImportState). This test is written ahead of that work per the architect's before-the-reconcile ruling and will run as soon as the resource is wired.")
+	t.Skip("anyscale_cloud_access is not yet registered or implemented (CRUD returns Not Implemented; no ImportState). This test is written ahead of that work per the before-the-reconcile ruling and will run as soon as the resource is wired.")
 
 	SkipIfNotAcceptanceTest(t)
 

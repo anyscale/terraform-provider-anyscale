@@ -264,7 +264,7 @@ resource "anyscale_cloud" "test" {
 // region inference, and no longer treated as empty since C12) with no
 // explicit region must fail with a clear provider-level error instead of
 // silently sending region="" through to a real add_resource call. Runs
-// through the real Create() framework path (not just forge's direct-function
+// through the real Create() framework path (not just a direct-function
 // unit test on regionRequiredForCreateError) against a mock server, so it
 // also proves the error surfaces correctly as a plan/apply-time diagnostic.
 func TestAccCloudResource_K8S_NoRegion_ClearError(t *testing.T) {
@@ -488,7 +488,7 @@ resource "anyscale_cloud" "test" {
 // This section is the MOCK-LEVEL regression guard for BUG C, the
 // user-reported cold-import compute_stack issue: a K8S cloud created OUTSIDE
 // Terraform (via the Anyscale CLI) then imported cold showed compute_stack =
-// VM instead of K8S. Forge's fix (resource_cloud.go's readCloudState) sources
+// VM instead of K8S. The fix (resource_cloud.go's readCloudState) sources
 // compute_stack from findDefaultInCloudResources - the same primary-resource
 // lookup requiredImportConfigBlocks already trusts - falling back to the
 // cloud-level derived field (GET /clouds/{id}'s own compute_stack, which
@@ -498,17 +498,17 @@ resource "anyscale_cloud" "test" {
 // is_default anywhere, but exactly one resource exists) rather than falling
 // through to the cloud-level value.
 //
-// IMPORTANT SCOPE NOTE (architect's correction, do not overclaim): these two
+// IMPORTANT SCOPE NOTE (do not overclaim): these two
 // mock variants prove the hardening logic itself is correct for the shapes
 // they construct - they do NOT prove this is the user's actual root cause.
-// Forge's own backend trace raised a real possibility that a single-resource
+// A backend trace raised a real possibility that a single-resource
 // cloud's is_default flag and the cloud-level derivation may be computed from
 // the SAME underlying selection, in which case is_default=false may not even
 // be a shape the real backend ever produces - and the user's real cause could
 // instead be the resource-level ComputeStack field itself being empty/wrong
-// for some clouds (e.g. older or CLI-registered ones), which no mock of mine
+// for some clouds (e.g. older or CLI-registered ones), which no mock here
 // can rule in or out. THE ARBITER for whether BUG C is actually fixed for the
-// user is Shipwright's real CLI-create-then-cold-import repro against the
+// user is a real CLI-create-then-cold-import repro against the
 // integrated binary, not these tests. Treat these as "the hardening works as
 // designed," not "the user's bug is closed."
 
@@ -578,7 +578,7 @@ func testAccColdImportComputeStackCheck(cloudID string) func([]*terraform.Instan
 // TestAccCloudResource_ColdImport_ComputeStack_IsDefaultTrue is variant 1:
 // the sole resource IS flagged is_default: true, matching
 // findDefaultInCloudResources' only matching condition. This is expected to
-// PASS against Forge's landed fix.
+// PASS against the landed fix.
 func TestAccCloudResource_ColdImport_ComputeStack_IsDefaultTrue(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -619,7 +619,7 @@ resource "anyscale_cloud" "test" {
 // TestAccCloudResource_ColdImport_ComputeStack_IsDefaultFalse is variant 2:
 // the sole resource is NOT flagged default (is_default: false). Confirmed via
 // mutation test (see the sibling True variant's history in git-log if this
-// comment predates it) that WITHOUT Forge's "exactly one resource is
+// comment predates it) that WITHOUT the "exactly one resource is
 // unambiguous" hardening, this variant fails (reports VM) while the
 // IsDefaultTrue variant alone would still pass - proving the hardening, not
 // just the base fix, is what this specific case needs. Passes now that the
