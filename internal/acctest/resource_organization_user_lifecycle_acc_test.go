@@ -155,9 +155,15 @@ func (s *mockCollaboratorLifecycleServer) isDeleted() bool {
 
 // TestAccOrganizationUserResource_Lifecycle_MockServer is the contract's T1/AC
 // mandatory CI-enforced lifecycle test (section 7): Import -> Read -> Delete,
-// all against a scripted mock, no env-var gating, no real identity touched. This
-// resource is import-only (Create always errors - covered separately), so the lifecycle
-// starts from Import rather than Create, matching the real-infra test's own established shape.
+// all against a scripted mock, no env-var gating, no real identity touched. The
+// lifecycle starts from Import rather than Create because that is what this
+// contract section requires covered here, matching the real-infra test's own
+// established shape - not because Create is blocked or errors for this
+// resource. It does neither: Create adopts an existing member or invites a new
+// one (see resource_organization_user.go's own doc comment), and that path has
+// its own dedicated coverage in resource_organization_user_origin_acc_test.go
+// (TestAccOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted and its
+// invited-path sibling).
 //
 // There is no Update leg any more: the resource is membership-only and exposes
 // no writable attribute, so no config change can produce an update plan. The
