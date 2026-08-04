@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -239,7 +240,7 @@ func (r *OrganizationInvitationResource) Read(ctx context.Context, req resource.
 	// Fetch invitation from API
 	invitation, err := r.getInvitationByID(ctx, invitationID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
+		if errors.Is(err, ErrNotFound) {
 			// Invitation was deleted or invalidated outside of Terraform
 			tflog.Warn(ctx, "Invitation not found, removing from state", map[string]interface{}{
 				"invitation_id": invitationID,
@@ -372,7 +373,7 @@ func (r *OrganizationInvitationResource) getInvitationByID(ctx context.Context, 
 	defer func() { _ = httpResp.Body.Close() }()
 
 	if httpResp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("invitation not found")
+		return nil, fmt.Errorf("%w: invitation not found", ErrNotFound)
 	}
 
 	body, err := io.ReadAll(httpResp.Body)

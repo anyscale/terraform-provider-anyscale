@@ -133,13 +133,13 @@ func archiveClusterEnvironment(ctx context.Context, client *Client, clusterEnvID
 		http.StatusBadRequest,
 	)
 	if err != nil {
-		// Check if already archived/deleted
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			tflog.Info(ctx, "Cluster environment already archived or deleted", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-			})
-			return
-		}
+		// No not-found check here (unlike most Read/Delete not-found sites in this provider):
+		// http.StatusNotFound is already in this call's expectedStatuses above, so a real 404
+		// is an accepted status and DoRequestRaw returns a nil error - execution never reaches
+		// this branch for that case. A string-matched "404"/"not found" guard used to sit here;
+		// it could never fire for a genuine 404 for the reason above, and it carried a narrow
+		// risk of misclassifying an unrelated error whose body text happened to contain that
+		// text as "already archived" instead of surfacing it via AddAPIError below.
 
 		// Check if this is a default cluster environment that cannot be archived
 		// This happens when using Anyscale's official images (e.g., anyscale/ray:*)

@@ -2,6 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -817,3 +821,56 @@ func TestExpandFileStorage(t *testing.T) {
 // provider still match" subtest, once addProviderConfig itself was consolidated into
 // buildProviderConfig (workbench #6) - same coverage, now against the function that actually
 // exists.
+
+// TestReadCloudResource_NotFoundSentinel guards readCloudResource's ErrNotFound wrap. It has
+// two distinct not-found conditions and used to return a fresh, unwrapped error for both: the
+// 404 case discarded the ErrNotFound wrap its inner listCloudResources call already carried,
+// while the scan-miss case never had one, since that list call succeeded and simply returned
+// nothing matching. errors.Is(err, ErrNotFound) was always false either way, even though the
+// strings.Contains(err.Error(), "not found") check at Read's call site happened to still match
+// both cases' literal text.
+func TestReadCloudResource_NotFoundSentinel(t *testing.T) {
+	t.Run("cloud itself gone (404 on the underlying list call)", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v2/clouds/cld_gone/resources" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}))
+		defer server.Close()
+
+		r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.readCloudResource(context.Background(), "cld_gone", "some-resource", &CloudResourceResourceModel{})
+		if err == nil {
+			t.Fatal("readCloudResource returned nil error for a gone cloud, want a non-nil error wrapping ErrNotFound")
+		}
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("errors.Is(err, ErrNotFound) = false for a gone cloud, want true (err: %v)", err)
+		}
+	})
+
+	t.Run("cloud exists, named resource is not in the list (client-side scan miss, not an HTTP 404)", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v2/clouds/cld_live/resources" {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{
+					Results:  []CloudDeploymentResult{{Name: "some-other-resource"}},
+					Metadata: DeploymentMetadata{Total: 1},
+				})
+				return
+			}
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}))
+		defer server.Close()
+
+		r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.readCloudResource(context.Background(), "cld_live", "missing-resource", &CloudResourceResourceModel{})
+		if err == nil {
+			t.Fatal("readCloudResource returned nil error for a scan miss, want a non-nil error wrapping ErrNotFound")
+		}
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("errors.Is(err, ErrNotFound) = false for a scan miss, want true (err: %v)", err)
+		}
+	})
+}

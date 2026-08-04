@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -422,6 +423,28 @@ func TestGetServiceByID_HitsServicesV2Endpoint(t *testing.T) {
 	wantPath := "/api/v2/services-v2/svc_path_test"
 	if gotPath != wantPath {
 		t.Errorf("request path = %q, want %q (the hyphenated -v2 mount path, not /api/v2/services)", gotPath, wantPath)
+	}
+}
+
+// TestGetServiceByID_NotFoundSentinel pins the property resource_service.go's and
+// data_source_service.go's Read now depend on: getServiceByID goes through DoRequestAndParse
+// with StatusOK as the only expected status, so a real 404 is wrapped into ErrNotFound and
+// propagated unchanged. That was always true of the helper - what changed is that those call
+// sites now test for it with errors.Is rather than by matching the error's text.
+func TestGetServiceByID_NotFoundSentinel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error": {"detail": "service not found"}}`))
+	}))
+	defer server.Close()
+	client := NewClientWithToken(server.URL, "test-token")
+
+	_, err := getServiceByID(context.Background(), client, "svc_gone")
+	if err == nil {
+		t.Fatal("getServiceByID returned nil error for a real 404, want a non-nil error wrapping ErrNotFound")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("errors.Is(err, ErrNotFound) = false for a real 404, want true (err: %v)", err)
 	}
 }
 

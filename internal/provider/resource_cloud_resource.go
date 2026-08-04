@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -934,7 +935,7 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 	tflog.Info(ctx, "Reading Anyscale Cloud Resource", map[string]any{"cloud_id": cloudID, "name": resourceName})
 
 	if err := r.readCloudResource(ctx, cloudID, resourceName, &state); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Cloud resource not found, removing from state", map[string]any{"cloud_id": cloudID, "name": resourceName})
 			resp.State.RemoveResource(ctx)
 			return
@@ -1090,8 +1091,8 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 	// organization_user (née organization_collaborator).
 	results, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			return fmt.Errorf("cloud not found")
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: cloud not found", ErrNotFound)
 		}
 		return fmt.Errorf("failed to read cloud resources: %w", err)
 	}
@@ -1106,7 +1107,12 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 	}
 
 	if foundResource == nil {
-		return fmt.Errorf("cloud resource not found")
+		// A client-side scan miss (the list call itself succeeded), not an HTTP 404 - still
+		// wrapped in the same sentinel, mirroring the precedent in
+		// findOrgCollaboratorByEmail (resource_organization_user_role.go), so a caller can
+		// treat "this named resource isn't in the list" the same as "the cloud is gone"
+		// without needing a second, string-matched condition.
+		return fmt.Errorf("%w: cloud resource not found", ErrNotFound)
 	}
 
 	// Update state from API response

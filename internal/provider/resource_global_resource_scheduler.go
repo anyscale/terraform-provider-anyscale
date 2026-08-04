@@ -2,9 +2,9 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -390,7 +390,7 @@ func (r *GlobalResourceSchedulerResource) Read(ctx context.Context, req resource
 
 	// Read global resource scheduler
 	if err := r.readMachinePool(ctx, schedulerName, &state); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Global resource scheduler not found, removing from state", map[string]any{"name": schedulerName})
 			resp.State.RemoveResource(ctx)
 			return
@@ -538,7 +538,7 @@ func (r *GlobalResourceSchedulerResource) readMachinePool(ctx context.Context, s
 	}
 
 	if foundScheduler == nil {
-		return fmt.Errorf("global resource scheduler not found: %s", schedulerName)
+		return fmt.Errorf("%w: global resource scheduler not found: %s", ErrNotFound, schedulerName)
 	}
 
 	// Map to model

@@ -345,3 +345,118 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 		t.Errorf("state.Name = %q, want null -- Create() must not write the generated name back into state", state.Name.ValueString())
 	}
 }
+
+// TestContainerImageRegistryRead_NotFoundRemovesFromState proves the observable contract for a
+// not-found read: the real Read() against a real 404 removes the resource from state and raises
+// no error diagnostic - not merely that some helper's error satisfies errors.Is.
+//
+// It does NOT guard the errors.Is(err, ErrNotFound) check itself. Reverting that check to
+// strings.Contains(err.Error(), "404") still passes this mock, because the legacy phrase
+// survives in DoRequestRaw's wrapped text for a genuine 404. The test below is what guards it.
+func TestContainerImageRegistryRead_NotFoundRemovesFromState(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/application_templates/cenv_gone" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"error": {"detail": "not found"}}`)
+			return
+		}
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	r := &ContainerImageRegistryResource{client: NewClientWithToken(server.URL, "test-token")}
+
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+
+	priorState := ContainerImageRegistryResourceModel{
+		ID:                  types.StringValue("cenv_gone"),
+		Name:                types.StringNull(),
+		ImageURI:            types.StringValue("docker.io/anyscale/ray:latest"),
+		RayVersion:          types.StringNull(),
+		RegistryLoginSecret: types.StringNull(),
+		BuildID:             types.StringValue("bld_1"),
+		BuildStatus:         types.StringValue("succeeded"),
+		CreatedAt:           types.StringValue("2026-01-01T00:00:00Z"),
+		IsBYOD:              types.BoolValue(true),
+		Revision:            types.Int64Value(1),
+		Digest:              types.StringValue("sha256:deadbeef"),
+		NameVersion:         types.StringValue("cenv_gone:1"),
+	}
+	tfState := tfsdk.State{Schema: schemaResp.Schema}
+	if diags := tfState.Set(ctx, &priorState); diags.HasError() {
+		t.Fatalf("failed to build state fixture: %v", diags)
+	}
+
+	readResp := &resource.ReadResponse{State: tfState}
+	r.Read(ctx, resource.ReadRequest{State: tfState}, readResp)
+
+	if readResp.Diagnostics.HasError() {
+		t.Fatalf("Read produced diagnostics errors for a real 404, want a clean removal: %v", readResp.Diagnostics)
+	}
+	if !readResp.State.Raw.IsNull() {
+		t.Error("Read did not remove the resource from state for a real 404")
+	}
+}
+
+// TestContainerImageRegistryRead_UnrelatedErrorTextNotTreatedAsNotFound is what actually guards
+// Read's errors.Is(err, ErrNotFound) check (see the limit noted on the test above). It forces a
+// 500 whose unrelated body text happens to contain "not found" - the exact false positive the old
+// substring check admitted, and which errors.Is rules out by construction, since the sentinel is
+// only ever attached when the real HTTP status was 404. Getting this wrong swallows a live
+// backend error as "already gone" and silently drops a still-live resource from state.
+func TestContainerImageRegistryRead_UnrelatedErrorTextNotTreatedAsNotFound(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/application_templates/cenv_live" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = fmt.Fprint(w, `{"error": {"detail": "dependency not found in upstream registry"}}`)
+			return
+		}
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	r := &ContainerImageRegistryResource{client: NewClientWithToken(server.URL, "test-token")}
+
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+
+	priorState := ContainerImageRegistryResourceModel{
+		ID:                  types.StringValue("cenv_live"),
+		Name:                types.StringNull(),
+		ImageURI:            types.StringValue("docker.io/anyscale/ray:latest"),
+		RayVersion:          types.StringNull(),
+		RegistryLoginSecret: types.StringNull(),
+		BuildID:             types.StringValue("bld_1"),
+		BuildStatus:         types.StringValue("succeeded"),
+		CreatedAt:           types.StringValue("2026-01-01T00:00:00Z"),
+		IsBYOD:              types.BoolValue(true),
+		Revision:            types.Int64Value(1),
+		Digest:              types.StringValue("sha256:deadbeef"),
+		NameVersion:         types.StringValue("cenv_live:1"),
+	}
+	tfState := tfsdk.State{Schema: schemaResp.Schema}
+	if diags := tfState.Set(ctx, &priorState); diags.HasError() {
+		t.Fatalf("failed to build state fixture: %v", diags)
+	}
+
+	readResp := &resource.ReadResponse{State: tfState}
+	r.Read(ctx, resource.ReadRequest{State: tfState}, readResp)
+
+	if readResp.State.Raw.IsNull() {
+		t.Fatal("Read removed a still-live resource from state because an unrelated 500's body text happened to contain \"not found\"")
+	}
+	if !readResp.Diagnostics.HasError() {
+		t.Error("Read produced no diagnostics for a genuine 500 - the error should have surfaced, not been silently swallowed")
+	}
+}

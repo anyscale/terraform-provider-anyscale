@@ -1161,7 +1161,7 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	tflog.Info(ctx, "Reading Anyscale Cloud", map[string]any{"id": cloudID})
 
 	if err := r.readCloudState(ctx, cloudID, &state); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Cloud not found, removing from state", map[string]any{"id": cloudID})
 			resp.State.RemoveResource(ctx)
 			return
@@ -1719,7 +1719,7 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	}()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("cloud not found")
+		return fmt.Errorf("%w: cloud not found", ErrNotFound)
 	}
 
 	body, err := io.ReadAll(resp.Body)

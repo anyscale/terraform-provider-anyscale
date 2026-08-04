@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -465,5 +466,32 @@ func TestFindCloudByName_PagesBeyondFirstPage(t *testing.T) {
 	}
 	if requestCount != 2 {
 		t.Errorf("expected 2 requests (one per page), got %d", requestCount)
+	}
+}
+
+// TestReadCloudIntoModel_NotFoundSentinel guards readCloudIntoModel's ErrNotFound wrap: it
+// hand-rolls its own request (bypassing DoRequestRaw/DoRequestAndParse entirely, a near-identical
+// duplicate of resource_cloud.go's readCloudState) and used to return a bare
+// fmt.Errorf("cloud not found") on a real 404, with no %w wrap - errors.Is(err, ErrNotFound)
+// was always false against it, even though Read's pre-existing strings.Contains(err.Error(),
+// "not found") call site happened to still match the literal text.
+func TestReadCloudIntoModel_NotFoundSentinel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/clouds/cld_gone" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"detail": "cloud not found"}`)
+			return
+		}
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	d := &CloudDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	err := d.readCloudIntoModel(context.Background(), "cld_gone", &CloudDataSourceModel{})
+	if err == nil {
+		t.Fatal("readCloudIntoModel returned nil error for a real 404, want a non-nil error wrapping ErrNotFound")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("errors.Is(err, ErrNotFound) = false for a real 404, want true (err: %v)", err)
 	}
 }

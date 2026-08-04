@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -258,7 +259,7 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	// Read project
 	if err := r.readProject(ctx, projectID, &state); err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Project not found, removing from state", map[string]any{"project_id": projectID})
 			resp.State.RemoveResource(ctx)
 			return
@@ -526,7 +527,7 @@ func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportSt
 
 	var model ProjectResourceModel
 	if err := r.readProject(ctx, projectID, &model); err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			AddConfigError(&resp.Diagnostics, "Project Not Found",
 				fmt.Sprintf("No project exists with ID %q.", projectID))
 			return
@@ -554,9 +555,8 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 		http.StatusOK,
 	)
 	if err != nil {
-		// Check for 404
-		if strings.Contains(err.Error(), "404") {
-			return fmt.Errorf("project not found (404)")
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: project not found", ErrNotFound)
 		}
 		return fmt.Errorf("failed to get project: %w", err)
 	}
