@@ -204,7 +204,7 @@ func TestDoRequestRaw(t *testing.T) {
 		// Guards an invariant two delete paths rely on: resource_service.go's final
 		// Delete call and container_image_helpers.go's archive call both deliberately list
 		// http.StatusNotFound as expected (an already-gone resource is a successful,
-		// idempotent delete). Their old strings.Contains(err.Error(), "404") guards were
+		// idempotent delete). Their old "404"/"not found" substring guards were
 		// removed as dead code on exactly this basis - if this ever regressed (404 stopped
 		// being treated as accepted here), those call sites would start receiving a real
 		// ErrNotFound-wrapped error with nothing left to catch it, surfacing as a hard

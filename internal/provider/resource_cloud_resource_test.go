@@ -823,9 +823,10 @@ func TestExpandFileStorage(t *testing.T) {
 // exists.
 
 // TestReadCloudResource_NotFoundSentinel guards readCloudResource's ErrNotFound wrap. It has
-// two distinct not-found conditions and used to manufacture a fresh, unwrapped error on both -
-// discarding the real ErrNotFound wrap its own inner listCloudResources call already carried.
-// errors.Is(err, ErrNotFound) was always false either way, even though the pre-existing
+// two distinct not-found conditions and used to return a fresh, unwrapped error for both: the
+// 404 case discarded the ErrNotFound wrap its inner listCloudResources call already carried,
+// while the scan-miss case never had one, since that list call succeeded and simply returned
+// nothing matching. errors.Is(err, ErrNotFound) was always false either way, even though the
 // strings.Contains(err.Error(), "not found") check at Read's call site happened to still match
 // both cases' literal text.
 func TestReadCloudResource_NotFoundSentinel(t *testing.T) {
