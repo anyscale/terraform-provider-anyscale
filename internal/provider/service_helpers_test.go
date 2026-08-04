@@ -34,7 +34,8 @@ func TestEvaluateServiceState(t *testing.T) {
 		{"reaches RUNNING target", "RUNNING", nil, serviceStateRunning, true, false, ""},
 		{"reaches TERMINATED target", "TERMINATED", nil, serviceStateTerminated, true, false, ""},
 
-		// Error buckets (is_error): terminal failure, done=true, err surfaces error_message.
+		// Error buckets (is_error) while waiting for RUNNING (Create/Update): terminal failure,
+		// done=true, err surfaces error_message.
 		{"UNHEALTHY with error_message", "UNHEALTHY", &errMsg, serviceStateRunning, true, true, errMsg},
 		{"SYSTEM_FAILURE with error_message", "SYSTEM_FAILURE", &errMsg, serviceStateRunning, true, true, errMsg},
 		{"USER_ERROR_FAILURE with error_message", "USER_ERROR_FAILURE", &errMsg, serviceStateRunning, true, true, errMsg},
@@ -43,10 +44,13 @@ func TestEvaluateServiceState(t *testing.T) {
 		// the failure mode this specifically guards against.
 		{"UNHEALTHY with nil error_message", "UNHEALTHY", nil, serviceStateRunning, true, true, "UNHEALTHY"},
 		{"SYSTEM_FAILURE with empty-string error_message", "SYSTEM_FAILURE", &emptyErrMsg, serviceStateRunning, true, true, "SYSTEM_FAILURE"},
-		// Error buckets are terminal regardless of which target the caller is waiting for -
-		// Delete's TERMINATED-wait must also stop and surface a SYSTEM_FAILURE, not keep polling
-		// past it hoping for TERMINATED.
-		{"SYSTEM_FAILURE while waiting for TERMINATED (delete path)", "SYSTEM_FAILURE", &errMsg, serviceStateTerminated, true, true, errMsg},
+		// Error buckets are NOT terminal while waiting for TERMINATED (Delete path) - a service
+		// being torn down can legitimately pass through an error state on its way to gone, and
+		// forcing a hard error here would make Delete itself fail on exactly the resources most
+		// in need of being deleted. Cover all three is_error buckets, not just one.
+		{"UNHEALTHY while waiting for TERMINATED (delete path) continues, no hard error", "UNHEALTHY", &errMsg, serviceStateTerminated, false, false, ""},
+		{"SYSTEM_FAILURE while waiting for TERMINATED (delete path) continues, no hard error", "SYSTEM_FAILURE", &errMsg, serviceStateTerminated, false, false, ""},
+		{"USER_ERROR_FAILURE while waiting for TERMINATED (delete path) continues, no hard error", "USER_ERROR_FAILURE", &errMsg, serviceStateTerminated, false, false, ""},
 
 		// Continue buckets (is_updating + TERMINATING): keep polling, no error, regardless of target.
 		{"STARTING continues (waiting for RUNNING)", "STARTING", nil, serviceStateRunning, false, false, ""},
@@ -254,6 +258,53 @@ func TestWaitForServiceStateWithTiming_SettlesAtTerminated(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(requestCount); got < 2 {
 		t.Errorf("requestCount = %d, want at least 2 (1 TERMINATING poll before TERMINATED)", got)
+	}
+}
+
+// TestWaitForServiceStateWithTiming_RecoversFromErrorStateWhileTerminating proves the actual bug
+// this guards against: a service that surfaces a transient is_error bucket mid-termination must
+// not fail the Delete - it must keep polling through the error state and succeed once TERMINATED
+// is actually reached. Before the target-aware guard in evaluateServiceState, this exact sequence
+// returned an error on the first USER_ERROR_FAILURE poll, so Delete itself could never complete
+// for a service stuck this way - the only way "out" was also blocked.
+func TestWaitForServiceStateWithTiming_RecoversFromErrorStateWhileTerminating(t *testing.T) {
+	server, requestCount := serviceStatePollTestServer(t, "svc_recovering", []string{"USER_ERROR_FAILURE", "USER_ERROR_FAILURE", "TERMINATED"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_recovering", serviceStateTerminated, 200*time.Millisecond, 5*time.Millisecond)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v (an is_error bucket observed while waiting for TERMINATED must not fail the wait)", err)
+	}
+	if service == nil || service.CurrentState != "TERMINATED" {
+		t.Fatalf("service = %+v, want CurrentState TERMINATED", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got < 3 {
+		t.Errorf("requestCount = %d, want at least 3 (2 USER_ERROR_FAILURE polls before TERMINATED)", got)
+	}
+}
+
+// TestWaitForServiceStateWithTiming_TimesOutOnErrorStateWhileTerminating proves the timeout
+// backstop still holds for the CONTINUE path above: a service permanently stuck in an is_error
+// bucket while being torn down must still fail the wait once the timeout elapses (naming the
+// last-seen state), not poll forever - the fix must not trade a false failure for a real hang.
+func TestWaitForServiceStateWithTiming_TimesOutOnErrorStateWhileTerminating(t *testing.T) {
+	server, requestCount := serviceStatePollTestServer(t, "svc_stuck_error_terminating", []string{"SYSTEM_FAILURE"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_stuck_error_terminating", serviceStateTerminated, 17*time.Millisecond, 5*time.Millisecond)
+
+	if err == nil {
+		t.Fatal("err = nil, want a timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("err = %q, want it to mention timing out", err.Error())
+	}
+	if service == nil || service.CurrentState != "SYSTEM_FAILURE" {
+		t.Fatalf("service = %+v, want the last-observed SYSTEM_FAILURE service returned alongside the timeout error", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got == 0 {
+		t.Error("requestCount = 0, want at least one poll before timing out")
 	}
 }
 
