@@ -193,7 +193,12 @@ func newDigestMockRegistryServer(t *testing.T, templateID, name, imageURI, rayVe
 	// snapshot is - correctly matching the real backend's contract of "GET the latest build
 	// for this application template", since template.LatestBuild.ID (fed into this URL by
 	// Read()) and the snapshot below always advance together via advanceLatestBuild.
-	mux.HandleFunc("/api/v2/builds/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
+	// 301-redirect a bare-path request, and whether that redirect is followed
+	// is not portable across Go versions/http.Client configs). Safe here because
+	// this handler (see comment above) never inspects the literal id segment.
+	buildsHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("unexpected method %s on %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -211,7 +216,9 @@ func newDigestMockRegistryServer(t *testing.T, templateID, name, imageURI, rayVe
 			"created_at": %[7]q, "last_modified_at": %[7]q, "is_byod": true,
 			"digest": %[8]q
 		}}`, snap.buildID, templateID, imageURI, rayVersion, snap.revision, snap.buildStatus, snap.createdAt, snap.digest)
-	})
+	}
+	mux.HandleFunc("/api/v2/builds/", buildsHandler)
+	mux.HandleFunc("/api/v2/builds", buildsHandler)
 
 	mux.HandleFunc("/api/v2/application_templates/"+templateID+"/archive", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

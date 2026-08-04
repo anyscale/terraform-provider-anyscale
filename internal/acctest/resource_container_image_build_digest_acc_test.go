@@ -75,7 +75,11 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 	// "latest_build always reflects the newest build" behavior.
 	currentBuildID := buildID1
 
-	mux.HandleFunc("/api/v2/application_templates/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
+	// 301-redirect a bare-path request, and whether that redirect is followed
+	// is not portable across Go versions/http.Client configs).
+	applicationTemplatesCreateHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected method %s on /api/v2/application_templates/", r.Method)
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -90,7 +94,9 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 			"id": %[1]q, "name": %[2]q, "creator_id": "user_mock",
 			"created_at": %[3]q, "anonymous": false, "is_default": false
 		}}`, templateID, name, createdAt)
-	})
+	}
+	mux.HandleFunc("/api/v2/application_templates/", applicationTemplatesCreateHandler)
+	mux.HandleFunc("/api/v2/application_templates", applicationTemplatesCreateHandler)
 
 	mux.HandleFunc("/api/v2/application_templates/"+templateID, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -110,7 +116,9 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 	// New build creation for Update(): CreateBuildRequest{application_template_id,
 	// containerfile} -> bare BuildResponse for the second build. This is what
 	// containerfileChanged triggers instead of a call to application_templates/.
-	mux.HandleFunc("/api/v2/builds/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (same portability
+	// rationale as application_templates/ above).
+	buildsCreateHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected method %s on /api/v2/builds/", r.Method)
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -125,7 +133,9 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 			"created_at": %[4]q, "last_modified_at": %[4]q, "is_byod": false,
 			"digest": %[5]q
 		}}`, buildID2, templateID, buildStatus, createdAt, digest2)
-	})
+	}
+	mux.HandleFunc("/api/v2/builds/", buildsCreateHandler)
+	mux.HandleFunc("/api/v2/builds", buildsCreateHandler)
 
 	// getBuild / waitForBuild polling target for the first build (Create + every
 	// subsequent Read while state.build_id is buildID1).
