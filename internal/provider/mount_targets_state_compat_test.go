@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-// Formalizes forge's mount_targets state-compat spike into a permanent
+// Formalizes a mount_targets state-compat spike into a permanent
 // test: reclassifying file_storage.mount_targets from a
 // schema.ListNestedBlock to a schema.ListNestedAttribute+Optional+Computed
 // (same nested address/zone types) is a pure value-identity passthrough -

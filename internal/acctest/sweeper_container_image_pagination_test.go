@@ -14,7 +14,7 @@ import (
 // proof for the sweeper's search call site. A single-page happy-path test
 // would pass even if the pagination loop were silently broken - this is the
 // same body-vs-query paging_token shape that CC5b hit in compute_config
-// (deferred there; not deferred here, since forge migrated this call site to
+// (deferred there; not deferred here, since this call site was migrated to
 // api/v2 in 3c43eea). This drives the real searchContainerImagesByContains
 // against a 2-page mock and asserts (a) both pages' results are collected
 // and (b) the second request actually carries the exact token the first

@@ -1,18 +1,16 @@
-// DRAFT, 2026-07-22 - PR2 (timeouts{} migration). Closes a
-// real, pre-existing coverage gap I found during the PR2 survey: unlike
-// service's well-tested H2 mechanism (TestAccServiceResource_
-// UpdateSkipsApplyWhenOnlyTimeoutChanges), NOTHING today proves
-// container_image_build's Update short-circuit (containerfileChanged check,
-// resource_container_image_build.go ~426-429) actually skips a real second
-// build when only the timeout changes - this is new coverage, not a repoint.
+// PR2 (timeouts{} migration). Closes a real, pre-existing coverage gap
+// found during the PR2 survey: unlike service's well-tested H2 mechanism
+// (TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges),
+// NOTHING today proves container_image_build's Update short-circuit
+// (containerfileChanged check, resource_container_image_build.go ~426-429)
+// actually skips a real second build when only the timeout changes - this
+// is new coverage, not a repoint.
 //
 // Mock endpoint shapes (POST /api/v2/application_templates/, POST
 // /api/v2/builds/, GET /api/v2/builds/{id}, POST .../archive) are copied
 // directly from this file's own newBuildDigestMockServer (same package,
 // resource_container_image_build_digest_acc_test.go) - verified against
-// real, already-working mock code, not invented. NOT yet run against
-// forge's real implementation (their worktree is mid-edit on a different
-// resource right now) - flagging for review before treating as verified.
+// real, already-working mock code, not invented.
 
 package acctest
 

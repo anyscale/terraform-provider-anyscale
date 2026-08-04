@@ -107,7 +107,7 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 // PUT .../lineage_tracking_enabled legitimately 403s here regardless of
 // provider correctness (confirmed live: "Lineage tracking is not enabled for
 // your organization"). Its read-side mapping is still proven correct by
-// forge's mocked unit test (TestReadCloudIntoModel_MapsFromResponseNotConstant),
+// a mocked unit test (TestReadCloudIntoModel_MapsFromResponseNotConstant),
 // which isn't subject to this org's feature gating.
 func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -160,7 +160,7 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 
 // TestAccCloudDataSource_C2ParityMatchesPluralDataSource is an
 // acceptance-level proof for change C2's third acceptance criterion:
-// "values match the same cloud in the plural data source." Forge's mocked
+// "values match the same cloud in the plural data source." A mocked
 // unit test proves the singular data source's mapping is internally correct
 // in isolation; this proves the singular and plural data sources actually
 // converge on the same real cloud, which a mapping-only test can't show.

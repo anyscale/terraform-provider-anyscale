@@ -18,7 +18,7 @@ import (
 // CC3b's final shape is an error guard in Update, NOT a RequiresReplace plan
 // modifier: a first pass tried RequiresReplace on cloud_id (with
 // UseStateForUnknown), but that cannot correctly detect a genuine cloud
-// change at plan time without a network call. The architect ruling: leave
+// change at plan time without a network call. Deliberately: leave
 // cloud_id with no plan modifiers, and instead have Update compare the
 // plan's cloud_id against state's cloud_id, erroring only when they
 // genuinely differ. This catches the orphan at apply time instead of plan

@@ -133,7 +133,7 @@ func TestGetAllConfiguredClouds_CachesAndDoesNotReprobe(t *testing.T) {
 }
 
 // TestGetAllConfiguredClouds_TransientResourcesCheckFailureNotCached
-// reproduces the exact gap assayer found in review: a per-cloud resources
+// reproduces the exact gap found in review: a per-cloud resources
 // check that fails transiently (not a confirmed absence of resources) must
 // not get baked into the cache, or a single blip would silently and
 // permanently exclude a genuinely healthy cloud for the rest of the whole

@@ -29,33 +29,24 @@ import (
 // adopt path. What changed is how a resource's name is chosen when a config
 // block omits it.
 //
-// Option B (superseded): drop client-side name computation entirely, always
-// send an empty name when omitted, and let the backend own naming
-// (auto-generate + auto-suffix on collision, cloud_resources_dao.py's
-// _generate_cloud_resource_name). This closed CR1 in the mock but was never
-// exercised against real infra until the multi-resource-cloud-basic E2E: the
-// real add_cloud_resource handler (clouds_resource.py add_cloud_resource,
+// CURRENT DESIGN (Required-name, DECISION 2026-07-08, superseding both
+// Option B and A2 -- see git history for those): name is Required:true
+// plus a stringvalidator.LengthAtLeast(1), with no client-side default of
+// any kind in Create(). An omitted name is a Terraform Core configuration
+// error and an explicitly empty one fails the validator, both at plan
+// time, so the provider can never send the backend an empty name by
+// construction rather than by convention. That matters because the real
+// add_cloud_resource handler (clouds_resource.py add_cloud_resource,
 // ~L2460-2570) discards the DAO's created-row return and responds with the
-// ORIGINAL REQUEST object instead -- so when the request's name is empty,
-// the response's name is empty too, even though the DAO generated and
-// persisted a real one. Nothing client-side or mock-side could see that seam
-// -- it's a real-backend-only bug in response construction, independent of
-// the DAO's own (still believed-correct, never disproven) generation logic.
-// This broke the COMMON case (a single resource, name omitted), which B had
-// no coverage for because every acceptance criterion in the original matrix
-// was about the multi-resource scenario.
-//
-// A2 (current, architect DECISION 2026-07-08): restore the exact client-side
-// name computation -- {compute_stack}-{provider}-{region}, lowercased --
-// that B had deleted, so the provider ALWAYS sends a concrete, non-empty
-// name and never depends on reading a generated name back. Keep the adopt
-// path removed (CR1 stays fixed). Deliberately NO client-side auto-suffix on
-// a tuple collision ("do not replicate the backend counter -- race-prone,"
-// architect) -- a second resource sharing the same region/compute_stack/
-// provider as an existing one now needs an EXPLICIT distinct name, or the
-// backend's real unique index on (cloud_id, name) 409s, loudly, every time.
-// This is the ORIGINAL working behavior (pre-regression) plus the CR1 fix;
-// release impact is unchanged (PATCH).
+// ORIGINAL REQUEST object -- so an empty request name comes back empty
+// even though the DAO generated and persisted a real one, a
+// real-backend-only defect no mock or client-side check could see. There
+// is likewise no client-side auto-suffix on a tuple collision (do not
+// replicate the backend counter -- race-prone): a second resource sharing
+// an existing one's region/compute_stack/provider needs an EXPLICIT
+// distinct name, or the backend's real unique index on (cloud_id, name)
+// 409s, loudly, every time. Release impact: BREAKING, unlike A2's own
+// PATCH-classified fix.
 //
 // The mock below is built to the TRACED real backend behavior for BOTH
 // branches: a duplicate explicit name always 409s (create-only, DB unique
@@ -68,22 +59,6 @@ import (
 // too-helpful auto-return an earlier version of this file used, so a
 // regression fails loudly here instead of surfacing only against real infra
 // again.
-//
-// STATUS (updated 2026-07-08, Required-name): architect superseded A2's
-// client-side name computation with a plan-time Required-name design --
-// name flips from Optional+Computed to Required:true, and the client-side
-// {compute_stack}-{provider}-{region} default block described above is
-// deleted from Create() entirely (forge, da7c125). A same-day follow-up
-// closes a second gap Required alone left open: Required:true stops an
-// OMITTED name but not an explicitly EMPTY one, since "" is a valid
-// "present" value -- so name also gains a stringvalidator.LengthAtLeast(1)
-// validator (forge, b500175)
-// to reject "" at plan time too. Together the two checks mean the provider
-// can never again send the backend an empty name by construction, not by
-// convention -- closing CR1's real-backend echo defect (see above) at the
-// schema level instead of relying on client-side default computation to
-// avoid it. Release impact: BREAKING, unlike A2's own PATCH-classified fix
-// (shipwright report S10).
 //
 // TestAccCloudResourceMulti_DistinctExplicitNames still asserts CR1's
 // adopt-path fix directly (2 distinct backend resources from two explicitly
@@ -103,8 +78,8 @@ import (
 // stays at 0 (neither block's add_resource ever runs), not just that some
 // error occurred.
 //
-// TestAccCloudResourceMulti_EmptyName_PlanError is new (architect
-// 2026-07-08, closing the empty-string gap): asserts the LengthAtLeast(1)
+// TestAccCloudResourceMulti_EmptyName_PlanError is new (2026-07-08,
+// closing the empty-string gap): asserts the LengthAtLeast(1)
 // validator rejects name = "" at plan time, the same tier as the
 // required-argument check above and for the same reason -- an empty name
 // must never reach add_resource, full stop.
@@ -429,8 +404,8 @@ resource "anyscale_cloud_resource" "b" {
 // TestAccCloudResourceMulti_BothOmitName_RequiredArgumentError supersedes
 // this test's previous assertion under both Option B (2 resources via
 // backend auto-suffix) and A2 (identical client-side-computed names, 409 at
-// apply time -- see git history for both). Required-name (architect
-// DECISION 2026-07-08, superseding A2's client-side name computation
+// apply time -- see git history for both). Required-name (DECISION
+// 2026-07-08, superseding A2's client-side name computation
 // entirely) leaves name with no default of any kind, so omitting it on
 // either block is now a Terraform Core configuration error caught at PLAN
 // time, before the provider is ever invoked to diff or apply -- there is no
@@ -494,7 +469,7 @@ resource "anyscale_cloud_resource" "b" {
 }
 
 // TestAccCloudResourceMulti_EmptyName_PlanError asserts the second half of
-// architect's empty-name closure (2026-07-08): Required:true alone stops an
+// the empty-name closure (2026-07-08): Required:true alone stops an
 // OMITTED name (see BothOmitName_RequiredArgumentError above) but does not
 // stop an explicitly EMPTY one -- name = "" is a valid "present" value under
 // plain Required. The schema's stringvalidator.LengthAtLeast(1)

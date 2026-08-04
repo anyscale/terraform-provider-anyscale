@@ -170,7 +170,7 @@ func TestCaptureServiceDiagnosticsOnFailure_NoIDInStateIsSafe(t *testing.T) {
 }
 
 // TestServiceDiagnosticLines_NeverIncludesRayServeConfigOrSecrets is the whitelist-safety proof
-// the architect's review required: even when the underlying API response carries a ray_serve_config
+// required by review: even when the underlying API response carries a ray_serve_config
 // blob containing something that looks exactly like a leaked secret (a user env_var value), the
 // formatted diagnostic lines must never surface it - only the named whitelist (ids, state, weights,
 // hostname/base_url, status checklist) is ever included.

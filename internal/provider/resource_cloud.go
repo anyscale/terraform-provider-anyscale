@@ -762,8 +762,7 @@ func regionRequiredForCreateError(region string) (summary, detail string, hasErr
 // itself) warns and silently picks the most recent match. This is deliberately the one
 // exception: this lookup gates an ADOPT decision (Create attaches Terraform management to
 // whatever ID comes back), so picking the wrong one among duplicates means silently managing
-// the wrong live cloud - higher stakes than a read. See .crystl/quest/spec.json's
-// resource_adopt_path design_decision.
+// the wrong live cloud - higher stakes than a read.
 type multipleCloudsWithNameError struct {
 	name string
 	ids  []string
@@ -1552,7 +1551,7 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 		// actually parses this field - json.loads(cloud.credentials), then
 		// reads provider_id/project_id/service_account_email out of it. A bare
 		// operator-identity string fails that parse and breaks GCP+K8S cloud
-		// creation outright (confirmed by architect's backend trace; this
+		// creation outright (confirmed by a backend trace; this
 		// AWS-mirroring form was wrong before it ever shipped). The VALUES are
 		// still ceremonial for K8S (real auth is the operator's own identity),
 		// but the FORM must be valid JSON - same shape as the placeholder

@@ -411,9 +411,9 @@ const fileStorageDefaultMountPath = "/mnt/shared"
 // API value is empty - resolve straight to fileStorageDefaultMountPath
 // there, the same value a config that never sets it would already show.
 // GCP/Azure/Generic DO carry a real value - recover it verbatim, or a later
-// plan diffs against backend-only drift. Net rule, same one architect
-// stated for the contract: recover mount_path only when the API actually
-// returns a non-empty value, else resolve to the default directly.
+// plan diffs against backend-only drift. Net rule (same as the contract's):
+// recover mount_path only when the API actually returns a non-empty value,
+// else resolve to the default directly.
 //
 // L3: mount_targets IS recovered here again, reversing the v0.15.2-through-
 // v0.16.1 history - v0.15.2/PR #180 recovered it verbatim; v0.16.1/PR #189

@@ -116,9 +116,8 @@ type organizationUserInfoResponse struct {
 // result.organizations[0] to the organization data source model.
 //
 // The backend userinfo handler always returns exactly one element in
-// organizations (the token-scoped org) - see
-// .crystl/quest/design/anyscale_organization_contract.md. An empty list is
-// treated as a real anomaly rather than a panic.
+// organizations (the token-scoped org), even though the field is typed as a
+// list. An empty list is treated as a real anomaly rather than a panic.
 func fetchCurrentOrganization(ctx context.Context, client *Client) (*OrganizationDataSourceModel, error) {
 	userInfo, err := DoRequestAndParse[organizationUserInfoResponse](ctx, client, "GET", "/api/v2/userinfo", nil, http.StatusOK)
 	if err != nil {

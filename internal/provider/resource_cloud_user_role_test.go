@@ -611,7 +611,7 @@ func TestCloudUserRoleCreate_SelfModify403GetsNamedDiagnostic(t *testing.T) {
 }
 
 // TestCloudUserRoleDelete_UnrepairableStateGetsExplanatoryDiagnosticNotRawPassthrough
-// is H22/G8's central regression test, and the one architect specified as
+// is H22/G8's central regression test, and the one specified as
 // mutation-proof: the legacy DELETE 404ing (the only way the unrepairable
 // state - a role granted outside Terraform without ever running the
 // bootstrap - can ever surface) must produce the exact three-part explanation

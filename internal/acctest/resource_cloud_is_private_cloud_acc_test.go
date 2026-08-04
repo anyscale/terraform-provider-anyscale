@@ -19,7 +19,7 @@ import (
 // newC3MockCloudServer's static echo (that mock never inspects the create
 // body at all). This must genuinely round-trip the request to distinguish
 // "the fix sends the field" from "the fix doesn't", mirroring the real
-// backend exactly: forge's trace confirmed the Cloud.is_private_cloud
+// backend exactly: a trace confirmed the Cloud.is_private_cloud
 // column is create-only (clouds_dao.py update path has no param for it) and
 // GET always reads back whatever was persisted at create (spec.json:
 // is_private_cloud_fix).
@@ -36,7 +36,7 @@ type isPrivateCloudMockServer struct {
 // sawServiceCloudKey reports whether the most recent POST /api/v2/clouds
 // body included the is_private_service_cloud key at all - distinct from its
 // VALUE, which is what the per-provider guard test needs to assert against
-// forge's *bool+omitempty mechanism (a present-but-false key must count as
+// the *bool+omitempty mechanism (a present-but-false key must count as
 // "seen"; an absent key must not).
 func (m *isPrivateCloudMockServer) sawServiceCloudKey() bool {
 	m.mu.Lock()
@@ -93,7 +93,7 @@ func newIsPrivateCloudMockServer(t *testing.T, cloudID string) (*httptest.Server
 			} else {
 				m.isPrivate = false
 			}
-			// Track KEY PRESENCE separately from value: forge's *bool+
+			// Track KEY PRESENCE separately from value: the *bool+
 			// omitempty mechanism must omit the key entirely for non-GCP,
 			// not just send a zero/false value - a plain ,ok type-assertion
 			// on the decoded value can't tell "false" from "absent" apart

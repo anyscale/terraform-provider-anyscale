@@ -1306,13 +1306,13 @@ func invitationErrorDetail(err error) string {
 // with a real additional_roles value by calling the singular per-user GET, the
 // only read path that can return one. GET-list's formatter hardcodes
 // additional_roles to an empty slice unconditionally, regardless of a user's
-// real roles or any flag state (traced against organizations_formatter.py;
-// architect ruling 1) - the same call-site-migration shape as the compute_config
-// ext/v0 pagination lesson: new information needs a real endpoint change, not
-// just new struct fields.
+// real roles or any flag state (traced against organizations_formatter.py) -
+// the same call-site-migration shape as the compute_config ext/v0 pagination
+// lesson: new information needs a real endpoint change, not just new struct
+// fields.
 //
 // additional_roles is tri-state: populated = real roles, empty = queried and genuinely
-// none (a flag-off org returns this cleanly, confirmed empirically - assayer -
+// none (a flag-off org returns this cleanly, confirmed empirically -
 // not an error), nil = could not be determined at all. This function returns
 // nil specifically (never a list) whenever it cannot query the singular GET,
 // so callers must treat a nil AdditionalRoles as "undetermined" and render it
@@ -1323,7 +1323,7 @@ func invitationErrorDetail(err error) string {
 // throughout. This is load-bearing, not an oversight: alter_collaborator (the
 // only real permission_level write path) writes Postgres only and never
 // touches SpiceDB, while the singular GET/search read base_role from SpiceDB
-// managed groups when the read flag is on. assayer proved live (real infra,
+// managed groups when the read flag is on. This was proved live (real infra,
 // toggling permission_level owner<->collaborator through the real write path)
 // that the SpiceDB-sourced base_role never moves at all in response to a real
 // write, while the list-derived (Postgres-formatted) base_role tracks it

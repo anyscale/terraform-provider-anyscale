@@ -117,7 +117,7 @@ func TestEvaluateSystemClusterState_ErrorNamesTheCloud(t *testing.T) {
 }
 
 // TestWaitForSystemClusterStateWithTiming_TerminatedThenRunningIsQuiet proves the fix for
-// architect's "quiet one expected log warning" review note: describe(start_cluster=true)
+// the "quiet one expected log warning" review note: describe(start_cluster=true)
 // against a cloud with no prior cluster is confirmed live (AC26) to create one and return
 // status=Terminated immediately, before the async StartingUp transition is even visible - so
 // this is the expected first-poll response on every Create, not an edge case. This test proves
@@ -193,7 +193,7 @@ func TestWaitForSystemClusterStateWithTiming_SurfacesTerminalErrors(t *testing.T
 }
 
 // TestWaitForSystemClusterStateWithTiming_ContinuesOnUnknownAndTerminating is AC14: Terminating
-// and Unknown are deliberately excluded from systemClusterContinueStates (per architect's
+// and Unknown are deliberately excluded from systemClusterContinueStates (per the
 // ruling, since the backend's own no-op-retry-start bucket excludes them too), so this proves
 // the F6 fallback still treats them as "keep polling", not a hard error, by settling at Running
 // right after seeing both.
@@ -431,7 +431,7 @@ func decoratedSessionsTestServer(t *testing.T, rows []DecoratedSessionResult) *h
 }
 
 func TestFindSystemWorkloadCluster_FindsMatchingCloudAmongMultiple(t *testing.T) {
-	// Reproduces the exact hazard forge's correction flagged: decorated_sessions' cloud_id query
+	// Reproduces the exact hazard the correction flagged: decorated_sessions' cloud_id query
 	// param is dead server-side, so a multi-cloud org's response can contain sessions for OTHER
 	// clouds too. This proves the client-side filter picks the right one, not just the first row.
 	rows := []DecoratedSessionResult{

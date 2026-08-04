@@ -320,7 +320,7 @@ func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
 	})
 
 	t.Run("K8S compute_stack on GCP: derived from kubernetes_config as valid JSON, not a placeholder", func(t *testing.T) {
-		// Real backend trace (architect, clouds_resource.py): GCP is the ONE
+		// Real backend trace (clouds_resource.py): GCP is the ONE
 		// provider that actually parses this field - json.loads(cloud.credentials)
 		// then reads provider_id/project_id/service_account_email out of it. A
 		// bare string (the AWS/Azure K8S fallback shape) fails that parse and
@@ -830,7 +830,7 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 		}
 	})
 
-	// This is the exact shape architect flagged in re-review: the user's real
+	// This is the exact shape flagged in re-review: the user's real
 	// repro was a single EKS resource registered via the CLI (never
 	// Terraform-created) then cold-imported. If that resource's is_default
 	// flag is not true - unconfirmed either way against the real backend,

@@ -115,7 +115,7 @@ func (s *mockOrgUserRoleServer) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 // TestAccOrganizationUserRoleResource_DenyRolesOmittedPlanStability is the
-// direct empirical answer architect asked for on R5/Gate 2: does omitting
+// direct empirical answer to the question raised on R5/Gate 2: does omitting
 // deny_roles from config after it was previously declared produce a stable
 // (empty) plan, or does it show a perpetual "known after apply"? Confirmed
 // PASSING against the shipped schema (deny_roles Optional+Computed, WITH
@@ -189,7 +189,7 @@ resource "anyscale_organization_user_role" "mock" {
 }
 
 // TestAccOrganizationUserRoleResource_DenyRolesExplicitEmptyPlanStability
-// covers the second half of forge's request: explicit deny_roles = [] must
+// covers the second half of the request: explicit deny_roles = [] must
 // also be stable across a re-plan, and must remain distinct from the omitted
 // case above rather than collapsing into it.
 func TestAccOrganizationUserRoleResource_DenyRolesExplicitEmptyPlanStability(t *testing.T) {
@@ -311,7 +311,7 @@ resource "anyscale_organization_user_role" "mock" {
 // doc) to check instead. This is the acceptance criterion for the fix, not a
 // broken test to work around - leave it red until Delete's authority check
 // is rebuilt on something that survives into Delete (e.g. resp.Private set
-// during Create/Update, per forge's proposed fix), then it should go green
+// during Create/Update, per the proposed fix), then it should go green
 // with no change to the assertions themselves.
 func TestAccOrganizationUserRoleResource_DestroyLeavesOmittedDenyRolesUntouched(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -361,7 +361,7 @@ resource "anyscale_organization_user_role" "mock" {
 }
 
 // TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesStaysOnLegacyPath
-// covers forge's second finding on the same root cause as the Delete bug:
+// covers a second finding on the same root cause as the Delete bug:
 // with UseStateForUnknown on deny_roles, plan.DenyRoles carries the prior
 // value forward even when config omits the attribute, so a write-path
 // selection that reads the PLAN (rather than Config) sends an ordinary
@@ -435,7 +435,7 @@ resource "anyscale_organization_user_role" "mock" {
 }
 
 // TestAccOrganizationUserRoleResource_DestroyClearAuthoritySurvivesRefresh is
-// architect's R12 requirement 2: the declared-vs-omitted authority signal
+// R12's requirement 2: the declared-vs-omitted authority signal
 // must survive an intervening Read (refresh), not just work immediately
 // after Create. If Private state is dropped or not re-read on refresh,
 // Delete would silently fall back to NOT clearing declared deny_roles -

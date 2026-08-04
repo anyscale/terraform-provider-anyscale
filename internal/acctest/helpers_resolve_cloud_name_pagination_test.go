@@ -8,12 +8,11 @@ import (
 )
 
 // TestResolveCloudNameToIDPaginatesAcrossPages is the coverage this repo's
-// own test-suite fixture resolver shipped without: forge's B1b fix
+// own test-suite fixture resolver shipped without: B1b's fix
 // (05c13d9, helpers.go's resolveCloudNameToID, the fifth instance of the
-// page-1-only bug found this session - see .crystl/quest/design/
-// cloud-selector-design.md) landed with zero tests, and the real test org
-// fits on one page, so nothing in the acceptance suite ever exercises the
-// pagination loop. This closes that gap.
+// same page-1-only bug across this provider's by-name lookups) landed with
+// zero tests, and the real test org fits on one page, so nothing in the
+// acceptance suite ever exercises the pagination loop. This closes that gap.
 //
 // Deliberately NOT TestAcc-prefixed and does NOT call
 // SkipIfNotAcceptanceTest: this is a plain unit test (that prefix means
@@ -29,7 +28,7 @@ import (
 // Confirmed failing-first (2026-07-25) against pre-B1b helpers.go: fails
 // with "no cloud found with name 'helper-cloud-on-page-two'", since the
 // unfixed resolveCloudNameToID only read page 1. Confirmed passing against
-// forge's landed fix, and mutation-proven with the normal break-and-revert
+// the landed fix, and mutation-proven with the normal break-and-revert
 // cycle, byte-diff clean.
 func TestResolveCloudNameToIDPaginatesAcrossPages(t *testing.T) {
 	const targetCloudID = "cld_helper_page_two_target"

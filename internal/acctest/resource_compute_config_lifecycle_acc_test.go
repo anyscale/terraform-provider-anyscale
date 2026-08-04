@@ -422,14 +422,13 @@ func newCC12MockComputeConfigServer(t *testing.T, configID, configName, cloudID 
 }
 
 // TestAccComputeConfigResource_ImportRecoversWriteOnlyFields is CC12's verify-gate,
-// assigned jointly to assayer and forge when CC12 was designed but not
-// actually written until caught reviewing the release PR text that claimed
-// it existed. Read intentionally never reads flags/advanced_instance_config
-// back from the API on ordinary refresh (to avoid perpetual drift against
-// what the user configured) - ImportState is the one place recovering them
-// is unambiguous, since there is no prior state yet to confuse "recovered at
-// import" with "genuinely never configured". Architect's three-point gate,
-// all exercised here:
+// which was designed but not actually written until the gap was caught while
+// reviewing the release PR text that claimed it existed. Read intentionally
+// never reads flags/advanced_instance_config back from the API on ordinary
+// refresh (to avoid perpetual drift against what the user configured) -
+// ImportState is the one place recovering them is unambiguous, since there
+// is no prior state yet to confuse "recovered at import" with "genuinely
+// never configured". The three-point gate, all exercised here:
 //  1. A config that already matches the recovered values reaches an empty
 //     plan (the recovered values are not phantom/unknown).
 //  2. A config that omits them shows a TRUTHFUL, non-empty diff - not a
@@ -544,8 +543,8 @@ resource "anyscale_compute_config" "test" {
 // advanced_instance_config - an IAM instance profile assignment, the exact
 // shape already shipping in examples/aws-vm-basic/compute_config.tf
 // (worker_nodes[].advanced_instance_config = jsonencode({IamInstanceProfile
-// = {Arn = ...}})), per scribe's find and the user's explicit ask to cover
-// workers specifically with more than one entry.
+// = {Arn = ...}})), prompted by an earlier finding and the user's explicit
+// ask to cover workers specifically with more than one entry.
 func newCC12PerNodeMockComputeConfigServer(t *testing.T, configID, configName, cloudID string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -594,9 +593,9 @@ func newCC12PerNodeMockComputeConfigServer(t *testing.T, configID, configName, c
 // apiWorkerNodeTypeToTerraform build them via a straight json.Marshal of the
 // decoded API response. The open question here is a byte-compare one: does
 // Go's compact, sorted-key json.Marshal output match what Terraform's own
-// jsonencode() produces for the same logical content. Architect's ruling: if
-// this does not reach an empty plan, that is a real per-node JSON
-// canonicalization fix for forge (in the same spirit as CC15), not a
+// jsonencode() produces for the same logical content. If this does not
+// reach an empty plan, that calls for a real per-node JSON
+// canonicalization fix (in the same spirit as CC15), not a
 // shrug-and-document fallback - the user confirmed this is a common real
 // customer pattern, not an edge case.
 func TestAccComputeConfigResource_ImportRecoversPerNodeAdvancedInstanceConfig(t *testing.T) {

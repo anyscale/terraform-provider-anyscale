@@ -32,10 +32,10 @@ var protoV6ProviderFactoriesWithEcho = map[string]func() (tfprotov6.ProviderServ
 
 // jsonStringOrNull renders s as a quoted JSON string, or the literal JSON null if s is nil. Used
 // by every mock HTTP handler in this file so that a null case always emits an explicit
-// "field": null in the raw response body rather than omitting the key - the test plan's hard rule
-// (.crystl/quest/PR1-TEST-PLAN.md): omitting the key is the exact false-green shape that shipped
-// the mount_targets bug (v0.15.2 era), since a mock missing a field can pass against broken
-// parsing code and prove nothing.
+// "field": null in the raw response body rather than omitting the key - a hard rule for every mock
+// in this file: omitting the key is the exact false-green shape that shipped the mount_targets bug
+// (v0.15.2 era), since a mock missing a field can pass against broken parsing code and prove
+// nothing.
 func jsonStringOrNull(s *string) string {
 	if s == nil {
 		return "null"
@@ -134,10 +134,9 @@ resource "echo" %q {}
 }
 
 // TestAccServiceCredentialsEphemeralResource is the mock-tier suite for
-// anyscale_service_credentials, covering every scenario in the locked test plan
-// (.crystl/quest/PR1-TEST-PLAN.md): bearer auth enabled (case 1), disabled (case 2), a token
-// rotation in progress (case 3), and an unknown service_id surfacing a genuine error rather than
-// a silent null (case 4). This resource adds no diagnostic of its own - bearer-enabled is not
+// anyscale_service_credentials, covering all four planned scenarios: bearer auth enabled
+// (case 1), disabled (case 2), a token rotation in progress (case 3), and an unknown service_id
+// surfacing a genuine error rather than a silent null (case 4). This resource adds no diagnostic of its own - bearer-enabled is not
 // independently-tracked state here, the API's own null-vs-non-null is the signal - so only value
 // assertions are needed; no direct-Open-call helper is required here.
 func TestAccServiceCredentialsEphemeralResource(t *testing.T) {

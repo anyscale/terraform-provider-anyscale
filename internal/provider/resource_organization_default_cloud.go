@@ -248,11 +248,10 @@ func (r *OrganizationDefaultCloudResource) Delete(ctx context.Context, req resou
 // same singular GET /clouds/{cloud_id} Read/drift already uses: auth-
 // independent, no userinfo involved in the validation itself. This
 // corrects an earlier draft that imported by organization id via userinfo
-// instead (caught independently by scribe and by re-reading architect's
-// authoritative spec) - that version silently accepted any import ID,
-// never validated it against what the caller actually typed, and
-// reintroduced the unverified-user null blind spot this whole resource
-// exists to avoid.
+// instead (caught both in review and by re-reading the authoritative
+// spec) - that version silently accepted any import ID, never validated
+// it against what the caller actually typed, and reintroduced the
+// unverified-user null blind spot this whole resource exists to avoid.
 //
 // The schema's own "id" attribute is organization id, not cloud_id, so one
 // userinfo call is still needed here to populate it - that is populating a

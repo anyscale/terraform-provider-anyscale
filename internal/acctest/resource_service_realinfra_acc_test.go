@@ -30,7 +30,7 @@ import (
 // Reuses an existing default application build (no fresh container image build needed - the org
 // already has default Ray images with succeeded builds) and creates only a fresh, cheap
 // compute_config against the existing pinned/discovered fixture cloud (never a fresh cloud) -
-// per architect's reuse-first ruling, this keeps the real-infra footprint to exactly one real
+// per a reuse-first ruling, this keeps the real-infra footprint to exactly one real
 // service (the thing actually under test) plus one lightweight compute_config registration.
 //
 // ray_serve_config points at anyscale/first-service, Anyscale's own minimal public example

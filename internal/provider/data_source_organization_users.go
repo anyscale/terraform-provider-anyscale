@@ -156,8 +156,8 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 	//
 	// additional_roles is backfilled per result via a supplementary singular GET
 	// (hydrateCollaboratorRoles) - the list endpoint this data source's primary
-	// fetch uses hardcodes it to empty unconditionally (architect ruling 1), and
-	// switching the primary fetch to POST /search to get it in bulk was traced
+	// fetch uses hardcodes it to empty unconditionally (organizations_formatter.py),
+	// and switching the primary fetch to POST /search to get it in bulk was traced
 	// and rejected: search has no is_service_account filter and only a combined
 	// name_or_email field, so it cannot replace list-and-filter without losing
 	// this data source's existing filters. This is therefore N+1 (one extra

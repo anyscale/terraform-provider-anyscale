@@ -28,7 +28,7 @@ import (
 // is what flips it (not an unconditional echo).
 //
 // isDefault starts false, deliberately NOT pre-matching the cloud_id the
-// test config asserts - assayer's catch: seeding it true from the start
+// test config asserts - deliberately so: seeding it true from the start
 // would make the Lifecycle test pass even against a completely broken
 // Create() that never calls update_default_cloud at all, since GET
 // /clouds/{cloud_id} would still read back is_default:true regardless of
@@ -117,7 +117,7 @@ func newOrgDefaultCloudMockServer(t *testing.T, orgID, cloudID string, knownClou
 
 // TestAccOrganizationDefaultCloudResource_Lifecycle_MockServer proves the
 // basic create -> plan-empty -> import round trip against a mock backend,
-// and - per assayer's review catch - that Create() actually calls the write
+// and - per a review catch - that Create() actually calls the write
 // API rather than merely producing state values a broken Create() could
 // have matched by coincidence (the mock starts isDefault:false precisely so
 // there is no coincidental match available).
@@ -205,7 +205,7 @@ resource "anyscale_organization_default_cloud" "test" {
 }
 
 // TestAccOrganizationDefaultCloudResource_BogusCloudID_MockServer is the
-// Gate 2 test architect named as a required build/test case: the backend's
+// Gate 2 test required as a build/test case: the backend's
 // update_default_cloud performs zero validation on cloud_id (confirmed
 // against the real service), so the ONLY thing standing between a user and
 // silently repointing their org default at a typo'd or wrong-org id is this

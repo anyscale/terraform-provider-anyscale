@@ -354,7 +354,7 @@ resource "anyscale_service" "test" {
 	}
 }
 
-// TestAccServiceResource_InPlaceRejectsBuildIDChange is the NEGATIVE case architect specified
+// TestAccServiceResource_InPlaceRejectsBuildIDChange is the NEGATIVE case specified
 // alongside the two positive upgrade scenarios: rollout_strategy = "IN_PLACE" permits changing
 // ONLY ray_serve_config (contract §4/§6, ModifyPlan). Changing build_id (or compute_config_id/
 // connection_ids - same guard, one representative field here) together with IN_PLACE must be

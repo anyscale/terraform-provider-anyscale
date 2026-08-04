@@ -13,10 +13,10 @@ import (
 // TestSystemClusterResourceStateUpgradeV0toV1_DropsStartTimeout mirrors this
 // repo's own established precedent for "prove a removed attribute
 // auto-migrates cleanly" (TestCloudResourceStateUpgradeV1toV2_DropsEnableSystemCluster,
-// TestCloudResourceResourceStateUpgradeV1toV2_DropsStatus). PR2-TIMEOUTS-PLAN.md
-// calls this out explicitly as forge's own responsibility to verify with a
-// real state-upgrade test, not assume auto-migrate - this is that proof, for
-// system_cluster's first-ever schema version bump.
+// TestCloudResourceResourceStateUpgradeV1toV2_DropsStatus). A removed attribute is
+// deliberately verified with a real state-upgrade test rather than assumed to
+// auto-migrate - this is that proof, for system_cluster's first-ever schema
+// version bump.
 func TestSystemClusterResourceStateUpgradeV0toV1_DropsStartTimeout(t *testing.T) {
 	ctx := context.Background()
 

@@ -348,8 +348,9 @@ func serviceVersionAttributes() map[string]schema.Attribute {
 
 // serviceSharedAttributes returns the anyscale_service / anyscale_services attributes that are
 // identical in name, type, and MarkdownDescription on both sides. Called directly by the singular
-// data source and wrapped inside the plural's per-item NestedObject. See
-// .crystl/quest/CONTRACT_anyscale_service.md for the full field-scope contract this implements.
+// data source and wrapped inside the plural's per-item NestedObject. The field-scope decisions
+// this implements - what is shared, what is defined per-data-source, and what is left out of the
+// schema entirely - are documented in the two paragraphs below.
 //
 // Deliberately excluded from this shared map, defined separately per-DS instead: id/name (singular
 // carries the either-id-or-name selector clause and Optional; plural's per-item versions are

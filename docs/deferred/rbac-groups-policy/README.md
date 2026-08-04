@@ -103,9 +103,8 @@ parts above:
   `membership list`) are a low-risk, independent addition — the exact same read paths the Anyscale
   CLI itself uses, so there is a demonstrated consumption path (finding 5 above is about *writes*,
   not reads). These make `anyscale_user.user_group_ids` (an existing, previously-unresolvable
-  opaque id list) actually useful, and give anyone who loses the `user_group_ids` attribute in the
-  D6 fix (see the main design record for this quest, if it still exists at the time you are
-  reading this) a real replacement instead of a dead end.
+  opaque id list) actually useful, and give anyone who loses the `user_group_ids` attribute to its
+  removal from the `anyscale_user` data source a real replacement instead of a dead end.
 - **The org/cloud/project per-user role resources** (the rest of this redesign — the
   `organization_user` rename and `anyscale_cloud_user_role`) are unrelated to this deferral. They
   model the existing per-user RBAC surface directly and do not depend on anything above.

@@ -30,8 +30,9 @@ type ServiceDataSource struct {
 	client *Client
 }
 
-// ServiceDataSourceModel describes the data source data model. See
-// .crystl/quest/CONTRACT_anyscale_service.md for the full field-scope contract.
+// ServiceDataSourceModel describes the data source data model. Which upstream fields are
+// surfaced, and why others are deliberately excluded, is documented on serviceSharedAttributes
+// in schema_shared_attributes.go.
 type ServiceDataSourceModel struct {
 	// Input attributes (at least one required)
 	ID   types.String `tfsdk:"id"`
@@ -59,7 +60,7 @@ type ServiceDataSourceModel struct {
 	// bare struct can only represent a fully-known object. CONFIRMED via a real CI acceptance
 	// test crash (TestAccServiceDataSource_ByID, "Path: service_observability_urls", "Received
 	// null value") - a data source must not crash on a null it can receive, independent of how
-	// commonly that null occurs (architect's ruling).
+	// commonly that null occurs.
 	ServiceObservabilityURLs types.Object `tfsdk:"service_observability_urls"`
 
 	PrimaryVersion types.Object         `tfsdk:"primary_version"`
@@ -249,7 +250,7 @@ func (d *ServiceDataSource) Read(ctx context.Context, req datasource.ReadRequest
 // service is a normal, expected state - not an accidental collision the way a duplicate cloud or
 // project name would be. Silently resolving to "the most recent one" would let an unrelated
 // team's later same-named deploy quietly re-point an existing data source at a different service
-// on the next refresh. See .crystl/quest/CONTRACT_anyscale_service.md for the full rationale.
+// on the next refresh.
 func (d *ServiceDataSource) findServiceByName(ctx context.Context, name, projectID, cloudID string) (string, error) {
 	// Build query parameters. The list endpoint's "name" param is a case-insensitive substring
 	// match server-side (services_dao.py: Service.name.ilike) - this is only a cheap pre-filter;

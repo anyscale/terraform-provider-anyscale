@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-// Real v0->v1 upgrader test (anyscale_cloud), per architect's completeness
+// Real v0->v1 upgrader test (anyscale_cloud), per a completeness
 // request: a minimal k8s-only seed can't catch a PriorSchema gap in
 // aws_config/file_storage, since those fields would just decode as zero
 // values either way. Two realistic seeds instead - a full VM cloud and a

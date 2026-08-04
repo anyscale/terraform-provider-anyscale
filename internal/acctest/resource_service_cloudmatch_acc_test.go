@@ -102,7 +102,7 @@ resource "anyscale_service" "test" {
 	}
 }
 
-// TestAccServiceResource_CloudMatchAllowsMatch is MT2, and per architect the MOST important
+// TestAccServiceResource_CloudMatchAllowsMatch is MT2, and the MOST important
 // case: project_id and compute_config_id resolve to the SAME cloud, so the validator must NOT
 // block the apply. A validator that rejects valid, matching configs would be a worse regression
 // than having no validator at all - this is the false-positive guard.

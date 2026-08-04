@@ -18,13 +18,12 @@ import (
 // detail: ResolveCloudNameToID (cloud_helpers.go) is the shared helper
 // behind cloud_name on all five data sources (compute_config, project,
 // projects, service, services) - the only surface left after R1 removed
-// cloud_name from the three resources (design doc: .crystl/quest/design/
-// cloud-selector-design.md, B1 and the cloud_name-removal addendum). Before
-// B1's fix it issued a single unpaginated GET and matched within page one
-// only. A mock that returns every cloud in one response cannot fail against
+// cloud_name from the three resources. Before B1's fix it issued a single
+// unpaginated GET and matched within page one only. A mock that returns
+// every cloud in one response cannot fail against
 // that bug - the page-1-only helper would find the name fine and this test
-// would go green against unfixed code, exactly the placebo shape architect
-// flagged when assigning B1. The target cloud here is placed on page 2
+// would go green against unfixed code, exactly the placebo shape flagged
+// when B1 was assigned. The target cloud here is placed on page 2
 // deliberately so the unfixed helper returns "no cloud found" and this test
 // fails for the right reason.
 //
@@ -32,11 +31,11 @@ import (
 // here after R1 removed cloud_name from that resource entirely, which broke
 // the build (undefined: testAccProjectResourceWithCloudNameConfig) - not
 // just a runtime failure, since the helper it called no longer exists.
-// Rewritten onto the data source per architect's explicit instruction: do
-// not delete this coverage, since ResolveCloudNameToID is still a live,
-// shipped fix guarding real behavior on all five data sources - deleting the
-// test because its old HCL stopped compiling would silently drop the only
-// guard on a fix this repo already shipped.
+// Rewritten onto the data source instead of deleted: this coverage must not
+// be dropped, since ResolveCloudNameToID is still a live, shipped fix
+// guarding real behavior on all five data sources - deleting the test
+// because its old HCL stopped compiling would silently drop the only guard
+// on a fix this repo already shipped.
 func newDataSourceCloudNamePaginationMockServer(t *testing.T, page1Clouds, page2Clouds []map[string]any, projects []map[string]any) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -128,14 +127,14 @@ func projectResult(id, name, createdAt, parentCloudID string) map[string]any {
 }
 
 // TestAccProjectDataSource_CloudNameResolvesAcrossPages is the mutation-proof
-// regression guard for design doc B1 (ResolveCloudNameToID is page-1-only,
+// regression guard for B1 (ResolveCloudNameToID is page-1-only,
 // cloud_helpers.go:227-259), retargeted onto data.anyscale_project after R1
 // removed cloud_name from the anyscale_project resource - see this file's
 // header comment.
 //
 // Confirmed failing-first (2026-07-25, pre-R1 form) against pre-B1 main with
 // the exact expected error - "Failed to resolve cloud name... no cloud found
-// with name..." - before forge's B1 fix landed. Re-confirmed post-R1 that
+// with name..." - before B1's fix landed. Re-confirmed post-R1 that
 // this retargeted form still exercises the same helper and still passes
 // against the fixed code.
 func TestAccProjectDataSource_CloudNameResolvesAcrossPages(t *testing.T) {
@@ -183,7 +182,7 @@ data "anyscale_project" "test" {
 // invisible. Two clouds share the same name, one on page 1 (older), one on
 // page 2 (newer) - asserts the resolver picks the newer, page-2 one.
 //
-// This is the property architect flagged as most important to preserve
+// This is the property flagged as most important to preserve
 // through the R1 retarget: it is the one that exposed the silent-wrong-cloud
 // bug (a not-found error is loud; picking the wrong cloud silently is not),
 // and it is the specific behavior the shipped release note now promises. A

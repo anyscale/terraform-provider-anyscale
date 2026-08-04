@@ -14,9 +14,9 @@ import (
 // TestContainerImageBuildResourceStateUpgradeV0toV1_DropsBuildTimeout mirrors
 // this repo's established precedent for "prove a removed attribute
 // auto-migrates cleanly" (TestSystemClusterResourceStateUpgradeV0toV1_DropsStartTimeout,
-// TestServiceResourceStateUpgradeV0toV1_DropsRolloutTimeout).
-// PR2-TIMEOUTS-PLAN.md calls this out explicitly as forge's own
-// responsibility to verify with a real state-upgrade test.
+// TestServiceResourceStateUpgradeV0toV1_DropsRolloutTimeout). This is
+// deliberately verified with a real state-upgrade test rather than assumed to
+// auto-migrate.
 //
 // THE reproducing shape: prior state carries build_timeout = "90m" - a REAL
 // customization that is neither the old default (30m) nor happens to equal

@@ -12,8 +12,7 @@ import (
 
 // Service current_state values the rollout/termination wait loop treats as terminal-success
 // when they match the caller's target, or classifies below. Traced against
-// ServiceEventCurrentState in services/dao/event_models.py - see
-// .crystl/quest/CONTRACT_anyscale_service_resource.md section 5b.
+// ServiceEventCurrentState in services/dao/event_models.py.
 const (
 	serviceStateRunning    = "RUNNING"
 	serviceStateTerminated = "TERMINATED"

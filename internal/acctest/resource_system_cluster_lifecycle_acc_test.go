@@ -17,7 +17,7 @@ import (
 // oracle+status Read (AC6), and the state-only Delete (AC10) through the real
 // provider machinery - not just a client-level unit test. The describe
 // sequence deliberately mirrors the real backend's observed live behavior
-// (assayer's AC26 smoke test): the first describe(start_cluster=true) call
+// (from AC26's smoke test): the first describe(start_cluster=true) call
 // returns Terminated immediately (StartingUp is genuinely async), then two
 // more polls advance StartingUp -> Running, proving the resource actually
 // loops rather than trusting a single call.

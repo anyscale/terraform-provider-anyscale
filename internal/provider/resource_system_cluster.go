@@ -15,7 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// defaultSystemClusterCreateTimeout is sized against assayer's live smoke
+// defaultSystemClusterCreateTimeout is sized against a live smoke
 // test (~49s to reach Running on the static fixture cloud) with generous
 // real-world headroom - see the timeouts block's CreateDescription.
 const defaultSystemClusterCreateTimeout = 20 * time.Minute
@@ -273,7 +273,7 @@ func (r *SystemClusterResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 // ImportState imports by cloud_id alone - the resource's real identity
-// (assayer's Q3: DB-unique exactly-one-per-cloud). No compound ID needed,
+// (confirmed DB-unique, exactly-one-per-cloud). No compound ID needed,
 // unlike anyscale_cloud_resource's cloud_id:name form.
 func (r *SystemClusterResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("cloud_id"), req, resp)

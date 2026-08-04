@@ -28,8 +28,7 @@ import (
 )
 
 // Rollout strategies accepted by the backend's ApplyProductionServiceV2Model. MULTI_VERSION
-// exists upstream but is out of scope for v1 (see
-// .crystl/quest/CONTRACT_anyscale_service_resource.md section 1) so it is deliberately not a
+// exists upstream but is out of scope for v1 of this resource, so it is deliberately not a
 // valid value here.
 const (
 	serviceRolloutStrategyRollout = "ROLLOUT"
@@ -63,8 +62,7 @@ type ServiceResource struct {
 	client *Client
 }
 
-// ServiceResourceModel describes the resource data model. See
-// .crystl/quest/CONTRACT_anyscale_service_resource.md for the full design contract.
+// ServiceResourceModel describes the resource data model.
 type ServiceResourceModel struct {
 	// Required inputs
 	Name            types.String  `tfsdk:"name"`
@@ -1074,8 +1072,7 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 // this resource actually sends. Fields deliberately not modeled (config, ray_gcs_external_storage_config,
 // tracing_config, canary_percent, auto_complete_rollout, traffic_percent, version) are omitted
 // from the request entirely - matching Go's zero-value/omitempty behavior - so the backend
-// applies its own defaults, rather than this provider re-deriving or freezing them. See
-// .crystl/quest/CONTRACT_anyscale_service_resource.md section 1 for the documented scope.
+// applies its own defaults, rather than this provider re-deriving or freezing them.
 //
 // tags is deliberately NOT one of these fields even though the backend model accepts one: this
 // resource always syncs tags through the dedicated /api/v2/tags/resource endpoints instead (see

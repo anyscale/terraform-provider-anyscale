@@ -11,8 +11,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// This file backs the anyscale_system_cluster resource/data source (shipwright's TF surface)
-// with reusable client support for the Anyscale "System Cluster" feature. Naming note: the
+// This file backs the anyscale_system_cluster resource/data source with reusable
+// client support for the Anyscale "System Cluster" feature. Naming note: the
 // wire-level API and its backend router call this concept "system workload"
 // (system_workload_router.py, SystemWorkloadService) - this file follows that vocabulary for
 // anything that talks to the wire, reserving "SystemCluster" for the user-facing Terraform
@@ -281,11 +281,11 @@ var systemClusterErrorStates = map[string]bool{
 // Terminating and Unknown are deliberately NOT in this set. They fall through to the
 // "unrecognized, continue with a warning" branch as any genuinely unknown future state (F6
 // forward-compat, mirroring service_helpers.go's evaluateServiceState) rather than being treated
-// as an expected transitional state - per architect's ruling, since the backend's own no-op-
-// retry-start bucket excludes them (a start call against a Terminating cluster is an untraced
-// risk). This wait loop never re-issues start_cluster=true after the initial Create request
-// regardless (see describeSystemWorkload's own doc comment), so this only affects how loudly we
-// log while waiting, not correctness.
+// as an expected transitional state, since the backend's own no-op-retry-start bucket excludes
+// them (a start call against a Terminating cluster is an untraced risk). This wait loop never
+// re-issues start_cluster=true after the initial Create request regardless (see
+// describeSystemWorkload's own doc comment), so this only affects how loudly we log while
+// waiting, not correctness.
 var systemClusterContinueStates = map[string]bool{
 	"StartingUp":      true,
 	"Updating":        true,
@@ -341,7 +341,7 @@ func waitForSystemClusterState(ctx context.Context, client *Client, cloudID, tar
 // own documented contract.
 //
 // GET errors are NOT tolerated here - a single failed describeSystemWorkload call aborts the
-// wait immediately (service-style fail-fast, a correctness gate per architect's ruling), not
+// wait immediately (service-style fail-fast, a deliberate correctness gate), not
 // waitForBuildDigestWithTiming's tolerate-and-continue settle-wait style: a stuck/erroring
 // System Cluster start is exactly the kind of thing Terraform must fail loudly on, not paper
 // over.

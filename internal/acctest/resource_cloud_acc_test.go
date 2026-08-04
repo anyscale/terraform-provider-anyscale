@@ -522,7 +522,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.persistent_volume_claim", "ray-shared-pvc"),
 					// The schema default still applies normally - proves the new
 					// ConflictsWith evaluated the raw (mount_path-omitted) config,
-					// not the post-default plan value, exactly as architect's
+					// not the post-default plan value, exactly as the
 					// review required.
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.mount_path", "/mnt/shared"),
 				),
@@ -536,9 +536,8 @@ resource "anyscale_cloud" "test" {
 // gcp_config.subnet_names when compute_stack is K8S: the backend's
 // conversion code applies subnet_names unconditionally after the Kubernetes
 // zone list is written to the same NetworkInfo field, genuinely corrupting
-// it (confirmed by tracing the real code, independently re-verified by
-// architect), not just leaving it a no-op. Plan-time only, no real infra
-// needed.
+// it (confirmed by tracing the real code, independently re-verified),
+// not just leaving it a no-op. Plan-time only, no real infra needed.
 func TestAccCloudResource_SubnetNamesK8SRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -872,8 +871,8 @@ resource "anyscale_cloud" "test" {
     // what surfaced BUG A live via ANYSCALE_TEST_REAL_INFRA=1 (2026-07-16):
     // apply stores this bare value, but import flattens the API's canonical
     // gs://-prefixed form, and stripBucketPrefix only un-prefixes AWS - so
-    // the two diverged. Per architect's disposition, the fix is a
-    // semantic-equality type/plan-modifier on bucket_name (Forge), NOT
+    // the two diverged. The fix is a
+    // semantic-equality type/plan-modifier on bucket_name, NOT
     // canonicalizing the test to gs://: this bare form must keep working
     // once that fix lands, since real existing GCP clouds may have been
     // created with a bare name too, and bucket_name is RequiresReplace -

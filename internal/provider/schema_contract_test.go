@@ -170,12 +170,12 @@ func hasInt64ValidatorContaining(vs []validator.Int64, want string) bool {
 // UseStateForUnknown is what keeps that resolved value stable across later
 // plans and import round-trips instead of showing a perpetual diff.
 //
-// anyscale_cloud.compute_stack shipped without Computed (see
-// .crystl/quest/spec.json finding F1) while its siblings cloud_provider and
-// region on the same resource had the full set — a schema copy/paste gap
-// that only a live acceptance-test apply could catch, because nothing
-// exercises plan-consistency at the schema level. This test catches the same
-// class of regression in milliseconds instead of a ~30s+ acceptance test run.
+// anyscale_cloud.compute_stack shipped without Computed while its siblings
+// cloud_provider and region on the same resource had the full set — a schema
+// copy/paste gap that only a live acceptance-test apply could catch, because
+// nothing exercises plan-consistency at the schema level. This test catches
+// the same class of regression in milliseconds instead of a ~30s+ acceptance
+// test run.
 func TestServerInferredStringAttributesAreComputedWithUseStateForUnknown(t *testing.T) {
 	cases := []struct {
 		resource  resource.Resource
@@ -695,8 +695,8 @@ func TestProjectDescriptionRequiresReplaceIfConfigured(t *testing.T) {
 // Requires UseNonNullStateForUnknown specifically, NOT plain
 // UseStateForUnknown. This was originally written mechanism-agnostic (before
 // either existed in the fix) accepting either UseStateForUnknown or a static
-// Default — forge's live update-add-worker-group repro (task 1f2d592f) found
-// that plain UseStateForUnknown actively regresses this exact scenario: for
+// Default — a live update-add-worker-group repro found that plain
+// UseStateForUnknown actively regresses this exact scenario: for
 // an update that adds a brand-new list element, the resource has prior state
 // but not at that new index, so UseStateForUnknown copies the missing
 // element's null state into the plan instead of leaving it unknown, and the
