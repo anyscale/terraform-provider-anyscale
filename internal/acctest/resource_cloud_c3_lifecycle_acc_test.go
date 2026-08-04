@@ -188,7 +188,7 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// RELABELED - this does NOT prove import-recovery correctness.
+				// This does NOT prove import-recovery correctness.
 				// ImportState above runs without ImportStatePersist, so per
 				// terraform-plugin-testing's own documented behavior (and
 				// testing_new_import_state.go's actual implementation) it
@@ -280,7 +280,7 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// RELABELED - this does NOT prove import-recovery correctness.
+				// This does NOT prove import-recovery correctness.
 				// ImportState above runs without ImportStatePersist, so per
 				// terraform-plugin-testing's own documented behavior (and
 				// testing_new_import_state.go's actual implementation) it
@@ -437,7 +437,7 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// RELABELED - this does NOT prove import-recovery correctness.
+				// This does NOT prove import-recovery correctness.
 				// ImportState above runs without ImportStatePersist, so per
 				// terraform-plugin-testing's own documented behavior (and
 				// testing_new_import_state.go's actual implementation) it
@@ -552,7 +552,7 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// RELABELED - this does NOT prove import-recovery correctness.
+				// This does NOT prove import-recovery correctness.
 				// ImportState above runs without ImportStatePersist, so per
 				// terraform-plugin-testing's own documented behavior (and
 				// testing_new_import_state.go's actual implementation) it
@@ -869,7 +869,7 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// RELABELED - this does NOT prove import-recovery correctness.
+				// This does NOT prove import-recovery correctness.
 				// ImportState above runs without ImportStatePersist, so per
 				// terraform-plugin-testing's own documented behavior (and
 				// testing_new_import_state.go's actual implementation) it

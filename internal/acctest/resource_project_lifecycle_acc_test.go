@@ -178,7 +178,7 @@ resource "anyscale_project" "test" {
 				ImportStateVerify: true,
 			},
 			{
-				// RELABELED - this does NOT prove import-recovery correctness.
+				// This does NOT prove import-recovery correctness.
 				// ImportState above runs without ImportStatePersist, so it
 				// executes in a throwaway working directory that is discarded
 				// at the end of that step (terraform-plugin-testing's
