@@ -553,6 +553,7 @@ type ApplicationTemplateResult struct {
 	CreatedAt      string           `json:"created_at"`
 	LastModifiedAt string           `json:"last_modified_at,omitempty"`
 	DeletedAt      *string          `json:"deleted_at,omitempty"`
+	ArchivedAt     *string          `json:"archived_at,omitempty"`
 	Anonymous      bool             `json:"anonymous"`
 	IsDefault      bool             `json:"is_default"`
 	LatestBuild    *MiniBuildResult `json:"latest_build,omitempty"`
@@ -562,9 +563,16 @@ type ApplicationTemplateResult struct {
 	IsExperimental bool    `json:"is_experimental"`
 }
 
-// IsArchived returns true if the application template has been deleted/archived
+// IsArchived returns true if the application template has been archived or deleted.
+// The real archive endpoint (POST /api/v2/application_templates/{id}/archive) sets
+// ArchivedAt, not DeletedAt - confirmed via a live GET on a template archived weeks
+// earlier: archived_at carried a real timestamp while deleted_at was still null.
+// DeletedAt has no known live producer for this resource type today (application
+// templates have no permanent-delete API - see resource_container_image_build.go's
+// Delete), but it is a real field the API sends, so it stays checked for whenever
+// that changes rather than silently going stale the day it starts being set.
 func (a *ApplicationTemplateResult) IsArchived() bool {
-	return a.DeletedAt != nil && *a.DeletedAt != ""
+	return (a.ArchivedAt != nil && *a.ArchivedAt != "") || (a.DeletedAt != nil && *a.DeletedAt != "")
 }
 
 // MiniBuildResult is the summarized latest-build reference embedded on a decorated

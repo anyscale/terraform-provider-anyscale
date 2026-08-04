@@ -404,6 +404,70 @@ func TestContainerImageRegistryRead_NotFoundRemovesFromState(t *testing.T) {
 	}
 }
 
+// TestContainerImageRegistryRead_ArchivedRemovesFromState proves Read's other removal path: a
+// template archived out of band (console, or another Terraform run) returns 200 with archived_at
+// populated, not a 404 - deleted_at stays null even though the template is gone from the user's
+// perspective, matching a real GET on a template archived weeks earlier (see IsArchived's doc
+// comment, models.go). Before ApplicationTemplateResult grew ArchivedAt, IsArchived() checked only
+// DeletedAt and so structurally never fired here: this exact 200-with-archived_at response left the
+// resource in state forever, with no way for a later apply to self-heal it.
+func TestContainerImageRegistryRead_ArchivedRemovesFromState(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/application_templates/cenv_archived" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"result": {
+				"id": "cenv_archived", "name": "tfacc-archived-elsewhere",
+				"creator_id": "usr_1", "created_at": "2026-01-01T00:00:00Z",
+				"anonymous": false, "is_default": false,
+				"deleted_at": null, "archived_at": "2026-01-02T00:00:00Z"
+			}}`)
+			return
+		}
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	r := &ContainerImageRegistryResource{client: NewClientWithToken(server.URL, "test-token")}
+
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+
+	priorState := ContainerImageRegistryResourceModel{
+		ID:                  types.StringValue("cenv_archived"),
+		Name:                types.StringNull(),
+		ImageURI:            types.StringValue("docker.io/anyscale/ray:latest"),
+		RayVersion:          types.StringNull(),
+		RegistryLoginSecret: types.StringNull(),
+		BuildID:             types.StringValue("bld_1"),
+		BuildStatus:         types.StringValue("succeeded"),
+		CreatedAt:           types.StringValue("2026-01-01T00:00:00Z"),
+		IsBYOD:              types.BoolValue(true),
+		Revision:            types.Int64Value(1),
+		Digest:              types.StringValue("sha256:deadbeef"),
+		NameVersion:         types.StringValue("cenv_archived:1"),
+	}
+	tfState := tfsdk.State{Schema: schemaResp.Schema}
+	if diags := tfState.Set(ctx, &priorState); diags.HasError() {
+		t.Fatalf("failed to build state fixture: %v", diags)
+	}
+
+	readResp := &resource.ReadResponse{State: tfState}
+	r.Read(ctx, resource.ReadRequest{State: tfState}, readResp)
+
+	if readResp.Diagnostics.HasError() {
+		t.Fatalf("Read produced diagnostics errors for an archived template, want a clean removal: %v", readResp.Diagnostics)
+	}
+	if !readResp.State.Raw.IsNull() {
+		t.Error("Read did not remove the resource from state for a template archived out of band (200 with archived_at set)")
+	}
+}
+
 // TestContainerImageRegistryRead_UnrelatedErrorTextNotTreatedAsNotFound is what actually guards
 // Read's errors.Is(err, ErrNotFound) check (see the limit noted on the test above). It forces a
 // 500 whose unrelated body text happens to contain "not found" - the exact false positive the old
