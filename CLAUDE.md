@@ -2,592 +2,444 @@
 
 ## Purpose
 
-You are assisting with development of a Go-based Terraform Provider for managing Anyscale resources via the Anyscale API v2.
-
-### Goals
-
-- Clean, idiomatic provider code using the Terraform Plugin Framework.
-- Stable, reviewable schemas and state <-> API mappings.
-- Docs compatible with Terraform Registry format (generated where possible).
-- Easy to test, extend, and troubleshoot.
+Go-based Terraform Provider for managing Anyscale resources via the Anyscale API v2, built on
+`terraform-plugin-framework`. Aim for idiomatic provider code, stable schemas and state ↔ API
+mappings, and generated Registry-compatible docs.
 
 ---
 
-## How to Respond (Agent Behavior)
+## Always follow
 
-### Default approach
-1. **Scaffold first, then refine**
-   - Start with minimal working code (provider + one resource/data source).
-   - Iterate to add validation, plan modifiers, error handling, and tests.
-
-2. **Show only what’s needed**
-   - If files are small: show full file contents.
-   - If files are large: show focused diffs/patches.
-   - Avoid generic explanations unless asked; prefer concrete changes.
-
-   **Be succinct.** Lead with the finding or the decision; put evidence under it, only as
-   much as is needed to check the claim. Cut restatement of what the reader already knows,
-   recaps of your own prior messages, and narration of process. This applies to messages
-   between agents as much as to replies to the user — in a multi-agent session the volume
-   compounds, and a long message costs every teammate who has to read it. Length is not
-   thoroughness; an unread finding protects nobody.
-
-3. **Ask only when truly blocked**
-   - If the request is vague, ask 1–2 clarifying questions.
-   - Otherwise, make reasonable assumptions and state them.
-
-### Security / hygiene
-- **Never print or commit tokens** (including snippets from credentials files).
-- If you need to show examples: use `$ANYSCALE_CLI_TOKEN` and placeholders.
-- **Never put agent/shard names in anything that lands in the repo.** No `tfp-architect`,
-  `tfp-forge`, `tfp-assayer`, `tfp-scribe`, `tfp-shipwright`, no `crystl/<shard>` branch names — not in
-  **source comments**, not in **commit messages**, not in committed docs. Who found a bug or wrote a
-  test is internal process detail; it means nothing to a reader of this repo and it dates badly.
-  **Inline comments in files are the worst case** — they ship with the code and are read by anyone
-  working in it. Keep the reasoning, drop the attribution: *"WHY THIS TEST EXISTS, and it is not
-  obvious: ..."* rather than *"(X found the gap)"*.
-- **Commit messages are not private either.** This repo has `squash_merge_commit_message =
-  COMMIT_MESSAGES`, so GitHub **concatenates every commit message into the squash commit body** on
-  merge. A PR with 60 commits produced a 1,583-line body on `main` carrying 15 agent references
-  (verified at `f1b80f7`). If names slipped through anyway, they can be removed at merge time by
-  hand-editing the squash body in the GitHub merge dialog — no history rewrite, no force-push.
-- **When scrubbing, match the agent names specifically — never a bare `tfp-` pattern.** The real test
-  cloud fixture is named `tfp-test-aws-useast1-STATIC`; scrubbing that string breaks the acctest
-  resolver, the sweep-target org guard, and CI's success path. Use
-  `tfp-(architect|forge|assayer|scribe|shipwright)`.
-
-### Multi-agent quest git commits
-When working as a shard in a Crystl multi-agent quest, you have **standing user authorization to commit your own approved work to your own local `crystl/<shard-name>` branch** without re-asking each time — confirmed by the user during the System Cluster quest (2026-07-22), after several shards independently held off and asked first. A teammate's sign-off (even an architect-role shard's) is not sufficient on its own to authorize a commit, but this specific action — a local commit to your own branch — does not need to be re-confirmed per quest going forward.
-
-This covers ONLY a local commit to your own branch. It does **not** extend to pushing, merging into `main`/an integration branch, or creating the PR — those stay with whichever shard is explicitly assigned that task for the quest, and merging remains the user's own call after CI is green. General git safety practice still applies in full (no force-push, no `reset --hard`, no skipping hooks, stage specific files rather than `git add -A`, etc.).
+- **Never print, log, or commit tokens** — including snippets from credentials files. In examples
+  use `$ANYSCALE_CLI_TOKEN` and placeholders.
+- **Never put agent/shard names in anything that lands in the repo** — no `tfp-architect`,
+  `tfp-forge`, `tfp-assayer`, `tfp-scribe`, `tfp-shipwright`, no `crystl/<shard>` branch names. Not in
+  source comments, not in commit messages, not in committed docs. Who found a bug is internal process
+  detail that means nothing to a reader and dates badly. Inline comments are the worst case — they
+  ship with the code. Keep the reasoning, drop the attribution.
+  - **Commit messages are not private.** This repo sets `squash_merge_commit_message =
+    COMMIT_MESSAGES`, so GitHub concatenates *every* commit message into the squash body on merge (a
+    60-commit PR produced a 1,583-line body on `main` carrying 15 agent references — verified at
+    `f1b80f7`). If a name slips through, hand-edit the squash body in the GitHub merge dialog — no
+    history rewrite needed.
+  - **When scrubbing, match the names specifically — never a bare `tfp-` pattern.** The real test
+    fixture is `tfp-test-aws-useast1-STATIC`; scrubbing that string breaks the acctest resolver, the
+    sweep-target org guard, and CI's success path. Use
+    `tfp-(architect|forge|assayer|scribe|shipwright)`.
+- **Be succinct.** Lead with the finding or decision; put only enough evidence under it to check the
+  claim. Cut restatement of what the reader knows, recaps of your own prior messages, and narration
+  of process. Applies to agent-to-agent messages as much as replies to the user — in a multi-agent
+  session the volume compounds and a long message costs every teammate who reads it. Length is not
+  thoroughness; an unread finding protects nobody.
+- **This repo is the only place files may be created or edited.**
+- The product monorepo `~/projects/anyscale/product` is **read-only reference**: read it to
+  understand API surface/models; never run build/test/tooling there; never propose changes to it.
+- **Trace both halves of the backend.** API code lives in
+  `~/projects/anyscale/product/backend/server/api`; the CLI at
+  `~/projects/anyscale/product/frontend/cli/anyscale` (`commands/`, `controllers/`). Behavior is
+  often split — the CLI may resolve/derive values client-side before calling the API (e.g.
+  `anyscale cloud register` resolves the EFS mount-target IP via boto3 unless
+  `--skip-verifications`), while the control plane derives them server-side otherwise. Tracing only
+  the backend and concluding "the control plane does X" is how this repo has been wrong before.
+- **Multi-agent quest commits:** as a Crystl shard you have standing authorization to commit your
+  own approved work to your own local `crystl/<shard-name>` branch without re-asking (granted
+  2026-07-22). That covers a local commit only — pushing, merging to `main`/an integration branch,
+  and opening the PR stay with the shard assigned that task, and merging is the user's call after CI
+  is green. A teammate's sign-off does not authorize a commit. Normal git safety still applies: no
+  force-push, no `reset --hard`, no skipping hooks, stage specific files rather than `git add -A`.
 
 ---
 
-## Tech Stack & Conventions
+## Repo layout
 
-- Language: Go (as defined by `go.mod`).
-- Framework: `github.com/hashicorp/terraform-plugin-framework` + `providerserver`.
-- API: Anyscale Managed Ray API v2 (see console OpenAPI/Swagger docs).
-- Docs: `tfplugindocs` preferred; do not hand-edit generated docs under `docs/` unless the repo explicitly requires it.
-- Layout (preferred):
-  - `main.go` — provider entrypoint using `providerserver.Serve`
-  - `internal/provider/provider.go` — `Metadata`, `Schema`, `Configure`, `Resources`, `DataSources`
-  - `internal/provider/resource_*.go` — each resource in its own file
-  - `internal/provider/data_source_*.go` — each data source in its own file
-  - `docs/` — generated docs
-  - `examples/` — runnable Terraform configs
-- Prefer the shared request/parse helpers in `internal/provider/api_helpers.go` (e.g. the generic `DoRequestAndParse[T]`) over hand-rolling the request → read → close → status-check → unmarshal sequence. Many call sites already use them; new resources and data sources should too.
-- For a nullable/optional API field mapped to a Computed attribute, parse it into a `*string` and set state via `types.StringPointerValue(...)` so an absent/`null` value becomes Terraform `null`, never `""`. The null-vs-empty-string distinction is a user-facing contract; collapsing it is a bug.
+- `main.go` — entrypoint using `providerserver.Serve`
+- `internal/provider/provider.go` — `Metadata`, `Schema`, `Configure`, `Resources`,
+  `DataSources`, `EphemeralResources`
+- `internal/provider/resource_*.go`, `data_source_*.go` — one resource/data source per file
+- `internal/provider/api_helpers.go` — shared request/parse helpers
+- `internal/acctest/` — acceptance tests and sweepers
+- `templates/` — `tfplugindocs` sources: `index.md.tmpl` (registry landing page), `guides/*.md`
+- `docs/` — generated, never hand-edit · `examples/` — runnable Terraform configs
 
 ---
 
-## Provider-Specific Notes
-
-### Authentication priority
-1. `token` argument on the provider block
-2. `ANYSCALE_CLI_TOKEN` environment variable
-3. `~/.anyscale/credentials.json` (same format as Anyscale CLI)
-
-### Configure behavior
-- Centralize token resolution in a helper (e.g. `resolveToken(ctx, config)`).
-- Initialize a shared Anyscale API client once.
-- Attach it to both:
-  - `resp.ResourceData`
-  - `resp.DataSourceData`
-
-
-### Connection-level identity (singleton data sources)
-Values that are invariant across every resource a given provider/token sees — organization identity, and other connection-level metadata — belong in a dedicated **zero-argument "current X" data source**, NOT mirrored as an attribute on individual resources. Precedents: `anyscale_user` (the authenticated principal) and `anyscale_organization` (the connected org), both sourced from `GET /api/v2/userinfo` and both taking no arguments (no selector, no plural variant). Before adding such a field to a resource, ask whether it is connection-level; if so, surface it through a singleton data source instead.
-
-Cardinality gotcha: `userinfo` types `organizations` as a *list*, but the backend handler always returns exactly one element (the token-scoped org). Trace the real handler/response, not the model's list type, before assuming a field can hold more than one value — the same "trace, don't assume" discipline the `api/v2` section calls for.
-
-### Import round-trip safety (backend-derived fields and replace-on-import)
-`terraform import` must produce a **no-op plan** for a realistic config, never a destroy-and-recreate. A recurring bug class here violates that: the Anyscale backend **auto-derives** several fields from a "source" input the user *did* supply (via `_populate_missing_derived_values` in the product backend), persists them, and returns them on `GET`. When `ImportState`'s `flatten*` helpers (`cloud_config_flatten.go` / `requiredImportConfigBlocks`) recover such a field into a schema slot marked `RequiresReplace`, a config that set only the *source* input — and legitimately omitted the derived field — plans a replacement of the live cloud on the next `plan`: config-absent vs. state-present is a diff, and the attribute forces replace.
-
-Known source→derived pairs on the cloud resources: `subnet_ids`→`zones`; `file_storage_id`→`file_storage.mount_targets` (control-plane `describe_mount_targets`) and GCP `mount_path`; `memorydb_cluster_name`→`memorydb_cluster_arn`+`memorydb_cluster_endpoint`; `memorystore_instance_name`→`memorystore_endpoint`. (Only `mount_targets` is fixed as of v0.16.1; the others are open — see the backlog "Import round-trip gaps" section.)
-
-**Before recovering any field in `flatten*`, ask: does the backend auto-derive it from another input, and is this attribute `RequiresReplace`?** If yes, recovering it causes replace-on-import for the minimal config. Two valid fixes — and **check block-vs-attribute first, because it decides which are even available:**
-- **Don't recover it (leave it null)** — for an optional/auxiliary field a valid config may omit. Non-breaking; null matches a config that omits it. This is the `file_storage.mount_targets` fix (v0.16.1). Verified against the real API: an AWS cloud's `file_storage` is only ever "absent → null" or "present → exactly one real, backend-assigned mount target" (the backend hard-rejects with a 400 an EFS that has zero mount targets), so null-at-import never discards a legitimate signal.
-- **Model it `Computed`** — for a pure backend-derived *output* (an ARN/endpoint) whose schema slot is an **Attribute**. A `Computed` attribute recovers the real value *and* absorbs config-omission without a diff (the ideal: state reflects reality, config need not declare it). But **framework Blocks (`ListNestedBlock`/`SingleNestedBlock`/`SetNestedBlock`) cannot be `Computed` at all** — only Attributes can (verified against the vendored framework source). So for a Block, "recover-and-reflect-reality" requires first converting it to a `ListNestedAttribute`, which is a **breaking HCL-syntax change** (`block { ... }` → `block = [{ ... }]`); there is no in-between. That is why `mount_targets`, a Block, got the null-at-import fix rather than a Computed one.
-
-Two constraints shape every fix here:
-- **Recover only in `ImportState`, never in `Read`/Create.** The config blocks (`aws_config`/`gcp_config`/`kubernetes_config`/`object_storage`/`file_storage`) are deliberately **not** Read-refreshed; populating one outside `ImportState` triggers "provider produced inconsistent result after apply" (the C12 regression). Consequence: a recovered value is a **frozen import-time snapshot** — if the backend value later changes, state won't update and `plan` won't surface it.
-- **An `ImportState`-only fix does not self-heal already-imported state.** A resource imported under a buggy version keeps the bad value in state; upgrading the provider or `apply -refresh-only` will not correct it (Read never touches the field). Affected users must **re-import** (`terraform state rm` then `terraform import`). Ship every such fix with that migration note (precedents: `anyscale_project` collaborators; `anyscale_cloud` `mount_targets`).
-
-**Validate the premise against the real API, not just source.** This is an instance of the Design Verification Policy below — see there for the general rule. The `mount_targets` behavior above was source-traced first and only *confirmed* correct after a real 3-scenario AWS run (real infra creation for this is pre-authorized; see Acceptance Tests).
-
-### Error handling
-- Use `resp.Diagnostics.AddError` for configuration/auth issues.
-- Avoid panics / fatal logs.
-
-### Compatibility targets
-- Terraform >= 1.10 - the floor required by this provider's Ephemeral Resources adoption
-  (`anyscale_service_credentials`), currently its highest real requirement. Verify this number
-  against the provider's actual adopted primitives before citing it elsewhere - it moves if a
-  higher-floor primitive (e.g. Actions, requiring 1.14) is adopted and shipped.
-- Current `terraform-plugin-framework` version used by the repo
-
-## Local Dev Workflow (Canonical: Makefile)
-
-### Build
-```bash
-make build
-```
-
-### Unit tests
-```bash
-make test
-```
-
-### Lint / format (optional but encouraged)
-```bash
-make fmt
-make lint
-```
-
-### Docs
-```bash
-make docs
-# Do not manually edit generated docs under docs/
-```
-- Schema `MarkdownDescription` strings are the source `tfplugindocs` renders into the registry-published doc pages, so write them to explain non-obvious behavior inline, not just label the field — e.g. *why* a data source takes no arguments, *why* an attribute can be `null`, or what a value is used for. A first-time reader should not have to guess. The `anyscale_organization` data source schema is a good example.
-
-## Changelog Policy: When to Skip
-
-The `changelog-gate` CI check accepts EITHER a `.changelog/<PR#>.txt` fragment OR the `skip-changelog` label — one is required on every PR. See [CONTRIBUTING.md](CONTRIBUTING.md#changelog-fragments) ("No user-facing effect?") for the full policy and the fragment format; this section is the short agent-facing version.
-
-- If a PR contains **no changes that require a new provider version** — e.g. CI/tooling, tests, internal docs, or examples-only edits **outside `examples/resources/`, `examples/data-sources/`, and `examples/provider/`** — apply the **`skip-changelog`** label instead of adding a fragment. Those three example directories feed `tfplugindocs` and land on registry-published doc pages, so changes there are provider-facing even though they are "just an example."
-- Only changes to the provider itself (schemas, resources/data sources, observable provider behavior, user-facing bug fixes) require a `.changelog/<PR#>.txt` fragment — folded into the next version bump at release time, not immediately.
-
-If you are unsure whether a change is user-facing, add a fragment — it is the safe default.
-
-## Deprecation Policy: Migration Guides
-
-Whenever a change deprecates or removes a user-facing attribute, resource, or data source, **ask
-the user** whether it warrants a migration guide before writing one unprompted. Do not assume a
-migration guide is needed just because a breaking change shipped — the `cloud_deployment_id` →
-`cloud_resource_id` removal (v0.13.0) intentionally skipped one, since the provider had no
-production users yet to migrate. That call belongs to the user each time, not a default.
-
-## Design Verification Policy: Real-Execution Gate
-
-Before a design for a bug fix or new behavior is confirmed and handed off for implementation —
-at design-confirmation time, not just before it ships — get a real, logged confirmation for any
-part of it that depends on either of these, treated as two distinct checks (they catch different
-failure modes and neither substitutes for the other):
-
-- **Gate 1 — API response shape.** Applies whenever correctness depends on a *specific* API
-  response shape or behavior for a given scenario — not "does this endpoint exist," but "what does
-  it actually return here." Confirm with a read-only call against a shared fixture (the static test
-  cloud used elsewhere in this doc) by default; escalate to a real create+import only when a
-  read-only check can't answer the question.
-- **Gate 2 — Framework/Core contract compliance.** Applies whenever a design relies on a specific
-  Terraform Plugin Framework or Core behavior for a plan modifier, schema shape, or state
-  transition — e.g. whether a modifier may rewrite `resp.PlanValue` at all for a given attribute.
-  Framework source can describe the mechanism without revealing every constraint Core enforces at
-  plan time. Confirm with a real `resource.Test` plan/apply run, not just a read of the vendored
-  source or a unit test built against it — a unit test written against the same source can share
-  its blind spot.
-
-"Done" means a real logged request/response, or real acceptance-test output, cited in the design
-doc — not "should return/behave like X" reasoning, and not a second source-trace restated as if it
-were independent verification. If a design's correctness genuinely depends only on documented,
-stable behavior nobody disputes, say so explicitly and skip the rest — that's a stated judgment
-call, not a silent omission.
-
-A Gate 1 confirmation doesn't stop at the design doc — the same confirmed wire shape must carry
-into any mock/fixture the committed tests use. A mock that returns a value the real API would never
-send in that scenario can pass against a broken fix and prove nothing (see the `mount_targets`
-mock-omission miss under Testing guidance below, and the same shape repeated in this fix's own first
-test draft before Gate 1's live `GET` corrected it).
-
-This is a **design-time** gate, separate from the standard **ship-time** gate (`make build`/`test`/
-`docs` green, changelog fragment wording checked against the actual merged diff, real-infra
-end-to-end confirmation before tagging). Different question, different stage — don't collapse them
-into one checkbox. Assign each gate as an explicit line item when scoping a design's test criteria;
-don't leave it to whoever happens to get blocked into finding it.
-
-Point-in-time precedent (2026-07-22, `object_storage.region` import fix): a design
-(Optional+Computed, recover-always) was independently source-traced and approved by three people
-before anyone ran it against a live API — only caught when one contributor, blocked on their own
-execution, traced the real backend and found the API collapses two distinct scenarios into an
-identical null response, which a follow-up live read-only `GET` against the static test cloud then
-confirmed byte-for-byte (Gate 1). The corrected design's own first implementation attempt then
-failed a *second*, unrelated way — a plan modifier rewriting `resp.PlanValue` to `null` against a
-non-null config, which Terraform Core rejects outright — caught only by an actual `resource.Test`
-acceptance run, not by re-reading the spec or the framework source (Gate 2). Same root gap behind
-both: design confirmed on paper before it was confirmed against anything real. Re-derive current
-specifics before citing this precedent as still-accurate; this note describes what happened, not a
-permanent property of this fix.
-
-## Framework-First Principle: Prefer Native Primitives Over Ad-Hoc Patterns
-
-When a behavior can be expressed through a terraform-plugin-framework or Terraform Core native
-primitive, prefer it over a hand-rolled equivalent. The framework's primitives carry semantics
-Core and downstream tooling already understand; an ad-hoc reimplementation reproduces the
-mechanism but loses the contract (and usually the edge cases). Reach for the native primitive
-first:
-
-- **Ephemeral Resources** (TF 1.10+) — for API-returned secrets that must never land in state.
-  Do NOT surface a live credential as a Sensitive Computed attribute (Sensitive does not keep it
-  out of state); omit it or surface it through an ephemeral resource. Adopted 2026-07-23:
-  `anyscale_service_credentials` (`auth_token`/`secondary_auth_token`).
-- **Write-only arguments** (TF 1.11+) — for input secrets that should not persist in state.
-  Converting an EXISTING Sensitive-but-in-state argument to write-only is a breaking
-  state-behavior change; adding a NEW write-only argument is additive. Not yet adopted here.
-- **Actions** (TF 1.14+; framework compatibility status is genuinely ambiguous as of
-  `terraform-plugin-framework` v1.19.0 — its introducing CHANGELOG entry called it "technical
-  preview... until Terraform 1.14 is generally available," that condition has since been met, but
-  no later entry formally promotes it to GA either; re-check before relying on either label) — for
-  imperative, ad-hoc side-effects outside a resource's declarative lifecycle. Layer an Action ON a
-  resource; never bend declarative CRUD to carry an imperative verb. Model Actions 1:1 to real
-  backend operations; do not synthesize composite verbs (e.g. a "restart" with no backend
-  endpoint) whose failure modes Terraform cannot reason about. `anyscale_system_cluster_terminate`
-  was fully designed, built, and real-infra confirmed 2026-07-23, then DEFERRED (not shipped)
-  rather than bumping the documented floor to 1.14 for one action — see
-  `docs/deferred/actions-adoption/README.md` for the preserved work and the revisit steps.
-- **timeouts{} block** — per-operation timeouts over an ad-hoc duration attribute (the v0.19.0
-  precedent: schema + state upgrader + mutation-proven tests + internal migration note).
-- **Plan modifiers / Default / state upgraders / validators** — over imperative fix-ups in CRUD.
-
-### Expose a surface only for a real end-user consumption path
-
-Before adding a new provider surface for a value the API happens to return, verify there is an
-actual end-user consumption path — trace the backend AND the CLI AND the public SDK AND (for
-anything console-adjacent) the web UI, not just "the API returns it" or "it's shaped like a
-credential." `anyscale_system_cluster_credentials` (`workload_service_url_auth`) was designed,
-built, and real-infra confirmed before this check caught that the value is browser cookie-auth
-plumbing consumed solely by the Anyscale console's own Ray-dashboard UI — not the CLI (which
-reads only `status` from the same endpoint), not the public SDK (which doesn't ship the
-describe-response model at all), no backend re-consumer. It was removed before merge. Contrast
-`anyscale_service_credentials`'s `auth_token`: unambiguously end-user-facing (the CLI prints a
-ready-to-use `curl -H "Authorization: Bearer <token>"` command and has dedicated token add/delete
-commands) — that one shipped.
-
-### Document the version floor and preview status on the page itself
-
-`tfplugindocs` auto-renders a compatibility badge ONLY for write-only attributes (the "Terraform
-1.11 and later" note); it renders NO equivalent banner on an Ephemeral Resource or Action doc
-page. Any new ephemeral resource or action MUST hand-write its Terraform version floor — and,
-for an Action, its current framework preview/stable status — into its own top-level
-`MarkdownDescription`, or a reader lands on the page with zero indication a floor even applies.
-
-### Don't demonstrate auto-triggering a destructive Action
-
-An example for a destructive Action (e.g. a terminate) should show the standalone
-`terraform apply -invoke=action.<type>.<name>` form, not a `lifecycle.action_trigger` block that
-auto-wires it to another resource's lifecycle event — the latter is a real, supported mechanism,
-but modeling it as the canonical example risks a copy-pasted config that destroys something the
-user didn't mean to trigger yet.
-
-### Version-floor discipline (verify at design time — do not assume)
-
-Native primitives raise the Terraform version required TO USE THEM. Whether that pushes the
-provider's globally documented floor, or stays a per-feature callout on top of an unchanged
-floor, is a real policy call, not something to assume either way — confirm the exact number
-against the framework source/CHANGELOG for each primitive, and confirm with the user whether it
-gates the global floor or stays additive. See "Compatibility targets" above for the current
-number and CHANGELOG.md for how it got there.
-
-### Extend the tooling to the new primitive, don't work around it
-
-When a new framework primitive doesn't fit existing tooling built before it existed, extend the
-tooling rather than force the primitive into the nearest existing category. Precedent: the
-changelog-fragment type list (`tools/changelog-build/fragment.go`) had only `new-resource` and
-`new-data-source`; filing an Ephemeral Resource's fragment under `new-resource` would have
-rendered it under "New Resources" and misled a reader into trying a `resource` block that doesn't
-exist for that type. Added `new-ephemeral-resource` and `new-action` as real first-class types
-instead. Same instinct applies to the doc-callout and CI-shard-naming gaps immediately above.
-
-### Sweep for remaining ad-hoc patterns
-
-When touching a resource, check whether an ad-hoc pattern it uses now has a framework-native
-replacement (hand-rolled timeout, imperative side-effect wedged into Update, secret held
-Sensitive-in-state, manual state migration). Prefer migrating it — under the same
-breaking-vs-additive and Gate discipline above — over extending the ad-hoc pattern.
-
-## Terraform Local Testing (dev_overrides)
-
-This repo uses Terraform dev_overrides in ~/.terraformrc to load the local provider binary.
-
-### Key rules
-
-- **Do not rely on `terraform init` to install the dev-overridden provider itself** — it is not in
-  the public registry, so init cannot fetch it; your locally built binary is what dev_overrides
-  substitutes in its place. Init still runs fine and installs every *other* provider normally in
-  this state — it explicitly skips only the overridden one ("These providers are not installed as
-  part of init since they were overwritten") — so it's safe, and sometimes necessary, to run for a
-  reason unrelated to this provider (e.g. `terraform providers lock -platform=...` to refresh
-  another provider's lock entries, or a fresh module fetch), as long as you don't expect it to touch
-  `anyscale/anyscale`. Confirmed empirically 2026-07-22 during an `object_storage.region` real-infra
-  e2e — re-verify against the terraform-plugin-framework/CLI version in use before relying on this
-  if it's been a while.
-- Rebuild after changes (`make build`) before running terraform plan/apply.
-- `make install` is a convenience wrapper that builds and prints the expected local binary location.
-
-### Example flow
+## Commands (Makefile is canonical)
 
 ```bash
-# Build provider binary where dev_overrides expects it
-make build
-
-# Test with example configs (no init)
-cd examples/aws-vm-basic/
-terraform plan
-terraform apply
-```
-
----
-
-## Testing guidance
-
-- Prefer:
-	- Unit tests for schema validation and model conversions.
-	- Acceptance tests using resource.
-	- Test.
-
-### Verifying test strength and CI execution
-- **Prove a "mutation-proof" test actually catches its regression.** If a test is meant to guard a specific behavior (e.g. a nullable field mapping to `null` not `""`, or a length guard preventing a panic), do not accept it on code review alone — temporarily introduce the regression, confirm the test FAILS, then revert (byte-diff clean). A test that would still pass against the broken code is not protecting anything.
-- **New acceptance tests must match their CI shard's name regex, or they are silently skipped.** CI runs acceptance tests in two name-sharded jobs (see `.github/workflows/ci.yml`): `acctest-data` selects `^TestAcc[A-Za-z]+DataSource` and `acctest-resource` selects `^TestAcc[A-Za-z]+Resource`. A test whose name does not match its shard's regex neither runs nor fails — it simply never executes. Name new acctests accordingly (e.g. `TestAcc<Thing>DataSource_<Case>`), and confirm they genuinely RUN (not SKIP) by reading the shard's job log, not just trusting the green checkmark.
-- **This extends to newer primitives too.** An Ephemeral Resource's acceptance test still runs through `resource.Test`/`TestStep` exactly like a regular resource (via the `echoprovider` pattern), so its Go test function name must still end in the literal word `Resource` to land in the `acctest-resource` shard (e.g. `TestAcc<Thing>EphemeralResource`, not a more literal but shard-blind name like `TestAccEphemeral<Thing>`). An Action has no acceptance-test tooling in `terraform-plugin-testing` at all today — only a Go-level unit test against a mocked client is possible — so it must NOT carry a `TestAcc` prefix, since that prefix means "shard-gated real acceptance test" everywhere else in this repo, and a unit test wearing it would misrepresent its own coverage.
-- **Prove an import-recovery fix with two tests — a Create→Import→re-apply→assert-no-op sequence cannot do it.** An `ImportState` step without `ImportStatePersist: true` (the default) runs in a **throwaway working directory**; `terraform-plugin-testing`'s own doc comment on that field says the imported state "is discarded at the end of the test step that is verifying import behavior" (see the `importStatePersist` branch in `testStepNewImportState`, `helper/resource/testing_new_import_state.go`). So a later step in the same test plans against whatever the preceding **Create** left, never against what import recovered — it cannot catch an import-recovery bug no matter how its comment reads. This repo carries the empirical disproof: a deliberately broken build with `regionSemanticEqualPlanModifier` removed still passed that three-step form (see the header of `resource_cloud_import_object_storage_region_acc_test.go`). Use instead:
-  - **Test A — what import actually recovered.** Assert inside the import step via `ImportStateCheck`, which runs in the same throwaway directory and therefore sees the real imported values. Add `ImportStateVerify: true` where a byte-compare is meaningful; a legitimate divergence goes in `ImportStateVerifyIgnore` **and** gets an explicit `ImportStateCheck` assertion, never a silent exclusion. A cold-import-only test cannot use `ImportStateVerify` at all — there is no prior state to compare against.
-  - **Test B — planning against the recovered shape.** Two sequential `Config`-only steps (no import), which *do* carry state forward, reconstructing the same state shape import would produce (e.g. a field omitted, then declared) and asserting the plan action on the second step. This is what proves "no spurious replace."
-  - `ImportStatePersist: true` looks like a shortcut but is not a drop-in fix for a Create-then-import test: `terraform import` refuses an address already managed in that working directory (`Error: Resource already managed by Terraform`). It works only for a genuinely cold import — import as the first step, resource pre-seeded out of band — as in `TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI`.
-  - The three-step form still proves something real and lesser: that Create's own state survives a same-config re-apply. Keep such tests if useful, but label them as refresh/plan stability, never as import coverage.
-- **A fixture that cannot represent the failure cannot detect it.** The mock/backend MUST return the backend-derived field the fix concerns: the v0.15.2 `mount_targets` import test passed only because its mock omitted `mount_targets` entirely — that omission is exactly why the bug shipped green.
-- **Never mutate a shared protected test fixture during real-infra validation.** The static cloud fixture and its IAM role/trust policy are shared across runs; for throwaway real-infra checks, stand up a dedicated, narrowly-scoped IAM role (same attached policies, a fresh trust policy scoped to a new `external_id`) and tear it down afterward — do not touch the fixture's own role even temporarily.
-
-### Acceptance Tests
-
-Acceptance tests run real API calls against Anyscale and require credentials.
-They are found in `internal/acctest`
-
-```bash
-make testacc
-```
-
-**Creating real cloud infrastructure for testing is pre-authorized.** Real EKS and GKE clouds
-(and whatever resources they provision) may be created for acceptance and example testing
-without asking first, as long as everything is torn down within 24 hours of creation. This
-covers both the acceptance tests here and the Makefile scenario targets under
-[Repo-Level Terraform Scenario Tests](#repo-level-terraform-scenario-tests-examples) below.
-Real AKS infrastructure is **not** covered by this authorization yet — hold real Azure test
-creation until told otherwise.
-
-### Acceptance tests with coverage
-
-```bash
-make testacc-cover
-```
-
-### Credentials
-Acceptance tests must authenticate using the same resolution order as the provider:
-1.	ANYSCALE_CLI_TOKEN
-2.	`~/.anyscale/credentials.json` from `anyscale login`
-
-**Never print or log raw tokens.**
-
-### Test cloud selection - preferred behavior: auto-discover
-
-Acceptance tests should be able to run without manually setting cloud IDs. Using the credentials, access the Anyscale APIs to list all clouds at:
-https://console.anyscale.com/api/v2/docs#/default/list_clouds_api_v2_clouds__get
-
-Optional overrides:
-- `ANYSCALE_TEST_CLOUD_ID` — pin tests to an existing cloud ID (validated to exist).
-- `ANYSCALE_TEST_CLOUD_NAME` — pin tests by cloud name (must resolve uniquely).
-
-If neither are set, tests fall back to a default pinned cloud NAME
-(`tfp-test-aws-useast1-STATIC`, a manually-created known-good fixture) resolved to
-an ID at runtime, before finally trying auto-discovery/ephemeral-creation. This
-default exists because the CI test org has no reliably-healthy cloud for
-auto-discovery to land on. It works the same way for a local run, an agent, and CI
-with zero setup, since it lives in the resolver itself rather than a wrapper script.
-
-Deliberately by NAME, not by ID: the cloud's ID is never committed anywhere in this
-repo (only its name, which is not sensitive). If you're tempted to "simplify" this by
-hardcoding the ID somewhere, don't — that was an explicit call, not an oversight.
-
-If none of the above resolve, tests should:
-1.	Discover an existing test cloud (e.g., by name prefix/tag such as tf-acc-*), or
-2.	Create an ephemeral test cloud, then reuse it during the test run.
-
-Cleanup:
-- By default, destroy any ephemeral cloud created by tests.
-- If `ANYSCALE_TEST_KEEP=1`, keep the created cloud for debugging and print the cloud ID/name (but never tokens).
-
-### Test user fixtures for the organization_user/invitation real-infra tests
-
-The `anyscale_organization_user` and `anyscale_organization_invitation` resources have
-real-infra acceptance tests that are opt-in via env var (see `resource_organization_user_acc_test.go`
-and `resource_organization_invitation_acc_test.go`) — they are genuinely destructive (member
-delete removes a real org member; a real permission-level change modifies real access) or
-rate-limited (invitations), so they must never run against an arbitrary or shared identity.
-
-Two optional env vars, resolved at runtime, tests skip cleanly if unset:
-- `ANYSCALE_TEST_USER_EMAIL` — an existing, accepted org member dedicated to testing (no clouds
-  assigned; the user surfaces in this repo manage org-level role, not cloud access, so a
-  cloud-less member is the right fixture). Used for organization_user import/read/update real-infra
-  checks and org_user/org_users data source lookups.
-- `ANYSCALE_TEST_INVITE_EMAIL` — a fresh, not-yet-invited address under the same disposable
-  identity, used as the invite target for the invitation lifecycle test (including a mixed-case
-  variant, to exercise the email-casing fix against real infra). Invalidate any invitation these
-  tests create when done.
-
-Same pattern as `ANYSCALE_TEST_CLOUD_NAME` above and deliberate for the same reason: the literal
-email address is never committed to this repo, only referenced by env var name. Resolve it locally
-(or in your own CI secret) from a real, disposable plus-alias under an inbox you control — e.g.
-`you+tfprovidertest@yourdomain.com` — so invitation emails land somewhere real and safe rather than
-a stranger's inbox, and losing the fixture is a non-event. Do not point either var at a real
-colleague's account or any identity you cannot afford to have its role temporarily changed.
-
----
-
-## Quick reference
-
-```bash
-# Build & Install
-make build
-make install
-
-# Testing
-make test
-make testacc
-
-# Code Quality
-make fmt
-make lint
-pre-commit run --all-files
-
-# Documentation
-make docs
+make build            # build binary where dev_overrides expects it
+make install          # build + print expected local binary location
+make test             # unit tests
+make test-compile     # verify tests compile without running them
+make testacc          # acceptance tests (real API calls, needs credentials)
+make testacc-cover    # acceptance tests with coverage
+make fmt lint         # format / lint
+make check            # fmt + vet + lint + test-compile
+make ci               # deps + check + test
+make docs             # regenerate docs from schema + templates/
 make docs-validate
+make validate-examples  # terraform fmt + tflint + validate across examples/
+make sweep            # delete leaked test resources
+make sweep-dry-run    # log what would be deleted
+pre-commit run --all-files
 ```
 
----
+### Local testing with dev_overrides
 
-## Repo-Level Terraform Scenario Tests (Examples)
+`~/.terraformrc` points Terraform at the locally built binary.
 
-There are Makefile targets that run end-to-end Terraform applies/destroys using the examples/ configs.
-
-### Primary matrix (efficient coverage)
+- **`terraform init` cannot install this provider** — it is not in the public registry, and
+  dev_overrides substitutes your local build. Don't expect init to touch `anyscale/anyscale`.
+- **Init only skips it safely on Terraform >= 1.15.0.** Earlier versions still query the registry
+  for a dev-overridden provider with no registry presence and hard-fail, contradicting
+  dev_overrides' own warning text. At >= 1.15 init is safe and sometimes necessary to run for
+  unrelated reasons (locking another provider, fetching modules) — it installs every other provider
+  normally and reports the overridden one as "not installed as part of init." This is why
+  `ci.yml`/`scheduled-acctest.yml` pin `1.15.7`; see the comment on ci.yml's Setup Terraform step.
+- Rebuild (`make build`) before every `terraform plan`/`apply`.
 
 ```bash
-make test-primary
-# or narrowed:
-make test-primary-aws
-make test-primary-gcp
-make test-primary-vm
-make test-primary-k8s
+make build
+cd examples/aws-vm-basic/ && terraform plan && terraform apply   # no init needed
 ```
 
-### Individual scenarios
+---
+
+## Coding conventions
+
+- Use the shared helpers in `api_helpers.go` (e.g. generic `DoRequestAndParse[T]`) instead of
+  hand-rolling request → read → close → status-check → unmarshal.
+- **Nullable/optional API field → Computed attribute:** parse into a `*string` and set state with
+  `types.StringPointerValue(...)`, so absent/`null` becomes Terraform `null`, never `""`. The
+  null-vs-empty-string distinction is a user-facing contract; collapsing it is a bug.
+- Report config/auth problems with `resp.Diagnostics.AddError`. No panics, no fatal logs.
+- Schema `MarkdownDescription` strings are what `tfplugindocs` publishes — explain non-obvious
+  behavior inline (why a data source takes no arguments, why an attribute can be `null`, what a
+  value is for), don't just label the field. `anyscale_organization` is a good example.
+- **`docs/` is output, not source.** Doc edits belong in the schema's `MarkdownDescription`, in
+  `templates/index.md.tmpl` (landing page), or in `templates/guides/*.md` — then `make docs`. Editing
+  `docs/` directly gets overwritten on the next regeneration.
+
+### Authentication
+
+Resolution order, used by the provider **and** acceptance tests:
+
+1. `token` argument on the provider block
+2. `ANYSCALE_CLI_TOKEN`
+3. `~/.anyscale/credentials.json` (Anyscale CLI format, from `anyscale login`)
+
+Centralize resolution in a helper (e.g. `resolveToken(ctx, config)`), initialize one shared API
+client, and attach it to both `resp.ResourceData` and `resp.DataSourceData`.
+
+### Connection-level identity → singleton data source
+
+Values invariant across every resource a given provider/token sees (organization identity, other
+connection-level metadata) belong in a zero-argument "current X" data source, **not** mirrored as an
+attribute on individual resources. Precedents: `anyscale_user` and `anyscale_organization`, both
+from `GET /api/v2/userinfo`, both argument-free with no plural variant.
+
+Gotcha: `userinfo` types `organizations` as a *list*, but the handler always returns exactly one
+element (the token-scoped org). Trace the real handler, not the model's type, before assuming a
+field can hold more than one value.
+
+### Compatibility
+
+- Terraform **>= 1.10** — the floor set by Ephemeral Resources (`anyscale_service_credentials`),
+  currently the highest real requirement. Re-verify against actually-adopted primitives before
+  citing this number elsewhere.
+- The `terraform-plugin-framework` version currently in `go.mod`.
+- **Two distinct numbers — don't conflate them.** 1.10 is the *user-facing* floor (README, docs). CI
+  and the local dev loop need **>= 1.15** purely for the dev_overrides `init` behavior above; a
+  Registry user never hits that path, so the CI pin is not the provider's floor. `sweep.yml`
+  deliberately stays at 1.10.0 — it only calls the Anyscale API, never plan/apply.
+- A native primitive raises the floor required *to use it*. Whether that moves the globally
+  documented floor or stays a per-feature callout is a user decision — confirm the exact number
+  against framework source/CHANGELOG, then ask.
+
+---
+
+## Framework-first: prefer native primitives
+
+Native primitives carry semantics Core and downstream tooling already understand; an ad-hoc
+reimplementation copies the mechanism and loses the contract.
+
+- **Ephemeral Resources** (TF 1.10+) — for API-returned secrets that must never reach state.
+  `Sensitive` does **not** keep a value out of state; omit it or use an ephemeral resource.
+  Adopted: `anyscale_service_credentials`.
+- **Write-only arguments** (TF 1.11+) — for input secrets that shouldn't persist. Adding a new one
+  is additive; converting an existing Sensitive-in-state argument is breaking. Not yet adopted.
+- **Actions** (TF 1.14+) — for imperative side-effects outside declarative CRUD. Layer an Action on
+  a resource; never bend CRUD to carry an imperative verb. Model 1:1 to real backend operations —
+  no synthesized composite verbs. Framework GA-vs-preview status is genuinely ambiguous as of
+  framework v1.19.0; re-check before relying on either label. `anyscale_system_cluster_terminate`
+  was built and real-infra confirmed, then **deferred** rather than bump the floor to 1.14 — see
+  `docs/deferred/actions-adoption/README.md`.
+- **`timeouts{}` block** over an ad-hoc duration attribute (v0.19.0 precedent).
+- **Plan modifiers / `Default` / state upgraders / validators** over imperative fix-ups in CRUD.
+
+Supporting rules:
+
+- **Only expose a surface with a real end-user consumption path.** Trace backend *and* CLI *and*
+  public SDK *and* (if console-adjacent) the web UI — "the API returns it" is not enough.
+  `workload_service_url_auth` was built and real-infra confirmed before this check found it was
+  console-only cookie plumbing; removed before merge. Contrast `auth_token`, which the CLI prints as
+  a ready-to-use `curl` command — that shipped.
+- **Hand-write the version floor into the doc page.** `tfplugindocs` renders a compatibility badge
+  only for write-only attributes — never for an Ephemeral Resource or Action. Put the floor (and,
+  for an Action, its preview status) in the top-level `MarkdownDescription`.
+- **Don't demo auto-triggering a destructive Action.** Show
+  `terraform apply -invoke=action.<type>.<name>`, not a `lifecycle.action_trigger` block that wires
+  it to another resource's lifecycle.
+- **Extend tooling to fit a new primitive** rather than filing it under the nearest existing
+  category — e.g. `tools/changelog-build/fragment.go` gained real `new-ephemeral-resource` and
+  `new-action` types instead of misfiling an ephemeral resource as `new-resource`.
+- **Sweep while you're there:** when touching a resource, check whether a hand-rolled timeout,
+  imperative Update side-effect, Sensitive-in-state secret, or manual migration now has a native
+  replacement, and migrate it under the same breaking-vs-additive and gate discipline.
+
+---
+
+## Import round-trip safety (backend-derived fields)
+
+`terraform import` must yield a **no-op plan** for a realistic config, never destroy-and-recreate.
+The recurring bug class: the backend auto-derives fields from a "source" input the user did supply
+(`_populate_missing_derived_values`), persists them, and returns them on `GET`. When `ImportState`'s
+`flatten*` helpers (`cloud_config_flatten.go` / `requiredImportConfigBlocks`) recover such a field
+into a slot marked `RequiresReplace`, a config that set only the source input plans a **replacement
+of the live cloud**: config-absent vs. state-present is a diff, and the attribute forces replace.
+
+Known source→derived pairs on the cloud resources: `subnet_ids`→`zones`;
+`file_storage_id`→`file_storage.mount_targets` and GCP `mount_path`;
+`memorydb_cluster_name`→`memorydb_cluster_arn`+`memorydb_cluster_endpoint`;
+`memorystore_instance_name`→`memorystore_endpoint`.
+
+Per-field status changes, so check the schema and the "Import round-trip gaps" section in
+`WORKBENCH.md` rather than trusting a status line here. As of `9dd5ecc` the derived slots that
+absorb config-omission (`Optional+Computed`) are `mount_targets`, `mount_path`,
+`memorydb_cluster_arn`, and `memorystore_endpoint`; the one remaining exposed slot is
+**`kubernetes_config.zones`** — `Optional` + `RequiresReplace` with no `Computed`, on both
+`anyscale_cloud` and `anyscale_cloud_resource`. Changing it is a schema change on a `RequiresReplace`
+attribute: it needs its own design pass and the two-test proof below, not a release-time patch.
+
+**Before recovering any field in `flatten*`, ask: does the backend derive it from another input, and
+is the attribute `RequiresReplace`?** If yes, choose a fix — and **check block-vs-attribute first,
+because it decides which fixes exist:**
+
+- **Leave it null (don't recover)** — for an optional/auxiliary field a valid config may omit.
+  Non-breaking; null matches a config that omits it.
+- **Model it `Computed`** — for a pure backend-derived output whose slot is an **Attribute**: it
+  recovers the real value *and* absorbs config-omission without a diff. But framework **Blocks
+  (`ListNestedBlock`/`SingleNestedBlock`/`SetNestedBlock`) cannot be `Computed` at all** — only
+  Attributes can. Making a Block `Computed`-capable means converting it to a
+  `ListNestedAttribute`, a **breaking HCL change** (`block { ... }` → `block = [{ ... }]`). There is
+  no in-between.
+
+Two constraints on every fix:
+
+- **Recover only in `ImportState`, never in `Read`/Create.** The config blocks (`aws_config`,
+  `gcp_config`, `kubernetes_config`, `object_storage`, `file_storage`) are deliberately not
+  Read-refreshed; populating one outside `ImportState` triggers "provider produced inconsistent
+  result after apply" (the C12 regression). Consequence: a recovered value is a frozen import-time
+  snapshot — later backend changes won't reach state and won't surface in `plan`.
+- **An `ImportState`-only fix does not self-heal existing state.** State imported under a buggy
+  version keeps the bad value; neither upgrading nor `apply -refresh-only` corrects it. Affected
+  users must re-import (`terraform state rm`, then `terraform import`). Ship every such fix with
+  that migration note (precedents: `anyscale_project` collaborators, `anyscale_cloud`
+  `mount_targets`).
+
+---
+
+## Design Verification Policy: real-execution gate
+
+At **design-confirmation** time — not just before shipping — get real logged confirmation for any
+part of a design that depends on either gate. They catch different failure modes; neither
+substitutes for the other.
+
+- **Gate 1 — API response shape.** Whenever correctness depends on what an endpoint actually
+  returns *in a specific scenario* (not merely that it exists). Default to a read-only call against
+  the static test cloud; escalate to a real create+import only if read-only can't answer it.
+- **Gate 2 — Framework/Core contract.** Whenever the design relies on specific plugin-framework or
+  Core behavior for a plan modifier, schema shape, or state transition (e.g. whether a modifier may
+  rewrite `resp.PlanValue` for a given attribute). Confirm with a real `resource.Test` plan/apply —
+  framework source describes the mechanism without revealing every constraint Core enforces at plan
+  time, and a unit test built on that source shares its blind spot.
+
+"Done" means a logged request/response or real acceptance-test output cited in the design doc — not
+"should behave like X" reasoning, and not a second source-trace restated as independent
+verification. If correctness genuinely rests only on documented, undisputed behavior, say so
+explicitly and skip the rest.
+
+- **Carry the confirmed wire shape into the mocks.** A fixture returning something the real API
+  would never send in that scenario can pass against a broken fix and prove nothing.
+- This is separate from the **ship-time** gate (`make build`/`test`/`docs` green, changelog wording
+  checked against the merged diff, real-infra end-to-end before tagging). Assign each gate as an
+  explicit line item when scoping a design's test criteria.
+
+---
+
+## Testing
+
+Unit tests for schema validation and model conversions; acceptance tests via `resource.Test`.
+
+### Test strength and CI execution
+
+- **Prove a mutation-proof test.** Temporarily introduce the regression, confirm the test FAILS,
+  then revert (byte-diff clean). Code review alone doesn't establish that a test protects anything.
+- **Match the CI shard name regex or the test silently never runs.** `.github/workflows/ci.yml`
+  shards acceptance tests: `acctest-data` runs `^TestAcc[A-Za-z]+DataSource`, `acctest-resource`
+  runs `^TestAcc[A-Za-z]+Resource`. A non-matching name neither runs nor fails. Confirm new tests
+  genuinely RUN (not SKIP) by reading the shard's job log, not the green checkmark.
+- **Naming corollaries.** An Ephemeral Resource's acceptance test runs through `resource.Test` (via
+  `echoprovider`), so its name must still end in `Resource` (e.g. `TestAccFooEphemeralResource`, not
+  `TestAccEphemeralFoo`). An Action has no acceptance-test tooling in `terraform-plugin-testing` at
+  all — only a mocked Go unit test is possible, so it must **not** carry the `TestAcc` prefix.
+- **Import-recovery fixes need TWO tests — a Create→Import→re-apply→assert-no-op sequence cannot
+  prove one.** An `ImportState` step without `ImportStatePersist: true` (the default) runs in a
+  **throwaway working directory**; `terraform-plugin-testing`'s own doc comment on that field says the
+  imported state "is discarded at the end of the test step that is verifying import behavior" (see the
+  `importStatePersist` branch in `testStepNewImportState`, `helper/resource/testing_new_import_state.go`).
+  A later step therefore plans against whatever **Create** left, never against what import recovered —
+  it cannot catch an import-recovery bug however its comment reads. This repo carries the empirical
+  disproof: a deliberately broken build with `regionSemanticEqualPlanModifier` removed still passed
+  that three-step form (see the header of `resource_cloud_import_object_storage_region_acc_test.go`).
+  Use instead:
+  - **Test A — what import actually recovered.** Assert inside the import step via `ImportStateCheck`,
+    which runs in the same throwaway directory and so sees the real imported values. Add
+    `ImportStateVerify: true` where a byte-compare is meaningful; a legitimate divergence goes in
+    `ImportStateVerifyIgnore` **and** gets an explicit `ImportStateCheck` assertion, never a silent
+    exclusion. A cold-import-only test cannot use `ImportStateVerify` at all — there is no prior state.
+  - **Test B — planning against the recovered shape.** Two sequential `Config`-only steps (no import),
+    which *do* carry state forward, reconstructing the state shape import would produce (e.g. a field
+    omitted, then declared) and asserting the plan action on the second. This proves "no spurious
+    replace."
+  - `ImportStatePersist: true` is not a drop-in fix: `terraform import` refuses an address already
+    managed in that working directory (`Error: Resource already managed by Terraform`). It works only
+    for a genuinely cold import — import as the first step, resource pre-seeded out of band — as in
+    `TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI`.
+  - The three-step form still proves something real but lesser: that Create's own state survives a
+    same-config re-apply. Keep such tests if useful, but label them refresh/plan stability, never
+    import coverage.
+- **A fixture that cannot represent the failure cannot detect it.** The mock/backend MUST return the
+  derived field the fix concerns: the v0.15.2 `mount_targets` import test passed only because its mock
+  omitted `mount_targets` entirely — that omission is exactly why the bug shipped green.
+- **Never mutate a shared protected fixture.** For throwaway real-infra checks, stand up a
+  dedicated narrowly-scoped IAM role (same policies, fresh trust policy, new `external_id`) and tear
+  it down — don't touch the static cloud's own role, even temporarily.
+
+### Real infrastructure is pre-authorized
+
+Real EKS and GKE clouds (and what they provision) may be created for acceptance and example testing
+without asking, provided **everything is torn down within 24 hours**. Covers `make testacc` and the
+scenario targets below. Real **AKS** infrastructure is **not** covered — hold Azure creation until
+told otherwise.
+
+### Test cloud selection
+
+Tests resolve a cloud at runtime with no manual setup. Optional overrides:
+
+- `ANYSCALE_TEST_CLOUD_ID` — pin by ID (validated to exist)
+- `ANYSCALE_TEST_CLOUD_NAME` — pin by name (must resolve uniquely)
+
+Otherwise: fall back to the pinned default cloud **name** `tfp-test-aws-useast1-STATIC` (a
+manually-created known-good fixture) resolved to an ID at runtime, then auto-discovery
+(`tf-acc-*`-style prefix), then ephemeral creation. The default lives in the resolver, not a wrapper
+script, so local runs, agents, and CI behave identically.
+
+By NAME, not ID, deliberately: the cloud's ID is never committed to this repo. Do not "simplify"
+this by hardcoding the ID.
+
+Cleanup: ephemeral clouds are destroyed by default; `ANYSCALE_TEST_KEEP=1` keeps one and prints its
+ID/name (never tokens).
+
+### User fixtures for organization_user / invitation tests
+
+These real-infra tests are opt-in by env var and skip cleanly when unset, because they are
+destructive (member delete removes a real org member; a role change alters real access) or
+rate-limited (invitations) — never point them at a shared or borrowed identity.
+
+- `ANYSCALE_TEST_USER_EMAIL` — an existing accepted org member dedicated to testing, with no clouds
+  assigned (these surfaces manage org-level role, not cloud access). Used by organization_user
+  import/read/update checks and the org_user/org_users data sources.
+- `ANYSCALE_TEST_INVITE_EMAIL` — a fresh, never-invited address under the same disposable identity,
+  used for the invitation lifecycle test (including a mixed-case variant). Invalidate invitations
+  the tests create.
+
+Same reasoning as `ANYSCALE_TEST_CLOUD_NAME`: the literal address is never committed. Use a real
+disposable plus-alias in an inbox you control (`you+tfprovidertest@yourdomain.com`) so invitation
+mail lands somewhere safe. Never a colleague's account or any identity whose role you can't afford
+to have changed.
+
+### Naming and sweepers
+
+- All test-created resources MUST use `acctest.UniqueName(t, slug)` → `tfacc-<slug>-<rand>`. Never
+  hardcode literal names; concurrent CI runs collide. Legacy `tf-test-`/`tfprovider-` prefixes are
+  still swept for compatibility but must not be used in new code.
+- Sweepers in `internal/acctest/sweeper_*.go` delete resources matching a sweepable prefix that are
+  older than `ANYSCALE_SWEEP_MIN_AGE` (default 2h) — the age guard prevents racing live tests. A
+  daily job (`.github/workflows/sweep.yml`) runs `make sweep` at 03:00 UTC against the test org.
+- **New resource type that creates real backend state → add
+  `internal/acctest/sweeper_<type>_test.go`** following `sweeper_project_test.go`. If it lives under
+  a cloud, add it to the cloud sweeper's `Dependencies` so it sweeps first.
+- Example-based targets wrap apply/destroy in a bash EXIT trap, so destroy fires on apply failure or
+  ctrl-C. If you still suspect a leak, run `make sweep-dry-run`.
+
+### Scenario tests (end-to-end apply/destroy over `examples/`)
+
 ```bash
-make test-aws-vm-basic
-make test-aws-vm-full
-make test-aws-eks-basic
-make test-gcp-vm-basic
-make test-gcp-vm-full
-make test-gcp-gke-basic
+make test-primary          # or: test-primary-aws / -gcp / -vm / -k8s
+make test-aws-vm-basic     # test-aws-vm-full, test-aws-eks-basic
+make test-gcp-vm-basic     # test-gcp-vm-full, test-gcp-gke-basic
 ```
 
-These targets run terraform apply and terraform destroy. Ensure your credentials and cloud quotas are in a safe state before running. Real infrastructure creation for these targets (including `test-aws-eks-basic` and `test-gcp-gke-basic`) is pre-authorized under the same 24-hour teardown condition as [Acceptance Tests](#acceptance-tests) above — see there for the AKS exclusion.
+These run real `terraform apply` **and** `destroy` — check credentials and cloud quotas first.
 
 ---
 
-## Repository Context & Boundaries
+## Policies
 
-- This Terraform provider repo is the only place where files may be created/edited.
-- External product monorepo is **read-only reference**:
-  - Location: ~/projects/anyscale/product
-  - You may read files there to understand API surface/models.
-  - **Do not** run build/test/tooling commands inside it.
-  - **Do not** suggest changes to that repository.
-  - API code reference: ~/projects/anyscale/product/backend/server/api and subfolders **and** the CLI at ~/projects/anyscale/product/frontend/cli/anyscale (its `commands/` and `controllers/`). Behavior is often **split** between the two: the CLI can resolve/derive values client-side before it ever calls the API (e.g. `anyscale cloud register` resolves the EFS mount-target IP via boto3 unless `--skip-verifications` is passed), while the control plane derives them server-side otherwise. Tracing only the backend and concluding "the control plane does X" is how this repo has been wrong before — for any register/create/derive behavior, check **both** the backend handler and the CLI controller.
+### Changelog
+
+`changelog-gate` requires **either** a `.changelog/<PR#>.txt` fragment **or** the `skip-changelog`
+label on every PR. Full policy and fragment format:
+[CONTRIBUTING.md](CONTRIBUTING.md#changelog-fragments).
+
+- Use `skip-changelog` when nothing requires a new provider version — CI/tooling, tests, internal
+  docs, or examples-only edits **outside** `examples/resources/`, `examples/data-sources/`, and
+  `examples/provider/`. Those three feed `tfplugindocs` and reach published doc pages, so changes
+  there ARE provider-facing.
+- Provider changes (schemas, resources/data sources, observable behavior, user-facing bug fixes)
+  need a fragment; it folds into the next version bump at release time.
+- Unsure? Add a fragment — that's the safe default.
+
+### Deprecation / migration guides
+
+When a change deprecates or removes a user-facing attribute, resource, or data source, **ask the
+user** whether it warrants a migration guide instead of writing one unprompted. A breaking change
+alone doesn't imply one — the `cloud_deployment_id` → `cloud_resource_id` removal (v0.13.0)
+intentionally skipped it, since there were no production users to migrate. That call is the user's
+every time.
 
 ---
 
-## Using the Anyscale API Docs
+## Anyscale API reference
 
-- Treat console OpenAPI/Swagger docs as the primary reference for endpoints and schemas.
-- The OpenAPI/Swagger docs can be found at https://console.anyscale.com/api/v2/docs
-- When showing example requests:
-  - Use Authorization: Bearer $ANYSCALE_CLI_TOKEN
-  - Do not print real tokens
-  - The $ANYSCALE_CLI_TOKEN may be read from an environment variable, or read from ~/.anyscale/credentials.json
+- OpenAPI/Swagger docs at <https://console.anyscale.com/api/v2/docs> are the primary reference for
+  endpoints and schemas.
+- Example requests use `Authorization: Bearer $ANYSCALE_CLI_TOKEN`.
 
-### API generations: always prefer `api/v2`
+### Always prefer `api/v2`
 
-The Anyscale backend exposes more than one API generation. Provider code should target
-`api/v2` whenever an equivalent endpoint exists.
+- `api/v2/...` is the current generation — fastest to receive fields, and the convergence target.
+  Default to it for all new resources, data sources, acctest helpers, and sweepers.
+- `ext/v0/...` is older and may lag (missing fields, stale shapes). Add no new `ext/v0` calls; when
+  you touch code that uses it, prefer migrating.
+- **Migration is not a pure rename.** Trace each call site against the real backend model (request
+  *and* response) first — some are field-identical aliases, others are genuine code changes, and a
+  mismatch can fail **silently**. Known example: list/search pagination goes in the request **body**
+  on `ext/v0` but as URL **query parameters** on `api/v2`; getting that wrong silently truncates
+  results (a sweep that misses candidates and leaks resources) instead of erroring. Watch for
+  differing defaults too — `api/v2` compute-config search defaults to latest-version-only where
+  `ext/v0` effectively returned all. Migrate related call sites together, not piecemeal.
 
-- **`api/v2/...`** — the current internal API generation. It receives changes and new
-  fields fastest and is the long-term migration target that every endpoint should converge
-  on. Default to it for all new resources, data sources, acctest helpers, and sweepers.
-- **`ext/v0/...`** — an older generation that may lag or have limitations (missing fields,
-  stale shapes). Do **not** add new `ext/v0` calls. When you touch code that still uses
-  `ext/v0`, prefer migrating it to the `api/v2` equivalent.
-
-When migrating an endpoint from `ext/v0` to `api/v2`, do **not** assume it is a pure rename.
-**Trace each call site against the real backend model** (both request and response shapes)
-before converting — some sites are field-identical aliases that swap near-free, but others
-are genuine code changes. Verify parity first, because a subtle mismatch can fail *silently*
-rather than erroring. Concrete example from the compute-config sync: list/search pagination
-is passed inside the request **body** on `ext/v0` but as URL **query parameters** on
-`api/v2`; getting that wrong silently truncates the result list (e.g. a sweep that misses
-candidates and leaks resources) rather than returning an error. Migrate all related call
-sites together, not piecemeal.
-
-Point-in-time note (2026-07, compute-config sync) — RESOLVED 2026-07-21 (PR #182, CC5b tail).
-The `anyscale_compute_config` resource, its data source, and every test-infra touchpoint
-(acctest `CheckDestroy`, the exists-in-API check, and the sweeper search) are now fully
-converged on `api/v2/compute_templates` — nothing compute_config-related remains on
-`ext/v0/cluster_computes`. The sweeper search was the one genuinely risky site: it carried
-both the body-vs-query pagination difference described above and a `version` field that
-defaults to latest-only on `api/v2` (the opposite of `ext/v0`'s effective all-versions
-default the sweeper relied on) — both traced against the real backend and mutation-tested
-(temporarily reverted, confirmed the test fails, reverted back) before landing, not just
-assumed safe. This split is unlikely to be unique to compute_config — if another resource
-shows the same pattern (resource on `api/v2`, its data source or sweeper still on `ext/v0`),
-apply the same trace-don't-guess method there. Re-check current code before relying on any
-specific detail in this note.
-
-## Test Resource Naming and Sweeping
-
-All test-created resources MUST use the `acctest.UniqueName(t, slug)` helper
-which produces names of the form `tfacc-<slug>-<rand>`. Do not hardcode
-literal names — concurrent CI runs will collide. Do not use legacy prefixes
-`tf-test-` or `tfprovider-` for new tests; sweepers still match those for
-backward compatibility but new code should standardize on `tfacc-`.
-
-### Sweepers
-
-Sweepers in `internal/acctest/sweeper_*.go` automatically clean leaked test
-resources whose names match a sweepable prefix AND that are older than
-`ANYSCALE_SWEEP_MIN_AGE` (default 2h). The age guard prevents racing live
-tests. Run manually:
-
-    make sweep            # actually deletes
-    make sweep-dry-run    # logs what would be deleted
-
-A daily GitHub Actions job at `.github/workflows/sweep.yml` runs `make sweep`
-at 03:00 UTC against the test org.
-
-### When a test crashes or is interrupted
-
-The example-based test targets (`make test-aws-vm-basic`, etc.) wrap apply
-and destroy in a bash EXIT trap so destroy fires even on apply failure or
-ctrl-C. If you still suspect a leak, run `make sweep-dry-run` to inspect or
-`make sweep` to clean.
-
-### Adding a new resource type
-
-If you add a new resource type to the provider that creates real backend
-state, add a sweeper file `internal/acctest/sweeper_<type>_test.go` following
-the pattern in `sweeper_project_test.go`. The cloud sweeper's `Dependencies`
-list determines order — if your new resource lives under a cloud, add it to
-the cloud sweeper's `Dependencies` so it sweeps first.
-
-<!-- crystl-cli:begin -->
+<!-- crystl-cli:begin v2.163.0 -->
 @AGENTS.md
 <!-- crystl-cli:end -->
