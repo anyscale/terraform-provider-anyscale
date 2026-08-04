@@ -106,3 +106,84 @@ func lineAfterHeadingIsMarker(changelog string, headingEnd int) bool {
 	}
 	return strings.TrimSpace(rest) == noTagOkMarker
 }
+
+// tagVersionRe extracts the version from a "v<version>" git tag name (e.g.
+// "v0.25.1" -> "0.25.1"). A tag that does not start with a literal "v"
+// followed by a digit is outside this project's release-tag convention and
+// is ignored by CheckTagsHeaded rather than treated as an error - the check
+// only knows how to relate release tags to CHANGELOG.md version headings.
+var tagVersionRe = regexp.MustCompile(`^v(\d\S*)$`)
+
+// tagNoHeadingMarkerFmt is the opt-out marker template CheckTagsHeaded
+// accepts anywhere in the file to exempt a specific git tag from its
+// requirement that every tag have a matching CHANGELOG.md heading, e.g.
+// "<!-- changelog-gate:tag-no-heading-ok: 0.1.0 -->". Unlike noTagOkMarker
+// (which must sit on the line directly beneath the heading it exempts),
+// this marker exempts a *tag* that has no heading to sit beneath, so its
+// position in the file does not matter to the check - but by the same
+// convention noTagOkMarker's doc comment describes, a bare marker with no
+// nearby human-facing prose explaining why just defers the question, and
+// should not be added without it (see the "## [0.1.1]" section's own note
+// about v0.1.0 for the pattern).
+const tagNoHeadingMarkerFmt = "<!-- changelog-gate:tag-no-heading-ok: %s -->"
+
+// tagNoHeadingMarkerRe parses tagNoHeadingMarkerFmt markers out of a
+// changelog, capturing the exempted version in group 1.
+var tagNoHeadingMarkerRe = regexp.MustCompile(`<!--\s*changelog-gate:tag-no-heading-ok:\s*(\S+)\s*-->`)
+
+// CheckTagsHeaded is the converse of CheckHeadingsTagged: it walks every git
+// tag and returns one error per tag that has neither a matching
+// "## [<version>]" CHANGELOG.md heading nor a tagNoHeadingMarkerFmt opt-out
+// marker anywhere in the file.
+//
+// WHY THIS CHECK EXISTS: CheckHeadingsTagged alone only catches a heading
+// whose tag is missing - it has nothing to say about a heading that is
+// missing entirely. Finalizing a release from a checkout whose CHANGELOG.md
+// predates the previous release produces a file with the new version's
+// heading and no previous one: the previous version is still really tagged
+// and shipped, so this is a silent erasure of a real release from the
+// record, and CheckHeadingsTagged reports success throughout, because it
+// only ever looks at headings that are actually present.
+//
+// There is no exemption here symmetric to CheckHeadingsTagged's topmost-
+// heading one. A tag is only ever created after its heading-bearing commit
+// merges (`make changelog-release` finalizes a heading on a PR; `make tag`
+// tags it only after that PR merges, as a separate later step), so a tag
+// legitimately preceding its own heading cannot happen the way a heading
+// legitimately preceding its own tag can - every tag this check sees should
+// already have a heading-bearing commit behind it.
+//
+// tags is injected (see gitListTags for the real implementation) so this
+// stays unit-testable without touching a real repository.
+func CheckTagsHeaded(changelog string, tags []string) []error {
+	headings := map[string]bool{}
+	for _, m := range versionHeadingRe.FindAllStringSubmatch(changelog, -1) {
+		headings[m[1]] = true
+	}
+
+	exempt := map[string]bool{}
+	for _, m := range tagNoHeadingMarkerRe.FindAllStringSubmatch(changelog, -1) {
+		exempt[m[1]] = true
+	}
+
+	var errs []error
+	for _, tag := range tags {
+		m := tagVersionRe.FindStringSubmatch(tag)
+		if m == nil {
+			continue
+		}
+		version := m[1]
+		if headings[version] || exempt[version] {
+			continue
+		}
+		errs = append(errs, fmt.Errorf(
+			"git tag %q has no matching CHANGELOG.md heading (%q) and no matching opt-out "+
+				"marker anywhere in the file — either add the missing heading documenting "+
+				"what that release actually shipped, or add %q and record nearby why the "+
+				"release has no section (e.g. as prose, the way the \"## [0.1.1]\" section "+
+				"explains v0.1.0)",
+			tag, "## ["+version+"]", fmt.Sprintf(tagNoHeadingMarkerFmt, version),
+		))
+	}
+	return errs
+}
