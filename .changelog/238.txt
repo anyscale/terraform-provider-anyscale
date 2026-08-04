@@ -1,0 +1,4 @@
+```
+release-note:fixed
+provider: Fix not-found detection on `anyscale_cloud`, `anyscale_cloud_resource`, `anyscale_project`, `anyscale_service`, `anyscale_container_image_build`, `anyscale_container_image_registry`, `anyscale_global_resource_scheduler`, `anyscale_organization_default_cloud`, and `anyscale_organization_invitation` (plus the `anyscale_cloud`, `anyscale_project`, and `anyscale_service` data sources) to check a reliable error type instead of matching substrings in error text, so an unrelated error can no longer be misclassified as "not found" and silently drop a still-live resource from state.
+```
