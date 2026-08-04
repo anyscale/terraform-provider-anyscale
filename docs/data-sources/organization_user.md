@@ -29,7 +29,7 @@ data "anyscale_organization_user" "by_user_id" {
 
 output "user_identity_id" {
   value       = data.anyscale_organization_user.by_email.id
-  description = "The identity_id, used as the import ID and id for anyscale_organization_user"
+  description = "The identity_id - a read-only identifier for reference/debugging, NOT what anyscale_organization_user is imported or keyed by (that resource uses email; see its own example)"
 }
 
 output "user_email_by_user_id" {
