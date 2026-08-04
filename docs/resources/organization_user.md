@@ -71,16 +71,19 @@ Both conditions are required. A SCIM-enabled organization that has no Policy API
 #   terraform import anyscale_organization_user.existing_user user@example.com
 #
 # This resource cannot create members - people join by invitation (see
-# anyscale_organization_invitation). Removing it from your configuration
-# evicts them from the organization - see the guarded example below for a
-# member whose removal would be disruptive.
+# anyscale_organization_invitation). It also cannot remove them: destroying
+# this resource for an adopted member (both examples below) removes nothing
+# from the organization - they keep full access, and a warning says so.
+# Revoking a real member has to happen from the Anyscale console; this
+# provider does not have that capability today.
 resource "anyscale_organization_user" "existing_user" {
   email = "user@example.com"
 }
 
-# Guard members whose removal would be disruptive. Destroying this resource
-# evicts a real person from the organization, and Terraform cannot tell an
-# intentional removal from an accidental one.
+# prevent_destroy here protects the STATE ENTRY, not the person - destroying
+# this resource is harmless to their actual access (see above), but it does
+# silently stop Terraform from tracking them, which is disruptive on its own
+# if you rely on the outputs below.
 resource "anyscale_organization_user" "admin" {
   email = "admin@example.com"
 

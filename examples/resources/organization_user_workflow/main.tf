@@ -67,9 +67,10 @@ output "invitation_expires_at" {
 # resource "anyscale_organization_user" "new_member" {
 #   email = "newmember@example.com"
 #
-#   # Importing this resource instead of declaring it works identically and gives you
-#   # eviction-as-code either way -- removing it from your configuration evicts the person
-#   # from the organization on your next apply:
+#   # Importing this resource instead of declaring it works identically - either way,
+#   # destroying it later removes nothing from the organization; the person keeps full
+#   # access and a warning says so. This resource can only stop tracking them, never
+#   # revoke them -- do that from the Anyscale console:
 #   #   terraform import anyscale_organization_user.new_member newmember@example.com
 # }
 #
