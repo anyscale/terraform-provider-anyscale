@@ -201,7 +201,7 @@ func TestDoRequestRaw(t *testing.T) {
 	})
 
 	t.Run("404 listed as an expected status is a nil-error success, not ErrNotFound", func(t *testing.T) {
-		// Guards the invariant a Lane 4 cleanup relies on: resource_service.go's final
+		// Guards an invariant two delete paths rely on: resource_service.go's final
 		// Delete call and container_image_helpers.go's archive call both deliberately list
 		// http.StatusNotFound as expected (an already-gone resource is a successful,
 		// idempotent delete). Their old strings.Contains(err.Error(), "404") guards were

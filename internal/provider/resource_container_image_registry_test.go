@@ -346,15 +346,13 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 	}
 }
 
-// TestContainerImageRegistryRead_NotFoundRemovesFromState is the Lane 4 AC4 proof for a clean
-// (no producer-level fix needed) conversion: drives the real Read() against a real 404 and
-// asserts the OBSERVABLE behavior - state actually removed, no diagnostics error - not just
-// that some helper's error satisfies errors.Is. Mutation-tested: reverting the errors.Is(err,
-// ErrNotFound) check at resource_container_image_registry.go:431 back to
-// strings.Contains(err.Error(), "404") still passes this specific mock (the legacy phrase is
-// still present in DoRequestRaw's wrapped text), so this test alone would not have caught that
-// particular regression - it exists to prove the AC4 "removed from state" shape this lane
-// promised, not to duplicate api_helpers_test.go's sentinel-format coverage.
+// TestContainerImageRegistryRead_NotFoundRemovesFromState proves the observable contract for a
+// not-found read: the real Read() against a real 404 removes the resource from state and raises
+// no error diagnostic - not merely that some helper's error satisfies errors.Is.
+//
+// It does NOT guard the errors.Is(err, ErrNotFound) check itself. Reverting that check to
+// strings.Contains(err.Error(), "404") still passes this mock, because the legacy phrase
+// survives in DoRequestRaw's wrapped text for a genuine 404. The test below is what guards it.
 func TestContainerImageRegistryRead_NotFoundRemovesFromState(t *testing.T) {
 	ctx := context.Background()
 
@@ -406,15 +404,12 @@ func TestContainerImageRegistryRead_NotFoundRemovesFromState(t *testing.T) {
 	}
 }
 
-// TestContainerImageRegistryRead_UnrelatedErrorTextNotTreatedAsNotFound is the mutation-proof
-// pair to the test above, and the one that actually guards the errors.Is(err, ErrNotFound)
-// conversion itself (the previous test alone does not - reverting resource_container_image_
-// registry.go:431 to strings.Contains(err.Error(), "404")/"not found" still passes it, since
-// the legacy phrase survives in DoRequestRaw's wrapped text for a genuine 404). This test
-// forces a 500 whose unrelated body text happens to contain "not found" - exactly the false-
-// positive risk the old substring check carried and errors.Is eliminates by construction, since
-// the sentinel is only ever attached when the real HTTP status was 404. A real backend error
-// wrongly swallowed as "already gone" would silently drop a still-live resource from state.
+// TestContainerImageRegistryRead_UnrelatedErrorTextNotTreatedAsNotFound is what actually guards
+// Read's errors.Is(err, ErrNotFound) check (see the limit noted on the test above). It forces a
+// 500 whose unrelated body text happens to contain "not found" - the exact false positive the old
+// substring check admitted, and which errors.Is rules out by construction, since the sentinel is
+// only ever attached when the real HTTP status was 404. Getting this wrong swallows a live
+// backend error as "already gone" and silently drops a still-live resource from state.
 func TestContainerImageRegistryRead_UnrelatedErrorTextNotTreatedAsNotFound(t *testing.T) {
 	ctx := context.Background()
 

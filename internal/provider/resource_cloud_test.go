@@ -899,8 +899,8 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 	})
 }
 
-// TestReadCloudState_NotFoundSentinel guards the Lane 4 fix: readCloudState hand-rolls its
-// own request (bypassing DoRequestRaw/DoRequestAndParse entirely) and used to return a bare
+// TestReadCloudState_NotFoundSentinel guards readCloudState's ErrNotFound wrap: it hand-rolls
+// its own request (bypassing DoRequestRaw/DoRequestAndParse entirely) and used to return a bare
 // fmt.Errorf("cloud not found") on a real 404, with no %w wrap - errors.Is(err, ErrNotFound)
 // was always false against it, even though the pre-existing strings.Contains(err.Error(),
 // "not found") check at Read's call site happened to still match the literal text. This does

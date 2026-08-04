@@ -469,8 +469,8 @@ func TestFindCloudByName_PagesBeyondFirstPage(t *testing.T) {
 	}
 }
 
-// TestReadCloudIntoModel_NotFoundSentinel guards the Lane 4 fix: readCloudIntoModel hand-rolls
-// its own request (bypassing DoRequestRaw/DoRequestAndParse entirely, a near-identical
+// TestReadCloudIntoModel_NotFoundSentinel guards readCloudIntoModel's ErrNotFound wrap: it
+// hand-rolls its own request (bypassing DoRequestRaw/DoRequestAndParse entirely, a near-identical
 // duplicate of resource_cloud.go's readCloudState) and used to return a bare
 // fmt.Errorf("cloud not found") on a real 404, with no %w wrap - errors.Is(err, ErrNotFound)
 // was always false against it, even though Read's pre-existing strings.Contains(err.Error(),

@@ -822,7 +822,7 @@ func TestExpandFileStorage(t *testing.T) {
 // buildProviderConfig (workbench #6) - same coverage, now against the function that actually
 // exists.
 
-// TestReadCloudResource_NotFoundSentinel guards the Lane 4 fix on readCloudResource, which has
+// TestReadCloudResource_NotFoundSentinel guards readCloudResource's ErrNotFound wrap. It has
 // two distinct not-found conditions and used to manufacture a fresh, unwrapped error on both -
 // discarding the real ErrNotFound wrap its own inner listCloudResources call already carried.
 // errors.Is(err, ErrNotFound) was always false either way, even though the pre-existing

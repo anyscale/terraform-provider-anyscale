@@ -426,11 +426,11 @@ func TestGetServiceByID_HitsServicesV2Endpoint(t *testing.T) {
 	}
 }
 
-// TestGetServiceByID_NotFoundSentinel guards the Lane 4 conversion at resource_service.go's and
-// data_source_service.go's Read: getServiceByID goes through DoRequestAndParse with StatusOK as
-// the only expected status, so a real 404 is wrapped into ErrNotFound and propagated unchanged -
-// this was already true before Lane 4, it is the call sites' own strings.Contains checks that
-// changed to errors.Is(err, ErrNotFound). Confirms the property those call sites now depend on.
+// TestGetServiceByID_NotFoundSentinel pins the property resource_service.go's and
+// data_source_service.go's Read now depend on: getServiceByID goes through DoRequestAndParse
+// with StatusOK as the only expected status, so a real 404 is wrapped into ErrNotFound and
+// propagated unchanged. That was always true of the helper - what changed is that those call
+// sites now test for it with errors.Is rather than by matching the error's text.
 func TestGetServiceByID_NotFoundSentinel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
