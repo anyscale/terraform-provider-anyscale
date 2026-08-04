@@ -111,12 +111,22 @@ func TestAccOrganizationUsersDataSource_FilterByName(t *testing.T) {
 // surfaced as a per-item output attribute, so no per-item assertion is
 // possible either.
 //
-// Instead this proves the filter actually partitions the full user list:
-// unfiltered count must equal (service-accounts-only count) + (regular-users-only
-// count). A no-op filter would make both the true and false variants return the
-// SAME full list, so their counts would sum to 2x the total instead of exactly
-// the total - this fails today whenever the org has at least one user (it has
-// two), independent of whether any service accounts currently exist.
+// CORRECTED: the original version of this test asserted unfiltered count ==
+// (true count) + (false count), which is not the real contract and fails on
+// any org with at least one user - confirmed with a live, read-only backend
+// trace, not assumed. Omitting is_service_account is NOT "return everyone";
+// the backend (and this data source's own schema description) documents it
+// as shorthand for is_service_account=false. So the correct, contract-true
+// invariant is unfiltered == false, not true+false == unfiltered.
+//
+// That alone would not catch a filter that silently ignores its value: a
+// no-op implementation that always behaves as "false" would still satisfy
+// unfiltered == false. So this also asserts true != unfiltered whenever the
+// org has at least one user - the moment is_service_account=true silently
+// behaves like the false/no-filter case, this fails, whether or not the org
+// happens to have any real service accounts today. Neither assertion depends
+// on the org's actual service-account population, unlike the version this
+// replaces.
 func TestAccOrganizationUsersDataSource_ServiceAccountFilterPartitionsUsers(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -200,10 +210,24 @@ func testAccCheckAllOrgUsersNameContains(usersResourceName, filterResourceName, 
 	}
 }
 
-// testAccCheckOrgUsersServiceAccountPartitionSumsToTotal asserts
-// len(service_accounts) + len(regular_users) == len(all), proving
-// is_service_account genuinely partitions the full list rather than being a
-// no-op that returns everything regardless of its value.
+// testAccCheckOrgUsersServiceAccountPartitionSumsToTotal asserts the real,
+// live-confirmed is_service_account contract: omitting the filter behaves
+// exactly like is_service_account=false (not "return everyone" - see the
+// CORRECTED note on the calling test), and is_service_account=true is not
+// silently ignored in favor of that same default. Two checks, neither
+// dependent on how many real service accounts the org happens to have today:
+//
+//  1. len(all) == len(regular_users) - the documented default. If a future
+//     regression made "no filter" start returning everyone (service accounts
+//     included), this catches it without needing any service accounts to
+//     exist.
+//  2. len(service_accounts) != len(all) whenever the org has at least one
+//     user - if is_service_account=true silently behaved like false/omitted
+//     instead of genuinely filtering, it would return the exact same count
+//     as the unfiltered/false case. This does not require the org to have
+//     any real service accounts: a working filter legitimately returning 0
+//     still satisfies 0 != total (given total > 0), while a no-op filter
+//     returning the full list would equal total and correctly fail here.
 func testAccCheckOrgUsersServiceAccountPartitionSumsToTotal() resource.TestCheckFunc {
 	countOf := func(s *terraform.State, resourceName string) (int, error) {
 		rs, ok := s.RootModule().Resources[resourceName]
@@ -223,7 +247,7 @@ func testAccCheckOrgUsersServiceAccountPartitionSumsToTotal() resource.TestCheck
 			return err
 		}
 		if total == 0 {
-			return fmt.Errorf("expected at least one user in the org, got 0 - cannot prove partitioning against an empty list")
+			return fmt.Errorf("expected at least one user in the org, got 0 - cannot prove the filter's behavior against an empty list")
 		}
 
 		serviceAccounts, err := countOf(s, "data.anyscale_organization_users.service_accounts")
@@ -235,10 +259,16 @@ func testAccCheckOrgUsersServiceAccountPartitionSumsToTotal() resource.TestCheck
 			return err
 		}
 
-		if serviceAccounts+regularUsers != total {
+		if regularUsers != total {
 			return fmt.Errorf(
-				"is_service_account=true (%d) + is_service_account=false (%d) = %d, want exactly %d (unfiltered total) - the filter is not partitioning the list, likely a no-op returning everything regardless of value",
-				serviceAccounts, regularUsers, serviceAccounts+regularUsers, total,
+				"is_service_account=false (%d) != unfiltered total (%d) - omitting the filter no longer matches its documented default of is_service_account=false",
+				regularUsers, total,
+			)
+		}
+		if serviceAccounts == total {
+			return fmt.Errorf(
+				"is_service_account=true (%d) equals the unfiltered/false total (%d) - the filter looks like it is being silently ignored and defaulting to false instead of genuinely filtering",
+				serviceAccounts, total,
 			)
 		}
 		return nil

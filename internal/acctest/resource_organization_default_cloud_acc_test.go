@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -60,8 +61,24 @@ func newOrgDefaultCloudMockServer(t *testing.T, orgID, cloudID string, knownClou
 		_, _ = fmt.Fprintf(w, `{"result": {"organizations": [{"id": %[1]q, "name": "mock-org", "public_identifier": "mock-org", "default_cloud_id": %[2]q}]}}`, orgID, cloudID)
 	})
 
-	mux.HandleFunc("/api/v2/clouds/", func(w http.ResponseWriter, r *http.Request) {
-		requestedID := r.URL.Path[len("/api/v2/clouds/"):]
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
+	// 301-redirect a bare-path request, and whether that redirect is followed
+	// is not portable across Go versions/http.Client configs). Unlike the other
+	// sites this sweep touched, this handler cannot just be re-registered
+	// as-is: it recovers the requested id by slicing r.URL.Path at a fixed
+	// offset sized for the "/api/v2/clouds/" prefix, which would panic
+	// (slice bounds out of range) if ever invoked for the bare "/api/v2/clouds"
+	// path (14 chars, shorter than the 15-char prefix). TrimPrefix is a no-op
+	// (leaves requestedID empty) when the prefix isn't present instead of
+	// panicking, and an empty requestedID cleanly falls into the existing
+	// "not found" branch below - this resource never calls the bare list form,
+	// so this is defensive-only, not a path this test exercises.
+	cloudHandler := func(w http.ResponseWriter, r *http.Request) {
+		requestedID := strings.TrimPrefix(r.URL.Path, "/api/v2/clouds/")
+		if requestedID == r.URL.Path {
+			requestedID = ""
+		}
 		if requestedID != cloudID && !knownCloudIDs[requestedID] {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = fmt.Fprint(w, `{"error": {"detail": "cloud not found"}}`)
@@ -75,7 +92,9 @@ func newOrgDefaultCloudMockServer(t *testing.T, orgID, cloudID string, knownClou
 			"id": %[1]q, "name": "mock-cloud", "provider": "AWS", "region": "us-east-2",
 			"status": "ready", "state": "ACTIVE", "compute_stack": "VM", "is_default": %[2]t
 		}}`, requestedID, isDefault)
-	})
+	}
+	mux.HandleFunc("/api/v2/clouds/", cloudHandler)
+	mux.HandleFunc("/api/v2/clouds", cloudHandler)
 
 	mux.HandleFunc("/api/v2/organizations/update_default_cloud", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -154,6 +173,24 @@ resource "anyscale_organization_default_cloud" "test" {
 				ImportState:       true,
 				ImportStateId:     cloudID,
 				ImportStateVerify: true,
+			},
+			// NOT import-recovery proof. ImportState above runs without
+			// ImportStatePersist, so it executes in a throwaway working
+			// directory that is discarded at the end of that step
+			// (terraform-plugin-testing's documented behavior) - this
+			// step's plan is computed against whatever the CREATE step
+			// above left, never against what import recovered. What this
+			// genuinely proves: state stays stable under a same-config
+			// re-apply - a real property, just not the import round-trip
+			// one. See resource_cloud_import_object_storage_region_acc_test.go
+			// for the two-test shape that actually proves import recovery.
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_organization_default_cloud.test", plancheck.ResourceActionNoop),
+					},
+				},
 			},
 		},
 	})

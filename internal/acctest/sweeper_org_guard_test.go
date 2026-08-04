@@ -11,12 +11,16 @@ import (
 
 // The sweep-target org guard.
 //
-// `make sweep` deletes real infrastructure across SEVEN endpoints and matches
-// three name prefixes (see sweepableResourcePrefixes), and one of its sweepers
-// issues a real POST /api/v2/machine_pools/delete for a resource type the
-// provider does not even register any more. A sweep aimed at the wrong
-// organization is therefore the single most destructive thing this repo can do
-// with valid credentials - and nothing stopped it before this guard.
+// `make sweep` deletes real infrastructure across SIX endpoint families and
+// matches three name prefixes (see sweepableResourcePrefixes). A sweep aimed
+// at the wrong organization is therefore one of the most destructive things
+// this repo can do with valid credentials - and nothing stopped it before
+// this guard.
+//
+// (A seventh sweeper, anyscale_global_resource_scheduler, is gated behind the
+// grs_enabled build tag - see sweeper_scheduler_test.go - so its real
+// POST /api/v2/machine_pools/delete does not compile into the default build
+// this guard protects; it re-joins the count if that tag is ever dropped.)
 //
 // It happened. On 2026-08-03 the credentials in ~/.anyscale/credentials.json
 // were scoped to a user's own staging org for an entire session; acceptance

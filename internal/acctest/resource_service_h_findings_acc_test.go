@@ -173,15 +173,19 @@ func TestAccServiceResource_PlainCreateSucceeds(t *testing.T) {
 
 // TestAccServiceResource_DeleteAlreadyGone is the H1 regression: terminate returning 404 (the
 // service was already terminated+deleted out-of-band) must make Delete succeed cleanly, not
-// fall through to the termination wait. Today, DoRequestRaw's terminate call lists
-// http.StatusNotFound as an ACCEPTED status, so a real 404 produces err=nil - the
-// strings.Contains(err.Error(), "404") guard right after it is dead code, unreachable, and
-// control falls into waitForServiceState, which GETs the now-absent service, 404s for real
-// this time (GET only accepts 200), and fails the destroy. Proven here by tracking whether the
-// service-by-id endpoint is ever hit AFTER terminate fires - the fixed behavior must return
-// immediately without ever needing another GET; the buggy behavior falls through into exactly
-// one such GET, which then errors and fails the whole resource.Test (a leaked destroy diagnostic
-// fails the test's own automatic cleanup destroy).
+// fall through to the termination wait.
+//
+// The original bug had two halves: the terminate call listed http.StatusNotFound as an ACCEPTED
+// status, so a real 404 produced err=nil, which left the already-gone guard right after it
+// unreachable dead code. Control then fell into waitForServiceState, which GETs the now-absent
+// service, 404s for real this time (GET only accepts 200), and fails the destroy. Both halves
+// are fixed - terminate accepts only StatusAccepted, and the guard tests
+// errors.Is(err, ErrNotFound) - so this test exists to stop either one being undone.
+//
+// Proven by tracking whether the service-by-id endpoint is hit AFTER terminate fires: correct
+// behavior returns immediately without another GET; the buggy behavior falls through into
+// exactly one such GET, which then errors and fails the whole resource.Test (a leaked destroy
+// diagnostic fails the test's own automatic cleanup destroy).
 func TestAccServiceResource_DeleteAlreadyGone(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 

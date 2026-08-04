@@ -1,3 +1,14 @@
+//go:build grs_enabled
+
+// GRS (Global Resource Scheduler) support is temporarily disabled pending
+// backend API rework - provider.go has NewGlobalResourceSchedulerResource and
+// its data sources commented out, so nothing in the default build can create a
+// machine pool through this provider and this sweeper has no legitimate
+// target. Gated behind the same build tag as the resource/data-source
+// acceptance tests (see resource_global_resource_scheduler_acc_test.go) so it
+// re-arms automatically when GRS is re-enabled, rather than issuing real
+// deletes against a resource type nothing here creates.
+
 package acctest
 
 import (

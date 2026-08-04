@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -769,7 +770,7 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	service, err := getServiceByID(ctx, r.client, serviceID)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Service not found, removing from state", map[string]any{"service_id": serviceID})
 			resp.State.RemoveResource(ctx)
 			return
@@ -978,7 +979,7 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	// H1 (contract section H): StatusNotFound must NOT be in the accepted list here - if it
 	// were, a 404 would make err nil (api_helpers.go's isStatusExpected treats any listed
-	// status as success), making the strings.Contains(err, "404") guard below unreachable dead
+	// status as success), making the errors.Is(err, ErrNotFound) guard below unreachable dead
 	// code. That would fall through to waitForServiceState against an already-gone service,
 	// which 404s there instead and turns an idempotent "already deleted" destroy into a
 	// failure. Only StatusAccepted is a real success here; a 404 must produce a real error for
@@ -988,7 +989,7 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 		http.StatusAccepted,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Info(ctx, "Service already gone", map[string]any{"service_id": serviceID})
 			return
 		}
@@ -1003,14 +1004,20 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	tflog.Info(ctx, "Deleting service", map[string]any{"service_id": serviceID})
 
+	// http.StatusNotFound is deliberately in expectedStatuses here (unlike the terminate
+	// call above): an already-gone service is a successful, idempotent delete, so a real
+	// 404 is treated as an accepted status and DoRequestRaw returns a nil error - err below
+	// can therefore never be a not-found condition. It can only be some other genuinely
+	// unexpected status or a transport failure, so it always belongs in AddAPIError. (A prior
+	// version of this code also string-matched "404" here as if it needed separate handling;
+	// that check could never fire for a real 404 for the reason above, and kept a narrow risk
+	// of misclassifying an unrelated error whose body text happened to contain "404" as a
+	// successful delete instead of surfacing it.)
 	_, err = DoRequestRaw(
 		ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/services-v2/%s", serviceID), nil,
 		http.StatusNoContent, http.StatusNotFound,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			return
-		}
 		AddAPIError(&resp.Diagnostics, "delete service", err)
 		return
 	}

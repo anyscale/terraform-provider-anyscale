@@ -15,9 +15,15 @@ import (
 )
 
 func init() {
-	// Both build and registry resources back the same cluster_environments API,
-	// so one F covers both. Registering twice keeps `terraform-plugin-testing`
-	// happy when callers ask for one resource by name.
+	// Both build and registry resources back the same application_templates
+	// API (resource_container_image_registry.go creates via POST
+	// /api/v2/application_templates/byod and deletes via the same archive call
+	// this sweeper makes), so one F covers both. Registering twice keeps
+	// `terraform-plugin-testing` happy when callers ask for one resource by
+	// name. Note: `terraform-plugin-testing`'s sweeper dedup keys on Name, not
+	// on the F func pointer, so both registrations run (sweepContainerImages
+	// executes twice per `make sweep`) - harmless since it is idempotent, but
+	// worth knowing before "simplifying" this to one registration.
 	resource.AddTestSweepers("anyscale_container_image_build", &resource.Sweeper{
 		Name: "anyscale_container_image_build",
 		// A leaked anyscale_service holds a build_id open, so it must sweep first - see
@@ -30,7 +36,10 @@ func init() {
 	})
 	resource.AddTestSweepers("anyscale_container_image_registry", &resource.Sweeper{
 		Name: "anyscale_container_image_registry",
-		F:    sweepContainerImages,
+		// Same in-use ordering as the build registration above - a leaked
+		// anyscale_service can hold a registry's application_template open too.
+		Dependencies: []string{"anyscale_service"},
+		F:            sweepContainerImages,
 	})
 }
 

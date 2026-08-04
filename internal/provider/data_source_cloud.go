@@ -3,10 +3,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -188,7 +188,7 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	}
 
 	if err := d.readCloudIntoModel(ctx, cloudID, &config); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			AddConfigError(&resp.Diagnostics,
 				"Cloud Not Found",
 				fmt.Sprintf("Cloud with ID '%s' not found in Anyscale", cloudID),
@@ -223,7 +223,7 @@ func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string
 	defer CloseBody(ctx, apiResp.Body)
 
 	if apiResp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("cloud not found")
+		return fmt.Errorf("%w: cloud not found", ErrNotFound)
 	}
 
 	body, err := io.ReadAll(apiResp.Body)

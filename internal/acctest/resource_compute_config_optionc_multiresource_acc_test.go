@@ -62,7 +62,11 @@ func newOptionCMockServer(t *testing.T) (*httptest.Server, *sync.Mutex, *[]any) 
 		})
 	})
 
-	mux.HandleFunc("/api/v2/compute_templates/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
+	// 301-redirect a bare-path request, and whether that redirect is followed
+	// is not portable across Go versions/http.Client configs).
+	computeTemplatesHandler := func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/compute_templates/":
 			body, err := io.ReadAll(r.Body)
@@ -100,7 +104,9 @@ func newOptionCMockServer(t *testing.T) (*httptest.Server, *sync.Mutex, *[]any) 
 		default:
 			t.Errorf("unexpected method %s on %s", r.Method, r.URL.Path)
 		}
-	})
+	}
+	mux.HandleFunc("/api/v2/compute_templates/", computeTemplatesHandler)
+	mux.HandleFunc("/api/v2/compute_templates", computeTemplatesHandler)
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)

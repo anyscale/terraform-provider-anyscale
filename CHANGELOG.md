@@ -52,6 +52,7 @@ here, in `0.24.0`. If you are upgrading from `0.22.0` or earlier, read the `[0.2
 - resource/anyscale_organization_user: The destroy warning is stronger about `terraform destroy` evicting a real person from the organization, including on a `destroy` that merely reaches this resource as part of a larger or failed apply - no behavior change, docs only.
 
 ## [0.23.0] - 2026-07-27
+<!-- changelog-gate:no-tag-ok -->
 
 ### Breaking Changes
 
@@ -960,6 +961,7 @@ make test-aws-vm-basic
 ---
 
 ## [0.0.1-dev] - Draft, never published (SDK v2 baseline)
+<!-- changelog-gate:no-tag-ok -->
 
 ### Added
 

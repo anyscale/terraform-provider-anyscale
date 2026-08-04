@@ -2,10 +2,10 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -344,7 +344,7 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 	// Get application template details (decorated: carries latest_build for free)
 	template, err := r.getApplicationTemplate(ctx, templateID)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Application template not found, removing from state", map[string]any{"cluster_environment_id": templateID})
 			resp.State.RemoveResource(ctx)
 			return
