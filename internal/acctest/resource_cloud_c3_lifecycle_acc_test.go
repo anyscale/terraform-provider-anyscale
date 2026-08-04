@@ -188,13 +188,21 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// ImportStateVerify above only proves imported state matches
-				// created state - both sides saw the same API-echoed value,
-				// so it cannot catch an operator-typed config value
-				// diverging from state on the NEXT plan after import. Re-apply
-				// the same create-time config here and assert the plan is a
-				// no-op for the resource: this is the check that would catch
-				// that class of bug.
+				// RELABELED - this does NOT prove import-recovery correctness.
+				// ImportState above runs without ImportStatePersist, so per
+				// terraform-plugin-testing's own documented behavior (and
+				// testing_new_import_state.go's actual implementation) it
+				// executes in a throwaway working directory that is discarded
+				// at the end of that step - this step's plan is computed
+				// against whatever the CREATE step above left, never against
+				// what import recovered. What this genuinely proves: Create's
+				// own state stays stable under a same-config re-apply - a
+				// real property, just not the import round-trip one. See
+				// resource_cloud_import_object_storage_region_acc_test.go for
+				// the two-test shape that actually proves import recovery
+				// (ImportStateCheck on the import step itself) and plan
+				// stability against a recovered shape (two Config-only
+				// steps, no Import) as separate proofs.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -272,13 +280,21 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// ImportStateVerify above only proves imported state matches
-				// created state - both sides saw the same API-echoed value,
-				// so it cannot catch an operator-typed config value
-				// diverging from state on the NEXT plan after import. Re-apply
-				// the same create-time config here and assert the plan is a
-				// no-op for the resource: this is the check that would catch
-				// that class of bug.
+				// RELABELED - this does NOT prove import-recovery correctness.
+				// ImportState above runs without ImportStatePersist, so per
+				// terraform-plugin-testing's own documented behavior (and
+				// testing_new_import_state.go's actual implementation) it
+				// executes in a throwaway working directory that is discarded
+				// at the end of that step - this step's plan is computed
+				// against whatever the CREATE step above left, never against
+				// what import recovered. What this genuinely proves: Create's
+				// own state stays stable under a same-config re-apply - a
+				// real property, just not the import round-trip one. See
+				// resource_cloud_import_object_storage_region_acc_test.go for
+				// the two-test shape that actually proves import recovery
+				// (ImportStateCheck on the import step itself) and plan
+				// stability against a recovered shape (two Config-only
+				// steps, no Import) as separate proofs.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -421,13 +437,21 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// ImportStateVerify above only proves imported state matches
-				// created state - both sides saw the same API-echoed value,
-				// so it cannot catch an operator-typed config value
-				// diverging from state on the NEXT plan after import. Re-apply
-				// the same create-time config here and assert the plan is a
-				// no-op for the resource: this is the check that would catch
-				// that class of bug.
+				// RELABELED - this does NOT prove import-recovery correctness.
+				// ImportState above runs without ImportStatePersist, so per
+				// terraform-plugin-testing's own documented behavior (and
+				// testing_new_import_state.go's actual implementation) it
+				// executes in a throwaway working directory that is discarded
+				// at the end of that step - this step's plan is computed
+				// against whatever the CREATE step above left, never against
+				// what import recovered. What this genuinely proves: Create's
+				// own state stays stable under a same-config re-apply - a
+				// real property, just not the import round-trip one. See
+				// resource_cloud_import_object_storage_region_acc_test.go for
+				// the two-test shape that actually proves import recovery
+				// (ImportStateCheck on the import step itself) and plan
+				// stability against a recovered shape (two Config-only
+				// steps, no Import) as separate proofs.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -528,13 +552,21 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// ImportStateVerify above only proves imported state matches
-				// created state - both sides saw the same API-echoed value,
-				// so it cannot catch an operator-typed config value
-				// diverging from state on the NEXT plan after import. Re-apply
-				// the same create-time config here and assert the plan is a
-				// no-op for the resource: this is the check that would catch
-				// that class of bug.
+				// RELABELED - this does NOT prove import-recovery correctness.
+				// ImportState above runs without ImportStatePersist, so per
+				// terraform-plugin-testing's own documented behavior (and
+				// testing_new_import_state.go's actual implementation) it
+				// executes in a throwaway working directory that is discarded
+				// at the end of that step - this step's plan is computed
+				// against whatever the CREATE step above left, never against
+				// what import recovered. What this genuinely proves: Create's
+				// own state stays stable under a same-config re-apply - a
+				// real property, just not the import round-trip one. See
+				// resource_cloud_import_object_storage_region_acc_test.go for
+				// the two-test shape that actually proves import recovery
+				// (ImportStateCheck on the import step itself) and plan
+				// stability against a recovered shape (two Config-only
+				// steps, no Import) as separate proofs.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -837,13 +869,21 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// ImportStateVerify above only proves imported state matches
-				// created state - both sides saw the same API-echoed value,
-				// so it cannot catch an operator-typed config value
-				// diverging from state on the NEXT plan after import. Re-apply
-				// the same create-time config here and assert the plan is a
-				// no-op for the resource: this is the check that would catch
-				// that class of bug. Note this is distinct from the PlanOnly
+				// RELABELED - this does NOT prove import-recovery correctness.
+				// ImportState above runs without ImportStatePersist, so per
+				// terraform-plugin-testing's own documented behavior (and
+				// testing_new_import_state.go's actual implementation) it
+				// executes in a throwaway working directory that is discarded
+				// at the end of that step - this step's plan is computed
+				// against whatever the CREATE step above left, never against
+				// what import recovered. What this genuinely proves: Create's
+				// own state stays stable under a same-config re-apply - a
+				// real property, just not the import round-trip one. See
+				// resource_cloud_import_object_storage_region_acc_test.go for
+				// the two-test shape that actually proves import recovery
+				// (ImportStateCheck on the import step itself) and plan
+				// stability against a recovered shape (two Config-only
+				// steps, no Import) as separate proofs. Note this is distinct from the PlanOnly
 				// step earlier in this test (which runs BEFORE import,
 				// against Create's own state) - this step specifically covers
 				// the post-import scenario the PlanOnly step does not reach.

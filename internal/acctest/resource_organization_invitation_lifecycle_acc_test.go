@@ -287,14 +287,18 @@ resource "anyscale_organization_invitation" "test" {
 				ImportStateVerify: true,
 			},
 			{
-				// Post-import stability check: ImportStateVerify
-				// above only compares imported state against created state - both
-				// sides read the same API-echoed value, so it cannot catch a
-				// defect where an operator-typed config value diverges from state
-				// on the NEXT plan after import. Re-apply the LATEST config this
-				// test actually applied before import - email2, after the
-				// RequiresReplace step above - and assert the plan is a clean
-				// no-op for this resource.
+				// RELABELED - this does NOT prove import-recovery correctness.
+				// ImportState above runs without ImportStatePersist, so it
+				// executes in a throwaway working directory that is discarded
+				// at the end of that step (terraform-plugin-testing's
+				// documented behavior) - this step's plan is computed against
+				// whatever the last real apply above left (email2, after the
+				// RequiresReplace step), never against what import recovered.
+				// What this genuinely proves: state stays stable under a
+				// same-config re-apply - a real property, just not the
+				// import round-trip one. See
+				// resource_cloud_import_object_storage_region_acc_test.go for
+				// the two-test shape that actually proves import recovery.
 				Config: configFor(email2),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
