@@ -85,10 +85,23 @@ practitioner-supplied `name` from ever being overwritten by an API value, which 
 that would force-replace every existing user. It also means Gate 1 below cannot turn this fix into a
 regression — only into an incomplete one.
 
-Note the `Optional+Computed` Unknown-versus-Null trap: the existing Create guard at `:243` tests
-`!plan.Name.IsNull()` only. Once `name` is `Computed`, an omitted attribute arrives as **Unknown, not
-Null**, and that guard would read an Unknown as user-supplied. It must become
-`!plan.Name.IsNull() && !plan.Name.IsUnknown()`, matching `ray_version`'s guard at `:226`.
+Note the `Optional+Computed` Unknown-versus-Null trap, **with a correction to an earlier draft of
+this section.** That draft stated the existing Create guard at `:243` tests `!plan.Name.IsNull()`
+only, and concluded that without an added `IsUnknown` clause every create with `name` omitted would
+send `name=""`. **That is wrong.** The guard already reads:
+
+```go
+if !plan.Name.IsNull() && plan.Name.ValueString() != "" {
+```
+
+Two clauses, not one. Since `ValueString()` on an Unknown returns `""`, the pre-existing `!= ""`
+clause *already* sends an Unknown down the generate-a-name branch. The regression the added guard was
+said to prevent does not reach the wire.
+
+**Still add `&& !plan.Name.IsUnknown()`** — it matches `ray_version`'s guard at `:226`, states the
+intent directly instead of relying on an emergent property of `ValueString()`, and stops a later
+edit to the `!= ""` clause from silently reopening the hole. But it is defensive hardening, not a bug
+fix, and reverting it alone breaks no test.
 
 **No state upgrader is required.** Adding `Computed` does not change the state shape — the attribute
 is a string before and after — so no schema `Version` bump. Existing state carrying `name = null`
@@ -189,8 +202,9 @@ import-recovery bug (`ImportState` without `ImportStatePersist` runs in a throwa
 
 Mutation-proof what can be mutation-proofed, and know in advance which change cannot be. Gate 2
 already ran this: reverting **Read's fill-on-null** fails correctly (on the value assertion, not the
-plancheck), and reverting the **`IsUnknown` guard** is a concrete regression confirmed from source
-plus Gate 1. Reverting **`UseStateForUnknown` does not fail any test** — it guards a path that is not
+plancheck). Reverting the **`IsUnknown` guard** alone breaks nothing — see the correction above; the
+pre-existing `!= ""` clause already catches Unknown. Two of the three changes therefore have no
+failing test to point at, and only Read's fill-on-null does. Reverting **`UseStateForUnknown` does not fail any test** — it guards a path that is not
 currently reachable on this resource, so do not spend time hunting for a test that goes red without
 it, and do not conclude from that green result that the modifier is unnecessary. Restore
 byte-identically after each. A build that fails to compile is not a failing test.
@@ -235,8 +249,11 @@ fixture requirement above.
 - Mutation-proofed in both directions, and both results changed this document: removing Read's
   fill-on-null fails on the value assertion but **not** on `ExpectEmptyPlan`; removing
   `UseStateForUnknown` does not fail at all.
-- The `IsUnknown` guard was confirmed necessary from source rather than taken on trust:
-  `StringValue.ValueString()` on an Unknown returns `""`, so without the guard every create with
-  `name` omitted under the new schema would send `name=""` — which Gate 1 independently confirms is
-  a `422`. The two gates corroborate each other on this point; it is a concrete regression, not a
-  hypothetical one.
+- **This bullet previously claimed the `IsUnknown` guard was "confirmed necessary" and prevented a
+  "concrete regression". Both halves were wrong, and the error is recorded rather than deleted
+  because of how it happened.** The reasoning — `ValueString()` on an Unknown returns `""`, and Gate
+  1 shows an empty name is a `422` — is individually true at every step. It skipped one check:
+  what the *existing* guard already does with that `""`. It already rejects it, via a `!= ""` clause
+  that has been there all along. A later mutation test (revert only the `IsUnknown` clause, leave
+  everything else) passes: the name still generates and nothing empty is sent. Add the clause as
+  hardening; do not describe it as fixing anything.
