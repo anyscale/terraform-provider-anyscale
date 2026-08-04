@@ -305,7 +305,13 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 
 	plan := tfsdk.Plan{Schema: schemaResp.Schema}
 	planDiags := plan.Set(ctx, &ContainerImageRegistryResourceModel{
-		// Name deliberately omitted (Null) -- this is the whole point of the test.
+		// Name deliberately omitted -- this is the whole point of the test. Unknown, not the
+		// zero-value Null: name is Optional+Computed, and that is what a real Core plan hands
+		// the provider for an omitted Computed attribute on a fresh Create (no prior state for
+		// UseStateForUnknown to carry forward). tfsdk.Plan.Set() does not run Core's plan
+		// pipeline, so this must be set explicitly to match - a bare zero-value field here would
+		// silently test an input shape Create can never actually receive from real Terraform.
+		Name:       types.StringUnknown(),
 		ImageURI:   types.StringValue(imageURI),
 		RayVersion: types.StringValue(rayVersion),
 	})
@@ -337,12 +343,14 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 	if state.ID.ValueString() != templateID {
 		t.Errorf("state.ID = %q, want template id %q", state.ID.ValueString(), templateID)
 	}
-	// Create() never writes the generated name back into state -- name is Optional
-	// (not Computed), and Read() doesn't rehydrate it either (see the "name" entry in
-	// ImportStateVerifyIgnore, resource_container_image_registry_acc_test.go), so a
-	// config that omits it stays null rather than drifting to whatever got generated.
-	if !state.Name.IsNull() {
-		t.Errorf("state.Name = %q, want null -- Create() must not write the generated name back into state", state.Name.ValueString())
+	// name is Optional+Computed: Create() must write the generated name back into state now
+	// (it is the only place this value will ever be known if the practitioner never sets it),
+	// and it must be the exact value that was actually sent to the backend, not a second,
+	// independently-regenerated guess.
+	if state.Name.IsNull() {
+		t.Error("state.Name = null, want the backend-generated name Create() actually sent")
+	} else if state.Name.ValueString() != templateReq.Name {
+		t.Errorf("state.Name = %q, want %q (the exact name sent in the create request)", state.Name.ValueString(), templateReq.Name)
 	}
 }
 

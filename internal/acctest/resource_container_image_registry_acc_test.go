@@ -66,7 +66,6 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"registry_login_secret", // sensitive: API never returns auth secrets after create
-					"name",                  // Optional-only schema field; auto-generated when omitted and not rehydrated to avoid drift on null configs
 					"ray_version",           // Optional-only schema field; rehydrated only when the user set it, so import on null configs is ignored
 				},
 			},

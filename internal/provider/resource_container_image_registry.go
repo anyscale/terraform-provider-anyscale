@@ -106,8 +106,10 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		// User-provided attributes
 		"name": schema.StringAttribute{
 			Optional:            true,
-			MarkdownDescription: "The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated.",
+			Computed:            true,
+			MarkdownDescription: "The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated and recorded here after create/import - the generated value is not derivable from config (it embeds a timestamp), so it lives only in state.",
 			PlanModifiers: []planmodifier.String{
+				stringplanmodifier.UseStateForUnknown(),
 				stringplanmodifier.RequiresReplace(),
 			},
 		},
@@ -239,8 +241,15 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 
 	// Determine name - use provided value or generate a valid one from image URI
 	// Name must match pattern: ^[A-Za-z0-9._-]+$
+	// name is now Optional+Computed: omitted in config plans Unknown, not Null (there is no
+	// prior state for UseStateForUnknown to carry forward on a fresh Create). The explicit
+	// IsUnknown() check is defensive/self-documenting rather than load-bearing on its own here -
+	// ValueString() on Unknown returns "" (confirmed, not assumed), which the pre-existing
+	// != "" check already routes to the generate-name branch below - but relying on that
+	// coincidence without saying so is exactly what reads as a hidden bug to the next person who
+	// has to re-derive it. Matches ray_version's identical guard just below in this file.
 	var name string
-	if !plan.Name.IsNull() && plan.Name.ValueString() != "" {
+	if !plan.Name.IsNull() && !plan.Name.IsUnknown() && plan.Name.ValueString() != "" {
 		name = plan.Name.ValueString()
 	} else {
 		// Sanitize image URI to create a valid name
@@ -294,6 +303,14 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		"cluster_environment_id": templateID,
 		"name":                   templateName,
 	})
+
+	// name is Optional+Computed and RequiresReplace (immutable): only fill it from the API's
+	// response when the practitioner omitted it from config (plan.Name is Unknown here, not Null,
+	// same as ray_version's guard below). The name is finalized by call 1 alone - call 2 (build
+	// creation) cannot change it - so this can fill immediately rather than waiting on call 2.
+	if plan.Name.IsUnknown() {
+		plan.Name = types.StringValue(templateName)
+	}
 
 	// Persist state now that the template exists remotely, before the build-create
 	// call below that can still fail. Delete() acts on ID (the cluster environment id),
@@ -512,11 +529,20 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 		}
 	}
 
-	// name is Optional-only (not Computed) - never overwrite state.Name from the API,
-	// since populating it when the user left it unset would cause drift on the next
-	// plan. Prefer it for name_version's display when set; otherwise fall back to the
-	// template's own name (already in hand from the fetch above, no extra call
-	// needed).
+	// name is Optional+Computed and RequiresReplace (immutable): only fill it when state does
+	// not already carry a value (unset at Create time, e.g. an upgraded pre-fix resource or a
+	// cold import, or - defensively - a still-null value somehow left over from Create). A
+	// previously-set value, whether user-typed or filled on an earlier refresh, is preserved
+	// untouched. Mirrors ray_version's fill-on-null guard immediately above.
+	if state.Name.IsNull() {
+		state.Name = types.StringValue(template.Name)
+	}
+
+	// name_version deliberately still prefers state.Name over template.Name here (unchanged from
+	// before name became Computed) - the backend never renames on submit (verified: an invalid
+	// character 422s, a name collision 409s, neither sanitizes nor uniquifies), so the two cannot
+	// actually disagree, and changing this to match would be a no-op decorated as a fix. See
+	// docs/decisions/container-image-registry-name for the full ruling and its reopen condition.
 	clusterEnvName := template.Name
 	if !state.Name.IsNull() {
 		clusterEnvName = state.Name.ValueString()
