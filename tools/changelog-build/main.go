@@ -11,12 +11,16 @@
 //	                                   # delete consumed fragments, write a release-notes file
 //	changelog-build -extract X.Y.Z     # read-only: re-emit an already-committed version
 //	                                   # section's body (used by release.yml on a fresh checkout)
+//	changelog-build -check-tags        # read-only: every non-topmost, non-Unreleased version
+//	                                   # heading must have a matching git tag or an explicit
+//	                                   # opt-out marker (see CheckHeadingsTagged in tagcheck.go)
 package main
 
 import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -37,6 +41,7 @@ func run(args []string) error {
 	notesOut := fs.String("notes-out", "dist/release-notes.md", "where to write the section body (with -finalize or -extract)")
 	date := fs.String("date", time.Now().UTC().Format("2006-01-02"), "release date to stamp on the finalized version heading (only with -finalize)")
 	check := fs.Bool("check", false, "validate that all fragments parse; write nothing")
+	checkTags := fs.Bool("check-tags", false, "validate that every non-topmost, non-Unreleased CHANGELOG.md version heading has a matching git tag or an explicit no-tag-ok marker; write nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -57,6 +62,22 @@ func run(args []string) error {
 			return fmt.Errorf("writing %s: %w", *notesOut, err)
 		}
 		fmt.Printf("changelog-build: extracted [%s] section to %s\n", *extractVersion, *notesOut)
+		return nil
+	}
+
+	if *checkTags {
+		changelog, err := os.ReadFile(*changelogPath)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", *changelogPath, err)
+		}
+		errs := CheckHeadingsTagged(string(changelog), gitTagExists)
+		if len(errs) > 0 {
+			for _, e := range errs {
+				fmt.Fprintf(os.Stderr, "changelog-build: %v\n", e)
+			}
+			return fmt.Errorf("%d changelog heading(s) failed the tag check", len(errs))
+		}
+		fmt.Println("changelog-build: every non-topmost, non-Unreleased CHANGELOG.md version heading has a matching git tag or opt-out marker")
 		return nil
 	}
 
@@ -129,4 +150,15 @@ func fragmentFiles(entries []Entry, dir string) []string {
 		}
 	}
 	return files
+}
+
+// gitTagExists is the real CheckHeadingsTagged tagExists implementation used
+// outside of tests. It shells out to git rather than any network call, so it
+// depends entirely on the tag already being present in the local checkout -
+// in CI that requires more than actions/checkout's default shallow clone;
+// see the fetch-depth: 0 plus explicit `git fetch --tags` steps this check is
+// wired up behind in changelog-gate.yml.
+func gitTagExists(version string) bool {
+	cmd := exec.Command("git", "rev-parse", "-q", "--verify", "refs/tags/v"+version)
+	return cmd.Run() == nil
 }
