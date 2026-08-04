@@ -412,9 +412,15 @@ func TestContainerImageDataSourceRead_BuildFetchFails_BuildFieldsAreNullButNoErr
 
 // TestContainerImageDataSourceNameResolutionLogic tests the real filterExactApplicationTemplateMatches
 // helper used by getApplicationTemplateByName, covering exact-name and archived filtering together.
+// Includes both archival shapes the backend actually sends: DeletedAt (the field this test used
+// exclusively before ApplicationTemplateResult grew ArchivedAt) and ArchivedAt (what a live GET on
+// a real archived template returns - deleted_at stays null). A fixture that only ever archived via
+// DeletedAt would keep passing against the old, wrong IsArchived() and prove nothing about the
+// shape that matters in production.
 func TestContainerImageDataSourceNameResolutionLogic(t *testing.T) {
 	// Simulate a name_contains search response with multiple application templates sharing a name.
 	deletedAt := "2024-01-03T00:00:00Z"
+	archivedAt := "2024-01-04T00:00:00Z"
 	templates := []ApplicationTemplateResult{
 		{
 			ID:        "apptemp_123",
@@ -432,12 +438,18 @@ func TestContainerImageDataSourceNameResolutionLogic(t *testing.T) {
 			ID:        "apptemp_789",
 			Name:      "test-image",
 			CreatedAt: "2024-01-03T00:00:00Z",
-			DeletedAt: &deletedAt, // Archived - should be filtered out
+			DeletedAt: &deletedAt, // Archived via DeletedAt - should be filtered out
+		},
+		{
+			ID:         "apptemp_def",
+			Name:       "test-image",
+			CreatedAt:  "2024-01-04T00:00:00Z",
+			ArchivedAt: &archivedAt, // Archived via ArchivedAt (the real production shape) - should be filtered out
 		},
 		{
 			ID:        "apptemp_abc",
 			Name:      "other-image",
-			CreatedAt: "2024-01-04T00:00:00Z",
+			CreatedAt: "2024-01-05T00:00:00Z",
 			DeletedAt: nil, // Not archived, but a different name - should be filtered out
 		},
 	}
@@ -455,38 +467,35 @@ func TestContainerImageDataSourceNameResolutionLogic(t *testing.T) {
 	}
 }
 
-// TestApplicationTemplateResultIsArchived tests the IsArchived() method
+// TestApplicationTemplateResultIsArchived tests the IsArchived() method against both fields it
+// checks. The real-archive case (archivedAt set, deletedAt nil) is the one that matters most: a
+// live GET on a template archived weeks earlier returned exactly that shape (archived_at carrying
+// a real timestamp, deleted_at null) - deletedAt-only was the previous, wrong implementation, and
+// a fixture that only ever sets deletedAt would still pass against it.
 func TestApplicationTemplateResultIsArchived(t *testing.T) {
-	deletedAt := "2024-01-01T00:00:00Z"
-	emptyDeletedAt := ""
+	ts := "2024-01-01T00:00:00Z"
+	empty := ""
 
 	tests := []struct {
 		name       string
+		archivedAt *string
 		deletedAt  *string
 		isArchived bool
 	}{
-		{
-			name:       "nil DeletedAt - not archived",
-			deletedAt:  nil,
-			isArchived: false,
-		},
-		{
-			name:       "empty DeletedAt - not archived",
-			deletedAt:  &emptyDeletedAt,
-			isArchived: false,
-		},
-		{
-			name:       "non-empty DeletedAt - archived",
-			deletedAt:  &deletedAt,
-			isArchived: true,
-		},
+		{"both nil - not archived", nil, nil, false},
+		{"both empty - not archived", &empty, &empty, false},
+		{"real archive shape: ArchivedAt set, DeletedAt nil - archived", &ts, nil, true},
+		{"ArchivedAt set, DeletedAt empty - archived", &ts, &empty, true},
+		{"DeletedAt set, ArchivedAt nil - archived", nil, &ts, true},
+		{"both set - archived", &ts, &ts, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ApplicationTemplateResult{
-				ID:        "apptemp_123",
-				DeletedAt: tt.deletedAt,
+				ID:         "apptemp_123",
+				ArchivedAt: tt.archivedAt,
+				DeletedAt:  tt.deletedAt,
 			}
 
 			if result.IsArchived() != tt.isArchived {

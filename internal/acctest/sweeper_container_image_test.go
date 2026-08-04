@@ -99,7 +99,16 @@ func sweepContainerImages(_ string) error {
 
 		if c.IsArchived() {
 			alreadyArchivedCount++
-			log.Printf("[sweep:anyscale_container_image] KEEP %s (%s): already archived at %s (no permanent delete API)", c.ID, c.Name, *c.DeletedAt)
+			// ArchivedAt is the real producer (see IsArchived's doc comment); DeletedAt has none
+			// today but is checked defensively, so it - not ArchivedAt - could in principle be the
+			// one that's set. Report whichever is actually non-empty rather than assuming.
+			archivedWhen := ""
+			if c.ArchivedAt != nil && *c.ArchivedAt != "" {
+				archivedWhen = *c.ArchivedAt
+			} else if c.DeletedAt != nil {
+				archivedWhen = *c.DeletedAt
+			}
+			log.Printf("[sweep:anyscale_container_image] KEEP %s (%s): already archived at %s (no permanent delete API)", c.ID, c.Name, archivedWhen)
 			continue
 		}
 
