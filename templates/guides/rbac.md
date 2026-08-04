@@ -19,7 +19,7 @@ Read this before writing configuration that spans more than one scope.
 
 | Scope | Resource | Manages |
 |---|---|---|
-| Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user exists in the organization at all. Import-only - it cannot create a member, and destroying it evicts them. |
+| Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | Cloud role | [`anyscale_cloud_user_role`](../resources/cloud_user_role.md) | One user's `base_role` and `deny_roles` on one cloud. Authoritative over that one (cloud, user) pair - not over the cloud's whole member list. Gated behind two separate backend flags; see that resource's own documentation. |
 
