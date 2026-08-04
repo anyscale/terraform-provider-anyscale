@@ -215,6 +215,30 @@ accompanying such a removal.
 3. `cloud_access` write path, including `member[*].projects` — this is what closes gap (iii).
 4. Remove `cloud_user_role`, in the PR that registers `cloud_access`.
 
+> **Superseded before this document merged — step 4 did not survive review, and the reasoning above
+> it is left standing deliberately so the decision is legible rather than silently rewritten.**
+>
+> The ordering above was the author's recommendation. It was put to the user as one of three
+> options, alongside removing `cloud_user_role` immediately (A) and deprecating it now for later
+> removal (C). **The user chose A — remove now — conditional on `cloud_access` not being close to
+> finished.** That condition was then measured rather than estimated: `resource_cloud_access.go` is
+> 441 lines of schema, `ValidateConfig` and a plan modifier; all four CRUD methods are single
+> unconditional refusals; `ImportState` does not exist; and the file makes **zero** API calls. The
+> condition does not trigger.
+>
+> So `cloud_user_role` is removed on its own, and a released version will exist with no cloud-role
+> management surface until `cloud_access` gains a write path. That gap is accepted, not overlooked —
+> it was the explicit cost of option A, weighed against a resource that had already shipped in two
+> releases after the decision to remove it, still carrying no `DeprecationMessage`.
+>
+> Steps 1–3 are unaffected and still describe the right order for the work that remains.
+> **Gap (iii) — no write surface for project roles — is unchanged by this and remains the largest
+> hole in the surface.**
+>
+> The removal ships as a changelog note only; the user was asked directly and declined a migration
+> guide. That makes the changelog entry the entire migration path rather than a summary of one,
+> which is why the constraint below is written the way it is.
+
 **Hard constraint on that removal, re-derived at `0e862fd`** with
 `grep -rln '<name>' internal/provider/*.go`:
 
