@@ -170,8 +170,7 @@ must get right.
 The last row is the sharp edge: a resource and a data source share a type name and disagree on what
 `id` holds.
 
-**Severity, stated precisely — an earlier draft of this audit overstated it.** The import path is
-*already* defended: `resource_organization_user.go:968-994` rejects any import ID without an `@`,
+**Severity, stated precisely.** The import path is *already* defended: `resource_organization_user.go:968-994` rejects any import ID without an `@`,
 and specifically recognises an `ide_` prefix, telling the reader it looks like an identity ID and
 that this resource is keyed by email. So feeding a data-source `id` to `terraform import` fails
 loudly with a good diagnostic rather than importing the wrong object.
@@ -264,11 +263,3 @@ Recorded so a later pass does not "improve" something already correct:
 - `organization_default_cloud`'s state-only destroy.
 - `cloud_user_role`'s unrepairable-404 destroy diagnostic. If that resource is removed, this failure
   mode must be re-checked against `cloud_access`'s revoke path, which uses the same endpoint.
-
-## Correction to an earlier record
-
-An earlier note held that `anyscale_cloud_access` carried no commented-out registration line or
-TODO, leaving a reader unable to distinguish "deferred" from "forgotten." That is no longer true:
-`internal/provider/provider.go:143-152` carries an eleven-line comment naming what exists, what does
-not, and why registration is withheld, ending in a commented `// NewCloudAccessResource,` line. No
-action needed.
