@@ -1,0 +1,4 @@
+```
+release-note:security
+provider: Update the `google.golang.org/grpc` dependency to v1.82.1, addressing GHSA-hrxh-6v49-42gf - an xDS RBAC authorization bypass, an HTTP/2 Rapid Reset mitigation bypass, and a server panic on crafted xDS RBAC policies.
+```
