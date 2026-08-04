@@ -174,6 +174,24 @@ resource "anyscale_organization_default_cloud" "test" {
 				ImportStateId:     cloudID,
 				ImportStateVerify: true,
 			},
+			// NOT import-recovery proof. ImportState above runs without
+			// ImportStatePersist, so it executes in a throwaway working
+			// directory that is discarded at the end of that step
+			// (terraform-plugin-testing's documented behavior) - this
+			// step's plan is computed against whatever the CREATE step
+			// above left, never against what import recovered. What this
+			// genuinely proves: state stays stable under a same-config
+			// re-apply - a real property, just not the import round-trip
+			// one. See resource_cloud_import_object_storage_region_acc_test.go
+			// for the two-test shape that actually proves import recovery.
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_organization_default_cloud.test", plancheck.ResourceActionNoop),
+					},
+				},
+			},
 		},
 	})
 
