@@ -1,7 +1,8 @@
 # Design: `anyscale_container_image_registry.name` — import round-trip and `name_version` provenance
 
-**Status: design, gated.** Measured at `0e862fd`. Implementation must not begin until the two gates
-below are closed with logged evidence, per the Design Verification Policy in `CLAUDE.md`.
+**Status: design, GATES CLOSED, cleared for implementation.** Measured at `0e862fd`; gates closed
+2026-08-04 with logged evidence (see "Gate results" below). Two claims in the original draft were
+corrected by those results and are marked inline.
 
 ## The reported problem
 
@@ -64,10 +65,20 @@ Three changes, each with its `ray_version` counterpart:
 | 2 | Create: fill `name` from the backend **only when the planned value is Unknown**. | `:389-394` |
 | 3 | Read: fill `name` from `template.Name` **only when state is null**. | `:507-513` |
 
-**`UseStateForUnknown` is mandatory, not stylistic.** Without it, a plan whose config omits `name`
-re-marks it Unknown on every run; an Unknown on a `RequiresReplace` attribute with a known prior
-state plans a **replacement**. Omitting this modifier converts an import bug into a
-replace-on-every-plan bug.
+**`UseStateForUnknown` — ship it, but the original rationale here was overstated.** The draft called
+it "mandatory, not stylistic", reasoning that an omitted `name` would re-mark Unknown each plan and
+that an Unknown on a `RequiresReplace` attribute forces replacement. Gate 2 disproved the premise for
+*this* resource: removing the modifier left the test passing. Traced in framework source
+(`internal/fwserver/server_planresourcechange.go`): Core's proposed-new-value for a `Computed`
+attribute with null config starts from **prior state** — already post-refresh by the time Plan runs —
+and the "mark computed nils unknown" sweep is skipped entirely when proposed equals prior. Because
+every other user-settable attribute on this resource is already `RequiresReplace`, no in-place-update
+path exists that could force that sweep while `name` rides along omitted.
+
+So it is **correct future-proofing, not the load-bearing piece**: it matches `ray_version`, costs
+nothing, and protects a path that is real but not currently reachable. Read's fill-on-null is what
+actually carries this transition. Ship both; do not describe the modifier as what makes the fix
+work.
 
 **Fill-on-Unknown / fill-on-null, never unconditional overwrite.** This is what keeps a
 practitioner-supplied `name` from ever being overwritten by an API value, which is the failure mode
@@ -100,9 +111,33 @@ Create writes `<backend-name>:N` and the next Read overwrites it with `<config-n
 consequences, both real: perpetual drift on a Computed attribute, and a `name_version` that does not
 work against the Anyscale API — which is its entire purpose.
 
-**Ruling: `name_version` must derive from the backend's name unconditionally, in both Create and
-Read.** Read's preference for `state.Name` is the defect. This is independent of the import fix and
-should land with it, since both hinge on the same capture.
+**Ruling, REVISED after Gate 1: do not change this, and do not land it with the import fix.**
+
+Gate 1 established that the backend never renames — an invalid character is a hard 422 and a name
+collision is a hard 409, so a `201` always carries back exactly the submitted name. The divergence
+described above therefore has **no reachable trigger**: Create's `templateName` and Read's
+`state.Name` cannot hold different values.
+
+This is the same shape-without-mechanism pattern recorded for `kubernetes_config.zones` in
+`CLAUDE.md`, and consistency requires the same answer. The two code paths genuinely do read from
+different sources, which is why it looked like a defect — but a change with no observable effect,
+riding along in a PR that already carries three changes and two tests, is a change bought for
+nothing.
+
+**What would reopen it:** any backend behavior that returns a name differing from the one submitted.
+Note that such a change would break more than `name_version` — with `name` modeled
+`Optional+Computed`, a config-supplied name that the backend altered would leave state holding the
+config value while the backend holds another, silently. If that day comes, this design is revisited
+as a whole, not patched at `name_version`.
+
+One caveat on the evidence, stated because it affects how far the conclusion travels: Gate 1 probed
+two scenarios (invalid character, collision) and both hard-rejected. That proves those two paths do
+not rename. The broader claim that *no* backend path renames is an extrapolation from two negative
+probes unless separately source-traced — untested shapes such as length truncation or Unicode
+normalization were not exercised. The ruling above does not depend on the stronger claim: the two
+probed paths are the two the provider can actually produce, since it either passes a
+practitioner-supplied name straight through or generates one from a sanitized URI plus a
+nanosecond timestamp.
 
 ## Gates — no implementation until both are closed
 
@@ -146,10 +181,19 @@ import-recovery bug (`ImportState` without `ImportStatePersist` runs in a throwa
   against — so the `ImportStateCheck` assertion is the whole proof and must be specific.
 - **Test B — planning against the recovered shape.** Two sequential `Config`-only steps, which do
   carry state forward: step 1 omits `name`, step 2 declares it at the value the backend holds.
-  Assert `plancheck.ExpectEmptyPlan()` on step 2. This is what proves "no spurious replace."
+  Assert `plancheck.ExpectEmptyPlan()` on step 2 — **and an explicit value assertion alongside it,
+  which is not optional.** Gate 2 demonstrated that `ExpectEmptyPlan` alone stays green with Read's
+  fill-on-null removed: a stably-null state produces a trivially empty plan whether or not Read ever
+  populates the attribute, so the empty-plan check is a placebo on its own. Assert that `name` holds
+  the real backend value.
 
-Both must be mutation-proof: revert each of the three changes in turn, confirm the relevant test
-**fails**, then restore byte-identically. A build that fails to compile is not a failing test.
+Mutation-proof what can be mutation-proofed, and know in advance which change cannot be. Gate 2
+already ran this: reverting **Read's fill-on-null** fails correctly (on the value assertion, not the
+plancheck), and reverting the **`IsUnknown` guard** is a concrete regression confirmed from source
+plus Gate 1. Reverting **`UseStateForUnknown` does not fail any test** — it guards a path that is not
+currently reachable on this resource, so do not spend time hunting for a test that goes red without
+it, and do not conclude from that green result that the modifier is unnecessary. Restore
+byte-identically after each. A build that fails to compile is not a failing test.
 
 **Fixture requirement, and it is the one most likely to be got wrong.** The mock must return a
 `name` that is **not derivable from `image_uri`** — a timestamped or otherwise arbitrary string.
@@ -166,3 +210,33 @@ runs nor fails. Confirm the tests genuinely RUN rather than SKIP by reading the 
 Provider-facing behavior change: needs a fragment. `name` becomes populated in state where it was
 previously null for practitioners who omitted it — visible in `terraform plan` output and readable
 via `.name`, so it is a user-visible change even though it is not breaking.
+
+
+## Gate results (closed 2026-08-04)
+
+**Gate 1 — API response shape: CLOSED.** Real API, static org, objects cleaned up afterwards.
+
+- A name containing a character outside `^[A-Za-z0-9._-]+$` (a slash): `HTTP 422`, *"name should
+  match this pattern: ^[A-Za-z0-9._-]+$"*. Hard rejection; nothing created; **no sanitization**.
+- A colliding name: created `tfacc-gate1-dup-9661` (`201`), re-POSTed the identical name: `HTTP 409`,
+  *"This name is already taken"*. Hard rejection; **no uniquification**.
+
+Consequence: on any `201`, the returned name is the submitted name. This is what downgraded the
+`name_version` finding above from a defect to be fixed into a change not to make.
+
+**Gate 2 — Framework/Core contract: CLOSED, PASS.** The three designed changes were built as a
+temporary env-var-gated spike, toggled per `TestStep` via `PreConfig`, and fully reverted afterwards
+(verified byte-identical). The mock name was deliberately not derivable from `image_uri`, per the
+fixture requirement above.
+
+- Step 1 under the old schema creates with `name` omitted → null. Step 2 under the new schema, with
+  the config unchanged, produces an **empty plan** *and* populates `name` to the real backend value.
+  Step 3 reconfirms stability. The transition — not merely the steady state — is what was proven.
+- Mutation-proofed in both directions, and both results changed this document: removing Read's
+  fill-on-null fails on the value assertion but **not** on `ExpectEmptyPlan`; removing
+  `UseStateForUnknown` does not fail at all.
+- The `IsUnknown` guard was confirmed necessary from source rather than taken on trust:
+  `StringValue.ValueString()` on an Unknown returns `""`, so without the guard every create with
+  `name` omitted under the new schema would send `name=""` — which Gate 1 independently confirms is
+  a `422`. The two gates corroborate each other on this point; it is a concrete regression, not a
+  hypothetical one.
