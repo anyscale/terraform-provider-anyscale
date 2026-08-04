@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -186,6 +187,21 @@ resource "anyscale_cloud" "test" {
 					"object_storage", // optional for VM (only aws_config/gcp_config is compute-stack-required); not recovered at import by design (C3-v2)
 				},
 			},
+			{
+				// ImportStateVerify above only proves imported state matches
+				// created state - both sides saw the same API-echoed value,
+				// so it cannot catch an operator-typed config value
+				// diverging from state on the NEXT plan after import. Re-apply
+				// the same create-time config here and assert the plan is a
+				// no-op for the resource: this is the check that would catch
+				// that class of bug.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
+					},
+				},
+			},
 		},
 	})
 }
@@ -253,6 +269,21 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
 					"object_storage", // optional for VM (only aws_config/gcp_config is compute-stack-required); not recovered at import by design (C3-v2)
+				},
+			},
+			{
+				// ImportStateVerify above only proves imported state matches
+				// created state - both sides saw the same API-echoed value,
+				// so it cannot catch an operator-typed config value
+				// diverging from state on the NEXT plan after import. Re-apply
+				// the same create-time config here and assert the plan is a
+				// no-op for the resource: this is the check that would catch
+				// that class of bug.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
+					},
 				},
 			},
 		},
@@ -389,6 +420,21 @@ resource "anyscale_cloud" "test" {
 					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
 				},
 			},
+			{
+				// ImportStateVerify above only proves imported state matches
+				// created state - both sides saw the same API-echoed value,
+				// so it cannot catch an operator-typed config value
+				// diverging from state on the NEXT plan after import. Re-apply
+				// the same create-time config here and assert the plan is a
+				// no-op for the resource: this is the check that would catch
+				// that class of bug.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
+					},
+				},
+			},
 		},
 	})
 }
@@ -479,6 +525,21 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
 					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
+				},
+			},
+			{
+				// ImportStateVerify above only proves imported state matches
+				// created state - both sides saw the same API-echoed value,
+				// so it cannot catch an operator-typed config value
+				// diverging from state on the NEXT plan after import. Re-apply
+				// the same create-time config here and assert the plan is a
+				// no-op for the resource: this is the check that would catch
+				// that class of bug.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
+					},
 				},
 			},
 		},
@@ -773,6 +834,24 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
 					"object_storage", // optional for VM; not recovered at import by design (C3-v2)
+				},
+			},
+			{
+				// ImportStateVerify above only proves imported state matches
+				// created state - both sides saw the same API-echoed value,
+				// so it cannot catch an operator-typed config value
+				// diverging from state on the NEXT plan after import. Re-apply
+				// the same create-time config here and assert the plan is a
+				// no-op for the resource: this is the check that would catch
+				// that class of bug. Note this is distinct from the PlanOnly
+				// step earlier in this test (which runs BEFORE import,
+				// against Create's own state) - this step specifically covers
+				// the post-import scenario the PlanOnly step does not reach.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
+					},
 				},
 			},
 		},

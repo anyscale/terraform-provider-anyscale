@@ -177,6 +177,20 @@ resource "anyscale_project" "test" {
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
+			{
+				// Post-import stability check: ImportStateVerify
+				// above only compares imported state against created state - both
+				// sides read the same API-echoed value, so it cannot catch a
+				// defect where an operator-typed config value diverges from state
+				// on the NEXT plan after import. Re-apply the identical config
+				// here and assert the plan is a clean no-op for this resource.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_project.test", plancheck.ResourceActionNoop),
+					},
+				},
+			},
 		},
 	})
 }
