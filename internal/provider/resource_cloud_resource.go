@@ -1213,11 +1213,15 @@ func expandAWSConfig(ctx context.Context, obj types.Object) (*AWSConfig, error) 
 		name := awsModel.MemoryDBClusterName.ValueString()
 		awsConfig.MemoryDBClusterName = &name
 	}
-	if !awsModel.MemoryDBClusterARN.IsNull() {
+	// Optional+Computed and unset at Create (no prior state for UseStateForUnknown to carry
+	// forward) plans Unknown, not Null - an IsNull()-only guard would read that as a
+	// user-supplied value and send an explicit empty string instead of omitting the field.
+	// Matches expandFileStorage's MountTargets guard below, the same Optional+Computed shape.
+	if !awsModel.MemoryDBClusterARN.IsNull() && !awsModel.MemoryDBClusterARN.IsUnknown() {
 		arn := awsModel.MemoryDBClusterARN.ValueString()
 		awsConfig.MemoryDBClusterARN = &arn
 	}
-	if !awsModel.MemoryDBClusterEndpoint.IsNull() {
+	if !awsModel.MemoryDBClusterEndpoint.IsNull() && !awsModel.MemoryDBClusterEndpoint.IsUnknown() {
 		endpoint := awsModel.MemoryDBClusterEndpoint.ValueString()
 		awsConfig.MemoryDBClusterEndpoint = &endpoint
 	}
@@ -1272,7 +1276,8 @@ func expandGCPConfig(ctx context.Context, obj types.Object) (*GCPConfig, error) 
 	if !gcpModel.MemorystoreInstanceName.IsNull() {
 		gcpConfig.MemorystoreInstanceName = gcpModel.MemorystoreInstanceName.ValueString()
 	}
-	if !gcpModel.MemorystoreEndpoint.IsNull() {
+	// Same Optional+Computed Unknown-at-Create guard as MemoryDBClusterARN/Endpoint above.
+	if !gcpModel.MemorystoreEndpoint.IsNull() && !gcpModel.MemorystoreEndpoint.IsUnknown() {
 		gcpConfig.MemorystoreEndpoint = gcpModel.MemorystoreEndpoint.ValueString()
 	}
 

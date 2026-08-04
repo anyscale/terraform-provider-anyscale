@@ -64,11 +64,13 @@ falling back to a sane default; see the [Compute Config guide](../../docs/guides
 | `anyscale_organization_invitation` | **Opt-in.** Zero instances unless you set `var.invite_email`; see below |
 | `anyscale_organization_user` | Shown, not applied — see the note below |
 
-`anyscale_organization_user` is import-only (no `Create`) and manages an *existing* org
-member's permissions, so it can't be part of a one-shot `apply` the way everything above is. It's
-included, commented out, in `organization.tf` with the import command you'd run once a real member
-exists. See [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) for the
-full invite -> wait -> import -> manage lifecycle.
+`anyscale_organization_user` manages an *existing* org member's membership (not their role -
+that's `anyscale_organization_user_role`), so it can't be part of a one-shot `apply` the way
+everything above is: there's no member for it to adopt until the invitation above is accepted.
+It's included, commented out, in `organization.tf`; declaring it with the member's email adopts
+them directly once they've accepted, no import required. See
+[`organization_user_workflow`](../resources/organization_user_workflow/main.tf) for the full
+invite -> wait -> adopt -> manage lifecycle.
 
 **Data sources (all 13 registered by the provider):** `anyscale_cloud`, `anyscale_clouds`,
 `anyscale_compute_config`, `anyscale_container_image`, `anyscale_container_images`,

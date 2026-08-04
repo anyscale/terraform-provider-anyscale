@@ -29,7 +29,7 @@ data "anyscale_organization_user" "by_user_id" {
 
 output "user_identity_id" {
   value       = data.anyscale_organization_user.by_email.id
-  description = "The identity_id, used as the import ID and id for anyscale_organization_user"
+  description = "The identity_id - a read-only identifier for reference/debugging, NOT what anyscale_organization_user is imported or keyed by (that resource uses email; see its own example)"
 }
 
 output "user_email_by_user_id" {
@@ -55,6 +55,10 @@ output "user_additional_roles" {
 
 - `email` (String) The email address of the user. Either `id`, `user_id`, or `email` must be specified.
 - `id` (String) The identity ID of the user. Either `id`, `user_id`, or `email` must be specified.
+
+Note this is **not** the same as the `id` of the `anyscale_organization_user` **resource**, which is the email
+address. The two surfaces share a name and key on different values; use `email` when you need a value the
+resource will accept.
 - `user_id` (String) The user ID of the user. Either `id`, `user_id`, or `email` must be specified.
 
 ### Read-Only

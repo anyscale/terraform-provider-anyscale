@@ -1,6 +1,4 @@
-# Import using the member's identity_id. If you don't know it, look it up
-# with the anyscale_organization_user data source first:
-#   data "anyscale_organization_user" "example" {
-#     email = "user@example.com"
-#   }
-terraform import anyscale_organization_user.example idt_abc123
+# Import using the member's email address, not identity_id or user_id -
+# those only exist once someone has accepted an invitation, while email
+# identifies the same person before, during, and after.
+terraform import anyscale_organization_user.example user@example.com

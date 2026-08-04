@@ -18,7 +18,11 @@ const (
 	serviceStateTerminated = "TERMINATED"
 )
 
-// serviceErrorStates are terminal failure buckets (traced ServiceEventCurrentState.is_error).
+// serviceErrorStates are is_error buckets (traced ServiceEventCurrentState.is_error). Terminal
+// only when the wait target is RUNNING (Create/Update): the rollout failed and won't self-heal.
+// NOT terminal when the target is TERMINATED (Delete) - a service being torn down can legitimately
+// pass through an error state on its way to gone, and its health no longer matters. See
+// evaluateServiceState.
 var serviceErrorStates = map[string]bool{
 	"UNHEALTHY":          true,
 	"SYSTEM_FAILURE":     true,
@@ -45,17 +49,21 @@ const defaultServiceRolloutPollInterval = 10 * time.Second
 
 // evaluateServiceState classifies a service's current_state against the wait loop's target
 // (serviceStateRunning for Create/Update, serviceStateTerminated for Delete). done=true means
-// stop polling; err is set only for a terminal failure bucket (error_message surfaced) - nil for
-// terminal success, while still in progress, or an unrecognized/unexpected state (F6, contract
-// section F: treated as CONTINUE rather than a hard error, so a backend adding a new benign
-// transitional state does not break every apply against an otherwise-healthy service; the
+// stop polling. err is set only when target is RUNNING and current_state is a terminal failure
+// bucket (error_message surfaced) - an error bucket observed while waiting for TERMINATED is
+// NOT terminal here: the service is already being torn down, so its health no longer matters,
+// and hard-erroring would make Delete itself fail on exactly the resources most in need of being
+// deleted (a Create-tainted service's only recovery path is destroy-then-recreate). err is nil
+// for terminal success, while still in progress, or an unrecognized/unexpected state (F6,
+// contract section F: treated as CONTINUE rather than a hard error, so a backend adding a new
+// benign transitional state does not break every apply against an otherwise-healthy service; the
 // caller's timeout still backstops a genuinely stuck or new-terminal state, and logs a warning
 // so the gap stays visible - see waitForServiceStateWithTiming).
 func evaluateServiceState(service *ServiceResult, target string) (done bool, err error) {
 	switch {
 	case service.CurrentState == target:
 		return true, nil
-	case serviceErrorStates[service.CurrentState]:
+	case target != serviceStateTerminated && serviceErrorStates[service.CurrentState]:
 		if service.ErrorMessage != nil && *service.ErrorMessage != "" {
 			return true, fmt.Errorf("service entered %s state: %s", service.CurrentState, *service.ErrorMessage)
 		}
@@ -138,11 +146,13 @@ func waitForServiceStateWithTiming(ctx context.Context, client *Client, serviceI
 
 		if done, evalErr := evaluateServiceState(service, target); done {
 			return service, evalErr
-		} else if !serviceContinueStates[service.CurrentState] {
+		} else if !serviceContinueStates[service.CurrentState] && (target != serviceStateTerminated || !serviceErrorStates[service.CurrentState]) {
 			// F6 (contract section F): an unrecognized current_state continues polling rather
 			// than hard-erroring - a backend adding a new benign transitional state must not
 			// break every apply against a healthy, still-converging service. The timeout below
-			// backstops a genuinely stuck/new-terminal state; this only keeps it visible.
+			// backstops a genuinely stuck/new-terminal state; this only keeps it visible. An
+			// is_error bucket while waiting for TERMINATED is excluded from this warning too -
+			// it is a known, expected bucket here (evaluateServiceState), not an unrecognized one.
 			tflog.Warn(ctx, "Unrecognized service current_state, continuing to poll", map[string]any{
 				"service_id":    serviceID,
 				"current_state": service.CurrentState,

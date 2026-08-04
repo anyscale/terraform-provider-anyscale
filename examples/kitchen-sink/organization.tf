@@ -15,35 +15,26 @@ resource "anyscale_organization_invitation" "new_member" {
   email = var.invite_email
 }
 
-# --- anyscale_organization_user (commented out; import-only) --------------------------
+# --- anyscale_organization_user (commented out; needs an accepted member) ------------
 # This resource manages only whether new_member is a member of the organization at all -- it has
-# no writable attributes, no Create, only Import, so it can't be part of a one-shot
-# `terraform apply` the way everything else in this example is. It's included here, commented
-# out, so the kitchen sink still shows every resource type this provider registers; uncomment and
-# run the import once new_member has actually accepted the invitation above (which can take
-# anywhere from seconds to days, and happens outside Terraform):
-#
-#   terraform import anyscale_organization_user.new_member <identity_id>
-#
-# Find <identity_id> with the anyscale_organization_user data source once the invitation is
-# accepted (see data_sources.tf's organization_user lookup for the pattern) -- or look it up
-# directly:
-#   data "anyscale_organization_user" "new_member" {
-#     email = var.invite_email
-#   }
+# no other writable attributes. It's included here, commented out, so the kitchen sink still
+# shows every resource type this provider registers; uncomment once new_member has actually
+# accepted the invitation above (which can take anywhere from seconds to days, and happens
+# outside Terraform). Keyed by email directly, same as anyscale_organization_user_role below --
+# no identity_id or user_id lookup needed, though importing instead of declaring it works
+# identically:
 #
 # See examples/resources/organization_user_workflow/main.tf for the full invite -> wait ->
-# import -> manage lifecycle this resource is meant to slot into.
+# manage lifecycle this resource is meant to slot into.
 #
 # resource "anyscale_organization_user" "new_member" {
-#   # All attributes are set on import; there is nothing to configure.
+#   email = var.invite_email
 # }
 
 # --- anyscale_organization_user_role (commented out; needs an accepted member) --------
-# Sets new_member's actual organization role. Unlike anyscale_organization_user above, this
-# resource is keyed by email directly -- no identity_id lookup, no import step -- but it still
-# needs a real, accepted member to point at, so the same "outside Terraform" wait applies before
-# uncommenting:
+# Sets new_member's actual organization role, same email key as anyscale_organization_user
+# above -- but it still needs a real, accepted member to point at, so the same "outside
+# Terraform" wait applies before uncommenting:
 #
 # resource "anyscale_organization_user_role" "new_member" {
 #   email     = var.invite_email

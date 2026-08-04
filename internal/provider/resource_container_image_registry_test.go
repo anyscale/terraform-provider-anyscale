@@ -305,7 +305,13 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 
 	plan := tfsdk.Plan{Schema: schemaResp.Schema}
 	planDiags := plan.Set(ctx, &ContainerImageRegistryResourceModel{
-		// Name deliberately omitted (Null) -- this is the whole point of the test.
+		// Name deliberately omitted -- this is the whole point of the test. Unknown, not the
+		// zero-value Null: name is Optional+Computed, and that is what a real Core plan hands
+		// the provider for an omitted Computed attribute on a fresh Create (no prior state for
+		// UseStateForUnknown to carry forward). tfsdk.Plan.Set() does not run Core's plan
+		// pipeline, so this must be set explicitly to match - a bare zero-value field here would
+		// silently test an input shape Create can never actually receive from real Terraform.
+		Name:       types.StringUnknown(),
 		ImageURI:   types.StringValue(imageURI),
 		RayVersion: types.StringValue(rayVersion),
 	})
@@ -337,12 +343,14 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 	if state.ID.ValueString() != templateID {
 		t.Errorf("state.ID = %q, want template id %q", state.ID.ValueString(), templateID)
 	}
-	// Create() never writes the generated name back into state -- name is Optional
-	// (not Computed), and Read() doesn't rehydrate it either (see the "name" entry in
-	// ImportStateVerifyIgnore, resource_container_image_registry_acc_test.go), so a
-	// config that omits it stays null rather than drifting to whatever got generated.
-	if !state.Name.IsNull() {
-		t.Errorf("state.Name = %q, want null -- Create() must not write the generated name back into state", state.Name.ValueString())
+	// name is Optional+Computed: Create() must write the generated name back into state now
+	// (it is the only place this value will ever be known if the practitioner never sets it),
+	// and it must be the exact value that was actually sent to the backend, not a second,
+	// independently-regenerated guess.
+	if state.Name.IsNull() {
+		t.Error("state.Name = null, want the backend-generated name Create() actually sent")
+	} else if state.Name.ValueString() != templateReq.Name {
+		t.Errorf("state.Name = %q, want %q (the exact name sent in the create request)", state.Name.ValueString(), templateReq.Name)
 	}
 }
 
@@ -401,6 +409,70 @@ func TestContainerImageRegistryRead_NotFoundRemovesFromState(t *testing.T) {
 	}
 	if !readResp.State.Raw.IsNull() {
 		t.Error("Read did not remove the resource from state for a real 404")
+	}
+}
+
+// TestContainerImageRegistryRead_ArchivedRemovesFromState proves Read's other removal path: a
+// template archived out of band (console, or another Terraform run) returns 200 with archived_at
+// populated, not a 404 - deleted_at stays null even though the template is gone from the user's
+// perspective, matching a real GET on a template archived weeks earlier (see IsArchived's doc
+// comment, models.go). Before ApplicationTemplateResult grew ArchivedAt, IsArchived() checked only
+// DeletedAt and so structurally never fired here: this exact 200-with-archived_at response left the
+// resource in state forever, with no way for a later apply to self-heal it.
+func TestContainerImageRegistryRead_ArchivedRemovesFromState(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/application_templates/cenv_archived" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"result": {
+				"id": "cenv_archived", "name": "tfacc-archived-elsewhere",
+				"creator_id": "usr_1", "created_at": "2026-01-01T00:00:00Z",
+				"anonymous": false, "is_default": false,
+				"deleted_at": null, "archived_at": "2026-01-02T00:00:00Z"
+			}}`)
+			return
+		}
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	r := &ContainerImageRegistryResource{client: NewClientWithToken(server.URL, "test-token")}
+
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+
+	priorState := ContainerImageRegistryResourceModel{
+		ID:                  types.StringValue("cenv_archived"),
+		Name:                types.StringNull(),
+		ImageURI:            types.StringValue("docker.io/anyscale/ray:latest"),
+		RayVersion:          types.StringNull(),
+		RegistryLoginSecret: types.StringNull(),
+		BuildID:             types.StringValue("bld_1"),
+		BuildStatus:         types.StringValue("succeeded"),
+		CreatedAt:           types.StringValue("2026-01-01T00:00:00Z"),
+		IsBYOD:              types.BoolValue(true),
+		Revision:            types.Int64Value(1),
+		Digest:              types.StringValue("sha256:deadbeef"),
+		NameVersion:         types.StringValue("cenv_archived:1"),
+	}
+	tfState := tfsdk.State{Schema: schemaResp.Schema}
+	if diags := tfState.Set(ctx, &priorState); diags.HasError() {
+		t.Fatalf("failed to build state fixture: %v", diags)
+	}
+
+	readResp := &resource.ReadResponse{State: tfState}
+	r.Read(ctx, resource.ReadRequest{State: tfState}, readResp)
+
+	if readResp.Diagnostics.HasError() {
+		t.Fatalf("Read produced diagnostics errors for an archived template, want a clean removal: %v", readResp.Diagnostics)
+	}
+	if !readResp.State.Raw.IsNull() {
+		t.Error("Read did not remove the resource from state for a template archived out of band (200 with archived_at set)")
 	}
 }
 

@@ -212,6 +212,58 @@ func TestExpandAWSConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			// Regression guard for the Optional+Computed Unknown-at-Create gap: memorydb_cluster_arn
+			// and memorydb_cluster_endpoint are Optional+Computed (config-omitted -> Unknown on a
+			// fresh Create, not Null - there is no prior state for UseStateForUnknown to carry
+			// forward). Before the explicit IsUnknown() guard, an IsNull()-only check read Unknown
+			// as user-supplied and called ValueString() on it, producing a non-nil pointer to "" -
+			// which would have been sent to the API as an explicit empty string instead of omitted.
+			name: "unset Optional+Computed fields plan Unknown at Create, not Null",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"vpc_id":                      types.StringType,
+					"subnet_ids":                  types.ListType{ElemType: types.StringType},
+					"subnet_ids_to_az":            types.MapType{ElemType: types.StringType},
+					"security_group_ids":          types.ListType{ElemType: types.StringType},
+					"controlplane_iam_role_arn":   types.StringType,
+					"dataplane_iam_role_arn":      types.StringType,
+					"cluster_instance_profile_id": types.StringType,
+					"external_id":                 types.StringType,
+					"memorydb_cluster_name":       types.StringType,
+					"memorydb_cluster_arn":        types.StringType,
+					"memorydb_cluster_endpoint":   types.StringType,
+				},
+				map[string]attr.Value{
+					"vpc_id":                      types.StringValue("vpc-789"),
+					"subnet_ids":                  types.ListValueMust(types.StringType, []attr.Value{types.StringValue("subnet-ccc")}),
+					"subnet_ids_to_az":            types.MapNull(types.StringType),
+					"security_group_ids":          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("sg-ccc")}),
+					"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::111:role/cp"),
+					"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::111:role/dp"),
+					"cluster_instance_profile_id": types.StringNull(),
+					"external_id":                 types.StringNull(),
+					"memorydb_cluster_name":       types.StringValue("anyscale-memorydb"),
+					"memorydb_cluster_arn":        types.StringUnknown(),
+					"memorydb_cluster_endpoint":   types.StringUnknown(),
+				},
+			),
+			want: &AWSConfig{
+				VPCID:             "vpc-789",
+				SubnetIDs:         []string{"subnet-ccc"},
+				SecurityGroupIDs:  []string{"sg-ccc"},
+				AnyscaleIAMRoleID: "arn:aws:iam::111:role/cp",
+				ClusterIAMRoleID:  "arn:aws:iam::111:role/dp",
+				MemoryDBClusterName: func() *string {
+					s := "anyscale-memorydb"
+					return &s
+				}(),
+				// Must stay nil, not a pointer to "" - that is the whole guard being proven here.
+				MemoryDBClusterARN:      nil,
+				MemoryDBClusterEndpoint: nil,
+			},
+			wantErr: false,
+		},
+		{
 			name:    "null object",
 			obj:     types.ObjectNull(map[string]attr.Type{}),
 			want:    nil,
@@ -246,6 +298,15 @@ func TestExpandAWSConfig(t *testing.T) {
 				}
 				if !stringPtrsEqual(got.ClusterInstanceProfileID, tt.want.ClusterInstanceProfileID) {
 					t.Errorf("expandAWSConfig() ClusterInstanceProfileID = %v, want %v", stringPtrDeref(got.ClusterInstanceProfileID), stringPtrDeref(tt.want.ClusterInstanceProfileID))
+				}
+				if !stringPtrsEqual(got.MemoryDBClusterName, tt.want.MemoryDBClusterName) {
+					t.Errorf("expandAWSConfig() MemoryDBClusterName = %v, want %v", stringPtrDeref(got.MemoryDBClusterName), stringPtrDeref(tt.want.MemoryDBClusterName))
+				}
+				if !stringPtrsEqual(got.MemoryDBClusterARN, tt.want.MemoryDBClusterARN) {
+					t.Errorf("expandAWSConfig() MemoryDBClusterARN = %v, want %v", stringPtrDeref(got.MemoryDBClusterARN), stringPtrDeref(tt.want.MemoryDBClusterARN))
+				}
+				if !stringPtrsEqual(got.MemoryDBClusterEndpoint, tt.want.MemoryDBClusterEndpoint) {
+					t.Errorf("expandAWSConfig() MemoryDBClusterEndpoint = %v, want %v", stringPtrDeref(got.MemoryDBClusterEndpoint), stringPtrDeref(tt.want.MemoryDBClusterEndpoint))
 				}
 				// Verify SubnetIDs (order may vary for map-based input)
 				if len(got.SubnetIDs) != len(tt.want.SubnetIDs) {

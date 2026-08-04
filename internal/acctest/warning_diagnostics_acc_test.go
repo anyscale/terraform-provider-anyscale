@@ -25,10 +25,10 @@ import (
 // Also serves as the regression test for a real methodology bug found while
 // building this: the ambient `~/.terraformrc` dev_overrides entry resolves
 // to a binary at the main repo checkout root, not any worktree, and can
-// silently be stale (see [[dev-overrides-shared-stale-binary]]). Every
-// helper here builds its own binary into a throwaway directory and points
-// dev_overrides at THAT via a scratch TF_CLI_CONFIG_FILE, deliberately never
-// touching ~/.terraformrc, so these tests can't fall into that trap.
+// silently be stale. Every helper here builds its own binary into a
+// throwaway directory and points dev_overrides at THAT via a scratch
+// TF_CLI_CONFIG_FILE, deliberately never touching ~/.terraformrc, so these
+// tests can't fall into that trap.
 
 // tfDiagnostic mirrors the subset of `terraform validate -json`'s
 // diagnostics we care about.

@@ -1,13 +1,12 @@
-# Complete workflow: Invite -> Wait -> Manage role -> Import membership
+# Complete workflow: Invite -> Wait -> Manage role -> Manage membership
 #
 # This is a walkthrough, not a single-shot apply: steps 2 and 3 depend on a real person
-# accepting an email invitation (seconds to days, and it happens outside Terraform entirely), and
-# step 3's anyscale_organization_user only supports import, never direct creation. Both are
-# left commented out below so a fresh copy of this file applies cleanly (it only sends
+# accepting an email invitation (seconds to days, and it happens outside Terraform entirely). Both
+# are left commented out below so a fresh copy of this file applies cleanly (it only sends
 # invitations) instead of failing on parts that cannot succeed yet. Uncomment and apply again as
-# you move through each step. Step 2 is keyed by email alone and can be uncommented as soon as
-# the invitation is accepted; step 3 additionally needs the identity_id lookup shown in its own
-# comment, because it manages a different thing (membership, not role).
+# you move through each step. Steps 2 and 3 are both keyed by email alone -- neither needs an
+# identity_id or user_id lookup -- and can be uncommented together as soon as the invitation is
+# accepted.
 #
 # Granting scoped access on a specific cloud is not included here: there is currently no
 # resource that can do it. anyscale_cloud_user_role, which used to fill this role, has been
@@ -46,10 +45,9 @@ output "invitation_expires_at" {
 }
 
 # Step 2: Once you have confirmed the invitation above was accepted (check invitation_status),
-# manage the member's organization role directly by email -- no identity_id lookup needed for
-# this step; that is only required later, for step 3's membership import. Applying this any
-# earlier than acceptance fails with a real "not found" error, since the person does not exist as
-# an org member yet.
+# manage the member's organization role directly by email -- no identity_id or user_id lookup
+# needed. Applying this any earlier than acceptance fails with a real "not found" error, since
+# the person does not exist as an org member yet.
 #
 # resource "anyscale_organization_user_role" "new_member" {
 #   email     = "newmember@example.com"
@@ -67,26 +65,18 @@ output "invitation_expires_at" {
 
 # Step 3: Bring the member's organization MEMBERSHIP itself under Terraform management -- a
 # separate concern from their role in step 2 (see the RBAC guide for why these are two
-# resources rather than one). anyscale_organization_user has no writable attributes and no
-# Create, only Import, so first find their identity_id:
-#
-# data "anyscale_organization_user" "accepted_user" {
-#   email = "newmember@example.com"
-# }
-#
-# output "user_identity_id" {
-#   value       = data.anyscale_organization_user.accepted_user.id
-#   description = "Use this ID to import the organization_user resource below"
-# }
-#
-# Then, once you have the identity_id:
-#
-#   terraform import anyscale_organization_user.new_member <identity_id>
+# resources rather than one). Keyed by email, same as step 2 -- declaring it and applying
+# adopts the existing member with no API call, since Terraform is just declaring a fact that
+# is already true:
 #
 # resource "anyscale_organization_user" "new_member" {
-#   # All attributes are set on import; there is nothing to configure. Importing this resource
-#   # gives you eviction-as-code -- removing it from your configuration evicts the person from
-#   # the organization on your next apply.
+#   email = "newmember@example.com"
+#
+#   # Importing this resource instead of declaring it works identically - either way,
+#   # destroying it later removes nothing from the organization; the person keeps full
+#   # access and a warning says so. This resource can only stop tracking them, never
+#   # revoke them -- do that from the Anyscale console:
+#   #   terraform import anyscale_organization_user.new_member newmember@example.com
 # }
 #
 # output "managed_user_email" {

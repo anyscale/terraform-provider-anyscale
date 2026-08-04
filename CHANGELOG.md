@@ -688,6 +688,11 @@ here, in `0.24.0`. If you are upgrading from `0.22.0` or earlier, read the `[0.2
 - resource/anyscale_cloud_resource: Fix the import ID error message and documentation, which incorrectly referred to the name attribute as resource_name.
 
 ## [0.1.1] - 2026-07-06
+<!-- changelog-gate:tag-no-heading-ok: 0.1.0 -->
+
+**Note:** `v0.1.0` and `v0.1.1` are separate tags on the exact same commit. `v0.1.0` was this
+provider's first tagged release, created before this CHANGELOG existed, so there is no `[0.1.0]`
+section to write - this section documents what both tags shipped.
 
 ### 🎉 Major Framework Migration
 

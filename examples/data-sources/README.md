@@ -220,8 +220,8 @@ output "organization_default_cloud_id" {
 Look up a specific user in the organization by identity ID, user ID, or email.
 
 **Use cases:**
-- Resolve a user's `identity_id` before importing an `anyscale_organization_user`
 - Confirm a user exists in the organization before granting project/cloud access
+- Read a user's current `base_role` and `additional_roles` without managing them
 
 **Example:**
 ```terraform
@@ -229,8 +229,8 @@ data "anyscale_organization_user" "by_email" {
   email = "user@example.com"
 }
 
-output "user_identity_id" {
-  value = data.anyscale_organization_user.by_email.id
+output "user_base_role" {
+  value = data.anyscale_organization_user.by_email.base_role
 }
 ```
 

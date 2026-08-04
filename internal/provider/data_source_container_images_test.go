@@ -262,6 +262,49 @@ func TestContainerImagesDataSourceRead_MapsBuildFields(t *testing.T) {
 	}
 }
 
+// TestContainerImagesDataSourceRead_IsArchivedReflectsRealArchiveShape drives the real Read()
+// against the shape a live GET on an archived application template actually returns:
+// archived_at carrying a timestamp, deleted_at null. TestContainerImagesArchivedFilter above only
+// ever sets DeletedAt and never calls Read() at all, so it could not have caught
+// ApplicationTemplateResult.IsArchived() structurally ignoring ArchivedAt - the bug that made this
+// data source's published is_archived attribute always false regardless of the real backend state.
+func TestContainerImagesDataSourceRead_IsArchivedReflectsRealArchiveShape(t *testing.T) {
+	const templateID = "apptemp_archived_real_shape"
+	archivedAt := "2024-01-01T00:00:00Z"
+	template := ApplicationTemplateResult{
+		ID:         templateID,
+		Name:       "archived-image",
+		CreatedAt:  "2024-01-01T00:00:00Z",
+		ArchivedAt: &archivedAt,
+		DeletedAt:  nil, // the real shape: archiving never sets deleted_at
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/application_templates/" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(ApplicationTemplatesListResponse{Results: []ApplicationTemplateResult{template}})
+	}))
+	defer server.Close()
+
+	d := &ContainerImagesDataSource{client: NewClientWithToken(server.URL, "fake-token-archived-real-shape")}
+	result, diags := runContainerImagesDataSourceRead(t, d, ContainerImagesDataSourceModel{})
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if len(result.ContainerImages) != 1 {
+		t.Fatalf("got %d container_images, want 1", len(result.ContainerImages))
+	}
+
+	if !result.ContainerImages[0].IsArchived.ValueBool() {
+		t.Error("IsArchived = false, want true (ArchivedAt is set, matching a real archived template's GET response)")
+	}
+}
+
 // TestContainerImagesDataSourceRead_NoLatestBuild_BuildFieldsAreNull replaces
 // TestContainerImageSummaryNoBuild, which hand-simulated the nil-LatestBuild branch inline and
 // asserted its own copy rather than exercising the real mapping code. This drives the real
