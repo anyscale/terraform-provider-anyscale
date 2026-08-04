@@ -1,6 +1,6 @@
 # Design record: `anyscale_cloud_user_role`'s lifecycle
 
-**Status: shipped** (`crystl/tfp-forge`, commits `83e4edd`, `c01a688`, `3af03a5`, `1e9a283`,
+**Status: shipped** (commits `83e4edd`, `c01a688`, `3af03a5`, `1e9a283`,
 `f6969c8`). This is the companion to `docs/deferred/rbac-groups-policy/README.md` — same
 investigation, same session, opposite outcome. That document preserves why a piece of this
 redesign was **not** built. This one preserves why the piece that **was** built looks the way it
@@ -35,10 +35,10 @@ or combine them into one.
 
 ## Why the bootstrap call must be unconditional, not conditional
 
-The first version of this design (tfp-architect's original draft, not forge's implementation of
-it) said: skip the legacy bootstrap `POST` when the cloud collaborator search already shows the
+The first version of this design (the original draft, not the implementation that shipped) said:
+skip the legacy bootstrap `POST` when the cloud collaborator search already shows the
 person as a collaborator, since the call would be redundant. **This was wrong, and it was the
-single most consequential mistake in this whole design** — live-confirmed by tfp-assayer, not just
+single most consequential mistake in this whole design** — live-confirmed, not just
 source-traced:
 
 - The legacy `POST` returns **409** if the target already has *any* permissions row for that
@@ -65,7 +65,7 @@ instead of letting a later `destroy` fail as a surprise. **This was the actual d
 during this session, and it was withdrawn after being live-tested and found not to be
 buildable — not because it was a bad idea, but because there is no way to implement it.**
 
-tfp-assayer tested this directly (Gate 8 in the design contract): granted a role through the roles
+This was tested directly (Gate 8 in the design contract): a role was granted through the roles
 `PUT` alone, with no bootstrap call anywhere in the sequence, on a fresh disposable cloud. The
 cloud collaborator search — the only plausible read-only probe — **returned the user anyway**, as
 a full, ordinary-looking record (identity id, user id, email, `permission_level: write`),
@@ -81,7 +81,7 @@ surface later, at `destroy` time, which is the next section.
 **One correction worth preserving alongside this:** the original reasoning also claimed this state
 could *only* arrive through `import`, never through this resource's own `Create` — reasoning being
 "`Create` always bootstraps first, so `Create` itself can never produce this." That claim was
-**false**, and it shipped into forge's first draft of the `Delete` diagnostic and the resource's
+**false**, and it shipped into the first draft of the `Delete` diagnostic and the resource's
 own schema description before being caught during review of `83e4edd`. The real path: someone
 already has a permissions row from an out-of-band grant (roles `PUT` used directly, or by a
 script, outside Terraform); a practitioner then writes this resource for them; `Create`'s mandatory
@@ -193,7 +193,7 @@ none of them work:
 ## Live evidence behind this design, and what is still source-level
 
 Per this repo's Design Verification Policy, a design is not confirmed by source-tracing and
-spec-reading alone. What was actually live-confirmed during this session, by tfp-assayer, against a
+spec-reading alone. What was actually live-confirmed during this session against a
 disposable cloud created and destroyed for each test (never the shared fixtures, never another
 org member's real access):
 

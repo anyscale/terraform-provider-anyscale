@@ -57,7 +57,7 @@ layer structurally could not catch**, all now fixed and verified with real `reso
    removal" for the same droppable Optional input.
 
 **A3 is REVERTED** (`cloud_name` back to plain Optional, byte-identical to pre-quest behavior)
-rather than patched a third time - architect's call, reached after weighing a live redesign
+rather than patched a third time - a call reached after weighing a live redesign
 against the cost of retrofitting unvalidated work into an already-clean state. The known
 limitation A3 was trying to close (a `cloud_name`-configured resource imported by `cpt_` id shows
 one benign, self-healing diff on its first post-import plan) is unchanged from before this quest
@@ -65,7 +65,7 @@ one benign, self-healing diff on its first post-import plan) is unchanged from b
 
 **Full 37-test real-infra acceptance suite against the final combined branch: 36 pass, 1 expected
 skip (K8S — no K8S cloud in this test org), zero failures.** The first fully clean run this quest
-had. Architect's final fanned-out re-review (3 subagents: correctness/accidental-changes,
+had. A final fanned-out re-review (3 subagents: correctness/accidental-changes,
 test-strength/placebos/CI-sharding, fixture-cleanliness/comments) came back FUNCTIONALLY READY
 with one outstanding item: a comment-cleanliness pass (quest-process narration - agent names,
 gate IDs like "G1g", commit hashes - in shipped code comments) that an earlier pass missed some
@@ -81,7 +81,7 @@ PR number is known, per this repo's own convention.
 `cloud_id`/`cloud_name` switching guarantee for this resource specifically ("nobody is using this
 particular resource yet... better break it today and not in 5 months") - too late in this quest
 to safely build and validate before tonight's push, so it's logged as an immediate follow-up
-(added to the project backlog by architect) rather than retrofitted here. See "Next Work" below
+(added to the project backlog) rather than retrofitted here. See "Next Work" below
 for the concrete direction.
 
 ## Repository Health
@@ -118,14 +118,14 @@ existing top-level fields keep meaning exactly the primary `anyscale_cloud_resou
 byte-identical for every existing single-resource user; a new optional `additional_resources`
 list block covers further cloud resources on the same cloud. Read/flatten matches wire entries
 back to (primary, additional[]) by `cloud_resource` name, not position - the same
-reorder-to-match-prior idiom used for `worker_nodes`, reused here after forge caught and fixed a
-real ordering-crash bug (alphabetical sort of a non-Computed list) before it ever left his branch.
+reorder-to-match-prior idiom used for `worker_nodes`, reused here after catching and fixing a
+real ordering-crash bug (alphabetical sort of a non-Computed list) before it ever shipped.
 
 **Two things almost shipped wrong, caught before landing:**
 1. GAP-3 (recovering `resources`/`required_resources`/`labels`/`required_labels`/node
    `cloud_deployment` on import) was verified safe early but fell out of the numbered fix agenda
-   between L3 and L4 with no recorded decision - a scribe catch; restored once flagged.
-2. The `docs/guides/*.md` vs `templates/guides/*.md` clobber trap - scribe's guide rewrite landed
+   between L3 and L4 with no recorded decision - caught during review; restored once flagged.
+2. The `docs/guides/*.md` vs `templates/guides/*.md` clobber trap - a guide rewrite landed
    on the generated output rather than its template source, invisible until the mandatory
    combined `make docs` regen at integration nearly overwrote it. Any future guide edit belongs in
    `templates/guides/`, never the generated `docs/guides/` output.
@@ -138,8 +138,8 @@ real ordering-crash bug (alphabetical sort of a non-Computed list) before it eve
 - `additional_resources` reordering in a user's own `.tf` still diffs (same List semantics as
   `worker_nodes` - a user-driven reorder isn't hidden, only a backend-driven one is).
 - Cold multi-resource IMPORT has no signal for which entry is primary vs. additional - the
-  deterministic fallback (first in API response order) is real but arbitrary; scribe has landed a
-  required guide callout for this.
+  deterministic fallback (first in API response order) is real but arbitrary; a
+  required guide callout for this has landed.
 - Worker-name / `cloud_resource`-name collision protections are proven safe at the
   Terraform-state-storage layer; whether a genuine runtime collision reaching the underlying Ray
   autoscaler actually shadows one worker group is unverified without launching a real cluster.
@@ -157,7 +157,7 @@ section, all 9 signed assets present with checksums and GPG signature independen
 Terraform Registry confirmed serving `0.22.0` as latest.
 
 **Backlog / fast-follow #1 (this week, explicit user direction):** cloud_id/cloud_name breaking
-redesign. Direction sketched by forge: `cloud_name` stays `Optional+Computed` (fixes the plain
+redesign. Direction sketched: `cloud_name` stays `Optional+Computed` (fixes the plain
 `cloud_id` import case that drove A3), and a config that drops an explicit `cloud_name` in favor
 of `cloud_id` no longer auto-clears it automatically - a disclosed, intentional
 `release-note:breaking-change` with migration text, the opposite trade-off from what CC3b protects
@@ -166,7 +166,7 @@ intended behavior, and full re-validation - not a quick patch. Full context (why
 the exact plan-modifier tension, the three real acceptance-test findings) lives in
 `approved-design.md`'s CC3b section and this entry.
 
-**Backlog / fast-follow #2 (added by architect after the post-push 404 incident):** migrate the
+**Backlog / fast-follow #2 (added after the post-push 404 incident):** migrate the
 6 legacy `strings.Contains(err.Error(), "404")` call sites - `resource_service.go` (x2),
 `data_source_project.go`, `data_source_service.go`, `resource_cloud_resource.go`,
 `resource_project.go` - to `errors.Is(err, ErrNotFound)`, the sentinel's actual intended purpose
@@ -179,22 +179,22 @@ silently stop detecting 404s under a naive migration). Not urgent - today's fix 
 tested - but worth doing deliberately rather than leaving fragile string-matching as the
 permanent state now that a real sentinel exists.
 
-## Per-Hero Status
+## Work Summary
 
-- **tfp-architect** - full design + contract owner throughout; ran the L10 integration review and
+- Design + contract ownership throughout; ran the L10 integration review and
   the final fanned-out (3-subagent) re-review; made the CC3b revert call and the ship-now
   recommendation to the user.
-- **tfp-forge** - implemented the entire fix/enhancement/validator/multi-resource agenda plus all
-  three real-bug fixes found during acceptance testing; caught two real bugs in his own work
+- Implemented the entire fix/enhancement/validator/multi-resource agenda plus all
+  three real-bug fixes found during acceptance testing; caught two real bugs
   before they shipped (the `additional_resources` ordering crash, and confirming the A3 revert
   empirically rather than assuming it).
-- **tfp-assayer** - built and mutation-proof-verified the full regression suite, the two "retain
+- Built and mutation-proof-verified the full regression suite, the two "retain
   exact version" acceptance proofs, and found all three real bugs plus the CC3b regression via
   live `resource.Test` runs against the integrated branch; owns the 36/37 clean baseline.
-- **tfp-scribe** - full docs pass across every fix and the A3 revert; caught the GAP-3 scope-drop
-  and the DS-side multi-resource parity gap; fixed her own templates/docs clobber mistake
+- Full docs pass across every fix and the A3 revert; caught the GAP-3 scope-drop
+  and the DS-side multi-resource parity gap; fixed a templates/docs clobber mistake
   same-session (twice, self-caught both times).
-- **tfp-shipwright (me)** - compat/changelog/release lane throughout; assembled, merged, and
+- Compat/changelog/release lane throughout; assembled, merged, and
   repeatedly re-validated the integration branch through several rounds of real bug fixes; caught
   the docs-template clobber during the first combined regen; owns the push once the last cleanup
   commit lands.
