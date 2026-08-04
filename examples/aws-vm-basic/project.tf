@@ -8,27 +8,12 @@ resource "anyscale_project" "basic" {
   description = "Basic project for testing and development"
 }
 
-# Project with collaborators (uncomment and provide valid email addresses to test)
-# resource "anyscale_project" "with_collaborators" {
-#   name        = "${var.cloud_name}-team-project"
-#   cloud_id    = anyscale_cloud.primary.id
-#   description = "Team project with collaborators"
-#
-#   collaborator {
-#     email            = "alice@example.com"
-#     permission_level = "owner"
-#   }
-#
-#   collaborator {
-#     email            = "bob@example.com"
-#     permission_level = "write"
-#   }
-#
-#   collaborator {
-#     email            = "charlie@example.com"
-#     permission_level = "readonly"
-#   }
-# }
+# Project access is NOT managed here. This resource used to carry a `collaborator`
+# block; it was removed in v0.25.0 because project roles cannot be granted
+# independently of a cloud role - see examples/resources/anyscale_project/resource.tf
+# for the full explanation. There is currently NO in-provider replacement; manage
+# project collaborators through the Anyscale console or API for now, or read them
+# (without managing them) via the anyscale_project data source below.
 
 # Data source example: Look up a project by name
 data "anyscale_project" "basic_lookup" {
