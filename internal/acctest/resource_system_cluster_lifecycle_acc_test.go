@@ -177,7 +177,11 @@ func newMockSystemClusterServer(t *testing.T) (*httptest.Server, *mockSystemClus
 		_, _ = fmt.Fprint(w, `{"result": {}}`)
 	})
 
-	mux.HandleFunc("/api/v2/decorated_sessions/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
+	// 301-redirect a bare-path request, and whether that redirect is followed
+	// is not portable across Go versions/http.Client configs).
+	decoratedSessionsHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		s.mu.Lock()
 		exists := len(s.describeStartCalls) > 0
@@ -194,7 +198,9 @@ func newMockSystemClusterServer(t *testing.T) (*httptest.Server, *mockSystemClus
 			}],
 			"metadata": {"total": 1, "next_paging_token": null}
 		}`, s.cloudID)
-	})
+	}
+	mux.HandleFunc("/api/v2/decorated_sessions/", decoratedSessionsHandler)
+	mux.HandleFunc("/api/v2/decorated_sessions", decoratedSessionsHandler)
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)

@@ -207,12 +207,18 @@ func TestAccServiceResource_CloudMatchSkipsOnOmittedProjectID(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, serviceCloudMatchComputeConfigJSON("cpt_findings", "cld_alpha"))
 	})
-	mux.HandleFunc("/api/v2/projects/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
+	// 301-redirect a bare-path request, and whether that redirect is followed
+	// is not portable across Go versions/http.Client configs).
+	projectsHandler := func(w http.ResponseWriter, r *http.Request) {
 		projectHit.Store(true)
 		w.WriteHeader(http.StatusOK)
 		cloudAlpha := "cld_alpha"
 		_, _ = fmt.Fprint(w, serviceCloudMatchProjectJSON("prj_backend_default", &cloudAlpha))
-	})
+	}
+	mux.HandleFunc("/api/v2/projects/", projectsHandler)
+	mux.HandleFunc("/api/v2/projects", projectsHandler)
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID, func(w http.ResponseWriter, r *http.Request) {
 		state := "RUNNING"
 		if terminated.Load() {
@@ -286,7 +292,11 @@ func TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID(t *testing.T
 	var createdComputeConfig map[string]any // stored so GET (refresh) echoes exactly what POST (create) returned
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v2/compute_templates/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
+	// 301-redirect a bare-path request, and whether that redirect is followed
+	// is not portable across Go versions/http.Client configs).
+	computeTemplatesHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			// Echo the real request's config back (rather than a hand-built stub) so every
 			// computed attribute resource_compute_config.go expects to populate from the
@@ -330,7 +340,9 @@ func TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID(t *testing.T
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{"result": record})
-	})
+	}
+	mux.HandleFunc("/api/v2/compute_templates/", computeTemplatesHandler)
+	mux.HandleFunc("/api/v2/compute_templates", computeTemplatesHandler)
 	mux.HandleFunc("/api/v2/compute_templates/cpt_findings/archive", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})

@@ -60,7 +60,13 @@ func newContainerImageDigestDataSourceMockServer(t *testing.T, templateID, build
 	// the by-id path. The list result must carry its own latest_build; that's
 	// what lets getApplicationTemplateByName return a template already fit to
 	// resolve the build from, with no second template fetch.
-	mux.HandleFunc("/api/v2/application_templates/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms: a subtree-only mock
+	// makes ServeMux 301-redirect a bare-path request instead of matching it
+	// directly, and whether that redirect is followed (preserving method/body)
+	// is not portable across Go versions/http.Client configs (see
+	// helpers_cloud_adoption_test.go for the fuller writeup) - so both forms
+	// point at the same handler to keep the redirect branch out of the picture.
+	applicationTemplatesListHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("unexpected method %s on application_templates/", r.Method)
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -73,7 +79,9 @@ func newContainerImageDigestDataSourceMockServer(t *testing.T, templateID, build
 			"created_at": %[3]q, "anonymous": false, "is_default": false,
 			"latest_build": {"id": %[4]q, "revision": %[5]d, "status": %[6]q}
 		}], "metadata": {"total": 1, "next_paging_token": null}}`, templateID, name, createdAt, buildID, revision, buildStatus)
-	})
+	}
+	mux.HandleFunc("/api/v2/application_templates/", applicationTemplatesListHandler)
+	mux.HandleFunc("/api/v2/application_templates", applicationTemplatesListHandler)
 
 	mux.HandleFunc("/api/v2/builds/"+buildID, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

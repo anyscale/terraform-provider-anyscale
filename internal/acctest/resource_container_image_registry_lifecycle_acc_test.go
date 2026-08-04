@@ -200,6 +200,42 @@ resource "anyscale_container_image_registry" "test" {
 					"name",                  // Optional-only schema field; Read() never rehydrates it (see resource_container_image_registry.go), so import always comes back null regardless of what config set
 				},
 			},
+			// ImportStateVerify above only proves imported state matches
+			// created state - both sides see the same API-echoed value - so
+			// it cannot catch a defect where an operator-typed config value
+			// diverges from state on the very next plan. This step
+			// re-applies the SAME config used at create and asserts that
+			// plan is a true no-op.
+			//
+			// Caveat confirmed empirically (not just inferred from docs):
+			// this step's plan is computed against the CARRIED-FORWARD
+			// state from the preceding real apply, not the freshly
+			// imported state - terraform-plugin-testing discards an
+			// ImportState step's result unless ImportStatePersist is also
+			// set (see its doc comment), and setting ImportStatePersist:
+			// true here to force it reproducibly fails with "Error:
+			// Resource already managed by Terraform" (terraform import
+			// refuses an address already present in the same working
+			// directory's state, which it is here after the preceding
+			// apply step) - a Terraform CLI-level constraint, not a
+			// provider defect, and not fixable from within this test
+			// shape. So this step, as added, does not independently prove
+			// name (ignored above because Read() never rehydrates it)
+			// survives a real import unscathed - it does still guard
+			// against any OTHER config/state divergence introduced
+			// between create and this point. See
+			// resource_cloud_import_object_storage_region_acc_test.go for
+			// the two-test shape that actually proves import recovery
+			// (ImportStateCheck on the import step itself, plus a separate
+			// Config-only two-step test for plan stability).
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_container_image_registry.test", plancheck.ResourceActionNoop),
+					},
+				},
+			},
 		},
 	})
 }

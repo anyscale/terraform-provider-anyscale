@@ -38,7 +38,11 @@ func newBuildTimeoutOnlyMockServer(t *testing.T, buildCallCount *int32, template
 	const createdAt = "2024-01-01T00:00:00Z"
 	const buildStatus = "succeeded"
 
-	mux.HandleFunc("/api/v2/application_templates/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
+	// 301-redirect a bare-path request, and whether that redirect is followed
+	// is not portable across Go versions/http.Client configs).
+	applicationTemplatesCreateHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected method %s on /api/v2/application_templates/", r.Method)
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -50,7 +54,9 @@ func newBuildTimeoutOnlyMockServer(t *testing.T, buildCallCount *int32, template
 			"id": %[1]q, "name": %[2]q, "creator_id": "user_mock",
 			"created_at": %[3]q, "anonymous": false, "is_default": false
 		}}`, templateID, name, createdAt)
-	})
+	}
+	mux.HandleFunc("/api/v2/application_templates/", applicationTemplatesCreateHandler)
+	mux.HandleFunc("/api/v2/application_templates", applicationTemplatesCreateHandler)
 
 	mux.HandleFunc("/api/v2/application_templates/"+templateID, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -69,7 +75,9 @@ func newBuildTimeoutOnlyMockServer(t *testing.T, buildCallCount *int32, template
 
 	// THE call under test: a real new-build POST. Counted so the test can
 	// assert it fires exactly once (from Create only).
-	mux.HandleFunc("/api/v2/builds/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (same portability
+	// rationale as application_templates/ above).
+	buildsCreateHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected method %s on /api/v2/builds/", r.Method)
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -84,7 +92,9 @@ func newBuildTimeoutOnlyMockServer(t *testing.T, buildCallCount *int32, template
 			"created_at": %[4]q, "last_modified_at": %[4]q, "is_byod": false,
 			"digest": %[5]q
 		}}`, buildID, templateID, buildStatus, createdAt, digest)
-	})
+	}
+	mux.HandleFunc("/api/v2/builds/", buildsCreateHandler)
+	mux.HandleFunc("/api/v2/builds", buildsCreateHandler)
 
 	mux.HandleFunc("/api/v2/builds/"+buildID, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

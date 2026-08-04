@@ -54,7 +54,12 @@ func newCC3bTwoCloudMockServer(t *testing.T, cloudAID, cloudBID, configID, confi
 		}
 	}`, configID, configName, cloudAID)
 
-	mux.HandleFunc("/api/v2/compute_templates/", func(w http.ResponseWriter, r *http.Request) {
+	// Registered under both the subtree and bare-path forms (see
+	// helpers_cloud_adoption_test.go for why a subtree-only mock is a portability
+	// hazard: ServeMux 301-redirects a bare-path request, and whether that
+	// redirect is followed is not consistent across Go versions/http.Client
+	// configs).
+	computeTemplatesCreateHandler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			w.WriteHeader(http.StatusCreated)
@@ -62,7 +67,9 @@ func newCC3bTwoCloudMockServer(t *testing.T, cloudAID, cloudBID, configID, confi
 		default:
 			t.Errorf("unexpected method %s on /api/v2/compute_templates/", r.Method)
 		}
-	})
+	}
+	mux.HandleFunc("/api/v2/compute_templates/", computeTemplatesCreateHandler)
+	mux.HandleFunc("/api/v2/compute_templates", computeTemplatesCreateHandler)
 
 	mux.HandleFunc("/api/v2/compute_templates/"+configID, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
