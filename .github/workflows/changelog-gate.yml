@@ -25,11 +25,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # actions/checkout defaults to a shallow (depth 1) clone, which
-          # brings zero tags with it. The "Changelog version headings have
-          # matching tags" step below needs every real release tag visible
-          # to `git rev-parse --verify refs/tags/v<version>`, or it can't
-          # tell a genuinely untagged heading apart from one this runner
-          # just never fetched.
+          # brings zero tags with it. The "Changelog headings and tags
+          # match" step below needs every real release tag visible to
+          # `git rev-parse --verify refs/tags/v<version>` and `git tag -l`,
+          # or it can't tell a genuinely untagged heading (or unheaded tag)
+          # apart from one this runner just never fetched.
           fetch-depth: 0
 
       - name: Fetch all tags
@@ -83,11 +83,15 @@ jobs:
             echo "No fragment for this PR (presence check already passed via skip-changelog label) -- nothing to validate."
           fi
 
-      - name: Changelog version headings have matching tags
+      - name: Changelog headings and tags match
         # Runs unconditionally, including on a `make changelog-release`
         # finalize PR (the `changelog/v*` branch exemption above is for the
         # fragment-presence check only, a different concern). This check
         # doesn't need that same exemption: CheckHeadingsTagged always skips
         # the single topmost version heading, which is exactly the one a
-        # finalize PR just created and that has no tag yet.
+        # finalize PR just created and that has no tag yet. CheckTagsHeaded
+        # (the converse - every tag needs a heading) has no symmetric
+        # exemption to worry about here: a tag is only ever created after
+        # its heading-bearing commit merges, never before, so it needs no
+        # "still in flight" carve-out (see tagcheck.go).
         run: go run ./tools/changelog-build -check-tags
