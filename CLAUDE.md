@@ -215,10 +215,53 @@ Known source→derived pairs on the cloud resources: `subnet_ids`→`zones`;
 Per-field status changes, so check the schema and the "Import round-trip gaps" section in
 `WORKBENCH.md` rather than trusting a status line here. As of `9dd5ecc` the derived slots that
 absorb config-omission (`Optional+Computed`) are `mount_targets`, `mount_path`,
-`memorydb_cluster_arn`, and `memorystore_endpoint`; the one remaining exposed slot is
-**`kubernetes_config.zones`** — `Optional` + `RequiresReplace` with no `Computed`, on both
-`anyscale_cloud` and `anyscale_cloud_resource`. Changing it is a schema change on a `RequiresReplace`
-attribute: it needs its own design pass and the two-test proof below, not a release-time patch.
+`memorydb_cluster_arn`, and `memorystore_endpoint`.
+
+**`kubernetes_config.zones` was listed here as the one remaining exposed slot. It is not an instance
+of this bug class — do not "fix" it.** The shape facts are true (`Optional` + `RequiresReplace`, no
+`Computed`, on both `anyscale_cloud` and `anyscale_cloud_resource`, and `flattenKubernetesConfig`
+does recover it at import). The *derivation* that makes that shape dangerous does not exist for it.
+Traced on both halves, each with a positive control proving the search could match real code:
+
+- Backend: `_populate_missing_derived_values`
+  (`backend/server/api/base/resources/clouds_resource.py:2572`) dispatches only on AWS and GCP and
+  writes only `aws_config`/`gcp_config`. No server-side assignment to `kubernetes_config.zones`
+  exists anywhere. (Control: `aws_config.zones = …` is found at `:2619`.)
+- CLI: no client-side derivation of Kubernetes zones. (Control: the AWS subnet→AZ resolution in
+  `frontend/cli/anyscale/util.py:409` and `:918` is found.)
+- Provider: K8S zones are sent only when the practitioner declares them
+  (`resource_cloud_resource.go:1318`), and `stringListOrNull` maps an empty API list to **null**, so
+  an undeclared value cannot come back as a phantom diff.
+
+So a config that omits `zones` imports to null and plans clean, and one that sets them round-trips.
+The genuinely exposed case is narrower and is not this bug class: importing a cloud created outside
+Terraform *with* zones set, into a config that omits them — ordinary unwritten-config drift, which
+`plan` shows before you apply. Changing the attribute would be a schema change on a
+`RequiresReplace` attribute in exchange for nothing.
+
+The `subnet_ids`→`zones` pair listed above is misfiled for the adjacent reason: the backend really
+does derive it, but on `aws_config`, and the provider models **no** `zones` attribute there.
+
+**Treat the derived-field import bug class as closed.** Re-open it only for a *new* source→derived
+pair, verified on both halves.
+
+**The adjacent question — list *order* sensitivity — is also settled, and negative.** Terraform lists
+are order-sensitive, so a recovered `RequiresReplace` list whose element order differed from config
+would force replacement on import. It does not happen: the backend preserves order end to end, and
+nothing sorts. `security_group_ids` → `aws_security_groups`, `firewall_policy_names` →
+`gcp_firewall_policy_ids`, and the GCP subnet list → `gcp_subnet_ids` are all
+`Column(PSQL_JSONB())` (`server/database/models/models.py:1220`, `:1246`, `:1226`/`:1250`), and JSON
+array element order is preserved by definition — that part is documented, undisputed PostgreSQL
+behavior, so it is asserted rather than re-tested. Writes go through `list(...)`
+(`cloud_resources_dao.py:317`) and protobuf `repeated`/`extend()` (`:841`); the read helper
+`optional_sqlalchemy_json_to_optional_list_of_strings` (`server/util.py:344`) returns `list(obj)`
+with no sort. A controlled search found **no** sorting applied to any of these lists (control: a
+`sorted(` call *is* found at `resource_tags_dao.py:123`, so the pattern matches real code).
+`kubernetes_config.zones` is immune for the stronger reason above — the backend never writes it at
+all. Corroborating: the backend's own drift check compares
+`resource.security_group_ids == record.aws_security_groups` (`cloud_resources_dao.py:259`), a Python
+list equality that is itself order-sensitive, so unstable order would break the control plane before
+it broke us.
 
 **Before recovering any field in `flatten*`, ask: does the backend derive it from another input, and
 is the attribute `RequiresReplace`?** If yes, choose a fix — and **check block-vs-attribute first,
