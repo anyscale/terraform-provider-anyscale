@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.1] - 2026-08-04
+
+### Fixed
+
+- provider: Fix not-found detection on `anyscale_cloud`, `anyscale_cloud_resource`, `anyscale_project`, `anyscale_service`, `anyscale_container_image_build`, `anyscale_container_image_registry`, `anyscale_organization_default_cloud`, and `anyscale_organization_invitation` (plus the `anyscale_cloud`, `anyscale_project`, and `anyscale_service` data sources) to check a reliable error type instead of matching substrings in error text, so an unrelated error can no longer be misclassified as "not found" and silently drop a still-live resource from state.
+
+### Security
+
+- provider: Update the indirect `google.golang.org/grpc` dependency to v1.82.1, clearing GHSA-hrxh-6v49-42gf. Two of the advisory's three issues are xDS-specific - an RBAC authorization bypass and a server panic on crafted xDS RBAC policies - and are not reachable in this provider, which links no xDS code. The remaining HTTP/2 Rapid Reset mitigation bypass affects the gRPC server the provider exposes to the Terraform CLI over its local plugin connection.
+
 ## [0.25.0] - 2026-08-03
 
 ### Breaking Changes
@@ -976,7 +986,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.25.1...HEAD
+[0.25.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.25.1
 [0.25.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.25.0
 [0.24.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.24.1
 [0.24.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.24.0
