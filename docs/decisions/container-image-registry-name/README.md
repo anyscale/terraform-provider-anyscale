@@ -85,10 +85,9 @@ practitioner-supplied `name` from ever being overwritten by an API value, which 
 that would force-replace every existing user. It also means Gate 1 below cannot turn this fix into a
 regression — only into an incomplete one.
 
-Note the `Optional+Computed` Unknown-versus-Null trap, **with a correction to an earlier draft of
-this section.** That draft stated the existing Create guard at `:243` tests `!plan.Name.IsNull()`
-only, and concluded that without an added `IsUnknown` clause every create with `name` omitted would
-send `name=""`. **That is wrong.** The guard already reads:
+Note the `Optional+Computed` Unknown-versus-Null trap, and note what it does **not** require here.
+It is tempting to conclude that because an omitted `name` arrives Unknown, the Create guard must
+gain an `IsUnknown` clause or it will send `name=""`. It will not. The guard already reads:
 
 ```go
 if !plan.Name.IsNull() && plan.Name.ValueString() != "" {
@@ -249,11 +248,10 @@ fixture requirement above.
 - Mutation-proofed in both directions, and both results changed this document: removing Read's
   fill-on-null fails on the value assertion but **not** on `ExpectEmptyPlan`; removing
   `UseStateForUnknown` does not fail at all.
-- **This bullet previously claimed the `IsUnknown` guard was "confirmed necessary" and prevented a
-  "concrete regression". Both halves were wrong, and the error is recorded rather than deleted
-  because of how it happened.** The reasoning — `ValueString()` on an Unknown returns `""`, and Gate
-  1 shows an empty name is a `422` — is individually true at every step. It skipped one check:
-  what the *existing* guard already does with that `""`. It already rejects it, via a `!= ""` clause
-  that has been there all along. A later mutation test (revert only the `IsUnknown` clause, leave
-  everything else) passes: the name still generates and nothing empty is sent. Add the clause as
-  hardening; do not describe it as fixing anything.
+- **The `IsUnknown` guard is hardening, not a fix — and the tempting argument that it is a fix does
+  not survive.** That argument runs: `ValueString()` on an Unknown returns `""`, and Gate 1 shows an
+  empty name is a `422`, therefore omitting the guard sends an empty name and breaks Create. Every
+  step is true and the conclusion is still wrong, because it never asks what the *existing* guard
+  does with that `""` — it already rejects it, via a `!= ""` clause that predates this work. Proven
+  by mutation: revert only the `IsUnknown` clause and the name still generates, with nothing empty
+  sent. Add it for the reasons above; do not describe it as fixing anything.
