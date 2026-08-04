@@ -56,9 +56,12 @@ func (d *OrganizationUserDataSource) Metadata(ctx context.Context, req datasourc
 func (d *OrganizationUserDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	attributes := organizationUserSharedAttributes()
 	attributes["id"] = schema.StringAttribute{
-		Optional:            true,
-		Computed:            true,
-		MarkdownDescription: "The identity ID of the user. Either `id`, `user_id`, or `email` must be specified.",
+		Optional: true,
+		Computed: true,
+		MarkdownDescription: "The identity ID of the user. Either `id`, `user_id`, or `email` must be specified.\n\n" +
+			"Note this is **not** the same as the `id` of the `anyscale_organization_user` **resource**, which is the email\n" +
+			"address. The two surfaces share a name and key on different values; use `email` when you need a value the\n" +
+			"resource will accept.",
 	}
 	attributes["user_id"] = schema.StringAttribute{
 		Optional:            true,
