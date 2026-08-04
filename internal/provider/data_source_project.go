@@ -3,10 +3,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -263,11 +263,8 @@ func (d *ProjectDataSource) getProject(ctx context.Context, projectID string) (*
 		ctx, d.client, "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil, http.StatusOK,
 	)
 	if err != nil {
-		// DS-PROJ-2: Contains("404") matches resource_project.go's robust check -
-		// the previous exact-string match on the full detail text would silently
-		// stop detecting not-found if the backend ever reworded that message.
-		if strings.Contains(err.Error(), "404") {
-			return nil, fmt.Errorf("project not found")
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: project not found", ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to get project: %w", err)
 	}

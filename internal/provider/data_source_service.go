@@ -3,10 +3,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -310,8 +310,8 @@ func (d *ServiceDataSource) getService(ctx context.Context, serviceID string) (*
 		ctx, d.client, "GET", fmt.Sprintf("/api/v2/services-v2/%s", serviceID), nil, http.StatusOK,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			return nil, fmt.Errorf("service not found")
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: service not found", ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to get service: %w", err)
 	}

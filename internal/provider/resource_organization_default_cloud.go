@@ -3,9 +3,9 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -106,8 +106,8 @@ func setOrganizationDefaultCloud(ctx context.Context, client *Client, cloudID st
 	if _, err := DoRequestRaw(
 		ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK,
 	); err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			return fmt.Errorf("cloud %q not found", cloudID)
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: cloud %q not found", ErrNotFound, cloudID)
 		}
 		return fmt.Errorf("validate cloud exists: %w", err)
 	}

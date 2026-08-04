@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -896,4 +897,32 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 			t.Errorf("ComputeStack = %q, want %q (genuinely ambiguous with 2+ resources and no default flagged - must not guess which one, cloud-level fallback is correct here)", got, "VM")
 		}
 	})
+}
+
+// TestReadCloudState_NotFoundSentinel guards the Lane 4 fix: readCloudState hand-rolls its
+// own request (bypassing DoRequestRaw/DoRequestAndParse entirely) and used to return a bare
+// fmt.Errorf("cloud not found") on a real 404, with no %w wrap - errors.Is(err, ErrNotFound)
+// was always false against it, even though the pre-existing strings.Contains(err.Error(),
+// "not found") check at Read's call site happened to still match the literal text. This does
+// not exercise Read() itself (RemoveResource requires a full tfsdk.State/schema harness this
+// file does not otherwise build), just the sentinel property the call site now depends on.
+func TestReadCloudState_NotFoundSentinel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/clouds/cld_gone" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"detail": "cloud not found"}`)
+			return
+		}
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+	err := r.readCloudState(context.Background(), "cld_gone", &CloudResourceModel{})
+	if err == nil {
+		t.Fatal("readCloudState returned nil error for a real 404, want a non-nil error wrapping ErrNotFound")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("errors.Is(err, ErrNotFound) = false for a real 404, want true (err: %v)", err)
+	}
 }

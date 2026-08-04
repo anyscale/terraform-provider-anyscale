@@ -199,6 +199,29 @@ func TestDoRequestRaw(t *testing.T) {
 			t.Errorf("expected error text to contain the verbatim legacy phrase \"unexpected status 404\" (string-matching callers and at least one acceptance test anchor on this exact phrase, not just the digits), got: %v", err)
 		}
 	})
+
+	t.Run("404 listed as an expected status is a nil-error success, not ErrNotFound", func(t *testing.T) {
+		// Guards the invariant a Lane 4 cleanup relies on: resource_service.go's final
+		// Delete call and container_image_helpers.go's archive call both deliberately list
+		// http.StatusNotFound as expected (an already-gone resource is a successful,
+		// idempotent delete). Their old strings.Contains(err.Error(), "404") guards were
+		// removed as dead code on exactly this basis - if this ever regressed (404 stopped
+		// being treated as accepted here), those call sites would start receiving a real
+		// ErrNotFound-wrapped error with nothing left to catch it, surfacing as a hard
+		// destroy/archive failure instead of a silent success.
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error": {"detail": "not found"}}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithToken(server.URL, "test-token")
+
+		_, err := DoRequestRaw(ctx, client, "DELETE", "/test", nil, http.StatusNoContent, http.StatusNotFound)
+		if err != nil {
+			t.Fatalf("expected nil error when 404 is a listed expected status, got: %v", err)
+		}
+	})
 }
 
 func TestMarshalRequestBody(t *testing.T) {

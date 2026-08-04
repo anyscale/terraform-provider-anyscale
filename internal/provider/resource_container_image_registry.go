@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -428,7 +429,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 		http.StatusOK,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Cluster environment not found, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
 			resp.State.RemoveResource(ctx)
 			return
