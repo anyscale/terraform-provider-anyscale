@@ -16,8 +16,9 @@ import (
 )
 
 // TestAccCloudAccessResourceImportRoundTrip is the Criterion 1 import proof for
-// anyscale_cloud_access, written AHEAD of the resource per the architect's
-// before-the-reconcile ruling. It is skipped unconditionally today: all four
+// anyscale_cloud_access, written AHEAD of the resource per the ruling that
+// tests come before the reconcile logic they will guard. It is skipped
+// unconditionally today: all four
 // CRUD methods return "Resource Not Implemented"
 // (resource_cloud_access.go:258-272), there is no ImportState method, and the
 // resource is not registered in provider.go. Delete the t.Skip on the first
@@ -60,7 +61,7 @@ import (
 // add users enabled" (product backend cloud_collaborators_service.py:540-544).
 // An authoritative resource cannot function on such a cloud - it can add but
 // never revoke, which is precisely the guarantee it exists to make. The
-// architect ruled that anyscale_cloud_access must REFUSE on an
+// ruling is that anyscale_cloud_access must REFUSE on an
 // auto_add_user=true cloud rather than silently degrade to add-only, since
 // add-only authority is authority in name only. No assertion here because the
 // behavior is not implemented yet. Note carefully for whoever writes that
@@ -89,25 +90,47 @@ type mockCloudAccessServer struct {
 // newMockCloudAccessServer serves the cloud-collaborator surface
 // anyscale_cloud_access will reconcile against.
 //
-// The routes below are NOT guesses. They are the ones anyscale_cloud_user_role
-// - the shipped, working resource cloud_access replaces - already calls against
-// the real backend (resource_cloud_user_role.go):
+// CORRECTED after a live Gate 1 check against the real backend (both calls
+// made against the pinned static fixture cloud, response shapes confirmed
+// byte-for-byte, not re-derived from source alone - a prior version of this
+// comment pinned four routes as "not guesses" and got two of them wrong,
+// which is exactly the failure this note exists to prevent from recurring).
+// The real routes (backend/server/api/product/routers/clouds_router.py):
 //
-//	GET    /api/v2/clouds/{cloud_id}/collaborators/users
-//	PUT    /api/v2/clouds/{cloud_id}/collaborators/users/{user_id}/roles
-//	PUT    /api/v2/clouds/{cloud_id}/collaborators/roles
-//	DELETE /api/v2/clouds/{cloud_id}/collaborators/{identity_id}
+//	POST   /api/v2/clouds/{cloud_id}/collaborators/users/search   - list members: paginated,
+//	                                                                 returns id/value.{id,name,email}/permission_level
+//	                                                                 (coarse: owner/write/readonly only - see below)
+//	PUT    /api/v2/clouds/{cloud_id}/collaborators/users/{user_id}/roles - grant/set a user's role
+//	DELETE /api/v2/clouds/{cloud_id}/collaborators/{identity_id}         - revoke
+//
+// NOT what an earlier version of this comment claimed: there is no GET on
+// .../collaborators/users (that path is POST-only, for adding one user - a
+// different call cloud_user_role makes, not a list), and .../collaborators/roles
+// is GET-only (a granular role read used by cloud_user_role - see
+// resource_cloud_user_role.go's listCloudUserRoles), never a PUT.
+//
+// PERMISSION_LEVEL ON THE LIST ROUTE IS LOSSY - confirmed live, not just
+// theorized: the four reader-tier base roles (collaborator, project_viewer,
+// compute_config_viewer, workload_operator) collapse into "write" or
+// "readonly" on this endpoint, and the live check surfaced a real instance -
+// a collaborator whose true base_role (per GET .../collaborators/roles) is
+// "collaborator" shows permission_level "write" here. Whoever builds Read
+// needs to decide whether the coarse value is sufficient or whether it must
+// join both endpoints by user_id for the granular role - this comment does
+// not make that call, it only pins the two routes' real, confirmed shapes.
 //
 // Pinning them matters more than it looks. A mock that answers any path
 // containing "collaborator" will happily serve a resource that calls a route
 // the real API does not expose, so the test would go green against code that
 // 404s in production - the same shape as the mount_targets mock omission that
-// let a real bug ship (see CLAUDE.md, Testing guidance). Routing is therefore
-// prefix-matched on the real shapes, and anything else 404s loudly.
+// let a real bug ship (see CLAUDE.md, Testing guidance), and the same shape
+// this very comment fell into before the live check above corrected it.
+// Routing is therefore matched on the real shapes, not a "collaborator"
+// substring, and anything else 404s loudly.
 //
-// Revisit only if cloud_access deliberately targets a different api/v2 surface
-// than cloud_user_role does; that would be a design change worth noticing here
-// rather than absorbing silently.
+// Revisit if cloud_access deliberately targets a different api/v2 surface
+// than what is pinned above; that would be a design change worth noticing
+// here rather than absorbing silently.
 func newMockCloudAccessServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	s := &mockCloudAccessServer{
@@ -132,14 +155,16 @@ func (s *mockCloudAccessServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Path
 
-	// Pinned to the real routes cloud_user_role already uses against the live
-	// backend, not to any path containing "collaborator". See the comment on
-	// newMockCloudAccessServer for why the permissive version is unsafe.
+	// Pinned to the real routes, live-confirmed (see the comment on
+	// newMockCloudAccessServer) - not to any path containing "collaborator".
 	collabRoot := strings.HasPrefix(path, "/api/v2/clouds/") && strings.Contains(path, "/collaborators")
-	isRolesWrite := collabRoot && strings.HasSuffix(path, "/roles")
+	// The grant/write-role route is .../collaborators/users/{user_id}/roles -
+	// require the "/users/" segment too, not just a bare "/roles" suffix, so
+	// this never matches the real (GET-only) .../collaborators/roles path.
+	isRolesWrite := collabRoot && strings.Contains(path, "/users/") && strings.HasSuffix(path, "/roles")
 
 	switch {
-	case r.Method == http.MethodGet && collabRoot && strings.HasSuffix(path, "/collaborators/users"):
+	case r.Method == http.MethodPost && collabRoot && strings.HasSuffix(path, "/collaborators/users/search"):
 		s.handleList(w)
 	case isRolesWrite && r.Method == http.MethodPut:
 		s.handleGrant(w, r)
@@ -154,6 +179,14 @@ func (s *mockCloudAccessServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleList serves the live-confirmed CloudCollaborator shape (an "id" that
+// is the identity_id for the permission, a nested "value" object carrying the
+// user_id/name/email, and "metadata.total" - not "total_count") rather than
+// this mock's own flat internal member representation. A response shaped
+// like the mock's internal map instead of the real API's would validate a
+// Read implementation that parses the wrong fields and 404s/mis-decodes in
+// production - the same mock-realism gap this file's own header comment
+// warns about.
 func (s *mockCloudAccessServer) handleList(w http.ResponseWriter) {
 	emails := make([]string, 0, len(s.members))
 	for email := range s.members {
@@ -162,12 +195,22 @@ func (s *mockCloudAccessServer) handleList(w http.ResponseWriter) {
 	sort.Strings(emails) // deterministic ordering across steps
 	results := make([]map[string]any, 0, len(emails))
 	for _, email := range emails {
-		results = append(results, s.members[email])
+		m := s.members[email]
+		userID := fmt.Sprint(m["user_id"])
+		results = append(results, map[string]any{
+			"id": "ide_mock_" + userID,
+			"value": map[string]any{
+				"id":    userID,
+				"name":  m["email"],
+				"email": m["email"],
+			},
+			"permission_level": m["permission_level"],
+		})
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"results":  results,
-		"metadata": map[string]any{"total_count": len(results)},
+		"metadata": map[string]any{"total": len(results), "next_paging_token": nil},
 	})
 }
 
@@ -258,7 +301,7 @@ func (s *mockCloudAccessServer) handleGetCloud(w http.ResponseWriter, path strin
 }
 
 func TestAccCloudAccessResourceImportRoundTrip(t *testing.T) {
-	t.Skip("anyscale_cloud_access is not yet registered or implemented (CRUD returns Not Implemented; no ImportState). This test is written ahead of that work per the architect's before-the-reconcile ruling and will run as soon as the resource is wired.")
+	t.Skip("anyscale_cloud_access is not yet registered or implemented (CRUD returns Not Implemented; no ImportState). This test is written ahead of that work and will run as soon as the resource is wired.")
 
 	SkipIfNotAcceptanceTest(t)
 
