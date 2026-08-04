@@ -361,9 +361,11 @@ func TestAccSystemClusterResource_DeleteIsStateOnly(t *testing.T) {
 				Check:  resource.TestCheckResourceAttr("anyscale_system_cluster.test", "state", "Running"),
 			},
 		},
-		// The framework's own post-test destroy (an unconditional defer, see
-		// tf-resource-test-unconditional-destroy-no-skip-hook) exercises
-		// Delete for us - no extra step needed to trigger it.
+		// The framework's own post-test destroy exercises Delete for us - no
+		// extra step needed to trigger it. resource.Test defers a destroy of
+		// any non-empty state after the last step unconditionally
+		// (terraform-plugin-testing's helper/resource/testing_new.go,
+		// runPostTestDestroy) - there is no per-step way to opt out of it.
 	})
 
 	_, _, terminateCalled := mockServer.snapshot()
@@ -373,10 +375,18 @@ func TestAccSystemClusterResource_DeleteIsStateOnly(t *testing.T) {
 }
 
 // TestAccSystemClusterResource_ImportByCloudID covers AC11: a create-then-
-// import (not cold-import-only, so ImportStateVerify is meaningful - see
-// tf-resource-test-unconditional-destroy-no-skip-hook's sibling guidance on
-// import test shape) using cloud_id as the sole import identifier, followed
-// by a no-op plan.
+// import (not cold-import-only, so ImportStateVerify at step 2 is a genuine
+// check against Create's own state) using cloud_id as the sole import
+// identifier.
+//
+// Step 3's no-op plan does NOT independently prove import recovery: step 2
+// runs without ImportStatePersist, so it executes in a throwaway working
+// directory (terraform-plugin-testing's documented behavior) and step 3
+// plans against whatever Create left, never against what import recovered
+// (same caveat as resource_project_lifecycle_acc_test.go). It is kept
+// because it is still a real, lesser property - Create's own state is
+// stable under a same-config re-apply - not because it adds independent
+// import coverage.
 func TestAccSystemClusterResource_ImportByCloudID(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
