@@ -196,7 +196,7 @@ func TestDoRequestRaw(t *testing.T) {
 		}
 
 		if !strings.Contains(err.Error(), "unexpected status 404") {
-			t.Errorf("expected error text to contain the verbatim legacy phrase \"unexpected status 404\" (string-matching callers and at least one acceptance test anchor on this exact phrase, not just the digits), got: %v", err)
+			t.Errorf("expected error text to contain the verbatim legacy phrase \"unexpected status 404\", not just the digits. No production code matches this text any more (all not-found sites use errors.Is), but this assertion and the ExpectError regexp in acctest/ephemeral_service_credentials_acc_test.go both anchor on the literal phrase - rewording it in api_helpers.go breaks both. Got: %v", err)
 		}
 	})
 

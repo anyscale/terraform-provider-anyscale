@@ -95,10 +95,14 @@ func DoRequestRaw(
 	if !isStatusExpected(httpResp.StatusCode, expectedStatuses) {
 		if httpResp.StatusCode == http.StatusNotFound {
 			// Reuse the exact pre-sentinel phrasing ("unexpected status 404: ...")
-			// verbatim, not just a bare "404" digit - several call sites (and one
-			// ephemeral-resource test) pre-date this sentinel and match on that
-			// specific phrase, not only its presence. errors.Is(err, ErrNotFound)
-			// still works via %w regardless of the trailing text.
+			// verbatim, not just a bare "404" digit. No production code depends on
+			// this text any more - every not-found call site now tests
+			// errors.Is(err, ErrNotFound) instead. It survives solely as a
+			// test-compatibility anchor for two tests that match the literal
+			// phrase: the TestDoRequestRaw subtest in api_helpers_test.go that
+			// asserts it, and the ExpectError regexp in
+			// acctest/ephemeral_service_credentials_acc_test.go. Reword this and
+			// both fail. errors.Is works via %w regardless of the trailing text.
 			return nil, fmt.Errorf("%w: unexpected status %d: %s", ErrNotFound, httpResp.StatusCode, string(bodyBytes))
 		}
 		return nil, fmt.Errorf("unexpected status %d: %s", httpResp.StatusCode, string(bodyBytes))
