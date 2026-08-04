@@ -65,8 +65,9 @@ deliberately, **not** authoritative over organization membership itself — that
 `anyscale_organization_user`, and destroying the role resource never evicts anyone.
 
 `anyscale_cloud_access` means something categorically larger by the same word: it is authoritative
-over **one cloud's entire member list**. Anyone not declared in its `member` map is revoked on the
-next apply, including someone granted access through the Anyscale console. This is why it is keyed
+over **one cloud's entire member list**. Anyone not declared in its `member` map is revoked —
+including someone granted access through the Anyscale console, and including on the **first** apply
+(see the Create ruling below). This is why it is keyed
 by `cloud_id` and not by user: authority over a set requires one resource owning the whole set, and
 a per-user resource is structurally blind to a member it was never told about — it can enforce "does
 Alice have access" but never "are these the only members of cloud X." Only the second guarantee
@@ -90,6 +91,38 @@ third case in the same family is deliberately **not** guarded and cannot be: a t
 destroying an `anyscale_cloud_access` correctly revokes that cloud's members, and the provider
 cannot tell that from a mistake. Mitigation for that case lives outside the provider
 (`lifecycle { prevent_destroy = true }` on production clouds).
+
+### Create is authoritative too, and the revoke it performs is undisclosed
+
+**Ruling: `Create` revokes undeclared pre-existing members, exactly as `Update` does.** Terraform is
+the source of truth for a cloud's member list from the first apply onward, not from the second. The
+alternative — adopt-on-create, enforce-later — was rejected: it would mean the resource's stated
+guarantee ("these are the only members") is false for the entire life of the first apply, and the
+moment it *became* true would be some unrelated later change.
+
+This is not a guard-shaped problem, and it is important not to file it as one. The two guards above
+work because each has a signal to fire on (two spellings of one address; a populated cloud going
+empty). A first apply that revokes a real person has **no such signal** — a member the operator
+never knew about is, by construction, indistinguishable from one they deliberately omitted. So there
+is nothing to detect, and **documentation is the only available mitigation.** Three consequences
+follow, and the resource's own page must carry all three:
+
+1. **"Review the plan" does not protect a reader here, and the page must not imply it does.** The
+   `for_each`-typo guidance above genuinely is plan-reviewable — the plan shows a destroy. A
+   first-apply revoke is not: the members about to lose access are ones Terraform has never read,
+   so they appear nowhere in the plan output. A page that offers plan review as the general
+   mitigation for this resource's sharp edges, without excluding this case, actively misleads.
+2. **The caller's own identity must be excluded from the authoritative set.** The token running
+   Terraform is usually a collaborator on the cloud it manages and frequently its owner, so without
+   this exclusion the first apply can revoke the operator's own access. This was originally argued
+   on narrower grounds (a permanently-occupied `unmanaged_grants` entry is an alarm that is always
+   on, i.e. no alarm at all); under authoritative-Create it is load-bearing, and it must land before
+   or with the reconcile rather than as later tidying.
+3. **A cloud owner who is not an organization admin can be revoked on the first apply.** Org admins
+   happen to be safe, but only by accident of plumbing — they are invisible to the endpoint this
+   resource reads, so it cannot revoke what it cannot see. A non-admin owner has no such accidental
+   protection. This is the worst realistic outcome of the ruling and belongs on the page explicitly,
+   not left for a reader to infer from the general authority statement.
 
 ## Relationship to anyscale_cloud_user_role
 
