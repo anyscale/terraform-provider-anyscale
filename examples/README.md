@@ -159,10 +159,11 @@ you haven't used yet.
   multi-resource cloud, instead of always landing on the primary
 - The attribute-reference dependency ordering a data source needs to safely read back a resource
   created earlier in the same apply, instead of 404ing on a first apply
-- Why `anyscale_organization_user` (import-only) and the `anyscale_service` resource
-  (deliberately not declared here - see the kitchen-sink README) are called out explicitly rather
-  than silently applied, and why the invitation email and existing-service lookup are both opt-in
-  variables rather than forced on every apply
+- Why `anyscale_organization_user` (shown commented out; adopts an existing member, never
+  applied here without one) and the `anyscale_service` resource (deliberately not declared here -
+  see the kitchen-sink README) are called out explicitly rather than silently applied, and why
+  the invitation email and existing-service lookup are both opt-in variables rather than forced
+  on every apply
 
 See the [kitchen-sink README](./kitchen-sink/README.md) for the full breakdown, including real
 AWS cost, apply time, and what it creates in your account and org before you apply it.
@@ -250,10 +251,13 @@ Minimal example showing just the `anyscale_project` resource configuration.
 
 #### [resources/anyscale_organization_user](./resources/anyscale_organization_user/)
 
-Minimal example showing the `anyscale_organization_user` resource — import-only, since
-members can't be created directly through the API.
+Minimal example showing the `anyscale_organization_user` resource, which manages organization
+membership - declaring it with an existing member's email adopts them directly, no import
+required.
 
-**Use this when**: You want to manage an existing org member's role through Terraform.
+**Use this when**: You want to bring an existing org member under Terraform management (for
+example, to guard them with `prevent_destroy`, or to pair with `anyscale_organization_user_role`
+for role management).
 
 #### [resources/anyscale_organization_invitation](./resources/anyscale_organization_invitation/)
 

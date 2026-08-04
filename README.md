@@ -56,7 +56,7 @@ provider "anyscale" {
   - Services (deploy Ray Serve applications and roll out new versions)
   - Projects
   - Organization invitations
-  - Organization collaborators (import-only; manages permissions for existing members)
+  - Organization collaborators (adopts or imports existing members; manages membership and role)
 - Currently supported data sources:
   - Clouds (single lookup and list/filter)
   - Projects (single lookup and list/filter)
