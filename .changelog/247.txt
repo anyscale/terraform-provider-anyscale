@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_service: `terraform destroy` (and the destroy-then-create recovery it enables after a failed `apply`) no longer fails when the service is in an error state (`UNHEALTHY`, `SYSTEM_FAILURE`, or `USER_ERROR_FAILURE`); Delete now only treats those states as terminal while waiting for `RUNNING`, not `TERMINATED`, since a service being torn down can legitimately pass through an error state on its way to gone.
+```
