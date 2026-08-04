@@ -1,4 +1,4 @@
 ```
 release-note:security
-provider: Update the `google.golang.org/grpc` dependency to v1.82.1, addressing GHSA-hrxh-6v49-42gf - an xDS RBAC authorization bypass, an HTTP/2 Rapid Reset mitigation bypass, and a server panic on crafted xDS RBAC policies.
+provider: Update the indirect `google.golang.org/grpc` dependency to v1.82.1, clearing GHSA-hrxh-6v49-42gf. Two of the advisory's three issues are xDS-specific - an RBAC authorization bypass and a server panic on crafted xDS RBAC policies - and are not reachable in this provider, which links no xDS code. The remaining HTTP/2 Rapid Reset mitigation bypass affects the gRPC server the provider exposes to the Terraform CLI over its local plugin connection.
 ```
