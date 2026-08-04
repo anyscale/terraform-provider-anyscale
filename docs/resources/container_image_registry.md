@@ -53,7 +53,7 @@ output "registry_image_digest" {
 
 ### Optional
 
-- `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated.
+- `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated and recorded here after create/import - the generated value is not derivable from config (it embeds a timestamp), so it lives only in state.
 - `ray_version` (String) The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; the API rejects unsupported values at creation time. If not specified, a supported default is used automatically.
 - `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries.
 

@@ -197,7 +197,6 @@ resource "anyscale_container_image_registry" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"registry_login_secret", // sensitive: API never returns auth secrets after create
-					"name",                  // Optional-only schema field; Read() never rehydrates it (see resource_container_image_registry.go), so import always comes back null regardless of what config set
 				},
 			},
 			// ImportStateVerify above only proves imported state matches
