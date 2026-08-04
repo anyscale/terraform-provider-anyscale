@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_container_image_registry: `name` no longer forces a destroy-and-recreate on import, or on the next plan for a resource already in state, when a configuration omits it; `name` is now Computed, filled from the Create API response when omitted and recovered on Read when null, so both a fresh cold import and an existing resource created under a prior version self-heal without a re-import.
+```
