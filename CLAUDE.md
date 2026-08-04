@@ -245,6 +245,24 @@ does derive it, but on `aws_config`, and the provider models **no** `zones` attr
 **Treat the derived-field import bug class as closed.** Re-open it only for a *new* source→derived
 pair, verified on both halves.
 
+**The adjacent question — list *order* sensitivity — is also settled, and negative.** Terraform lists
+are order-sensitive, so a recovered `RequiresReplace` list whose element order differed from config
+would force replacement on import. It does not happen: the backend preserves order end to end, and
+nothing sorts. `security_group_ids` → `aws_security_groups`, `firewall_policy_names` →
+`gcp_firewall_policy_ids`, and the GCP subnet list → `gcp_subnet_ids` are all
+`Column(PSQL_JSONB())` (`server/database/models/models.py:1220`, `:1246`, `:1226`/`:1250`), and JSON
+array element order is preserved by definition — that part is documented, undisputed PostgreSQL
+behavior, so it is asserted rather than re-tested. Writes go through `list(...)`
+(`cloud_resources_dao.py:317`) and protobuf `repeated`/`extend()` (`:841`); the read helper
+`optional_sqlalchemy_json_to_optional_list_of_strings` (`server/util.py:344`) returns `list(obj)`
+with no sort. A controlled search found **no** sorting applied to any of these lists (control: a
+`sorted(` call *is* found at `resource_tags_dao.py:123`, so the pattern matches real code).
+`kubernetes_config.zones` is immune for the stronger reason above — the backend never writes it at
+all. Corroborating: the backend's own drift check compares
+`resource.security_group_ids == record.aws_security_groups` (`cloud_resources_dao.py:259`), a Python
+list equality that is itself order-sensitive, so unstable order would break the control plane before
+it broke us.
+
 **Before recovering any field in `flatten*`, ask: does the backend derive it from another input, and
 is the attribute `RequiresReplace`?** If yes, choose a fix — and **check block-vs-attribute first,
 because it decides which fixes exist:**
