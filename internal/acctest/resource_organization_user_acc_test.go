@@ -62,8 +62,13 @@ func TestAccOrganizationUserResource_Import(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Import existing collaborator. ImportStateVerify is NOT usable here:
 			// it verifies import against an *already-established* prior resource
-			// state from an earlier step (normally created via Create()), but
-			// Create() is intentionally blocked for this resource — there is no
+			// state from an earlier step (normally created via Create()), but this
+			// test has no earlier step at all - it is a single cold import against
+			// a real, disposable identity (see warnDestructiveCollaboratorTest
+			// above). That is a choice about THIS test, not a limitation of the
+			// resource: Create adopts an existing member or invites a new one (see
+			// resource_organization_user.go's own doc comment), it is not blocked.
+			// So there is no
 			// "old" state to compare against, so ImportStateVerify would always
 			// fail with "Failed state verification, resource with ID ... not
 			// found" regardless of whether import itself actually worked. This

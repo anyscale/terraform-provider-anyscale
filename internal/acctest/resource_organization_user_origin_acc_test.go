@@ -349,8 +349,10 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 // config to match the backend's normalization.
 //
 // The rule is therefore: IMPORT WRITES THE EMAIL AS GIVEN IN THE IMPORT ID -
-// what the operator typed - never the API echo. That is what makes the third
-// step below a no-op rather than a diff.
+// what the operator typed - never the API echo. That is what step 2's
+// ImportStateVerify pins below - it compares the freshly imported resource
+// against the one Create already applied, in the same throwaway directory,
+// before either is discarded.
 //
 // ON WHICH STEP ACTUALLY CATCHES WHAT - measured, because the obvious story is
 // wrong for this resource and a wrong story here invites a bad "simplification":
@@ -369,12 +371,15 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 //	     "produced an unexpected new value: .email: was cty.StringVal(...)"
 //
 // So step 3 did not catch either mutation I could construct, and I could not
-// construct one it uniquely catches. It is kept because criterion 1 requires the
-// no-op plan assertion and because it is the assertion that survives a schema
-// change - the moment email became Optional+Computed, Core would stop enforcing
-// equality with config and steps 1 and 2 would both go quiet. Do not read its
-// presence as evidence that it is currently the load-bearing check; it is
-// insurance, and the comment says so rather than implying otherwise.
+// construct one it uniquely catches - by construction, it cannot. Step 2 runs
+// without ImportStatePersist, so it executes in a throwaway working directory
+// discarded at the end of that step; step 3's plan is computed against
+// whatever CREATE (step 1) left, never against what import recovered. It is
+// kept because criterion 1 requires the no-op plan assertion, and because it
+// is real (if lesser) insurance that Create's own state stays stable under a
+// same-config re-apply - not because it would start covering import if email
+// ever became Optional+Computed. Steps 1 and 2 above are this test's only
+// import coverage.
 //
 // The broader gap it guards against IS real elsewhere: 19 of the 23 files in this
 // repo using ImportStateVerify stop there, and the invitation resource shipped an
@@ -420,9 +425,11 @@ func TestAccOrganizationUserResourceImportRoundTripPreservesCasing(t *testing.T)
 				// someone hiding a real failure.
 			},
 			{
-				// 3. The assertion the first two cannot make: against a realistic
-				// config, the next plan is EMPTY. This is where an API-echoed
-				// lower-case email would surface as a permanent diff.
+				// 3. Does NOT prove import-recovery correctness - see the
+				// throwaway-working-directory note in the doc comment above;
+				// this step cannot observe anything step 2's import wrote.
+				// What it genuinely proves: against a realistic config,
+				// re-applying Create's own state (step 1) is a no-op.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
