@@ -142,7 +142,10 @@ Because the expiry is only noticed during a refresh, a lapsed resource with this
 ### Read-Only
 
 - `created_at` (String) Timestamp when the member was added to the organization. Null while an invitation is still pending. Write-once: populated the first time the member is seen and never re-read afterward, since the API has returned different values for it across reads.
-- `id` (String) The member's email address. Same value as `email`.
+- `id` (String) The member's email address. Same value as `email`. Note this is **not** the same as the `id` of the
+`anyscale_organization_user` **data source**, which is the identity ID - the two surfaces share a name and key on
+different values. When you need to pass a member's identity from a data source into this resource, use the data
+source's `email` attribute, not its `id`.
 - `identity_id` (String) The identity ID of the member, once they exist. Null while an invitation is still pending. This was the resource's ID before it was re-keyed to email.
 - `name` (String) The name of the organization member. Null while an invitation is still pending.
 - `user_id` (String) The user ID of the member, once they exist. Null while an invitation is still pending, and null for identity types that do not have one.

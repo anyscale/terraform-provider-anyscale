@@ -55,6 +55,10 @@ output "user_additional_roles" {
 
 - `email` (String) The email address of the user. Either `id`, `user_id`, or `email` must be specified.
 - `id` (String) The identity ID of the user. Either `id`, `user_id`, or `email` must be specified.
+
+Note this is **not** the same as the `id` of the `anyscale_organization_user` **resource**, which is the email
+address. The two surfaces share a name and key on different values; use `email` when you need a value the
+resource will accept.
 - `user_id` (String) The user ID of the user. Either `id`, `user_id`, or `email` must be specified.
 
 ### Read-Only

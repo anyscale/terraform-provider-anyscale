@@ -168,16 +168,28 @@ must get right.
 | `anyscale_organization_user` (**data source**) | the **identity** ID | `data_source_organization_user.go:61` |
 
 The last row is the sharp edge: a resource and a data source share a type name and disagree on what
-`id` holds. Reading `data.anyscale_organization_user.x.id` and passing it to
-`terraform import anyscale_organization_user.x <value>` imports the wrong thing.
+`id` holds.
+
+**Severity, stated precisely — an earlier draft of this audit overstated it.** The import path is
+*already* defended: `resource_organization_user.go:968-994` rejects any import ID without an `@`,
+and specifically recognises an `ide_` prefix, telling the reader it looks like an identity ID and
+that this resource is keyed by email. So feeding a data-source `id` to `terraform import` fails
+loudly with a good diagnostic rather than importing the wrong object.
+
+What remains is a clarity problem plus one unguarded path: wiring
+`data.anyscale_organization_user.x.id` into an attribute that expects an email — for example
+`anyscale_organization_user_role.email` — passes an identity ID where an address is required, and
+that is caught only at API-lookup time, with a less pointed error. The fix is documentation on both
+`id` attributes, not a new validator.
 
 Three identifier namespaces are in play for one human — `email`, `user_id`, `identity_id` — with
 `identity_id` present on `cloud_user_role` purely as destroy plumbing
 (`resource_cloud_user_role.go:112`).
 
 **Recommendation.** Keying resources on `email` is right and consistent; keep it. Document the
-resource-versus-data-source `id` divergence explicitly in both `MarkdownDescription`s now
-(non-breaking); treat aligning the values as a major-version item.
+resource-versus-data-source `id` divergence explicitly in both `MarkdownDescription`s
+(non-breaking, and **done** — see the commit that accompanies this correction); treat aligning the
+values as a major-version item.
 
 ## Finding 4 — three removals are queued behind one unwritten runtime
 

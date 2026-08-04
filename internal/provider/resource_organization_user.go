@@ -139,7 +139,10 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 				// and neither exists before the person accepts. Email is the only value that
 				// is stable across the whole lifecycle - before the invitation, while it is
 				// pending, and after they join.
-				MarkdownDescription: "The member's email address. Same value as `email`.",
+				MarkdownDescription: "The member's email address. Same value as `email`. Note this is **not** the same as the `id` of the\n" +
+					"`anyscale_organization_user` **data source**, which is the identity ID - the two surfaces share a name and key on\n" +
+					"different values. When you need to pass a member's identity from a data source into this resource, use the data\n" +
+					"source's `email` attribute, not its `id`.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
