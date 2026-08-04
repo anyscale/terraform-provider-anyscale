@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
 // This file closes the same framework-level gap for Compute Config that
@@ -352,6 +353,33 @@ resource "anyscale_compute_config" "test" {
 					// for the actual CC12 recovery-with-real-values proof.
 					"head_node", "worker_nodes",
 					"min_resources", "max_resources", "zones",
+				},
+			},
+			// RELABELED - this does NOT prove import-recovery correctness.
+			// ImportState above runs without ImportStatePersist, so it
+			// executes in a throwaway working directory that is discarded
+			// at the end of that step (terraform-plugin-testing's
+			// documented behavior) - this step's plan is computed against
+			// whatever the last real apply (configV2) left, never against
+			// what import recovered. Attempting ImportStatePersist: true to
+			// fix this reproducibly fails with "Error: Resource already
+			// managed by Terraform" (terraform import refuses an address
+			// already present in the same working directory's state, which
+			// it is here after the preceding create/update steps) - a
+			// Terraform CLI-level constraint, not fixable from within this
+			// test shape. What this genuinely proves: state stays stable
+			// under a same-config re-apply - a real property, just not the
+			// import round-trip one, and in particular it says nothing
+			// about whether head_node/worker_nodes/min_resources/
+			// max_resources/zones (ignored above) survive a real import.
+			// See resource_cloud_import_object_storage_region_acc_test.go
+			// for the two-test shape that actually proves import recovery.
+			{
+				Config: configV2,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_compute_config.test", plancheck.ResourceActionNoop),
+					},
 				},
 			},
 		},
