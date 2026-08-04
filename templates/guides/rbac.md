@@ -2,7 +2,7 @@
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
 subcategory: "Behavior & Limitations"
 description: |-
-  How access control is split across anyscale_organization_user, anyscale_organization_user_role, and anyscale_cloud_user_role - the vocabulary differences between scopes, what "authoritative" means for each resource, and why destroying anyscale_organization_user_role does not revert a person's role.
+  How access control is split across anyscale_organization_user and anyscale_organization_user_role - the vocabulary differences between scopes, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
 ---
 
 # RBAC: Roles Across Organizations, Clouds, and Projects
@@ -21,11 +21,15 @@ Read this before writing configuration that spans more than one scope.
 |---|---|---|
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user exists in the organization at all. Import-only - it cannot create a member, and destroying it evicts them. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
-| Cloud role | [`anyscale_cloud_user_role`](../resources/cloud_user_role.md) | One user's `base_role` and `deny_roles` on one cloud. Authoritative over that one (cloud, user) pair - not over the cloud's whole member list. Gated behind two separate backend flags; see that resource's own documentation. |
 
-Both role resources use the word "authoritative," and both mean the same thing: authoritative over the
-one row they manage, never over a whole population - see
-[Authority](#authority-what-terraform-manages-here-actually-means), below.
+This resource uses the word "authoritative" to mean: authoritative over the one row it manages, never
+over a whole population - see [Authority](#authority-what-terraform-manages-here-actually-means),
+below.
+
+**Cloud-scoped role management has no resource today.** `anyscale_cloud_user_role` used to fill this
+role and has been removed with no replacement yet; a specific user's `base_role`/`deny_roles` on a
+specific cloud can only be read or changed outside Terraform (the console or the API directly) until
+a replacement ships.
 
 ## The vocabulary problem
 
@@ -67,34 +71,28 @@ the same thing, on another.** Check the specific resource's schema every time.
 
 ## Authority: what "Terraform manages here" actually means
 
-Both role resources use the word "authoritative," and for both it means the same thing: authoritative
-over the one row they manage, never over a whole population. `anyscale_organization_user_role` is
-authoritative over one user's organization role - `base_role` and `deny_roles` for that person - and
-has no opinion about anyone else. `anyscale_cloud_user_role` is authoritative over one user's role on
-one cloud, the same shape one scope down: setting `base_role` there replaces whatever role and deny
-roles that user previously held on that cloud, and never touches any other user's access. Neither
-resource discovers or revokes anyone Terraform was not explicitly told to manage - a person nobody
-wrote a resource for is invisible to it, not evicted by it.
+`anyscale_organization_user_role` uses the word "authoritative" to mean: authoritative over the one
+row it manages, never over a whole population. It is authoritative over one user's organization role -
+`base_role` and `deny_roles` for that person - and has no opinion about anyone else. It does not
+discover or revoke anyone Terraform was not explicitly told to manage - a person nobody wrote a
+resource for is invisible to it, not evicted by it.
 
-Both resources make the same design choice for the same reason: `base_role` is **required**, with no
-default value. A default would need to pick some role for a bare first `apply` against a person who
-already holds real access - and if that default were ever lower than what someone actually holds,
-adopting them under Terraform would silently demote them on the very first `apply`, with nothing
-unusual in the plan to catch it. Stating the role explicitly every time trades a small amount of
-config brevity for making sure a demotion, if it ever happens, is a value you typed and can see in the
-diff - never a fallback you didn't choose.
+This resource makes a deliberate design choice: `base_role` is **required**, with no default value. A
+default would need to pick some role for a bare first `apply` against a person who already holds real
+access - and if that default were ever lower than what someone actually holds, adopting them under
+Terraform would silently demote them on the very first `apply`, with nothing unusual in the plan to
+catch it. Stating the role explicitly every time trades a small amount of config brevity for making
+sure a demotion, if it ever happens, is a value you typed and can see in the diff - never a fallback
+you didn't choose.
 
 **One sharp edge is worth flagging before the details below:** `anyscale_organization_user_role`'s
 destroy can **leave a privilege behind** - an owner stays an owner - and can even **grant new
 capability**, by lifting a declared `deny_roles` restriction. Neither is a bug; both follow from the
 same rule explained next.
 
-Each resource's `destroy` can also fail to fully complete, for reasons specific to its own scope -
-read each resource's own documentation rather than assuming one explains the other. See
+This resource's `destroy` can also fail to fully complete - see
 ["Destroying `anyscale_organization_user_role`"](#destroying-anyscale_organization_user_role-what-actually-happens)
-below for the organization case, and `anyscale_cloud_user_role`'s own documentation for the cloud case
-(a role granted on top of pre-existing, out-of-band cloud access can leave that resource's `destroy`
-with no clean exit but `terraform state rm`) - the two mechanisms are unrelated.
+below for the details.
 
 ## Destroying `anyscale_organization_user_role`: what actually happens
 

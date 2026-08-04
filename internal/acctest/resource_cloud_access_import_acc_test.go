@@ -126,10 +126,10 @@ type mockCloudAccessServer struct {
 //	DELETE /api/v2/clouds/{cloud_id}/collaborators/{identity_id}         - revoke
 //
 // NOT what an earlier version of this comment claimed: there is no GET on
-// .../collaborators/users (that path is POST-only, for adding one user - a
-// different call cloud_user_role makes, not a list), and .../collaborators/roles
-// is GET-only (a granular role read used by cloud_user_role - see
-// resource_cloud_user_role.go's listCloudUserRoles), never a PUT.
+// .../collaborators/users (that path is POST-only, for adding one user, not
+// listing), and .../collaborators/roles is GET-only (a granular per-user role
+// read - this resource will need it for the same reason the list route's
+// permission_level is lossy, see below), never a PUT.
 //
 // PERMISSION_LEVEL ON THE LIST ROUTE IS LOSSY - confirmed live, not just
 // theorized: the four reader-tier base roles (collaborator, project_viewer,

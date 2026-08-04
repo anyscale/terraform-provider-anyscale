@@ -139,7 +139,6 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewComputeConfigResource,
 		NewCloudResourceResource,
 		NewCloudResource,
-		NewCloudUserRoleResource,
 		// anyscale_cloud_access: NOT registered. Schema and plan-time validation
 		// exist (resource_cloud_access.go) - cloud_id/member/base_role/deny_roles/
 		// projects, the case-insensitive-email guard, the cloud_read_only cross-field
