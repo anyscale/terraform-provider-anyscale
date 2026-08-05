@@ -1492,31 +1492,20 @@ func TestCloudAccessRevokeFailureReason(t *testing.T) {
 	}
 }
 
-// TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall is AC-36: the
-// half of the fatal-grant-path story that AC-35 does not cover. AC-35
-// (TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords etc.)
-// proves the FAILED APPLY's own behavior - no error, Ungranted populated,
-// destructive phase suppressed. This test proves what happens AFTER: state
-// claims the full planned map (per AC-21a's ruling - `member` has no
-// Computed sub-fields, so applyCloudAccess must write the plan verbatim
-// even for a member whose grant failed), so the failure is invisible in
-// THAT state. It must not stay invisible forever - the next real refresh
-// has to recover it, which is what makes the following plan re-propose the
-// grant rather than silently converging on a lie.
+// TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall is AC-36:
+// after a failed grant, state still claims the full planned map (AC-21a -
+// `member` has no Computed sub-fields, so applyCloudAccess must write the
+// plan verbatim even for a member whose grant failed). The failure must not
+// stay invisible forever - the next refresh has to recover it, so the
+// following plan re-proposes the grant rather than converging on a lie.
 //
-// Chains applyCloudAccess (the AC-35 scenario, direct function call) into
-// Read (via runCloudAccessRead), the same direct-call technique
-// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned below uses -
-// the write gate stays closed throughout, since neither call goes through
-// Create/Update's refuseWriteWhileReadOnly check.
-//
-// Asserting "the refreshed member map omits the failed grant" rather than
-// running an actual Terraform plan is a deliberate proxy, not a shortcut:
-// Core has no code under test here to diff against, and the write gate
-// being closed means no real resource.Test plan step can run yet. What the
-// proxy proves is exactly what forces a non-empty plan - state no longer
-// matching what the configuration (unchanged) still declares - so the
-// grant is a live diff again, not a permanently converged omission.
+// Chains applyCloudAccess (the AC-35 scenario) into Read directly - the
+// write gate stays closed throughout, since neither call goes through
+// Create/Update's refuseWriteWhileReadOnly check. Asserting the refreshed
+// member map omits the failed grant is a deliberate proxy for a real
+// Terraform plan (which can't run while the gate is closed): it proves
+// exactly what forces a non-empty plan - state no longer matching what the
+// unchanged config declares.
 func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 	const cloudID = "cld_grantfail_refresh"
 
@@ -1605,28 +1594,21 @@ func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 	}
 }
 
-// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned is AC-21b,
-// converted from a diagnostic test into a regression guard rather than
-// closed outright (design record ed5a176): its original purpose - catching
-// a read-back that diverges from the plan on `deny_roles` - is moot today,
-// because applyCloudAccess (resource_cloud_access.go:744-769) never reads
-// `member` back on any path, full stop. But nothing would fail if a future
-// edit reintroduced one, and four other decisions (AC-21a/c, the grant-path
-// fix, the general read-back rule) rest on that prohibition holding. This
-// test is what would catch it.
+// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned is AC-21b, a
+// regression guard rather than a diagnostic test (design record ed5a176):
+// applyCloudAccess never reads `member` back on any path today, so its
+// original purpose is moot, but nothing would fail if a future edit
+// reintroduced one - this test is what would catch it.
 //
-// The mock's roles GET is overridden to report a DIFFERENT deny_roles value
-// (cloud_read_only) than the plan declares - an EMPTY, DECLARED list, the
-// narrowest input that distinguishes "wrote the plan verbatim" from "wrote
-// something read back", per architect's own framing of the original AC-21b.
+// The mock's roles GET is overridden to report a deny_roles value different
+// from the plan's - an EMPTY, DECLARED list, the narrowest input that
+// distinguishes "wrote the plan verbatim" from "wrote something read back".
 // If applyCloudAccess ever read that response into plan.Member, the
 // override value would appear in state and the assertion below would fail.
 //
 // Mutation-proven: temporarily reintroducing a read-back write to
-// plan.Member inside applyCloudAccess (mirroring the pre-fix shape) makes
-// this test fail with the override's value instead of the plan's; reverting
-// restores the pass. Not left in the tree - the guard is the permanent
-// artifact, the mutation was the proof it works.
+// plan.Member makes this test fail with the override's value instead of the
+// plan's; reverting restores the pass.
 func TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned(t *testing.T) {
 	const cloudID = "cld_apply_guard"
 

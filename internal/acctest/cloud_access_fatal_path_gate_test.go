@@ -18,49 +18,17 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// This file answers AC-21a only, NOT the whole of AC-21
-// (docs/decisions/rbac-surface-consolidation, "Acceptance criteria for the
-// write path"). AC-21 splits into two per architect's review:
+// This file answers AC-21a only (docs/decisions/rbac-surface-consolidation):
+// does writing the FULL PLANNED `member` map to state after a mid-reconcile
+// failure - never erroring, only warning - trip Terraform Core's "provider
+// produced inconsistent result after apply" for a collection with no
+// Computed elements? Answered: no.
 //
-//   - AC-21a, the DESIGN question: does writing the FULL PLANNED `member`
-//     map to state after a real mid-reconcile failure - never erroring, only
-//     warning and recording the shortfall - trip Terraform Core's "provider
-//     produced inconsistent result after apply" check IN PRINCIPLE, for a
-//     collection none of whose elements are Computed? ANSWERED HERE: no. If
-//     it had been yes, the never-error-after-a-write ruling (see gate 2.1,
-//     framework_core_state_persistence_gate_test.go) would have no safe
-//     shape to land in and would need revisiting before any write path
-//     ships.
-//   - AC-21b, the CRITERION, is NOT met by this file and needs the real
-//     `member` schema once forge's write path exists. Core checks
-//     consistency per attribute PATH, recursively, and the real `member`
-//     object has paths this gate's flat `map[string]string` cannot
-//     represent at all: `deny_roles` deliberately keeps prior state's shape
-//     when the API returns empty, because the wire cannot distinguish
-//     never-declared from declared-as-empty
-//     (resource_cloud_access.go:1075-1091) - `projects` is the same class.
-//     If the fatal path emits null on one of these where the plan held an
-//     empty list, THAT is what would trip the inconsistency error - and a
-//     flat string map has no such nested path on which that divergence
-//     could ever occur. AC-21b's narrowest input is a member whose planned
-//     `deny_roles` is an empty list, not null and not populated - target
-//     that case first.
-//
-// AC-21a is answered here with a throwaway fake resource, the same trick
-// gate 2.1 used, rather than waiting on forge's real implementation -
-// architect's direction was to run the design question early precisely
-// because it does not need one. The fake resource's `members` attribute is
-// deliberately built to match the real `member` schema's property that
-// AC-21a is actually about: none of its fields are Computed, so Core's plan
-// for the collection is never Unknown - it is always exactly the
-// practitioner's config. That shape, not any code this gate resource runs,
-// is what forces "return the full planned map or fail the consistency
-// check" for AC-21a's question - this test exists to confirm that reasoning
-// against real Core behavior rather than trust it from schema inspection
-// alone (Design Verification Policy, gate 2). It is a flat
-// `map[string]string`, NOT a nested-object map like the real `member` -
-// that is exactly why it cannot also close AC-21b; do not read the two as
-// the same shape.
+// AC-21b (the criterion, not the design question) is NOT met by this file:
+// it needs the real nested `member` schema, since Core checks consistency
+// per attribute PATH and this gate's flat `map[string]string` has no path on
+// which `deny_roles`' null-vs-empty-list divergence could occur. Do not read
+// the two as the same shape.
 //
 // The throwaway provider/resource here exist ONLY for this gate - they are
 // not part of, and must never be wired into, the real anyscale provider.
@@ -88,27 +56,21 @@ func (p *fatalPathGateProvider) DataSources(_ context.Context) []func() datasour
 	return nil
 }
 
-// fatalPathGateResourceModel mirrors the two properties of the real schema
-// that matter for AC-21a specifically (see the file header for what it does
-// NOT mirror): `members`, a Required flat map with no Computed elements at
-// all - not a nested-object map like the real `member`, just enough to make
-// Core's plan for it non-Unknown - and `shortfall`, a Computed list with no
-// plan modifier, exactly like `unmanaged_grants` (see the "No
-// UseStateForUnknown" comment on that attribute in resource_cloud_access.go).
-// `simulate_partial_failure` is the only thing this fake resource adds: a
-// practitioner-controlled trigger standing in for "the reconcile hit a
-// fatal error partway through", since there is no real backend here to fail.
+// fatalPathGateResourceModel mirrors two properties of the real schema:
+// `members`, a Required flat map with no Computed elements (see file header
+// for why this is not the real nested `member`), and `shortfall`, a Computed
+// list with no plan modifier like `unmanaged_grants`. `simulate_partial_failure`
+// stands in for "the reconcile hit a fatal error partway through", since
+// there is no real backend here to fail.
 type fatalPathGateResourceModel struct {
 	ID                     types.String `tfsdk:"id"`
 	Members                types.Map    `tfsdk:"members"`
 	Shortfall              types.List   `tfsdk:"shortfall"`
 	SimulatePartialFailure types.Bool   `tfsdk:"simulate_partial_failure"`
-	// SimulateReadBackDivergence stands in for a post-apply re-read (like
-	// applyCloudAccess's listCloudAccessMembers call) that comes back
-	// DIFFERENT from what was planned - e.g. an eventually-consistent
-	// authorization-service read that has not caught up yet, the hazard
-	// architect generalized this gate to cover after the AC-21a/Part-3
-	// exchange. See TestAccCloudAccessReadBackDivergenceGateResource.
+	// SimulateReadBackDivergence stands in for a post-apply re-read that
+	// comes back DIFFERENT from what was planned - e.g. an eventually-
+	// consistent authorization-service read that hasn't caught up yet. See
+	// TestAccCloudAccessReadBackDivergenceGateResource (AC-21c).
 	SimulateReadBackDivergence types.Bool `tfsdk:"simulate_read_back_divergence"`
 }
 
@@ -334,23 +296,17 @@ resource "fatalgate_gate" "test" {
 
 // TestAccCloudAccessReadBackDivergenceGateResource is AC-21c: the converse
 // AC-21a never tested. AC-21a proved only that writing a value MATCHING the
-// plan for a Required, non-Computed collection succeeds. The general
-// read-back-must-not-touch-non-Computed-attributes rule architect derived
-// from the grant-failure finding rests entirely on the OTHER direction -
-// that writing a DIFFERING value for such an attribute actually trips
-// "provider produced inconsistent result after apply" rather than being
-// silently tolerated. Nothing had established that before this test; it is
-// the missing half of the mechanism, not a restatement of AC-21a.
+// plan for a Required, non-Computed collection succeeds. The general rule
+// that a post-apply read may only touch Computed attributes rests on the
+// OTHER direction too - that writing a DIFFERING value for a non-Computed
+// attribute actually trips "provider produced inconsistent result after
+// apply" rather than being silently tolerated. This is the missing half of
+// the mechanism, not a restatement of AC-21a.
 //
-// Create here writes a `members` value that differs from the plan in
-// exactly one entry, standing in for a stale post-apply re-read (the
-// generalized hazard, not specifically a grant failure - see
-// fatalPathGateDiverge and architect's ruling that even a fully SUCCESSFUL
-// apply's read-back could diverge under eventual consistency). If Core
-// tolerated this, the read-back-touching-`member`/`projects` prohibition
-// would be removing latitude the framework never required. It does not
-// tolerate it: the apply must fail with Core's own inconsistency error, not
-// a resource-raised one.
+// Create writes a `members` value differing from the plan in one entry,
+// standing in for a stale post-apply re-read (a general eventual-consistency
+// hazard, not specific to a grant failure). The apply must fail with Core's
+// own inconsistency error, not a resource-raised one.
 func TestAccCloudAccessReadBackDivergenceGateResource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: fatalPathGateProviderFactories(),
