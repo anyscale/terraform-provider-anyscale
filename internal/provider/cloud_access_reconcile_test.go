@@ -1452,6 +1452,118 @@ func TestCloudAccessRevokeFailureReason(t *testing.T) {
 	}
 }
 
+// TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall is AC-36: the
+// half of the fatal-grant-path story that AC-35 does not cover. AC-35
+// (TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords etc.)
+// proves the FAILED APPLY's own behavior - no error, Ungranted populated,
+// destructive phase suppressed. This test proves what happens AFTER: state
+// claims the full planned map (per AC-21a's ruling - `member` has no
+// Computed sub-fields, so applyCloudAccess must write the plan verbatim
+// even for a member whose grant failed), so the failure is invisible in
+// THAT state. It must not stay invisible forever - the next real refresh
+// has to recover it, which is what makes the following plan re-propose the
+// grant rather than silently converging on a lie.
+//
+// Chains applyCloudAccess (the AC-35 scenario, direct function call) into
+// Read (via runCloudAccessRead), the same direct-call technique
+// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned below uses -
+// the write gate stays closed throughout, since neither call goes through
+// Create/Update's refuseWriteWhileReadOnly check.
+//
+// Asserting "the refreshed member map omits the failed grant" rather than
+// running an actual Terraform plan is a deliberate proxy, not a shortcut:
+// Core has no code under test here to diff against, and the write gate
+// being closed means no real resource.Test plan step can run yet. What the
+// proxy proves is exactly what forces a non-empty plan - state no longer
+// matching what the configuration (unchanged) still declares - so the
+// grant is a live diff again, not a permanently converged omission.
+func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
+	const cloudID = "cld_grantfail_refresh"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "idn_a", UserID: "usr_a"},
+			"bob@example.com":   {IdentityID: "idn_b", UserID: "usr_b"},
+		},
+		failRoleWriteFor: map[string]bool{"bob@example.com": true},
+	}
+	client := cloudAccessTestClient(t, mock.handler(t, cloudID))
+
+	// STEP 1: apply a config declaring both alice and bob. alice's grant
+	// succeeds against the backend; bob's fails and is rolled back (the same
+	// AC-35 shape forge's reconcile-level tests already cover) - confirmed
+	// against the backend below, not assumed.
+	plan := &CloudAccessResourceModel{
+		ID:                  types.StringValue(cloudID),
+		CloudID:             types.StringValue(cloudID),
+		AllowEmptyMemberSet: types.BoolValue(false),
+		Member: cloudAccessMemberMap(map[string]attr.Value{
+			"alice@example.com": cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+			"bob@example.com":   cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+		}),
+	}
+	declaredMember := plan.Member // saved before applyCloudAccess can touch plan
+
+	r := &CloudAccessResource{client: client}
+	ctx := context.Background()
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	applyState := tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), nil)}
+
+	var applyDiags diag.Diagnostics
+	r.applyCloudAccess(ctx, plan, types.MapNull(cloudAccessMemberObjectType()), &applyState, &applyDiags)
+	if applyDiags.HasError() {
+		t.Fatalf("the apply itself must not error on a grant failure (AC-35): %v", applyDiags)
+	}
+	if _, ok := mock.members["bob@example.com"]; ok {
+		t.Fatalf("precondition failed: bob's grant should have failed and rolled back, but the backend has him: %v", mock.memberEmails())
+	}
+	if mem, ok := mock.members["alice@example.com"]; !ok || len(mem.BaseRoles) == 0 {
+		t.Fatalf("precondition failed: alice's grant should have succeeded against the backend: %v", mock.memberEmails())
+	}
+
+	var postApply CloudAccessResourceModel
+	if diags := applyState.Get(ctx, &postApply); diags.HasError() {
+		t.Fatalf("failed to read back the post-apply state: %v", diags)
+	}
+	if _, ok := postApply.Member.Elements()["bob@example.com"]; !ok {
+		t.Fatalf("AC-21a precondition failed: post-apply state must still claim bob (the full planned map), or this test isn't exercising the shortfall AC-36 is about")
+	}
+
+	// STEP 2: refresh. The backend genuinely never granted bob, so a
+	// refresh reading the real member-search must recover THAT truth,
+	// diverging from what the (still-error-free, per AC-21a) apply claimed.
+	refreshed, readDiags := runCloudAccessRead(t, client, &postApply)
+	if readDiags.HasError() {
+		t.Fatalf("unexpected error refreshing: %v", readDiags)
+	}
+
+	if _, stillClaimed := refreshed.Member.Elements()["bob@example.com"]; stillClaimed {
+		t.Errorf("the refresh still reports bob@example.com as a member - the failed grant's shortfall did not " +
+			"surface, so a plan against the unchanged config (which still declares bob) would show no diff and " +
+			"silently never retry the grant")
+	}
+	// Control: alice's real, successful grant must survive the refresh
+	// unchanged - otherwise this test could not distinguish "the refresh
+	// correctly reports reality" from "the refresh drops everyone".
+	if _, present := refreshed.Member.Elements()["alice@example.com"]; !present {
+		t.Fatalf("control failed: alice's real grant did not survive the refresh - this test's own assertion above proves nothing without it")
+	}
+
+	// The declared config (unchanged from step 1) still names bob - the
+	// comparison that would drive a real plan's diff, made explicit here
+	// since no live Terraform plan step can run while the write gate is
+	// closed.
+	if _, stillDeclared := declaredMember.Elements()["bob@example.com"]; !stillDeclared {
+		t.Fatalf("test setup error: the declared config must still name bob for the re-propose claim to mean anything")
+	}
+}
+
 // TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned is AC-21b,
 // converted from a diagnostic test into a regression guard rather than
 // closed outright (design record ed5a176): its original purpose - catching
