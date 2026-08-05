@@ -1,4 +1,4 @@
 ```
 release-note:breaking-change
-resource/anyscale_cloud_user_role: Removed with no replacement. Adopters get no deprecation warning and no diff: Terraform cannot decode the existing state at all and fails with `unsupported-resource-type`. No state upgrader can help, since the type is gone - the safe path is `terraform state rm` on every instance before upgrading to this version. `terraform state rm` does not revoke anyone: it only stops Terraform tracking the grant, leaving the person's cloud access untouched. Removing the resource block and applying, or running `terraform destroy`, issues a real `DELETE` against the backend and revokes that person's cloud access.
+resource/anyscale_cloud_user_role: Removed and no longer available. Existing state can't be decoded, so run `terraform state rm` on any instance before upgrading - that only stops Terraform tracking it and does not change anyone's access. Running `terraform destroy` or removing the block and applying does revoke real access.
 ```
