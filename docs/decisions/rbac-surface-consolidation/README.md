@@ -571,7 +571,7 @@ of trying. Because the read and write paths return the *identical* 501 detail st
 name both possibilities. `anyscale_cloud_access` does not currently carry any version of this
 warning and must gain one before it registers.
 
-## Contract rulings added for the full-CRUD round (J.11–J.19)
+## Contract rulings added for the full-CRUD round (J.11–J.21)
 
 The rulings above govern behavior that was designed before a write path existed. These cover the
 questions that only become answerable — or only become dangerous — once one does. They are recorded
@@ -703,7 +703,60 @@ which for `deny_roles`. Do not assume the roles endpoint is the better source fo
 organization scope it is the better source for one field and the worse source for the other. Until
 this is answered, no documentation should promise that out-of-band role changes are detected.
 
-## Acceptance criteria for the write path (AC-1 – AC-30)
+**J.20 — a cloud carrying any group policy binding is a structural blocker: `Create` and `Update`
+refuse, `Delete` attempts and records.** This is J.9's shape rather than a new mechanism, and it is
+the third structural blocker on this surface after `auto_add_user` and directory sync.
+
+A separate Policy API grants cloud access to user-group principals, with a real CLI command behind it,
+so it clears this repository's bar for a surface with a genuine consumption path. An asynchronous
+reconciler then flattens group membership into ordinary per-user collaborator rows **in the same table
+this resource reads**, carrying no field that marks the origin. Three consequences compose into the
+ruling:
+
+- The resource cannot distinguish a group-derived member from a manually granted one, so an
+  authoritative reconcile revokes it.
+- The reconciler re-synchronizes on policy or membership change rather than continuously, so a revoke
+  may hold and then silently reverse. That is **permanent non-convergence against another
+  controller**, which differs in kind from the undisclosed revoke this contract already accepts: that
+  one is a single convergent act against someone no configuration named.
+- The resource cannot express the group binding, so it cannot repair what it breaks. Authority over a
+  set whose membership another system also writes is not authority.
+
+**Detection is tri-state and must not be collapsed into a boolean.** Binding confirmed present:
+refuse, and name the binding. Confirmed absent: proceed. **Undetermined** — the Policy API is BETA and
+may 404 or 501 — proceed, warn loudly, and never record the skip as a pass. Refusing on undetermined
+would brick the resource everywhere that endpoint is not exposed, which is the same trade J.2 makes
+for an unresolvable caller identity.
+
+The rejected alternative is accepting the collision and documenting it. It fails because Terraform
+silently fighting another reconciler is not a disclosable cost — there is no plan output that shows
+it, the diff reappears at intervals governed by a system outside the configuration, and the practical
+result is an operator who cannot tell whether their access policy is converged.
+
+**J.21 — a member holding only a legacy grant reads back with `base_role` null, and that is correct;
+do not repair it by deriving a role from `permission_level`.** The roles listing has no Postgres
+fallback, and both first-party administrative surfaces write only the legacy path, so this is the
+common case on a real cloud rather than an edge. `base_role` is `Required` with no `Computed`
+(`resource_cloud_access.go:296`), and the read leaves it null when the roles listing says nothing
+about a member (`:1060-1073`).
+
+**The consequence is a defect in the read-only build, not in the write path.** A configuration
+declaring such members diffs on every plan, and while `Create` and `Update` refuse, that diff can
+never be applied. So the read-only resource produces a permanent unresolvable plan on a realistic
+cloud — and the use that breaks, a configuration-managed audit, is the one that justified registering
+it read-only in the first place. Once writes exist it self-heals: the first apply writes through the
+RBAC path, which creates the group the roles listing reads, and the second plan is empty. **This is
+the strongest argument for J.18's sequencing**, and it is stronger than the compatibility argument,
+because it is about the resource being broken rather than about who might be affected.
+
+Deriving `base_role` from `permission_level` was considered and rejected. It does not even remove the
+diff: `permission_level` collapses a larger role set into three values, so a member the practitioner
+declared as `writer` would read back as `collaborator` and diff anyway — the derivation changes
+*which* members diff rather than whether they do. And it would report a role the roles system does not
+record, which is inventing state to make a plan look clean. Null is the honest answer: this member has
+no RBAC role recorded, and the first write establishes one.
+
+## Acceptance criteria for the write path (AC-1 – AC-33)
 
 Numbered `AC-` rather than continuing the legacy `criterion N` sequence, which runs to 31 and whose
 authoritative list is not in this repository — a collision there would be silent and unresolvable.
@@ -813,6 +866,24 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   coverage limit explicitly. No cloud-provider-specific gate is known on these endpoints, but "no
   gate found in source" and "confirmed on another stack" are different claims.
 
+**Added with J.20 and J.21**
+
+- **AC-31** *(live)* On a cloud whose members hold **only** legacy grants — no RBAC roles entry, which
+  per J.21 is the common real-world case — the first apply converges and the second plan is empty. This
+  is the self-heal, and it is the most realistic adoption path this resource has. Note that AC-2 must
+  therefore be exercised against members granted through the RBAC path; run against a legacy-only cloud
+  AC-2 fails, and that is the criterion working rather than a defect in it.
+- **AC-32** A cloud carrying a group policy binding refuses `Create` and `Update` with a message naming
+  the binding, and `Delete` proceeds. All three branches of J.20's detection are covered: confirmed
+  present refuses, confirmed absent proceeds, and an undetermined result — the BETA endpoint answering
+  404 or 501 — proceeds **with a warning**. A test that exercises only the present and absent branches
+  leaves the branch most likely to occur in the field unexercised.
+- **AC-33** A member list spanning more than one page is enumerated completely. Pagination on these
+  endpoints is in the **query string**, and a request that omits it returns a valid first page with no
+  error, so the regression is silent and its consequence is revoking everyone past the page boundary.
+  Prove it with a mock returning a `next_paging_token`, and mutation-prove it by removing the paging
+  loop: a test that passes with the loop gone has not tested this.
+
 ## Wire-shape facts the read path depends on
 
 Recorded separately from the rulings because these are properties of the API rather than decisions,
@@ -914,12 +985,35 @@ detail.
 
 **Live API shape:**
 
-1. The cloud member-search response shape, and whether it is genuinely unpaginated. A suspected
-   paging defect, where response metadata is computed from unfiltered rows, needs confirming or
-   ruling out: if real, `total` can never be trusted and paging must follow tokens to exhaustion.
-2. Whether a legacy-only collaborator — one who has never had a roles entry — appears in the roles
-   listing at all. If they can be absent, the roles listing alone cannot enumerate the member set and
-   the membership search becomes mandatory rather than supplementary.
+1. **CLOSED, with one part reclassified as moot rather than verified.** All four routes the import
+   fixture pins were confirmed against the live API and the published OpenAPI document, and match as
+   pinned — which retires the hazard noted below about the correction whose source PR #259 deleted.
+   Pagination was confirmed live and behaves exactly as the wire-shape section above states: a
+   `count=1` in the **query string** truncates the response, and a real `next_paging_token` comes back.
+
+   The suspected metadata defect — `total` computed from unfiltered rows — is **not closed by that
+   capture and does not need to be.** The capture sent no filter, and with no filter applied both the
+   defect and its absence predict the same `total`, so the observation cannot distinguish them.
+   Establishing it would need a *filtered* search with a `count` below the filtered result count. It is
+   moot for this resource because the provider deliberately sends an empty body and never filters, so
+   even a metadata value derived from unfiltered rows would be the true total for the request actually
+   made — and the read follows the token to exhaustion rather than trusting `total` in any case. Record
+   it as inapplicable, not as verified; the distinction matters if a filtered search is ever added,
+   which would reopen it.
+
+   The route confirmation also carries a lesson about how the pagination question was first answered
+   wrongly, and it is worth keeping because the error was reasonable. The search body schema declares
+   `additionalProperties: false` with a single field, from which it was concluded that no pagination
+   input exists at all. A body schema cannot describe query parameters. Separately, a live capture
+   against a cloud with fewer members than the default page size cannot distinguish "unpaginated" from
+   "one page sufficed" — the observation was sound and the inference was not licensed by it.
+2. **CLOSED, and the answer is the contingency rather than the hoped-for case.** A legacy-only
+   collaborator is invisible on the roles listing entirely — that listing reads only from the
+   authorization service with no fallback, while the legacy add path writes only the relational row.
+   Since both first-party administrative surfaces use the legacy path exclusively, this is the common
+   case rather than an edge, so the membership search is **mandatory** as the enumeration source and
+   the roles listing is supplementary only. The shipped read already works this way. See J.21 for the
+   consequence, which is that such members read back with a null `base_role`.
 3. Whether the identity ID returned by the organization-collaborator listing is the same identity the
    **project** collaborator write and delete endpoints match against. The cloud-scope delete already
    ships on this assumption; the project endpoints are new to this design and inherit nothing.
