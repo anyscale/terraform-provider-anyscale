@@ -21,15 +21,18 @@ Read this before writing configuration that spans more than one scope.
 |---|---|---|
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
+| Cloud membership, cloud role, and project role | [`anyscale_cloud_access`](../resources/cloud_access.md) | One cloud's **entire** member list, each member's `base_role`/`deny_roles` on that cloud, and their per-project roles under it. **Read and import only in this version** - see [`anyscale_cloud_access`: read-only today, authoritative by design](#anyscale_cloud_access-read-only-today-authoritative-by-design), below, before writing configuration against it. |
 
-This resource uses the word "authoritative" to mean: authoritative over the one row it manages, never
-over a whole population - see [Authority](#authority-what-terraform-manages-here-actually-means),
-below.
+The two role resources above use the word "authoritative" to mean: authoritative over the one row
+each manages, never over a whole population - see
+[Authority](#authority-what-terraform-manages-here-actually-means), below. `anyscale_cloud_access`
+means something categorically larger by the same word - see its own section below.
 
-**Cloud-scoped role management has no resource today.** `anyscale_cloud_user_role` used to fill this
-role and has been removed with no replacement yet; a specific user's `base_role`/`deny_roles` on a
-specific cloud can only be read or changed outside Terraform (the console or the API directly) until
-a replacement ships.
+`anyscale_cloud_user_role`, which used to fill the single-user cloud-role gap, has been **removed**
+with no coexistence period: it and `anyscale_cloud_access` manage the same collaborator surface
+under incompatible authority models (one row vs. the whole set), and running both against the same
+cloud would mean `anyscale_cloud_access` silently revoking members `anyscale_cloud_user_role` thinks
+it still manages. There was never a version where declaring both was safe.
 
 ## The vocabulary problem
 
@@ -93,6 +96,80 @@ same rule explained next.
 This resource's `destroy` can also fail to fully complete - see
 ["Destroying `anyscale_organization_user_role`"](#destroying-anyscale_organization_user_role-what-actually-happens)
 below for the details.
+
+## `anyscale_cloud_access`: read-only today, authoritative by design
+
+**This section describes two different things, and the version you're running only does the
+first.** `anyscale_cloud_access` is registered as **read and import only**: it can populate state
+with a cloud's members, their `base_role`/`deny_roles`, and their per-project roles, but `Create`,
+`Update`, and `Destroy` all refuse. You cannot yet add, change, or revoke access through it - do
+that through the console or the API directly, the same as before this resource existed. Everything
+below the first paragraph describes what this resource is *designed* to do once its write path
+ships in a future version, so that reading it now doesn't mean re-reading it later.
+
+**Read this before you rely on "review the plan" as your safety net for this resource specifically
+- it will not be one, for one particular failure mode, once writes are enabled.** Once writes ship,
+`anyscale_cloud_access` is authoritative over **one cloud's entire member list**, not over a single
+row the way the two role resources above are. Anyone not declared in its `member` map is revoked -
+including someone granted access through the console, and including on the cloud's very **first**
+`apply` under this resource, not only on later ones. That first-apply revoke has no signal to
+detect: a member the operator never knew about looks, to Terraform, identical to one they
+deliberately left out, so there is nothing a validator or a guard can catch here. **The plan will
+not show it** - a member Terraform has never read appears nowhere in plan output, so reviewing the
+plan before applying does not protect you against this specific case the way it does for an
+accidental `for_each` typo (which *does* show up as a destroy in the plan). Documentation is the
+only mitigation available, which is why it's stated here plainly rather than left to be inferred.
+
+Once writes are enabled, three consequences of that authority model are worth knowing in advance:
+
+- **The caller's own identity is excluded from the authoritative set.** The backend already refuses
+  self-removal outright (a 403, "You cannot remove yourself from the cloud"), so this exclusion is
+  not what stands between you and locking yourself out - that can't happen through this resource
+  regardless. What it actually prevents: without it, every apply where the caller is undeclared
+  would attempt a revoke the backend refuses, permanently occupying the `unmanaged_grants` alarm
+  this page tells you to watch. **This is a guard against noise on that alarm, not a
+  protected-persons list - it follows the token.** Whoever runs a given `apply` is excluded during
+  that apply; a colleague who ran last week's `apply` and is not declared in your configuration is
+  still revoked, correctly.
+- **A cloud owner who is not an organization admin can be revoked on a first apply that omits
+  them.** Organization admins are incidentally safe (they're invisible to the endpoint this
+  resource reads, so it can't revoke what it can't see), but a non-admin owner has no such
+  accidental protection. Declare every current member before your first `apply` against a
+  production cloud.
+- **Removing a cloud member cascades:** the backend recursively revokes that member's project
+  permissions on that cloud too, so this resource must not (and does not) attempt a separate
+  project-scope revoke for a member it just removed at cloud scope - there is nothing left for that
+  second revoke to reach.
+- **Project authority is scoped to projects your configuration names, not to every project under
+  the cloud.** A project role granted out of band on a project your configuration never mentions is
+  neither reported by this resource nor revoked by it - that blindness is deliberate and disclosed,
+  not a bug, but it means this resource's authority over projects is narrower than its authority
+  over cloud membership itself.
+
+Once writes are enabled, `anyscale_cloud_access` also carries two typo guards worth knowing about
+ahead of time: a
+case-insensitive duplicate-email check (Terraform's own map-key duplicate detection is
+case-sensitive, so two spellings of one address look like two people to Terraform and are one
+person to Anyscale), and a guard that refuses an apply that would empty a currently-populated
+cloud's member list, naming how many people would lose access. Neither guard can catch a typo in
+the `cloud_id` a `for_each` keys off of - a mistyped cloud ID is indistinguishable from a
+deliberate removal, and destroying this resource against the wrong cloud correctly-per-its-own-logic
+revokes that cloud's members. Mitigate that case the same way you would any other
+too-easy-to-destroy resource: `lifecycle { prevent_destroy = true }` on production clouds.
+
+**A cloud's `auto_add_user` setting can defeat this resource's authority outright, and it is worth
+checking before your first `apply` against a cloud you did not create.** Enabling `auto_add_user`
+on a cloud that already has organization members retroactively adds every one of them as a
+collaborator immediately, not just future members - live-confirmed behavior, not a design
+assumption. An authoritative resource cannot converge against a cloud that keeps regranting access
+out from under it; if `auto_add_user` is on, this resource's revokes are fighting a setting that
+keeps re-adding people, and it will not win.
+
+Project roles nest inside each member (`member[*].projects`) rather than living in a sibling
+resource, because the backend enforces two things only a single nesting resource can check at plan
+time instead of surfacing as a confusing `apply`-time failure: a project role cannot exist without a
+cloud role on that same cloud, and a member holding the `cloud_read_only` deny role may only hold
+`readonly` on that cloud's projects - anything else is rejected.
 
 ## Destroying `anyscale_organization_user_role`: what actually happens
 

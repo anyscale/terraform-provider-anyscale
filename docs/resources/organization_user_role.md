@@ -9,7 +9,7 @@ description: |-
   Destroy leaves the member at whatever base_role they currently have, and emits a warning naming them and that role. It does not demote them, because an organization member always has some base role - there is no "no role" state to return them to - and demoting an organization owner removes their implicit permissions across every cloud in the organization. If deny_roles was declared, destroy does clear it to empty, since an empty deny set is a real, reachable state this resource took authority over.
   A consequence worth stating plainly: because email forces replacement, correcting a typo in email leaves the previously-named person at the role Terraform gave them, permanently. Terraform destroys the old resource and creates a new one, and the destroy does not revert the role. Review the plan; the provider cannot distinguish a typo from a deliberate change of subject.
   Organization roles are not cloud roles. The vocabularies differ and the same words mean different things at different scopes - collaborator is an organization base role and a cloud base role with different meanings. See the RBAC guide before mixing them.
-  deny_roles requires a feature that is not enabled in every organization, and is unavailable on Azure. Managing base_role alone uses an endpoint that works everywhere. See the deny_roles description.
+  deny_roles requires a feature that is not enabled in every organization. Managing base_role alone uses an endpoint that works everywhere. See the deny_roles description.
 ---
 
 # anyscale_organization_user_role (Resource)
@@ -26,7 +26,7 @@ A consequence worth stating plainly: because `email` forces replacement, **corre
 
 **Organization roles are not cloud roles.** The vocabularies differ and the same words mean different things at different scopes - `collaborator` is an organization base role *and* a cloud base role with different meanings. See the RBAC guide before mixing them.
 
-**`deny_roles` requires a feature that is not enabled in every organization**, and is unavailable on Azure. Managing `base_role` alone uses an endpoint that works everywhere. See the `deny_roles` description.
+**`deny_roles` requires a feature that is not enabled in every organization.** Managing `base_role` alone uses an endpoint that works everywhere. See the `deny_roles` description.
 
 ## Example Usage
 
@@ -40,8 +40,7 @@ resource "anyscale_organization_user_role" "analyst" {
 
   # deny_roles is omitted here. Omitting it leaves any existing container-image restrictions
   # untouched and keeps this resource on the endpoint that works in every organization -- setting
-  # deny_roles at all requires a feature that is not enabled in every organization, and never on
-  # Azure.
+  # deny_roles at all requires a feature flag that is not enabled in every organization.
 }
 
 # Set both base_role and deny_roles. This goes through a different, gated API endpoint than
@@ -89,7 +88,7 @@ Note these **also restrict organization owners**, unlike cloud deny roles, which
 
 Omit this attribute to leave the organization's existing deny roles untouched. Set it - including to an empty list `[]`, which removes all deny roles - to manage the set authoritatively.
 
-**Setting this attribute at all requires the organization roles API**, which is not enabled in every organization and is unavailable on Azure. Managing only `base_role` uses a different endpoint that works everywhere.
+**Setting this attribute at all requires the organization roles API**, which is not enabled in every organization. Managing only `base_role` uses a different endpoint that works everywhere.
 
 The underlying API field is named `additional_roles`; that name is misleading and this attribute deliberately does not copy it.
 

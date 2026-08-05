@@ -131,9 +131,24 @@ func setOrganizationPermissionLevel(ctx context.Context, client *Client, identit
 
 // orgRolesFeatureDisabled reports whether an error is the org roles endpoint's
 // feature gate rather than a real failure. The roles path is gated behind an
-// organization feature flag and is unconditionally unavailable on Azure; both
-// surface as 501. Matched on the status text DoRequestRaw produces, since the
-// helper does not return the status code itself.
+// organization feature flag; that gate surfaces as 501.
+//
+// An earlier version of this comment, and of the diagnostic below, claimed the
+// endpoint is unconditionally unavailable on Azure regardless of the flag. That
+// was unsourced: the backend's 501 sites gate on the feature flag alone and none
+// of them reads the cloud provider. It may still be true in practice that the
+// flag is never enabled for Azure deployments, but that is a different,
+// unverified claim, and the version that shipped told Azure users the endpoint
+// was unavailable regardless - which would talk a customer out of asking
+// support about a feature they might be able to have. Corrected here; the same
+// claim on cloud_access's equivalent function carries the fuller trace.
+//
+// DO NOT DELETE THIS PARAGRAPH even though it describes an absence. This is the
+// claim's origin file - it was copied from here onto cloud_access - so removing
+// this record is exactly what would let it spread a third time.
+//
+// Matched on the status text DoRequestRaw produces, since the helper does not
+// return the status code itself.
 func orgRolesFeatureDisabled(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "unexpected status 501")
 }
@@ -167,8 +182,7 @@ const orgRolesDisabledDetail = "The organization roles API is not enabled for th
 	"Setting deny_roles (even to an empty list) routes this resource to the gated " +
 	"PUT /api/v2/organization_collaborators/{user_id}/roles endpoint; base_role on its own uses an " +
 	"ungated endpoint and works everywhere. Remove deny_roles from your configuration to manage " +
-	"base_role alone, or contact Anyscale support to enable the organization roles API. This endpoint is " +
-	"unavailable on Azure regardless of the feature flag."
+	"base_role alone, or contact Anyscale support to enable the organization roles API."
 
 var (
 	_ resource.Resource                = &OrganizationUserRoleResource{}
@@ -226,9 +240,8 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 			"**Organization roles are not cloud roles.** The vocabularies differ and the same words mean different " +
 			"things at different scopes - `collaborator` is an organization base role *and* a cloud base role with " +
 			"different meanings. See the RBAC guide before mixing them.\n\n" +
-			"**`deny_roles` requires a feature that is not enabled in every organization**, and is " +
-			"unavailable on Azure. Managing `base_role` alone uses an endpoint that works everywhere. See the " +
-			"`deny_roles` description.",
+			"**`deny_roles` requires a feature that is not enabled in every organization.** Managing `base_role` " +
+			"alone uses an endpoint that works everywhere. See the `deny_roles` description.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -325,8 +338,8 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 					"including to an empty list `[]`, which removes all deny roles - to manage the set " +
 					"authoritatively.\n\n" +
 					"**Setting this attribute at all requires the organization roles API**, which is not enabled in " +
-					"every organization and is unavailable on Azure. Managing only `base_role` uses a different " +
-					"endpoint that works everywhere.\n\n" +
+					"every organization. Managing only `base_role` uses a different endpoint that works " +
+					"everywhere.\n\n" +
 					"The underlying API field is named `additional_roles`; that name is misleading and this " +
 					"attribute deliberately does not copy it.",
 			},
@@ -378,9 +391,9 @@ type privateStateSetter interface {
 // UseStateForUnknown on deny_roles, a config that OMITS the attribute has the
 // prior state value carried into the plan, so a plan-based check reports
 // "declared" for an ordinary base_role-only update - routing it onto the gated
-// endpoint (which 501s in organizations without the feature, and always on
-// Azure) and rewriting deny roles that were never Terraform's to touch. Config
-// is null when omitted, regardless of any plan modifier.
+// endpoint (which 501s in organizations without the feature enabled) and
+// rewriting deny roles that were never Terraform's to touch. Config is null
+// when omitted, regardless of any plan modifier.
 //
 // Unknown counts as DECLARED here: a deny_roles computed from another resource
 // is genuinely declared, just not yet known. This differs from the earlier
@@ -849,6 +862,13 @@ func (r *OrganizationUserRoleResource) ImportState(ctx context.Context, req reso
 // setOrganizationRoles above). Relocated from resource_cloud_user_role.go, which shared
 // this exact same Optional-not-Computed-list contract before that resource was removed;
 // this is now its only caller.
+//
+// APPLY-TIME ONLY. ElementsAs errors on an unknown element, which at APPLY time
+// cannot happen - every value is resolved by then - but at VALIDATE or PLAN time
+// is the ordinary shape of a value interpolated from another resource. Calling
+// this from a ValidateConfig would report a legitimate configuration as invalid.
+// resolvedStringListValues in resource_cloud_access.go is the plan-time-safe
+// counterpart; note it can prove a value present but never absent.
 func stringListToSlice(ctx context.Context, l types.List) ([]string, diag.Diagnostics) {
 	if l.IsNull() || l.IsUnknown() {
 		return []string{}, nil

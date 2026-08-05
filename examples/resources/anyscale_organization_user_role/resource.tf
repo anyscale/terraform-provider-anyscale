@@ -7,8 +7,7 @@ resource "anyscale_organization_user_role" "analyst" {
 
   # deny_roles is omitted here. Omitting it leaves any existing container-image restrictions
   # untouched and keeps this resource on the endpoint that works in every organization -- setting
-  # deny_roles at all requires a feature that is not enabled in every organization, and never on
-  # Azure.
+  # deny_roles at all requires a feature flag that is not enabled in every organization.
 }
 
 # Set both base_role and deny_roles. This goes through a different, gated API endpoint than

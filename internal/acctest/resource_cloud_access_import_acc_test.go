@@ -18,13 +18,11 @@ import (
 
 // TestAccCloudAccessResourceImportRoundTrip is the Criterion 1 import proof for
 // anyscale_cloud_access, written AHEAD of the resource per the ruling that
-// tests come before the reconcile logic they will guard. It is skipped
-// unconditionally today: all four
-// CRUD methods return "Resource Not Implemented"
-// (resource_cloud_access.go:258-272), there is no ImportState method, and the
-// resource is not registered in provider.go. Delete the t.Skip on the first
-// line the moment those three things land - everything below it is written as
-// if the resource worked.
+// tests come before the reconcile logic they will guard. It is skipped today
+// because the write path is gated off, not because the resource is missing -
+// it is registered and its read path is live. See the t.Skip's own reason
+// before re-enabling it: the fixture's premise needs reworking, not just the
+// skip removed.
 //
 // WHY THIS RESOURCE NEEDS ITS OWN IMPORT PROOF, HARDER THAN ANY OTHER.
 // anyscale_cloud_access is AUTHORITATIVE over a cloud's ENTIRE member list:
@@ -343,7 +341,13 @@ func (s *mockCloudAccessServer) handleGetCloud(w http.ResponseWriter, path strin
 }
 
 func TestAccCloudAccessResourceImportRoundTrip(t *testing.T) {
-	t.Skip("anyscale_cloud_access is not yet registered or implemented (CRUD returns Not Implemented; no ImportState). This test is written ahead of that work and will run as soon as the resource is wired.")
+	t.Skip("anyscale_cloud_access is registered and its read path is live, but the write path is gated off " +
+		"(cloudAccessWriteEnabled), so the apply steps below cannot run yet. DO NOT simply delete this skip when the " +
+		"gate opens: this fixture's premise is void. It depends on an undeclared pre-existing member surviving all " +
+		"three steps, and an authoritative Create revokes that member at step one - so re-enabling it as-is produces a " +
+		"red test that looks like a broken resource and is actually a broken fixture. Rework the premise with the write " +
+		"path; the cleanest route is making that member's revoke FAIL in the mock so it legitimately persists via " +
+		"unmanaged_grants, which also exercises converge-and-record.")
 
 	SkipIfNotAcceptanceTest(t)
 

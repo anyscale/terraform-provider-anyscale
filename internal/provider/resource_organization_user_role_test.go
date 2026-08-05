@@ -214,7 +214,7 @@ func (s *mockOrgUserRoleServer) handleSetRoles(w http.ResponseWriter, r *http.Re
 
 	if s.rolesEndpoint501 {
 		// The feature-gate response: the roles API is behind an organization
-		// flag and is unconditionally unavailable on Azure, both as a 501.
+		// flag, surfaced as a 501.
 		w.WriteHeader(http.StatusNotImplemented)
 		_, _ = fmt.Fprintf(w, `{"error":{"detail":%q}}`, s.rolesEndpoint501D)
 		return
@@ -813,8 +813,8 @@ func TestOrganizationUserRoleDelete_ClearsDenyRolesAndNeverEvictsMember(t *testi
 
 // TestOrganizationUserRoleWrite_501ProducesActionableDiagnostic covers the one
 // failure a practitioner is most likely to hit and least able to diagnose: the
-// roles endpoint is gated behind an organization feature flag and is
-// unconditionally unavailable on Azure, and both surface as a bare 501.
+// roles endpoint is gated behind an organization feature flag, surfaced as a
+// bare 501.
 //
 // The trigger is never obvious from the plan - it is the presence of
 // deny_roles, not base_role, that forces this resource onto the gated endpoint
