@@ -168,11 +168,12 @@ too-easy-to-destroy resource: `lifecycle { prevent_destroy = true }` on producti
   is reconciled into the same member rows this resource reads, with nothing marking a member as
   group-derived - so this resource cannot tell a group grant from a manual one and would revoke it
   outright, only for the group's own reconciler to silently re-add it later. `Create` and `Update`
-  refuse and name the binding; `Delete` proceeds the same way it does for `auto_add_user`. If the
-  provider cannot determine whether a binding exists (the underlying API is beta and may not
-  respond), it warns loudly and proceeds rather than blocking - the same "warn, don't block" rule as
-  the org-admin check above, and for the same reason: an unresolvable check must not become a hard
-  failure with no escape.
+  refuse and name the binding; `Delete` proceeds the same way it does for `auto_add_user`. This check
+  only runs on an apply that would actually revoke someone, and it needs a permission tier the
+  token running Terraform may not hold - if it can't get a clear answer (most commonly a
+  permission error, not an outage), it warns loudly and proceeds rather than blocking, the same
+  "warn, don't block" rule as the org-admin check above. **The absence of a warning is not proof
+  that no binding exists** - it may mean the check could not run at all.
 - **`base_role = "owner"` combined with `deny_roles = ["cloud_read_only"]`.** The backend rejects
   cloud owners being read-only outright; this resource catches it at plan time instead of partway
   through an apply.
@@ -187,9 +188,11 @@ detected" as one statement.
 - **A change that turns a member's read-only restriction on or off is detected.** This shows up as a
   real diff, and applying repairs it.
 - **A change to a member's underlying role - between `write` and `owner`, for example - is NOT
-  detected, in either direction.** The console and CLI write through an older API that never
-  touches the newer per-role data this resource reads, so `terraform plan` reports no difference
-  even though the member's actual role has changed. **This is a privilege-escalation blind spot: a
+  detected, in either direction.** The console and CLI write through an older API that populates
+  this resource's per-role data once, at the moment a member is first added, and never revisits it
+  on a later change - so the role this resource reads is frozen at whatever it was when the member
+  was created, and a later console change to it produces no difference `terraform plan` can see even
+  though the member's actual role has changed. **This is a privilege-escalation blind spot: a
   member promoted to `owner` through the console stays `owner`, silently, while Terraform's state
   and every subsequent plan continue to say whatever role they held before.** There is no signal
   telling you to check.
