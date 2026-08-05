@@ -975,6 +975,30 @@ Three constraints on the fix:
   hazard, and it concerns destructive actions taken while the intended end state was not reached — not
   grants.
 
+- **A post-apply read may write only `Computed` attributes.** This is the general form of the rule, and
+  it is broader than the partial-failure path that exposed it.
+
+  `member` is `Required` with no `Computed` sub-attributes, so Core requires the post-apply state to
+  equal the plan. A post-apply re-read can therefore only return exactly the plan, in which case writing
+  it accomplishes nothing, or return something different, in which case writing it trips
+  "provider produced inconsistent result after apply". Zero value, non-zero risk.
+
+  The happy path has survived this because a successful write usually reads back identical — usually, not
+  always. These reads are served from the authorization service and nothing establishes that a read is
+  immediately consistent with the write that preceded it; J.19's capture observed a prompt read for one
+  sequence, which is not a guarantee. **A transiently stale re-read on a fully successful apply would
+  trip the same error with no failure anywhere.**
+
+  So the fix is not to skip the read-back on the failure path but to stop it touching `member` on any
+  path — fewer branches, and it removes a latent eventual-consistency defect rather than one instance of
+  a partial-failure one. `Computed` attributes are exempt because their planned value is unknown, which
+  is the latitude Core grants them and the reason `unmanaged_grants` can be populated this way at all.
+  `projects` is `Optional` with no `Computed` and falls under the same prohibition as `member`.
+
+  Blast radius, stated so it is not mistaken for a shipped defect: this path is in code merged with
+  #260, but `applyCloudAccess` runs only on write operations and every one of those refuses today. Gated,
+  not reachable. It does not change the no-premature-tag position under J.18 and it is not a hotfix.
+
 - **Record the skipped revokes, not only the failed grants.** When a grant failure suppresses the revoke
   phase, those members really do still hold access the configuration says they should not, which is
   exactly what `unmanaged_grants` means — so they belong there, with a reason distinguishing
