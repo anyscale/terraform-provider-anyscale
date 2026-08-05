@@ -307,11 +307,29 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 				// destroy rather than relying on import's throwaway state
 				// (which terraform-plugin-testing discards at the end of
 				// the step that verifies import).
+				//
+				// This step itself is a real apply (Create runs again since
+				// import's state didn't persist into this step - CLAUDE.md's
+				// own documented gotcha), not a no-op - it does NOT prove
+				// AC-2 on its own. The no-op proof is step 3, below.
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "member.%", "1"),
 					resource.TestCheckResourceAttr(resourceName, "member."+email+".base_role", "writer"),
 				),
+			},
+			{
+				// AC-2: a config declaring exactly the recovered members
+				// plans EMPTY. This is the "Test B" shape CLAUDE.md
+				// prescribes for import-recovery criteria - two sequential
+				// Config-only steps, no import involved, so state actually
+				// carries forward between them (unlike the discarded
+				// throwaway ImportState step above). Step 2 just applied
+				// this exact config for real; re-planning the SAME config
+				// here must show no changes.
+				Config:             config,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
 			},
 		},
 	})
