@@ -9,6 +9,7 @@ description: |-
   auto_add_user and this resource are mutually exclusive
   ~> A cloud with auto_add_user enabled cannot have its member list owned by Terraform at all. While that setting is on, Anyscale automatically grants every organization member access to the cloud and refuses to remove a collaborator, so authoritative management is impossible rather than merely degraded.
   ~> Worth knowing before you enable that flag: turning auto_add_user on for a cloud that already has organization members retroactively adds all of them as collaborators immediately, not only members added afterwards. Enabling it is itself a grant to everyone in the organization.
+  Turning it back off does not remove the collaborators it already added - it only stops further additions and unblocks removal. So a cloud that has ever had auto_add_user enabled starts out with your whole organization on its member list, and the first apply that takes authority over it revokes everyone the configuration does not declare. Review that plan carefully.
   Not available in every organization
   ~> This resource reads the cloud roles API, which returns 501 in two separate situations: an organization that does not have the roles feature enabled, and any cloud on Azure, where the endpoint is unavailable regardless of that feature flag. The first can be turned on by Anyscale support; the second cannot. Use the Anyscale console or API to manage cloud access in either case.
   Reviewing the plan will not protect you from the first apply
@@ -35,6 +36,8 @@ Reads and imports the **complete** member list of one Anyscale cloud, including 
 ~> A cloud with `auto_add_user` enabled cannot have its member list owned by Terraform at all. While that setting is on, Anyscale automatically grants every organization member access to the cloud and refuses to remove a collaborator, so authoritative management is impossible rather than merely degraded.
 
 ~> Worth knowing before you enable that flag: turning `auto_add_user` on for a cloud that **already** has organization members retroactively adds all of them as collaborators immediately, not only members added afterwards. Enabling it is itself a grant to everyone in the organization.
+
+Turning it back off does **not** remove the collaborators it already added - it only stops further additions and unblocks removal. So a cloud that has ever had `auto_add_user` enabled starts out with your whole organization on its member list, and the first apply that takes authority over it revokes everyone the configuration does not declare. Review that plan carefully.
 
 ### Not available in every organization
 

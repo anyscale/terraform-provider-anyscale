@@ -183,6 +183,10 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"~> Worth knowing before you enable that flag: turning `auto_add_user` on for a cloud that **already** " +
 			"has organization members retroactively adds all of them as collaborators immediately, not only members " +
 			"added afterwards. Enabling it is itself a grant to everyone in the organization.\n\n" +
+			"Turning it back off does **not** remove the collaborators it already added - it only stops further " +
+			"additions and unblocks removal. So a cloud that has ever had `auto_add_user` enabled starts out with your " +
+			"whole organization on its member list, and the first apply that takes authority over it revokes everyone " +
+			"the configuration does not declare. Review that plan carefully.\n\n" +
 			"### Not available in every organization\n\n" +
 			"~> This resource reads the cloud roles API, which returns `501` in two separate situations: an " +
 			"organization that does not have the roles feature enabled, and **any** cloud on **Azure**, where the " +

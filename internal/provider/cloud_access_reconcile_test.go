@@ -396,6 +396,20 @@ func TestReconcileCloudAccess_AutoAddUserBlocksRevokes(t *testing.T) {
 		if len(mock.calls) != 0 {
 			t.Errorf("the refusal came after writes had already been made: %v - it must be a preflight so a refused apply changes nothing", mock.calls)
 		}
+
+		// The message has to explain itself, not just refuse. An operator cannot
+		// derive "turn off a setting on a different resource" from a refusal, and the
+		// revoke count is their whole organization, which looks like a provider bug
+		// unless the message says why.
+		d := cloudAccessFindError(diags, "Cloud Has auto_add_user Enabled")
+		if d == nil {
+			t.Fatalf("expected the auto_add_user error specifically: %v", diags)
+		}
+		for _, want := range []string{"auto_add_user = false", "retroactively", "cannot converge"} {
+			if !strings.Contains(d.Detail(), want) {
+				t.Errorf("the refusal detail does not mention %q, so the operator has no way to derive the remedy or to understand why the count is their whole organization: %s", want, d.Detail())
+			}
+		}
 	})
 
 	t.Run("a reconcile with nothing to revoke is allowed", func(t *testing.T) {

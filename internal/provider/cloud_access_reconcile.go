@@ -325,11 +325,17 @@ func reconcileCloudAccess(
 			diags.AddError(
 				"Cloud Has auto_add_user Enabled",
 				fmt.Sprintf("Cloud %s has auto_add_user enabled, and this apply would revoke %d member(s) that the "+
-					"configuration does not declare.\n\nWhile that setting is on, Anyscale automatically grants every "+
-					"organization member access to this cloud and refuses to remove a collaborator, so Terraform cannot be "+
-					"authoritative over the member list at all - this is not a degraded mode, it is impossible. Set "+
-					"auto_add_user = false on the cloud (anyscale_cloud exposes it) before managing its members here.\n\n"+
-					"No changes were made.", cloudID, len(toRevoke)),
+					"configuration does not declare.\n\nThat count is high for a reason worth understanding: enabling "+
+					"auto_add_user adds every organization member as a collaborator on this cloud - retroactively, not "+
+					"just members added afterwards - and the same setting then refuses every attempt to remove one. So "+
+					"this resource would try to revoke your whole organization on every apply, fail on all of them, and "+
+					"record one unmanaged grant per person. It cannot converge on such a cloud: this is not a degraded "+
+					"mode, it is a permanently broken one, which is why the apply is refused up front rather than "+
+					"attempted.\n\nThe remedy is to set auto_add_user = false on the cloud - anyscale_cloud exposes it - "+
+					"before managing its members here. Note that doing so does not itself remove the collaborators the "+
+					"flag already added; it only stops the additions and unblocks removal, after which this resource "+
+					"revokes whoever the configuration does not declare. Review that plan carefully.\n\nNo changes were "+
+					"made.", cloudID, len(toRevoke)),
 			)
 			return result, diags
 		}
