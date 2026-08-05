@@ -122,18 +122,29 @@ only mitigation available, which is why it's stated here plainly rather than lef
 
 Once writes are enabled, three consequences of that authority model are worth knowing in advance:
 
-- **The caller's own identity is excluded from the authoritative set.** The token running Terraform
-  is usually a collaborator on the cloud it manages, often its owner - without this exclusion, the
-  first authoritative `apply` could revoke the operator's own access. This is handled for you; it's
-  listed here so the design is visible, not because it's something you need to configure.
+- **The caller's own identity is excluded from the authoritative set.** The backend already refuses
+  self-removal outright (a 403, "You cannot remove yourself from the cloud"), so this exclusion is
+  not what stands between you and locking yourself out - that can't happen through this resource
+  regardless. What it actually prevents: without it, every apply where the caller is undeclared
+  would attempt a revoke the backend refuses, permanently occupying the `unmanaged_grants` alarm
+  this page tells you to watch. **This is a guard against noise on that alarm, not a
+  protected-persons list - it follows the token.** Whoever runs a given `apply` is excluded during
+  that apply; a colleague who ran last week's `apply` and is not declared in your configuration is
+  still revoked, correctly.
 - **A cloud owner who is not an organization admin can be revoked on a first apply that omits
   them.** Organization admins are incidentally safe (they're invisible to the endpoint this
   resource reads, so it can't revoke what it can't see), but a non-admin owner has no such
   accidental protection. Declare every current member before your first `apply` against a
   production cloud.
 - **Removing a cloud member cascades:** the backend recursively revokes that member's project
-  permissions on that cloud too. You do not need to also drop their entries from other
-  project-scoped configuration for the same cloud - the backend has already done it.
+  permissions on that cloud too, so this resource must not (and does not) attempt a separate
+  project-scope revoke for a member it just removed at cloud scope - there is nothing left for that
+  second revoke to reach.
+- **Project authority is scoped to projects your configuration names, not to every project under
+  the cloud.** A project role granted out of band on a project your configuration never mentions is
+  neither reported by this resource nor revoked by it - that blindness is deliberate and disclosed,
+  not a bug, but it means this resource's authority over projects is narrower than its authority
+  over cloud membership itself.
 
 Once writes are enabled, `anyscale_cloud_access` also carries two typo guards worth knowing about
 ahead of time: a
@@ -145,6 +156,14 @@ the `cloud_id` a `for_each` keys off of - a mistyped cloud ID is indistinguishab
 deliberate removal, and destroying this resource against the wrong cloud correctly-per-its-own-logic
 revokes that cloud's members. Mitigate that case the same way you would any other
 too-easy-to-destroy resource: `lifecycle { prevent_destroy = true }` on production clouds.
+
+**A cloud's `auto_add_user` setting can defeat this resource's authority outright, and it is worth
+checking before your first `apply` against a cloud you did not create.** Enabling `auto_add_user`
+on a cloud that already has organization members retroactively adds every one of them as a
+collaborator immediately, not just future members - live-confirmed behavior, not a design
+assumption. An authoritative resource cannot converge against a cloud that keeps regranting access
+out from under it; if `auto_add_user` is on, this resource's revokes are fighting a setting that
+keeps re-adding people, and it will not win.
 
 Project roles nest inside each member (`member[*].projects`) rather than living in a sibling
 resource, because the backend enforces two things only a single nesting resource can check at plan
