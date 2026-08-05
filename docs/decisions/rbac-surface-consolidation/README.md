@@ -677,16 +677,29 @@ a `types.List` and **shipped that way in v0.25.0**, so its shape is frozen. Conv
 resource leaves two sibling attributes with the same name and the same semantics carrying different
 types, permanently — a real cost against a hazard that is still unmeasured.
 
-The sequencing that follows is cheap and settles it either way. **Confirm the returned order first**:
-one read of a member holding both enum values.
+**CLOSED, and vacuously — there is no ordering hazard to have at cloud scope.** The cloud deny-role enum
+has exactly one member, `cloud_read_only`, so a `deny_roles` list can never hold two elements and can
+never differ from configuration in order. Keep `List`. No shape change, no semantic-equality modifier,
+no capture.
 
-- If the order is stable, keep `List`, matching the released sibling, and record that the choice was
-  examined rather than inherited.
-- If the order is unstable, that is a defect in **both** resources, and the shape change is the worse
-  of the two available fixes because it cannot be applied to the released one. Preserving configuration
-  order in state when the returned collection is set-equal fixes both, needs no schema change, and
-  breaks nobody. This provider already carries a semantic-equality plan modifier for an analogous
-  normalization problem, so the pattern exists rather than needing invention.
+**The instruction this ruling originally gave was impossible to carry out, and the way it went wrong is
+worth more than the ruling.** It said to confirm the returned order by reading a member holding both enum
+values. There is no second value to hold. The two-member enum — `image_reader` and
+`image_reader_no_base_images` — is the **organization**-scope one, and it was carried into a cloud-scope
+discussion. This document states the correct fact about 380 lines above the ruling that contradicted it.
+**When adding to a long record, the facts most likely to be contradicted are the ones already in it**,
+because the section being edited is what is in view and the rest is not.
+
+**What would make the hazard live, recorded because the shape decision is only free until it isn't.**
+`deny_roles` deliberately carries no closed enum validator, since the roles API is actively extended and
+a closed enum would reject a new backend value until the next provider release. So if a second cloud deny
+role is ever added, the ordering question becomes real — and by then this resource will have shipped, so
+the shape will be frozen exactly as the organization sibling's already is. The answer at that point is the
+semantic-equality fix, not a shape change, for the reason already given: it works on a released schema
+where a type change does not.
+
+The `null`-versus-empty handling at `resource_cloud_access.go:1075-1091` is untouched by any of this. It
+concerns whether the collection is absent or empty, not the order of what is in it.
 
 Note what the correct normalization is not: sorting the value into state would diff forever against a
 configuration that lists the two values in the other order. The fix is to keep the practitioner's order
