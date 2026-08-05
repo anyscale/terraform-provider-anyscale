@@ -16,28 +16,49 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// This file answers AC-21 (docs/decisions/rbac-surface-consolidation,
-// "Acceptance criteria for the write path"), the design blocker the whole
-// cloud_access fatal-path story depends on: does writing the FULL PLANNED
-// `member` map to state after a real mid-reconcile failure - never erroring,
-// only warning and recording the shortfall - trip Terraform Core's
-// "provider produced inconsistent result after apply" check? If it does, the
-// never-error-after-a-write ruling (see gate 2.1,
-// framework_core_state_persistence_gate_test.go) has no safe shape to land
-// in and must be revisited before any write path ships.
+// This file answers AC-21a only, NOT the whole of AC-21
+// (docs/decisions/rbac-surface-consolidation, "Acceptance criteria for the
+// write path"). AC-21 splits into two per architect's review:
 //
-// Answered here with a throwaway fake resource, the same trick gate 2.1
-// used, rather than waiting on forge's real implementation - architect's
-// direction was to run this early precisely because it does not need one.
-// The fake resource's `members` attribute is deliberately built to match the
-// real `member` schema's one load-bearing property: none of its nested
-// fields (base_role/deny_roles/projects on the real resource) are Computed,
-// so Core's plan for `members` is never Unknown - it is always exactly the
+//   - AC-21a, the DESIGN question: does writing the FULL PLANNED `member`
+//     map to state after a real mid-reconcile failure - never erroring, only
+//     warning and recording the shortfall - trip Terraform Core's "provider
+//     produced inconsistent result after apply" check IN PRINCIPLE, for a
+//     collection none of whose elements are Computed? ANSWERED HERE: no. If
+//     it had been yes, the never-error-after-a-write ruling (see gate 2.1,
+//     framework_core_state_persistence_gate_test.go) would have no safe
+//     shape to land in and would need revisiting before any write path
+//     ships.
+//   - AC-21b, the CRITERION, is NOT met by this file and needs the real
+//     `member` schema once forge's write path exists. Core checks
+//     consistency per attribute PATH, recursively, and the real `member`
+//     object has paths this gate's flat `map[string]string` cannot
+//     represent at all: `deny_roles` deliberately keeps prior state's shape
+//     when the API returns empty, because the wire cannot distinguish
+//     never-declared from declared-as-empty
+//     (resource_cloud_access.go:1075-1091) - `projects` is the same class.
+//     If the fatal path emits null on one of these where the plan held an
+//     empty list, THAT is what would trip the inconsistency error - and a
+//     flat string map has no such nested path on which that divergence
+//     could ever occur. AC-21b's narrowest input is a member whose planned
+//     `deny_roles` is an empty list, not null and not populated - target
+//     that case first.
+//
+// AC-21a is answered here with a throwaway fake resource, the same trick
+// gate 2.1 used, rather than waiting on forge's real implementation -
+// architect's direction was to run the design question early precisely
+// because it does not need one. The fake resource's `members` attribute is
+// deliberately built to match the real `member` schema's property that
+// AC-21a is actually about: none of its fields are Computed, so Core's plan
+// for the collection is never Unknown - it is always exactly the
 // practitioner's config. That shape, not any code this gate resource runs,
 // is what forces "return the full planned map or fail the consistency
-// check" - this test exists to confirm that reasoning against real Core
-// behavior rather than trust it from schema inspection alone (Design
-// Verification Policy, gate 2).
+// check" for AC-21a's question - this test exists to confirm that reasoning
+// against real Core behavior rather than trust it from schema inspection
+// alone (Design Verification Policy, gate 2). It is a flat
+// `map[string]string`, NOT a nested-object map like the real `member` -
+// that is exactly why it cannot also close AC-21b; do not read the two as
+// the same shape.
 //
 // The throwaway provider/resource here exist ONLY for this gate - they are
 // not part of, and must never be wired into, the real anyscale provider.
@@ -66,12 +87,14 @@ func (p *fatalPathGateProvider) DataSources(_ context.Context) []func() datasour
 }
 
 // fatalPathGateResourceModel mirrors the two properties of the real schema
-// that matter for AC-21: `members` (a Required map with no Computed nested
-// fields, exactly like `member`) and `shortfall` (a Computed list with no
-// plan modifier, exactly like `unmanaged_grants` - see the "No
+// that matter for AC-21a specifically (see the file header for what it does
+// NOT mirror): `members`, a Required flat map with no Computed elements at
+// all - not a nested-object map like the real `member`, just enough to make
+// Core's plan for it non-Unknown - and `shortfall`, a Computed list with no
+// plan modifier, exactly like `unmanaged_grants` (see the "No
 // UseStateForUnknown" comment on that attribute in resource_cloud_access.go).
-// `simulate_partial_failure` is the only thing this fake resource adds:
-// a practitioner-controlled trigger standing in for "the reconcile hit a
+// `simulate_partial_failure` is the only thing this fake resource adds: a
+// practitioner-controlled trigger standing in for "the reconcile hit a
 // fatal error partway through", since there is no real backend here to fail.
 type fatalPathGateResourceModel struct {
 	ID                     types.String `tfsdk:"id"`
@@ -104,7 +127,7 @@ func (r *fatalPathGateResource) Schema(_ context.Context, _ fwresource.SchemaReq
 	}
 }
 
-// fatalPathGateShortfall computes the AC-21 shortfall list for a given
+// fatalPathGateShortfall computes the AC-21a shortfall list for a given
 // SimulatePartialFailure trigger - shared by Create and Update so the two
 // lifecycle methods can't drift on what "a simulated fatal error" means.
 func fatalPathGateShortfall(ctx context.Context, simulateFailure bool) (types.List, diag.Diagnostics) {
@@ -116,7 +139,7 @@ func fatalPathGateShortfall(ctx context.Context, simulateFailure bool) (types.Li
 }
 
 // Create writes plan.Members verbatim to state - the full planned map, never
-// a partial one - regardless of SimulatePartialFailure. That is the AC-21
+// a partial one - regardless of SimulatePartialFailure. That is the AC-21a
 // behavior under test: a real reconcile would have applied only some of
 // these members to a real backend before hitting a fatal error, and the
 // design ruling is to report the shortfall (in `shortfall`) and warn, but
@@ -145,7 +168,7 @@ func (r *fatalPathGateResource) Create(ctx context.Context, req fwresource.Creat
 	// THE ASSERTION THIS FILE EXISTS FOR: plan.Members is untouched here. The
 	// full planned map goes to state exactly as planned, never trimmed to
 	// "only what a real backend call would have reached" - that is the
-	// behavior AC-21 asks whether Core will accept.
+	// behavior AC-21a asks whether Core will accept.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -153,7 +176,7 @@ func (r *fatalPathGateResource) Create(ctx context.Context, req fwresource.Creat
 // through a shared helper because *resource.CreateResponse and
 // *resource.UpdateResponse share no common interface for .State/.Diagnostics
 // in this framework version, and this file's only job is to be a faithful,
-// legible AC-21 gate, not a reusable library.
+// legible AC-21a gate, not a reusable library.
 func (r *fatalPathGateResource) Update(ctx context.Context, req fwresource.UpdateRequest, resp *fwresource.UpdateResponse) {
 	var plan fatalPathGateResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -187,7 +210,8 @@ func fatalPathGateProviderFactories() map[string]func() (tfprotov6.ProviderServe
 	}
 }
 
-// TestAccCloudAccessFatalPathGateResource is AC-21. Step 1 creates with
+// TestAccCloudAccessFatalPathGateResource is AC-21a (see the file header
+// for why this is not also AC-21b). Step 1 creates with
 // simulate_partial_failure=true and two members: if Core's consistency check
 // rejects a full-planned-map return after this fake resource's Diagnostics
 // carry only a warning (never an error), the apply fails right here with a
@@ -215,7 +239,7 @@ resource "fatalgate_gate" "test" {
   simulate_partial_failure = true
 }
 `,
-				// No ExpectError: a clean apply here IS the AC-21 answer.
+				// No ExpectError: a clean apply here IS the AC-21a answer.
 				// Core would raise its own "inconsistent result" error if the
 				// full-planned-map return were rejected, and that error would
 				// surface as a hard test failure below, not a silent skip.
