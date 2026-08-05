@@ -322,14 +322,15 @@ func sortedProjectIDs(m map[string]string) []string {
 //
 // Fires on ANY 403 from these routes, not on a detail substring: the real
 // body is a bare "Permission denied" with nothing to distinguish on. The
-// ordinary cause is named first on purpose - a bare "Permission denied" is
-// exactly what a token that genuinely lacks the permission produces, so
-// leading with the rarer explanation would mislead the common case. That
-// rarer cause - this project's owner grant missing from the authorization
-// service, a known backend condition that can also leave the project
-// undeletable - is a question for whoever administers the organization's
-// feature flags, not the practitioner's token, and this error alone cannot
-// tell the two apart.
+// token check is named first as what to check first, not as a claim about
+// which cause is more likely - we have no measurement of that, and in the
+// one organization where we have any evidence at all it runs the other way.
+// Ordering conveys the practical priority without asserting a distribution.
+// The other cause - this project's owner grant missing from the
+// authorization service, a known backend condition that can also leave the
+// project undeletable - is a question for whoever administers the
+// organization's feature flags, not the practitioner's token, and this
+// error alone cannot tell the two apart.
 //
 // Project-scope only, deliberately not folded into cloudAccessRevokeFailureReason
 // (the cloud-scope equivalent): cloud-scope already has its own distinguishable
@@ -341,11 +342,11 @@ func cloudAccessProjectWrite403Reason(err error) string {
 	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusForbidden {
 		return detail
 	}
-	return fmt.Sprintf("%s (two things are known to cause this: most commonly, the token being used does not "+
-		"have permission to manage collaborators on this project - check that first. Less commonly, this "+
-		"project's owner grant is missing from the authorization service, a known backend condition that can "+
-		"also leave the project undeletable - a question for whoever administers this organization's feature "+
-		"flags, not something this configuration did. This error alone cannot distinguish the two)", detail)
+	return fmt.Sprintf("%s (two things are known to cause this. Check first whether the token being used has "+
+		"permission to manage collaborators on this project. Also possible: this project's owner grant is "+
+		"missing from the authorization service, a known backend condition that can also leave the project "+
+		"undeletable - a question for whoever administers this organization's feature flags, not something "+
+		"this configuration did. This error alone cannot distinguish the two)", detail)
 }
 
 // applyProjectRoles executes a project plan.
