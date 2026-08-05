@@ -2,8 +2,10 @@ package acctest
 
 import (
 	"context"
+	"regexp"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -101,6 +103,13 @@ type fatalPathGateResourceModel struct {
 	Members                types.Map    `tfsdk:"members"`
 	Shortfall              types.List   `tfsdk:"shortfall"`
 	SimulatePartialFailure types.Bool   `tfsdk:"simulate_partial_failure"`
+	// SimulateReadBackDivergence stands in for a post-apply re-read (like
+	// applyCloudAccess's listCloudAccessMembers call) that comes back
+	// DIFFERENT from what was planned - e.g. an eventually-consistent
+	// authorization-service read that has not caught up yet, the hazard
+	// architect generalized this gate to cover after the AC-21a/Part-3
+	// exchange. See TestAccCloudAccessReadBackDivergenceGateResource.
+	SimulateReadBackDivergence types.Bool `tfsdk:"simulate_read_back_divergence"`
 }
 
 type fatalPathGateResource struct{}
@@ -122,7 +131,8 @@ func (r *fatalPathGateResource) Schema(_ context.Context, _ fwresource.SchemaReq
 				ElementType: types.StringType,
 				// Deliberately no PlanModifiers - see the model comment above.
 			},
-			"simulate_partial_failure": rschema.BoolAttribute{Optional: true},
+			"simulate_partial_failure":      rschema.BoolAttribute{Optional: true},
+			"simulate_read_back_divergence": rschema.BoolAttribute{Optional: true},
 		},
 	}
 }
@@ -136,6 +146,24 @@ func fatalPathGateShortfall(ctx context.Context, simulateFailure bool) (types.Li
 		entries = []string{"member-that-the-simulated-fatal-error-never-reached"}
 	}
 	return types.ListValueFrom(ctx, types.StringType, entries)
+}
+
+// fatalPathGateDiverge stands in for a stale post-apply re-read: it returns a
+// map that differs from planned in exactly one value, the shape a genuinely
+// eventually-consistent read would produce. Used only when
+// SimulateReadBackDivergence is set - the happy path and the AC-21a path
+// both write planned unchanged.
+func fatalPathGateDiverge(ctx context.Context, planned types.Map) (types.Map, diag.Diagnostics) {
+	elements := planned.Elements()
+	diverged := make(map[string]attr.Value, len(elements))
+	for k, v := range elements {
+		diverged[k] = v
+	}
+	for k := range diverged {
+		diverged[k] = types.StringValue("stale-value-from-a-lagging-read")
+		break // one changed value is enough to diverge from the plan.
+	}
+	return types.MapValue(types.StringType, diverged)
 }
 
 // Create writes plan.Members verbatim to state - the full planned map, never
@@ -165,10 +193,22 @@ func (r *fatalPathGateResource) Create(ctx context.Context, req fwresource.Creat
 	}
 	plan.Shortfall = shortfall
 
-	// THE ASSERTION THIS FILE EXISTS FOR: plan.Members is untouched here. The
-	// full planned map goes to state exactly as planned, never trimmed to
-	// "only what a real backend call would have reached" - that is the
-	// behavior AC-21a asks whether Core will accept.
+	// AC-21c's trigger: overwrite plan.Members with something that differs
+	// from the plan, standing in for a stale post-apply re-read. This is the
+	// ONLY place this file ever writes something other than the planned
+	// value for `members` - every other path (including AC-21a's) writes it
+	// unchanged.
+	if plan.SimulateReadBackDivergence.ValueBool() {
+		diverged, divergeDiags := fatalPathGateDiverge(ctx, plan.Members)
+		resp.Diagnostics.Append(divergeDiags...)
+		plan.Members = diverged
+	}
+
+	// THE ASSERTION THIS FILE EXISTS FOR (AC-21a's half): absent divergence,
+	// plan.Members is untouched here. The full planned map goes to state
+	// exactly as planned, never trimmed to "only what a real backend call
+	// would have reached" - that is the behavior AC-21a asks whether Core
+	// will accept.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -194,6 +234,12 @@ func (r *fatalPathGateResource) Update(ctx context.Context, req fwresource.Updat
 		)
 	}
 	plan.Shortfall = shortfall
+
+	if plan.SimulateReadBackDivergence.ValueBool() {
+		diverged, divergeDiags := fatalPathGateDiverge(ctx, plan.Members)
+		resp.Diagnostics.Append(divergeDiags...)
+		plan.Members = diverged
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -281,6 +327,50 @@ resource "fatalgate_gate" "test" {
 `,
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
+// TestAccCloudAccessReadBackDivergenceGateResource is AC-21c: the converse
+// AC-21a never tested. AC-21a proved only that writing a value MATCHING the
+// plan for a Required, non-Computed collection succeeds. The general
+// read-back-must-not-touch-non-Computed-attributes rule architect derived
+// from the grant-failure finding rests entirely on the OTHER direction -
+// that writing a DIFFERING value for such an attribute actually trips
+// "provider produced inconsistent result after apply" rather than being
+// silently tolerated. Nothing had established that before this test; it is
+// the missing half of the mechanism, not a restatement of AC-21a.
+//
+// Create here writes a `members` value that differs from the plan in
+// exactly one entry, standing in for a stale post-apply re-read (the
+// generalized hazard, not specifically a grant failure - see
+// fatalPathGateDiverge and architect's ruling that even a fully SUCCESSFUL
+// apply's read-back could diverge under eventual consistency). If Core
+// tolerated this, the read-back-touching-`member`/`projects` prohibition
+// would be removing latitude the framework never required. It does not
+// tolerate it: the apply must fail with Core's own inconsistency error, not
+// a resource-raised one.
+func TestAccCloudAccessReadBackDivergenceGateResource(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: fatalPathGateProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "fatalgate_gate" "test" {
+  id = "gate-divergence-1"
+  members = {
+    "alice@example.com" = "writer"
+  }
+  simulate_read_back_divergence = true
+}
+`,
+				// The error Core raises for this is a framework-level
+				// consistency failure, not anything this fake resource's own
+				// Diagnostics ever add - matching on "inconsistent" is
+				// specific enough to rule out a coincidental match while not
+				// depending on Core's exact wording.
+				ExpectError: regexp.MustCompile(`(?i)inconsistent`),
 			},
 		},
 	})
