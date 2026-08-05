@@ -1380,7 +1380,28 @@ the test owns and destroys. Read criteria against the static cloud are fine.
 - **AC-15** *(live)* Dropping a project entry from a member revokes that project role. **Split into two
   questions, because bundling them made it look blocked when only one half was.**
 
-  **Status: (a) is SPECIFIED AND PENDING, not obtained.** Recorded in those words because the first
+  **Status: (a) is UNOBTAINABLE IN THIS ORGANIZATION, cause identified and external.** The project
+  collaborator-management route 403s universally for the available identity — on a month-old project as well
+  as a freshly created one, and even on a project that identity created and owns. That rules out
+  creation-time propagation entirely.
+
+  The cause is a previously investigated two-flag skew, not a new discovery and not attributable to this
+  resource: one flag gates the authorization-service **write** at project creation while a separate flag gates
+  the **read** at collaborator-manage and delete time. With the write flag off and the read flag on, the
+  relational row is always created and the authorization-service tuple never is, so the owner grant is
+  permanently missing and every subsequent check fails. It explains every observation, including a project its
+  own creator cannot delete. Re-verify the flag state before relying on this, since the investigation predates
+  this round by about two and a half weeks.
+
+  **Consequence for this resource, which is an environment property rather than a provider one.** While that
+  skew persists in a given organization, the `projects` feature cannot be exercised there at all — not today,
+  and not by any later test. It also means **every project-scope request shape in this resource is mock-only**:
+  the write was never attempted live, and the cold-import criterion read no projects because it named none. In
+  a round where mock-only request shapes were twice found silently wrong, that is the single largest
+  unverified surface remaining, and it is stated here rather than left to be inferred from a green suite.
+
+  *Superseded status note, kept because the error is instructive:* this was first recorded as specified and
+  pending, after being briefly reported as already obtained. Recorded in those words because the first
   description of this split said the live half was "obtained by" direct API exercise, which reads as past
   tense where "obtainable by" was meant — and that one word turned an instruction into a finding, which then
   reached a release record before it was caught. A report claiming live verification for something nobody ran
