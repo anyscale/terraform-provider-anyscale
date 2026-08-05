@@ -7,7 +7,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -19,6 +21,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// defaultCloudAccessTimeout bounds one Create/Update/Delete reconcile,
+// including every per-write retry J.13 permits (at most 3 attempts per write,
+// exponential backoff capped at cloudAccessRetryMaxBackoff). 5 minutes gives
+// real headroom even for a large member map with several retried transient
+// failures, while still being a real bound rather than an unbounded reconcile.
+const defaultCloudAccessTimeout = 5 * time.Minute
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
 //
@@ -159,12 +168,13 @@ type CloudAccessResource struct {
 
 // CloudAccessResourceModel maps the resource schema.
 type CloudAccessResourceModel struct {
-	ID                  types.String `tfsdk:"id"`
-	CloudID             types.String `tfsdk:"cloud_id"`
-	AllowEmptyMemberSet types.Bool   `tfsdk:"allow_empty_member_set"`
-	Member              types.Map    `tfsdk:"member"`
-	UnmanagedGrants     types.List   `tfsdk:"unmanaged_grants"`
-	UngrantedMembers    types.List   `tfsdk:"ungranted_members"`
+	ID                  types.String   `tfsdk:"id"`
+	CloudID             types.String   `tfsdk:"cloud_id"`
+	AllowEmptyMemberSet types.Bool     `tfsdk:"allow_empty_member_set"`
+	Member              types.Map      `tfsdk:"member"`
+	UnmanagedGrants     types.List     `tfsdk:"unmanaged_grants"`
+	UngrantedMembers    types.List     `tfsdk:"ungranted_members"`
+	Timeouts            timeouts.Value `tfsdk:"timeouts"`
 }
 
 // CloudAccessMemberModel is one entry of the member map, keyed by email.
@@ -437,6 +447,19 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 				},
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create: true,
+				Update: true,
+				Delete: true,
+				CreateDescription: "Maximum time to wait for a create's reconcile to finish, including every per-write " +
+					"retry (e.g. `2m`, `10m`). Defaults to `5m` - real headroom even for a large member map with " +
+					"several retried transient failures. Purely local to this provider - never sent to or read from the " +
+					"Anyscale API.",
+				UpdateDescription: "Maximum time to wait for an update's reconcile to finish. Same default and rationale as `create`.",
+				DeleteDescription: "Maximum time to wait for destroy's revoke pass to finish. Same default and rationale as `create`.",
+			}),
+		},
 	}
 }
 
@@ -534,6 +557,14 @@ func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	timeout, diags := plan.Timeouts.Create(ctx, defaultCloudAccessTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	// State is written before any API call, with every Computed attribute
 	// populated. The framework returns whatever Create put in resp.State
@@ -724,6 +755,14 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
+	timeout, diags := plan.Timeouts.Update(ctx, defaultCloudAccessTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	plan.ID = types.StringValue(plan.CloudID.ValueString())
 	plan.UnmanagedGrants = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
 	plan.UngrantedMembers = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
@@ -836,6 +875,14 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	timeout, timeoutDiags := state.Timeouts.Delete(ctx, defaultCloudAccessTimeout)
+	resp.Diagnostics.Append(timeoutDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	cloudID := state.CloudID.ValueString()
 	if cloudID == "" {

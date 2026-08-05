@@ -141,6 +141,7 @@ A map rather than a list so Terraform rejects duplicate keys at plan time. Note 
 This exists because an empty `member` map is usually an accident - a `for_each` over a mistyped or missing group renders identically to a deliberate purge.
 
 ~> This attribute is **provider-side only**. It has no representation in Anyscale and is never read back, so `terraform import` always lands it at `false`. If your configuration sets it to `true`, the first plan after an import shows `false` -> `true`. That diff is expected and is disclosing that Terraform is now permitted to empty this cloud's member list.
+- `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
 ### Read-Only
 
@@ -181,6 +182,16 @@ Note `write` here, not `writer` - the project vocabulary and the cloud vocabular
 A consequence worth knowing after `terraform import`: an imported resource names no projects, so none are in scope and this attribute comes back `null` even for a member who holds project roles. Declaring them brings them into scope on the first apply.
 
 Keyed by project **ID** rather than name, even though `member` is keyed by email: project names are not reliably unique across an organization's clouds, so a name would not identify one project. This resource therefore spans three identifier namespaces - cloud ID, member email, project ID - each the stable key for what it addresses.
+
+
+<a id="nestedblock--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) Maximum time to wait for a create's reconcile to finish, including every per-write retry (e.g. `2m`, `10m`). Defaults to `5m` - real headroom even for a large member map with several retried transient failures. Purely local to this provider - never sent to or read from the Anyscale API.
+- `delete` (String) Maximum time to wait for destroy's revoke pass to finish. Same default and rationale as `create`.
+- `update` (String) Maximum time to wait for an update's reconcile to finish. Same default and rationale as `create`.
 
 
 <a id="nestedatt--ungranted_members"></a>

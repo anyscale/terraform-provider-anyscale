@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -131,6 +132,18 @@ func cloudAccessConfigModel(member types.Map) CloudAccessResourceModel {
 		Member:              member,
 		UnmanagedGrants:     types.ListNull(cloudAccessUnmanagedGrantObjectType()),
 		UngrantedMembers:    types.ListNull(cloudAccessUnmanagedGrantObjectType()),
+		Timeouts:            timeouts.Value{Object: types.ObjectNull(cloudAccessTimeoutsAttrTypes())},
+	}
+}
+
+// cloudAccessTimeoutsAttrTypes is the attr.Type map the timeouts.Block schema
+// option (Create/Update/Delete, no Read) produces - needed here to build a
+// null timeouts.Value fixture that matches the real schema's shape exactly.
+func cloudAccessTimeoutsAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"create": types.StringType,
+		"update": types.StringType,
+		"delete": types.StringType,
 	}
 }
 
