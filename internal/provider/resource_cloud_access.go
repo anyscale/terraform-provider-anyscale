@@ -517,63 +517,16 @@ func (r *CloudAccessResource) Configure(ctx context.Context, req resource.Config
 	r.client = client
 }
 
-// Create reconciles the cloud to the configuration, revoking undeclared members
-// exactly as Update does.
+// Create reconciles the cloud to the configuration, revoking undeclared
+// members exactly as Update does - Terraform is authoritative from the first
+// apply, not the second. The revoke never appears in a plan: a member in
+// neither config nor prior state is one Terraform has never read, so there
+// is nothing to diff against. The resource page is the only mitigation.
 //
-// Terraform is the source of truth for this cloud's member list from the FIRST
-// apply, not the second. Adopt-on-create-and-enforce-later was rejected: it
-// would make the resource's stated guarantee false for the entire life of the
-// first apply, and the moment it became true would be some unrelated later
-// change.
-//
-// The revoke this performs cannot appear in a plan, and that is a property of
-// Terraform rather than a gap here - a member in neither the configuration nor
-// prior state is one Terraform has never read, so it appears nowhere in the plan
-// output. There is nothing to detect and no guard shape that fits; documentation
-// on the resource page is the only available mitigation.
-// cloudAccessWriteEnabled gates the write path. Now true - see the history
-// below for why it was ever false and what closing it required.
-//
-// WHY IT WAS EVER A GATE RATHER THAN A SPLIT BRANCH: the reconcile was
-// complete and covered before this resource's first release, but that release
-// shipped read and import only, so that the one resource in this provider that
-// can revoke real people's access at scale was exercised against real clouds
-// before it was allowed to change anything. Deleting the reconcile to express
-// that and re-adding it later is the shape that loses work: this repo has
-// already had verified changes disappear between a scratch check and a landed
-// commit. Keeping it here, gated, made enabling it a one-line diff plus the
-// docs change that had to accompany it.
-//
-// WHAT ENABLING IT REQUIRED, so it was not flipped on a whim: the two 409
-// envelopes that block a revoke confirmed against a live capture rather than a
-// backend source trace (auto_add_user - confirmed; the directory-sync/Policy
-// API case - source-traced only, accepted as a documented limitation since it
-// is org-wide and not preflightable the way auto_add_user is); confirmation
-// that Terraform Core persists state written before an error return, which
-// unmanaged_grants depends on entirely; the resource page rewritten from
-// "this version is read-only" to the authority warnings it now describes as
-// current behavior; and five live acceptance criteria run against real
-// infrastructure (four passed live; the fifth's live half was unobtainable in
-// the test organization due to a tracked, external SpiceDB-tuple defect
-// unrelated to this resource, with its mock-provable half already met).
-//
-// One of those prerequisites came back with an answer that changed the design
-// rather than confirming it, and it is recorded here so a future re-read of
-// this history does not skip past it: Core DOES persist state written before
-// an errored Create, but it persists it as TAINTED, so the next apply would
-// have been a full destroy-then-recreate of the resource rather than a
-// retriable per-member reconcile - which for this resource meant a failed
-// first apply would schedule a destroy revoking every member it did manage to
-// write. That finding is why the reconcile never returns an error after a
-// successful write: every write method converges (records the shortfall,
-// warns, returns success) instead, and applyCloudAccess never re-reads and
-// writes back `member` after any apply, on any path - see its own doc comment
-// for the general rule this follows.
-//
-// A var rather than a const on purpose: as a const, every branch below folds
-// away and the reconcile would read as dead code to both the reader and the
-// linter, which would have made it easy to miss during review that this gate
-// exists and is deliberate rather than accidental.
+// cloudAccessWriteEnabled gates the write path. See
+// docs/decisions/rbac-surface-consolidation/README.md (J.18) for why it
+// existed and what enabling it required. A var rather than a const so the
+// branches below don't fold away as dead code under the linter.
 var cloudAccessWriteEnabled = true
 
 // cloudAccessWriteDisabledSummary and Detail are the refusal the three write
@@ -831,30 +784,13 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 
 // applyCloudAccess is the shared body of Create and Update.
 //
-// DOES NOT RE-READ member (or projects) AFTER WRITING, on any path, and that is
-// a deliberate absence rather than a missing optimization. `member` is Required
-// with no Computed sub-fields, so Core requires the state this function returns
-// for it to equal the PLAN exactly - not approximately, not "usually". A
-// post-apply re-read can only do one of two things: return exactly the plan,
-// in which case writing it back accomplishes nothing, or return something
-// different, in which case writing it trips "provider produced inconsistent
-// result after apply". There is no outcome where re-reading helps. An earlier
-// version of this function did re-read and write back, and got away with it
-// only because a fully successful write usually reads back identical -
-// usually, not always: these reads come from the authorization service, and
-// nothing establishes the read is immediately consistent with the write, let
-// alone that every member's grant landed exactly as attempted. So `plan.Member`
-// is left exactly as the practitioner declared it, on every path, full stop.
-// `projects` is Optional with no Computed and falls under the identical
-// prohibition for the same reason.
-//
-// The general rule this follows: a post-apply write may only touch Computed
-// attributes (unmanaged_grants, ungranted_members here), because only their
-// planned value is Unknown - which is exactly the latitude Core extends to
-// them and does not extend to anything else. Drift in `member` or `projects`
-// is not lost by this - it is surfaced on the next Read/refresh instead of
-// optimistically corrected here, which is the same mechanism the fatal-path
-// design already relies on for a grant or revoke shortfall.
+// Never re-reads or writes back `member` or `projects` after applying, on any
+// path. Both are non-Computed, so Core requires the returned state to equal
+// the plan exactly - a post-apply write can only match the plan (a no-op) or
+// diverge from it ("provider produced inconsistent result after apply"). A
+// post-apply write may only touch Computed attributes (unmanaged_grants,
+// ungranted_members here), since only their planned value is Unknown. Drift
+// in `member`/`projects` surfaces on the next Read/refresh instead.
 func (r *CloudAccessResource) applyCloudAccess(
 	ctx context.Context,
 	plan *CloudAccessResourceModel,
@@ -1479,59 +1415,29 @@ func (r *CloudAccessResource) refuseDeclaringTheCaller(ctx context.Context, plan
 }
 
 // refuseDeclaringOrgAdmins reports an error if the plan declares an
-// organization admin as a member (J.22).
+// organization admin as a member (J.22) - the cloud roles write refuses
+// outright to change an org admin's role, and catching that mid-reconcile
+// (after some other member's grant already succeeded) leaves no acceptable
+// outcome: erroring taints Create, and unmanaged_grants isn't the right place
+// to record a grant that was never made.
 //
-// Organization admins are a fourth structural blocker on this surface,
-// distinct from auto_add_user, directory sync and a group policy binding: the
-// cloud roles write refuses outright to change an org admin's role ("You
-// cannot modify an organization admin cloud role", live-confirmed - see J.19's
-// capture). That failure cannot be handled the way a revoke failure is.
-// Discovering it mid-reconcile, after some other member's grant has already
-// succeeded, forces a choice between two things this resource forbids:
-// erroring after a successful write taints the Create, and recording it in
-// unmanaged_grants would misuse that attribute for a grant the configuration
-// asked for and never received, rather than an existing grant that could not
-// be revoked. So this must be caught before the first write when possible -
-// see the important caveat below before relying on that.
+// Best-effort, not a guarantee: the backend's real check is a live SpiceDB
+// ORG_OWNER lookup with no provider-facing equivalent, so nothing read here
+// can predict it with certainty. The reconcile's own write-side handling is
+// what actually protects a practitioner if this warning misses.
 //
-// THIS IS A BEST-EFFORT EARLY WARNING, NOT A GUARANTEE (J.22, revised). The
-// backend's actual refusal is gated on ORG_OWNER managed-group membership in
-// the authorization service - a live SpiceDB check with no equivalent
-// provider-facing API. Nothing this resource can read predicts that signal
-// with certainty, so this check cannot be one either, and must not be
-// documented or relied on as if it were. The reconcile's own handling of a
-// mid-apply refusal (see the comment on the write-side check, not this one)
-// is what actually protects a practitioner if this early warning misses.
+// Proxy is base_role from the singular organization-collaborator GET, one
+// call per declared member - deliberately not permission_level from the list
+// endpoint, which is relationally-served and can diverge from ORG_OWNER after
+// a legacy-path change; the singular GET reads from the same store ORG_OWNER
+// does, so the two go stale together.
 //
-// The proxy used is base_role from the SINGULAR organization-collaborator GET
-// (/api/v2/organization_collaborators/{user_id}), one call per DECLARED
-// member rather than a full org listing - O(declared), not O(organization),
-// since a single cloud's member map is almost always far smaller than the
-// whole org. base_role from the singular GET is read from the same
-// authorization-service store ORG_OWNER lives in, so the two go stale
-// TOGETHER relative to a legacy permission_level-only change - which is
-// exactly the property a proxy wants. Deliberately NOT permission_level from
-// the list endpoint: that is relationally-served and can diverge from
-// ORG_OWNER in either direction after a legacy-path change.
-//
-// Same placement and same skip-if-unresolvable discipline as
-// refuseDeclaringTheCaller, and for the same two reasons: it needs an API
-// call, so it cannot live in ValidateConfig, which may run before the
-// provider is configured; and if a given member's admin status cannot be
-// read, THAT MEMBER's check is skipped rather than failed - a hard failure
-// would turn a transient lookup blip into an unplannable configuration, and
-// the only thing lost is a friendly plan-time message for that one member.
-//
-// Unlike the caller, more than one declared member can be an org admin, so
-// every offending entry is reported rather than stopping at the first - one
-// member's failure must not suppress another's, the same discipline
-// ValidateConfig already follows elsewhere on this resource.
-//
-// The mirror side needs no separate guard: org admins hold cloud roles while
-// being filtered out of the member-search endpoint entirely (see the
-// wire-shape facts in the design record), so they are already invisible on
-// refresh and never revoked - admins are outside this resource's scope in
-// both directions, like the caller.
+// Same placement and skip-if-unresolvable discipline as
+// refuseDeclaringTheCaller (needs an API call, so can't live in
+// ValidateConfig; an unresolvable member's check is skipped, not failed) but
+// unlike the caller, every offending member is reported, not just the first.
+// No mirror guard needed on Read: org admins are filtered out of
+// member-search entirely, so they're already invisible and never revoked.
 func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan tfsdk.Plan, diags *diag.Diagnostics) {
 	if r.client == nil {
 		return
