@@ -1237,6 +1237,20 @@ regression, confirm the test fails, revert byte-clean. This is repeated here bec
 prevents has occurred on this exact surface: a `mount_targets` import test passed only because its
 mock omitted the field the fix concerned.
 
+*A capture that validates an API is not a capture that validates your call to it.* Every live capture in
+this round used **hand-crafted** requests — a `count=1` probe, raw curls, direct endpoint hits — and not one
+exercised the provider's own request parameters until an acceptance test drove the real resource. So the
+endpoint's behavior was confirmed repeatedly while the provider's *call* was never confirmed at all, and the
+first live test through the resource failed on its first `Read`: the member search sent `count=100` to an
+endpoint that rejects anything above 50 with a 422. The read path had therefore never worked against the
+real API, on code already merged.
+
+Two consequences worth carrying past this bug. **Gate 1 is not satisfied by probing an endpoint** — it is
+satisfied by observing the provider's own request succeed, which usually means driving the resource. And
+**scope every such find before fixing it**: a sweep for the same mistake elsewhere found exactly one other
+site, in a *shipped* data source, against a different endpoint whose limit is unknown — a question to settle
+by one request rather than by reasoning from the fact that the value was presumably copied from working code.
+
 *The write gate is a release mechanism, not a test barrier.* The five live-required criteria cannot run
 while `cloudAccessWriteEnabled` is false, and the gate cannot come off until they pass — a genuine circular
 dependency. It breaks by flipping the gate as a **local uncommitted edit**, running the criteria, and
