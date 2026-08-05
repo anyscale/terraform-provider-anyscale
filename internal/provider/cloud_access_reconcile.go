@@ -62,18 +62,11 @@ const (
 
 // cloudAccessRetryableError reports whether err is a genuinely transient
 // condition worth retrying (J.13): 429, 502, 503, 504, or a connection-level
-// failure (DoRequestRaw wraps client.DoRequest's own errors as "API request
-// failed: %w", never containing "unexpected status" at all, since those never
-// reached the point of getting an HTTP status back).
-//
-// Deliberately narrow. Every other 4xx - 403, 409, 422, 501 - is a terminal
-// decision, not a transient condition, and retrying a decision only converts
-// a clear diagnostic into a slow one. Retrying here is safe specifically
-// because of two properties already established elsewhere on this surface:
-// the roles write has SET semantics (live-confirmed as V8), so re-issuing an
-// identical write is idempotent, and the membership bootstrap already absorbs
-// its own conflict response (J.3). It would NOT be safe against a batch
-// endpoint, which is one more reason those stay unused here.
+// failure. Deliberately narrow - every other 4xx is a terminal decision, and
+// retrying is safe here only because the roles write has SET semantics
+// (live-confirmed as V8, so a repeat write is idempotent) and the bootstrap
+// already absorbs its own conflict response (J.3); neither holds for a batch
+// endpoint, which is why those stay unused here.
 func cloudAccessRetryableError(err error) bool {
 	if err == nil {
 		return false
@@ -105,19 +98,14 @@ func cloudAccessRetryableError(err error) bool {
 	return strings.Contains(err.Error(), "API request failed")
 }
 
-// cloudAccessDoWriteRetry wraps DoRequestRaw with J.13's bounded retry policy
-// for this resource's write calls. A retry budget exhausted mid-reconcile is
-// a converge-and-record outcome (Ungranted or Unmanaged, plus a warning), not
-// an error - the never-error-after-a-successful-write rule admits no
-// exemption for retry exhaustion, since exhaustion is if anything MORE likely
-// once some writes have already landed than before.
+// cloudAccessDoWriteRetry wraps DoRequestRaw with J.13's bounded retry
+// policy. A budget exhausted mid-reconcile converges and records (Ungranted
+// or Unmanaged, plus a warning) rather than erroring - the
+// never-error-after-a-successful-write rule admits no exemption here.
 //
-// body is rewound (via io.Seeker, which every body constructed by
-// MarshalRequestBody satisfies) before each retry attempt after the first -
-// without this, a retried POST/PUT would send an empty body on its second
-// attempt, since the first attempt's read already consumed it. A nil body
-// (every DELETE call here) is unaffected: the type assertion on a nil
-// interface simply reports false and no rewind is attempted.
+// body is rewound via io.Seeker before each retry after the first, since the
+// first attempt's read already consumed it; a nil body (every DELETE here)
+// is unaffected.
 func cloudAccessDoWriteRetry(
 	ctx context.Context, client *Client, method, path string, body io.Reader, expectedStatuses ...int,
 ) ([]byte, error) {
@@ -408,18 +396,13 @@ type cloudAccessReconcileOptions struct {
 	// somewhere to go back to; a destroy does not.
 	RefuseWhenAutoAddUserEnabled bool
 
-	// RefuseWhenGroupPolicyBound aborts before any write when the cloud carries a
-	// group policy binding (J.20). A separate, asynchronous reconciler flattens
-	// group membership into the same collaborator rows this resource reads, with
-	// nothing marking their origin, so this resource cannot tell a group-derived
-	// member from a manually granted one and would revoke it - and that other
-	// reconciler may then silently re-grant it later, on its own schedule,
-	// producing permanent non-convergence against a controller this resource
-	// cannot see or express.
-	//
-	// TRUE for an apply and FALSE for a destroy, same asymmetry and same reason as
-	// RefuseWhenAutoAddUserEnabled: refusing a destroy strands the resource in
-	// state with no exit but 'terraform state rm'.
+	// RefuseWhenGroupPolicyBound aborts before any write when the cloud carries
+	// a group policy binding (J.20): an asynchronous reconciler flattens group
+	// membership into the same collaborator rows with no origin marker, so this
+	// resource can't tell a group-derived member from a manual one and would
+	// revoke it only to lose to a later silent re-grant, forever out of
+	// convergence. Same apply/destroy asymmetry and reason as
+	// RefuseWhenAutoAddUserEnabled.
 	RefuseWhenGroupPolicyBound bool
 
 	// PriorProjects is what state previously declared, keyed by folded email then
@@ -554,20 +537,14 @@ func reconcileCloudAccess(
 		}
 	}
 
-	// GRANTS FIRST, and EVERY declared member is attempted regardless of an
-	// earlier failure in this same loop. See property 1 on this file: an apply
-	// that dies partway through should leave too much access rather than too
-	// little. A failed grant records into Ungranted and the loop continues -
-	// it is NOT fatal, and it must not be, for a reason sharper than that
-	// property: this reconcile must never return an error after it has
-	// already written real, successful state to the backend, because Core
-	// persists that as a TAINTED resource and the next apply becomes a
-	// destroy-then-recreate that revokes every member this apply DID manage to
-	// grant. A grant failure suppresses the DESTRUCTIVE half of this apply
-	// below (project drops and cloud revokes) - never the additive half.
-	// Continuing to attempt every other grant is additive and therefore safe
-	// under the SAME rule that already governs revokes: never fail to attempt
-	// what configuration asked for, only ever fail to un-apply.
+	// GRANTS FIRST, and every declared member is attempted regardless of an
+	// earlier failure in this loop - a failed grant records into Ungranted and
+	// continues, never aborts. It must not be fatal: erroring after this
+	// reconcile has already written real state taints the resource in Core, so
+	// the next apply becomes a destroy-then-recreate that revokes every member
+	// this apply DID manage to grant. A grant failure suppresses only the
+	// DESTRUCTIVE half below (project drops, cloud revokes), never the
+	// additive half.
 	for _, folded := range cloudAccessSortedMemberKeys(desired) {
 		m := desired[folded]
 		if grantDiags := grantCloudAccessMember(ctx, client, cloudID, m); grantDiags.HasError() {
@@ -580,14 +557,11 @@ func reconcileCloudAccess(
 		}
 	}
 
-	// A grant failure anywhere in this apply - cloud-scope above, or
-	// project-scope below - suppresses every DESTRUCTIVE action for the rest
-	// of this reconcile: project drops and cloud revokes. The reasoning is
-	// J.5's hazard applied to a genuinely unfinished intent rather than an
-	// ordering choice - revoking members outside the set this apply managed to
-	// establish could leave the cloud with less access than intended, in the
-	// worst case without an owner, on the strength of an end state this apply
-	// never actually reached.
+	// A grant failure anywhere in this apply (cloud-scope above, or
+	// project-scope below) suppresses every destructive action for the rest of
+	// this reconcile - J.5's hazard applied to an apply that never reached its
+	// intended end state: revoking outside that unfinished set could leave the
+	// cloud with less access than intended, in the worst case without an owner.
 	anyGrantFailed := len(result.Ungranted) > 0
 
 	// PROJECT PASS, between the cloud grants and the cloud revokes. Before,

@@ -106,11 +106,11 @@ func searchCloudCollaborators(ctx context.Context, client *Client, cloudID strin
 		}
 
 		query := url.Values{}
-		// 50 is the real endpoint's enforced maximum - confirmed live: count=100
-		// 422s outright ("query.count: ensure this value is less than or equal to
-		// 50"), on the very first request, unconditionally. This was never caught
-		// by any test because the mock echoes back whatever count is sent instead
-		// of enforcing the real cap. Must match listCloudRoles's count=50 below.
+		// 50 is the real endpoint's enforced maximum: a higher count 422s
+		// outright ("query.count: ensure this value is less than or equal to
+		// 50") on the very first request. A mock that echoes the count instead
+		// of enforcing the cap won't catch a regression here. Must match
+		// listCloudRoles's count=50 below.
 		query.Set("count", "50")
 		if pagingToken != "" {
 			query.Set("paging_token", pagingToken)
