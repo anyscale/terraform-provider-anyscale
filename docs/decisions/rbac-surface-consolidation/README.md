@@ -571,6 +571,67 @@ of trying. Because the read and write paths return the *identical* 501 detail st
 name both possibilities. `anyscale_cloud_access` does not currently carry any version of this
 warning and must gain one before it registers.
 
+## The contract, stated plainly
+
+Everything else in this document is a reasoning trail. This section is the contract itself, for a reader
+who needs to know what the resource does rather than why. **Where this summary and a ruling disagree, the
+ruling wins** — it carries the evidence and this does not. Rationale, rejected alternatives and the
+evidence behind each line live in the ruling named beside it.
+
+**What it is authoritative over.** The complete member set of one cloud, and within each declared member,
+only the project roles the configuration names (J.10). Anyone not declared is revoked, on `Create` as well
+as `Update`. Two exceptions, both structural rather than courtesies: the caller's own identity (J.2) and
+organization admins (J.22), who are outside its scope in both directions — never granted, never revoked,
+never reported.
+
+**One instance per cloud** (J.11). Two Terraform states managing one cloud revoke each other's members
+indefinitely while both report success. Unsupported by contract, undetectable by the provider, documented
+rather than guarded.
+
+**Identity and shape.** Keyed by `cloud_id` (`Required`, `RequiresReplace` — the only replacement trigger)
+and, within `member`, by email, case-insensitively (a map so duplicates fail at plan time, plus an explicit
+fold because Terraform's own check is case-sensitive). `base_role` `Required` with no closed enum, since the
+roles API is extended. `deny_roles` and `projects` `Optional` — omission means absent, so dropping a project
+entry revokes that role, and the two fail in opposite directions: omitting `deny_roles` removes a
+restriction and grants access, omitting `projects` removes a grant. `unmanaged_grants` and the ungranted
+list are `Computed` diagnostics only and never influence planning (J.12).
+
+**Read.** The membership search is the enumeration source; the roles listing is supplementary and cannot
+see a member holding only a legacy grant. Such a member reads back with `base_role` null, which is correct
+rather than a gap (J.21). A genuine not-found removes the resource from state; any other error is a
+diagnostic (criterion 31).
+
+**Drift.** An out-of-band grant or revoke through the RBAC path is detected. A role change made through the
+CLI or console is **not** — those write the legacy path, and `base_role` does not move (J.19). The read-only
+restriction crossing its boundary *is* visible in `deny_roles`. State this per-field; the two behave
+oppositely.
+
+**Refusals, all before any write.** `auto_add_user` enabled (J.9), a group policy binding present (J.20),
+an organization admin declared (J.22), `owner` combined with `cloud_read_only` (J.7), an empty `member` map
+without `allow_empty_member_set`. `Delete` is exempt from the first two — refusing it would strand the
+resource with no exit but `terraform state rm`.
+
+**Ordering within an apply.** Narrow first, then add, then revoke (J.5). A member slated for removal keeps
+access while others are added, which is over-privilege for someone the prior state already granted rather
+than a grant nobody intended.
+
+**Failure.** Per-member and independent; no batch endpoints. Never an error after a successful write,
+because Core persists pre-error `Create` state **tainted** and this resource's destroy revokes everyone it
+believes it manages. A failed revoke records and warns and the apply succeeds. A grant failure suppresses
+the destructive half of the apply and not the additive half, records both the failed grants and the
+consequently-skipped revokes, and still succeeds. Retry only genuinely transient conditions, bounded, with
+exhaustion treated as record-and-warn (J.13). A post-apply read may write only `Computed` attributes; the
+correction arrives on the next refresh, not within the failed apply (AC-21a/AC-21c).
+
+**Import.** `cloud_id` is the import ID. A configuration declaring exactly the imported members plans empty
+(AC-2), with `projects` covering only config-named projects. A cloud whose members hold only legacy grants
+imports with null roles and converges on the first apply (AC-31).
+
+**Compatibility.** Additive with **no affected practitioners**, conditional on J.18: no released tag
+contains this resource, so nobody can have imported it. Schema version 0, no upgrader, none needed —
+enabling writes changes no schema. That classification expires the moment a tag ships the read-only
+resource, which is why not shipping one is a release constraint rather than a preference.
+
 ## Contract rulings added for the full-CRUD round (J.11–J.22)
 
 The rulings above govern behavior that was designed before a write path existed. These cover the
