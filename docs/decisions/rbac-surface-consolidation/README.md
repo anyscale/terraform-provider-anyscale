@@ -929,11 +929,50 @@ Three parts follow:
    function name. **A grep returning nothing is evidence only if the pattern could have matched.**
 3. **A refusal arriving mid-apply must remain visible on the next plan.** This is where two standing
    rules appear to collide — never error after a successful write, and never silently fail to apply what
-   configuration declared — and visibility resolves it. For the affected member, state must not claim a
-   grant that did not happen: if it does, the next plan is empty and the failure is lost permanently.
-   **That constraint outranks writing the full planned map for that member**, and it is the part that
-   protects a practitioner, since it needs no knowledge of who is an admin. It interacts with AC-21b and
-   the two must be settled together, not separately.
+   configuration declared — and visibility resolves it. It needs no knowledge of who is an admin, which
+   is why it and not the preflight is what protects a practitioner.
+
+   **Corrected, because the first wording of this part was too strong and pointed at a shape that cannot
+   work.** It said state must not claim a grant that did not happen. Taken literally that means omitting
+   the failed member from state or writing its `base_role` null, and **both diverge from the plan on a
+   path Core checks, so both trip "provider produced inconsistent result after apply"** — the very error
+   AC-21 exists to avoid.
+
+   The requirement is narrower: the failure must be visible **on the next plan**, not in the state this
+   apply writes. The refresh delivers that for free. A member whose grant failed has no roles entry, so
+   `base_role` reads back null under J.21; a member whose grant failed outright is absent from
+   member-search and drops out of state. Either way the following plan re-proposes the grant.
+
+   So the shape is: write the full planned map, return **success** with a warning, record the ungranted
+   members, and let the next refresh surface it. The accepted cost is the one already recorded for the
+   fatal path — between a failed apply and the next refresh, state claims members that were never
+   granted.
+
+**The grant path has this bug today, and it is worse than the revoke path ever was.** Verified in code:
+the reconcile's grant loop returns on the first failure after earlier members in the same loop may
+already have been granted, and the apply writes `state.Set(plan)` then returns on error, skipping the
+read-back. An errored apply with persisted state is tainted, so the next apply is a destroy-and-recreate
+— and this resource's destroy revokes every member state believes it manages, **including the ones that
+really did get granted**. One grant failure schedules a mass revoke. It is not specific to the org-admin
+refusal; any grant failure reaches it.
+
+Three constraints on the fix:
+
+- **Keep the abort.** Refusing to continue to the revoke phase after a grant failure is correct — the
+  member list this apply was working from has not been established, and revoking on the strength of it
+  would be worse. Change the error return into a recorded shortfall; do not change the abort.
+- **Grants need their own recording channel, separate from `unmanaged_grants`.** That attribute means
+  *could not revoke*. Overloading it makes `length(...) > 0` ambiguous between someone holding access
+  they should not and someone lacking access they should have — opposite problems demanding opposite
+  responses.
+- **The warning names the member and the reason**, as on the revoke side.
+
+**Both of this round's part-2 and part-3 answers turned on two rulings interacting rather than on either
+alone.** Part 2 chose the closest-matching signal over the superset one *because* part 3 makes a false
+negative degrade gracefully while a false positive hard-blocks a valid configuration with no workaround.
+Under part 3's earlier shape, where a miss was catastrophic, the superset signal was the correct choice.
+The same pair of costs inverts depending on a ruling made elsewhere, so neither can be settled in
+isolation.
 
 **A live confirmation of the group-membership signal was proposed and deliberately declined.** Both
 available forms require temporarily promoting an identity to organization owner, which is a real
@@ -948,7 +987,7 @@ leaking once. If a delete path exists only through the CLI, drive cleanup throug
 reverse-engineering an endpoint; if it exists nowhere, that is a reason not to create them in automation
 at all.
 
-## Acceptance criteria for the write path (AC-1 – AC-34)
+## Acceptance criteria for the write path (AC-1 – AC-36)
 
 Numbered `AC-` rather than continuing the legacy `criterion N` sequence, which runs to 31 and whose
 authoritative list is not in this repository — a collision there would be silent and unresolvable.
@@ -1088,6 +1127,15 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   easy to omit and are the point of the criterion: the confirmed-absent branch must emit **no** warning,
   since a warning there fires on nearly every cloud; and the undetermined branch must be evaluated only
   when a revoke is pending, so an apply that revokes nobody stays silent even under a 403.
+- **AC-35** A grant failure part-way through a reconcile leaves the apply **successful**, records the
+  ungranted members in their own attribute, warns naming member and reason, and aborts the remaining
+  phases without revoking anyone. The criterion that catches the live bug: after such an apply, the next
+  plan must **not** be a destroy-and-recreate, and the members that did grant successfully must still
+  hold their access. Assert the second part against the backend, not against state — state is exactly
+  what is untrustworthy on this path.
+- **AC-36** After a grant failure, the next refresh surfaces the shortfall and the following plan
+  re-proposes the failed grant. This is what makes AC-35's write-the-planned-map safe rather than
+  concealing; without it, the same apply looks identical to a clean one.
 - **AC-34** Declaring an organization admin in `member` is an error raised at plan time, before any
   write is attempted, per J.22. Two assertions carry the criterion: that **no** mutation was issued, and
   that an unresolvable admin lookup skips the check without erroring and without being recorded as a
