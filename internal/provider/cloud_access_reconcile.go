@@ -414,6 +414,22 @@ func reconcileCloudAccess(
 // bootstrap then 409s forever and the revoke 404s forever, and no read can
 // detect the state ahead of time. First, because the legacy call is itself a SET
 // over permission_level and would clobber the role if it ran second.
+//
+// THAT PREMISE IS NOW IN DOUBT, and the doubt is recorded here rather than acted
+// on. A live check found the roles PUT alone, against a user with no prior cloud
+// relationship at all, returns 204 and leaves the user visible in BOTH the roles
+// list and the membership search - which would mean the no-membership-edge state
+// is unreachable through this endpoint pair, and this two-step bootstrap is
+// redundant rather than mandatory.
+//
+// Not changed yet, for a specific reason: the original hazard was never "the user
+// is invisible", it was "the revoke 404s forever and the only exit is terraform
+// state rm". Search visibility is strong evidence an edge exists but it is not
+// that measurement. What settles it is a DELETE against the identity the search
+// returns for such a user - if that succeeds the bootstrap is redundant and
+// should come out; if it 404s, membership visibility is a red herring and the
+// bootstrap stays exactly as it is. Until then, running one extra call and
+// swallowing an expected 409 is the cheap side of the trade.
 func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string, m cloudAccessDesiredMember) diag.Diagnostics {
 	var diags diag.Diagnostics
 
@@ -537,8 +553,6 @@ func revokeCloudAccessMember(ctx context.Context, client *Client, cloudID, ident
 // cloudAccessRevokeFailureReason turns a failed revoke into the text that lands
 // in unmanaged_grants. The three recognized cases are all situations a reader
 // cannot act on from the raw API detail alone.
-// cloudAccessRevokeFailureReason turns a failed revoke into the text that lands
-// in unmanaged_grants.
 //
 // The unrecognized case names BOTH structural blockers rather than returning the
 // raw detail alone, because they return the same 409 status and differ only in

@@ -392,7 +392,10 @@ func (r *CloudAccessResource) Configure(ctx context.Context, req resource.Config
 // backend source trace; confirmation that Terraform Core persists state written
 // before an error return, which unmanaged_grants depends on entirely; and the
 // resource page rewritten from "this version is read-only" to the authority
-// warnings it currently holds as future behavior.
+// warnings it currently holds as future behavior; and a decision on whether the
+// two-step bootstrap in grantCloudAccessMember is still necessary, since a live
+// check has cast doubt on the premise it exists for (see the note there - it is a
+// simplification to make before shipping the write path, not after).
 //
 // One of those prerequisites came back with an answer that changes the design
 // rather than confirming it, and it is recorded here so enabling the gate cannot
