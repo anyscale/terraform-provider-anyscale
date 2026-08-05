@@ -91,8 +91,16 @@ func cloudRolesFeatureDisabled(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "unexpected status 501")
 }
 
-const cloudRolesDisabledDetail = "The cloud roles API is not enabled for this organization, so this resource cannot " +
-	"read a cloud's member roles.\n\nReading roles and writing them are gated by two separate feature flags that " +
+// cloudRolesDisabledSummary and cloudRolesDisabledDetail are the diagnostic
+// this resource must return on EVERY path that can reach either flag, not only
+// Read. The detail is deliberately operation-agnostic ("cannot proceed" rather
+// than "cannot read") because the same 501 is reachable from a role write
+// (setCloudAccessRole) as well as the member-list read (listCloudAccessMembers),
+// and a read-flavored message on a write failure would send an operator looking
+// at the wrong half of the two-flag gate.
+const cloudRolesDisabledSummary = "Cloud Roles API Not Available"
+const cloudRolesDisabledDetail = "The cloud roles API is not enabled for this organization, so this operation cannot " +
+	"proceed.\n\nReading roles and writing them are gated by two separate feature flags that " +
 	"return the same response, so this error does not say which of the two is missing - mention both when you ask. " +
 	"Contact Anyscale support to have the cloud roles API enabled for your organization. Until then, manage cloud and " +
 	"project access through the Anyscale console or API."
@@ -549,7 +557,7 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 	remote, err := listCloudAccessMembers(ctx, r.client, cloudID)
 	if err != nil {
 		if cloudRolesFeatureDisabled(err) {
-			resp.Diagnostics.AddError("Cloud Roles API Not Available", cloudRolesDisabledDetail)
+			resp.Diagnostics.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail)
 			return
 		}
 		if errors.Is(err, ErrNotFound) {
@@ -700,6 +708,7 @@ func (r *CloudAccessResource) applyCloudAccess(
 	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, desired, cloudAccessReconcileOptions{
 		RevokeUndeclared:             true,
 		RefuseWhenAutoAddUserEnabled: true,
+		RefuseWhenGroupPolicyBound:   true,
 		PriorProjects:                priorProjects,
 	})
 	diags.Append(reconcileDiags...)
@@ -826,10 +835,12 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, map[string]cloudAccessDesiredMember{},
 		cloudAccessReconcileOptions{
 			RevokeUndeclared: true,
-			// Destroy does NOT refuse on an auto_add_user cloud. It attempts every
-			// revoke, records each failure and names the remedy, because refusing
-			// would strand the resource in state with no exit but 'terraform state rm'.
+			// Destroy does NOT refuse on an auto_add_user cloud, or on a group policy
+			// binding. Both attempt every revoke, record each failure and name the
+			// remedy, because refusing would strand the resource in state with no exit
+			// but 'terraform state rm'.
 			RefuseWhenAutoAddUserEnabled: false,
+			RefuseWhenGroupPolicyBound:   false,
 			// No PriorProjects on a destroy: removing each cloud collaborator cascades
 			// to their permissions on that cloud's projects, so per-project revokes
 			// would only produce 404s to misreport as failures.

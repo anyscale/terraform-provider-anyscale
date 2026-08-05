@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -285,4 +286,76 @@ func cloudAccessProjectRoles(ctx context.Context, client *Client, projectIDs []s
 		out[projectID] = byUserID
 	}
 	return out, nil
+}
+
+// resourcePolicyBinding is one entry of GET /api/v2/policy/cloud/{cloud_id}'s
+// bindings list (product backend resource_policies_service.py:751-780). Every
+// principal representable at this path is a user-group ID: the backend's own
+// write-side validator, _validate_user_groups_exist, resolves every entry in
+// principals[] against the user_groups table unconditionally, with no other
+// principal shape accepted. So a non-empty bindings list IS a group-principal
+// binding by construction - there is no user-principal variant it could
+// instead be, and no need to inspect principal shape further (J.20,
+// Amendment 2).
+type resourcePolicyBinding struct {
+	RoleName   string   `json:"role_name"`
+	Principals []string `json:"principals"`
+}
+
+type resourcePolicyResult struct {
+	Bindings []resourcePolicyBinding `json:"bindings"`
+}
+
+type resourcePolicyResponse struct {
+	Result resourcePolicyResult `json:"result"`
+}
+
+// cloudAccessGroupPolicyStatus is the tri-state result of checking whether a
+// cloud carries a group policy binding (J.20). Kept tri-state rather than a
+// bool: Present and Absent are both CONFIRMED, and Undetermined - this
+// resource could not check at all - must never be conflated with either one.
+type cloudAccessGroupPolicyStatus int
+
+const (
+	cloudAccessGroupPolicyAbsent cloudAccessGroupPolicyStatus = iota
+	cloudAccessGroupPolicyPresent
+	cloudAccessGroupPolicyUndetermined
+)
+
+// cloudAccessGroupPolicyBinding reports whether cloudID carries a group
+// policy binding through the (BETA) Policy API.
+//
+// Present = 200 with a non-empty bindings list.
+//
+// Absent = 404 ("No policy found for resource"), or 200 with an empty
+// bindings list. 404 is the ORDINARY response for the overwhelming majority
+// of clouds today, not evidence the API is unavailable: the backend's only
+// feature flag on this surface, FLAG_ENABLE_NEW_POLICY_API_ACCESS, gates the
+// WRITE path (update_policy_for_resource) only - the GET this calls has no
+// flag gate at all, and a 404 means exactly "no resource_permission row
+// exists for this cloud." Treating 404 as Undetermined would warn on nearly
+// every apply forever, the same always-on-alarm J.2 already rejects for the
+// caller-exclusion case.
+//
+// Undetermined = a 403 (this GET requires the same update-tier, org-admin
+// permission as the write path, and the token running Terraform is usually a
+// cloud collaborator or owner rather than an org admin - see J.2's identical
+// observation about the member-search endpoint) or any other unexpected
+// status. Every Undetermined result carries a non-nil error; every Present or
+// Absent result carries a nil one, so a caller can dispatch on the status
+// alone. See J.20 in the design record for the full rationale.
+func cloudAccessGroupPolicyBinding(ctx context.Context, client *Client, cloudID string) (cloudAccessGroupPolicyStatus, error) {
+	resp, err := DoRequestAndParse[resourcePolicyResponse](
+		ctx, client, "GET", fmt.Sprintf("/api/v2/policy/cloud/%s", cloudID), nil, http.StatusOK,
+	)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return cloudAccessGroupPolicyAbsent, nil
+		}
+		return cloudAccessGroupPolicyUndetermined, err
+	}
+	if resp == nil || len(resp.Result.Bindings) == 0 {
+		return cloudAccessGroupPolicyAbsent, nil
+	}
+	return cloudAccessGroupPolicyPresent, nil
 }

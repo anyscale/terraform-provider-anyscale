@@ -248,6 +248,20 @@ type cloudAccessReconcileOptions struct {
 	// somewhere to go back to; a destroy does not.
 	RefuseWhenAutoAddUserEnabled bool
 
+	// RefuseWhenGroupPolicyBound aborts before any write when the cloud carries a
+	// group policy binding (J.20). A separate, asynchronous reconciler flattens
+	// group membership into the same collaborator rows this resource reads, with
+	// nothing marking their origin, so this resource cannot tell a group-derived
+	// member from a manually granted one and would revoke it - and that other
+	// reconciler may then silently re-grant it later, on its own schedule,
+	// producing permanent non-convergence against a controller this resource
+	// cannot see or express.
+	//
+	// TRUE for an apply and FALSE for a destroy, same asymmetry and same reason as
+	// RefuseWhenAutoAddUserEnabled: refusing a destroy strands the resource in
+	// state with no exit but 'terraform state rm'.
+	RefuseWhenGroupPolicyBound bool
+
 	// PriorProjects is what state previously declared, keyed by folded email then
 	// project ID. It is the ONLY source of project revokes: a pair that was
 	// declared and is now dropped gets removed, while a role merely observed on an
@@ -280,6 +294,10 @@ func reconcileCloudAccess(
 
 	remote, err := listCloudAccessMembers(ctx, client, cloudID)
 	if err != nil {
+		if cloudRolesFeatureDisabled(err) {
+			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+"\n\nNo changes were made.")
+			return result, diags
+		}
 		diags.AddError(
 			"Could Not Read The Cloud's Current Members",
 			fmt.Sprintf("The current member list of cloud %s could not be read, so this apply cannot tell who needs to "+
@@ -338,6 +356,41 @@ func reconcileCloudAccess(
 					"made.", cloudID, len(toRevoke)),
 			)
 			return result, diags
+		}
+	}
+
+	// The group-policy preflight runs ONLY when a revoke is pending, same entry
+	// point as auto_add_user above: an apply that revokes nobody cannot clobber a
+	// group-derived grant, so the check would be irrelevant noise on the common
+	// case of a cloud with no pending revokes. Unlike auto_add_user, an
+	// inconclusive answer here does NOT abort - see cloudAccessGroupPolicyBinding
+	// for why 403 is the expected, common failure on this BETA endpoint rather
+	// than a rare one, and J.20 in the design record for the full rationale.
+	if len(toRevoke) > 0 && opts.RefuseWhenGroupPolicyBound {
+		switch status, err := cloudAccessGroupPolicyBinding(ctx, client, cloudID); status {
+		case cloudAccessGroupPolicyPresent:
+			diags.AddError(
+				"Cloud Has A Group Policy Binding",
+				fmt.Sprintf("Cloud %s has at least one group policy binding, and this apply would revoke %d member(s) "+
+					"the configuration does not declare.\n\nA group binding is reconciled into this cloud's ordinary "+
+					"member list by a separate, asynchronous system - the same rows this resource reads, with nothing "+
+					"marking their origin. Revoking a group-derived member here does not remove the binding, so that "+
+					"system may silently re-grant it later, on its own schedule, entirely outside this configuration. "+
+					"This resource cannot express or repair the actual authority - the group binding itself - so it "+
+					"refuses rather than fight another controller indefinitely.\n\nRemove the group's policy binding on "+
+					"this cloud first, then retry.\n\nNo changes were made.", cloudID, len(toRevoke)),
+			)
+			return result, diags
+		case cloudAccessGroupPolicyUndetermined:
+			diags.AddWarning(
+				"Could Not Confirm This Cloud Has No Group Policy Binding",
+				fmt.Sprintf("This resource could not determine whether cloud %s carries a group policy binding before "+
+					"revoking %d member(s): %s\n\nIf a group binding exists, the asynchronous system that applies it may "+
+					"silently re-grant a member this apply revokes, outside Terraform's model entirely. Proceeding "+
+					"anyway: this endpoint is BETA and commonly returns 403 for a token that is not an organization "+
+					"admin, which on its own is not evidence a binding exists.", cloudID, len(toRevoke),
+					extractAPIErrorDetail(err)),
+			)
 		}
 	}
 
@@ -479,8 +532,21 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 
 	{
 		detail := extractAPIErrorDetail(roleErr)
+		// The role WRITE is gated by the other half of the same two-flag pair
+		// cloudRolesFeatureDisabled/cloudRolesDisabledDetail already names for the
+		// read side (cloudRolesFeatureDisabled matches on status text alone, so it
+		// is agnostic to which flag tripped). Every branch below still names its
+		// own consequence (pre-existing access untouched, or rollback outcome) so
+		// that information is not lost - only the summary/cause text changes.
+		featureGated := cloudRolesFeatureDisabled(roleErr)
 
 		if !weCreatedMembership {
+			if featureGated {
+				diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+fmt.Sprintf(
+					"\n\nThey were already a collaborator on cloud %s before this apply, and that pre-existing access was "+
+						"NOT modified or removed.", cloudID))
+				return diags
+			}
 			diags.AddError(
 				"Could Not Set Cloud Role",
 				fmt.Sprintf("Setting %s's role on cloud %s failed: %s\n\nThey were already a collaborator on this cloud "+
@@ -491,11 +557,23 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 
 		// Membership was created moments ago by this very call and the role write
 		// that was supposed to follow it failed. Roll back, rather than leave the
-		// bridge permission level in place as access nobody asked for.
+		// bridge permission level in place as access nobody asked for. This runs
+		// regardless of featureGated: whether the write-flag is off or the write
+		// failed for any other reason, the bootstrap grant this call just made is
+		// still unintended access that must not be left behind.
 		if _, delErr := DoRequestRaw(
 			ctx, client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s/collaborators/%s", cloudID, identityID), nil,
 			http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 		); delErr != nil {
+			if featureGated {
+				diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+fmt.Sprintf(
+					"\n\nThis resource also tried to remove the cloud membership it had just created as a rollback, and "+
+						"that failed too: %s\n\nAs a result %s now holds an unintended %q permission level on cloud %s that "+
+						"Terraform did not manage to remove. Remove it manually (for example DELETE "+
+						"/api/v2/clouds/%s/collaborators/%s, or the equivalent console action) and retry.",
+					extractAPIErrorDetail(delErr), m.Email, cloudAccessBridgePermissionLevel, cloudID, cloudID, identityID))
+				return diags
+			}
 			diags.AddError(
 				"Could Not Set Cloud Role, And Rollback Also Failed",
 				fmt.Sprintf("Setting %s's role on cloud %s failed: %s\n\nThis resource then tried to remove the cloud "+
@@ -508,6 +586,12 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 			return diags
 		}
 
+		if featureGated {
+			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+
+				"\n\nThe cloud membership this resource had just created was rolled back successfully - no unintended "+
+				"access was left behind.")
+			return diags
+		}
 		diags.AddError(
 			"Could Not Set Cloud Role",
 			fmt.Sprintf("Setting %s's role on cloud %s failed: %s\n\nThe cloud membership this resource had just created "+
@@ -602,6 +686,10 @@ func reconcileProjectRoles(
 
 	members, err := listCloudAccessMembers(ctx, client, cloudID)
 	if err != nil {
+		if cloudRolesFeatureDisabled(err) {
+			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+"\n\nProject roles were not changed.")
+			return nil, diags
+		}
 		diags.AddError(
 			"Could Not Re-Read Cloud Members Before Applying Project Roles",
 			fmt.Sprintf("The cloud-level changes were applied, but the member list could not be re-read, and project "+

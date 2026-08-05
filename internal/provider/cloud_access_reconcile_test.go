@@ -45,6 +45,29 @@ type cloudAccessReconcileMock struct {
 	// cloudGetStatus, when non-zero, is returned by the cloud GET instead of a
 	// body - used to prove the auto_add_user preflight fails closed.
 	cloudGetStatus int
+	// rolesReadStatus, when non-zero, is returned by the roles GET instead of a
+	// body - used to prove a 501 (the read-side feature flag) on that endpoint
+	// surfaces the two-flag diagnostic rather than a generic read-failure one.
+	rolesReadStatus int
+	// rolesWriteStatus, when non-zero, is returned by every roles PUT instead of
+	// writing anything - used to prove a 501 (the write-side feature flag) on
+	// that endpoint surfaces the two-flag diagnostic rather than a generic
+	// set-role-failure one.
+	rolesWriteStatus int
+
+	// groupPolicyBindingCount, when > 0, makes GET /api/v2/policy/cloud/{id}
+	// return that many bindings (Present). groupPolicyStatusOverride, when
+	// non-zero, makes it return that raw status instead (e.g. 403, to prove
+	// Undetermined). groupPolicyRegisterEmpty forces the route to register and
+	// return a 200 with zero bindings (the OTHER Absent shape) even though that
+	// is indistinguishable, by count alone, from "don't register." With none of
+	// the three set, the route is left unregistered and ServeMux's own 404
+	// fires - proving the common Absent shape needs no special mock support at
+	// all, which is the ordinary case in production too.
+	groupPolicyBindingCount     int
+	groupPolicyStatusOverride   int
+	groupPolicyRegisterEmpty    bool
+	groupPolicyRequestsRecorded int
 
 	// failRoleWriteFor / failRevokeFor are emails whose write fails.
 	failRoleWriteFor map[string]bool
@@ -123,6 +146,13 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 
 	mux.HandleFunc(fmt.Sprintf("/api/v2/clouds/%s/collaborators/roles", cloudID),
 		func(w http.ResponseWriter, r *http.Request) {
+			if m.rolesReadStatus != 0 {
+				w.WriteHeader(m.rolesReadStatus)
+				writeJSON(w, map[string]interface{}{"error": map[string]interface{}{
+					"detail": "the cloud roles feature is not enabled for this organization",
+				}})
+				return
+			}
 			results := []map[string]interface{}{}
 			for _, mem := range m.members {
 				if len(mem.BaseRoles) == 0 {
@@ -179,6 +209,13 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 			trailing := strings.TrimPrefix(r.URL.Path, fmt.Sprintf("/api/v2/clouds/%s/collaborators/", cloudID))
 
 			if r.Method == http.MethodPut && strings.HasSuffix(trailing, "/roles") {
+				if m.rolesWriteStatus != 0 {
+					w.WriteHeader(m.rolesWriteStatus)
+					writeJSON(w, map[string]interface{}{"error": map[string]interface{}{
+						"detail": "the cloud roles feature is not enabled for this organization",
+					}})
+					return
+				}
 				userID := strings.TrimSuffix(strings.TrimPrefix(trailing, "users/"), "/roles")
 				raw, err := io.ReadAll(r.Body)
 				if err != nil {
@@ -229,6 +266,25 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 			t.Fatalf("unexpected request to the collaborators subtree: %s %s", r.Method, r.URL.Path)
 		})
 
+	// Only registered when a test opts in - see the fields' own doc comment for
+	// why an unregistered route (the default) is itself the Absent case, not a
+	// mock gap needing a stub.
+	if m.groupPolicyBindingCount > 0 || m.groupPolicyStatusOverride != 0 || m.groupPolicyRegisterEmpty {
+		mux.HandleFunc(fmt.Sprintf("/api/v2/policy/cloud/%s", cloudID), func(w http.ResponseWriter, r *http.Request) {
+			m.groupPolicyRequestsRecorded++
+			if m.groupPolicyStatusOverride != 0 {
+				w.WriteHeader(m.groupPolicyStatusOverride)
+				writeJSON(w, map[string]interface{}{"error": map[string]interface{}{"detail": "forbidden"}})
+				return
+			}
+			bindings := make([]map[string]interface{}, m.groupPolicyBindingCount)
+			for i := range bindings {
+				bindings[i] = map[string]interface{}{"role_name": "write", "principals": []string{fmt.Sprintf("ug_%d", i)}}
+			}
+			writeJSON(w, map[string]interface{}{"result": map[string]interface{}{"bindings": bindings, "sync_status": "success"}})
+		})
+	}
+
 	return mux
 }
 
@@ -243,7 +299,9 @@ func (m *cloudAccessReconcileMock) memberEmails() []string {
 // cloudAccessApplyOptions is the option set an apply uses. Destroy differs on
 // RefuseWhenAutoAddUserEnabled and has its own test below.
 func cloudAccessApplyOptions() cloudAccessReconcileOptions {
-	return cloudAccessReconcileOptions{RevokeUndeclared: true, RefuseWhenAutoAddUserEnabled: true}
+	return cloudAccessReconcileOptions{
+		RevokeUndeclared: true, RefuseWhenAutoAddUserEnabled: true, RefuseWhenGroupPolicyBound: true,
+	}
 }
 
 func cloudAccessDesired(entries ...cloudAccessDesiredMember) map[string]cloudAccessDesiredMember {
@@ -536,6 +594,220 @@ func TestReconcileCloudAccess_FailedGrantIsFatalBeforeAnyRevoke(t *testing.T) {
 	}
 }
 
+// TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage covers AC-5
+// on the reconcile's own member-list read. Before this fix, a 501 here (the
+// read-side flag) fell through to the generic "Could Not Read The Cloud's
+// Current Members" message, which sends an operator looking at permissions or
+// the network instead of at the two feature flags that actually gate this
+// endpoint.
+func TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage(t *testing.T) {
+	const cloudID = "cld_gate_read"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID:    "usr_caller",
+		callerEmail:     "operator@example.com",
+		members:         map[string]cloudAccessMockMember{},
+		orgMembers:      map[string]cloudAccessMockIdentity{},
+		rolesReadStatus: http.StatusNotImplemented,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(), cloudAccessApplyOptions())
+
+	if !diags.HasError() {
+		t.Fatal("expected an error: the roles listing 501'd")
+	}
+	if d := cloudAccessFindError(diags, "Could Not Read The Cloud's Current Members"); d != nil {
+		t.Fatalf("got the generic read-failure diagnostic instead of the feature-gate one: %s", d.Detail())
+	}
+	d := cloudAccessFindError(diags, cloudRolesDisabledSummary)
+	if d == nil {
+		t.Fatalf("expected the %q diagnostic: %v", cloudRolesDisabledSummary, diags)
+	}
+	if !strings.Contains(d.Detail(), "two separate feature flags") {
+		t.Errorf("the detail does not name the two-flag ambiguity: %s", d.Detail())
+	}
+}
+
+// TestReconcileCloudAccess_FeatureGateOnRoleWriteSurfacesTwoFlagMessage covers
+// AC-5 on the OTHER half of the two-flag gate - the roles PUT, which is
+// reachable only through a grant. Before this fix, a 501 here fell through to
+// "Could Not Set Cloud Role", which is just as misleading as the read-side
+// generic message and for the same reason.
+func TestReconcileCloudAccess_FeatureGateOnRoleWriteSurfacesTwoFlagMessage(t *testing.T) {
+	const cloudID = "cld_gate_write"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"incoming@example.com": {IdentityID: "idn_in", UserID: "usr_in"},
+		},
+		rolesWriteStatus: http.StatusNotImplemented,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}),
+		cloudAccessApplyOptions())
+
+	if !diags.HasError() {
+		t.Fatal("expected an error: the role write 501'd")
+	}
+	if d := cloudAccessFindError(diags, "Could Not Set Cloud Role"); d != nil {
+		t.Fatalf("got the generic set-role-failure diagnostic instead of the feature-gate one: %s", d.Detail())
+	}
+	d := cloudAccessFindError(diags, cloudRolesDisabledSummary)
+	if d == nil {
+		t.Fatalf("expected the %q diagnostic: %v", cloudRolesDisabledSummary, diags)
+	}
+	if !strings.Contains(d.Detail(), "two separate feature flags") {
+		t.Errorf("the detail does not name the two-flag ambiguity: %s", d.Detail())
+	}
+
+	// The bootstrap membership the failed role write left behind must still be
+	// rolled back - the feature gate changes the message, never the cleanup.
+	if _, ok := mock.members["incoming@example.com"]; ok {
+		t.Errorf("the bootstrap membership was not rolled back after the gated role write: %v", mock.memberEmails())
+	}
+}
+
+// TestReconcileCloudAccess_GroupPolicyBindingRefusesRevoke covers AC-32's
+// Present branch: a cloud carrying a group policy binding refuses before any
+// write, naming the binding, so this resource never revokes a member the
+// async group reconciler could silently re-grant later (J.20).
+func TestReconcileCloudAccess_GroupPolicyBindingRefusesRevoke(t *testing.T) {
+	const cloudID = "cld_grouppolicy_present"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"undeclared@example.com": {IdentityID: "idn_u", UserID: "usr_u", BaseRoles: []string{"writer"}},
+		},
+		orgMembers:              map[string]cloudAccessMockIdentity{},
+		groupPolicyBindingCount: 1,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID, cloudAccessDesired(), cloudAccessApplyOptions())
+
+	d := cloudAccessFindError(diags, "Cloud Has A Group Policy Binding")
+	if d == nil {
+		t.Fatalf("expected the group-policy refusal: %v", diags)
+	}
+	if len(mock.calls) != 0 {
+		t.Errorf("the refusal came after writes had already been made: %v - it must be a preflight so a refused apply "+
+			"changes nothing", mock.calls)
+	}
+	if _, ok := mock.members["undeclared@example.com"]; !ok {
+		t.Error("the member was revoked despite the group-policy refusal")
+	}
+}
+
+// TestReconcileCloudAccess_GroupPolicyAbsentProceedsSilently covers AC-32's
+// Absent branch, both of its two shapes: a 404 (no policy row at all - the
+// ordinary case for nearly every cloud today) and a 200 with an empty bindings
+// list. Neither should produce any diagnostic.
+func TestReconcileCloudAccess_GroupPolicyAbsentProceedsSilently(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		registerEmpty bool
+	}{
+		{name: "no policy row at all (404, unregistered route)", registerEmpty: false},
+		{name: "200 with an empty bindings list", registerEmpty: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const cloudID = "cld_grouppolicy_absent"
+			mock := &cloudAccessReconcileMock{
+				callerUserID: "usr_caller", callerEmail: "operator@example.com",
+				members: map[string]cloudAccessMockMember{
+					"undeclared@example.com": {IdentityID: "idn_u", UserID: "usr_u", BaseRoles: []string{"writer"}},
+				},
+				orgMembers:               map[string]cloudAccessMockIdentity{},
+				groupPolicyRegisterEmpty: tc.registerEmpty,
+			}
+
+			_, diags := reconcileCloudAccess(context.Background(),
+				cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID, cloudAccessDesired(), cloudAccessApplyOptions())
+
+			if diags.HasError() {
+				t.Fatalf("expected no error: absent must proceed silently: %v", diags)
+			}
+			if d := cloudAccessFindWarning(diags, "Could Not Confirm This Cloud Has No Group Policy Binding"); d != nil {
+				t.Errorf("expected no warning for the absent case: %s", d.Detail())
+			}
+			if _, ok := mock.members["undeclared@example.com"]; ok {
+				t.Error("the ordinary revoke did not happen - absent must not block the reconcile")
+			}
+		})
+	}
+}
+
+// TestReconcileCloudAccess_GroupPolicyUndeterminedWarnsAndProceeds covers
+// AC-32's Undetermined branch: a 403 (the common case for a Terraform token
+// that is not an organization admin) warns loudly but does not refuse, and the
+// ordinary revoke still happens.
+func TestReconcileCloudAccess_GroupPolicyUndeterminedWarnsAndProceeds(t *testing.T) {
+	const cloudID = "cld_grouppolicy_undetermined"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"undeclared@example.com": {IdentityID: "idn_u", UserID: "usr_u", BaseRoles: []string{"writer"}},
+		},
+		orgMembers:                map[string]cloudAccessMockIdentity{},
+		groupPolicyStatusOverride: http.StatusForbidden,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID, cloudAccessDesired(), cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("expected no error: undetermined must warn and proceed, never refuse: %v", diags)
+	}
+	d := cloudAccessFindWarning(diags, "Could Not Confirm This Cloud Has No Group Policy Binding")
+	if d == nil {
+		t.Fatalf("expected the undetermined warning: %v", diags)
+	}
+	if _, ok := mock.members["undeclared@example.com"]; ok {
+		t.Error("undetermined blocked the ordinary revoke - it must warn and proceed, not refuse")
+	}
+}
+
+// TestReconcileCloudAccess_GroupPolicyCheckSkippedWithNoRevokePending covers
+// the entry-point gating: an apply that revokes nobody must not call the
+// Policy API at all, matching auto_add_user's own entry point (J.20,
+// Amendment 1) - the check would be irrelevant noise on the common case.
+func TestReconcileCloudAccess_GroupPolicyCheckSkippedWithNoRevokePending(t *testing.T) {
+	const cloudID = "cld_grouppolicy_norevoke"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"existing@example.com": {IdentityID: "idn_e", UserID: "usr_e", BaseRoles: []string{"writer"}},
+		},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"existing@example.com": {IdentityID: "idn_e", UserID: "usr_e"},
+		},
+		groupPolicyBindingCount: 1,
+	}
+
+	// Desired matches the existing member exactly, so there is nothing to
+	// revoke - the group-policy check must not even run.
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(cloudAccessDesiredMember{Email: "existing@example.com", BaseRole: "writer"}),
+		cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("expected no error: nothing to revoke, so the group-policy check should not even fire: %v", diags)
+	}
+	if mock.groupPolicyRequestsRecorded != 0 {
+		t.Errorf("the group-policy check ran even though no revoke was pending: %d request(s)", mock.groupPolicyRequestsRecorded)
+	}
+}
+
 // TestReconcileCloudAccess_ExistingMemberIsUpdatedNotDowngraded covers the
 // unconditional bootstrap. It runs on every member, including existing ones, and
 // that is only safe because the API answers an existing member with a 409 and
@@ -670,6 +942,35 @@ func TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser(t *testing.T) {
 	}
 	if len(result.Unmanaged) != 1 {
 		t.Errorf("got %d recorded failures, want 1: the destroy must record what it could not remove: %+v", len(result.Unmanaged), result.Unmanaged)
+	}
+}
+
+// TestReconcileCloudAccess_DestroyDoesNotRefuseOnGroupPolicyBinding is
+// TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser's twin for J.20's
+// asymmetry: a destroy attempts every revoke on a cloud carrying a group
+// policy binding rather than refusing, for the same reason - refusing would
+// strand the resource in state with no exit but 'terraform state rm'.
+func TestReconcileCloudAccess_DestroyDoesNotRefuseOnGroupPolicyBinding(t *testing.T) {
+	const cloudID = "cld_destroy_grouppolicy"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"member@example.com": {IdentityID: "idn_m", UserID: "usr_m", BaseRoles: []string{"writer"}},
+		},
+		orgMembers:              map[string]cloudAccessMockIdentity{},
+		groupPolicyBindingCount: 1,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID, map[string]cloudAccessDesiredMember{},
+		cloudAccessReconcileOptions{RevokeUndeclared: true, RefuseWhenGroupPolicyBound: false})
+
+	if diags.HasError() {
+		t.Fatalf("a destroy must not refuse on a group-policy-bound cloud: %v", diags)
+	}
+	if _, ok := mock.members["member@example.com"]; ok {
+		t.Error("the destroy did not attempt the revoke - a group policy binding must not block destroy")
 	}
 }
 

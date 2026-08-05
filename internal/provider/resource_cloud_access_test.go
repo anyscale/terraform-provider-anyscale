@@ -180,6 +180,16 @@ func cloudAccessFindError(diags diag.Diagnostics, summary string) diag.Diagnosti
 	return nil
 }
 
+// cloudAccessFindWarning is cloudAccessFindError's warning-severity twin.
+func cloudAccessFindWarning(diags diag.Diagnostics, summary string) diag.Diagnostic {
+	for _, d := range diags {
+		if d.Severity() == diag.SeverityWarning && d.Summary() == summary {
+			return d
+		}
+	}
+	return nil
+}
+
 // cloudAccessAssertOnlyErrorSummary fails if any error carries a summary other
 // than the expected one - a config crafted to trip exactly one invariant should
 // not also be tripping another.
