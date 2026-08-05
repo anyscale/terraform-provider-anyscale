@@ -958,9 +958,29 @@ refusal; any grant failure reaches it.
 
 Three constraints on the fix:
 
-- **Keep the abort.** Refusing to continue to the revoke phase after a grant failure is correct — the
-  member list this apply was working from has not been established, and revoking on the strength of it
-  would be worse. Change the error return into a recorded shortfall; do not change the abort.
+- **A grant failure suppresses the destructive half of the apply, not the additive half.** There are two
+  distinct aborts in that code path and the original return conflated them: stopping the *remaining
+  grants*, and stopping before the *destructive phases* — project drops and cloud revokes. Only the
+  second is correct.
+
+  Attempt every declared grant, and every additive project grant. Skip project drops and cloud revokes.
+  Continuing the grant loop is not merely permitted but required: grants are per-member and idempotent
+  under the SET semantics V8 confirmed, a grant can only add access, and skipping one because an earlier
+  one failed is silently declining to attempt something the configuration declared — which the
+  asymmetric rule forbids. We may fail to un-apply; we must never fail to *try* to apply.
+
+  The original comment's reasoning survives under this narrower reading and is worth carrying into the
+  replacement. Configuration declares A, B and C; B's grant fails; revoking everyone outside that set
+  would leave the cloud with less access than intended and, at worst, without an owner. That is the J.5
+  hazard, and it concerns destructive actions taken while the intended end state was not reached — not
+  grants.
+
+- **Record the skipped revokes, not only the failed grants.** When a grant failure suppresses the revoke
+  phase, those members really do still hold access the configuration says they should not, which is
+  exactly what `unmanaged_grants` means — so they belong there, with a reason distinguishing
+  *skipped-because-a-grant-failed* from *attempted-and-refused*. Without this the apply reports a grant
+  problem and stays silent about nobody having been revoked, and an operator reading the ungranted list
+  would reasonably conclude the rest of the apply completed.
 - **Grants need their own recording channel, separate from `unmanaged_grants`.** That attribute means
   *could not revoke*. Overloading it makes `length(...) > 0` ambiguous between someone holding access
   they should not and someone lacking access they should have — opposite problems demanding opposite
@@ -1133,6 +1153,12 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   plan must **not** be a destroy-and-recreate, and the members that did grant successfully must still
   hold their access. Assert the second part against the backend, not against state — state is exactly
   what is untrustworthy on this path.
+
+  Two further assertions, because a fix can satisfy the above and still leave the operator with a false
+  picture: that the revoke set is **untouched** — nobody revoked — and that **both** channels are
+  populated, the failed grants in their own attribute and the consequently-skipped revokes in
+  `unmanaged_grants` with a distinguishing reason. A fix that records the failed grant and silently drops
+  the revokes passes a narrower reading of this criterion.
 - **AC-36** After a grant failure, the next refresh surfaces the shortfall and the following plan
   re-proposes the failed grant. This is what makes AC-35's write-the-planned-map safe rather than
   concealing; without it, the same apply looks identical to a clean one.
