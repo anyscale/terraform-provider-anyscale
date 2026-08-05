@@ -701,6 +701,20 @@ identical write is idempotent; and the membership bootstrap already absorbs its 
 response under J.3. A retry would not be safe against a batch endpoint, which is one more reason
 those stay unused.
 
+**A TIMEOUT expiring mid-reconcile is likewise a converge-and-record outcome, and it is the case most
+likely to tempt an exception.** Normally a timeout is the clearest possible error and returning the context
+error is the obvious thing to write. It cannot be here: by the time a timeout fires, grants have almost
+certainly succeeded, so returning an error taints the state and the next apply becomes a
+destroy-and-recreate that revokes everyone this apply granted — the failure the grant-path fix addressed,
+arriving from the retry path instead. On timeout: stop attempting, record everything unachieved in both
+channels, warn naming the timeout as the cause, and return success. The rule has no timeout exemption.
+
+**Include a `timeouts` block.** This was first recorded as *should gain, additive*, which was softer than
+intended. It is the framework-native answer, this repository has a v0.19.0 precedent for preferring it over
+an ad-hoc duration attribute, and under J.18 it costs nothing to add now. Without it the worst-case runtime
+is members × attempts × backoff cap with no practitioner control, which on a large member list is not a
+small number.
+
 **A retry budget exhausted mid-reconcile is a converge-and-record outcome — `unmanaged_grants` plus a
 warning — not an error.** The never-error-after-a-successful-write rule admits no exemption for
 retry exhaustion, and the reason is that exhaustion is *more* likely to occur after some writes have
