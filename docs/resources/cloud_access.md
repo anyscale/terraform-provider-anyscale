@@ -5,6 +5,9 @@ subcategory: ""
 description: |-
   Reads and imports the complete member list of one Anyscale cloud, including each member's cloud role and the deny roles layered on it.
   ~> This version is read-only. Create, update and delete are not implemented and fail with an explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage them through Terraform. Cloud-scoped role management has no writable provider surface until that lands.
+  What this version is for: drift detection. Declare the member list you expect, and terraform plan reports any difference between your configuration and reality - it simply cannot correct one yet. Import a cloud, write out its members, and a clean plan then means the cloud's member list and the project roles you declared are still exactly what you wrote.
+  Read the scope limits on member, projects and unmanaged_grants before relying on that, though - a clean plan is not the same as "nobody has access you did not intend". Organization admins are invisible to the endpoint this reads, your own identity is excluded, and project roles are compared only for the projects your configuration names.
+  That is also why member is Required on a resource that cannot write: handing over the full expected member list is not busywork here, it is the thing being compared against.
   ~> This resource is designed to be authoritative, and that is not yet in effect. When the write path ships, Terraform will own who has access to this cloud, and any member not declared in member will be revoked - including people granted access through the Anyscale console, and including on the first apply. None of that happens in this version. It is stated here so the behavior is not a surprise when it arrives; read this page again before you first apply a change with it.
   auto_add_user and this resource are mutually exclusive
   ~> A cloud with auto_add_user enabled cannot have its member list owned by Terraform at all. While that setting is on, Anyscale automatically grants every organization member access to the cloud and refuses to remove a collaborator, so authoritative management is impossible rather than merely degraded.
@@ -21,6 +24,7 @@ description: |-
   An accidentally empty member map is guarded, however - see allow_empty_member_set.
   Projects nest under members for a reason
   A member's project roles live inside their entry because the backend requires a cloud grant before a project grant on the same cloud, and revoking the cloud grant cascades to the projects. Declaring a project role for someone with no cloud role is a plan-time error here rather than a confusing failure partway through an apply.
+  ~> The attribute descriptions below describe this resource's full behavior, including the write operations that are not enabled in this version. Reference docs get read by jumping to the attribute you are configuring, so the read-only note at the top of this page is easy to miss. Plan-time validation is the exception and does apply today: anything described below as rejected at plan time really is.
 ---
 
 # anyscale_cloud_access (Resource)
@@ -28,6 +32,12 @@ description: |-
 Reads and imports the **complete** member list of one Anyscale cloud, including each member's cloud role and the deny roles layered on it.
 
 ~> **This version is read-only.** Create, update and delete are not implemented and fail with an explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage them through Terraform. Cloud-scoped role management has no writable provider surface until that lands.
+
+**What this version is for: drift detection.** Declare the member list you expect, and `terraform plan` reports any difference between your configuration and reality - it simply cannot correct one yet. Import a cloud, write out its members, and a clean plan then means the cloud's member list and the project roles you declared are still exactly what you wrote.
+
+Read the scope limits on `member`, `projects` and `unmanaged_grants` before relying on that, though - a clean plan is not the same as "nobody has access you did not intend". Organization admins are invisible to the endpoint this reads, your own identity is excluded, and project roles are compared only for the projects your configuration names.
+
+That is also why `member` is Required on a resource that cannot write: handing over the full expected member list is not busywork here, it is the thing being compared against.
 
 ~> **This resource is designed to be authoritative, and that is not yet in effect.** When the write path ships, Terraform will own who has access to this cloud, and any member not declared in `member` will be **revoked** - including people granted access through the Anyscale console, and including on the **first** apply. None of that happens in this version. It is stated here so the behavior is not a surprise when it arrives; read this page again before you first apply a change with it.
 
@@ -60,6 +70,8 @@ An accidentally *empty* `member` map is guarded, however - see `allow_empty_memb
 ### Projects nest under members for a reason
 
 A member's project roles live inside their entry because the backend requires a cloud grant before a project grant on the same cloud, and revoking the cloud grant cascades to the projects. Declaring a project role for someone with no cloud role is a plan-time error here rather than a confusing failure partway through an apply.
+
+~> **The attribute descriptions below describe this resource's full behavior, including the write operations that are not enabled in this version.** Reference docs get read by jumping to the attribute you are configuring, so the read-only note at the top of this page is easy to miss. Plan-time validation is the exception and does apply today: anything described below as rejected at plan time really is.
 
 
 

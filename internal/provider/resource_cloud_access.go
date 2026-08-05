@@ -178,6 +178,16 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage " +
 			"them through Terraform. Cloud-scoped role management has no writable provider surface until that " +
 			"lands.\n\n" +
+			"**What this version is for: drift detection.** Declare the member list you expect, and `terraform plan` " +
+			"reports any difference between your configuration and reality - it simply cannot correct one yet. Import " +
+			"a cloud, write out its members, and a clean plan then means the cloud's member list and the project " +
+			"roles you declared are still exactly what you wrote.\n\n" +
+			"Read the scope limits on `member`, `projects` and `unmanaged_grants` before relying on that, though - a " +
+			"clean plan is not the same as \"nobody has access you did not intend\". Organization admins are invisible " +
+			"to the endpoint this reads, your own identity is excluded, and project roles are compared only for the " +
+			"projects your configuration names.\n\n" +
+			"That is also why `member` is Required on a resource that cannot write: handing over the full expected " +
+			"member list is not busywork here, it is the thing being compared against.\n\n" +
 			"~> **This resource is designed to be authoritative, and that is not yet in effect.** When the write " +
 			"path ships, Terraform will own who has access to this cloud, and any member not declared in `member` " +
 			"will be **revoked** - including people granted access through the Anyscale console, and including on " +
@@ -223,7 +233,11 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"A member's project roles live inside their entry because the backend requires a cloud grant " +
 			"before a project grant on the same cloud, and revoking the cloud grant cascades to the " +
 			"projects. Declaring a project role for someone with no cloud role is a plan-time error here " +
-			"rather than a confusing failure partway through an apply.",
+			"rather than a confusing failure partway through an apply.\n\n" +
+			"~> **The attribute descriptions below describe this resource's full behavior, including the write " +
+			"operations that are not enabled in this version.** Reference docs get read by jumping to the attribute " +
+			"you are configuring, so the read-only note at the top of this page is easy to miss. Plan-time validation " +
+			"is the exception and does apply today: anything described below as rejected at plan time really is.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
