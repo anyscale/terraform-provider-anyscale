@@ -703,6 +703,39 @@ which for `deny_roles`. Do not assume the roles endpoint is the better source fo
 organization scope it is the better source for one field and the worse source for the other. Until
 this is answered, no documentation should promise that out-of-band role changes are detected.
 
+**Provisional answer, derived rather than captured, and the split is sharper than at organization
+scope.** Three separately-established facts compose into it: the roles listing reads exclusively from
+the authorization service's managed groups with no relational fallback; the legacy collaborator PUT
+changes `permission_level` in the relational store and toggles **only** the read-only deny group in
+the authorization service, never a base-role group; and both first-party administrative surfaces write
+only that legacy path.
+
+- **`base_role` drift through the CLI or console is invisible.** A legacy `permission_level` change
+  writes no base-role group, and `base_role` is read only from those groups, so the value does not
+  move. For a member who never held an RBAC role that means null indefinitely (J.21). For a member who
+  does hold one, it means `base_role` reports the **old** RBAC role indefinitely after an administrator
+  changes their permission in the console — the same staleness as organization scope.
+- **`deny_roles` drift through the CLI or console is visible**, because the legacy PUT does toggle the
+  read-only deny group and that is where `deny_roles` is read from.
+
+So two fields inside one nested object have **opposite** drift-detection properties, and documentation
+must not describe them in one breath. AC-27 converts to a documented limitation for `base_role` and
+remains met for `deny_roles`.
+
+**This is a composition of two source traces, which is reasoning and not capture, so gate 1 still
+applies.** The confirming sequence is narrow: on an ephemeral cloud with a disposable identity, write an
+RBAC `base_role`, read it back, change `permission_level` through the collaborators endpoint, and read
+`base_role` again. Not the static cloud — that would alter a real person's access.
+
+**The larger question underneath J.19: which store decides EFFECTIVE access?** If authorization is
+enforced from the relational `permission_level` for legacy members and from authorization-service
+base-role groups for RBAC members, then two members carrying the same `base_role` in our state can hold
+different real access, and this resource reports both as converged. That is not a drift-detection gap —
+it is a question about whether the field this resource manages is the field that decides anything.
+Establish where cloud access is enforced and which store that path consults; if both are consulted,
+establish which takes precedence. Answer this before shipping a write path, because a resource that
+manages the losing field is worse than no resource.
+
 **J.20 — a cloud carrying any group policy binding is a structural blocker: `Create` and `Update`
 refuse, `Delete` attempts and records.** This is J.9's shape rather than a new mechanism, and it is
 the third structural blocker on this surface after `auto_add_user` and directory sync.
