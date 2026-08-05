@@ -1238,6 +1238,7 @@ func (r *CloudAccessResource) ModifyPlan(ctx context.Context, req resource.Modif
 	// the thing that only makes sense with prior state, not this.
 	if !req.Plan.Raw.IsNull() {
 		r.refuseDeclaringTheCaller(ctx, req.Plan, &resp.Diagnostics)
+		r.refuseDeclaringOrgAdmins(ctx, req.Plan, &resp.Diagnostics)
 	}
 
 	// No prior state means a create: there are no members to revoke, so an empty
@@ -1357,6 +1358,82 @@ func (r *CloudAccessResource) refuseDeclaringTheCaller(ctx context.Context, plan
 				"to a list of protected people: another operator who is not declared here is still revoked.", email),
 		)
 		return
+	}
+}
+
+// refuseDeclaringOrgAdmins reports an error if the plan declares an
+// organization admin as a member (J.22).
+//
+// Organization admins are a fourth structural blocker on this surface,
+// distinct from auto_add_user, directory sync and a group policy binding: the
+// cloud roles write refuses outright to change an org admin's role ("You
+// cannot modify an organization admin cloud role", live-confirmed - see J.19's
+// capture). That failure cannot be handled the way a revoke failure is.
+// Discovering it mid-reconcile, after some other member's grant has already
+// succeeded, forces a choice between two things this resource forbids:
+// erroring after a successful write taints the Create, and recording it in
+// unmanaged_grants would misuse that attribute for a grant the configuration
+// asked for and never received, rather than an existing grant that could not
+// be revoked. So this must be caught before the first write, not converged
+// or warned about afterward.
+//
+// Same placement and same skip-if-unresolvable discipline as
+// refuseDeclaringTheCaller, and for the same two reasons: it needs an API
+// call, so it cannot live in ValidateConfig, which may run before the
+// provider is configured; and if the org-admin list cannot be read, the check
+// is SKIPPED rather than failed; a hard failure would turn a transient
+// listing blip into an unplannable configuration; the only thing lost is a
+// friendly plan-time message; the write itself still fails safely, since it
+// never runs against a member this check would have caught.
+//
+// Unlike the caller, more than one declared member can be an org admin, so
+// every offending entry is reported rather than stopping at the first - one
+// member's failure must not suppress another's, the same discipline
+// ValidateConfig already follows elsewhere on this resource.
+//
+// The mirror side needs no separate guard: org admins hold cloud roles while
+// being filtered out of the member-search endpoint entirely (see the
+// wire-shape facts in the design record), so they are already invisible on
+// refresh and never revoked - admins are outside this resource's scope in
+// both directions, like the caller.
+func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan tfsdk.Plan, diags *diag.Diagnostics) {
+	if r.client == nil {
+		return
+	}
+
+	var member types.Map
+	if getDiags := plan.GetAttribute(ctx, path.Root("member"), &member); getDiags.HasError() {
+		return
+	}
+	if member.IsNull() || member.IsUnknown() || len(member.Elements()) == 0 {
+		return
+	}
+
+	collaborators, err := listAllOrganizationCollaborators(ctx, r.client, nil)
+	if err != nil {
+		return
+	}
+	admins := make(map[string]bool, len(collaborators))
+	for _, c := range collaborators {
+		if c.PermissionLevel == "owner" {
+			admins[cloudAccessFoldEmail(c.Email)] = true
+		}
+	}
+
+	for email := range member.Elements() {
+		if !admins[cloudAccessFoldEmail(email)] {
+			continue
+		}
+		diags.AddAttributeError(
+			path.Root("member").AtMapKey(email),
+			"Cannot Manage An Organization Admin's Cloud Access Here",
+			fmt.Sprintf("%q is an organization admin, and the cloud roles API refuses to change an organization admin's "+
+				"role. Remove that entry from member.\n\nOrganization admins are outside this resource's scope in both "+
+				"directions: the member-search endpoint this resource reads never reports them, so they are already "+
+				"invisible on refresh and never revoked - declaring one here would only ever fail the write, and "+
+				"discovering that after another member's grant already succeeded is exactly the situation this resource "+
+				"must never allow itself to reach.", email),
+		)
 	}
 }
 

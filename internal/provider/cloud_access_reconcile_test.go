@@ -91,6 +91,11 @@ type cloudAccessMockMember struct {
 type cloudAccessMockIdentity struct {
 	IdentityID string
 	UserID     string
+	// PermissionLevel is the organization-scope permission_level reported by
+	// GET /api/v2/organization_collaborators - "owner" or "collaborator".
+	// Defaults to "collaborator" when unset, so only a test that cares about
+	// J.22's org-admin guard needs to set it.
+	PermissionLevel string
 }
 
 func (m *cloudAccessReconcileMock) record(r *http.Request) {
@@ -124,8 +129,13 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 		results := []map[string]interface{}{}
 		for email, id := range m.orgMembers {
 			userID := id.UserID
+			permissionLevel := id.PermissionLevel
+			if permissionLevel == "" {
+				permissionLevel = "collaborator"
+			}
 			results = append(results, map[string]interface{}{
 				"id": id.IdentityID, "email": email, "user_id": userID, "name": "Test",
+				"permission_level": permissionLevel,
 			})
 		}
 		writeJSON(w, map[string]interface{}{"results": results, "metadata": emptyMeta})
@@ -1080,6 +1090,98 @@ func TestCloudAccessModifyPlan_RefusesDeclaringTheCaller(t *testing.T) {
 		diags := runCloudAccessModifyPlanWithClient(t, client, planWith("operator@example.com"))
 		if diags.HasError() {
 			t.Fatalf("an unresolvable caller must not make the plan fail: %v", diags)
+		}
+	})
+}
+
+// TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins covers J.22/AC-34: the
+// cloud roles write refuses outright to change an organization admin's role,
+// and discovering that mid-reconcile - after another member's grant already
+// succeeded - is exactly the situation the never-error-after-a-successful-
+// write rule forbids. So this is caught at plan time instead, same placement
+// as the caller check.
+func TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins(t *testing.T) {
+	const cloudID = "cld_plan_orgadmin"
+
+	newMock := func() *cloudAccessReconcileMock {
+		return &cloudAccessReconcileMock{
+			callerUserID: "usr_caller", callerEmail: "operator@example.com",
+			members: map[string]cloudAccessMockMember{},
+			orgMembers: map[string]cloudAccessMockIdentity{
+				"admin@example.com":       {IdentityID: "idn_admin", UserID: "usr_admin", PermissionLevel: "owner"},
+				"other-admin@example.com": {IdentityID: "idn_admin2", UserID: "usr_admin2", PermissionLevel: "owner"},
+				"alice@example.com":       {IdentityID: "idn_alice", UserID: "usr_alice", PermissionLevel: "collaborator"},
+			},
+		}
+	}
+
+	planWith := func(emails ...string) *CloudAccessResourceModel {
+		entries := make(map[string]attr.Value, len(emails))
+		for _, e := range emails {
+			entries[e] = cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects())
+		}
+		m := cloudAccessConfigModel(cloudAccessMemberMap(entries))
+		return &m
+	}
+
+	t.Run("declaring an org admin is an error naming them", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("admin@example.com", "alice@example.com"))
+
+		d := cloudAccessFindError(diags, "Cannot Manage An Organization Admin's Cloud Access Here")
+		if d == nil {
+			t.Fatalf("expected the org-admin refusal: %v", diags)
+		}
+		cloudAccessAssertErrorPath(t, d, path.Root("member").AtMapKey("admin@example.com"))
+	})
+
+	t.Run("every declared admin is reported, not just the first", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("admin@example.com", "other-admin@example.com", "alice@example.com"))
+
+		for _, email := range []string{"admin@example.com", "other-admin@example.com"} {
+			found := false
+			for _, d := range diags {
+				if d.Severity() == diag.SeverityError && strings.Contains(d.Detail(), email) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected an error naming %s: %v", email, diags)
+			}
+		}
+	})
+
+	t.Run("matched case-insensitively", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("Admin@Example.com"))
+		if cloudAccessFindError(diags, "Cannot Manage An Organization Admin's Cloud Access Here") == nil {
+			t.Errorf("a differently-cased spelling of the admin's address slipped past the check: %v", diags)
+		}
+	})
+
+	t.Run("declaring a non-admin is fine", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("alice@example.com"))
+		if diags.HasError() {
+			t.Fatalf("unexpected error for a configuration that declares no organization admin: %v", diags)
+		}
+	})
+
+	t.Run("an unresolvable admin list skips the check without failing the plan", func(t *testing.T) {
+		broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		t.Cleanup(broken.Close)
+		client := &Client{BaseURL: broken.URL, Token: "test-token", HTTPClient: broken.Client()}
+
+		diags := runCloudAccessModifyPlanWithClient(t, client, planWith("admin@example.com"))
+		if diags.HasError() {
+			t.Fatalf("an unresolvable admin list must not make the plan fail: %v", diags)
 		}
 	})
 }
