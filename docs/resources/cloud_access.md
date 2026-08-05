@@ -6,6 +6,9 @@ description: |-
   Reads and imports the complete member list of one Anyscale cloud, including each member's cloud role and the deny roles layered on it.
   ~> This version is read-only. Create, update and delete are not implemented and fail with an explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage them through Terraform. Cloud-scoped role management has no writable provider surface until that lands.
   ~> This resource is designed to be authoritative, and that is not yet in effect. When the write path ships, Terraform will own who has access to this cloud, and any member not declared in member will be revoked - including people granted access through the Anyscale console, and including on the first apply. None of that happens in this version. It is stated here so the behavior is not a surprise when it arrives; read this page again before you first apply a change with it.
+  auto_add_user and this resource are mutually exclusive
+  ~> A cloud with auto_add_user enabled cannot have its member list owned by Terraform at all. While that setting is on, Anyscale automatically grants every organization member access to the cloud and refuses to remove a collaborator, so authoritative management is impossible rather than merely degraded.
+  ~> Worth knowing before you enable that flag: turning auto_add_user on for a cloud that already has organization members retroactively adds all of them as collaborators immediately, not only members added afterwards. Enabling it is itself a grant to everyone in the organization.
   Not available in every organization
   ~> This resource reads the cloud roles API, which returns 501 in two separate situations: an organization that does not have the roles feature enabled, and any cloud on Azure, where the endpoint is unavailable regardless of that feature flag. The first can be turned on by Anyscale support; the second cannot. Use the Anyscale console or API to manage cloud access in either case.
   Reviewing the plan will not protect you from the first apply
@@ -26,6 +29,12 @@ Reads and imports the **complete** member list of one Anyscale cloud, including 
 ~> **This version is read-only.** Create, update and delete are not implemented and fail with an explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage them through Terraform. Cloud-scoped role management has no writable provider surface until that lands.
 
 ~> **This resource is designed to be authoritative, and that is not yet in effect.** When the write path ships, Terraform will own who has access to this cloud, and any member not declared in `member` will be **revoked** - including people granted access through the Anyscale console, and including on the **first** apply. None of that happens in this version. It is stated here so the behavior is not a surprise when it arrives; read this page again before you first apply a change with it.
+
+### `auto_add_user` and this resource are mutually exclusive
+
+~> A cloud with `auto_add_user` enabled cannot have its member list owned by Terraform at all. While that setting is on, Anyscale automatically grants every organization member access to the cloud and refuses to remove a collaborator, so authoritative management is impossible rather than merely degraded.
+
+~> Worth knowing before you enable that flag: turning `auto_add_user` on for a cloud that **already** has organization members retroactively adds all of them as collaborators immediately, not only members added afterwards. Enabling it is itself a grant to everyone in the organization.
 
 ### Not available in every organization
 

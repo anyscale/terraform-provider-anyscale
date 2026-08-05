@@ -53,9 +53,8 @@ import (
 
 // cloudAccessReadOnlyDenyRole is the cloud deny role that constrains which
 // project roles a member may hold; cloudAccessReadOnlyProjectRole is the only
-// project role compatible with it. Note the project vocabulary uses "readonly"
-// while the cloud base-role vocabulary uses "writer" not "write" - the two
-// scopes genuinely differ and are not interchangeable.
+// project role compatible with it. See the three-vocabulary note below before
+// assuming any spelling carries across scopes.
 const (
 	cloudAccessReadOnlyDenyRole    = "cloud_read_only"
 	cloudAccessReadOnlyProjectRole = "readonly"
@@ -84,8 +83,26 @@ const cloudRolesDisabledDetail = "The cloud roles API is not enabled for this or
 	"and project access through the Anyscale console or API in either case."
 
 // cloudAccessProjectWriteRole is the project-scope spelling of the write tier;
-// cloudAccessCloudWriteRole is the cloud-scope spelling of an unrelated role
+// cloudAccessCloudWriteRole is the cloud ROLES spelling of an unrelated role
 // that happens to be a near-homograph of it.
+//
+// THERE ARE THREE VOCABULARIES HERE, NOT TWO, and two of them share a spelling.
+// Conflating any pair of them is the recurring mistake on this surface:
+//
+//  1. Cloud ROLES - base_role on PUT .../collaborators/users/{user_id}/roles.
+//     Known values owner, WRITER, collaborator, project_viewer,
+//     compute_config_viewer, workload_operator. This is the vocabulary this
+//     resource's base_role attribute speaks.
+//  2. Cloud LEGACY permission_level - on POST .../collaborators/users, the
+//     bootstrap call. Enum owner / WRITE / readonly, live-confirmed. Same scope
+//     as (1), different spelling, different concept; this resource only ever
+//     sends "readonly" to it, as the least-privilege bridge value.
+//  3. PROJECT permission_level - owner / WRITE / readonly. Same spelling as (2)
+//     and a different scope again.
+//
+// So "write" is correct at cloud scope on the legacy endpoint and wrong as a
+// project role, which is why the check below is about (1) versus (3)
+// specifically rather than about "cloud versus project" in general.
 //
 // Only ONE direction of this confusion is rejected below - a project role of
 // "writer", which the API answers with a 422. The reverse (a cloud base_role of
@@ -158,6 +175,14 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"will be **revoked** - including people granted access through the Anyscale console, and including on " +
 			"the **first** apply. None of that happens in this version. It is stated here so the behavior is not a " +
 			"surprise when it arrives; read this page again before you first apply a change with it.\n\n" +
+			"### `auto_add_user` and this resource are mutually exclusive\n\n" +
+			"~> A cloud with `auto_add_user` enabled cannot have its member list owned by Terraform at all. While " +
+			"that setting is on, Anyscale automatically grants every organization member access to the cloud and " +
+			"refuses to remove a collaborator, so authoritative management is impossible rather than merely " +
+			"degraded.\n\n" +
+			"~> Worth knowing before you enable that flag: turning `auto_add_user` on for a cloud that **already** " +
+			"has organization members retroactively adds all of them as collaborators immediately, not only members " +
+			"added afterwards. Enabling it is itself a grant to everyone in the organization.\n\n" +
 			"### Not available in every organization\n\n" +
 			"~> This resource reads the cloud roles API, which returns `501` in two separate situations: an " +
 			"organization that does not have the roles feature enabled, and **any** cloud on **Azure**, where the " +
@@ -882,10 +907,10 @@ func (r *CloudAccessResource) ValidateConfig(ctx context.Context, req resource.V
 			resp.Diagnostics.AddAttributeError(
 				memberPath.AtName("projects").AtMapKey(projectID),
 				"Cloud Role Spelling Used For A Project Role",
-				fmt.Sprintf("Member %q is granted %q on project %s, but %q is a *cloud* role and Anyscale rejects it "+
-					"on a project. Did you mean %q?\n\nThe two scopes genuinely use different words: a cloud member "+
-					"is a %q, while a project collaborator is a %q. They are near-homographs for unrelated grants, "+
-					"not two spellings of one role.",
+				fmt.Sprintf("Member %q is granted %q on project %s, but a project only accepts `owner`, `write` or `readonly`, "+
+					"and Anyscale rejects %q on one. Did you mean %q?\n\nThe cloud role vocabulary this resource's "+
+					"base_role speaks uses %q; a project collaborator is a %q. They are near-homographs for unrelated "+
+					"grants, not two spellings of one role.",
 					email, cloudAccessCloudWriteRole, projectID, cloudAccessCloudWriteRole, cloudAccessProjectWriteRole,
 					cloudAccessCloudWriteRole, cloudAccessProjectWriteRole),
 			)

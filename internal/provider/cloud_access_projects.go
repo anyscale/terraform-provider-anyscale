@@ -30,6 +30,11 @@ import (
 // attempting them would produce 404s that this resource would then have to
 // misreport as failures.
 //
+// Live-confirmed rather than taken from the design record: an identity added as
+// both a cloud collaborator and a project collaborator, revoked at CLOUD scope
+// only, was gone from the project's collaborator list on the next read with no
+// project-level call made.
+//
 // The project vocabulary is also genuinely different from the cloud one: a
 // project takes owner, write or readonly, and 422s on the cloud's "writer".
 // ValidateConfig rejects that spelling at plan time.

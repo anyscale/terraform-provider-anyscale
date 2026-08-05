@@ -64,7 +64,8 @@ const cloudAccessAlreadyHasPermissionsSubstring = "already has permissions for t
 // detail is "Users cannot be removed from clouds which have auto add users
 // enabled." and the status is 409.
 //
-// Source-traced against the removal handler, not captured live. The substring is
+// LIVE-CONFIRMED against a real cloud, byte-for-byte identical to the backend
+// source trace it was first taken from. The substring is
 // the stable part of that sentence; matching the whole thing would break on a
 // reworded message, and matching less would risk a false positive.
 const cloudAccessAutoAddUserSubstring = "auto add users enabled"
