@@ -80,8 +80,9 @@ const (
 // DO NOT DELETE THIS PARAGRAPH even though it describes an absence. This claim
 // was introduced on anyscale_organization_user_role in #228, shipped, and was
 // never retracted - it reached this file by being copied from that released
-// code. Sweeps then found it in four code sites, a test that asserted it, and
-// an example comment: four surfaces, three people, one afternoon.
+// code. Sweeps then found it in four code sites, the generated docs page, a
+// test comment repeating it, and an example comment: four surfaces, three
+// people, one afternoon.
 //
 // Matched on the status text DoRequestRaw produces, since that helper does not
 // return the status code itself. Same approach as the organization-scope

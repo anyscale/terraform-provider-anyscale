@@ -145,7 +145,7 @@ func setOrganizationPermissionLevel(ctx context.Context, client *Client, identit
 //
 // DO NOT DELETE THIS PARAGRAPH even though it describes an absence. This is the
 // claim's origin file - it was copied from here onto cloud_access - so removing
-// this record is exactly what would let it come back a third time.
+// this record is exactly what would let it spread a third time.
 //
 // Matched on the status text DoRequestRaw produces, since the helper does not
 // return the status code itself.
