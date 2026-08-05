@@ -942,8 +942,44 @@ silently fighting another reconciler is not a disclosable cost — there is no p
 it, the diff reappears at intervals governed by a system outside the configuration, and the practical
 result is an operator who cannot tell whether their access policy is converged.
 
-**J.21 — a member holding only a legacy grant reads back with `base_role` null, and that is correct;
-do not repair it by deriving a role from `permission_level`.** The roles listing has no Postgres
+**J.21 — PARTIALLY FALSIFIED BY CAPTURE. Read the correction below before relying on any of it.** A
+member created through the legacy path reads back the role they held **at creation**, not null. The
+ruling's shape survives only for a member with a relational row and no authorization-service group, which
+may be a far narrower population than the common case claimed below.
+
+Confirmed live: a member added through the legacy create route alone, with no RBAC role write, appeared in
+the roles listing immediately with a base role derived from the legacy permission level. A subsequent
+legacy *alter* did not move it.
+
+**Those two observations jointly rule out the obvious explanation, which is worth stating because it
+settles the mechanism without visibility into the authorization service.** Were the roles listing falling
+back to the relational permission level at read time, the alter would have changed the derived value too,
+since the relational store did change. It did not. So the create path establishes the group and the alter
+path never revisits it. The read really is authorization-service-only, as traced; what it holds is a value
+**frozen at creation**.
+
+**Two consequences, and the second is worse than what it replaces.**
+
+- **The claim that the read-only build is non-functional on realistic clouds is withdrawn to what the
+  capture supports.** It rested on every member reading back null against a `Required` attribute. If
+  legacy-created members read back a real role, a configuration declaring that value plans empty and the
+  read-only resource serves an audit. J.18 does not depend on this — no released tag contains the resource,
+  so nothing is lost by not tagging — but the argument called the strongest one for it does not survive.
+- **J.19's drift gap gets sharper, not milder.** A null role is visibly wrong and self-heals on the first
+  apply. A role frozen at creation **looks right while being stale** after any console change, so a
+  configuration declaring the stale value shows no diff and the resource reports converged while the
+  console shows something else. That is the reports-a-compliance-it-cannot-verify failure rejected under
+  J.10, arriving by a third door.
+
+**Limits, recorded because the original ruling over-read a source trace and the correction must not repeat
+it.** One capture, one identity, a service account, created with a single permission level. Whether it
+holds for a human identity is untested, and the create-side mechanism is unexplained — the legacy create
+path traces as a relational insert with no authorization-service call. The fallback hypothesis is excluded
+by deduction from two observations rather than by its own capture.
+
+**The original ruling follows, superseded in its premise but not in its reasoning about
+derivation.** A member holding only a legacy grant reads back with `base_role` null, and that is correct;
+do not repair it by deriving a role from `permission_level`. The roles listing has no Postgres
 fallback, and both first-party administrative surfaces write only the legacy path, so this is the
 common case on a real cloud rather than an edge. `base_role` is `Required` with no `Computed`
 (`resource_cloud_access.go:296`), and the read leaves it null when the roles listing says nothing
@@ -1280,7 +1316,12 @@ the test owns and destroys. Read criteria against the static cloud are fine.
 
 **Added with J.20 and J.21**
 
-- **AC-31** *(live)* On a cloud whose members hold **only** legacy grants — no RBAC roles entry, which
+- **AC-31** *(live)* **Premise under revision — see J.21's correction.** Written on the assumption that
+  legacy-only members read back null; a legacy-*created* member reads back a role frozen at creation
+  instead, so the self-heal this criterion describes may not be the behavior to assert. Re-derive it before
+  building it: the case worth asserting is now most likely a member whose console-changed role is stale in
+  the roles listing, and whether a configuration declaring the *current* role converges in one apply. As
+  written: on a cloud whose members hold **only** legacy grants — no RBAC roles entry, which
   per J.21 is the common real-world case — the first apply converges and the second plan is empty. This
   is the self-heal, and it is the most realistic adoption path this resource has. Note that AC-2 must
   therefore be exercised against members granted through the RBAC path; run against a legacy-only cloud
