@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -72,6 +73,14 @@ type cloudAccessReconcileMock struct {
 	// failRoleWriteFor / failRevokeFor are emails whose write fails.
 	failRoleWriteFor map[string]bool
 	failRevokeFor    map[string]string
+
+	// roleReadOverrideDenyRoles, keyed by user_id, makes the roles GET report a
+	// DIFFERENT deny_roles value than what m.members actually holds - standing
+	// in for a stale/eventually-consistent read-back rather than a write bug.
+	// Used only by the read-back-must-not-touch-member regression guard: if
+	// applyCloudAccess ever read this response back into state.Member, the
+	// override value (not the plan's) would show up, and the guard would fail.
+	roleReadOverrideDenyRoles map[string][]string
 
 	// calls is every mutating request, in order, as "VERB path".
 	calls []string
@@ -191,8 +200,12 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 				if len(mem.BaseRoles) == 0 {
 					continue
 				}
+				denyRoles := mem.DenyRoles
+				if override, ok := m.roleReadOverrideDenyRoles[mem.UserID]; ok {
+					denyRoles = override
+				}
 				results = append(results, map[string]interface{}{
-					"user_id": mem.UserID, "base_roles": mem.BaseRoles, "deny_roles": mem.DenyRoles,
+					"user_id": mem.UserID, "base_roles": mem.BaseRoles, "deny_roles": denyRoles,
 				})
 			}
 			writeJSON(w, map[string]interface{}{"results": results, "metadata": emptyMeta})
@@ -1476,5 +1489,213 @@ func TestCloudAccessRevokeFailureReason(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall is AC-36: the
+// half of the fatal-grant-path story that AC-35 does not cover. AC-35
+// (TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords etc.)
+// proves the FAILED APPLY's own behavior - no error, Ungranted populated,
+// destructive phase suppressed. This test proves what happens AFTER: state
+// claims the full planned map (per AC-21a's ruling - `member` has no
+// Computed sub-fields, so applyCloudAccess must write the plan verbatim
+// even for a member whose grant failed), so the failure is invisible in
+// THAT state. It must not stay invisible forever - the next real refresh
+// has to recover it, which is what makes the following plan re-propose the
+// grant rather than silently converging on a lie.
+//
+// Chains applyCloudAccess (the AC-35 scenario, direct function call) into
+// Read (via runCloudAccessRead), the same direct-call technique
+// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned below uses -
+// the write gate stays closed throughout, since neither call goes through
+// Create/Update's refuseWriteWhileReadOnly check.
+//
+// Asserting "the refreshed member map omits the failed grant" rather than
+// running an actual Terraform plan is a deliberate proxy, not a shortcut:
+// Core has no code under test here to diff against, and the write gate
+// being closed means no real resource.Test plan step can run yet. What the
+// proxy proves is exactly what forces a non-empty plan - state no longer
+// matching what the configuration (unchanged) still declares - so the
+// grant is a live diff again, not a permanently converged omission.
+func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
+	const cloudID = "cld_grantfail_refresh"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "idn_a", UserID: "usr_a"},
+			"bob@example.com":   {IdentityID: "idn_b", UserID: "usr_b"},
+		},
+		failRoleWriteFor: map[string]bool{"bob@example.com": true},
+	}
+	client := cloudAccessTestClient(t, mock.handler(t, cloudID))
+
+	// STEP 1: apply a config declaring both alice and bob. alice's grant
+	// succeeds against the backend; bob's fails and is rolled back (the same
+	// AC-35 shape forge's reconcile-level tests already cover) - confirmed
+	// against the backend below, not assumed.
+	plan := &CloudAccessResourceModel{
+		ID:                  types.StringValue(cloudID),
+		CloudID:             types.StringValue(cloudID),
+		AllowEmptyMemberSet: types.BoolValue(false),
+		Timeouts:            timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "update": types.StringType, "delete": types.StringType})},
+		Member: cloudAccessMemberMap(map[string]attr.Value{
+			"alice@example.com": cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+			"bob@example.com":   cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+		}),
+	}
+	declaredMember := plan.Member // saved before applyCloudAccess can touch plan
+
+	r := &CloudAccessResource{client: client}
+	ctx := context.Background()
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	applyState := tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), nil)}
+
+	var applyDiags diag.Diagnostics
+	r.applyCloudAccess(ctx, plan, types.MapNull(cloudAccessMemberObjectType()), &applyState, &applyDiags)
+	if applyDiags.HasError() {
+		t.Fatalf("the apply itself must not error on a grant failure (AC-35): %v", applyDiags)
+	}
+	if _, ok := mock.members["bob@example.com"]; ok {
+		t.Fatalf("precondition failed: bob's grant should have failed and rolled back, but the backend has him: %v", mock.memberEmails())
+	}
+	if mem, ok := mock.members["alice@example.com"]; !ok || len(mem.BaseRoles) == 0 {
+		t.Fatalf("precondition failed: alice's grant should have succeeded against the backend: %v", mock.memberEmails())
+	}
+
+	var postApply CloudAccessResourceModel
+	if diags := applyState.Get(ctx, &postApply); diags.HasError() {
+		t.Fatalf("failed to read back the post-apply state: %v", diags)
+	}
+	if _, ok := postApply.Member.Elements()["bob@example.com"]; !ok {
+		t.Fatalf("AC-21a precondition failed: post-apply state must still claim bob (the full planned map), or this test isn't exercising the shortfall AC-36 is about")
+	}
+
+	// STEP 2: refresh. The backend genuinely never granted bob, so a
+	// refresh reading the real member-search must recover THAT truth,
+	// diverging from what the (still-error-free, per AC-21a) apply claimed.
+	refreshed, readDiags := runCloudAccessRead(t, client, &postApply)
+	if readDiags.HasError() {
+		t.Fatalf("unexpected error refreshing: %v", readDiags)
+	}
+
+	if _, stillClaimed := refreshed.Member.Elements()["bob@example.com"]; stillClaimed {
+		t.Errorf("the refresh still reports bob@example.com as a member - the failed grant's shortfall did not " +
+			"surface, so a plan against the unchanged config (which still declares bob) would show no diff and " +
+			"silently never retry the grant")
+	}
+	// Control: alice's real, successful grant must survive the refresh
+	// unchanged - otherwise this test could not distinguish "the refresh
+	// correctly reports reality" from "the refresh drops everyone".
+	if _, present := refreshed.Member.Elements()["alice@example.com"]; !present {
+		t.Fatalf("control failed: alice's real grant did not survive the refresh - this test's own assertion above proves nothing without it")
+	}
+
+	// The declared config (unchanged from step 1) still names bob - the
+	// comparison that would drive a real plan's diff, made explicit here
+	// since no live Terraform plan step can run while the write gate is
+	// closed.
+	if _, stillDeclared := declaredMember.Elements()["bob@example.com"]; !stillDeclared {
+		t.Fatalf("test setup error: the declared config must still name bob for the re-propose claim to mean anything")
+	}
+}
+
+// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned is AC-21b,
+// converted from a diagnostic test into a regression guard rather than
+// closed outright (design record ed5a176): its original purpose - catching
+// a read-back that diverges from the plan on `deny_roles` - is moot today,
+// because applyCloudAccess (resource_cloud_access.go:744-769) never reads
+// `member` back on any path, full stop. But nothing would fail if a future
+// edit reintroduced one, and four other decisions (AC-21a/c, the grant-path
+// fix, the general read-back rule) rest on that prohibition holding. This
+// test is what would catch it.
+//
+// The mock's roles GET is overridden to report a DIFFERENT deny_roles value
+// (cloud_read_only) than the plan declares - an EMPTY, DECLARED list, the
+// narrowest input that distinguishes "wrote the plan verbatim" from "wrote
+// something read back", per architect's own framing of the original AC-21b.
+// If applyCloudAccess ever read that response into plan.Member, the
+// override value would appear in state and the assertion below would fail.
+//
+// Mutation-proven: temporarily reintroducing a read-back write to
+// plan.Member inside applyCloudAccess (mirroring the pre-fix shape) makes
+// this test fail with the override's value instead of the plan's; reverting
+// restores the pass. Not left in the tree - the guard is the permanent
+// artifact, the mutation was the proof it works.
+func TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned(t *testing.T) {
+	const cloudID = "cld_apply_guard"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "ide_alice", UserID: "usr_alice"},
+		},
+		roleReadOverrideDenyRoles: map[string][]string{
+			"usr_alice": {cloudAccessReadOnlyDenyRole},
+		},
+	}
+
+	plan := &CloudAccessResourceModel{
+		ID:                  types.StringValue(cloudID),
+		CloudID:             types.StringValue(cloudID),
+		AllowEmptyMemberSet: types.BoolValue(false),
+		Timeouts:            timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "update": types.StringType, "delete": types.StringType})},
+		Member: cloudAccessMemberMap(map[string]attr.Value{
+			"alice@example.com": cloudAccessMember("writer", cloudAccessDenyRoles(), cloudAccessNoProjects()),
+		}),
+	}
+
+	client := cloudAccessTestClient(t, mock.handler(t, cloudID))
+	r := &CloudAccessResource{client: client}
+
+	ctx := context.Background()
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	rawType := schemaResp.Schema.Type().TerraformType(ctx)
+	state := tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(rawType, nil)}
+
+	var diags diag.Diagnostics
+	r.applyCloudAccess(ctx, plan, types.MapNull(cloudAccessMemberObjectType()), &state, &diags)
+	if diags.HasError() {
+		t.Fatalf("unexpected error applying a config this mock should accept cleanly: %v", diags)
+	}
+
+	var got CloudAccessResourceModel
+	if diags := state.Get(ctx, &got); diags.HasError() {
+		t.Fatalf("failed to read back the state applyCloudAccess wrote: %v", diags)
+	}
+
+	elems := got.Member.Elements()
+	aliceVal, ok := elems["alice@example.com"]
+	if !ok {
+		t.Fatalf("state.Member is missing alice@example.com entirely: %v", elems)
+	}
+	aliceObj, ok := aliceVal.(types.Object)
+	if !ok {
+		t.Fatalf("alice@example.com is not an object: %#v", aliceVal)
+	}
+	denyRolesVal := aliceObj.Attributes()["deny_roles"]
+	denyRolesList, ok := denyRolesVal.(types.List)
+	if !ok {
+		t.Fatalf("alice@example.com's deny_roles is not a list: %#v", denyRolesVal)
+	}
+	if denyRolesList.IsNull() {
+		t.Errorf("alice@example.com's deny_roles came back null - the plan declared it as an empty list, not " +
+			"never-declared, and a null here means SOMETHING wrote a value other than the plan's")
+	}
+	if got := len(denyRolesList.Elements()); got != 0 {
+		t.Errorf("alice@example.com's deny_roles has %d entries, want 0 (the plan's empty list) - a non-empty "+
+			"result matching the mock's override (%v) means applyCloudAccess read the roles GET back into "+
+			"state instead of writing the plan verbatim, which is exactly the regression this guard exists to catch",
+			got, []string{cloudAccessReadOnlyDenyRole})
 	}
 }
