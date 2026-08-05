@@ -1493,6 +1493,21 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   Prove it with a mock returning a `next_paging_token`, and mutation-prove it by removing the paging
   loop: a test that passes with the loop gone has not tested this.
 
+  **Met at mock level, with a live gap that is stated rather than closed.** The committed tests drive real
+  response envelopes including `next_paging_token`, and separately pin the split transport — `count` and
+  `paging_token` in the query string, the filter in the JSON body — against someone "simplifying" the
+  pagination into the body, which is the change that would silently truncate. What no test establishes is the
+  **real** endpoint's token semantics: whether a token is returned when a page is exactly full, whether it is
+  opaque, whether it expires. The live runs used clouds with a handful of members, so the loop never followed
+  a token against the real API.
+  
+  Closing it needs a cloud with more than 50 members, since the fixed request now asks for the maximum page
+  size — impractical to construct on an ephemeral cloud, so it stays a recorded limitation. The consequence
+  if the real semantics differ: a **silently incomplete member list**, which for an authoritative resource
+  means its authority claim is quietly false rather than loudly broken. The direction is at least the safer
+  one — members past the boundary are never seen, so they are not revoked — but "we did not revoke them
+  because we could not see them" is not the guarantee this resource advertises.
+
 ## Wire-shape facts the read path depends on
 
 Recorded separately from the rulings because these are properties of the API rather than decisions,
