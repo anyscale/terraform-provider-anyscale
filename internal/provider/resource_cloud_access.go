@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -218,6 +219,14 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 								"Note `write` here, not `writer` - the project vocabulary and the cloud vocabulary " +
 								"genuinely differ. `writer` on a project is rejected at plan time with a did-you-mean, " +
 								"rather than left to fail as an API error partway through an apply.\n\n" +
+								"~> **Authority here is scoped to the projects you name.** This resource is authoritative " +
+								"over these project roles and no others: a role dropped from this map is revoked, but a role " +
+								"granted out of band on a project no configuration mentions is invisible to Terraform and is " +
+								"left alone. That is deliberate - reading every project under the cloud would mean adopting " +
+								"this resource silently took ownership of projects you never mentioned.\n\n" +
+								"A consequence worth knowing after `terraform import`: an imported resource names no " +
+								"projects, so none are in scope and this attribute comes back `null` even for a member who " +
+								"holds project roles. Declaring them brings them into scope on the first apply.\n\n" +
 								"Keyed by project **ID** rather than name, even though `member` is keyed by email: " +
 								"project names are not reliably unique across an organization's clouds, so a name would " +
 								"not identify one project. This resource therefore spans three identifier namespaces - " +
@@ -241,7 +250,11 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 					"was granted but cannot be revoked, and it is not detectable before attempting the revoke.\n\n" +
 					"The apply still converges rather than failing, because one unrevokable member would " +
 					"otherwise block the whole set forever. Alert on this: `length(anyscale_cloud_access.x." +
-					"unmanaged_grants) > 0` means someone has access Terraform intends them not to have.",
+					"unmanaged_grants) > 0` means someone has access Terraform intends them not to have.\n\n" +
+					"~> **This lists only revokes that were attempted.** It covers every member of the cloud, but at " +
+					"project scope only the projects your configuration names - a grant on a project this resource " +
+					"never manages is not attempted, not failed, and so never appears here. An empty list means " +
+					"nothing in scope failed, not that nobody holds access outside that scope.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"email": schema.StringAttribute{
@@ -394,7 +407,13 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 		visible = append(visible, m)
 	}
 
-	memberMap, diags := cloudAccessMembersToState(ctx, visible, state.Member)
+	projectRoles, projectDiags := r.readScopedProjectRoles(ctx, state.Member)
+	resp.Diagnostics.Append(projectDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	memberMap, diags := cloudAccessMembersToState(ctx, visible, state.Member, projectRoles)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -527,7 +546,38 @@ func (r *CloudAccessResource) applyCloudAccess(
 		return
 	}
 
-	memberMap, convDiags := cloudAccessMembersToState(ctx, remote, plan.Member)
+	// The caller is excluded here for the same reason Read excludes them, and
+	// missing it here would be worse: state written by an apply that included the
+	// caller contradicts the plan directly, which Core rejects outright as
+	// "provider produced inconsistent result after apply".
+	//
+	// The identity is re-resolved rather than threaded down from the reconcile, so
+	// that this stays correct if the write-back is ever reached by another path. A
+	// failure to resolve it degrades to a warning rather than failing an apply that
+	// has already made its changes - unlike Read, there is nothing to retry here.
+	visible := remote
+	if caller, callerErr := fetchCloudAccessCallerIdentity(ctx, r.client); callerErr == nil {
+		visible = make([]cloudAccessRemoteMember, 0, len(remote))
+		for _, m := range remote {
+			if caller.matches(m) {
+				continue
+			}
+			visible = append(visible, m)
+		}
+	} else {
+		diags.AddWarning(
+			"Could Not Confirm The Calling Identity After Applying",
+			fmt.Sprintf("The changes to cloud %s were applied, but the identity Terraform is authenticated as could not "+
+				"be resolved for the read-back: %s\n\nIf that identity is a member of this cloud it may appear in state, "+
+				"which the next plan will propose removing and this resource will decline to remove. Re-run the plan; a "+
+				"successful refresh corrects it.", cloudID, extractAPIErrorDetail(callerErr)),
+		)
+	}
+
+	// nil project roles: an apply refuses a configuration that declares project
+	// roles, so nothing is in scope to read back. This becomes a real read when the
+	// project write path lands.
+	memberMap, convDiags := cloudAccessMembersToState(ctx, visible, plan.Member, nil)
 	diags.Append(convDiags...)
 	if convDiags.HasError() {
 		return
@@ -810,7 +860,12 @@ func cloudAccessMemberType() attr.Type {
 // an undeclared member, so authoritative mode can act on it. Dropping the member
 // instead - the intuitive reading of "we cannot represent this" - would hide an
 // existing member from the one resource whose job is to know the whole set.
-func cloudAccessMembersToState(ctx context.Context, remote []cloudAccessRemoteMember, priorMember types.Map) (types.Map, diag.Diagnostics) {
+func cloudAccessMembersToState(
+	ctx context.Context,
+	remote []cloudAccessRemoteMember,
+	priorMember types.Map,
+	projectRoles map[string]map[string]string,
+) (types.Map, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	// Prior entries are looked up case-INSENSITIVELY. Email identity is not
@@ -866,20 +921,51 @@ func cloudAccessMembersToState(ctx context.Context, remote []cloudAccessRemoteMe
 			denyRoles = list
 		}
 
-		// PROJECT ROLES ARE NOT REFRESHED. They are carried over from prior state
-		// unchanged, and land null on import.
+		// PROJECT ROLES ARE REFRESHED, BUT ONLY WITHIN SCOPE. This resource is
+		// authoritative over the projects the configuration NAMES, not over every
+		// project under the cloud - so the read covers exactly the projects already
+		// present in state for this member, and nothing else.
 		//
-		// This is a deliberate interim contract, not an oversight, and it has a real
-		// cost: a project role changed outside Terraform is not detected, so drift
-		// at project scope is invisible. Refreshing it needs one call per project
-		// under the cloud on every read - there is no list-collaborators-for-a-cloud
-		// endpoint - and whether to pay that, gate it, or accept the blind spot is
-		// an open decision. Carrying prior state forward is the only interim that
-		// does not manufacture a permanent phantom diff: projects is plain Optional,
-		// so a read that nulled a declared value would show a change on every plan.
+		// The alternative, enumerating every project under the cloud, was rejected on
+		// authority rather than cost: adopting this resource would then silently take
+		// ownership of projects the practitioner never mentioned, and strip roles on
+		// them. A disclosed blind spot beats an ownership escalation discovered
+		// during an apply.
+		//
+		// What the scope costs, stated so it is not mistaken for a bug: a role granted
+		// out of band on a project no configuration names is invisible here. What it
+		// does NOT cost is drift detection on declared projects - a role dropped from
+		// one of those is read as absent and revoked, which is the whole point.
+		//
+		// A cold import has no prior state, so nothing is in scope and projects lands
+		// null. The first apply against a configuration that declares project roles
+		// then writes them and brings them into scope.
 		projects := types.MapNull(types.StringType)
-		if hadPrior {
-			projects = priorEntry.Projects
+		if hadPrior && !priorEntry.Projects.IsNull() && !priorEntry.Projects.IsUnknown() {
+			inScope := priorEntry.Projects.Elements()
+			current := make(map[string]attr.Value, len(inScope))
+			for projectID := range inScope {
+				roles, read := projectRoles[projectID]
+				if !read {
+					// Not read this pass. Carrying the prior value is the only safe
+					// choice: reporting the role as absent would have an authoritative
+					// apply revoke access on the strength of a project it never looked at.
+					current[projectID] = inScope[projectID]
+					continue
+				}
+				level, held := roles[m.UserID]
+				if !held {
+					// Genuinely gone. Omitted rather than carried, so the drift shows.
+					continue
+				}
+				current[projectID] = types.StringValue(level)
+			}
+			projectMap, projectDiags := types.MapValue(types.StringType, current)
+			diags.Append(projectDiags...)
+			if diags.HasError() {
+				return types.MapNull(cloudAccessMemberType()), diags
+			}
+			projects = projectMap
 		}
 
 		obj, objDiags := types.ObjectValue(
@@ -1092,4 +1178,63 @@ func (r *CloudAccessResource) refuseDeclaringTheCaller(ctx context.Context, plan
 		)
 		return
 	}
+}
+
+// readScopedProjectRoles reads the collaborators of every project already named
+// in state, across all members, and returns them keyed by project then user_id.
+//
+// The union across members rather than per-member, because the same project
+// commonly appears under several of them and it is one request either way.
+//
+// Returns a nil map when nothing is in scope, which is the ordinary case for a
+// freshly imported resource and for any configuration that declares no project
+// roles. A nil map is not an error and is not the same as "read and found
+// nothing": cloudAccessMembersToState distinguishes the two, because a project
+// that was never read must keep its prior value rather than be reported absent.
+func (r *CloudAccessResource) readScopedProjectRoles(ctx context.Context, member types.Map) (map[string]map[string]string, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if member.IsNull() || member.IsUnknown() {
+		return nil, diags
+	}
+
+	entries := make(map[string]CloudAccessMemberModel, len(member.Elements()))
+	diags.Append(member.ElementsAs(ctx, &entries, false)...)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	seen := make(map[string]bool)
+	var projectIDs []string
+	for _, m := range entries {
+		if m.Projects.IsNull() || m.Projects.IsUnknown() {
+			continue
+		}
+		for projectID := range m.Projects.Elements() {
+			if seen[projectID] {
+				continue
+			}
+			seen[projectID] = true
+			projectIDs = append(projectIDs, projectID)
+		}
+	}
+	if len(projectIDs) == 0 {
+		return nil, diags
+	}
+	sort.Strings(projectIDs)
+
+	roles, err := cloudAccessProjectRoles(ctx, r.client, projectIDs)
+	if err != nil {
+		// An unreadable project is an ERROR, not a skipped entry. Silently omitting
+		// it would report its roles as absent, and for an authoritative resource
+		// "absent" is an instruction to revoke - so a transient read failure would
+		// become a real revoke on the next apply.
+		diags.AddError(
+			"Could Not Read Project Roles",
+			fmt.Sprintf("This resource refreshes the project roles it manages, and one of those projects could not be "+
+				"read: %s\n\nState is left unchanged. Reporting the roles as absent instead would make the next apply "+
+				"revoke them.", extractAPIErrorDetail(err)),
+		)
+		return nil, diags
+	}
+	return roles, diags
 }

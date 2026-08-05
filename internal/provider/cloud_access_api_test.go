@@ -334,7 +334,7 @@ func TestCloudAccessMembersToState_BaseRoleCount(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, diags := cloudAccessMembersToState(ctx, []cloudAccessRemoteMember{{
 				Email: "member@example.com", UserID: "usr_1", IdentityID: "idn_1", BaseRoles: tc.baseRoles,
-			}}, types.MapNull(cloudAccessMemberType()))
+			}}, types.MapNull(cloudAccessMemberType()), nil)
 			if diags.HasError() {
 				t.Fatalf("unexpected error: %v", diags)
 			}
@@ -417,7 +417,7 @@ func TestCloudAccessMembersToState_DenyRolesShape(t *testing.T) {
 
 			got, convDiags := cloudAccessMembersToState(ctx, []cloudAccessRemoteMember{{
 				Email: email, UserID: "usr_1", BaseRoles: []string{"writer"}, DenyRoles: tc.remote,
-			}}, prior)
+			}}, prior, nil)
 			if convDiags.HasError() {
 				t.Fatalf("unexpected error: %v", convDiags)
 			}
@@ -442,12 +442,12 @@ func TestCloudAccessMembersToState_DenyRolesShape(t *testing.T) {
 // TestCloudAccessMembersToState_CarriesProjectsAcrossEmailCasing covers two
 // things at once, both about prior state rather than the wire.
 //
-// Project roles are not refreshed - they are carried across from prior state -
+// Project roles for a project that was NOT read this pass are carried across
+// from prior state - the nil projectRoles argument below is exactly that case -
 // so this is the test that fails if a future change starts building the member
-// map from the API alone without also populating projects. That is a real
-// hazard: it would silently discard every project grant on the next refresh,
-// and for an authoritative write, state that has forgotten a project role is
-// state that revokes it.
+// map from the API alone. That is a real hazard: it would silently discard a
+// project grant the read never looked at, and for an authoritative write, state
+// that has forgotten a project role is state that revokes it.
 //
 // The prior lookup is also case-INSENSITIVE, because email identity is not
 // case-sensitive to Anyscale. An exact-match lookup would treat the API's
@@ -468,7 +468,7 @@ func TestCloudAccessMembersToState_CarriesProjectsAcrossEmailCasing(t *testing.T
 
 	got, convDiags := cloudAccessMembersToState(ctx, []cloudAccessRemoteMember{{
 		Email: "alice@example.com", UserID: "usr_1", BaseRoles: []string{"writer"},
-	}}, prior)
+	}}, prior, nil)
 	if convDiags.HasError() {
 		t.Fatalf("unexpected error: %v", convDiags)
 	}
@@ -496,7 +496,7 @@ func TestCloudAccessMembersToState_ProjectsNullWithoutPriorState(t *testing.T) {
 
 	got, diags := cloudAccessMembersToState(ctx, []cloudAccessRemoteMember{{
 		Email: "new@example.com", UserID: "usr_1", BaseRoles: []string{"writer"},
-	}}, types.MapNull(cloudAccessMemberType()))
+	}}, types.MapNull(cloudAccessMemberType()), nil)
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
@@ -504,5 +504,101 @@ func TestCloudAccessMembersToState_ProjectsNullWithoutPriorState(t *testing.T) {
 	entry := cloudAccessStateEntry(t, ctx, got, "new@example.com")
 	if !entry.Projects.IsNull() {
 		t.Errorf("projects came out as %v, want null", entry.Projects)
+	}
+}
+
+// TestCloudAccessMembersToState_RefreshesProjectRolesInScope covers the scoped
+// project refresh, which is where this resource's project authority begins and
+// ends.
+//
+// The resource is authoritative over the projects the configuration NAMES, not
+// over every project under the cloud. Enumerating them all was rejected on
+// authority rather than cost: adopting the resource would then silently take
+// ownership of projects nobody mentioned. What the scope must still do is detect
+// drift on the projects it does own, which is the first case below - and the case
+// a "carry prior state forward" implementation would fail.
+func TestCloudAccessMembersToState_RefreshesProjectRolesInScope(t *testing.T) {
+	ctx := context.Background()
+	const email = "member@example.com"
+
+	priorWith := func(t *testing.T, roles map[string]string) types.Map {
+		t.Helper()
+		projects, diags := types.MapValueFrom(ctx, types.StringType, roles)
+		if diags.HasError() {
+			t.Fatalf("building the fixture failed: %v", diags)
+		}
+		return cloudAccessPriorMap(t, map[string]attr.Value{
+			email: cloudAccessStateMember(t, "writer", types.ListNull(types.StringType), projects),
+		})
+	}
+
+	for _, tc := range []struct {
+		name         string
+		prior        map[string]string
+		projectRoles map[string]map[string]string
+		want         map[string]string
+	}{
+		{
+			// The whole point of refreshing at all. A role revoked outside Terraform
+			// on a project the configuration names must read as absent, so the next
+			// apply re-grants it - a carried-forward value would hide it forever.
+			name:         "a role dropped outside Terraform is reported absent",
+			prior:        map[string]string{"prj_1": "write"},
+			projectRoles: map[string]map[string]string{"prj_1": {}},
+			want:         map[string]string{},
+		},
+		{
+			name:         "a role changed outside Terraform reports the current value",
+			prior:        map[string]string{"prj_1": "write"},
+			projectRoles: map[string]map[string]string{"prj_1": {"usr_1": "readonly"}},
+			want:         map[string]string{"prj_1": "readonly"},
+		},
+		{
+			// A project that was not read keeps its prior value. Reporting it absent
+			// would have an authoritative apply revoke access on the strength of a
+			// project the refresh never looked at - the one outcome worse than not
+			// detecting drift.
+			name:         "a project that was not read keeps its prior value",
+			prior:        map[string]string{"prj_1": "write"},
+			projectRoles: map[string]map[string]string{},
+			want:         map[string]string{"prj_1": "write"},
+		},
+		{
+			// Roles read on a project nobody declared are ignored, not adopted. This
+			// is the authority boundary, asserted rather than assumed.
+			name:  "a role on an undeclared project is not adopted",
+			prior: map[string]string{"prj_1": "write"},
+			projectRoles: map[string]map[string]string{
+				"prj_1":          {"usr_1": "write"},
+				"prj_undeclared": {"usr_1": "owner"},
+			},
+			want: map[string]string{"prj_1": "write"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, diags := cloudAccessMembersToState(ctx, []cloudAccessRemoteMember{{
+				Email: email, UserID: "usr_1", BaseRoles: []string{"writer"},
+			}}, priorWith(t, tc.prior), tc.projectRoles)
+			if diags.HasError() {
+				t.Fatalf("unexpected error: %v", diags)
+			}
+
+			entry := cloudAccessStateEntry(t, ctx, got, email)
+			if entry.Projects.IsNull() {
+				t.Fatalf("projects came out null; prior state named projects, so the value must be a map even when it is empty")
+			}
+			var gotRoles map[string]string
+			if convDiags := entry.Projects.ElementsAs(ctx, &gotRoles, false); convDiags.HasError() {
+				t.Fatalf("reading the projects map failed: %v", convDiags)
+			}
+			if len(gotRoles) != len(tc.want) {
+				t.Fatalf("got %v, want %v", gotRoles, tc.want)
+			}
+			for projectID, want := range tc.want {
+				if gotRoles[projectID] != want {
+					t.Errorf("project %s came out as %q, want %q (full map %v)", projectID, gotRoles[projectID], want, gotRoles)
+				}
+			}
+		})
 	}
 }

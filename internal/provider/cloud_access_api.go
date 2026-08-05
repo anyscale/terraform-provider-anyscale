@@ -237,3 +237,52 @@ func cloudAutoAddUserEnabled(ctx context.Context, client *Client, cloudID string
 	}
 	return cloudResp.Result.AutoAddUser, nil
 }
+
+// listProjectCollaborators pages through GET
+// /projects/{project_id}/collaborators/users.
+//
+// One call per project, because there is no endpoint that lists project
+// collaborators for a whole cloud. That cost is what makes this resource's
+// project-role authority SCOPED: it reads the projects the configuration names
+// rather than every project under the cloud.
+//
+// Cheaper than it first looks - the response is a list of collaborators per
+// project, so the cost is one request per project, never one per
+// (project, member).
+func listProjectCollaborators(ctx context.Context, client *Client, projectID string) ([]ProjectCollaboratorResult, error) {
+	return PaginatedRequest(
+		ctx, client, fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil,
+		func(body []byte) ([]ProjectCollaboratorResult, *string, error) {
+			var listResp ProjectCollaboratorListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse project collaborators response: %w", err)
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
+	)
+}
+
+// cloudAccessProjectRoles maps each requested project to the roles held on it,
+// keyed by the collaborator's user_id.
+//
+// A project that cannot be read is reported in the error rather than silently
+// omitted: an unreadable project's roles would otherwise look like roles that no
+// longer exist, which for an authoritative resource reads as "revoke these".
+func cloudAccessProjectRoles(ctx context.Context, client *Client, projectIDs []string) (map[string]map[string]string, error) {
+	out := make(map[string]map[string]string, len(projectIDs))
+	for _, projectID := range projectIDs {
+		collaborators, err := listProjectCollaborators(ctx, client, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("reading collaborators of project %s: %w", projectID, err)
+		}
+		byUserID := make(map[string]string, len(collaborators))
+		for _, c := range collaborators {
+			if c.Value.ID == "" {
+				continue
+			}
+			byUserID[c.Value.ID] = c.PermissionLevel
+		}
+		out[projectID] = byUserID
+	}
+	return out, nil
+}
