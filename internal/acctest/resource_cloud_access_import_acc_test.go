@@ -60,21 +60,33 @@ import (
 // persists legitimately, the premise survives all three steps, and the
 // converge-and-record path (unmanaged_grants) gets exercised too.
 //
-// SECOND, SEPARATE HAZARD - NOT ASSERTED HERE, AND A FUTURE TEST MUST COVER IT.
-// A cloud with auto_add_user=true hard-blocks member removal: the backend
-// returns 409 CONFLICT, "Users cannot be removed from clouds which have auto
-// add users enabled" (product backend cloud_collaborators_service.py:540-544).
-// An authoritative resource cannot function on such a cloud - it can add but
-// never revoke, which is precisely the guarantee it exists to make. The
-// ruling is that anyscale_cloud_access must REFUSE on an
-// auto_add_user=true cloud rather than silently degrade to add-only, since
-// add-only authority is authority in name only. No assertion here because the
-// behavior is not implemented yet. Note carefully for whoever writes that
-// test: this mock's cloud object carries auto_add_user=false and its revoke
-// path never 409s, and a mock that IGNORES auto_add_user would pass happily
-// against a resource that 409s in reality - the same mock-omission shape that
-// let the mount_targets bug ship green. The auto_add_user test must set the
-// flag true on the cloud AND make the revoke path 409, or it proves nothing.
+// SECOND, SEPARATE HAZARD - NOT ASSERTED HERE, AND UNIT-COVERED BUT NOT YET
+// ACCEPTANCE-COVERED. A cloud with auto_add_user=true hard-blocks member
+// removal: the backend returns 409 CONFLICT, "Users cannot be removed from
+// clouds which have auto add users enabled" (product backend
+// cloud_collaborators_service.py:540-544). An authoritative resource cannot
+// function on such a cloud - it can add but never revoke, which is precisely
+// the guarantee it exists to make. The ruling is that anyscale_cloud_access
+// must REFUSE on an auto_add_user=true cloud rather than silently degrade to
+// add-only, since add-only authority is authority in name only.
+//
+// This IS implemented (RefuseWhenAutoAddUserEnabled, cloud_access_reconcile.go)
+// and unit-covered by TestReconcileCloudAccess_AutoAddUserBlocksRevokes and
+// TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser, which set the
+// flag true on a mock cloud AND make the revoke path 409, per J.9. Unit-level
+// is the current ceiling only because the write gate (cloudAccessWriteEnabled)
+// is closed - Create and Update cannot run through the real resource at all
+// yet. AC-9 requires this refusal proven through the real resource once the
+// gate opens; that acceptance coverage is still owed and belongs in this file
+// or a sibling, not assumed satisfied by the unit tests above.
+//
+// No assertion here because this fixture's mock cloud carries
+// auto_add_user=false and its revoke path never 409s - a mock that ignores
+// auto_add_user would pass happily against a resource that 409s in reality,
+// the same mock-omission shape that let the mount_targets bug ship green.
+// Whoever writes the AC-9 acceptance test needs a mock cloud with
+// auto_add_user=true AND a revoke path that actually 409s, or it proves
+// nothing.
 
 const (
 	cloudAccessMockCloudID = "cld_cloudaccess_import_mock"

@@ -145,6 +145,13 @@ This exists because an empty `member` map is usually an accident - a `for_each` 
 ### Read-Only
 
 - `id` (String) The ID of the cloud whose access this resource manages. Same value as `cloud_id`.
+- `ungranted_members` (Attributes List) Members this apply could not grant the declared role, and why. Populated when a grant fails partway through an apply - the configuration asked for this access and this resource was not able to establish it.
+
+The apply still converges rather than failing, because erroring after another member's grant already succeeded would leave this resource's state tainted - the next apply would then destroy and recreate it, revoking every member this one DID manage to grant. Alert on this: `length(anyscale_cloud_access.x.ungranted_members) > 0` means someone is missing access this configuration says they should have.
+
+~> **When this is non-empty, this apply also skipped every revoke it would otherwise have attempted** - see `unmanaged_grants` for who that affects, recorded there with a reason naming the skip. A grant shortfall is treated as too dangerous a moment to also remove access.
+
+~> **State for the affected member(s) still shows the values this apply planned, not what was actually granted**, since writing anything else would itself produce an inconsistent-result error. The next `terraform plan` after a refresh shows the true gap and retries it. (see [below for nested schema](#nestedatt--ungranted_members))
 - `unmanaged_grants` (Attributes List) Grants this resource could not revoke, and why. Populated when an undeclared member could not be removed - the Anyscale API can reach a state where a role was granted but cannot be revoked, and it is not detectable before attempting the revoke.
 
 The apply still converges rather than failing, because one unrevokable member would otherwise block the whole set forever. Alert on this: `length(anyscale_cloud_access.x.unmanaged_grants) > 0` means someone has access Terraform intends them not to have.
@@ -174,6 +181,16 @@ Note `write` here, not `writer` - the project vocabulary and the cloud vocabular
 A consequence worth knowing after `terraform import`: an imported resource names no projects, so none are in scope and this attribute comes back `null` even for a member who holds project roles. Declaring them brings them into scope on the first apply.
 
 Keyed by project **ID** rather than name, even though `member` is keyed by email: project names are not reliably unique across an organization's clouds, so a name would not identify one project. This resource therefore spans three identifier namespaces - cloud ID, member email, project ID - each the stable key for what it addresses.
+
+
+<a id="nestedatt--ungranted_members"></a>
+### Nested Schema for `ungranted_members`
+
+Read-Only:
+
+- `email` (String) Email of the member whose grant could not be established.
+- `project_id` (String) Project the grant applies to, or null when it is the cloud-level grant.
+- `reason` (String) What the API reported when the grant was attempted.
 
 
 <a id="nestedatt--unmanaged_grants"></a>

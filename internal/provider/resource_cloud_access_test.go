@@ -130,6 +130,7 @@ func cloudAccessConfigModel(member types.Map) CloudAccessResourceModel {
 		AllowEmptyMemberSet: types.BoolValue(false),
 		Member:              member,
 		UnmanagedGrants:     types.ListNull(cloudAccessUnmanagedGrantObjectType()),
+		UngrantedMembers:    types.ListNull(cloudAccessUnmanagedGrantObjectType()),
 	}
 }
 
@@ -174,6 +175,16 @@ func runCloudAccessValidateConfig(t *testing.T, model CloudAccessResourceModel) 
 func cloudAccessFindError(diags diag.Diagnostics, summary string) diag.Diagnostic {
 	for _, d := range diags {
 		if d.Severity() == diag.SeverityError && d.Summary() == summary {
+			return d
+		}
+	}
+	return nil
+}
+
+// cloudAccessFindWarning is cloudAccessFindError's warning-severity twin.
+func cloudAccessFindWarning(diags diag.Diagnostics, summary string) diag.Diagnostic {
+	for _, d := range diags {
+		if d.Severity() == diag.SeverityWarning && d.Summary() == summary {
 			return d
 		}
 	}
