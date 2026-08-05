@@ -1488,8 +1488,21 @@ the test owns and destroys. Read criteria against the static cloud are fine.
 
 **Drift**
 
-- **AC-26** *(live)* An out-of-band grant made through the roles path is detected on refresh and
-  revoked on the next apply.
+- **AC-26** *(live)* **CONFIRMED.** An out-of-band grant made through the roles path is detected on refresh
+  and revoked on the next apply.
+
+  **This does not contradict J.19's blind spot, and the two must never be stated as independent claims.**
+  AC-26 exercises a write through the **RBAC roles** path; J.19 concerns a write through the **legacy** path
+  the CLI and console use. Both are true. A document asserting "drift detection is live-verified" in one
+  section and "drift has a privilege-escalation blind spot" in another invites a reader to conclude one is
+  wrong — and the one they will distrust is the warning. Say it in a single sentence with the path named in
+  each half: changes made through the RBAC roles API are detected, live-confirmed; changes made through the
+  legacy path are not, except when they cross the read-only boundary.
+
+  A note on how this was nearly proven backwards. The first version of the test used `RefreshState: true`,
+  which asserts that a subsequent plan is **empty**. A drift test built on it would have passed by proving
+  the opposite of its own name — no drift detected, criterion marked met, evidence meaning the reverse of the
+  claim. `PlanOnly` with `ExpectNonEmptyPlan` is the correct shape. Caught before the result was trusted.
 - **AC-27** **Conditional on J.19.** An out-of-band role change made through the legacy
   `permission_level` path — which is what the CLI and console actually write — is detected on refresh.
   If J.19 establishes that cloud scope carries the organization-scope read/write split, this criterion
