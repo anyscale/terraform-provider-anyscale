@@ -1237,6 +1237,27 @@ regression, confirm the test fails, revert byte-clean. This is repeated here bec
 prevents has occurred on this exact surface: a `mount_targets` import test passed only because its
 mock omitted the field the fix concerned.
 
+*The write gate is a release mechanism, not a test barrier.* The five live-required criteria cannot run
+while `cloudAccessWriteEnabled` is false, and the gate cannot come off until they pass — a genuine circular
+dependency. It breaks by flipping the gate as a **local uncommitted edit**, running the criteria, and
+reverting: nothing about the gate's purpose requires that no build ever have writes enabled, only that no
+merged or tagged build have them enabled before the evidence exists. Deliberately not a branch commit,
+which can be merged by accident, and deliberately not an environment-variable or build-tag override, which
+is a mechanism that can itself ship accidentally enabled — strictly worse than the problem it solves. The
+run's log is a **precondition** for merging the flip, not a follow-up to it.
+
+*A criterion proved once by a human run is not ongoing protection.* These tests depend on an opt-in
+identity variable that makes them skip cleanly when unset — correct design, since pointing a destructive
+authoritative test at a borrowed identity is worse than skipping. But if that variable is unset in CI, the
+five skip forever there, and every later change to this resource shows green with the live write path
+unexercised. Record which it is. If unset, the honest follow-up is a scheduled job rather than a
+per-PR one, and the criteria are a one-time proof until that exists. **Marking a criterion "met" invites
+the reader to assume a pipeline re-checks it.**
+
+*Names must match the CI shard regex or the test silently never runs.* The acceptance shard matches
+`TestAcc` + letters + `Resource`; a name omitting the `Resource` suffix neither runs nor fails. This bit
+this repository already, on the very tests that established the Core-taint finding.
+
 *Live write coverage never runs against the shared static cloud.* An authoritative `Create` revokes
 every undeclared member, and that fixture's member list plausibly includes real identities including
 whoever is running the tests. Write criteria require a freshly created cloud whose entire member set
