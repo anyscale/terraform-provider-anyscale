@@ -134,18 +134,32 @@ member set (anyone undeclared is revoked); `cloud_user_role` is authoritative ov
 `cloud_user_role` manages, on `cloud_user_role`'s very next apply — the two cannot safely coexist
 once `cloud_access` is actually wired up. This follows directly from the authority-model section
 above; it is recorded here as its own ruling because it does not arise from anything PR #228 itself
-changed — `cloud_user_role` is untouched by that PR, and as of this writing it remains registered
-in `provider.go` while `cloud_access` remains schema-and-validation-only. The conflict is latent,
-not yet live: it becomes real the moment `cloud_access`'s reconcile lands and it is registered.
+changed — `cloud_user_role` is untouched by that PR.
 
-**Ruling: `anyscale_cloud_user_role` is removed outright in the same release that registers
-`anyscale_cloud_access`, rather than deprecated for a cycle.** A deprecation window only helps if
-both resources can coexist safely for a time, and here they cannot — leaving `cloud_user_role`
-usable alongside a registered `cloud_access` ships a silent-revoke footgun rather than a graceful
-transition. This is a second breaking change for a resource that shipped new in v0.24.0, only
-shortly before; the changelog fragment for the removal should say plainly that the shape was
-corrected against the real authority-model conflict before wide adoption, rather than left to
-harden.
+**Ruling: `anyscale_cloud_user_role` is removed outright rather than deprecated for a cycle.** A
+deprecation window only helps if both resources can coexist safely for a time, and here they cannot
+— leaving `cloud_user_role` usable alongside a registered `cloud_access` ships a silent-revoke
+footgun rather than a graceful transition. This is a second breaking change for a resource that
+shipped new in v0.24.0, only shortly before; the changelog fragment for the removal should say
+plainly that the shape was corrected against the real authority-model conflict before wide adoption,
+rather than left to harden.
+
+**Amendment (2026-08-04): the removal shipped *before* the replacement, deliberately departing from
+this ruling's original "in the same release that registers `anyscale_cloud_access`" timing.** The
+removal landed as PR #259 (`ab2c3b5`) while `cloud_access` is still unregistered and still refuses
+every CRUD call. This was chosen over both "remove when the replacement lands" and "deprecate first",
+conditional on the replacement not being close to done — a condition that was measured rather than
+estimated at the time and held (schema and validation only; zero API calls in
+`resource_cloud_access.go`; no `ImportState`).
+
+Record the consequence rather than the preference, because it is the part that affects users: there
+is now a window in which the provider cannot manage cloud-scoped roles **at all**. Combined with the
+`anyscale_project` `collaborator` removal at v0.25.0, three of the four steps in the ordinary
+new-member journey — grant a cloud, grant a project, revoke either — have no provider surface during
+this window. Only adding a member to the organization with a role still works. Anything written
+against that window's provider version (release notes, the RBAC guide's resource table, a migration
+answer) is correct only until `cloud_access` registers, and must be revisited then rather than left
+to read as durable prose.
 
 ## The `deny_roles` naming ruling
 
@@ -214,6 +228,201 @@ than surface as a confusing apply-time failure:
    projects.** Anything else 422s — this is a genuine cross-field constraint spanning a member's
    cloud deny roles and their project roles, and it is the concrete reason projects live inside
    members rather than in a sibling resource.
+
+## Reconcile rulings for `anyscale_cloud_access`
+
+These govern the unbuilt reconcile. They are recorded here, rather than only alongside the
+implementation, because every one of them is a decision about user-facing behavior that outlives
+whatever code first expresses it.
+
+**J.10 — authority over projects is scoped to those named in configuration.** `anyscale_cloud_access`
+is authoritative over the cloud's **whole member set** but only over the **config-named subset** of
+each member's project roles. The schema's own wording already points this way, describing `member` as
+"the **complete** set" and `projects` as no such thing.
+
+The wider alternative — authoritative over every project under the cloud — was originally rejected on
+cost, and that argument is the weaker of the two available. It is O(projects × pages) on every plan
+and every apply and grows with the cloud rather than with the configuration, which is a real recurring
+expense but one a determined implementer can always argue is affordable. **The stronger objection is
+authority surprise.** Under the wider scope, adopting `anyscale_cloud_access` to manage a cloud's
+membership silently takes ownership of every project beneath that cloud, so the resource would strip
+project roles the practitioner never mentioned anywhere in their configuration. That is a
+categorically larger claim than "these are the members of this cloud", and the two costs land
+differently: the narrower scope's blindness is *disclosed in documentation*, while the wider scope's
+escalation is *discovered during an apply*. Prefer the failure a reader can be warned about.
+
+Two consequences, both of which must reach the resource page rather than living here:
+
+- A project role granted out-of-band on a project no configuration names is **invisible** to
+  Terraform. This is the accepted cost of the narrower scope, not an oversight.
+- `unmanaged_grants.project_id` therefore covers only config-named projects, and the attribute's
+  description must not imply broader coverage.
+
+**The `projects` read follows from J.10: read the projects named in configuration and in prior
+state, and no others.** Reading only config-named projects would make a dropped project entry
+unobservable and so unrevokable; reading every project under the cloud is the scope J.10 rejected.
+The union is the smallest read that keeps both grant and revoke working, and its cost is bounded by
+configuration size rather than by the cloud's project count. Two shape facts this rests on, each
+confirmed against working provider code rather than assumed: the per-project collaborator endpoint
+returns a **list** of collaborators, so the read is O(projects) and never O(projects × members); and
+projects under a cloud can be listed with a single `parent_cloud_id`-filtered request rather than a
+client-side sweep.
+
+Two alternatives were considered and rejected on their consequences rather than their cost, and both
+rejections generalize:
+
+- **An import-only frozen snapshot** would make the provider report a compliance it cannot verify —
+  a clean plan against a configuration that claims authority, while reality has diverged. The
+  precedent it appears to follow (the cloud config blocks, which are deliberately not
+  Read-refreshed) exists to avoid a specific "provider produced inconsistent result after apply"
+  failure that does **not** apply here, because `projects` is a plain attribute rather than a
+  framework Block. Borrowing a workaround's shape without inheriting its cause is a recurring error
+  in this provider's history.
+- **Gating the read behind an opt-in** would make `terraform import` populate differently depending
+  on a flag. If cost ever forces a gate, it must gate the resource's declared *scope* — and reject
+  `projects` being set at all under that gate — never silently reduce read fidelity while the
+  configuration still declares project roles.
+- **Leaving `projects` unread and preserving whatever prior state held** is not available at all,
+  and the reason is a schema consequence worth stating on its own: because `projects` is plain
+  `Optional` with no `Computed`, a `Read` that leaves it null against a configuration that declares
+  it produces a **permanent phantom diff** — plan wants to set it, apply sets it, the next `Read`
+  nulls it again. `Read` therefore cannot decline to populate this attribute. Any future proposal to
+  economize on this read has to satisfy that constraint first.
+
+**Detection and authority are separable, and the wider scope conflates them.** The one real thing the
+narrower scope gives up is the ability to *notice* an out-of-band grant on an undeclared project.
+That does not require taking authority over those projects: a read-only surfacing — a `Computed`
+attribute listing undeclared project grants, or a data source — reports the drift without claiming
+the right to revoke it. This is the preferred route if the blindness ever proves unacceptable in
+practice, both because it avoids the authority escalation and because adding a `Computed` attribute
+is additive where widening authority is not. Recorded here so that "we need to detect out-of-band
+project grants" does not automatically get read as "we need the wider scope."
+
+**Open, and a user decision rather than an engineering one: whether dropping a project entry from a
+member revokes that project role.** The schema as committed already implies yes — `projects` is
+plain `Optional` with no `Computed`, which is Terraform's shape for "configuration wins, omission
+means absent" — and a no answer would leave the provider able to grant a project role but never
+remove one. It is nonetheless recorded as open because it is data-loss-shaped, and because it is
+*not* the same question as the settled member-set authority above. Note the asymmetry that makes it
+worth asking rather than assuming: `deny_roles` is also plain `Optional`, so omitting it removes a
+**restriction** and fails toward more access, while omitting `projects` removes a **grant** and fails
+toward less. One structural rule, opposite blast directions.
+
+**J.2 — the caller's own identity is excluded from the authoritative set, resolved via
+`GET /api/v2/userinfo`.** Never grant, revoke, or record it. The alternatives fail on their
+consequences: recording it in `unmanaged_grants` permanently occupies the alarm the schema itself
+recommends users watch, and an alarm that is always on is not an alarm; refusing to run when the
+caller is a member of the cloud refuses the near-universal case, since the token running Terraform is
+usually a collaborator on the cloud it manages and often its owner. `userinfo` is already this
+provider's established route to connection-level identity, so this reuses a pattern rather than
+introducing one. The exclusion is the single stated exception to "anyone not declared is revoked" and
+belongs on the resource page in those terms, not in a code comment.
+
+**J.5 — ordering within an apply: narrow first, then add, then remove.** Project drops and role
+changes on retained members run before adds; revokes run last. The residual window is that a member
+slated for removal keeps access while new members are being added — over-privilege for someone the
+*prior* state already granted, never a grant nobody intended. That is the correct trade against
+leaving a cloud transiently ownerless if an apply dies partway through.
+
+**J.7 — `base_role = "owner"` combined with `deny_roles = ["cloud_read_only"]` is a plan-time
+error.** The backend rejects the combination outright, it is checkable from configuration alone, and
+the whole reason projects nest inside members is to turn this class of failure into a plan-time error
+rather than a confusing mid-apply one. Implement it as a targeted equality test against the literal
+`owner`, **not** as an enum validator — `base_role` deliberately carries no `OneOf` because the roles
+API is actively extended, and a closed enum would reject a new backend role until the next provider
+release.
+
+**J.9 — on a cloud with `auto_add_user` enabled, `Create` and `Update` refuse; `Delete` does not.**
+The flag structurally blocks every revoke, so the resource cannot honor its authority claim there.
+Refusing uniformly is a contract statement rather than a per-apply judgment: a resource that works
+only when a given apply happens not to need a revoke is harder to reason about than one that refuses.
+`Delete` is the deliberate exception, because refusing it would strand the resource in state with no
+exit but `terraform state rm` — attempt the revokes, record every failure, and name the real remedy
+(disable the flag on the cloud, then retry).
+
+**J.3 — run the membership bootstrap unconditionally, including on a role-only change.** The
+narrower reading, that a bootstrap buys nothing when only a role changes, may well be correct on the
+mechanics. It is deferred to anyway, because "reasoning that the bootstrap was unnecessary here" is
+the move a prior design record in this repo identifies as its own most consequential mistake, and the
+rule that mistake produced is explicit: never skip it on the strength of what a search appears to
+show. The asymmetry of costs settles it — being wrong toward an extra call costs one absorbed
+conflict response per member per apply; being wrong the other way costs a user an unrepairable grant
+whose only exit is `terraform state rm`.
+
+**Batch endpoints are not used.** Their all-or-nothing validation is hostile to per-member
+partial-failure recording, there is no batch roles write to begin with, and batching only the
+membership half saves N−1 of 2N calls while making the failure mode strictly worse.
+
+**Every `unmanaged_grants` entry also emits a warning naming the email and the reason.** The schema's
+argument against a warning as the *only* channel — warnings recur on every plan and get scrolled past
+— is not an argument against having both. The attribute is the machine-readable alarm; the warning is
+what stops the very first apply from looking clean.
+
+**Feature gating: two independent flags, and a 501 that does not say which one is off.** The removed
+per-user resource carried this warning verbatim, and it transfers unchanged: the feature is gated
+behind two separately-controlled backend flags, one for reading roles and one for writing them; if
+either is off, operations fail as an HTTP 501, and the provider cannot detect it ahead of time short
+of trying. Because the read and write paths return the *identical* 501 detail string from
+*different* flags, a 501 alone does not tell an operator which half is disabled — so the message must
+name both possibilities. `anyscale_cloud_access` does not currently carry any version of this
+warning and must gain one before it registers.
+
+## Verification still owed before the reconcile is built
+
+Nothing in the reconcile rulings above has been confirmed against a live API or a real Terraform
+run; all of it is source-traced or derived. The design-verification policy in `CLAUDE.md` requires
+both gates at design-confirmation time, so these are listed as owed work rather than as background
+detail.
+
+**Live API shape:**
+
+1. The cloud member-search response shape, and whether it is genuinely unpaginated. A suspected
+   paging defect, where response metadata is computed from unfiltered rows, needs confirming or
+   ruling out: if real, `total` can never be trusted and paging must follow tokens to exhaustion.
+2. Whether a legacy-only collaborator — one who has never had a roles entry — appears in the roles
+   listing at all. If they can be absent, the roles listing alone cannot enumerate the member set and
+   the membership search becomes mandatory rather than supplementary.
+3. Whether the identity ID returned by the organization-collaborator listing is the same identity the
+   **project** collaborator write and delete endpoints match against. The cloud-scope delete already
+   ships on this assumption; the project endpoints are new to this design and inherit nothing.
+4. J.3's underlying question: does the membership bootstrap conflict for a roles-write-only user, or
+   does it repair the missing membership edge?
+5. The exact error envelope of the `auto_add_user` conflict, byte-for-byte, so that fixtures match
+   what the API really sends rather than what a fixture author expected.
+6. **Whether the cloud-scope roles endpoints are unconditionally 501 on Azure deployments.** This was
+   asserted while drafting the reconcile rulings and is **not** substantiated: the two-flag warning
+   recovered from the removed resource says nothing about Azure, and the flag name does not appear in
+   the backend service paths where such a gate would live. Treat "this resource cannot function on an
+   Azure cloud" as unverified. It matters disproportionately because, if true, it belongs on the
+   resource page rather than in a footnote.
+
+**Framework and Core contract**, each needing a real `resource.Test` rather than a unit test, since
+framework source describes the mechanism without revealing every constraint Core enforces:
+
+1. Whether Core persists a state written via `resp.State` *before* an error return, in `Create`,
+   `Update`, and `Delete`. The partial-failure recording that `unmanaged_grants` depends on is built
+   entirely on this being true, and it is the item most likely to surprise — this repo's recorded
+   precedent is a design that read correctly in framework source and was rejected outright by Core at
+   plan time.
+2. That a `Computed` list-of-objects left unknown genuinely fails. Run the mutation; do not assume it
+   from the schema comment asserting it.
+3. That partial `member` writes followed by a full write on success do not trip "provider produced
+   inconsistent result after apply".
+
+**A committed fixture hazard, recorded because its evidence no longer exists.** The import
+acceptance test for this resource pins the HTTP methods it expects on four routes, and two of those
+four were identified as wrong. The correction was derived from the per-user resource that PR #259
+deleted, so the source that substantiated it is gone from the working tree. Do **not** correct that
+route list from this document, from memory, or from the deleted file's history: confirm all four
+against the live API as part of item 1 above, which is now the only remaining source of truth for
+them. The general lesson the finding carried is worth keeping — pinning a route in a comment is not
+verifying it, and a permissive mock will happily serve routes the real API does not expose.
+
+Separately, that fixture's premise no longer holds. It depends on an undeclared, pre-existing member
+surviving all three of its steps, which authoritative `Create` now revokes at step one. Rework the
+fixture rather than weakening the resource to preserve it; the cleanest rework makes that member's
+revoke *fail* in the mock, so it legitimately persists through `unmanaged_grants` and the fixture
+keeps testing what it was written to test while also exercising the converge-and-record path.
 
 ## Other rulings worth citing by name
 
