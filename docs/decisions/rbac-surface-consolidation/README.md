@@ -43,8 +43,35 @@ they reuse the **same** words for **different** things. Four instances, all now 
    possible cloud `base_role` values (an unrelated concept), and the Anyscale console's own display
    name for the legacy `write` permission level.
 2. **Project `write` and cloud `writer` are not the same role**, despite being near-homographs, and
-   the typo trap runs in one direction: the cloud role's real spelling is `writer`, but a project
-   only accepts `write` — sending `writer` to a project 422s.
+   the typo trap runs in one direction: a project only accepts `write` — sending `writer` to a
+   project 422s.
+
+   **Correction (2026-08-04): "cloud versus project" names the wrong axis, and this entry said so
+   for months.** There are **three** role vocabularies on this surface, not two:
+
+   1. Cloud **roles** `base_role`, on the roles write — `owner`, `writer`, `collaborator`,
+      `project_viewer`, `compute_config_viewer`, `workload_operator`.
+   2. Cloud **legacy** `permission_level`, on the membership write — `owner`, `write`, `readonly`.
+   3. Project `permission_level` — `owner`, `write`, `readonly`.
+
+   So (2) and (3) share a *spelling* while (1) and (2) share a *scope*. Splitting the world into
+   "cloud" and "project" therefore picks the wrong axis and makes `write` at cloud scope look like
+   an error when it is a legal legacy value. A validator or diagnostic here should state what a
+   **project** accepts rather than assert what `writer` is.
+
+   This has a direct consequence worth recording: a symmetric validator — one that rejected `write`
+   as a cloud `base_role` the way it rejects `writer` as a project role — would reject working
+   configurations. The decision not to make it symmetric was originally argued from `base_role`
+   having no `OneOf`; it turns out to be load-bearing for a stronger reason than the one given.
+
+   The six values in (1) are confirmed rather than asserted: `CloudBaseRole` in the backend model
+   and the published `openapi.json` enum agree exactly, including order. `CloudDenyRole` likewise
+   has exactly one member, `cloud_read_only`, so that is the **complete** set rather than merely the
+   only value currently known — which is a stronger claim than the schema currently makes and the
+   page may as well make it. One detail is source-only and cannot be confirmed from the published
+   schema because it is a comment: the enum's iteration order is contractual and fixes the order of
+   `base_roles` in list responses, which means a member holding more than one cannot produce a
+   spurious diff from reordering.
 3. **Project `readonly` and cloud `cloud_read_only` are different kinds of thing, not just
    different spellings.** Project `readonly` is a whole permission tier, on equal footing with
    `owner` and `write`. Cloud `cloud_read_only` is a **deny role** — a restriction layered on a
@@ -394,14 +421,17 @@ Two implementation constraints that are part of the ruling rather than detail:
   guard does: `ValidateConfig` can run before the provider is configured, so the client may be nil
   there and the caller unresolvable.
 - If the caller cannot be resolved, **skip the check without erroring, and do not treat the skip as a
-  pass.** The reconcile's own exclusion is what actually prevents lockout; the plan-time error is
-  only the friendly early warning, and an unresolvable identity must not become a hard failure.
+  pass.** The reconcile's own exclusion is what keeps the alarm usable; the plan-time error is only
+  the friendly early warning, and an unresolvable identity must not become a hard failure. Nothing
+  here is protecting against a lockout — the backend refuses self-removal on its own, as recorded
+  above — so a skipped check costs a good error message, not safety.
 
-**State on the resource page that the excluded identity is token-dependent.** This is a self-lockout
-guard, not a protected-persons list. Whoever runs an apply is safe during that apply; a colleague who
-ran it last week and is not declared in configuration remains revokable, which is correct and is the
-resource's whole contract. Left unstated, "the caller is excluded" reads as "anyone who has run
-Terraform is permanently safe," which is both false and dangerous to rely on.
+**State on the resource page that the excluded identity is token-dependent.** It is scoped to
+whoever runs a given apply, not a protected-persons list. Whoever runs an apply has their identity
+excluded during that apply; a colleague who ran it last week and is not declared in configuration
+remains revokable, which is correct and is the resource's whole contract. Left unstated, "the caller
+is excluded" reads as "anyone who has run Terraform is permanently safe," which is both false and
+dangerous to rely on.
 
 A subtler alternative was considered and rejected: `Read` could report the caller only when prior
 state already contains them, which is implementable because `Read` does have `State`, and which
