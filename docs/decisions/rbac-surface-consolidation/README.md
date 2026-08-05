@@ -888,6 +888,46 @@ here, because granting it access to an *ephemeral* cloud and revoking it again i
 touches no organization-level role. Its documentation sits under the organization-user tests and does not
 announce itself as usable for cloud scope, which is why the next person would make the same call.
 
+**J.22 revised — the preflight is a best-effort early warning, not a guarantee, and the reconcile
+carries the real protection.** The first version of this ruling assumed a readable field could predict
+the refusal. None can, and the reason generalizes.
+
+The backend guard that raises the refusal checks **organization-owner managed-group membership in the
+authorization service** — not the `is_admin` column on the permissions table, and not any relational
+role field. That signal is subject to the same read/write split confirmed under J.19: legacy
+`permission_level` writes touch the relational store only. So a member promoted through the legacy path
+is absent from the group and the backend does **not** refuse them, while a member in the group whose
+`permission_level` later changed relationally still trips the refusal. The second direction is the
+damaging one, and its mechanism is a confirmed fact on this surface rather than a hypothetical.
+
+Three parts follow:
+
+1. **The preflight is best-effort by construction.** This must be stated in the code and in the
+   documentation, because a guard *described* as a guarantee is worse than one described as a courtesy:
+   it discourages writing the reconcile defensively, which is where the actual protection lives.
+2. **Use the proxy whose staleness matches the target's.** `base_role` from the **singular**
+   organization-collaborator GET is read from the same store as the group membership, so the two go
+   stale *together* against a legacy `permission_level` write — which is exactly the property a proxy
+   needs. The relational listing's `permission_level` drifts against the real signal instead. **The
+   field's known defect is what makes it the right choice here**, and an earlier instruction in this
+   round said the opposite for the opposite question: the right source depends on which store the thing
+   being predicted lives in. Do not substitute the `is_admin` column, which is at best redundant and
+   possibly a stale migration-era backfill.
+3. **A refusal arriving mid-apply must remain visible on the next plan.** This is where two standing
+   rules appear to collide — never error after a successful write, and never silently fail to apply what
+   configuration declared — and visibility resolves it. For the affected member, state must not claim a
+   grant that did not happen: if it does, the next plan is empty and the failure is lost permanently.
+   **That constraint outranks writing the full planned map for that member**, and it is the part that
+   protects a practitioner, since it needs no knowledge of who is an admin. It interacts with AC-21b and
+   the two must be settled together, not separately.
+
+**A live confirmation of the group-membership signal was proposed and deliberately declined.** Both
+available forms require temporarily promoting an identity to organization owner, which is a real
+privilege escalation on a real organization and is not covered by the standing real-infrastructure
+authorization — that covers clouds and what they provision, and a disposable test identity does not make
+organization ownership disposable. It was declined on value rather than only on cost: under part 1 the
+capture could only sharpen a warning, while part 3 needs no such knowledge at all.
+
 **Do not create service accounts a test cannot delete.** No `api/v2` delete path for them was found, and
 they do not appear in the organization-collaborator search, so one leaks per run — which is worse than
 leaking once. If a delete path exists only through the CLI, drive cleanup through the CLI rather than
