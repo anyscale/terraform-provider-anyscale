@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -52,6 +53,18 @@ func (b *cloudAccessMockBackend) handler(t *testing.T, cloudID string) http.Hand
 	// answer a request that no longer resembles the real one.
 	mux.HandleFunc(fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/search", cloudID),
 		func(w http.ResponseWriter, r *http.Request) {
+			// Enforces the real endpoint's live-confirmed cap (count > 50 -> 422)
+			// rather than silently accepting anything, the way this mock did before
+			// count=100 shipped and 422'd unconditionally on every real cloud - a
+			// mock that ignores the cap is exactly what let that regression pass
+			// green. See cloudAccessAssertsSearchCountWithinLimit below.
+			if count := r.URL.Query().Get("count"); count != "" {
+				if n, err := strconv.Atoi(count); err == nil && n > 50 {
+					w.WriteHeader(http.StatusUnprocessableEntity)
+					_, _ = w.Write([]byte(`{"error": {"detail": "query.count: ensure this value is less than or equal to 50"}}`))
+					return
+				}
+			}
 			body, _ := io.ReadAll(r.Body)
 			b.searchRequests = append(b.searchRequests, r)
 			b.searchBodies = append(b.searchBodies, string(body))
@@ -237,6 +250,45 @@ func TestListCloudAccessMembers_ErrorsOnACollaboratorWithNoEmail(t *testing.T) {
 	_, err := listCloudAccessMembers(context.Background(), cloudAccessTestClient(t, backend.handler(t, cloudID)), cloudID)
 	if err == nil {
 		t.Fatal("expected an error: a member with no email cannot be keyed, matched against config, or revoked, and silently skipping it would understate the member list an authoritative write acts on")
+	}
+}
+
+// TestListCloudAccessMembers_SearchCountWithinRealEndpointLimit is the
+// regression test for a live-confirmed bug: searchCloudCollaborators sent
+// count=100, but the real endpoint rejects any count above 50 with a 422 -
+// unconditionally, on the very first request, on every cloud. Read and
+// Import on this ENTIRE resource 422'd outright from the moment #260 merged,
+// and nothing caught it because the mock (before this test) echoed back
+// whatever count was sent instead of enforcing the real cap. This test
+// exercises the real helper against a mock that DOES enforce the cap, so a
+// future regression back to a too-high count fails loudly here rather than
+// only in a live acceptance run.
+func TestListCloudAccessMembers_SearchCountWithinRealEndpointLimit(t *testing.T) {
+	const cloudID = "cld_countcap"
+
+	backend := &cloudAccessMockBackend{
+		searchPages: [][]map[string]interface{}{{cloudAccessCollaborator("idn_1", "usr_1", "alice@example.com")}},
+		rolePages:   [][]map[string]interface{}{{cloudAccessRoles("usr_1", []string{"writer"}, nil)}},
+	}
+
+	_, err := listCloudAccessMembers(context.Background(), cloudAccessTestClient(t, backend.handler(t, cloudID)), cloudID)
+	if err != nil {
+		t.Fatalf("unexpected error - if this fails with a 422 mentioning count, searchCloudCollaborators regressed to "+
+			"sending more than the real endpoint's 50-per-page limit: %v", err)
+	}
+	if len(backend.searchRequests) == 0 {
+		t.Fatal("the search endpoint was never called")
+	}
+	count := backend.searchRequests[0].URL.Query().Get("count")
+	if count == "" {
+		t.Fatal("the search request sent no count query parameter")
+	}
+	n, err := strconv.Atoi(count)
+	if err != nil {
+		t.Fatalf("count query parameter %q is not a number: %v", count, err)
+	}
+	if n > 50 {
+		t.Errorf("count=%d exceeds the real endpoint's confirmed maximum of 50", n)
 	}
 }
 

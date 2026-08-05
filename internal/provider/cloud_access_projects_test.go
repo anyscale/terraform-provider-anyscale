@@ -312,3 +312,42 @@ func TestApplyProjectRoles_PriorCloudGrantFailureSkipsProjectRevokesToo(t *testi
 		t.Errorf("expected the revoke recorded as skipped: %+v", unmanaged)
 	}
 }
+
+// TestCloudAccessUnplannedProjectShortfall covers the safe fallback when the
+// project pass could not even be planned (a read failure before
+// planProjectRoles could run, most likely J.13's own timeout firing after
+// cloud-scope grants already succeeded). It must over-report rather than
+// under-report: every declared project role becomes ungranted, and every
+// previously-declared-but-now-dropped one becomes unmanaged, with no overlap
+// between the two channels for the same (email, project) pair.
+func TestCloudAccessUnplannedProjectShortfall(t *testing.T) {
+	desired := map[string]cloudAccessDesiredMember{
+		"alice@example.com": projectMember("alice@example.com", map[string]string{"prj_keep": "write"}),
+	}
+	prior := map[string]map[string]string{
+		"alice@example.com": {"prj_keep": "write", "prj_dropped": "write"},
+		"bob@example.com":   {"prj_bob": "readonly"},
+	}
+	cascaded := map[string]bool{"bob@example.com": true}
+
+	unmanaged, ungranted := cloudAccessUnplannedProjectShortfall(desired, prior, cascaded, "read timed out")
+
+	if len(ungranted) != 1 || ungranted[0].Email.ValueString() != "alice@example.com" ||
+		ungranted[0].ProjectID.ValueString() != "prj_keep" {
+		t.Fatalf("expected exactly one ungranted entry (alice/prj_keep), got: %+v", ungranted)
+	}
+	if len(unmanaged) != 1 || unmanaged[0].Email.ValueString() != "alice@example.com" ||
+		unmanaged[0].ProjectID.ValueString() != "prj_dropped" {
+		t.Fatalf("expected exactly one unmanaged entry (alice/prj_dropped), got: %+v", unmanaged)
+	}
+	// bob is cascaded (his cloud-scope revoke already handles his project roles),
+	// so he must appear in NEITHER channel.
+	for _, e := range append(append([]CloudAccessUnmanagedGrantModel{}, unmanaged...), ungranted...) {
+		if e.Email.ValueString() == "bob@example.com" {
+			t.Errorf("cascaded member bob@example.com must not appear in either channel: %+v / %+v", unmanaged, ungranted)
+		}
+	}
+	if !strings.Contains(ungranted[0].Reason.ValueString(), "read timed out") {
+		t.Errorf("expected the reason to be carried through: %s", ungranted[0].Reason.ValueString())
+	}
+}

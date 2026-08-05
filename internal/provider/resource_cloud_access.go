@@ -7,7 +7,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -19,6 +21,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// defaultCloudAccessTimeout bounds one Create/Update/Delete reconcile,
+// including every per-write retry J.13 permits (at most 3 attempts per write,
+// exponential backoff capped at cloudAccessRetryMaxBackoff). 5 minutes gives
+// real headroom even for a large member map with several retried transient
+// failures, while still being a real bound rather than an unbounded reconcile.
+const defaultCloudAccessTimeout = 5 * time.Minute
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
 //
@@ -159,12 +168,13 @@ type CloudAccessResource struct {
 
 // CloudAccessResourceModel maps the resource schema.
 type CloudAccessResourceModel struct {
-	ID                  types.String `tfsdk:"id"`
-	CloudID             types.String `tfsdk:"cloud_id"`
-	AllowEmptyMemberSet types.Bool   `tfsdk:"allow_empty_member_set"`
-	Member              types.Map    `tfsdk:"member"`
-	UnmanagedGrants     types.List   `tfsdk:"unmanaged_grants"`
-	UngrantedMembers    types.List   `tfsdk:"ungranted_members"`
+	ID                  types.String   `tfsdk:"id"`
+	CloudID             types.String   `tfsdk:"cloud_id"`
+	AllowEmptyMemberSet types.Bool     `tfsdk:"allow_empty_member_set"`
+	Member              types.Map      `tfsdk:"member"`
+	UnmanagedGrants     types.List     `tfsdk:"unmanaged_grants"`
+	UngrantedMembers    types.List     `tfsdk:"ungranted_members"`
+	Timeouts            timeouts.Value `tfsdk:"timeouts"`
 }
 
 // CloudAccessMemberModel is one entry of the member map, keyed by email.
@@ -194,14 +204,20 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage " +
 			"them through Terraform. Cloud-scoped role management has no writable provider surface until that " +
 			"lands.\n\n" +
-			"**What this version is for: drift detection.** Declare the member list you expect, and `terraform plan` " +
-			"reports any difference between your configuration and reality - it simply cannot correct one yet. Import " +
-			"a cloud, write out its members, and a clean plan then means the cloud's member list and the project " +
-			"roles you declared are still exactly what you wrote.\n\n" +
+			"**What this version is for: drift detection - within limits stated plainly below, not assumed.** " +
+			"Declare the member list you expect, and `terraform plan` reports any difference between your " +
+			"configuration and reality it can actually see - it simply cannot correct one yet.\n\n" +
 			"Read the scope limits on `member`, `projects` and `unmanaged_grants` before relying on that, though - a " +
-			"clean plan is not the same as \"nobody has access you did not intend\". Organization admins are invisible " +
-			"to the endpoint this reads, your own identity is excluded, and project roles are compared only for the " +
-			"projects your configuration names.\n\n" +
+			"clean plan is not the same as \"nobody has access you did not intend\", and it is not even proof " +
+			"nothing has changed out of band. Organization admins are invisible to the endpoint this reads, your " +
+			"own identity is excluded, project roles are compared only for the projects your configuration names, " +
+			"and - the sharpest limit - an administrator can change a member's role through the Anyscale console or " +
+			"CLI without this resource noticing at all. That legacy path writes through a different store than the " +
+			"one this resource reads, so a member promoted from `writer` to `owner` through the console reads back " +
+			"exactly as declared and plans clean, while actually holding a different role. The one direction this " +
+			"resource CAN see is a change crossing the `cloud_read_only` restriction specifically - see " +
+			"`deny_roles` below. Read a clean plan as confirmation of what this resource was able to check, not as " +
+			"confirmation of the member's actual role.\n\n" +
 			"That is also why `member` is Required on a resource that cannot write: handing over the full expected " +
 			"member list is not busywork here, it is the thing being compared against.\n\n" +
 			"~> **This resource is designed to be authoritative, and that is not yet in effect.** When the write " +
@@ -209,6 +225,13 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"will be **revoked** - including people granted access through the Anyscale console, and including on " +
 			"the **first** apply. None of that happens in this version. It is stated here so the behavior is not a " +
 			"surprise when it arrives; read this page again before you first apply a change with it.\n\n" +
+			"~> **Two Computed attributes track write-path shortfalls once it ships, and they mean OPPOSITE " +
+			"things.** `unmanaged_grants` is someone who still has access this configuration says they should not " +
+			"have (a revoke that could not complete). `ungranted_members` is someone who lacks access this " +
+			"configuration says they should have (a grant that could not complete). Neither ever influences " +
+			"planning - both are diagnostics only, alertable via `length(...) > 0`, and a shortfall in either one " +
+			"still lets the apply converge rather than fail, since erroring after another member's change already " +
+			"succeeded would taint this resource's state and schedule a destructive retry.\n\n" +
 			"### `auto_add_user` and this resource are mutually exclusive\n\n" +
 			"~> A cloud with `auto_add_user` enabled cannot have its member list owned by Terraform at all. While " +
 			"that setting is on, Anyscale automatically grants every organization member access to the cloud and " +
@@ -221,6 +244,27 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"additions and unblocks removal. So a cloud that has ever had `auto_add_user` enabled starts out with your " +
 			"whole organization on its member list, and the first apply that takes authority over it revokes everyone " +
 			"the configuration does not declare. Review that plan carefully.\n\n" +
+			"### A cloud carrying a group policy binding is a third structural refusal\n\n" +
+			"~> Alongside `auto_add_user` and an empty `member` map, a cloud with a group policy binding (set via " +
+			"the Anyscale Policy API, for example `anyscale policy set --resource-type cloud`) refuses `Create` and " +
+			"`Update` once the write path ships. A separate, asynchronous system flattens group membership into " +
+			"this cloud's ordinary member list - the same rows this resource reads, with nothing marking their " +
+			"origin - so an authoritative apply cannot tell a group-derived member from a manually granted one and " +
+			"would revoke it. That system may then silently re-grant the same member later, on its own schedule, " +
+			"entirely outside this configuration: permanent non-convergence against a controller this resource " +
+			"cannot see or express, not a one-time undisclosed revoke. `Delete` is the deliberate exception - it " +
+			"still attempts and records, the same asymmetry `auto_add_user` has, because refusing a destroy would " +
+			"strand the resource in state with no exit but `terraform state rm`.\n\n" +
+			"~> Detecting a binding is best-effort, not a guarantee - the check itself may be inconclusive (this " +
+			"endpoint is BETA and commonly returns 403 for a token that is not an organization admin), in which " +
+			"case this resource warns and proceeds rather than refusing on suspicion alone.\n\n" +
+			"### One Terraform state per cloud, and this resource cannot check\n\n" +
+			"~> Two `anyscale_cloud_access` instances - in the same configuration, or in two entirely separate " +
+			"ones - managing the same `cloud_id` revoke each other's members indefinitely, and BOTH report success " +
+			"on every apply: one grants Alice and revokes Bob, the other grants Bob and revokes Alice, and neither " +
+			"ever converges. This resource cannot detect it, because it cannot see another Terraform state. Manage " +
+			"each cloud's member list from exactly one `anyscale_cloud_access` instance - this is the price of " +
+			"authority, stated here because the failure otherwise gives an operator no signal at all.\n\n" +
 			"### Not available in every organization\n\n" +
 			"~> This resource reads the cloud roles API, which returns `501` in organizations that do not have " +
 			"that feature enabled. Reading roles and writing them are gated by **two separate feature flags** which " +
@@ -232,8 +276,12 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"never read, so they appear **nowhere** in plan output. This is the one sharp edge on this resource that " +
 			"plan review genuinely cannot catch. The `for_each` warning below *is* plan-reviewable; this is not.\n\n" +
 			"The worst realistic case: a cloud owner who is **not** an organization admin can be revoked on the " +
-			"first apply. Organization admins happen to be safe, but only by accident of plumbing - they are " +
-			"invisible to the endpoint this resource reads, so it cannot revoke what it cannot see.\n\n" +
+			"first apply, with no protection but reviewing the plan before it runs. Organization admins are safe in " +
+			"BOTH directions, and deliberately rather than by accident of plumbing: they are invisible to the " +
+			"endpoint this resource reads, so it cannot revoke what it cannot see, and once the write path ships, " +
+			"declaring one in `member` is a plan-time error (see the organization-admin note on `member` below) - " +
+			"backed by the API itself independently refusing to change an organization admin's role at all. Two " +
+			"different mechanisms landing on the same guarantee, not a coincidence to rely on.\n\n" +
 			"Your own identity is excluded entirely: the identity Terraform authenticates as is never reported as a " +
 			"member and cannot be declared as one. That is scoped to whoever runs the apply, not to a list of " +
 			"protected people - another operator who is not declared here is still revoked.\n\n" +
@@ -299,7 +347,14 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 					"A map rather than a list so Terraform rejects duplicate keys at plan time. Note its " +
 					"duplicate check is case-sensitive, so this resource additionally rejects two keys that " +
 					"differ only in case - email identity is not case-sensitive and treating it as such is a " +
-					"known source of split, half-granted access.",
+					"known source of split, half-granted access.\n\n" +
+					"~> **Declaring an organization admin here is a plan-time error, once the write path ships.** " +
+					"The Anyscale API refuses to change an organization admin's role at all, and discovering that " +
+					"mid-apply - after another member's grant already succeeded - is not recoverable the way a " +
+					"revoke failure is. This check is best-effort: no field this resource can read predicts the " +
+					"backend's own admin signal with certainty, so a plan-time pass is not a guarantee nothing will " +
+					"fail, and a plan-time miss is not silent - it still fails safely at apply time, just without " +
+					"the earlier warning.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"base_role": schema.StringAttribute{
@@ -355,16 +410,22 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 				// first State.Set - a Computed list-of-objects left unknown has crashed
 				// this provider before. No UseStateForUnknown: this tracks whether a
 				// revoke failed, which genuinely changes between applies.
-				MarkdownDescription: "Grants this resource could not revoke, and why. Populated when an " +
-					"undeclared member could not be removed - the Anyscale API can reach a state where a role " +
-					"was granted but cannot be revoked, and it is not detectable before attempting the revoke.\n\n" +
-					"The apply still converges rather than failing, because one unrevokable member would " +
-					"otherwise block the whole set forever. Alert on this: `length(anyscale_cloud_access.x." +
-					"unmanaged_grants) > 0` means someone has access Terraform intends them not to have.\n\n" +
-					"~> **This lists only revokes that were attempted.** It covers every member of the cloud, but at " +
-					"project scope only the projects your configuration names - a grant on a project this resource " +
-					"never manages is not attempted, not failed, and so never appears here. An empty list means " +
-					"nothing in scope failed, not that nobody holds access outside that scope.",
+				MarkdownDescription: "Grants this resource could not revoke, or deliberately skipped revoking " +
+					"because a grant failed elsewhere in the same apply, and why. Populated in two distinct " +
+					"cases, both worth alerting on: an undeclared member could not be removed - the Anyscale API " +
+					"can reach a state where a role was granted but cannot be revoked, and it is not detectable " +
+					"before attempting the revoke - or a grant failed elsewhere in the same apply, which suppresses " +
+					"every revoke this apply would otherwise have attempted (see `ungranted_members`) and records " +
+					"each one here with a reason naming the skip.\n\n" +
+					"The apply still converges rather than failing, because one unrevokable member - or one unfinished " +
+					"grant elsewhere - would otherwise block the whole set forever. Alert on this: " +
+					"`length(anyscale_cloud_access.x.unmanaged_grants) > 0` means someone has access Terraform intends " +
+					"them not to have.\n\n" +
+					"~> **This lists only revokes that were attempted OR deliberately skipped because a grant failed.** " +
+					"It covers every member of the cloud, but at project scope only the projects your configuration " +
+					"names - a grant on a project this resource never manages is neither attempted nor skipped, and so " +
+					"never appears here. An empty list means nothing in scope failed or was skipped, not that nobody " +
+					"holds access outside that scope.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"email": schema.StringAttribute{
@@ -436,6 +497,19 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 					},
 				},
 			},
+		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create: true,
+				Update: true,
+				Delete: true,
+				CreateDescription: "Maximum time to wait for a create's reconcile to finish, including every per-write " +
+					"retry (e.g. `2m`, `10m`). Defaults to `5m` - real headroom even for a large member map with " +
+					"several retried transient failures. Purely local to this provider - never sent to or read from the " +
+					"Anyscale API.",
+				UpdateDescription: "Maximum time to wait for an update's reconcile to finish. Same default and rationale as `create`.",
+				DeleteDescription: "Maximum time to wait for destroy's revoke pass to finish. Same default and rationale as `create`.",
+			}),
 		},
 	}
 }
@@ -534,6 +608,14 @@ func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	timeout, diags := plan.Timeouts.Create(ctx, defaultCloudAccessTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	// State is written before any API call, with every Computed attribute
 	// populated. The framework returns whatever Create put in resp.State
@@ -724,6 +806,14 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
+	timeout, diags := plan.Timeouts.Update(ctx, defaultCloudAccessTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	plan.ID = types.StringValue(plan.CloudID.ValueString())
 	plan.UnmanagedGrants = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
 	plan.UngrantedMembers = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
@@ -836,6 +926,14 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	timeout, timeoutDiags := state.Timeouts.Delete(ctx, defaultCloudAccessTimeout)
+	resp.Diagnostics.Append(timeoutDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	cloudID := state.CloudID.ValueString()
 	if cloudID == "" {

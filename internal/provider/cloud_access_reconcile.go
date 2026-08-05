@@ -2,10 +2,13 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -39,6 +42,121 @@ import (
 //     usually a collaborator on the cloud it manages and frequently its owner,
 //     so without this the first apply can lock the operator out of the thing
 //     they are managing.
+
+// cloudAccessRetryInitialBackoff and cloudAccessRetryMaxBackoff are vars
+// rather than consts purely so tests can override them to milliseconds for
+// the duration of a test (save, set, defer-restore) instead of a unit test
+// actually waiting out real seconds - production code never changes them.
+// Same shape as resource_cloud.go's autoAddUserRetryInitialBackoff.
+var (
+	cloudAccessRetryInitialBackoff = 1 * time.Second
+	cloudAccessRetryMaxBackoff     = 8 * time.Second
+)
+
+const (
+	// cloudAccessRetryMaxAttempts is J.13's bound: at most three attempts per
+	// write, never unbounded.
+	cloudAccessRetryMaxAttempts   = 3
+	cloudAccessRetryBackoffFactor = 2.0
+)
+
+// cloudAccessRetryableError reports whether err is a genuinely transient
+// condition worth retrying (J.13): 429, 502, 503, 504, or a connection-level
+// failure (DoRequestRaw wraps client.DoRequest's own errors as "API request
+// failed: %w", never containing "unexpected status" at all, since those never
+// reached the point of getting an HTTP status back).
+//
+// Deliberately narrow. Every other 4xx - 403, 409, 422, 501 - is a terminal
+// decision, not a transient condition, and retrying a decision only converts
+// a clear diagnostic into a slow one. Retrying here is safe specifically
+// because of two properties already established elsewhere on this surface:
+// the roles write has SET semantics (live-confirmed as V8), so re-issuing an
+// identical write is idempotent, and the membership bootstrap already absorbs
+// its own conflict response (J.3). It would NOT be safe against a batch
+// endpoint, which is one more reason those stay unused here.
+func cloudAccessRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Structural check on the real numeric status, not a text match: DoRequestRaw's
+	// "unexpected status %d: %s" format embeds the raw response BODY after the
+	// code, so grepping for "unexpected status 503" would also match a body that
+	// happens to echo that text - a gateway or proxy relaying an upstream status,
+	// for instance - misclassifying an actual decision (a 4xx the backend meant)
+	// as transient. errors.As unwraps to the typed value regardless of how many
+	// times the error has been wrapped with %w.
+	var statusErr *UnexpectedStatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.StatusCode {
+		case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		default:
+			return false
+		}
+	}
+
+	// No UnexpectedStatusError to unwrap means the request never got as far as a
+	// response - client.DoRequest itself failed (DNS, connection refused, a
+	// timeout mid-request), which DoRequestRaw wraps as "API request failed: %w".
+	// That text match is safe: this prefix is written by exactly one call site in
+	// the whole provider and never embeds a response body, since there was no
+	// response to embed.
+	return strings.Contains(err.Error(), "API request failed")
+}
+
+// cloudAccessDoWriteRetry wraps DoRequestRaw with J.13's bounded retry policy
+// for this resource's write calls. A retry budget exhausted mid-reconcile is
+// a converge-and-record outcome (Ungranted or Unmanaged, plus a warning), not
+// an error - the never-error-after-a-successful-write rule admits no
+// exemption for retry exhaustion, since exhaustion is if anything MORE likely
+// once some writes have already landed than before.
+//
+// body is rewound (via io.Seeker, which every body constructed by
+// MarshalRequestBody satisfies) before each retry attempt after the first -
+// without this, a retried POST/PUT would send an empty body on its second
+// attempt, since the first attempt's read already consumed it. A nil body
+// (every DELETE call here) is unaffected: the type assertion on a nil
+// interface simply reports false and no rewind is attempted.
+func cloudAccessDoWriteRetry(
+	ctx context.Context, client *Client, method, path string, body io.Reader, expectedStatuses ...int,
+) ([]byte, error) {
+	seeker, _ := body.(io.Seeker)
+	backoff := cloudAccessRetryInitialBackoff
+
+	var lastResp []byte
+	var lastErr error
+	for attempt := 1; attempt <= cloudAccessRetryMaxAttempts; attempt++ {
+		if attempt > 1 && seeker != nil {
+			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
+				return nil, fmt.Errorf("could not rewind request body for retry attempt %d: %w", attempt, seekErr)
+			}
+		}
+
+		lastResp, lastErr = DoRequestRaw(ctx, client, method, path, body, expectedStatuses...)
+		if lastErr == nil || !cloudAccessRetryableError(lastErr) || attempt == cloudAccessRetryMaxAttempts {
+			return lastResp, lastErr
+		}
+
+		tflog.Warn(ctx, "Transient failure on cloud_access write, retrying", map[string]any{
+			"method": method, "path": path, "attempt": attempt, "backoff": backoff.String(),
+		})
+		select {
+		case <-ctx.Done():
+			// Named explicitly rather than returning lastErr bare: this is the
+			// reconcile's own timeout (J.13) or a canceled apply, not the transient
+			// condition that triggered the retry, and a caller recording this into
+			// Ungranted/unmanaged_grants should be able to say why in the warning.
+			return lastResp, fmt.Errorf("%w (after %d attempt(s), most recent failure: %s)", ctx.Err(), attempt, lastErr)
+		case <-time.After(backoff):
+		}
+		backoff = time.Duration(float64(backoff) * cloudAccessRetryBackoffFactor)
+		if backoff > cloudAccessRetryMaxBackoff {
+			backoff = cloudAccessRetryMaxBackoff
+		}
+	}
+	return lastResp, lastErr
+}
 
 // cloudAccessBridgePermissionLevel is the legacy permission_level used to
 // establish membership before a role can be written.
@@ -611,7 +729,7 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 		diags.AddError("Error Marshaling Request", err.Error())
 		return diags
 	}
-	if _, err := DoRequestRaw(
+	if _, err := cloudAccessDoWriteRetry(
 		ctx, client, "POST", fmt.Sprintf("/api/v2/clouds/%s/collaborators/users", cloudID), reqBody,
 		http.StatusOK, http.StatusNoContent,
 	); err != nil {
@@ -666,7 +784,7 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 		// regardless of featureGated: whether the write-flag is off or the write
 		// failed for any other reason, the bootstrap grant this call just made is
 		// still unintended access that must not be left behind.
-		if _, delErr := DoRequestRaw(
+		if _, delErr := cloudAccessDoWriteRetry(
 			ctx, client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s/collaborators/%s", cloudID, identityID), nil,
 			http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 		); delErr != nil {
@@ -717,7 +835,7 @@ func setCloudAccessRole(ctx context.Context, client *Client, cloudID, userID, ba
 	if err != nil {
 		return fmt.Errorf("failed to marshal set cloud role request: %w", err)
 	}
-	_, err = DoRequestRaw(
+	_, err = cloudAccessDoWriteRetry(
 		ctx, client, "PUT", fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/%s/roles", cloudID, userID), reqBody,
 		http.StatusOK, http.StatusNoContent,
 	)
@@ -732,7 +850,7 @@ func setCloudAccessRole(ctx context.Context, client *Client, cloudID, userID, ba
 // state, and treating it as a failure would put a permanent entry in
 // unmanaged_grants for access that does not exist.
 func revokeCloudAccessMember(ctx context.Context, client *Client, cloudID, identityID string) error {
-	_, err := DoRequestRaw(
+	_, err := cloudAccessDoWriteRetry(
 		ctx, client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s/collaborators/%s", cloudID, identityID), nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 	)
@@ -817,17 +935,21 @@ func reconcileProjectRoles(
 
 	members, err := listCloudAccessMembers(ctx, client, cloudID)
 	if err != nil {
+		// NOT fatal, deliberately - see cloudAccessUnplannedProjectShortfall. A read
+		// failure this late (cloud-scope grants above may already have succeeded)
+		// erroring here would taint the resource exactly like an unrecovered grant
+		// failure would - most likely cause in practice is the reconcile's own
+		// context deadline (J.13) firing while this read was in flight or retrying,
+		// which is a timeout, not a decision, and must converge the same way any
+		// other mid-reconcile shortfall does.
+		reason := "could not re-read the cloud's member list to plan project roles"
 		if cloudRolesFeatureDisabled(err) {
-			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+"\n\nProject roles were not changed.")
-			return nil, nil, diags
+			reason = cloudRolesDisabledDetail
+		} else {
+			reason = fmt.Sprintf("%s: %s", reason, extractAPIErrorDetail(err))
 		}
-		diags.AddError(
-			"Could Not Re-Read Cloud Members Before Applying Project Roles",
-			fmt.Sprintf("The cloud-level changes were applied, but the member list could not be re-read, and project "+
-				"roles need it to resolve who to grant and revoke: %s\n\nProject roles were not changed.",
-				extractAPIErrorDetail(err)),
-		)
-		return nil, nil, diags
+		unmanaged, ungranted := cloudAccessUnplannedProjectShortfall(desired, priorProjects, cascaded, reason)
+		return unmanaged, ungranted, diags
 	}
 	identityByFoldedEmail := make(map[string]cloudAccessRemoteMember, len(members))
 	for _, m := range members {
@@ -836,15 +958,15 @@ func reconcileProjectRoles(
 
 	current, err := cloudAccessProjectRoles(ctx, client, inScope)
 	if err != nil {
-		// Read failure here is fatal rather than "assume nothing is granted": that
-		// assumption would re-issue every grant, which is harmless, AND treat every
-		// existing role as absent, which is not.
-		diags.AddError(
-			"Could Not Read Project Roles",
-			fmt.Sprintf("The projects this configuration manages could not be read, so it cannot tell which roles need "+
-				"changing: %s\n\nProject roles were not changed.", extractAPIErrorDetail(err)),
-		)
-		return nil, nil, diags
+		// Same non-fatal treatment, same reason. The comment this replaced argued
+		// fatal over "assume nothing is granted", but that was never the choice -
+		// cloudAccessUnplannedProjectShortfall assumes NEITHER granted nor absent,
+		// it records every declared project role as not-yet-confirmed and lets the
+		// next apply re-attempt it, which is harmless for whatever already
+		// succeeded.
+		reason := fmt.Sprintf("could not read the projects this configuration manages: %s", extractAPIErrorDetail(err))
+		unmanaged, ungranted := cloudAccessUnplannedProjectShortfall(desired, priorProjects, cascaded, reason)
+		return unmanaged, ungranted, diags
 	}
 
 	plan := planProjectRoles(desired, priorProjects, current, identityByFoldedEmail, cascaded)

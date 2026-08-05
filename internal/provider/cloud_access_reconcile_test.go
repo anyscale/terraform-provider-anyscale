@@ -699,6 +699,45 @@ func TestReconcileCloudAccess_GrantLoopContinuesPastAFailure(t *testing.T) {
 	}
 }
 
+// TestReconcileCloudAccess_ProjectPassReadFailureConvergesNotErrors covers the
+// gap this same round found and fixed: a read failure inside the project
+// pass (most plausibly J.13's own timeout firing after cloud-scope grants
+// already succeeded) must NOT error - it must record the shortfall via
+// cloudAccessUnplannedProjectShortfall and converge, exactly like a grant
+// failure does. The mock here has no project-scope routes at all, so the
+// project-roles read hits a genuine 404 - proving the fallback fires on a
+// real read failure, not a synthetic one.
+func TestReconcileCloudAccess_ProjectPassReadFailureConvergesNotErrors(t *testing.T) {
+	const cloudID = "cld_projectreadfail"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "idn_a", UserID: "usr_a"},
+		},
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(cloudAccessDesiredMember{
+			Email: "alice@example.com", BaseRole: "writer", Projects: map[string]string{"prj_1": "write"},
+		}),
+		cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("a project-pass read failure must not error, or a mid-reconcile timeout would taint the resource: %v", diags)
+	}
+	if len(result.Ungranted) != 1 || result.Ungranted[0].ProjectID.ValueString() != "prj_1" {
+		t.Fatalf("expected the project grant recorded as ungranted, got: %+v", result.Ungranted)
+	}
+	// Alice's CLOUD-scope grant must still have succeeded - the project pass
+	// read failure must not roll that back or prevent it.
+	if mem, ok := mock.members["alice@example.com"]; !ok || len(mem.BaseRoles) == 0 || mem.BaseRoles[0] != "writer" {
+		t.Errorf("alice's cloud-scope grant did not succeed: %v", mock.memberEmails())
+	}
+}
+
 // TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage covers AC-5
 // on the reconcile's own member-list read. Before this fix, a 501 here (the
 // read-side flag) fell through to the generic "Could Not Read The Cloud's
