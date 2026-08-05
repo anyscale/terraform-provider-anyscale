@@ -619,3 +619,135 @@ func TestCloudAccessModifyPlan_RefusesToEmptyACloudThatHasMembers(t *testing.T) 
 		}
 	})
 }
+
+// TestCloudAccessValidateConfig_RejectsCloudWriteRoleOnAProject covers the one
+// vocabulary collision in this resource that is a near-homograph rather than a
+// distinct word: the cloud role is spelled "writer" and the project role is
+// spelled "write". A project 422s on "writer".
+//
+// Rejecting it at plan time matters more here than for a typical typo, because
+// this resource reconciles a whole member list in one apply - an apply-time 422
+// on one project entry lands after other members have already been written.
+//
+// The check deliberately does NOT reject the mirror-image mistake (a cloud
+// base_role of "write"): base_role carries no OneOf because the roles API is
+// actively extended, so a hard rejection there could only be lifted by a
+// provider release. The cases below pin that asymmetry down so it cannot be
+// "tidied up" into a symmetric check without a deliberate decision.
+func TestCloudAccessValidateConfig_RejectsCloudWriteRoleOnAProject(t *testing.T) {
+	const (
+		wantSummary = "Cloud Role Spelling Used For A Project Role"
+		email       = "typo@example.com"
+		projectID   = "prj_1"
+	)
+
+	t.Run("writer on a project is rejected, with the right value suggested", func(t *testing.T) {
+		diags := runCloudAccessValidateConfig(t, cloudAccessConfigModel(cloudAccessMemberMap(map[string]attr.Value{
+			email: cloudAccessMember(cloudAccessCloudWriteRole, cloudAccessNoDenyRoles(),
+				cloudAccessProjects(map[string]string{projectID: cloudAccessCloudWriteRole})),
+		})))
+
+		d := cloudAccessFindError(diags, wantSummary)
+		if d == nil {
+			t.Fatalf("expected a %q error: the API 422s a project role of %q, and catching it only at apply time fails partway through a reconcile that has already written other members. Got: %v",
+				wantSummary, cloudAccessCloudWriteRole, diags)
+		}
+		cloudAccessAssertOnlyErrorSummary(t, diags, wantSummary)
+		// Scoped to the offending entry: a member may hold roles on many projects.
+		cloudAccessAssertErrorPath(t, d, path.Root("member").AtMapKey(email).AtName("projects").AtMapKey(projectID))
+
+		detail := d.Detail()
+		// The suggestion is the whole value of this check over a bare "invalid
+		// role" rejection - without it the practitioner is told the word is wrong
+		// but not which near-identical word to use.
+		if !strings.Contains(detail, fmt.Sprintf("Did you mean %q?", cloudAccessProjectWriteRole)) {
+			t.Errorf("error detail does not suggest %q: %s", cloudAccessProjectWriteRole, detail)
+		}
+		if !strings.Contains(detail, projectID) {
+			t.Errorf("error detail does not name project %q: %s", projectID, detail)
+		}
+		if !strings.Contains(detail, email) {
+			t.Errorf("error detail does not name the member %q: %s", email, detail)
+		}
+	})
+
+	for _, tc := range []struct {
+		name     string
+		baseRole string
+		projects types.Map
+	}{
+		{
+			name:     "write on a project is the correct spelling and is allowed",
+			baseRole: cloudAccessCloudWriteRole,
+			projects: cloudAccessProjects(map[string]string{projectID: cloudAccessProjectWriteRole}),
+		},
+		{
+			// The mirror-image mistake, deliberately allowed through - see the
+			// comment on this test and on the constants in the resource.
+			name:     "write as a cloud base_role is NOT rejected here",
+			baseRole: cloudAccessProjectWriteRole,
+			projects: cloudAccessNoProjects(),
+		},
+		{
+			// Proves the check is exact rather than a substring or prefix match:
+			// "writer" appears inside a longer role name that is not the typo.
+			name:     "a longer role name containing writer is not the typo",
+			baseRole: cloudAccessCloudWriteRole,
+			projects: cloudAccessProjects(map[string]string{projectID: "writer_of_nothing"}),
+		},
+		{
+			name:     "no projects declared at all",
+			baseRole: cloudAccessCloudWriteRole,
+			projects: cloudAccessNoProjects(),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diags := runCloudAccessValidateConfig(t, cloudAccessConfigModel(cloudAccessMemberMap(map[string]attr.Value{
+				email: cloudAccessMember(tc.baseRole, cloudAccessNoDenyRoles(), tc.projects),
+			})))
+			if diags.HasError() {
+				t.Fatalf("unexpected error: %v - rejecting this blocks a legitimate config at plan time", diags)
+			}
+		})
+	}
+
+	// A project role interpolated from an unresolved value is unknown at validate
+	// time. Reading it as a Go string is an error, so the check has to skip it -
+	// and this case is what proves it skips rather than reporting a spurious
+	// failure against a value nobody has typed wrong yet. Terraform validates
+	// again once the value is known.
+	t.Run("an unknown project role is skipped, not reported", func(t *testing.T) {
+		projects, diags := types.MapValue(types.StringType, map[string]attr.Value{
+			projectID: types.StringUnknown(),
+		})
+		if diags.HasError() {
+			t.Fatalf("building the fixture failed: %v", diags)
+		}
+
+		got := runCloudAccessValidateConfig(t, cloudAccessConfigModel(cloudAccessMemberMap(map[string]attr.Value{
+			email: cloudAccessMember(cloudAccessCloudWriteRole, cloudAccessNoDenyRoles(), projects),
+		})))
+		if got.HasError() {
+			t.Fatalf("unexpected error for an unknown project role: %v", got)
+		}
+	})
+
+	// The typo check runs BEFORE the deny-role short-circuit in ValidateConfig,
+	// so both errors surface from one validate pass rather than the practitioner
+	// fixing one and discovering the other. A null deny_roles is the common case
+	// and it short-circuits, so ordering the checks the other way would leave
+	// this validator silent for most configs that hit the typo.
+	t.Run("reported alongside the cloud_read_only conflict", func(t *testing.T) {
+		diags := runCloudAccessValidateConfig(t, cloudAccessConfigModel(cloudAccessMemberMap(map[string]attr.Value{
+			email: cloudAccessMember("collaborator", cloudAccessDenyRoles(cloudAccessReadOnlyDenyRole),
+				cloudAccessProjects(map[string]string{projectID: cloudAccessCloudWriteRole})),
+		})))
+
+		if cloudAccessFindError(diags, wantSummary) == nil {
+			t.Errorf("expected the %q error: %v", wantSummary, diags)
+		}
+		if cloudAccessFindError(diags, "Project Role Conflicts With cloud_read_only") == nil {
+			t.Errorf("expected the cloud_read_only conflict error as well - both are true of this entry and one validate pass should report both: %v", diags)
+		}
+	})
+}

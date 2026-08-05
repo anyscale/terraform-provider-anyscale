@@ -53,6 +53,22 @@ const (
 	cloudAccessReadOnlyProjectRole = "readonly"
 )
 
+// cloudAccessProjectWriteRole is the project-scope spelling of the write tier;
+// cloudAccessCloudWriteRole is the cloud-scope spelling of an unrelated role
+// that happens to be a near-homograph of it.
+//
+// Only ONE direction of this confusion is rejected below - a project role of
+// "writer", which the API answers with a 422. The reverse (a cloud base_role of
+// "write") is deliberately NOT rejected: base_role carries no OneOf because the
+// roles API is actively extended, and a validator that hard-rejects a value the
+// backend might legalize later can only be unblocked by a provider release. The
+// project vocabulary is a fixed three-value tier list, so it does not carry that
+// risk.
+const (
+	cloudAccessProjectWriteRole = "write"
+	cloudAccessCloudWriteRole   = "writer"
+)
+
 var (
 	_ resource.Resource                   = &CloudAccessResource{}
 	_ resource.ResourceWithValidateConfig = &CloudAccessResource{}
@@ -190,7 +206,12 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 							MarkdownDescription: "This member's roles on projects under this cloud, keyed by project ID. " +
 								"Known values are `owner`, `write` and `readonly`.\n\n" +
 								"Note `write` here, not `writer` - the project vocabulary and the cloud vocabulary " +
-								"genuinely differ, and sending the wrong one is rejected by the API.",
+								"genuinely differ. `writer` on a project is rejected at plan time with a did-you-mean, " +
+								"rather than left to fail as an API error partway through an apply.\n\n" +
+								"Keyed by project **ID** rather than name, even though `member` is keyed by email: " +
+								"project names are not reliably unique across an organization's clouds, so a name would " +
+								"not identify one project. This resource therefore spans three identifier namespaces - " +
+								"cloud ID, member email, project ID - each the stable key for what it addresses.",
 						},
 					},
 				},
@@ -331,23 +352,48 @@ func (r *CloudAccessResource) ValidateConfig(ctx context.Context, req resource.V
 			)
 		}
 
-		if m.Projects.IsNull() || m.Projects.IsUnknown() || m.DenyRoles.IsNull() || m.DenyRoles.IsUnknown() {
-			continue
-		}
+		// Both remaining checks read project roles through resolvedStringMapValues
+		// rather than ElementsAs, and deny roles through resolvedStringListValues,
+		// because a value interpolated from something Terraform has not resolved yet
+		// is unknown at validate time and converting it to a Go string is an error.
+		// Reporting that as a config error would fail a legitimate config; Terraform
+		// validates again once the value is known.
+		projects := resolvedStringMapValues(m.Projects)
+		denyRoles := resolvedStringListValues(m.DenyRoles)
 
-		var denyRoles []string
-		resp.Diagnostics.Append(m.DenyRoles.ElementsAs(ctx, &denyRoles, false)...)
-		var projects map[string]string
-		resp.Diagnostics.Append(m.Projects.ElementsAs(ctx, &projects, false)...)
-		if resp.Diagnostics.HasError() {
-			return
+		// The project-vocabulary check runs BEFORE the deny-role check below,
+		// deliberately: a "writer" project role is wrong whether or not the member
+		// has any deny roles, and the deny-role check does nothing for a member with
+		// none - which is the common case. Ordering these the other way, with the
+		// early-continue the deny-role check needs, would leave this validator silent
+		// for most configs that hit the typo.
+		for projectID, level := range projects {
+			if level != cloudAccessCloudWriteRole {
+				continue
+			}
+			resp.Diagnostics.AddAttributeError(
+				memberPath.AtName("projects").AtMapKey(projectID),
+				"Cloud Role Spelling Used For A Project Role",
+				fmt.Sprintf("Member %q is granted %q on project %s, but %q is a *cloud* role and Anyscale rejects it "+
+					"on a project. Did you mean %q?\n\nThe two scopes genuinely use different words: a cloud member "+
+					"is a %q, while a project collaborator is a %q. They are near-homographs for unrelated grants, "+
+					"not two spellings of one role.",
+					email, cloudAccessCloudWriteRole, projectID, cloudAccessCloudWriteRole, cloudAccessProjectWriteRole,
+					cloudAccessCloudWriteRole, cloudAccessProjectWriteRole),
+			)
 		}
 
 		// A member carrying cloud_read_only can only hold readonly on this cloud's
 		// projects - the backend 422s anything else. This is genuinely a cross-field
-		// constraint spanning a member's cloud role and their project roles, which is
-		// exactly why the two live in one resource: split apart, this could only ever
-		// surface as a confusing failure partway through an apply.
+		// constraint spanning a member's cloud deny roles and their project roles,
+		// which is exactly why the two live in one resource: split apart, this could
+		// only ever surface as a confusing failure partway through an apply.
+		//
+		// Gated on cloud_read_only being definitely PRESENT, which is why an
+		// unresolved deny_roles element does not need to suppress this check: an
+		// unknown element cannot hide a value that is already visible, and if
+		// cloud_read_only turns out to be the unknown one, the check simply does not
+		// fire this pass and Terraform validates again once it resolves.
 		if !slices.Contains(denyRoles, cloudAccessReadOnlyDenyRole) {
 			continue
 		}
@@ -366,6 +412,49 @@ func (r *CloudAccessResource) ValidateConfig(ctx context.Context, req resource.V
 			)
 		}
 	}
+}
+
+// resolvedStringMapValues returns the entries of a string map whose values
+// Terraform has actually resolved, skipping null and unknown ones. A null or
+// unknown map yields an empty result.
+//
+// This exists instead of ElementsAs because ElementsAs into a
+// map[string]string errors on an unknown element, and at validate time an
+// unknown element is the ordinary shape of a value interpolated from another
+// resource - not a config mistake. Surfacing it as an error would fail a
+// legitimate config; skipping it lets every value the practitioner did type get
+// checked, and Terraform re-validates once the rest resolve.
+func resolvedStringMapValues(m types.Map) map[string]string {
+	if m.IsNull() || m.IsUnknown() {
+		return nil
+	}
+	out := make(map[string]string, len(m.Elements()))
+	for k, v := range m.Elements() {
+		s, ok := v.(types.String)
+		if !ok || s.IsNull() || s.IsUnknown() {
+			continue
+		}
+		out[k] = s.ValueString()
+	}
+	return out
+}
+
+// resolvedStringListValues is resolvedStringMapValues for a list. Callers must
+// treat the result as possibly incomplete: it can prove a value is PRESENT but
+// never that one is absent, since a skipped unknown element could be it.
+func resolvedStringListValues(l types.List) []string {
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	out := make([]string, 0, len(l.Elements()))
+	for _, v := range l.Elements() {
+		s, ok := v.(types.String)
+		if !ok || s.IsNull() || s.IsUnknown() {
+			continue
+		}
+		out = append(out, s.ValueString())
+	}
+	return out
 }
 
 // ModifyPlan implements the empty-member-set guard.
