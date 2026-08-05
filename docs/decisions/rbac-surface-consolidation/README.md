@@ -1248,8 +1248,15 @@ real API, on code already merged.
 Two consequences worth carrying past this bug. **Gate 1 is not satisfied by probing an endpoint** — it is
 satisfied by observing the provider's own request succeed, which usually means driving the resource. And
 **scope every such find before fixing it**: a sweep for the same mistake elsewhere found exactly one other
-site, in a *shipped* data source, against a different endpoint whose limit is unknown — a question to settle
-by one request rather than by reasoning from the fact that the value was presumably copied from working code.
+site sending the same value, in a *shipped* data source against a different endpoint. **Checked and clear** —
+that endpoint returns 200 for `count=100`, confirmed live, so the limit is endpoint-specific and the shipped
+data source is unaffected. The fix stays one line in one file.
+
+That clearance is recorded rather than dropped, for two reasons. A checked-and-clear result is the kind of
+thing the next person re-checks if nobody wrote it down. And the reasoning that would have skipped the check
+was *available and persuasive* — the newer code visibly copied the older pattern, so the value presumably
+came from something that works, which is true and would still have left a shipped data source unverified on a
+guess. The answer arrived from one request; the guess would have been right for the wrong reason.
 
 *The write gate is a release mechanism, not a test barrier.* The five live-required criteria cannot run
 while `cloudAccessWriteEnabled` is false, and the gate cannot come off until they pass — a genuine circular
