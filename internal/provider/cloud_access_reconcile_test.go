@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -1538,6 +1539,7 @@ func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 		ID:                  types.StringValue(cloudID),
 		CloudID:             types.StringValue(cloudID),
 		AllowEmptyMemberSet: types.BoolValue(false),
+		Timeouts:            timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "update": types.StringType, "delete": types.StringType})},
 		Member: cloudAccessMemberMap(map[string]attr.Value{
 			"alice@example.com": cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
 			"bob@example.com":   cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
@@ -1643,6 +1645,7 @@ func TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned(t *testing.T) {
 		ID:                  types.StringValue(cloudID),
 		CloudID:             types.StringValue(cloudID),
 		AllowEmptyMemberSet: types.BoolValue(false),
+		Timeouts:            timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "update": types.StringType, "delete": types.StringType})},
 		Member: cloudAccessMemberMap(map[string]attr.Value{
 			"alice@example.com": cloudAccessMember("writer", cloudAccessDenyRoles(), cloudAccessNoProjects()),
 		}),
