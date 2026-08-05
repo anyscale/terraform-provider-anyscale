@@ -1,0 +1,8 @@
+```
+release-note:new-resource
+resource/anyscale_cloud_access: Reads and imports the complete member list of one Anyscale cloud — each member's base_role and the deny_roles layered on it. This version is read-only: terraform import and refresh work; create, update and delete fail with an explicit error, so cloud- and project-scoped access management still has no writable provider surface. Member project roles are reported only for projects the configuration names, so a fresh import reports none even for a member who holds them. The cloud roles API is gated behind two independent organization feature flags, one for read and one for write; either being off returns an identical 501 detail, so a 501 alone does not indicate which. The resource is designed to be authoritative over a cloud's whole member list; that is not in effect in this release.
+```
+```
+release-note:fixed
+resource/anyscale_organization_user_role: Remove an unsourced claim that the organization roles API is unavailable on Azure regardless of the feature flag. The backend gates this endpoint on a feature flag alone; there is no Azure-specific check. No behavior change - only user-facing text (schema descriptions, the 501 error detail, and an example comment) was corrected.
+```
