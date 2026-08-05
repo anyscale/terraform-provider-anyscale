@@ -571,6 +571,138 @@ of trying. Because the read and write paths return the *identical* 501 detail st
 name both possibilities. `anyscale_cloud_access` does not currently carry any version of this
 warning and must gain one before it registers.
 
+## Contract rulings added for the full-CRUD round (J.11–J.19)
+
+The rulings above govern behavior that was designed before a write path existed. These cover the
+questions that only become answerable — or only become dangerous — once one does. They are recorded
+as a separate group rather than folded into the list above so that it stays clear which decisions
+predate the write path and which were made with it in view.
+
+**J.18 comes first because it changes what the other rulings cost.**
+
+**J.18 — the read-only resource has never been released, and that must remain true until the write
+path ships.** `git tag --contains 5a220b1` is empty; the latest tag reachable from `main` is
+`v0.25.1`, which predates PR #260. `anyscale_cloud_access` therefore exists only on unreleased
+`main`.
+
+Four consequences, the third of which is a constraint on the release rather than an observation:
+
+- The compatibility question this round was convened to answer — whether enabling writes is a hidden
+  breaking change for practitioners who imported the read-only resource — resolves to *there can be
+  no such practitioners*. That answer is conditional, not permanent.
+- Every schema change to this resource is currently free: no state upgrader, no migration note, no
+  compatibility cost. The schema carries no `Version`, i.e. 0, and flipping a Go bool changes no
+  schema, so the gate flip alone never needs an upgrader under any circumstances.
+- **Do not tag a release containing a read-only-only `anyscale_cloud_access`.** That one act
+  manufactures precisely the population whose breakage this round is meant to prevent, and it
+  converts J.16 below from free into breaking. Read and write ship in one release, or neither ships
+  yet. This is the strongest available argument for the sequencing and it is a release constraint,
+  not a preference.
+- The window this opens is the reason J.16 is worth acting on now rather than filing.
+
+**J.11 — one instance per `cloud_id`; two Terraform states cannot safely manage one cloud.** Two
+authoritative instances over the same `cloud_id` revoke each other's members indefinitely, and both
+report success on every apply: the first grants Alice and revokes Bob, the second grants Bob and
+revokes Alice, and neither ever converges. The provider cannot detect this, because it cannot see
+another state file, so the resolution is contractual and documented rather than guarded.
+
+State it on the resource page as the price of authority rather than as a limitation. A practitioner
+splitting a cloud's membership across two configurations is doing something the resource's central
+claim forbids, and the failure gives them no signal — an apply that reports success is the worst
+available shape for a misconfiguration this severe.
+
+**J.12 — `unmanaged_grants` is diagnostics only and never influences planning.** It is `Computed`,
+never compared against configuration, never consulted to decide whether to attempt a write, and never
+an input to anything. Each plan re-attempts everything still undone regardless of what the attribute
+holds.
+
+The rejected alternative is worth naming because it looks like an optimization: letting a recorded
+entry suppress a retry would mean a stale entry silently suppressing a real grant — the resource
+declining to do work the configuration asked for, on the strength of a failure that may have been
+transient and hours old. That is the exact inverse of the attribute's purpose, which is to make an
+unachieved intent *visible*, never to make it permanent.
+
+**J.13 — bounded retry, and only for genuinely transient conditions.** No retry or backoff exists in
+the write path today. Retry `429` and `502`/`503`/`504` and connection-level failures. Retry nothing
+else: `403`, `409`, `422` and `501` are terminal decisions, and retrying a decision converts a clear
+diagnostic into a slow one. At most three attempts per member, exponential backoff with a cap, the
+whole reconcile bounded by a `timeouts` block — which this resource does not currently have and
+should gain, an additive change.
+
+Two properties make per-member retry safe rather than reckless, and both are already established
+rather than assumed: the roles write has SET semantics, confirmed live as V8, so re-issuing an
+identical write is idempotent; and the membership bootstrap already absorbs its own conflict
+response under J.3. A retry would not be safe against a batch endpoint, which is one more reason
+those stay unused.
+
+**A retry budget exhausted mid-reconcile is a converge-and-record outcome — `unmanaged_grants` plus a
+warning — not an error.** The never-error-after-a-successful-write rule admits no exemption for
+retry exhaustion, and the reason is that exhaustion is *more* likely to occur after some writes have
+already landed than before, which is exactly the case the rule exists for.
+
+**J.14 — whether a group or team can hold cloud access is UNRESOLVED, and it is a hole in the
+authority claim rather than a missing feature.** If a non-user principal can be granted access to a
+cloud, then a `member` map keyed by user email is structurally blind to it, and "authoritative over
+the cloud's whole member set" is false in a way documentation cannot repair. The resource would
+either ignore such grants silently, overstating its authority, or attempt to revoke a principal the
+schema has no way to express.
+
+No group handling appears anywhere in `cloud_access_api.go`. **That is not evidence about the
+backend** — it is evidence about our code, and the two are only related if someone checked. Settle
+this against the API before the gate comes off. If group principals exist, the honest options are to
+model them or to narrow the documented authority claim; continuing to claim whole-member-set
+authority is not among them.
+
+**J.15 — service accounts and Anyscale-managed identities are UNRESOLVED.** Two parts: whether
+service accounts appear in the member search and the roles listing as ordinary members keyed by
+something email-shaped, and whether any Anyscale-managed identity exists on a cloud that must never
+be revoked in the way the caller must not be.
+
+The backend demonstrably distinguishes service accounts already — the directory-sync revoke blocker
+spares them while failing every human revoke — so the provider cannot treat them as ordinary
+members by default. An authoritative resource that revokes a service account some other system
+depends on produces an outage with no obvious cause, and the member map gives a practitioner no
+natural place to notice the identity is special.
+
+**J.16 — `deny_roles` is a `ListAttribute`, and that is an ordering hazard worth closing while it is
+free.** `resource_cloud_access.go:164` and `:305`. Terraform lists are order-sensitive, so a backend
+response ordering the values differently from configuration produces a diff on every plan forever.
+
+`SetAttribute` is the semantically correct shape: `deny_roles` is a set of restrictions and the order
+carries no meaning. Confirm the returned order live before changing it — the enum has exactly two
+members, so the hazard is narrow — but weigh that against J.18: this is a free change today and a
+breaking one after the first tag that contains the resource. The asymmetry, not the probability, is
+what should decide it.
+
+**J.17 — a configuration declaring exactly the imported members must plan empty after
+`terraform import`,** with `projects` covering only config-named projects per J.10.
+
+This criterion cannot be proved by the shape the committed fixture uses. An `ImportState` step
+without `ImportStatePersist` runs in a throwaway working directory, so any later step plans against
+what `Create` left rather than against what import recovered. Proving it needs the two-test shape
+this repository already documents: `ImportStateCheck` asserting inside the import step what was
+actually recovered, plus two sequential `Config`-only steps reconstructing the recovered state shape
+and asserting the plan action on the second.
+
+**J.19 — an out-of-band role change made through the CLI or the console may be INVISIBLE to `Read`,
+and that must be settled before the resource claims drift detection.** Both first-party
+administrative surfaces write the legacy three-value `permission_level` through the collaborators
+endpoints, not the RBAC roles path this resource reads. At organization scope, the equivalent split
+is confirmed and consequential: the `permission_level` write touches Postgres only while `base_role`
+is read from SpiceDB, so `base_role` from the singular GET goes *permanently* stale after a
+`permission_level` change.
+
+If cloud scope carries the same split, the failure is severe and quiet: an administrator changes a
+member's role in the console, and `anyscale_cloud_access` reports a clean plan against a role that no
+longer matches reality. This is the same defect as the import-only frozen snapshot rejected under
+J.10 — reporting a compliance the resource cannot verify — arriving through a different door.
+
+Establish per-field provenance for the cloud-scope read the way it was established at organization
+scope: which endpoint is authoritative for `base_role` after a legacy `permission_level` write, and
+which for `deny_roles`. Do not assume the roles endpoint is the better source for both; at
+organization scope it is the better source for one field and the worse source for the other. Until
+this is answered, no documentation should promise that out-of-band role changes are detected.
+
 ## Wire-shape facts the read path depends on
 
 Recorded separately from the rulings because these are properties of the API rather than decisions,
@@ -768,6 +900,26 @@ surviving all three of its steps, which authoritative `Create` now revokes at st
 fixture rather than weakening the resource to preserve it; the cleanest rework makes that member's
 revoke *fail* in the mock, so it legitimately persists through `unmanaged_grants` and the fixture
 keeps testing what it was written to test while also exercising the converge-and-record path.
+
+**Added with the J.11–J.19 rulings.** Four further items, each blocking the gate rather than merely
+desirable, and each stated with what would close it:
+
+9. **Can a group or team hold cloud access?** (J.14) Closed by establishing from the API whether any
+   non-user principal can appear on a cloud's member set. A negative answer is as valuable as a
+   positive one and must be recorded either way, because the authority claim currently rests on the
+   answer being no and nobody has checked.
+10. **Do service accounts appear as ordinary members, and is any identity structurally unrevokable?**
+    (J.15) Closed by a read against a cloud that has at least one service account, plus whatever the
+    directory-sync capture in item 8 reveals about how the backend classifies them.
+11. **What order does the API return `deny_roles` in?** (J.16) Closed by one read of a member holding
+    both enum values. Cheap, and the answer decides whether the attribute changes shape while that
+    change is still free under J.18.
+12. **Per-field provenance for the cloud-scope read after a legacy `permission_level` write.** (J.19)
+    Closed by a live sequence: write `permission_level` through the collaborators endpoint, then read
+    `base_role` from the roles path, and see whether it moved. This is the highest-value capture of
+    the four — at organization scope the equivalent answer was *no, it goes permanently stale*, and if
+    cloud scope behaves the same way then drift detection against console-made changes does not work
+    and must not be documented as though it does.
 
 ## Other rulings worth citing by name
 
