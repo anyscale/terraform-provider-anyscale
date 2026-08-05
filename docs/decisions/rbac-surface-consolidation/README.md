@@ -1288,7 +1288,26 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   so writing the planned value back matches the plan — and that argument holds identically for a nested
   map whose sub-attributes are `Required` or `Optional`. The never-error-after-a-write ruling therefore
   has a safe shape and is not revisited.
-- **AC-21b** **NOT met by AC-21a, and the gap is specific.** The gate resource's collection is a flat
+- **AC-21b** **CONVERTED into a regression guard — its original purpose is moot, and it does not therefore
+  close.** The landed implementation writes the planned `member` map to state verbatim on every path and
+  never re-reads it, so it cannot produce a divergence for Core to reject. The diagnostic question is
+  answered by construction.
+
+  What is not answered is whether it stays that way. Four decisions rest on the read-back prohibition, and
+  nothing in the suite would fail if a read-back assignment were reintroduced while tidying up — which is
+  exactly how this arose: the read-back existed, looked reasonable, was carefully commented, and was wrong.
+  So assert that after a partial-failure apply against the **real** nested schema, state equals the plan for
+  `member` and `projects`, including a member whose planned `deny_roles` is an empty list, and mutation-prove
+  it by reintroducing a read-back assignment.
+
+  **The general move is worth keeping**, because this is the second item in this round to take it: when a
+  criterion's stated method turns out impossible or unnecessary, ask what the criterion is *for* before
+  closing it. J.16's method was impossible and the item shrank to a documented trigger; this one's purpose
+  was satisfied by construction and the item became a guard. Neither simply vanished, and both would have
+  been closed as satisfied by a reading that only checked executability.
+
+  *Original wording, kept because the gap it describes is what the guard now protects:* not met by AC-21a,
+  and the gap is specific. The gate resource's collection is a flat
   `MapAttribute` of strings; the real `member` is a `MapNestedAttribute` whose object carries
   `base_role`, `deny_roles` and `projects`. Core compares consistency per attribute **path**,
   recursively, so a nested object map has strictly more paths on which an implementation can write
