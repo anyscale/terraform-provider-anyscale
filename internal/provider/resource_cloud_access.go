@@ -2,10 +2,13 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -17,11 +20,17 @@ import (
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
 //
-// NOT YET REGISTERED in provider.go. This file is the schema only; the CRUD
-// methods below deliberately refuse to run. Registration happens once the
+// NOT YET REGISTERED in provider.go. Read and ImportState are implemented; the
+// three WRITE methods deliberately refuse to run. Registration happens once the
 // reconcile and its guards are complete, because this is the one resource in
 // the provider that can revoke real people's access to a real cloud at scale,
 // and a half-wired version of it is worse than none.
+//
+// The read half is built and landed first on purpose, and the ordering is a
+// safety property rather than convenience: a resource that can only read cannot
+// revoke anyone, so it can be reviewed, tested and even exercised against real
+// infrastructure with no way to cause harm. Nothing here reaches a practitioner
+// until registration.
 //
 // WHY THIS IS KEYED BY cloud_id AND NOT BY USER. Authority over a set requires
 // one resource owning that whole set, so the resource's key must be the set's
@@ -74,6 +83,7 @@ var (
 	_ resource.ResourceWithValidateConfig = &CloudAccessResource{}
 	_ resource.ResourceWithModifyPlan     = &CloudAccessResource{}
 	_ resource.ResourceWithConfigure      = &CloudAccessResource{}
+	_ resource.ResourceWithImportState    = &CloudAccessResource{}
 )
 
 // NewCloudAccessResource returns a new anyscale_cloud_access resource.
@@ -268,28 +278,135 @@ func (r *CloudAccessResource) Configure(ctx context.Context, req resource.Config
 	r.client = client
 }
 
-// cloudAccessNotWiredDetail is the placeholder refusal. It exists so that this
-// resource cannot act if it is registered before its guards are finished -
-// failing loudly beats a reconcile that runs without its empty-set guard or its
-// adds-before-removes ordering.
-const cloudAccessNotWiredDetail = "anyscale_cloud_access is not finished and must not be used yet. " +
-	"Its schema is in place but its reconcile logic, plan-time guards and revoke handling are not. " +
-	"This is a provider bug if you are seeing it in a released version - please report it."
+// cloudAccessNotWiredDetail is the refusal shared by the three write methods. It
+// exists so that this resource cannot act if it is registered before its guards
+// are finished - failing loudly beats a reconcile that runs without its
+// empty-set guard, its auto_add_user check or its adds-before-removes ordering.
+//
+// Read and ImportState are deliberately NOT covered by it: neither can revoke
+// anyone, so neither carries the risk this refusal is protecting against.
+const cloudAccessNotWiredDetail = "anyscale_cloud_access cannot yet write. Its schema, validation, refresh and " +
+	"import are in place, but its reconcile logic and revoke handling are not, so it must not be used to change " +
+	"access. This is a provider bug if you are seeing it in a released version - please report it."
 
 func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	resp.Diagnostics.AddError("Resource Not Implemented", cloudAccessNotWiredDetail)
+	resp.Diagnostics.AddError("Cloud Access Writes Not Implemented", cloudAccessNotWiredDetail)
 }
 
+// Read refreshes the whole member list from the API.
+//
+// It is the read half of a resource whose write half can revoke real people, so
+// two rules govern it. First, only a genuine not-found removes the resource from
+// state - a 500 or a timeout surfaces as a diagnostic, because treating any
+// error as "gone" would let a transient failure evict the resource and let the
+// next apply re-assert Terraform's view over whatever changed out of band.
+// Second, a member the API reports is always represented, even when its roles
+// cannot be: an existing member missing from state is invisible to an
+// authoritative resource, which is the one failure here that loses someone's
+// access rather than reporting it.
 func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	resp.Diagnostics.AddError("Resource Not Implemented", cloudAccessNotWiredDetail)
+	var state CloudAccessResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cloudID := state.CloudID.ValueString()
+	if cloudID == "" {
+		cloudID = state.ID.ValueString()
+	}
+	if cloudID == "" {
+		resp.Diagnostics.AddError(
+			"Cloud Access State Has No Cloud ID",
+			"This resource's state carries neither cloud_id nor id, so there is nothing to refresh. Remove it from "+
+				"state with 'terraform state rm' and import it again.",
+		)
+		return
+	}
+
+	remote, err := listCloudAccessMembers(ctx, r.client, cloudID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// The cloud itself is gone, which takes its member list with it. This is
+			// the only branch that drops the resource from state.
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError(
+			"Could Not Read Cloud Access",
+			fmt.Sprintf("Reading the members of cloud %s failed: %s\n\nThe resource is left in state unchanged. Only a "+
+				"genuine not-found removes it, so that a transient failure cannot cause the next apply to re-assert "+
+				"Terraform's view over an out-of-band change.", cloudID, extractAPIErrorDetail(err)),
+		)
+		return
+	}
+
+	memberMap, diags := cloudAccessMembersToState(ctx, remote, state.Member)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	state.ID = types.StringValue(cloudID)
+	state.CloudID = types.StringValue(cloudID)
+	state.Member = memberMap
+
+	// allow_empty_member_set is provider-side only, with no representation in
+	// Anyscale, so a refresh has nothing to read it from and must leave whatever
+	// is in state alone. The one exception is a state that has no value at all -
+	// the shape a fresh import lands in - where the schema's own documented
+	// contract is that it comes back as false.
+	if state.AllowEmptyMemberSet.IsNull() || state.AllowEmptyMemberSet.IsUnknown() {
+		state.AllowEmptyMemberSet = types.BoolValue(false)
+	}
+
+	// unmanaged_grants records what the LAST APPLY could not revoke, which is not
+	// something any read can recompute - so a refresh preserves it rather than
+	// clearing it. Clearing it on refresh would silence an alert about access
+	// Terraform intends someone not to have, which is precisely the thing this
+	// attribute exists to keep visible. Null (again, the fresh-import shape)
+	// becomes an empty list, never left unknown: a Computed list-of-objects left
+	// unknown has crashed this provider before.
+	if state.UnmanagedGrants.IsNull() || state.UnmanagedGrants.IsUnknown() {
+		state.UnmanagedGrants = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// ImportState takes the cloud ID and lets Read populate the member list.
+//
+// The two provider-side attributes are set here rather than left null, because
+// Read deliberately preserves whatever it finds in them and a null would
+// survive the refresh. Both land on the value the schema documents for an
+// import: allow_empty_member_set false (so an imported resource cannot empty a
+// cloud until someone opts in, which is why a config that sets true shows a
+// false -> true diff on its first plan), and unmanaged_grants empty (nothing has
+// been attempted yet, so nothing has failed).
+func (r *CloudAccessResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	cloudID := strings.TrimSpace(req.ID)
+	if cloudID == "" {
+		resp.Diagnostics.AddError(
+			"Invalid Import ID",
+			"Import anyscale_cloud_access using the cloud's ID, for example 'terraform import "+
+				"anyscale_cloud_access.example cld_abc123'.",
+		)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue(cloudID))...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_id"), types.StringValue(cloudID))...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("allow_empty_member_set"), types.BoolValue(false))...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("unmanaged_grants"),
+		types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{}))...)
 }
 
 func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError("Resource Not Implemented", cloudAccessNotWiredDetail)
+	resp.Diagnostics.AddError("Cloud Access Writes Not Implemented", cloudAccessNotWiredDetail)
 }
 
 func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	resp.Diagnostics.AddError("Resource Not Implemented", cloudAccessNotWiredDetail)
+	resp.Diagnostics.AddError("Cloud Access Writes Not Implemented", cloudAccessNotWiredDetail)
 }
 
 // ValidateConfig enforces the invariants that can be checked from configuration
@@ -412,6 +529,152 @@ func (r *CloudAccessResource) ValidateConfig(ctx context.Context, req resource.V
 			)
 		}
 	}
+}
+
+// cloudAccessUnmanagedGrantType is the element type of unmanaged_grants. It
+// must stay in step with the schema's NestedObject; the framework hard-errors
+// on a mismatch in either direction.
+func cloudAccessUnmanagedGrantType() attr.Type {
+	return types.ObjectType{AttrTypes: map[string]attr.Type{
+		"email":      types.StringType,
+		"project_id": types.StringType,
+		"reason":     types.StringType,
+	}}
+}
+
+// cloudAccessMemberType is the element type of the member map.
+func cloudAccessMemberType() attr.Type {
+	return types.ObjectType{AttrTypes: map[string]attr.Type{
+		"base_role":  types.StringType,
+		"deny_roles": types.ListType{ElemType: types.StringType},
+		"projects":   types.MapType{ElemType: types.StringType},
+	}}
+}
+
+// cloudAccessMembersToState converts the API's view of a cloud's members into
+// the member map, using priorMember (the map already in state, which is null on
+// import) to preserve shapes the wire cannot express.
+//
+// THE ROLE COUNT IS THE SUBTLE PART. The roles endpoint reports base_roles as a
+// list, and this provider only ever writes exactly one, but two other counts are
+// reachable and they are NOT the same kind of event:
+//
+//   - ZERO is ordinary, not an anomaly. A member added through the legacy
+//     collaborator path - the Anyscale console, or the API's permission_level
+//     endpoint - has a membership row and no role row. Erroring on that would
+//     make this resource unusable against most real clouds, and warning on it
+//     would emit noise on every refresh for a completely normal cloud.
+//   - MORE THAN ONE is a genuine anomaly, only reachable through a directory-sync
+//     interaction outside this resource's writes. It gets a warning naming what
+//     was found.
+//
+// Both land base_role as NULL rather than guessing an element or dropping the
+// member, and that choice does real work in both directions. A member the
+// configuration declares shows a diff and the next apply writes the declared
+// role - which, for the multi-role case, is also what repairs it, since the roles
+// write is a SET. A member the configuration does not declare stays visible as
+// an undeclared member, so authoritative mode can act on it. Dropping the member
+// instead - the intuitive reading of "we cannot represent this" - would hide an
+// existing member from the one resource whose job is to know the whole set.
+func cloudAccessMembersToState(ctx context.Context, remote []cloudAccessRemoteMember, priorMember types.Map) (types.Map, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	// Prior entries are looked up case-INSENSITIVELY. Email identity is not
+	// case-sensitive to Anyscale, so a config key of "Alice@x.com" and an API
+	// response of "alice@x.com" are one person; matching them exactly would treat
+	// the API's spelling as a new member and the config's as a departed one.
+	prior := make(map[string]CloudAccessMemberModel)
+	if !priorMember.IsNull() && !priorMember.IsUnknown() {
+		raw := make(map[string]CloudAccessMemberModel, len(priorMember.Elements()))
+		diags.Append(priorMember.ElementsAs(ctx, &raw, false)...)
+		if diags.HasError() {
+			return types.MapNull(cloudAccessMemberType()), diags
+		}
+		for email, m := range raw {
+			prior[strings.ToLower(strings.TrimSpace(email))] = m
+		}
+	}
+
+	elements := make(map[string]attr.Value, len(remote))
+	for _, m := range remote {
+		priorEntry, hadPrior := prior[strings.ToLower(strings.TrimSpace(m.Email))]
+
+		baseRole := types.StringNull()
+		switch {
+		case len(m.BaseRoles) == 1:
+			baseRole = types.StringValue(m.BaseRoles[0])
+		case len(m.BaseRoles) > 1:
+			diags.AddWarning(
+				"Cloud Member Has More Than One Base Role",
+				fmt.Sprintf("Member %s holds %d base roles on this cloud (%v), but a member is expected to hold exactly "+
+					"one. This is only reachable through a change made outside this resource, which always writes a "+
+					"single role.\n\nbase_role is reported as null for this member rather than guessing which of the %d "+
+					"applies. If your configuration declares a role for them, the next apply writes it and replaces the "+
+					"whole set, which resolves this.", m.Email, len(m.BaseRoles), m.BaseRoles, len(m.BaseRoles)),
+			)
+		}
+
+		// The wire cannot distinguish "deny_roles was never declared" from
+		// "deny_roles was declared as []", because both are sent as an empty list
+		// and both come back as one. Reproducing a single shape unconditionally
+		// would put a permanent diff against whichever the practitioner wrote, so an
+		// empty result keeps prior state's shape. A non-empty result always wins:
+		// that is real current server state.
+		denyRoles := types.ListNull(types.StringType)
+		switch {
+		case len(m.DenyRoles) > 0:
+			list, listDiags := types.ListValueFrom(ctx, types.StringType, m.DenyRoles)
+			diags.Append(listDiags...)
+			denyRoles = list
+		case hadPrior && !priorEntry.DenyRoles.IsNull() && !priorEntry.DenyRoles.IsUnknown():
+			list, listDiags := types.ListValueFrom(ctx, types.StringType, []string{})
+			diags.Append(listDiags...)
+			denyRoles = list
+		}
+
+		// PROJECT ROLES ARE NOT REFRESHED. They are carried over from prior state
+		// unchanged, and land null on import.
+		//
+		// This is a deliberate interim contract, not an oversight, and it has a real
+		// cost: a project role changed outside Terraform is not detected, so drift
+		// at project scope is invisible. Refreshing it needs one call per project
+		// under the cloud on every read - there is no list-collaborators-for-a-cloud
+		// endpoint - and whether to pay that, gate it, or accept the blind spot is
+		// an open decision. Carrying prior state forward is the only interim that
+		// does not manufacture a permanent phantom diff: projects is plain Optional,
+		// so a read that nulled a declared value would show a change on every plan.
+		projects := types.MapNull(types.StringType)
+		if hadPrior {
+			projects = priorEntry.Projects
+		}
+
+		obj, objDiags := types.ObjectValue(
+			map[string]attr.Type{
+				"base_role":  types.StringType,
+				"deny_roles": types.ListType{ElemType: types.StringType},
+				"projects":   types.MapType{ElemType: types.StringType},
+			},
+			map[string]attr.Value{
+				"base_role":  baseRole,
+				"deny_roles": denyRoles,
+				"projects":   projects,
+			},
+		)
+		diags.Append(objDiags...)
+		if diags.HasError() {
+			return types.MapNull(cloudAccessMemberType()), diags
+		}
+
+		// Keyed by the API's own spelling of the email, not prior state's. The two
+		// can differ in case, and the API's is what a fresh import would produce -
+		// so using it keeps an imported state and a refreshed state identical rather
+		// than making the key depend on which path got there first.
+		elements[m.Email] = obj
+	}
+
+	result, resultDiags := types.MapValue(cloudAccessMemberType(), elements)
+	diags.Append(resultDiags...)
+	return result, diags
 }
 
 // resolvedStringMapValues returns the entries of a string map whose values
