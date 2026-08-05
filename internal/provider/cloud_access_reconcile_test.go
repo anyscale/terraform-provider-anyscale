@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -45,10 +46,41 @@ type cloudAccessReconcileMock struct {
 	// cloudGetStatus, when non-zero, is returned by the cloud GET instead of a
 	// body - used to prove the auto_add_user preflight fails closed.
 	cloudGetStatus int
+	// rolesReadStatus, when non-zero, is returned by the roles GET instead of a
+	// body - used to prove a 501 (the read-side feature flag) on that endpoint
+	// surfaces the two-flag diagnostic rather than a generic read-failure one.
+	rolesReadStatus int
+	// rolesWriteStatus, when non-zero, is returned by every roles PUT instead of
+	// writing anything - used to prove a 501 (the write-side feature flag) on
+	// that endpoint surfaces the two-flag diagnostic rather than a generic
+	// set-role-failure one.
+	rolesWriteStatus int
+
+	// groupPolicyBindingCount, when > 0, makes GET /api/v2/policy/cloud/{id}
+	// return that many bindings (Present). groupPolicyStatusOverride, when
+	// non-zero, makes it return that raw status instead (e.g. 403, to prove
+	// Undetermined). groupPolicyRegisterEmpty forces the route to register and
+	// return a 200 with zero bindings (the OTHER Absent shape) even though that
+	// is indistinguishable, by count alone, from "don't register." With none of
+	// the three set, the route is left unregistered and ServeMux's own 404
+	// fires - proving the common Absent shape needs no special mock support at
+	// all, which is the ordinary case in production too.
+	groupPolicyBindingCount     int
+	groupPolicyStatusOverride   int
+	groupPolicyRegisterEmpty    bool
+	groupPolicyRequestsRecorded int
 
 	// failRoleWriteFor / failRevokeFor are emails whose write fails.
 	failRoleWriteFor map[string]bool
 	failRevokeFor    map[string]string
+
+	// roleReadOverrideDenyRoles, keyed by user_id, makes the roles GET report a
+	// DIFFERENT deny_roles value than what m.members actually holds - standing
+	// in for a stale/eventually-consistent read-back rather than a write bug.
+	// Used only by the read-back-must-not-touch-member regression guard: if
+	// applyCloudAccess ever read this response back into state.Member, the
+	// override value (not the plan's) would show up, and the guard would fail.
+	roleReadOverrideDenyRoles map[string][]string
 
 	// calls is every mutating request, in order, as "VERB path".
 	calls []string
@@ -68,6 +100,11 @@ type cloudAccessMockMember struct {
 type cloudAccessMockIdentity struct {
 	IdentityID string
 	UserID     string
+	// PermissionLevel is the organization-scope permission_level reported by
+	// GET /api/v2/organization_collaborators - "owner" or "collaborator".
+	// Defaults to "collaborator" when unset, so only a test that cares about
+	// J.22's org-admin guard needs to set it.
+	PermissionLevel string
 }
 
 func (m *cloudAccessReconcileMock) record(r *http.Request) {
@@ -101,11 +138,39 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 		results := []map[string]interface{}{}
 		for email, id := range m.orgMembers {
 			userID := id.UserID
+			permissionLevel := id.PermissionLevel
+			if permissionLevel == "" {
+				permissionLevel = "collaborator"
+			}
 			results = append(results, map[string]interface{}{
 				"id": id.IdentityID, "email": email, "user_id": userID, "name": "Test",
+				"permission_level": permissionLevel,
 			})
 		}
 		writeJSON(w, map[string]interface{}{"results": results, "metadata": emptyMeta})
+	})
+
+	// The singular GET, keyed by user_id - what cloudAccessLikelyOrgAdmin (J.22)
+	// actually reads base_role from. Kept driven by the same PermissionLevel
+	// field as the list handler above: for this mock's purposes, one signal per
+	// test identity is enough to say "this person is an org admin", even though
+	// the two endpoints have different real-world staleness properties.
+	mux.HandleFunc("/api/v2/organization_collaborators/", func(w http.ResponseWriter, r *http.Request) {
+		userID := strings.TrimPrefix(r.URL.Path, "/api/v2/organization_collaborators/")
+		for _, id := range m.orgMembers {
+			if id.UserID != userID {
+				continue
+			}
+			baseRole := id.PermissionLevel
+			if baseRole == "" {
+				baseRole = "collaborator"
+			}
+			writeJSON(w, map[string]interface{}{"result": map[string]interface{}{
+				"base_role": baseRole, "additional_roles": []string{},
+			}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
 	})
 
 	mux.HandleFunc(fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/search", cloudID),
@@ -123,13 +188,24 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 
 	mux.HandleFunc(fmt.Sprintf("/api/v2/clouds/%s/collaborators/roles", cloudID),
 		func(w http.ResponseWriter, r *http.Request) {
+			if m.rolesReadStatus != 0 {
+				w.WriteHeader(m.rolesReadStatus)
+				writeJSON(w, map[string]interface{}{"error": map[string]interface{}{
+					"detail": "the cloud roles feature is not enabled for this organization",
+				}})
+				return
+			}
 			results := []map[string]interface{}{}
 			for _, mem := range m.members {
 				if len(mem.BaseRoles) == 0 {
 					continue
 				}
+				denyRoles := mem.DenyRoles
+				if override, ok := m.roleReadOverrideDenyRoles[mem.UserID]; ok {
+					denyRoles = override
+				}
 				results = append(results, map[string]interface{}{
-					"user_id": mem.UserID, "base_roles": mem.BaseRoles, "deny_roles": mem.DenyRoles,
+					"user_id": mem.UserID, "base_roles": mem.BaseRoles, "deny_roles": denyRoles,
 				})
 			}
 			writeJSON(w, map[string]interface{}{"results": results, "metadata": emptyMeta})
@@ -179,6 +255,13 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 			trailing := strings.TrimPrefix(r.URL.Path, fmt.Sprintf("/api/v2/clouds/%s/collaborators/", cloudID))
 
 			if r.Method == http.MethodPut && strings.HasSuffix(trailing, "/roles") {
+				if m.rolesWriteStatus != 0 {
+					w.WriteHeader(m.rolesWriteStatus)
+					writeJSON(w, map[string]interface{}{"error": map[string]interface{}{
+						"detail": "the cloud roles feature is not enabled for this organization",
+					}})
+					return
+				}
 				userID := strings.TrimSuffix(strings.TrimPrefix(trailing, "users/"), "/roles")
 				raw, err := io.ReadAll(r.Body)
 				if err != nil {
@@ -229,6 +312,25 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 			t.Fatalf("unexpected request to the collaborators subtree: %s %s", r.Method, r.URL.Path)
 		})
 
+	// Only registered when a test opts in - see the fields' own doc comment for
+	// why an unregistered route (the default) is itself the Absent case, not a
+	// mock gap needing a stub.
+	if m.groupPolicyBindingCount > 0 || m.groupPolicyStatusOverride != 0 || m.groupPolicyRegisterEmpty {
+		mux.HandleFunc(fmt.Sprintf("/api/v2/policy/cloud/%s", cloudID), func(w http.ResponseWriter, r *http.Request) {
+			m.groupPolicyRequestsRecorded++
+			if m.groupPolicyStatusOverride != 0 {
+				w.WriteHeader(m.groupPolicyStatusOverride)
+				writeJSON(w, map[string]interface{}{"error": map[string]interface{}{"detail": "forbidden"}})
+				return
+			}
+			bindings := make([]map[string]interface{}, m.groupPolicyBindingCount)
+			for i := range bindings {
+				bindings[i] = map[string]interface{}{"role_name": "write", "principals": []string{fmt.Sprintf("ug_%d", i)}}
+			}
+			writeJSON(w, map[string]interface{}{"result": map[string]interface{}{"bindings": bindings, "sync_status": "success"}})
+		})
+	}
+
 	return mux
 }
 
@@ -243,7 +345,9 @@ func (m *cloudAccessReconcileMock) memberEmails() []string {
 // cloudAccessApplyOptions is the option set an apply uses. Destroy differs on
 // RefuseWhenAutoAddUserEnabled and has its own test below.
 func cloudAccessApplyOptions() cloudAccessReconcileOptions {
-	return cloudAccessReconcileOptions{RevokeUndeclared: true, RefuseWhenAutoAddUserEnabled: true}
+	return cloudAccessReconcileOptions{
+		RevokeUndeclared: true, RefuseWhenAutoAddUserEnabled: true, RefuseWhenGroupPolicyBound: true,
+	}
 }
 
 func cloudAccessDesired(entries ...cloudAccessDesiredMember) map[string]cloudAccessDesiredMember {
@@ -499,12 +603,14 @@ func TestReconcileCloudAccess_FailedRevokeConvergesIntoUnmanagedGrants(t *testin
 	}
 }
 
-// TestReconcileCloudAccess_FailedGrantIsFatalBeforeAnyRevoke covers the
-// asymmetry between a failed grant and a failed revoke. A failed grant means the
-// access the configuration asked for does not exist, so continuing would revoke
-// other members on the strength of a member list this apply has already failed
-// to establish.
-func TestReconcileCloudAccess_FailedGrantIsFatalBeforeAnyRevoke(t *testing.T) {
+// TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords covers AC-35:
+// a grant failure records into Ungranted and warns rather than erroring - the
+// error would taint the Create/Update, and the next apply would then destroy
+// and recreate the resource, revoking every member this apply DID manage to
+// grant. What a grant failure DOES suppress is the destructive half of the
+// SAME apply: the cloud-scope revoke phase, whose skipped entries must still
+// surface, distinguishably, in Unmanaged rather than silently vanishing.
+func TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords(t *testing.T) {
 	const cloudID = "cld_grantfail"
 
 	mock := &cloudAccessReconcileMock{
@@ -518,21 +624,334 @@ func TestReconcileCloudAccess_FailedGrantIsFatalBeforeAnyRevoke(t *testing.T) {
 		failRoleWriteFor: map[string]bool{"incoming@example.com": true},
 	}
 
-	_, diags := reconcileCloudAccess(context.Background(),
+	result, diags := reconcileCloudAccess(context.Background(),
 		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
 		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}), cloudAccessApplyOptions())
-	if !diags.HasError() {
-		t.Fatal("expected an error: the configuration asked for access that does not exist after the apply")
+
+	// NOT an error: erroring here after any other member's grant had already
+	// succeeded would taint the resource and schedule a destroy-then-recreate
+	// that revokes everyone this apply DID manage to grant. The failure is
+	// recorded and warned about instead.
+	if diags.HasError() {
+		t.Fatalf("a failed grant must not error - it must record into Ungranted and warn, or the resource taints: %v", diags)
+	}
+	if len(result.Ungranted) != 1 || result.Ungranted[0].Email.ValueString() != "incoming@example.com" {
+		t.Fatalf("expected incoming@example.com in Ungranted, got: %+v", result.Ungranted)
 	}
 
 	if _, ok := mock.members["undeclared@example.com"]; !ok {
-		t.Errorf("an undeclared member was revoked even though the grant pass failed: %v - the revoke set was computed from a member list this apply never managed to establish", mock.memberEmails())
+		t.Errorf("an undeclared member was revoked even though a grant failed: %v - the destructive half of the apply must be suppressed on any grant failure", mock.memberEmails())
+	}
+	// The skipped revoke must still be VISIBLE, not merely absent, so an
+	// operator reading only Ungranted does not conclude the rest of the apply
+	// completed.
+	foundSkip := false
+	for _, u := range result.Unmanaged {
+		if u.Email.ValueString() == "undeclared@example.com" && strings.Contains(u.Reason.ValueString(), "skipped") {
+			foundSkip = true
+		}
+	}
+	if !foundSkip {
+		t.Errorf("expected undeclared@example.com recorded in Unmanaged with a skipped-because-a-grant-failed reason: %+v", result.Unmanaged)
 	}
 
 	// Membership created by the failed grant is rolled back, so no unintended
 	// bridge-level access is left behind.
 	if _, ok := mock.members["incoming@example.com"]; ok {
 		t.Errorf("the bootstrap membership created moments before the failed role write was not rolled back: %v", mock.memberEmails())
+	}
+}
+
+// TestReconcileCloudAccess_GrantLoopContinuesPastAFailure covers the other
+// half of AC-35: a grant failure must not stop the loop from attempting every
+// OTHER declared member. Grants are additive and per-member independent, so
+// skipping "b" because "a" failed would silently fail to attempt access the
+// configuration asked for - forbidden by the same rule that requires revokes
+// to keep going past one unrevokable member.
+func TestReconcileCloudAccess_GrantLoopContinuesPastAFailure(t *testing.T) {
+	const cloudID = "cld_grantfail_continue"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "idn_a", UserID: "usr_a"},
+			"bob@example.com":   {IdentityID: "idn_b", UserID: "usr_b"},
+		},
+		failRoleWriteFor: map[string]bool{"alice@example.com": true},
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(
+			cloudAccessDesiredMember{Email: "alice@example.com", BaseRole: "writer"},
+			cloudAccessDesiredMember{Email: "bob@example.com", BaseRole: "writer"},
+		),
+		cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("a grant failure must not error: %v", diags)
+	}
+	if len(result.Ungranted) != 1 || result.Ungranted[0].Email.ValueString() != "alice@example.com" {
+		t.Fatalf("expected only alice@example.com in Ungranted, got: %+v", result.Ungranted)
+	}
+	if mem, ok := mock.members["bob@example.com"]; !ok || len(mem.BaseRoles) == 0 || mem.BaseRoles[0] != "writer" {
+		t.Errorf("bob's grant was not attempted after alice's failed: %v", mock.memberEmails())
+	}
+}
+
+// TestReconcileCloudAccess_ProjectPassReadFailureConvergesNotErrors covers the
+// gap this same round found and fixed: a read failure inside the project
+// pass (most plausibly J.13's own timeout firing after cloud-scope grants
+// already succeeded) must NOT error - it must record the shortfall via
+// cloudAccessUnplannedProjectShortfall and converge, exactly like a grant
+// failure does. The mock here has no project-scope routes at all, so the
+// project-roles read hits a genuine 404 - proving the fallback fires on a
+// real read failure, not a synthetic one.
+func TestReconcileCloudAccess_ProjectPassReadFailureConvergesNotErrors(t *testing.T) {
+	const cloudID = "cld_projectreadfail"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "idn_a", UserID: "usr_a"},
+		},
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(cloudAccessDesiredMember{
+			Email: "alice@example.com", BaseRole: "writer", Projects: map[string]string{"prj_1": "write"},
+		}),
+		cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("a project-pass read failure must not error, or a mid-reconcile timeout would taint the resource: %v", diags)
+	}
+	if len(result.Ungranted) != 1 || result.Ungranted[0].ProjectID.ValueString() != "prj_1" {
+		t.Fatalf("expected the project grant recorded as ungranted, got: %+v", result.Ungranted)
+	}
+	// Alice's CLOUD-scope grant must still have succeeded - the project pass
+	// read failure must not roll that back or prevent it.
+	if mem, ok := mock.members["alice@example.com"]; !ok || len(mem.BaseRoles) == 0 || mem.BaseRoles[0] != "writer" {
+		t.Errorf("alice's cloud-scope grant did not succeed: %v", mock.memberEmails())
+	}
+}
+
+// TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage covers AC-5
+// on the reconcile's own member-list read. Before this fix, a 501 here (the
+// read-side flag) fell through to the generic "Could Not Read The Cloud's
+// Current Members" message, which sends an operator looking at permissions or
+// the network instead of at the two feature flags that actually gate this
+// endpoint.
+func TestReconcileCloudAccess_FeatureGateOnReadSurfacesTwoFlagMessage(t *testing.T) {
+	const cloudID = "cld_gate_read"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID:    "usr_caller",
+		callerEmail:     "operator@example.com",
+		members:         map[string]cloudAccessMockMember{},
+		orgMembers:      map[string]cloudAccessMockIdentity{},
+		rolesReadStatus: http.StatusNotImplemented,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(), cloudAccessApplyOptions())
+
+	if !diags.HasError() {
+		t.Fatal("expected an error: the roles listing 501'd")
+	}
+	if d := cloudAccessFindError(diags, "Could Not Read The Cloud's Current Members"); d != nil {
+		t.Fatalf("got the generic read-failure diagnostic instead of the feature-gate one: %s", d.Detail())
+	}
+	d := cloudAccessFindError(diags, cloudRolesDisabledSummary)
+	if d == nil {
+		t.Fatalf("expected the %q diagnostic: %v", cloudRolesDisabledSummary, diags)
+	}
+	if !strings.Contains(d.Detail(), "two separate feature flags") {
+		t.Errorf("the detail does not name the two-flag ambiguity: %s", d.Detail())
+	}
+}
+
+// TestReconcileCloudAccess_FeatureGateOnRoleWriteSurfacesTwoFlagMessage covers
+// AC-5 on the OTHER half of the two-flag gate - the roles PUT, which is
+// reachable only through a grant. Before this fix, a 501 here fell through to
+// "Could Not Set Cloud Role", which is just as misleading as the read-side
+// generic message and for the same reason.
+func TestReconcileCloudAccess_FeatureGateOnRoleWriteSurfacesTwoFlagMessage(t *testing.T) {
+	const cloudID = "cld_gate_write"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"incoming@example.com": {IdentityID: "idn_in", UserID: "usr_in"},
+		},
+		rolesWriteStatus: http.StatusNotImplemented,
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}),
+		cloudAccessApplyOptions())
+
+	// NOT an error: a grant failure is recorded into Ungranted and warned
+	// about, never erroring - see TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords.
+	if diags.HasError() {
+		t.Fatalf("a gated role write must not error: %v", diags)
+	}
+	if cloudAccessFindError(diags, "Could Not Set Cloud Role") != nil {
+		t.Fatalf("got the generic set-role-failure diagnostic: %v", diags)
+	}
+	if len(result.Ungranted) != 1 || result.Ungranted[0].Email.ValueString() != "incoming@example.com" {
+		t.Fatalf("expected incoming@example.com in Ungranted, got: %+v", result.Ungranted)
+	}
+	reason := result.Ungranted[0].Reason.ValueString()
+	if !strings.Contains(reason, "two separate feature flags") {
+		t.Errorf("the recorded reason does not name the two-flag ambiguity: %s", reason)
+	}
+
+	// The bootstrap membership the failed role write left behind must still be
+	// rolled back - the feature gate changes the message, never the cleanup.
+	if _, ok := mock.members["incoming@example.com"]; ok {
+		t.Errorf("the bootstrap membership was not rolled back after the gated role write: %v", mock.memberEmails())
+	}
+}
+
+// TestReconcileCloudAccess_GroupPolicyBindingRefusesRevoke covers AC-32's
+// Present branch: a cloud carrying a group policy binding refuses before any
+// write, naming the binding, so this resource never revokes a member the
+// async group reconciler could silently re-grant later (J.20).
+func TestReconcileCloudAccess_GroupPolicyBindingRefusesRevoke(t *testing.T) {
+	const cloudID = "cld_grouppolicy_present"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"undeclared@example.com": {IdentityID: "idn_u", UserID: "usr_u", BaseRoles: []string{"writer"}},
+		},
+		orgMembers:              map[string]cloudAccessMockIdentity{},
+		groupPolicyBindingCount: 1,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID, cloudAccessDesired(), cloudAccessApplyOptions())
+
+	d := cloudAccessFindError(diags, "Cloud Has A Group Policy Binding")
+	if d == nil {
+		t.Fatalf("expected the group-policy refusal: %v", diags)
+	}
+	if len(mock.calls) != 0 {
+		t.Errorf("the refusal came after writes had already been made: %v - it must be a preflight so a refused apply "+
+			"changes nothing", mock.calls)
+	}
+	if _, ok := mock.members["undeclared@example.com"]; !ok {
+		t.Error("the member was revoked despite the group-policy refusal")
+	}
+}
+
+// TestReconcileCloudAccess_GroupPolicyAbsentProceedsSilently covers AC-32's
+// Absent branch, both of its two shapes: a 404 (no policy row at all - the
+// ordinary case for nearly every cloud today) and a 200 with an empty bindings
+// list. Neither should produce any diagnostic.
+func TestReconcileCloudAccess_GroupPolicyAbsentProceedsSilently(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		registerEmpty bool
+	}{
+		{name: "no policy row at all (404, unregistered route)", registerEmpty: false},
+		{name: "200 with an empty bindings list", registerEmpty: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const cloudID = "cld_grouppolicy_absent"
+			mock := &cloudAccessReconcileMock{
+				callerUserID: "usr_caller", callerEmail: "operator@example.com",
+				members: map[string]cloudAccessMockMember{
+					"undeclared@example.com": {IdentityID: "idn_u", UserID: "usr_u", BaseRoles: []string{"writer"}},
+				},
+				orgMembers:               map[string]cloudAccessMockIdentity{},
+				groupPolicyRegisterEmpty: tc.registerEmpty,
+			}
+
+			_, diags := reconcileCloudAccess(context.Background(),
+				cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID, cloudAccessDesired(), cloudAccessApplyOptions())
+
+			if diags.HasError() {
+				t.Fatalf("expected no error: absent must proceed silently: %v", diags)
+			}
+			if d := cloudAccessFindWarning(diags, "Could Not Confirm This Cloud Has No Group Policy Binding"); d != nil {
+				t.Errorf("expected no warning for the absent case: %s", d.Detail())
+			}
+			if _, ok := mock.members["undeclared@example.com"]; ok {
+				t.Error("the ordinary revoke did not happen - absent must not block the reconcile")
+			}
+		})
+	}
+}
+
+// TestReconcileCloudAccess_GroupPolicyUndeterminedWarnsAndProceeds covers
+// AC-32's Undetermined branch: a 403 (the common case for a Terraform token
+// that is not an organization admin) warns loudly but does not refuse, and the
+// ordinary revoke still happens.
+func TestReconcileCloudAccess_GroupPolicyUndeterminedWarnsAndProceeds(t *testing.T) {
+	const cloudID = "cld_grouppolicy_undetermined"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"undeclared@example.com": {IdentityID: "idn_u", UserID: "usr_u", BaseRoles: []string{"writer"}},
+		},
+		orgMembers:                map[string]cloudAccessMockIdentity{},
+		groupPolicyStatusOverride: http.StatusForbidden,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID, cloudAccessDesired(), cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("expected no error: undetermined must warn and proceed, never refuse: %v", diags)
+	}
+	d := cloudAccessFindWarning(diags, "Could Not Confirm This Cloud Has No Group Policy Binding")
+	if d == nil {
+		t.Fatalf("expected the undetermined warning: %v", diags)
+	}
+	if _, ok := mock.members["undeclared@example.com"]; ok {
+		t.Error("undetermined blocked the ordinary revoke - it must warn and proceed, not refuse")
+	}
+}
+
+// TestReconcileCloudAccess_GroupPolicyCheckSkippedWithNoRevokePending covers
+// the entry-point gating: an apply that revokes nobody must not call the
+// Policy API at all, matching auto_add_user's own entry point (J.20,
+// Amendment 1) - the check would be irrelevant noise on the common case.
+func TestReconcileCloudAccess_GroupPolicyCheckSkippedWithNoRevokePending(t *testing.T) {
+	const cloudID = "cld_grouppolicy_norevoke"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"existing@example.com": {IdentityID: "idn_e", UserID: "usr_e", BaseRoles: []string{"writer"}},
+		},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"existing@example.com": {IdentityID: "idn_e", UserID: "usr_e"},
+		},
+		groupPolicyBindingCount: 1,
+	}
+
+	// Desired matches the existing member exactly, so there is nothing to
+	// revoke - the group-policy check must not even run.
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(cloudAccessDesiredMember{Email: "existing@example.com", BaseRole: "writer"}),
+		cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("expected no error: nothing to revoke, so the group-policy check should not even fire: %v", diags)
+	}
+	if mock.groupPolicyRequestsRecorded != 0 {
+		t.Errorf("the group-policy check ran even though no revoke was pending: %d request(s)", mock.groupPolicyRequestsRecorded)
 	}
 }
 
@@ -673,6 +1092,35 @@ func TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser(t *testing.T) {
 	}
 }
 
+// TestReconcileCloudAccess_DestroyDoesNotRefuseOnGroupPolicyBinding is
+// TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser's twin for J.20's
+// asymmetry: a destroy attempts every revoke on a cloud carrying a group
+// policy binding rather than refusing, for the same reason - refusing would
+// strand the resource in state with no exit but 'terraform state rm'.
+func TestReconcileCloudAccess_DestroyDoesNotRefuseOnGroupPolicyBinding(t *testing.T) {
+	const cloudID = "cld_destroy_grouppolicy"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"member@example.com": {IdentityID: "idn_m", UserID: "usr_m", BaseRoles: []string{"writer"}},
+		},
+		orgMembers:              map[string]cloudAccessMockIdentity{},
+		groupPolicyBindingCount: 1,
+	}
+
+	_, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID, map[string]cloudAccessDesiredMember{},
+		cloudAccessReconcileOptions{RevokeUndeclared: true, RefuseWhenGroupPolicyBound: false})
+
+	if diags.HasError() {
+		t.Fatalf("a destroy must not refuse on a group-policy-bound cloud: %v", diags)
+	}
+	if _, ok := mock.members["member@example.com"]; ok {
+		t.Error("the destroy did not attempt the revoke - a group policy binding must not block destroy")
+	}
+}
+
 // runCloudAccessModifyPlanWithClient is runCloudAccessModifyPlan with a
 // configured client, so the plan-time checks that need an API call actually run.
 // The nil-client variant exists too, and deliberately: ValidateConfig-adjacent
@@ -779,6 +1227,98 @@ func TestCloudAccessModifyPlan_RefusesDeclaringTheCaller(t *testing.T) {
 		diags := runCloudAccessModifyPlanWithClient(t, client, planWith("operator@example.com"))
 		if diags.HasError() {
 			t.Fatalf("an unresolvable caller must not make the plan fail: %v", diags)
+		}
+	})
+}
+
+// TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins covers J.22/AC-34: the
+// cloud roles write refuses outright to change an organization admin's role,
+// and discovering that mid-reconcile - after another member's grant already
+// succeeded - is exactly the situation the never-error-after-a-successful-
+// write rule forbids. So this is caught at plan time instead, same placement
+// as the caller check.
+func TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins(t *testing.T) {
+	const cloudID = "cld_plan_orgadmin"
+
+	newMock := func() *cloudAccessReconcileMock {
+		return &cloudAccessReconcileMock{
+			callerUserID: "usr_caller", callerEmail: "operator@example.com",
+			members: map[string]cloudAccessMockMember{},
+			orgMembers: map[string]cloudAccessMockIdentity{
+				"admin@example.com":       {IdentityID: "idn_admin", UserID: "usr_admin", PermissionLevel: "owner"},
+				"other-admin@example.com": {IdentityID: "idn_admin2", UserID: "usr_admin2", PermissionLevel: "owner"},
+				"alice@example.com":       {IdentityID: "idn_alice", UserID: "usr_alice", PermissionLevel: "collaborator"},
+			},
+		}
+	}
+
+	planWith := func(emails ...string) *CloudAccessResourceModel {
+		entries := make(map[string]attr.Value, len(emails))
+		for _, e := range emails {
+			entries[e] = cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects())
+		}
+		m := cloudAccessConfigModel(cloudAccessMemberMap(entries))
+		return &m
+	}
+
+	t.Run("declaring an org admin is an error naming them", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("admin@example.com", "alice@example.com"))
+
+		d := cloudAccessFindError(diags, "This Member Appears To Be An Organization Admin")
+		if d == nil {
+			t.Fatalf("expected the org-admin refusal: %v", diags)
+		}
+		cloudAccessAssertErrorPath(t, d, path.Root("member").AtMapKey("admin@example.com"))
+	})
+
+	t.Run("every declared admin is reported, not just the first", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("admin@example.com", "other-admin@example.com", "alice@example.com"))
+
+		for _, email := range []string{"admin@example.com", "other-admin@example.com"} {
+			found := false
+			for _, d := range diags {
+				if d.Severity() == diag.SeverityError && strings.Contains(d.Detail(), email) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected an error naming %s: %v", email, diags)
+			}
+		}
+	})
+
+	t.Run("matched case-insensitively", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("Admin@Example.com"))
+		if cloudAccessFindError(diags, "This Member Appears To Be An Organization Admin") == nil {
+			t.Errorf("a differently-cased spelling of the admin's address slipped past the check: %v", diags)
+		}
+	})
+
+	t.Run("declaring a non-admin is fine", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("alice@example.com"))
+		if diags.HasError() {
+			t.Fatalf("unexpected error for a configuration that declares no organization admin: %v", diags)
+		}
+	})
+
+	t.Run("an unresolvable admin list skips the check without failing the plan", func(t *testing.T) {
+		broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		t.Cleanup(broken.Close)
+		client := &Client{BaseURL: broken.URL, Token: "test-token", HTTPClient: broken.Client()}
+
+		diags := runCloudAccessModifyPlanWithClient(t, client, planWith("admin@example.com"))
+		if diags.HasError() {
+			t.Fatalf("an unresolvable admin list must not make the plan fail: %v", diags)
 		}
 	})
 }
@@ -949,5 +1489,195 @@ func TestCloudAccessRevokeFailureReason(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall is AC-36:
+// after a failed grant, state still claims the full planned map (AC-21a -
+// `member` has no Computed sub-fields, so applyCloudAccess must write the
+// plan verbatim even for a member whose grant failed). The failure must not
+// stay invisible forever - the next refresh has to recover it, so the
+// following plan re-proposes the grant rather than converging on a lie.
+//
+// Chains applyCloudAccess (the AC-35 scenario) into Read directly - the
+// write gate stays closed throughout, since neither call goes through
+// Create/Update's refuseWriteWhileReadOnly check. Asserting the refreshed
+// member map omits the failed grant is a deliberate proxy for a real
+// Terraform plan (which can't run while the gate is closed): it proves
+// exactly what forces a non-empty plan - state no longer matching what the
+// unchanged config declares.
+func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
+	const cloudID = "cld_grantfail_refresh"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "idn_a", UserID: "usr_a"},
+			"bob@example.com":   {IdentityID: "idn_b", UserID: "usr_b"},
+		},
+		failRoleWriteFor: map[string]bool{"bob@example.com": true},
+	}
+	client := cloudAccessTestClient(t, mock.handler(t, cloudID))
+
+	// STEP 1: apply a config declaring both alice and bob. alice's grant
+	// succeeds against the backend; bob's fails and is rolled back (the same
+	// AC-35 shape forge's reconcile-level tests already cover) - confirmed
+	// against the backend below, not assumed.
+	plan := &CloudAccessResourceModel{
+		ID:                  types.StringValue(cloudID),
+		CloudID:             types.StringValue(cloudID),
+		AllowEmptyMemberSet: types.BoolValue(false),
+		Timeouts:            timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "update": types.StringType, "delete": types.StringType})},
+		Member: cloudAccessMemberMap(map[string]attr.Value{
+			"alice@example.com": cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+			"bob@example.com":   cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+		}),
+	}
+	declaredMember := plan.Member // saved before applyCloudAccess can touch plan
+
+	r := &CloudAccessResource{client: client}
+	ctx := context.Background()
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	applyState := tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), nil)}
+
+	var applyDiags diag.Diagnostics
+	r.applyCloudAccess(ctx, plan, types.MapNull(cloudAccessMemberObjectType()), &applyState, &applyDiags)
+	if applyDiags.HasError() {
+		t.Fatalf("the apply itself must not error on a grant failure (AC-35): %v", applyDiags)
+	}
+	if _, ok := mock.members["bob@example.com"]; ok {
+		t.Fatalf("precondition failed: bob's grant should have failed and rolled back, but the backend has him: %v", mock.memberEmails())
+	}
+	if mem, ok := mock.members["alice@example.com"]; !ok || len(mem.BaseRoles) == 0 {
+		t.Fatalf("precondition failed: alice's grant should have succeeded against the backend: %v", mock.memberEmails())
+	}
+
+	var postApply CloudAccessResourceModel
+	if diags := applyState.Get(ctx, &postApply); diags.HasError() {
+		t.Fatalf("failed to read back the post-apply state: %v", diags)
+	}
+	if _, ok := postApply.Member.Elements()["bob@example.com"]; !ok {
+		t.Fatalf("AC-21a precondition failed: post-apply state must still claim bob (the full planned map), or this test isn't exercising the shortfall AC-36 is about")
+	}
+
+	// STEP 2: refresh. The backend genuinely never granted bob, so a
+	// refresh reading the real member-search must recover THAT truth,
+	// diverging from what the (still-error-free, per AC-21a) apply claimed.
+	refreshed, readDiags := runCloudAccessRead(t, client, &postApply)
+	if readDiags.HasError() {
+		t.Fatalf("unexpected error refreshing: %v", readDiags)
+	}
+
+	if _, stillClaimed := refreshed.Member.Elements()["bob@example.com"]; stillClaimed {
+		t.Errorf("the refresh still reports bob@example.com as a member - the failed grant's shortfall did not " +
+			"surface, so a plan against the unchanged config (which still declares bob) would show no diff and " +
+			"silently never retry the grant")
+	}
+	// Control: alice's real, successful grant must survive the refresh
+	// unchanged - otherwise this test could not distinguish "the refresh
+	// correctly reports reality" from "the refresh drops everyone".
+	if _, present := refreshed.Member.Elements()["alice@example.com"]; !present {
+		t.Fatalf("control failed: alice's real grant did not survive the refresh - this test's own assertion above proves nothing without it")
+	}
+
+	// The declared config (unchanged from step 1) still names bob - the
+	// comparison that would drive a real plan's diff, made explicit here
+	// since no live Terraform plan step can run while the write gate is
+	// closed.
+	if _, stillDeclared := declaredMember.Elements()["bob@example.com"]; !stillDeclared {
+		t.Fatalf("test setup error: the declared config must still name bob for the re-propose claim to mean anything")
+	}
+}
+
+// TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned is AC-21b, a
+// regression guard rather than a diagnostic test (design record ed5a176):
+// applyCloudAccess never reads `member` back on any path today, so its
+// original purpose is moot, but nothing would fail if a future edit
+// reintroduced one - this test is what would catch it.
+//
+// The mock's roles GET is overridden to report a deny_roles value different
+// from the plan's - an EMPTY, DECLARED list, the narrowest input that
+// distinguishes "wrote the plan verbatim" from "wrote something read back".
+// If applyCloudAccess ever read that response into plan.Member, the
+// override value would appear in state and the assertion below would fail.
+//
+// Mutation-proven: temporarily reintroducing a read-back write to
+// plan.Member makes this test fail with the override's value instead of the
+// plan's; reverting restores the pass.
+func TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned(t *testing.T) {
+	const cloudID = "cld_apply_guard"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "ide_alice", UserID: "usr_alice"},
+		},
+		roleReadOverrideDenyRoles: map[string][]string{
+			"usr_alice": {cloudAccessReadOnlyDenyRole},
+		},
+	}
+
+	plan := &CloudAccessResourceModel{
+		ID:                  types.StringValue(cloudID),
+		CloudID:             types.StringValue(cloudID),
+		AllowEmptyMemberSet: types.BoolValue(false),
+		Timeouts:            timeouts.Value{Object: types.ObjectNull(map[string]attr.Type{"create": types.StringType, "update": types.StringType, "delete": types.StringType})},
+		Member: cloudAccessMemberMap(map[string]attr.Value{
+			"alice@example.com": cloudAccessMember("writer", cloudAccessDenyRoles(), cloudAccessNoProjects()),
+		}),
+	}
+
+	client := cloudAccessTestClient(t, mock.handler(t, cloudID))
+	r := &CloudAccessResource{client: client}
+
+	ctx := context.Background()
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	rawType := schemaResp.Schema.Type().TerraformType(ctx)
+	state := tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(rawType, nil)}
+
+	var diags diag.Diagnostics
+	r.applyCloudAccess(ctx, plan, types.MapNull(cloudAccessMemberObjectType()), &state, &diags)
+	if diags.HasError() {
+		t.Fatalf("unexpected error applying a config this mock should accept cleanly: %v", diags)
+	}
+
+	var got CloudAccessResourceModel
+	if diags := state.Get(ctx, &got); diags.HasError() {
+		t.Fatalf("failed to read back the state applyCloudAccess wrote: %v", diags)
+	}
+
+	elems := got.Member.Elements()
+	aliceVal, ok := elems["alice@example.com"]
+	if !ok {
+		t.Fatalf("state.Member is missing alice@example.com entirely: %v", elems)
+	}
+	aliceObj, ok := aliceVal.(types.Object)
+	if !ok {
+		t.Fatalf("alice@example.com is not an object: %#v", aliceVal)
+	}
+	denyRolesVal := aliceObj.Attributes()["deny_roles"]
+	denyRolesList, ok := denyRolesVal.(types.List)
+	if !ok {
+		t.Fatalf("alice@example.com's deny_roles is not a list: %#v", denyRolesVal)
+	}
+	if denyRolesList.IsNull() {
+		t.Errorf("alice@example.com's deny_roles came back null - the plan declared it as an empty list, not " +
+			"never-declared, and a null here means SOMETHING wrote a value other than the plan's")
+	}
+	if got := len(denyRolesList.Elements()); got != 0 {
+		t.Errorf("alice@example.com's deny_roles has %d entries, want 0 (the plan's empty list) - a non-empty "+
+			"result matching the mock's override (%v) means applyCloudAccess read the roles GET back into "+
+			"state instead of writing the plan verbatim, which is exactly the regression this guard exists to catch",
+			got, []string{cloudAccessReadOnlyDenyRole})
 	}
 }

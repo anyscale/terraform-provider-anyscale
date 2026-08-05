@@ -148,11 +148,21 @@ func coreGateProviderFactories() map[string]func() (tfprotov6.ProviderServer, er
 	}
 }
 
-// TestFrameworkCoreGate_ErroredCreateStatePersists is gate 2.1's Create half.
-// Step 1 makes Create write marker then error. If Core had discarded that
-// partial state, Core would have no record of this resource at all and step
-// 2 would just call Create again, succeeding silently (trigger_err is false
-// this time) - no error, test would fail on the ExpectError below.
+// TestAccFrameworkCoreGateErroredCreateStatePersistsResource is gate 2.1's
+// Create half. Step 1 makes Create write marker then error. If Core had
+// discarded that partial state, Core would have no record of this resource
+// at all and step 2 would just call Create again, succeeding silently
+// (trigger_err is false this time) - no error, test would fail on the
+// ExpectError below.
+//
+// Named TestAcc*Resource, not TestFrameworkCoreGate_*, so ci.yml's
+// acctest-resource shard (-run '^TestAcc[A-Za-z]+Resource') actually runs
+// it. Under the old name this test was unreachable by any CI workflow:
+// lint-and-unit's `make test` never sets TF_ACC (resource.Test self-skips
+// without it), and the only invocation that runs the package unfiltered is
+// a bare `make testacc`, which no workflow calls. It needs no real
+// credentials - the provider under test is the throwaway "coregate" fake -
+// so it costs nothing extra in the shard it now runs in.
 //
 // What actually happens, confirmed by running this: Core PERSISTS the
 // partial state AND taints the resource, so step 2 plans a destroy-then-
@@ -162,7 +172,7 @@ func coreGateProviderFactories() map[string]func() (tfprotov6.ProviderServer, er
 // the cloud_access design: a failed Create does not leave a resource in a
 // retriable "try the same reconcile again" shape, it leaves a TAINTED
 // resource whose next apply is destroy-then-recreate of the WHOLE resource.
-func TestFrameworkCoreGate_ErroredCreateStatePersists(t *testing.T) {
+func TestAccFrameworkCoreGateErroredCreateStatePersistsResource(t *testing.T) {
 	coreGateDeleteFailureBudget.Store(1)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: coreGateProviderFactories(),
@@ -192,14 +202,18 @@ resource "coregate_gate" "test" {
 	})
 }
 
-// TestFrameworkCoreGate_ErroredDeleteStatePersists is gate 2.1's Delete half,
-// the one flagged as least likely to match Create/Update because it is a
-// different Core decision. Step 1 creates cleanly. Step 2 destroys, which
-// always errors without clearing state. Step 3 re-applies the ORIGINAL config
-// with PlanOnly+ExpectNonEmptyPlan(false): an empty plan is only possible if
-// Core still believes the resource exists with its last-known attributes -
-// i.e. the errored Delete did not wipe it.
-func TestFrameworkCoreGate_ErroredDeleteStatePersists(t *testing.T) {
+// TestAccFrameworkCoreGateErroredDeleteStatePersistsResource is gate 2.1's
+// Delete half, the one flagged as least likely to match Create/Update
+// because it is a different Core decision. Step 1 creates cleanly. Step 2
+// destroys, which always errors without clearing state. Step 3 re-applies
+// the ORIGINAL config with PlanOnly+ExpectNonEmptyPlan(false): an empty plan
+// is only possible if Core still believes the resource exists with its
+// last-known attributes - i.e. the errored Delete did not wipe it.
+//
+// Renamed alongside its Create-half sibling above - see that comment for
+// why the TestAcc*Resource shape matters here (CI-shard reachability, not
+// style).
+func TestAccFrameworkCoreGateErroredDeleteStatePersistsResource(t *testing.T) {
 	coreGateDeleteFailureBudget.Store(1)
 	config := `
 resource "coregate_gate" "test" {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -130,6 +131,19 @@ func cloudAccessConfigModel(member types.Map) CloudAccessResourceModel {
 		AllowEmptyMemberSet: types.BoolValue(false),
 		Member:              member,
 		UnmanagedGrants:     types.ListNull(cloudAccessUnmanagedGrantObjectType()),
+		UngrantedMembers:    types.ListNull(cloudAccessUnmanagedGrantObjectType()),
+		Timeouts:            timeouts.Value{Object: types.ObjectNull(cloudAccessTimeoutsAttrTypes())},
+	}
+}
+
+// cloudAccessTimeoutsAttrTypes is the attr.Type map the timeouts.Block schema
+// option (Create/Update/Delete, no Read) produces - needed here to build a
+// null timeouts.Value fixture that matches the real schema's shape exactly.
+func cloudAccessTimeoutsAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"create": types.StringType,
+		"update": types.StringType,
+		"delete": types.StringType,
 	}
 }
 
@@ -174,6 +188,16 @@ func runCloudAccessValidateConfig(t *testing.T, model CloudAccessResourceModel) 
 func cloudAccessFindError(diags diag.Diagnostics, summary string) diag.Diagnostic {
 	for _, d := range diags {
 		if d.Severity() == diag.SeverityError && d.Summary() == summary {
+			return d
+		}
+	}
+	return nil
+}
+
+// cloudAccessFindWarning is cloudAccessFindError's warning-severity twin.
+func cloudAccessFindWarning(diags diag.Diagnostics, summary string) diag.Diagnostic {
+	for _, d := range diags {
+		if d.Severity() == diag.SeverityWarning && d.Summary() == summary {
 			return d
 		}
 	}

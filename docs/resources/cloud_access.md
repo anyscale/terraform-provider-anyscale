@@ -3,43 +3,47 @@
 page_title: "anyscale_cloud_access Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Reads and imports the complete member list of one Anyscale cloud, including each member's cloud role and the deny roles layered on it.
-  ~> This version is read-only. Create, update and delete are not implemented and fail with an explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage them through Terraform. Cloud-scoped role management has no writable provider surface until that lands.
-  What this version is for: drift detection. Declare the member list you expect, and terraform plan reports any difference between your configuration and reality - it simply cannot correct one yet. Import a cloud, write out its members, and a clean plan then means the cloud's member list and the project roles you declared are still exactly what you wrote.
-  Read the scope limits on member, projects and unmanaged_grants before relying on that, though - a clean plan is not the same as "nobody has access you did not intend". Organization admins are invisible to the endpoint this reads, your own identity is excluded, and project roles are compared only for the projects your configuration names.
-  That is also why member is Required on a resource that cannot write: handing over the full expected member list is not busywork here, it is the thing being compared against.
-  ~> This resource is designed to be authoritative, and that is not yet in effect. When the write path ships, Terraform will own who has access to this cloud, and any member not declared in member will be revoked - including people granted access through the Anyscale console, and including on the first apply. None of that happens in this version. It is stated here so the behavior is not a surprise when it arrives; read this page again before you first apply a change with it.
+  Manages the complete member list of one Anyscale cloud: cloud roles, deny roles, and each member's roles on the projects your configuration names.
+  ~> This resource is authoritative. Terraform owns who has access to this cloud. Any member not declared in member is revoked - including people granted access through the Anyscale console, and including on the first apply. That is the point of this resource - it is how you make Terraform the source of truth for a cloud's membership - but it means a mistake here removes real people's access. Read this whole page before your first apply against a production cloud.
+  Declare the member list you expect, and terraform plan/apply makes it so - adding, changing, and revoking roles to match. Read the scope limits below before relying on a clean plan as complete assurance, though.
+  A clean plan is not the same as "nobody has access you did not intend", and it is not proof nothing has changed out of band. Organization admins are invisible to the endpoint this reads, your own identity is excluded, project roles are compared only for the projects your configuration names, and - the sharpest limit - an administrator can change a member's role through the Anyscale console or CLI without this resource noticing at all. That legacy path writes through a different store than the one this resource reads, so a member promoted from writer to owner through the console reads back exactly as declared and plans clean, while actually holding a different role. The one direction this resource CAN see is a change crossing the cloud_read_only restriction specifically - see deny_roles below. Read a clean plan as confirmation of what this resource was able to check, not as confirmation of the member's actual role.
+  That is also why member is Required: it is this resource's whole authority, not an optional filter - omitting it is not meaningful on an authoritative resource.
+  ~> Two Computed attributes track write-path shortfalls, and they mean OPPOSITE things. unmanaged_grants is someone who still has access this configuration says they should not have (a revoke that could not complete). ungranted_members is someone who lacks access this configuration says they should have (a grant that could not complete). Neither ever influences planning - both are diagnostics only, alertable via length(...) > 0, and a shortfall in either one still lets the apply converge rather than fail, since erroring after another member's change already succeeded would taint this resource's state and schedule a destructive retry.
   auto_add_user and this resource are mutually exclusive
   ~> A cloud with auto_add_user enabled cannot have its member list owned by Terraform at all. While that setting is on, Anyscale automatically grants every organization member access to the cloud and refuses to remove a collaborator, so authoritative management is impossible rather than merely degraded.
   ~> Worth knowing before you enable that flag: turning auto_add_user on for a cloud that already has organization members retroactively adds all of them as collaborators immediately, not only members added afterwards. Enabling it is itself a grant to everyone in the organization.
   Turning it back off does not remove the collaborators it already added - it only stops further additions and unblocks removal. So a cloud that has ever had auto_add_user enabled starts out with your whole organization on its member list, and the first apply that takes authority over it revokes everyone the configuration does not declare. Review that plan carefully.
+  A cloud carrying a group policy binding is a third structural refusal
+  ~> Alongside auto_add_user and an empty member map, a cloud with a group policy binding (set via the Anyscale Policy API, for example anyscale policy set --resource-type cloud) refuses Create and Update. A separate, asynchronous system flattens group membership into this cloud's ordinary member list - the same rows this resource reads, with nothing marking their origin - so an authoritative apply cannot tell a group-derived member from a manually granted one and would revoke it. That system may then silently re-grant the same member later, on its own schedule, entirely outside this configuration: permanent non-convergence against a controller this resource cannot see or express, not a one-time undisclosed revoke. Delete is the deliberate exception - it still attempts and records, the same asymmetry auto_add_user has, because refusing a destroy would strand the resource in state with no exit but terraform state rm.
+  ~> Detecting a binding is best-effort, not a guarantee - the check itself may be inconclusive (this endpoint is BETA and commonly returns 403 for a token that is not an organization admin), in which case this resource warns and proceeds rather than refusing on suspicion alone.
+  One Terraform state per cloud, and this resource cannot check
+  ~> Two anyscale_cloud_access instances - in the same configuration, or in two entirely separate ones - managing the same cloud_id revoke each other's members indefinitely, and BOTH report success on every apply: one grants Alice and revokes Bob, the other grants Bob and revokes Alice, and neither ever converges. This resource cannot detect it, because it cannot see another Terraform state. Manage each cloud's member list from exactly one anyscale_cloud_access instance - this is the price of authority, stated here because the failure otherwise gives an operator no signal at all.
   Not available in every organization
   ~> This resource reads the cloud roles API, which returns 501 in organizations that do not have that feature enabled. Reading roles and writing them are gated by two separate feature flags which return the same response, so a 501 does not tell you which of the two you are missing - mention both when you ask Anyscale support to enable it. Until it is enabled, manage cloud access through the Anyscale console or API.
   Reviewing the plan will not protect you from the first apply
-  ~> When the write path ships, the members about to lose access on a first apply are ones Terraform has never read, so they appear nowhere in plan output. This is the one sharp edge on this resource that plan review genuinely cannot catch. The for_each warning below is plan-reviewable; this is not.
-  The worst realistic case: a cloud owner who is not an organization admin can be revoked on the first apply. Organization admins happen to be safe, but only by accident of plumbing - they are invisible to the endpoint this resource reads, so it cannot revoke what it cannot see.
+  ~> The members about to lose access on a first apply are ones Terraform has never read, so they appear nowhere in plan output. This is the one sharp edge on this resource that plan review genuinely cannot catch. The for_each warning below is plan-reviewable; this is not.
+  The worst realistic case: a cloud owner who is not an organization admin can be revoked on the first apply, with no protection but reviewing the plan before it runs. Organization admins are safe in BOTH directions, and deliberately rather than by accident of plumbing: they are invisible to the endpoint this resource reads, so it cannot revoke what it cannot see, and declaring one in member is a plan-time error (see the organization-admin note on member below) - backed by the API itself independently refusing to change an organization admin's role at all. Two different mechanisms landing on the same guarantee, not a coincidence to rely on.
   Your own identity is excluded entirely: the identity Terraform authenticates as is never reported as a member and cannot be declared as one. That is scoped to whoever runs the apply, not to a list of protected people - another operator who is not declared here is still revoked.
   The most dangerous mistake, stated plainly
-  Also future behavior, for the same reason as above - this version destroys nothing. A typo in the cloud_id used as a for_each key is not preventable by this resource. Terraform sees one resource destroyed and another created, and destroying an anyscale_cloud_access correctly revokes that cloud's members - the provider cannot tell that from a deliberate removal. Mitigate it outside the provider: review the plan, and put lifecycle { prevent_destroy = true } on production clouds.
+  A typo in the cloud_id used as a for_each key is not preventable by this resource. Terraform sees one resource destroyed and another created, and destroying an anyscale_cloud_access correctly revokes that cloud's members - the provider cannot tell that from a deliberate removal. Mitigate it outside the provider: review the plan, and put lifecycle { prevent_destroy = true } on production clouds.
   An accidentally empty member map is guarded, however - see allow_empty_member_set.
   Projects nest under members for a reason
   A member's project roles live inside their entry because the backend requires a cloud grant before a project grant on the same cloud, and revoking the cloud grant cascades to the projects. Declaring a project role for someone with no cloud role is a plan-time error here rather than a confusing failure partway through an apply.
-  ~> The attribute descriptions below describe this resource's full behavior, including the write operations that are not enabled in this version. Reference docs get read by jumping to the attribute you are configuring, so the read-only note at the top of this page is easy to miss. Plan-time validation is the exception and does apply today: anything described below as rejected at plan time really is.
 ---
 
 # anyscale_cloud_access (Resource)
 
-Reads and imports the **complete** member list of one Anyscale cloud, including each member's cloud role and the deny roles layered on it.
+Manages the **complete** member list of one Anyscale cloud: cloud roles, deny roles, and each member's roles on the projects your configuration names.
 
-~> **This version is read-only.** Create, update and delete are not implemented and fail with an explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage them through Terraform. Cloud-scoped role management has no writable provider surface until that lands.
+~> **This resource is authoritative.** Terraform owns who has access to this cloud. Any member not declared in `member` is **revoked** - including people granted access through the Anyscale console, and including on the **first** apply. That is the point of this resource - it is how you make Terraform the source of truth for a cloud's membership - but it means a mistake here removes real people's access. Read this whole page before your first apply against a production cloud.
 
-**What this version is for: drift detection.** Declare the member list you expect, and `terraform plan` reports any difference between your configuration and reality - it simply cannot correct one yet. Import a cloud, write out its members, and a clean plan then means the cloud's member list and the project roles you declared are still exactly what you wrote.
+**Declare the member list you expect, and `terraform plan`/`apply` makes it so** - adding, changing, and revoking roles to match. Read the scope limits below before relying on a clean plan as complete assurance, though.
 
-Read the scope limits on `member`, `projects` and `unmanaged_grants` before relying on that, though - a clean plan is not the same as "nobody has access you did not intend". Organization admins are invisible to the endpoint this reads, your own identity is excluded, and project roles are compared only for the projects your configuration names.
+A clean plan is not the same as "nobody has access you did not intend", and it is not proof nothing has changed out of band. Organization admins are invisible to the endpoint this reads, your own identity is excluded, project roles are compared only for the projects your configuration names, and - the sharpest limit - an administrator can change a member's role through the Anyscale console or CLI without this resource noticing at all. That legacy path writes through a different store than the one this resource reads, so a member promoted from `writer` to `owner` through the console reads back exactly as declared and plans clean, while actually holding a different role. The one direction this resource CAN see is a change crossing the `cloud_read_only` restriction specifically - see `deny_roles` below. Read a clean plan as confirmation of what this resource was able to check, not as confirmation of the member's actual role.
 
-That is also why `member` is Required on a resource that cannot write: handing over the full expected member list is not busywork here, it is the thing being compared against.
+That is also why `member` is Required: it is this resource's whole authority, not an optional filter - omitting it is not meaningful on an authoritative resource.
 
-~> **This resource is designed to be authoritative, and that is not yet in effect.** When the write path ships, Terraform will own who has access to this cloud, and any member not declared in `member` will be **revoked** - including people granted access through the Anyscale console, and including on the **first** apply. None of that happens in this version. It is stated here so the behavior is not a surprise when it arrives; read this page again before you first apply a change with it.
+~> **Two Computed attributes track write-path shortfalls, and they mean OPPOSITE things.** `unmanaged_grants` is someone who still has access this configuration says they should not have (a revoke that could not complete). `ungranted_members` is someone who lacks access this configuration says they should have (a grant that could not complete). Neither ever influences planning - both are diagnostics only, alertable via `length(...) > 0`, and a shortfall in either one still lets the apply converge rather than fail, since erroring after another member's change already succeeded would taint this resource's state and schedule a destructive retry.
 
 ### `auto_add_user` and this resource are mutually exclusive
 
@@ -49,21 +53,31 @@ That is also why `member` is Required on a resource that cannot write: handing o
 
 Turning it back off does **not** remove the collaborators it already added - it only stops further additions and unblocks removal. So a cloud that has ever had `auto_add_user` enabled starts out with your whole organization on its member list, and the first apply that takes authority over it revokes everyone the configuration does not declare. Review that plan carefully.
 
+### A cloud carrying a group policy binding is a third structural refusal
+
+~> Alongside `auto_add_user` and an empty `member` map, a cloud with a group policy binding (set via the Anyscale Policy API, for example `anyscale policy set --resource-type cloud`) refuses `Create` and `Update`. A separate, asynchronous system flattens group membership into this cloud's ordinary member list - the same rows this resource reads, with nothing marking their origin - so an authoritative apply cannot tell a group-derived member from a manually granted one and would revoke it. That system may then silently re-grant the same member later, on its own schedule, entirely outside this configuration: permanent non-convergence against a controller this resource cannot see or express, not a one-time undisclosed revoke. `Delete` is the deliberate exception - it still attempts and records, the same asymmetry `auto_add_user` has, because refusing a destroy would strand the resource in state with no exit but `terraform state rm`.
+
+~> Detecting a binding is best-effort, not a guarantee - the check itself may be inconclusive (this endpoint is BETA and commonly returns 403 for a token that is not an organization admin), in which case this resource warns and proceeds rather than refusing on suspicion alone.
+
+### One Terraform state per cloud, and this resource cannot check
+
+~> Two `anyscale_cloud_access` instances - in the same configuration, or in two entirely separate ones - managing the same `cloud_id` revoke each other's members indefinitely, and BOTH report success on every apply: one grants Alice and revokes Bob, the other grants Bob and revokes Alice, and neither ever converges. This resource cannot detect it, because it cannot see another Terraform state. Manage each cloud's member list from exactly one `anyscale_cloud_access` instance - this is the price of authority, stated here because the failure otherwise gives an operator no signal at all.
+
 ### Not available in every organization
 
 ~> This resource reads the cloud roles API, which returns `501` in organizations that do not have that feature enabled. Reading roles and writing them are gated by **two separate feature flags** which return the same response, so a `501` does not tell you which of the two you are missing - mention both when you ask Anyscale support to enable it. Until it is enabled, manage cloud access through the Anyscale console or API.
 
 ### Reviewing the plan will not protect you from the first apply
 
-~> When the write path ships, the members about to lose access on a first apply are ones Terraform has never read, so they appear **nowhere** in plan output. This is the one sharp edge on this resource that plan review genuinely cannot catch. The `for_each` warning below *is* plan-reviewable; this is not.
+~> The members about to lose access on a first apply are ones Terraform has never read, so they appear **nowhere** in plan output. This is the one sharp edge on this resource that plan review genuinely cannot catch. The `for_each` warning below *is* plan-reviewable; this is not.
 
-The worst realistic case: a cloud owner who is **not** an organization admin can be revoked on the first apply. Organization admins happen to be safe, but only by accident of plumbing - they are invisible to the endpoint this resource reads, so it cannot revoke what it cannot see.
+The worst realistic case: a cloud owner who is **not** an organization admin can be revoked on the first apply, with no protection but reviewing the plan before it runs. Organization admins are safe in BOTH directions, and deliberately rather than by accident of plumbing: they are invisible to the endpoint this resource reads, so it cannot revoke what it cannot see, and declaring one in `member` is a plan-time error (see the organization-admin note on `member` below) - backed by the API itself independently refusing to change an organization admin's role at all. Two different mechanisms landing on the same guarantee, not a coincidence to rely on.
 
 Your own identity is excluded entirely: the identity Terraform authenticates as is never reported as a member and cannot be declared as one. That is scoped to whoever runs the apply, not to a list of protected people - another operator who is not declared here is still revoked.
 
 ### The most dangerous mistake, stated plainly
 
-Also future behavior, for the same reason as above - this version destroys nothing. A typo in the `cloud_id` used as a `for_each` key is **not preventable by this resource**. Terraform sees one resource destroyed and another created, and destroying an `anyscale_cloud_access` correctly revokes that cloud's members - the provider cannot tell that from a deliberate removal. Mitigate it outside the provider: review the plan, and put `lifecycle { prevent_destroy = true }` on production clouds.
+A typo in the `cloud_id` used as a `for_each` key is **not preventable by this resource**. Terraform sees one resource destroyed and another created, and destroying an `anyscale_cloud_access` correctly revokes that cloud's members - the provider cannot tell that from a deliberate removal. Mitigate it outside the provider: review the plan, and put `lifecycle { prevent_destroy = true }` on production clouds.
 
 An accidentally *empty* `member` map is guarded, however - see `allow_empty_member_set`.
 
@@ -71,22 +85,26 @@ An accidentally *empty* `member` map is guarded, however - see `allow_empty_memb
 
 A member's project roles live inside their entry because the backend requires a cloud grant before a project grant on the same cloud, and revoking the cloud grant cascades to the projects. Declaring a project role for someone with no cloud role is a plan-time error here rather than a confusing failure partway through an apply.
 
-~> **The attribute descriptions below describe this resource's full behavior, including the write operations that are not enabled in this version.** Reference docs get read by jumping to the attribute you are configuring, so the read-only note at the top of this page is easy to miss. Plan-time validation is the exception and does apply today: anything described below as rejected at plan time really is.
-
 ## Example Usage
 
 ```terraform
-# anyscale_cloud_access is READ AND IMPORT ONLY in this version. Create, Update, and Destroy all
-# refuse -- you cannot add, change, or revoke a cloud's members through this resource yet. Manage
-# actual membership through the console or the API directly, then use `terraform import` (see
-# import.sh) to bring the current state under Terraform for visibility.
+# anyscale_cloud_access is AUTHORITATIVE over this cloud's entire member list. Anyone with access
+# to the cloud who is not declared in `member` below is REVOKED, including on the very first
+# apply -- including people granted access through the console. Before running this against a
+# real cloud for the first time, list its current members (console or `terraform import`, see
+# import.sh) and declare every one of them here; a member you forget to declare is revoked
+# silently and does not appear anywhere in `terraform plan`'s output.
 #
-# The block below is what your configuration should look like to MATCH an imported cloud's real
-# members -- write it to describe reality, not to change it. A config that doesn't match what
-# `terraform import` recovers will show a diff on every plan, since Terraform still computes one
-# even though applying it errors.
+# lifecycle.prevent_destroy guards against the sharpest failure mode: destroying this resource, or
+# replacing it because of a typo in cloud_id, correctly-per-its-own-logic revokes every member of
+# whichever cloud_id it was pointed at. Keep this on for any cloud you cannot afford to depopulate
+# by accident.
 resource "anyscale_cloud_access" "production" {
   cloud_id = "cld_00000000000000000000000000"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 
   member = {
     "owner@example.com" = {
@@ -115,12 +133,20 @@ resource "anyscale_cloud_access" "production" {
   }
 }
 
-# unmanaged_grants surfaces any member this resource could not manage as declared -- once writes
-# are enabled, alert on it directly rather than trusting a clean plan alone:
+# unmanaged_grants and ungranted_members report opposite failures -- alert on both rather than
+# trusting a clean plan alone. A nonzero unmanaged_grants means someone has access this
+# configuration says they shouldn't; a nonzero ungranted_members means someone lacks access this
+# configuration says they should have.
 #   length(anyscale_cloud_access.production.unmanaged_grants) > 0
+#   length(anyscale_cloud_access.production.ungranted_members) > 0
 output "production_unmanaged_grants" {
   value       = anyscale_cloud_access.production.unmanaged_grants
-  description = "Grants this resource could not reconcile to match configuration, and why"
+  description = "Grants this resource could not revoke to match configuration, and why"
+}
+
+output "production_ungranted_members" {
+  value       = anyscale_cloud_access.production.ungranted_members
+  description = "Grants this resource could not establish to match configuration, and why"
 }
 ```
 
@@ -132,7 +158,9 @@ output "production_unmanaged_grants" {
 - `cloud_id` (String) ID of the cloud whose member list this resource owns. Changing it replaces the resource, which revokes the members of the *old* cloud - review such a plan carefully.
 - `member` (Attributes Map) The complete set of members for this cloud, keyed by email address. **Anyone not listed here is revoked.**
 
-A map rather than a list so Terraform rejects duplicate keys at plan time. Note its duplicate check is case-sensitive, so this resource additionally rejects two keys that differ only in case - email identity is not case-sensitive and treating it as such is a known source of split, half-granted access. (see [below for nested schema](#nestedatt--member))
+A map rather than a list so Terraform rejects duplicate keys at plan time. Note its duplicate check is case-sensitive, so this resource additionally rejects two keys that differ only in case - email identity is not case-sensitive and treating it as such is a known source of split, half-granted access.
+
+~> **Declaring an organization admin here is a plan-time error.** The Anyscale API refuses to change an organization admin's role at all, and discovering that mid-apply - after another member's grant already succeeded - is not recoverable the way a revoke failure is. This check is best-effort: no field this resource can read predicts the backend's own admin signal with certainty, so a plan-time pass is not a guarantee nothing will fail, and a plan-time miss is not silent - it still fails safely at apply time, just without the earlier warning. (see [below for nested schema](#nestedatt--member))
 
 ### Optional
 
@@ -141,15 +169,23 @@ A map rather than a list so Terraform rejects duplicate keys at plan time. Note 
 This exists because an empty `member` map is usually an accident - a `for_each` over a mistyped or missing group renders identically to a deliberate purge.
 
 ~> This attribute is **provider-side only**. It has no representation in Anyscale and is never read back, so `terraform import` always lands it at `false`. If your configuration sets it to `true`, the first plan after an import shows `false` -> `true`. That diff is expected and is disclosing that Terraform is now permitted to empty this cloud's member list.
+- `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
 ### Read-Only
 
 - `id` (String) The ID of the cloud whose access this resource manages. Same value as `cloud_id`.
-- `unmanaged_grants` (Attributes List) Grants this resource could not revoke, and why. Populated when an undeclared member could not be removed - the Anyscale API can reach a state where a role was granted but cannot be revoked, and it is not detectable before attempting the revoke.
+- `ungranted_members` (Attributes List) Members this apply could not grant the declared role, and why. Populated when a grant fails partway through an apply - the configuration asked for this access and this resource was not able to establish it.
 
-The apply still converges rather than failing, because one unrevokable member would otherwise block the whole set forever. Alert on this: `length(anyscale_cloud_access.x.unmanaged_grants) > 0` means someone has access Terraform intends them not to have.
+The apply still converges rather than failing, because erroring after another member's grant already succeeded would leave this resource's state tainted - the next apply would then destroy and recreate it, revoking every member this one DID manage to grant. Alert on this: `length(anyscale_cloud_access.x.ungranted_members) > 0` means someone is missing access this configuration says they should have.
 
-~> **This lists only revokes that were attempted.** It covers every member of the cloud, but at project scope only the projects your configuration names - a grant on a project this resource never manages is not attempted, not failed, and so never appears here. An empty list means nothing in scope failed, not that nobody holds access outside that scope. (see [below for nested schema](#nestedatt--unmanaged_grants))
+~> **When this is non-empty, this apply also skipped every revoke it would otherwise have attempted** - see `unmanaged_grants` for who that affects, recorded there with a reason naming the skip. A grant shortfall is treated as too dangerous a moment to also remove access.
+
+~> **State for the affected member(s) still shows the values this apply planned, not what was actually granted**, since writing anything else would itself produce an inconsistent-result error. The next `terraform plan` after a refresh shows the true gap and retries it. (see [below for nested schema](#nestedatt--ungranted_members))
+- `unmanaged_grants` (Attributes List) Grants this resource could not revoke, or deliberately skipped revoking because a grant failed elsewhere in the same apply, and why. Populated in two distinct cases, both worth alerting on: an undeclared member could not be removed - the Anyscale API can reach a state where a role was granted but cannot be revoked, and it is not detectable before attempting the revoke - or a grant failed elsewhere in the same apply, which suppresses every revoke this apply would otherwise have attempted (see `ungranted_members`) and records each one here with a reason naming the skip.
+
+The apply still converges rather than failing, because one unrevokable member - or one unfinished grant elsewhere - would otherwise block the whole set forever. Alert on this: `length(anyscale_cloud_access.x.unmanaged_grants) > 0` means someone has access Terraform intends them not to have.
+
+~> **This lists only revokes that were attempted OR deliberately skipped because a grant failed.** It covers every member of the cloud, but at project scope only the projects your configuration names - a grant on a project this resource never manages is neither attempted nor skipped, and so never appears here. An empty list means nothing in scope failed or was skipped, not that nobody holds access outside that scope. (see [below for nested schema](#nestedatt--unmanaged_grants))
 
 <a id="nestedatt--member"></a>
 ### Nested Schema for `member`
@@ -176,6 +212,26 @@ A consequence worth knowing after `terraform import`: an imported resource names
 Keyed by project **ID** rather than name, even though `member` is keyed by email: project names are not reliably unique across an organization's clouds, so a name would not identify one project. This resource therefore spans three identifier namespaces - cloud ID, member email, project ID - each the stable key for what it addresses.
 
 
+<a id="nestedblock--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) Maximum time to wait for a create's reconcile to finish, including every per-write retry (e.g. `2m`, `10m`). Defaults to `5m` - real headroom even for a large member map with several retried transient failures. Purely local to this provider - never sent to or read from the Anyscale API.
+- `delete` (String) Maximum time to wait for destroy's revoke pass to finish. Same default and rationale as `create`.
+- `update` (String) Maximum time to wait for an update's reconcile to finish. Same default and rationale as `create`.
+
+
+<a id="nestedatt--ungranted_members"></a>
+### Nested Schema for `ungranted_members`
+
+Read-Only:
+
+- `email` (String) Email of the member whose grant could not be established.
+- `project_id` (String) Project the grant applies to, or null when it is the cloud-level grant.
+- `reason` (String) What the API reported when the grant was attempted.
+
+
 <a id="nestedatt--unmanaged_grants"></a>
 ### Nested Schema for `unmanaged_grants`
 
@@ -192,8 +248,10 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import by cloud_id -- the same value the resource is keyed by. This is the only supported
-# entry point in this version: writes refuse, so import is how you get an existing cloud's member
-# list into state at all.
+# Import by cloud_id -- the same value the resource is keyed by. Do this before your first
+# `apply` against any cloud you did not create through this resource: because Create is just as
+# authoritative as Update, applying against a cloud with real, undeclared members revokes them
+# exactly as an Update would. Import first, write your configuration to match what came back
+# (`terraform plan` will show you the difference if it doesn't), and only then start changing it.
 terraform import anyscale_cloud_access.production cld_00000000000000000000000000
 ```
