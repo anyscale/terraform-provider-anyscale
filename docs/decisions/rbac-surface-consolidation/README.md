@@ -1377,7 +1377,28 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   adds, and revokes last, per J.5. Assert on request ordering against a mock.
 - **AC-13** Re-applying an unchanged configuration produces an empty plan and issues no writes.
 - **AC-14** A role change on a retained member converges in one apply; the following plan is empty.
-- **AC-15** *(live)* Dropping a project entry from a member revokes that project role.
+- **AC-15** *(live)* Dropping a project entry from a member revokes that project role. **Split into two
+  questions, because bundling them made it look blocked when only one half was.**
+
+  *(a) Does the project-role revoke request work against the real API?* This is the count-bug question, the
+  one mocks provably cannot answer, and it does **not** need the resource. Create a throwaway project on a
+  cloud that can host one, grant the role to the test member directly, revoke it directly, delete the
+  project. No authoritative reconcile is involved, so A1 is not engaged and the shared cloud is safe for it —
+  nothing is revoked from anyone.
+
+  *(b) Does the drop-equals-revoke logic behave correctly?* Which projects come into scope, what a dropped
+  entry does, that a cascaded member gets no per-project revoke. Deterministic reconcile logic; mock coverage
+  is the right tool and already exists.
+
+  **Do not let a test-infrastructure obstacle collapse (a) into mock-only.** A bare ephemeral cloud returns
+  403 on project creation, which blocks running this through the resource but does not block (a) at all.
+  Driving the resource against the shared cloud is **not** an alternative: it is authoritative on every
+  apply, so it would revoke that cloud's undeclared members regardless of which criterion is under test.
+
+  On the 403: this repository has two known 403 classes on projects — a permission check that is not
+  organization-wide, and an eventual-consistency propagation delay an age-gated retry resolves. Establish
+  which before designing around it. If a bare cloud structurally cannot host projects, record that so nobody
+  retries it; if it is propagation, the ephemeral path works with a retry.
 - **AC-16** A member drop issues **no** subsequent project-scope revoke — the cloud-scope revoke
   already cascaded. Assert that no such request was made; a 404 absorbed there would look like
   success while hiding a false `unmanaged_grants` entry.
