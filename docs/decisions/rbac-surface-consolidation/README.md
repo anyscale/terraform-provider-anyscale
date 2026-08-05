@@ -837,7 +837,40 @@ both are guarded (see J.22). The mechanism — which store each endpoint reads a
 identity-type branch that any trace found, so the result is expected to generalize; but it was confirmed
 on a service account, and this record does not claim more than that.
 
-**The larger question underneath J.19: which store decides EFFECTIVE access?** If authorization is
+**ANSWERED — the design holds on this axis.** Enforcement is decided entirely by the relational
+permissions table, never by the authorization service: every cloud-access permission check on that router
+passes a bare action, and the dependency that would consult the authorization service returns false
+unconditionally for a bare action. And the RBAC write this resource grants through **dual-writes** both
+stores, as does the revoke path in reverse.
+
+Two properties carry that conclusion, and it is only as strong as they are, so they are named rather than
+left implicit:
+
+- **No middle state is reachable where the authorization service is written and the relational store is
+  not.** The write reverts the former on a failure of the latter, and when the feature flag is off the
+  endpoint returns 501 and writes nothing. Had a one-sided outcome been reachable, the catastrophic
+  version of this question would have returned in a subtler form — the write appears to succeed, the roles
+  listing confirms it, and enforced access never changes.
+- **The enumeration source is the membership search, which reads the table that decides access.** So a
+  member holding enforced access always appears, even when the roles listing knows nothing about them. The
+  design committed to search-as-primary for an unrelated reason and it turns out to be load-bearing here
+  too.
+
+**One narrow question this raises rather than settles, and it is the most consequential thing left on this
+axis: can a legacy-only member be revoked?** Someone with a relational permissions row and no
+authorization-service group. The revoke performs a group removal *and* a relational delete; if it assumes
+the group exists, revoking such a member could fail or partially fail. That matters disproportionately
+because legacy-only is what the CLI and console produce, making it **the most common revoke this resource
+will ever perform**. An authority claim that cannot revoke the typical member is not an authority claim.
+Two things may already answer it: authorization-service relationship deletes are normally idempotent, and
+the cascade capture recorded as owed item 7 revoked an identity that may itself have been legacy-only —
+check what that capture actually did before spending anything new.
+
+**Out of scope, deliberately:** the revert-on-failure path is source-read rather than live-exercised. That
+is a backend reliability question, and inducing a mid-write failure of the relational store is not
+something this work should attempt.
+
+**The original question, kept because the answer is only meaningful against it:** If authorization is
 enforced from the relational `permission_level` for legacy members and from authorization-service
 base-role groups for RBAC members, then two members carrying the same `base_role` in our state can hold
 different real access, and this resource reports both as converged. That is not a drift-detection gap —
