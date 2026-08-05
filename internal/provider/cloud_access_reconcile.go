@@ -208,18 +208,32 @@ func (res cloudAccessReconcileResult) unmanagedGrantsList() (types.List, diag.Di
 	return list, diags
 }
 
+// cloudAccessReconcileOptions makes the two decisions that differ between an
+// apply and a destroy explicit at each call site, rather than implicit in which
+// function did the calling.
+type cloudAccessReconcileOptions struct {
+	// RevokeUndeclared removes members the configuration does not declare.
+	RevokeUndeclared bool
+
+	// RefuseWhenAutoAddUserEnabled aborts before any write when the cloud
+	// auto-enrols every organization member, because Terraform cannot be
+	// authoritative over such a cloud's member list at all.
+	//
+	// TRUE for an apply and FALSE for a destroy, and the asymmetry is deliberate.
+	// Refusing a destroy would strand the resource in state with no exit but
+	// 'terraform state rm', which is a worse position than a destroy that tries,
+	// fails on each member and says exactly what to do about it. An apply has
+	// somewhere to go back to; a destroy does not.
+	RefuseWhenAutoAddUserEnabled bool
+}
+
 // reconcileCloudAccess makes cloudID's collaborator list match desired.
-//
-// Pass revokeUndeclared=false to grant and update only, leaving undeclared
-// members alone. Nothing currently does; the parameter exists so that the
-// revoke pass is a visible, named decision at every call site rather than an
-// implicit consequence of which function was called.
 func reconcileCloudAccess(
 	ctx context.Context,
 	client *Client,
 	cloudID string,
 	desired map[string]cloudAccessDesiredMember,
-	revokeUndeclared bool,
+	opts cloudAccessReconcileOptions,
 ) (cloudAccessReconcileResult, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	var result cloudAccessReconcileResult
@@ -248,7 +262,7 @@ func reconcileCloudAccess(
 	// Work out the revoke set BEFORE touching anything, so the auto_add_user
 	// preflight below can be skipped entirely when there is nothing to revoke.
 	var toRevoke []cloudAccessRemoteMember
-	if revokeUndeclared {
+	if opts.RevokeUndeclared {
 		for _, m := range remote {
 			if _, declared := desired[cloudAccessFoldEmail(m.Email)]; declared {
 				continue
@@ -266,7 +280,7 @@ func reconcileCloudAccess(
 	// can flip the flag, so a check made at create time can be invalidated by a
 	// sibling resource before the next apply. It is also not in ModifyPlan, which
 	// must stay cheap and side-effect-free.
-	if len(toRevoke) > 0 {
+	if len(toRevoke) > 0 && opts.RefuseWhenAutoAddUserEnabled {
 		enabled, err := cloudAutoAddUserEnabled(ctx, client, cloudID)
 		if err != nil {
 			diags.AddError(

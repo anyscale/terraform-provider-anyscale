@@ -6,8 +6,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // These tests cover the reconcile, which is the only code in this provider that
@@ -231,6 +240,12 @@ func (m *cloudAccessReconcileMock) memberEmails() []string {
 	return out
 }
 
+// cloudAccessApplyOptions is the option set an apply uses. Destroy differs on
+// RefuseWhenAutoAddUserEnabled and has its own test below.
+func cloudAccessApplyOptions() cloudAccessReconcileOptions {
+	return cloudAccessReconcileOptions{RevokeUndeclared: true, RefuseWhenAutoAddUserEnabled: true}
+}
+
 func cloudAccessDesired(entries ...cloudAccessDesiredMember) map[string]cloudAccessDesiredMember {
 	out := make(map[string]cloudAccessDesiredMember, len(entries))
 	for _, e := range entries {
@@ -260,7 +275,7 @@ func TestReconcileCloudAccess_GrantsBeforeRevokes(t *testing.T) {
 
 	result, diags := reconcileCloudAccess(context.Background(),
 		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
-		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}), true)
+		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}), cloudAccessApplyOptions())
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
@@ -332,7 +347,7 @@ func TestReconcileCloudAccess_NeverRevokesTheCaller(t *testing.T) {
 			// is only spared by the exclusion.
 			_, diags := reconcileCloudAccess(context.Background(),
 				cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
-				map[string]cloudAccessDesiredMember{}, true)
+				map[string]cloudAccessDesiredMember{}, cloudAccessApplyOptions())
 			if diags.HasError() {
 				t.Fatalf("unexpected error: %v", diags)
 			}
@@ -373,7 +388,7 @@ func TestReconcileCloudAccess_AutoAddUserBlocksRevokes(t *testing.T) {
 		mock := newMock()
 		_, diags := reconcileCloudAccess(context.Background(),
 			cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
-			map[string]cloudAccessDesiredMember{}, true)
+			map[string]cloudAccessDesiredMember{}, cloudAccessApplyOptions())
 
 		if !diags.HasError() {
 			t.Fatal("expected an error: with auto_add_user on, the member list cannot be authoritative and every revoke would fail")
@@ -392,7 +407,7 @@ func TestReconcileCloudAccess_AutoAddUserBlocksRevokes(t *testing.T) {
 
 		_, diags := reconcileCloudAccess(context.Background(),
 			cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
-			cloudAccessDesired(cloudAccessDesiredMember{Email: "undeclared@example.com", BaseRole: "writer"}), true)
+			cloudAccessDesired(cloudAccessDesiredMember{Email: "undeclared@example.com", BaseRole: "writer"}), cloudAccessApplyOptions())
 		if diags.HasError() {
 			t.Fatalf("unexpected error: %v", diags)
 		}
@@ -405,7 +420,7 @@ func TestReconcileCloudAccess_AutoAddUserBlocksRevokes(t *testing.T) {
 
 		_, diags := reconcileCloudAccess(context.Background(),
 			cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
-			map[string]cloudAccessDesiredMember{}, true)
+			map[string]cloudAccessDesiredMember{}, cloudAccessApplyOptions())
 		if !diags.HasError() {
 			t.Fatal("expected an error: the auto_add_user check failed, so the reconcile does not know whether revoking is possible and must not proceed")
 		}
@@ -431,13 +446,18 @@ func TestReconcileCloudAccess_FailedRevokeConvergesIntoUnmanagedGrants(t *testin
 			"stuck@example.com":     {IdentityID: "idn_stuck", UserID: "usr_stuck", BaseRoles: []string{"writer"}},
 			"removable@example.com": {IdentityID: "idn_ok", UserID: "usr_ok", BaseRoles: []string{"writer"}},
 		},
-		orgMembers:    map[string]cloudAccessMockIdentity{},
-		failRevokeFor: map[string]string{"stuck@example.com": "Cannot remove: this cloud has auto add users enabled"},
+		orgMembers: map[string]cloudAccessMockIdentity{},
+		// A NEUTRAL failure detail on purpose. The auto_add_user 409's real envelope
+		// has not been captured, and a fixture invented for a response nobody has
+		// seen is what lets a broken mapping pass green. What is under test here is
+		// converge-and-record, which does not depend on that envelope's wording;
+		// the auto_add_user-specific message stays untested until the capture lands.
+		failRevokeFor: map[string]string{"stuck@example.com": "revoke refused by the backend"},
 	}
 
 	result, diags := reconcileCloudAccess(context.Background(),
 		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
-		map[string]cloudAccessDesiredMember{}, true)
+		map[string]cloudAccessDesiredMember{}, cloudAccessApplyOptions())
 	if diags.HasError() {
 		t.Fatalf("a failed revoke must not fail the apply: %v", diags)
 	}
@@ -455,8 +475,8 @@ func TestReconcileCloudAccess_FailedRevokeConvergesIntoUnmanagedGrants(t *testin
 	if !got.ProjectID.IsNull() {
 		t.Errorf("project_id is %q, want null: this is the cloud-level grant, not a grant on a project", got.ProjectID.ValueString())
 	}
-	if !strings.Contains(got.Reason.ValueString(), "auto_add_user") {
-		t.Errorf("the reason does not explain the auto_add_user cause a reader cannot infer from the raw detail: %q", got.Reason.ValueString())
+	if !strings.Contains(got.Reason.ValueString(), "revoke refused by the backend") {
+		t.Errorf("the reason does not carry the API's own detail: %q - a reader has nothing else to go on", got.Reason.ValueString())
 	}
 
 	// The other member was still revoked: one stuck member must not stop the rest.
@@ -486,7 +506,7 @@ func TestReconcileCloudAccess_FailedGrantIsFatalBeforeAnyRevoke(t *testing.T) {
 
 	_, diags := reconcileCloudAccess(context.Background(),
 		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
-		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}), true)
+		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}), cloudAccessApplyOptions())
 	if !diags.HasError() {
 		t.Fatal("expected an error: the configuration asked for access that does not exist after the apply")
 	}
@@ -525,7 +545,7 @@ func TestReconcileCloudAccess_ExistingMemberIsUpdatedNotDowngraded(t *testing.T)
 		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
 		cloudAccessDesired(cloudAccessDesiredMember{
 			Email: "existing@example.com", BaseRole: "owner", DenyRoles: []string{cloudAccessReadOnlyDenyRole},
-		}), true)
+		}), cloudAccessApplyOptions())
 	if diags.HasError() {
 		t.Fatalf("the bootstrap 409 for an already-present member must be tolerated, not fatal: %v", diags)
 	}
@@ -573,7 +593,7 @@ func TestReconcileCloudAccess_OmittedDenyRolesClearsRestrictions(t *testing.T) {
 		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
 		// DenyRoles left nil, as cloudAccessDesiredMembers produces for an omitted
 		// attribute.
-		cloudAccessDesired(cloudAccessDesiredMember{Email: "member@example.com", BaseRole: "writer"}), true)
+		cloudAccessDesired(cloudAccessDesiredMember{Email: "member@example.com", BaseRole: "writer"}), cloudAccessApplyOptions())
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
@@ -591,5 +611,276 @@ func TestReconcileCloudAccess_OmittedDenyRolesClearsRestrictions(t *testing.T) {
 	}
 	if !strings.Contains(mock.roleWriteBodies[0], `"deny_roles":[]`) {
 		t.Errorf("the roles PUT body was %s, want deny_roles sent as an empty array - the wire field is required, and null is not the same request", mock.roleWriteBodies[0])
+	}
+}
+
+// TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser covers the one
+// asymmetry between an apply and a destroy.
+//
+// An apply refuses outright on an auto_add_user cloud, because Terraform cannot
+// be authoritative over such a cloud's members at all. A destroy must NOT refuse:
+// refusing would strand the resource in state with no exit but 'terraform state
+// rm', which is a worse position than a destroy that tries, fails on each member
+// and says exactly what to do about it. An apply has somewhere to go back to; a
+// destroy does not.
+func TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser(t *testing.T) {
+	const cloudID = "cld_destroy_autoadd"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		autoAddUser: true,
+		members: map[string]cloudAccessMockMember{
+			"member@example.com": {IdentityID: "idn_m", UserID: "usr_m", BaseRoles: []string{"writer"}},
+		},
+		orgMembers:    map[string]cloudAccessMockIdentity{},
+		failRevokeFor: map[string]string{"member@example.com": "removal refused by the backend"},
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		map[string]cloudAccessDesiredMember{},
+		cloudAccessReconcileOptions{RevokeUndeclared: true, RefuseWhenAutoAddUserEnabled: false})
+
+	if diags.HasError() {
+		t.Fatalf("a destroy must not refuse on an auto_add_user cloud - refusing leaves no exit but 'terraform state rm': %v", diags)
+	}
+
+	sawAttempt := false
+	for _, call := range mock.calls {
+		if strings.HasPrefix(call, "DELETE") {
+			sawAttempt = true
+		}
+	}
+	if !sawAttempt {
+		t.Errorf("the destroy did not attempt the revoke at all: %v", mock.calls)
+	}
+	if len(result.Unmanaged) != 1 {
+		t.Errorf("got %d recorded failures, want 1: the destroy must record what it could not remove: %+v", len(result.Unmanaged), result.Unmanaged)
+	}
+}
+
+// runCloudAccessModifyPlanWithClient is runCloudAccessModifyPlan with a
+// configured client, so the plan-time checks that need an API call actually run.
+// The nil-client variant exists too, and deliberately: ValidateConfig-adjacent
+// hooks can run before the provider is configured.
+func runCloudAccessModifyPlanWithClient(t *testing.T, client *Client, planned *CloudAccessResourceModel) diag.Diagnostics {
+	t.Helper()
+	ctx := context.Background()
+
+	r := &CloudAccessResource{client: client}
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	rawType := schemaResp.Schema.Type().TerraformType(ctx)
+
+	holder := tfsdk.Plan{Schema: schemaResp.Schema, Raw: tftypes.NewValue(rawType, nil)}
+	if diags := holder.Set(ctx, planned); diags.HasError() {
+		t.Fatalf("failed to build the plan fixture: %v", diags)
+	}
+
+	resp := &resource.ModifyPlanResponse{}
+	r.ModifyPlan(ctx, resource.ModifyPlanRequest{
+		// Null prior state: a create. The caller check runs on a create too, which
+		// is the point of it being ahead of the empty-member-set guard.
+		State: tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(rawType, nil)},
+		Plan:  tfsdk.Plan{Schema: schemaResp.Schema, Raw: holder.Raw},
+	}, resp)
+	return resp.Diagnostics
+}
+
+// TestCloudAccessModifyPlan_RefusesDeclaringTheCaller covers the plan-time half
+// of the caller exclusion.
+//
+// The caller is absent from read, plan and write alike. Read omits them because
+// reporting them while the reconcile refuses to revoke them has no working
+// outcome - the post-apply state either contradicts the plan or the next refresh
+// proposes the same removal forever. Given that, a configuration DECLARING the
+// caller would be proposed as an addition on every plan and never converge, so it
+// has to be an error rather than a silent no-op.
+func TestCloudAccessModifyPlan_RefusesDeclaringTheCaller(t *testing.T) {
+	const cloudID = "cld_plan"
+
+	newMock := func() *cloudAccessReconcileMock {
+		return &cloudAccessReconcileMock{
+			callerUserID: "usr_caller", callerEmail: "operator@example.com",
+			members:    map[string]cloudAccessMockMember{},
+			orgMembers: map[string]cloudAccessMockIdentity{},
+		}
+	}
+
+	planWith := func(emails ...string) *CloudAccessResourceModel {
+		entries := make(map[string]attr.Value, len(emails))
+		for _, e := range emails {
+			entries[e] = cloudAccessMember("writer", cloudAccessNoDenyRoles(), cloudAccessNoProjects())
+		}
+		m := cloudAccessConfigModel(cloudAccessMemberMap(entries))
+		return &m
+	}
+
+	t.Run("declaring the caller is an error", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("operator@example.com", "alice@example.com"))
+
+		d := cloudAccessFindError(diags, "Cannot Manage Your Own Cloud Access Here")
+		if d == nil {
+			t.Fatalf("expected the error: a declared entry for the caller can never converge, because Read never reports them: %v", diags)
+		}
+		cloudAccessAssertErrorPath(t, d, path.Root("member").AtMapKey("operator@example.com"))
+	})
+
+	t.Run("matched case-insensitively", func(t *testing.T) {
+		// Email identity is not case-sensitive to Anyscale, so a differently-cased
+		// spelling is the same person and the same non-converging plan.
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("Operator@Example.com"))
+		if cloudAccessFindError(diags, "Cannot Manage Your Own Cloud Access Here") == nil {
+			t.Errorf("a differently-cased spelling of the caller's own address slipped past the check: %v", diags)
+		}
+	})
+
+	t.Run("declaring other people is fine", func(t *testing.T) {
+		mock := newMock()
+		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
+			planWith("alice@example.com", "bob@example.com"))
+		if diags.HasError() {
+			t.Fatalf("unexpected error for a configuration that declares nobody's own access: %v", diags)
+		}
+	})
+
+	t.Run("an unresolvable caller skips the check without failing the plan", func(t *testing.T) {
+		// What actually prevents an operator locking themselves out is the
+		// reconcile's own exclusion, which fails closed. All that is lost here is a
+		// friendly message, so a transient userinfo failure must not make the
+		// configuration unplannable.
+		broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		t.Cleanup(broken.Close)
+		client := &Client{BaseURL: broken.URL, Token: "test-token", HTTPClient: broken.Client()}
+
+		diags := runCloudAccessModifyPlanWithClient(t, client, planWith("operator@example.com"))
+		if diags.HasError() {
+			t.Fatalf("an unresolvable caller must not make the plan fail: %v", diags)
+		}
+	})
+}
+
+// runCloudAccessRead drives Read against a mock backend and returns the state it
+// wrote.
+func runCloudAccessRead(t *testing.T, client *Client, priorState *CloudAccessResourceModel) (CloudAccessResourceModel, diag.Diagnostics) {
+	t.Helper()
+	ctx := context.Background()
+
+	r := &CloudAccessResource{client: client}
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	rawType := schemaResp.Schema.Type().TerraformType(ctx)
+
+	holder := tfsdk.State{Schema: schemaResp.Schema, Raw: tftypes.NewValue(rawType, nil)}
+	if diags := holder.Set(ctx, priorState); diags.HasError() {
+		t.Fatalf("failed to build the prior-state fixture: %v", diags)
+	}
+
+	resp := &resource.ReadResponse{State: tfsdk.State{Schema: schemaResp.Schema, Raw: holder.Raw}}
+	r.Read(ctx, resource.ReadRequest{State: tfsdk.State{Schema: schemaResp.Schema, Raw: holder.Raw}}, resp)
+
+	var got CloudAccessResourceModel
+	if resp.State.Raw.IsNull() {
+		return got, resp.Diagnostics
+	}
+	diags := resp.Diagnostics
+	diags.Append(resp.State.Get(ctx, &got)...)
+	return got, diags
+}
+
+// TestCloudAccessRead_OmitsTheCaller covers the read half of the caller
+// exclusion, and it is the half with no safe fallback.
+//
+// If Read reports the caller while the reconcile refuses to revoke them, the
+// post-apply state either contradicts the plan - which Core rejects as "provider
+// produced inconsistent result after apply" - or omits them, and the next Read
+// puts them back and proposes the same removal forever. There is no third
+// outcome, which is why this is enforced in Read rather than left to the write
+// path.
+func TestCloudAccessRead_OmitsTheCaller(t *testing.T) {
+	const cloudID = "cld_read"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"operator@example.com": {IdentityID: "idn_caller", UserID: "usr_caller", BaseRoles: []string{"owner"}},
+			"alice@example.com":    {IdentityID: "idn_a", UserID: "usr_a", BaseRoles: []string{"writer"}},
+		},
+		orgMembers: map[string]cloudAccessMockIdentity{},
+	}
+
+	prior := cloudAccessConfigModel(types.MapNull(cloudAccessMemberType()))
+	prior.CloudID = types.StringValue(cloudID)
+	prior.ID = types.StringValue(cloudID)
+
+	got, diags := runCloudAccessRead(t, cloudAccessTestClient(t, mock.handler(t, cloudID)), &prior)
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+
+	keys := got.Member.Elements()
+	if _, present := keys["operator@example.com"]; present {
+		t.Errorf("Read reported the calling identity as a member. A configuration cannot declare them - that is a plan-time error - so reporting them makes every plan propose the same removal, which the reconcile then refuses to perform: %v", keys)
+	}
+	if _, present := keys["alice@example.com"]; !present {
+		t.Errorf("Read dropped a member who is not the caller: %v", keys)
+	}
+	if len(keys) != 1 {
+		t.Errorf("got %d members, want 1: %v", len(keys), keys)
+	}
+}
+
+// Read must not fail the whole refresh for the ordinary reasons, but it MUST fail
+// when it cannot identify the caller: an unidentified caller means the refresh
+// cannot tell whether it is about to write the one member that must not appear in
+// state, and a failed refresh is recoverable while a state that disagrees with
+// the plan is not.
+func TestCloudAccessRead_FailsWhenTheCallerCannotBeIdentified(t *testing.T) {
+	const cloudID = "cld_noidentity"
+
+	// Only userinfo fails; every other endpoint works. A mock that failed
+	// everything would make Read error for a different reason entirely, and the
+	// test would pass whether or not this branch exists at all.
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{
+			"alice@example.com": {IdentityID: "idn_a", UserID: "usr_a", BaseRoles: []string{"writer"}},
+		},
+		orgMembers: map[string]cloudAccessMockIdentity{},
+	}
+	backend := mock.handler(t, cloudID)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/userinfo" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		backend.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	prior := cloudAccessConfigModel(types.MapNull(cloudAccessMemberType()))
+	prior.CloudID = types.StringValue(cloudID)
+	prior.ID = types.StringValue(cloudID)
+
+	_, diags := runCloudAccessRead(t,
+		&Client{BaseURL: server.URL, Token: "test-token", HTTPClient: server.Client()}, &prior)
+
+	// Asserted on the SPECIFIC summary, not merely that some error occurred: "an
+	// error happened" is satisfied by any failure anywhere in Read and would not
+	// notice this branch disappearing.
+	if cloudAccessFindError(diags, "Could Not Identify The Calling Identity") == nil {
+		t.Fatalf("expected the caller-identity error: without that identity this refresh cannot know which member to omit, and reporting everyone produces a state that contradicts the plan. Got: %v", diags)
 	}
 }

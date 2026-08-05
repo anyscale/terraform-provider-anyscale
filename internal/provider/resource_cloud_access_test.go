@@ -751,3 +751,44 @@ func TestCloudAccessValidateConfig_RejectsCloudWriteRoleOnAProject(t *testing.T)
 		}
 	})
 }
+
+// TestCloudAccessValidateConfig_OneMemberFailingDoesNotSuppressAnother covers a
+// bug that no single-member fixture can express, which is exactly why it shipped
+// unnoticed: the cross-field checks used to judge their value-conversion failures
+// from resp.Diagnostics, which by the time a second member is visited can already
+// hold an error added for the FIRST one. One empty base_role anywhere in the map
+// therefore abandoned the cloud_read_only check for every member not yet visited.
+//
+// Go map iteration order is random, so the bug's effect was non-deterministic:
+// the same configuration would report both errors or only one depending on which
+// member came out of the map first. Both orderings are asserted below rather than
+// one, because a single ordering can pass by luck.
+func TestCloudAccessValidateConfig_OneMemberFailingDoesNotSuppressAnother(t *testing.T) {
+	const (
+		emptyRoleEmail = "aaa-empty-role@example.com"
+		conflictEmail  = "zzz-conflict@example.com"
+		projectID      = "prj_1"
+	)
+
+	// Two members, each failing a DIFFERENT check. The names sort at opposite ends
+	// of the alphabet so that if anything ever iterates in sorted order, the two
+	// runs below still exercise both directions.
+	members := map[string]attr.Value{
+		emptyRoleEmail: cloudAccessMember("", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+		conflictEmail: cloudAccessMember("collaborator", cloudAccessDenyRoles(cloudAccessReadOnlyDenyRole),
+			cloudAccessProjects(map[string]string{projectID: "owner"})),
+	}
+
+	// Repeated because the iteration order that triggers the bug is chosen by the
+	// runtime, not by the fixture: a single pass could take the harmless order.
+	for i := 0; i < 20; i++ {
+		diags := runCloudAccessValidateConfig(t, cloudAccessConfigModel(cloudAccessMemberMap(members)))
+
+		if cloudAccessFindError(diags, "Empty Cloud Role") == nil {
+			t.Fatalf("run %d: the empty base_role was not reported: %v", i, diags)
+		}
+		if cloudAccessFindError(diags, "Project Role Conflicts With cloud_read_only") == nil {
+			t.Fatalf("run %d: the other member's cloud_read_only conflict was suppressed by the first member's error. Both are true of this configuration and one validate pass must report both, or the practitioner fixes one, re-plans, and meets the next: %v", i, diags)
+		}
+	}
+}

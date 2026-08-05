@@ -345,6 +345,30 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 		return
 	}
 
+	// The calling identity is INVISIBLE to this resource, and Read is one of the
+	// three places that has to agree on it. Reporting the caller while the
+	// reconcile refuses to revoke them has no working outcome: the post-apply
+	// state either contradicts the plan, which Core rejects as "provider produced
+	// inconsistent result after apply", or omits them and the next Read puts them
+	// back and proposes the same removal forever. Read cannot arbitrate by looking
+	// at the configuration either - ReadRequest carries State, Private,
+	// ProviderMeta and ClientCapabilities, and no Config. So the caller is absent
+	// from read, plan and write alike, and declaring them is a plan-time error.
+	caller, err := fetchCloudAccessCallerIdentity(ctx, r.client)
+	if err != nil {
+		// Deliberately an error rather than "report everyone and hope". An
+		// unidentified caller means this refresh cannot tell whether it is about to
+		// write the one member that must not appear in state, and a refresh that
+		// fails is recoverable while a state that disagrees with the plan is not.
+		resp.Diagnostics.AddError(
+			"Could Not Identify The Calling Identity",
+			fmt.Sprintf("This resource excludes the identity Terraform is authenticated as from the member list it "+
+				"manages, so it must resolve that identity before it can refresh. Reading /api/v2/userinfo failed: %s\n\n"+
+				"State is left unchanged. Retry the refresh.", extractAPIErrorDetail(err)),
+		)
+		return
+	}
+
 	remote, err := listCloudAccessMembers(ctx, r.client, cloudID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -362,7 +386,15 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 		return
 	}
 
-	memberMap, diags := cloudAccessMembersToState(ctx, remote, state.Member)
+	visible := make([]cloudAccessRemoteMember, 0, len(remote))
+	for _, m := range remote {
+		if caller.matches(m) {
+			continue
+		}
+		visible = append(visible, m)
+	}
+
+	memberMap, diags := cloudAccessMembersToState(ctx, visible, state.Member)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -465,7 +497,10 @@ func (r *CloudAccessResource) applyCloudAccess(
 		return
 	}
 
-	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, desired, true)
+	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, desired, cloudAccessReconcileOptions{
+		RevokeUndeclared:             true,
+		RefuseWhenAutoAddUserEnabled: true,
+	})
 	diags.Append(reconcileDiags...)
 
 	// unmanaged_grants is written even when the reconcile errored: a revoke that
@@ -572,7 +607,14 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 
 	// An empty desired set with revokes enabled means "revoke everyone this
 	// resource knows about", which is exactly destroy's meaning here.
-	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, map[string]cloudAccessDesiredMember{}, true)
+	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, map[string]cloudAccessDesiredMember{},
+		cloudAccessReconcileOptions{
+			RevokeUndeclared: true,
+			// Destroy does NOT refuse on an auto_add_user cloud. It attempts every
+			// revoke, records each failure and names the remedy, because refusing
+			// would strand the resource in state with no exit but 'terraform state rm'.
+			RefuseWhenAutoAddUserEnabled: false,
+		})
 	resp.Diagnostics.Append(reconcileDiags...)
 	if reconcileDiags.HasError() {
 		return
@@ -673,7 +715,11 @@ func (r *CloudAccessResource) ValidateConfig(ctx context.Context, req resource.V
 		// early-continue the deny-role check needs, would leave this validator silent
 		// for most configs that hit the typo.
 		for projectID, level := range projects {
-			if level != cloudAccessCloudWriteRole {
+			// Folded and trimmed, matching how base_role is checked two blocks above
+			// and how email identity is compared throughout this resource. Without it
+			// " writer" and "Writer" slip past a validator whose whole purpose is
+			// catching a typo, and 422 at apply time instead.
+			if !strings.EqualFold(strings.TrimSpace(level), cloudAccessCloudWriteRole) {
 				continue
 			}
 			resp.Diagnostics.AddAttributeError(
@@ -921,6 +967,13 @@ func resolvedStringListValues(l types.List) []string {
 // omitted map from an empty one, since the accident produces exactly the empty
 // one - the opt-in has to live outside the data path it protects.
 func (r *CloudAccessResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// The caller check runs before the create/destroy short-circuit below, because
+	// declaring the caller is wrong on a create too - the empty-member-set guard is
+	// the thing that only makes sense with prior state, not this.
+	if !req.Plan.Raw.IsNull() {
+		r.refuseDeclaringTheCaller(ctx, req.Plan, &resp.Diagnostics)
+	}
+
 	// No prior state means a create: there are no members to revoke, so an empty
 	// map is harmless. No plan means a destroy, which is governed by the
 	// prevent_destroy guidance on the resource page rather than by this attribute.
@@ -978,4 +1031,65 @@ func (r *CloudAccessResource) ModifyPlan(ctx context.Context, req resource.Modif
 			"If revoking all %d member(s) is genuinely what you want, set `allow_empty_member_set = true` on this "+
 			"resource.", currentCount, cloudID, currentCount),
 	)
+}
+
+// refuseDeclaringTheCaller reports an error if the plan declares the identity
+// Terraform is authenticated as.
+//
+// This resource manages OTHER people's access to a cloud; the operator's own
+// access is out of scope by construction, which is what makes the caller
+// consistently absent from read, plan and write. Declaring them would otherwise
+// propose an addition on every plan forever, since Read never reports them.
+//
+// Two deliberate weaknesses, both preferable to their alternatives:
+//
+//   - It lives in ModifyPlan rather than ValidateConfig because it needs an API
+//     call, and ValidateConfig can run before the provider is configured, so the
+//     client may be nil there. Same reason the empty-member-set guard is here.
+//   - If the caller cannot be resolved, the check is SKIPPED rather than failed.
+//     What actually prevents an operator locking themselves out is the reconcile's
+//     own exclusion, which fails closed; all that is lost here is a friendly
+//     plan-time message. A hard failure would turn a transient userinfo blip into
+//     an unplannable configuration.
+//
+// The excluded identity is TOKEN-dependent, and that is worth being clear about
+// because it is easy to misread as a protected-persons list. Whoever runs the
+// apply is safe during that apply. A colleague who ran it last week and is not
+// declared in the configuration is still revoked, correctly - that is the
+// resource's contract.
+func (r *CloudAccessResource) refuseDeclaringTheCaller(ctx context.Context, plan tfsdk.Plan, diags *diag.Diagnostics) {
+	if r.client == nil {
+		return
+	}
+
+	var member types.Map
+	if getDiags := plan.GetAttribute(ctx, path.Root("member"), &member); getDiags.HasError() {
+		return
+	}
+	if member.IsNull() || member.IsUnknown() || len(member.Elements()) == 0 {
+		return
+	}
+
+	caller, err := fetchCloudAccessCallerIdentity(ctx, r.client)
+	if err != nil || caller.Email == "" {
+		return
+	}
+	callerEmail := cloudAccessFoldEmail(caller.Email)
+
+	for email := range member.Elements() {
+		if cloudAccessFoldEmail(email) != callerEmail {
+			continue
+		}
+		diags.AddAttributeError(
+			path.Root("member").AtMapKey(email),
+			"Cannot Manage Your Own Cloud Access Here",
+			fmt.Sprintf("%q is the identity Terraform is authenticated as, and this resource cannot manage it. Remove "+
+				"that entry from member.\n\nThe resource deliberately excludes the calling identity from the member list "+
+				"it owns, so that an authoritative apply can never revoke your own access to the cloud you are managing. "+
+				"That exclusion applies to reading as well as writing, so a declared entry for yourself would be proposed "+
+				"as an addition on every plan and never converge.\n\nNote this is scoped to whoever runs the apply, not "+
+				"to a list of protected people: another operator who is not declared here is still revoked.", email),
+		)
+		return
+	}
 }
