@@ -34,8 +34,8 @@ import (
 // identity_id, the roles path by user_id. They are different identifiers for the
 // same person and are not interchangeable; passing one where the other is
 // expected produces a 404 that looks like "no such member" rather than a type
-// error. resolveIdentityForEmail (resource_cloud_user_role.go) returns both, in
-// that order, for exactly this reason.
+// error. resolveIdentityForEmail (below) returns both, in that order, for
+// exactly this reason.
 //
 // Why the split is mandatory rather than an optimization: permission_level is a
 // SINGLE flattened enum
@@ -288,11 +288,12 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				//   declared -> authoritative over the whole set, including an explicit []
 				//               which genuinely clears, via the gated roles endpoint.
 				//
-				// This is deliberately ASYMMETRIC with anyscale_cloud_user_role.deny_roles,
-				// which is plain Optional ("omitted means none"). Porting that contract here
-				// would make every apply need the gated endpoint, so the resource would fail
-				// in any organization without the feature - consistency would cost the
-				// resource. The cloud roles endpoint is ungated; this one is not.
+				// This is deliberately ASYMMETRIC with a plain Optional "omitted means none"
+				// contract (the simpler shape a deny-list attribute would default to).
+				// Porting that contract here would make every apply need the gated endpoint,
+				// so the resource would fail in any organization without the feature -
+				// consistency would cost the resource. The cloud roles endpoint this contrasts
+				// against is ungated; this one is not.
 				//
 				// UseStateForUnknown, CONFIRMED by a real plan run rather than reasoning:
 				// an omitted deny_roles otherwise shows "known after apply" on every plan,
@@ -498,8 +499,8 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 // hydrateCollaboratorRoles performs the second read and preserves the tri-state
 // (nil = undetermined, [] = genuinely none).
 //
-// Note this overlaps resolveIdentityForEmail (resource_cloud_user_role.go),
-// which runs the same query but returns only the two IDs. Worth collapsing onto
+// Note this overlaps resolveIdentityForEmail (below), which runs the same
+// query but returns only the two IDs. Worth collapsing onto
 // one helper that returns the record, with the ID-only variant derived from it -
 // left alone here to avoid changing a shipped resource's behavior in the same
 // change that introduces this one.
@@ -839,4 +840,51 @@ func (r *OrganizationUserRoleResource) ImportState(ctx context.Context, req reso
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
+}
+
+// stringListToSlice converts a types.List of strings to a []string, treating a null or
+// unknown list as empty - the deny_roles Optional-not-Computed contract means "omitted"
+// must translate to "send an empty additional_roles set," never "omit the field," since
+// SetOrganizationRolesRequest.AdditionalRoles is a required field on the wire (see
+// setOrganizationRoles above). Relocated from resource_cloud_user_role.go, which shared
+// this exact same Optional-not-Computed-list contract before that resource was removed;
+// this is now its only caller.
+func stringListToSlice(ctx context.Context, l types.List) ([]string, diag.Diagnostics) {
+	if l.IsNull() || l.IsUnknown() {
+		return []string{}, nil
+	}
+	var out []string
+	diags := l.ElementsAs(ctx, &out, false)
+	if out == nil {
+		out = []string{}
+	}
+	return out, diags
+}
+
+// resolveIdentityForEmail resolves an org member's identity_id and user_id from their
+// email via the org-wide collaborator list (the same listAllOrganizationCollaborators
+// already shared with anyscale_organization_user/users), mirroring the email-lookup
+// branch that data source already established: a server-side email query param as a
+// narrowing hint, plus a case-insensitive exact match client-side, since the filter is
+// not guaranteed to be a strict match. This resolution direction (email -> both ids) is
+// reliable; the reverse (user_id -> email) is not, since user_id is an optional field on
+// the org-wide response. Relocated from resource_cloud_user_role.go, which needed this
+// resolution for the same reason (cloud roles are keyed by user_id, the org role wire
+// layer above by user_id too - see the ID-namespace note on that layer) before that
+// resource was removed; this is now its only caller.
+func resolveIdentityForEmail(ctx context.Context, client *Client, email string) (identityID, userID string, err error) {
+	collaborators, err := listAllOrganizationCollaborators(ctx, client, url.Values{"email": []string{email}})
+	if err != nil {
+		return "", "", err
+	}
+	for _, c := range collaborators {
+		if !strings.EqualFold(c.Email, email) {
+			continue
+		}
+		if c.UserID == nil || *c.UserID == "" {
+			return "", "", fmt.Errorf("organization member %s has no user_id (some identity types do not have one) and cannot be granted a role through this resource", email)
+		}
+		return c.ID, *c.UserID, nil
+	}
+	return "", "", fmt.Errorf("no organization member found with email %s", email)
 }

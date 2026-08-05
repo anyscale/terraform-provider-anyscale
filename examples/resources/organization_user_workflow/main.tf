@@ -1,12 +1,17 @@
-# Complete workflow: Invite -> Wait -> Manage role -> Manage membership -> Grant cloud access
+# Complete workflow: Invite -> Wait -> Manage role -> Manage membership
 #
-# This is a walkthrough, not a single-shot apply: steps 2 through 4 depend on a real person
-# accepting an email invitation (seconds to days, and it happens outside Terraform entirely). All
-# three are left commented out below so a fresh copy of this file applies cleanly (it only sends
+# This is a walkthrough, not a single-shot apply: steps 2 and 3 depend on a real person
+# accepting an email invitation (seconds to days, and it happens outside Terraform entirely). Both
+# are left commented out below so a fresh copy of this file applies cleanly (it only sends
 # invitations) instead of failing on parts that cannot succeed yet. Uncomment and apply again as
-# you move through each step. Steps 2, 3, and 4 are all keyed by email alone -- none needs an
+# you move through each step. Steps 2 and 3 are both keyed by email alone -- neither needs an
 # identity_id or user_id lookup -- and can be uncommented together as soon as the invitation is
 # accepted.
+#
+# Granting scoped access on a specific cloud is not included here: there is currently no
+# resource that can do it. anyscale_cloud_user_role, which used to fill this role, has been
+# removed with no direct replacement yet - see the RBAC guide for the current state of that
+# surface.
 
 terraform {
   required_providers {
@@ -79,20 +84,6 @@ output "invitation_expires_at" {
 #   description = "Email of the managed member"
 # }
 
-# Step 4: Grant scoped access on a specific cloud. Like step 2, anyscale_cloud_user_role is keyed
-# by email directly -- no identity_id, no import -- and it can be uncommented as soon as the
-# invitation is accepted, in the same apply that first sets their org-level role if you like.
-# Substitute a real cloud_id for the placeholder below. Two roles shown side by side so the set
-# of possible values reads as a set, not a single example value -- see the resource's own
-# documentation for the full list, and for the two things worth reading before your first apply
-# (why destroy can fail, and why this resource can't grant a role to its own calling identity).
-#
-# resource "anyscale_cloud_user_role" "new_member_compute_viewer" {
-#   cloud_id  = "cld_abc123"
-#   email     = "newmember@example.com"
-#   base_role = "compute_config_viewer"
-# }
-
 # Example: Invite multiple users at once. Every invitation still grants only default
 # collaborator access -- if "lead@example.com" should end up as an owner, that happens in step 2
 # (via anyscale_organization_user_role), after they accept, same as any other promotion.
@@ -121,26 +112,24 @@ output "team_invitations" {
 
 # Once each team member above has accepted, this is the closest thing to managing a
 # "group" this provider has today -- there is no group resource, so a for_each over a
-# list of emails granting a role per person is the actual answer. Each email gets its
-# own role here to show the range: dev1 and dev2 get one of the three roles that have
-# no console UI at all, lead gets the shared collaborator value. Uncomment once every
-# invitation above is accepted and a real cloud_id is substituted for the placeholder.
+# list of emails granting a role per person is the actual answer (see Step 2 above for
+# the single-member version of this same resource). Uncomment once every invitation
+# above is accepted.
 #
-# resource "anyscale_cloud_user_role" "team_member_roles" {
+# resource "anyscale_organization_user_role" "team_member_roles" {
 #   for_each = {
-#     "dev1@example.com" = "compute_config_viewer"
-#     "dev2@example.com" = "workload_operator"
-#     "lead@example.com" = "collaborator"
+#     "dev1@example.com" = "collaborator"
+#     "dev2@example.com" = "collaborator"
+#     "lead@example.com" = "owner"
 #   }
 #
-#   cloud_id  = "cld_abc123"
 #   email     = each.key
 #   base_role = each.value
 # }
 #
-# output "team_cloud_roles" {
+# output "team_roles" {
 #   value = {
-#     for email, role in anyscale_cloud_user_role.team_member_roles : email => role.base_role
+#     for email, role in anyscale_organization_user_role.team_member_roles : email => role.base_role
 #   }
-#   description = "Cloud role granted to each team member"
+#   description = "Organization role granted to each team member"
 # }

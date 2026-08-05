@@ -13,8 +13,8 @@ resource "anyscale_organization_user_role" "analyst" {
 
 # Set both base_role and deny_roles. This goes through a different, gated API endpoint than
 # base_role alone -- see this resource's own documentation before relying on it in an
-# organization you do not control. Note that these deny roles restrict organization OWNERS too,
-# unlike the similarly named deny_roles on anyscale_cloud_user_role, which do not.
+# organization you do not control. Note that these deny roles restrict organization OWNERS too --
+# there is no "owners are exempt" carve-out at this scope.
 resource "anyscale_organization_user_role" "restricted_owner" {
   email      = "owner@example.com"
   base_role  = "owner"

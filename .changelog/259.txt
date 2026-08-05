@@ -1,0 +1,4 @@
+```
+release-note:breaking-change
+resource/anyscale_cloud_user_role: Removed with no replacement. An adopter gets no deprecation warning and no diff: Terraform cannot decode the state at all and fails with `unsupported-resource-type`, no state upgrader can help because the type is gone, and the only exit is `terraform state rm` before upgrading to this version.
+```

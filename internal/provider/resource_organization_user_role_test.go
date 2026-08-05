@@ -58,9 +58,10 @@ type mockOrgUserRoleServer struct {
 	rolesEndpoint501D string
 }
 
-// orgUserRoleMemberFixture is one organization member's backend state. Named
-// with the orgUserRole prefix because resource_cloud_user_role_test.go already
-// owns the plain orgMemberFixture name in this package.
+// orgUserRoleMemberFixture is one organization member's backend state. Named with the
+// orgUserRole prefix rather than the plain orgMemberFixture to avoid a name collision with a
+// fixture type in resource_cloud_user_role_test.go, since removed - kept as-is rather than
+// renamed, since renaming now would touch every call site for no behavioral benefit.
 type orgUserRoleMemberFixture struct {
 	identityID string
 	userID     string
@@ -868,4 +869,35 @@ func TestOrganizationUserRoleWrite_501ProducesActionableDiagnostic(t *testing.T)
 		return
 	}
 	t.Errorf("expected an error scoped to the deny_roles attribute (the attribute whose presence forces the gated endpoint), got: %v", diags)
+}
+
+// TestResolveIdentityForEmail_ResolvesBothIDs confirms the org-wide, email-keyed
+// resolution this resource depends on for everything (Create, Update via state, Import)
+// returns both identity_id and user_id from one call, case-insensitively. Relocated from
+// resource_cloud_user_role_test.go along with the function it tests.
+func TestResolveIdentityForEmail_ResolvesBothIDs(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	client := NewClientWithToken(httpServer.URL, "test-token")
+	mock.seedMember("Mixed.Case@Example.com", "ide_mixed", "usr_mixed", "collaborator", nil)
+
+	identityID, userID, err := resolveIdentityForEmail(context.Background(), client, "mixed.case@example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if identityID != "ide_mixed" || userID != "usr_mixed" {
+		t.Errorf("got identityID=%q userID=%q, want identityID=%q userID=%q", identityID, userID, "ide_mixed", "usr_mixed")
+	}
+}
+
+// TestResolveIdentityForEmail_NotFoundErrors confirms a clean error (not a panic or a
+// silently empty result) for an email with no matching org member. Relocated from
+// resource_cloud_user_role_test.go along with the function it tests.
+func TestResolveIdentityForEmail_NotFoundErrors(t *testing.T) {
+	httpServer, _ := newMockOrgUserRoleServer(t)
+	client := NewClientWithToken(httpServer.URL, "test-token")
+
+	_, _, err := resolveIdentityForEmail(context.Background(), client, "nobody@example.com")
+	if err == nil {
+		t.Fatal("expected an error for an email with no matching org member, got nil")
+	}
 }
