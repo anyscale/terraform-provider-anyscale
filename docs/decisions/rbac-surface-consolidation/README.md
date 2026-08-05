@@ -1492,7 +1492,33 @@ detail.
    a failure would produce a false `unmanaged_grants` alarm. The same capture incidentally
    re-confirmed that the identity ID is consistent across the cloud and project collaborator
    endpoints.
-8. Whether the directory-sync blocker behaves as traced — that it spares service accounts, that it
+8. **CLOSED as not testable and not needing a mechanism.** Recorded as a ruling rather than left open,
+   because "unverified" invited someone to keep trying.
+
+   **Not testable.** Reproducing it requires an organization with directory sync configured *and* at least
+   one Policy API binding. Directory sync is an identity-provider integration at organization level, not a
+   setting to toggle for a test, and configuring it on the test organization is out of scope for this work.
+
+   **No mechanism is needed, and that is the substantive point.** A directory-sync 409 arrives on a
+   *revoke*, which is already the converge-and-record case: record the entry, warn, succeed. Nothing about
+   this blocker calls for a new code path. A preflight was considered and rejected for J.20's reason — the
+   condition is organization-wide, so refusing on it would brick the resource for every directory-synced
+   organization, which is a worse outcome than a recorded revoke failure.
+
+   **The requirement reduces to the diagnostic, and the implementation already satisfies it.** The
+   revoke-failure reason names `auto_add_user`, self-removal and the Policy API case each on their own
+   detail substring, and its default branch names **both** known blockers and tells the operator to check
+   both before treating the failure as transient. That is the discipline this document already demanded for
+   two mutually ambiguous 409s: name both possibilities or distinguish on the detail string, never pick the
+   likelier one and report it as fact.
+
+   **Two things remain owed, neither of them a capture.** The documentation must name the
+   service-account-versus-human split — on such an organization every human revoke fails while service
+   accounts succeed, which reads as random failure to anyone who has not been told. And any fixture for
+   this path must be built from the **raise**, not the docstring above it, which says 403 where the code
+   raises 409; a fixture built from the prose would let a broken revoke path pass green.
+
+   Original wording of the item, kept for the record: whether the directory-sync blocker behaves as traced — that it spares service accounts, that it
    requires a Policy API binding rather than merely a directory ID, and that it surfaces as a 409
    distinguishable from the `auto_add_user` one. This blocker was found late, is not in any earlier
    version of this design, and has never been exercised against anything.
