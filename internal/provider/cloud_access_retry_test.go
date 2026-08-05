@@ -128,3 +128,34 @@ func TestCloudAccessDoWriteRetry_RewindsBodyOnRetry(t *testing.T) {
 		t.Errorf("the retried body %q differs from the first attempt's %q", bodies[1], bodies[0])
 	}
 }
+
+// TestCloudAccessDoWriteRetry_BodyEchoingAnotherStatusIsNotMisclassified
+// covers the hardening item found in review: cloudAccessRetryableError checks
+// the REAL numeric status via UnexpectedStatusError, not a text match against
+// the whole error string - because DoRequestRaw's error format embeds the
+// response BODY after the code, a 403 whose body happens to contain the text
+// "unexpected status 503" (a gateway or proxy relaying upstream status,
+// plausibly) must NOT be retried. Retrying it would convert a terminal
+// decision into a slow one, the exact thing J.13 rules out.
+func TestCloudAccessDoWriteRetry_BodyEchoingAnotherStatusIsNotMisclassified(t *testing.T) {
+	cloudAccessFastRetryBackoff(t)
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusForbidden)
+		// The response body itself contains text shaped like a DIFFERENT status -
+		// exactly the case a text-matching classifier would misread.
+		_, _ = w.Write([]byte(`{"error": "upstream gateway reported: unexpected status 503: service unavailable"}`))
+	}))
+	t.Cleanup(server.Close)
+	client := &Client{BaseURL: server.URL, Token: "test-token", HTTPClient: server.Client()}
+
+	_, err := cloudAccessDoWriteRetry(context.Background(), client, "PUT", "/api/v2/whatever", nil, http.StatusNoContent)
+	if err == nil {
+		t.Fatal("expected an error: this is a 403, a terminal decision")
+	}
+	if requests != 1 {
+		t.Errorf("got %d requests, want exactly 1 - a 403 whose BODY happens to mention 'unexpected status 503' must not be retried on the strength of its body text", requests)
+	}
+}
