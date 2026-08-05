@@ -1122,9 +1122,16 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   cannot distinguish never-declared from declared-as-empty (`resource_cloud_access.go:1075-1091`); if
   the fatal path emits null where the plan held an empty list, that path diverges and trips the exact
   error AC-21 concerns. A flat string map cannot surface it. Re-assert against the real schema once a
-  write path exists, and target first a member whose planned `deny_roles` is an **empty list** — not
-  null and not populated, which is the narrowest input separating correct from broken here. `projects`
-  is the same class.
+  write path exists. Two inputs separate correct from broken: a member whose planned `deny_roles` is an
+  **empty list** — not null and not populated — and a **partial-failure apply whose post-apply re-read
+  genuinely differs from the plan**. The second is the sharper of the two, because it is the case the
+  read-back prohibition under J.22 exists for. `projects` is the same class.
+- **AC-21c** The converse of AC-21a, which nothing has established. AC-21a proves only that writing a
+  value **matching** the plan succeeds; the whole read-back prohibition rests on the other direction —
+  that writing a value **differing** from the plan for a `Required` non-`Computed` attribute really does
+  trip the inconsistency error on a real Core, rather than being tolerated. That is buildable today
+  against a throwaway resource and needs no write path. **A rule justified only by the half that was
+  measured is a rule resting on an assumption**, and this one now carries several decisions.
 - **AC-22** Following AC-21, the next refresh corrects state to reality and the next plan shows the
   remaining work.
 - **AC-23** No write path produces a tainted state. Exercised as the consequence rather than the
