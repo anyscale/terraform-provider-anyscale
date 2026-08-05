@@ -318,6 +318,50 @@ provider's established route to connection-level identity, so this reuses a patt
 introducing one. The exclusion is the single stated exception to "anyone not declared is revoked" and
 belongs on the resource page in those terms, not in a code comment.
 
+**J.2 extended — the exclusion must hold in `Read` as well as in the reconcile, and declaring the
+caller in `member` is therefore a plan-time error.** Excluding the caller from revocation while
+`Read` still reports them is not a partial implementation, it is a broken one, and both of the
+obvious repairs fail:
+
+- **Report the caller honestly and skip revoking them.** Reality holds the caller, configuration does
+  not, so the plan proposes removing them and the reconcile declines. The post-apply state then
+  either includes the caller — contradicting the plan, which trips "provider produced inconsistent
+  result after apply" — or omits them, and the next `Read` restores them and proposes the same
+  removal forever. There is no third outcome.
+- **Omit the caller from `Read` and leave the rest alone.** This fixes the undeclared case and breaks
+  its mirror: a configuration that *declares* the caller now has a state that never contains them, so
+  the plan proposes adding them forever.
+
+`Read` cannot arbitrate between those two cases, and the reason is structural rather than incidental:
+`resource.ReadRequest` carries `State`, `Private`, `ProviderMeta` and `ClientCapabilities` — **no
+`Config`** (confirmed in `terraform-plugin-framework` v1.19.0). A `Read` implementation cannot know
+whether the configuration declares the caller.
+
+So the caller is absent from read, from plan, and from write, consistently: this resource manages
+other people's access to a cloud, and the operator's own access is outside its scope by construction.
+Declaring it is rejected at plan time.
+
+Two implementation constraints that are part of the ruling rather than detail:
+
+- The check belongs in `ModifyPlan`, not `ValidateConfig`, for the same reason the empty-member-set
+  guard does: `ValidateConfig` can run before the provider is configured, so the client may be nil
+  there and the caller unresolvable.
+- If the caller cannot be resolved, **skip the check without erroring, and do not treat the skip as a
+  pass.** The reconcile's own exclusion is what actually prevents lockout; the plan-time error is
+  only the friendly early warning, and an unresolvable identity must not become a hard failure.
+
+**State on the resource page that the excluded identity is token-dependent.** This is a self-lockout
+guard, not a protected-persons list. Whoever runs an apply is safe during that apply; a colleague who
+ran it last week and is not declared in configuration remains revokable, which is correct and is the
+resource's whole contract. Left unstated, "the caller is excluded" reads as "anyone who has run
+Terraform is permanently safe," which is both false and dangerous to rely on.
+
+A subtler alternative was considered and rejected: `Read` could report the caller only when prior
+state already contains them, which is implementable because `Read` does have `State`, and which
+converges in both the declared and undeclared cases. It was rejected because it makes identical
+reality read differently depending on history, and because a cold import has no prior state, so
+import and steady state would disagree. Recorded so it is not re-proposed as an obvious improvement.
+
 **J.5 — ordering within an apply: narrow first, then add, then remove.** Project drops and role
 changes on retained members run before adds; revokes run last. The residual window is that a member
 slated for removal keeps access while new members are being added — over-privilege for someone the
@@ -366,6 +410,63 @@ of trying. Because the read and write paths return the *identical* 501 detail st
 *different* flags, a 501 alone does not tell an operator which half is disabled — so the message must
 name both possibilities. `anyscale_cloud_access` does not currently carry any version of this
 warning and must gain one before it registers.
+
+## Wire-shape facts the read path depends on
+
+Recorded separately from the rulings because these are properties of the API rather than decisions,
+and because each one, if forgotten, produces a member list that is **wrong** rather than one that
+errors — and a wrong member list, in an authoritative resource, is a revoke.
+
+**Reading one cloud's member list is a join, not a call.** The collaborator search endpoint supplies
+identity only (email, identity ID, user ID); the roles endpoint supplies base roles and deny roles
+keyed by user ID and carries no email. Neither alone can produce a map keyed by email and valued by
+role. The join key is the user ID, which is **not** the identity ID — the collaborator delete takes
+the identity ID while the roles endpoints take the user ID, and conflating the two is a live hazard
+rather than a naming inconvenience.
+
+**Pagination on the search endpoint is a split transport, and getting it wrong fails silently.**
+`count` and the paging token belong in the URL query string while the filter belongs in the JSON
+body. Sending pagination in the body returns a valid first page and **no error**, so the observable
+failure is a truncated member list. For a resource that revokes whoever it was not shown, that means
+quietly revoking every member past the page boundary. This is the same silent-truncation shape this
+repo has been bitten by before when a call moved between API generations, and it is the reason this
+class of bug is worth a paragraph rather than a comment.
+
+**Do not trust the response's total; follow the paging token to exhaustion.** Response metadata is
+suspected of computing totals from unfiltered rows. The robust implementation does not merely avoid
+reading the total — it declines to parse the field at all, so no later change can start trusting it.
+The same reasoning applies to the search endpoint's `permission_level`: leaving a known-untrustworthy
+field out of the parse struct is stronger than parsing and ignoring it, because a struct field is an
+invitation.
+
+**The search endpoint's `permission_level` is lossy and must not be used as the member's role.** It
+has been observed misreporting a `workload_operator` as a plain `readonly`. **The provenance of that
+observation is not recorded and should be re-confirmed by a live capture** — the entire join design
+rests on this field being untrustworthy, so it deserves better than an undocumented assertion. Until
+then, treat the join as correct for its own reasons (only the roles endpoint carries deny roles at
+all) rather than as justified solely by this field's unreliability.
+
+**Organization admins are invisible to this resource, and that is load-bearing rather than
+incidental.** The search endpoint filters them out server-side, so a roles entry with no matching
+collaborator has no email to key it by and is dropped. The consequence cuts both ways: an admin's
+access can neither be seen nor revoked here, which is why a non-admin cloud owner is the genuinely
+exposed case in the authoritative-Create ruling above.
+
+**A collaborator with no roles entry is kept, never dropped.** That is the ordinary shape of anyone
+added through the console's legacy path, and an existing member missing from state is invisible to an
+authoritative write — which is to say, silently revoked. For the same reason a member whose roles
+entry is absent or ambiguous reports a null `base_role` and stays visible, rather than being omitted
+or having an element indexed out of a list that can legitimately hold more than one.
+
+**Preserve the prior null-versus-empty-list shape of `deny_roles` when the API reports none.** The
+wire cannot distinguish an omitted attribute from an explicit `[]`, so reproducing one shape
+unconditionally guarantees a permanent diff against the other. On a cold import there is no prior
+shape to preserve, so it lands null and a configuration declaring `[]` shows one first-plan diff that
+then stabilizes — minor, self-healing, and worth asserting in a test rather than discovering.
+
+**Fold email case on every prior-state lookup.** Anyscale treats email identity as case-insensitive.
+An exact-match lookup reads one person as simultaneously a new member and a departed one, which in an
+authoritative resource means granting and revoking the same human in one apply.
 
 ## Verification still owed before the reconcile is built
 
