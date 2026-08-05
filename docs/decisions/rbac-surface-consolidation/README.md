@@ -596,9 +596,10 @@ entry revokes that role, and the two fail in opposite directions: omitting `deny
 restriction and grants access, omitting `projects` removes a grant. `unmanaged_grants` and the ungranted
 list are `Computed` diagnostics only and never influence planning (J.12).
 
-**Read.** The membership search is the enumeration source; the roles listing is supplementary and cannot
-see a member holding only a legacy grant. Such a member reads back with `base_role` null, which is correct
-rather than a gap (J.21). A genuine not-found removes the resource from state; any other error is a
+**Read.** The membership search is the enumeration source; the roles listing is supplementary. A member
+created through the legacy path reads back the role they held **at creation** — populated, not null, and
+never updated by a later legacy write (J.21, as corrected). Null is reachable only for a member with a
+relational row and no authorization-service group, which is a narrower population than first claimed. A genuine not-found removes the resource from state; any other error is a
 diagnostic (criterion 31).
 
 **Drift.** An out-of-band grant or revoke through the RBAC path is detected. A role change made through the
@@ -626,8 +627,10 @@ exhaustion treated as record-and-warn (J.13). A post-apply read may write only `
 correction arrives on the next refresh, not within the failed apply (AC-21a/AC-21c).
 
 **Import.** `cloud_id` is the import ID. A configuration declaring exactly the imported members plans empty
-(AC-2), with `projects` covering only config-named projects. A cloud whose members hold only legacy grants
-imports with null roles and converges on the first apply (AC-31).
+(AC-2), with `projects` covering only config-named projects. A cloud whose members were created through the
+legacy path imports with their creation-time roles, so a configuration declaring those values plans clean;
+a role since changed in the console imports stale, and declaring the true value repairs it on apply
+(J.21 as corrected — AC-31's premise is under revision).
 
 **Compatibility.** Additive with **no affected practitioners**, conditional on J.18: no released tag
 contains this resource, so nobody can have imported it. Schema version 0, no upgrader, none needed —
