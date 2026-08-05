@@ -723,10 +723,43 @@ ruling:
   set whose membership another system also writes is not authority.
 
 **Detection is tri-state and must not be collapsed into a boolean.** Binding confirmed present:
-refuse, and name the binding. Confirmed absent: proceed. **Undetermined** — the Policy API is BETA and
-may 404 or 501 — proceed, warn loudly, and never record the skip as a pass. Refusing on undetermined
-would brick the resource everywhere that endpoint is not exposed, which is the same trade J.2 makes
-for an unresolvable caller identity.
+refuse, and name the binding. Confirmed absent: proceed silently. **Undetermined**: proceed, warn
+loudly, and never record the skip as a pass. Refusing on undetermined would brick the resource for
+every token that cannot see the answer, which is the same trade J.2 makes for an unresolvable caller
+identity.
+
+**Which HTTP response maps to which branch was wrong in the first version of this ruling, and the
+correction matters more than the error.** The original framing guessed that a 404 or a 501 meant
+undetermined. Traced against the handler, a **404 is confirmed-absent** — it is what the endpoint
+returns when no policy row exists, which is the ordinary state of nearly every cloud — and there is no
+feature-flag gate on the read at all, so no real 501 path exists. The undetermined case is **403**,
+because the read requires the same update-tier permission as the write and the caller must be an
+organization admin.
+
+That correction is not cosmetic: coding 404 as undetermined would emit a warning on essentially every
+apply forever, which is precisely the always-on alarm J.2 rejects. **A ruling that contradicts another
+ruling in this record is wrong on its face.**
+
+**The undetermined branch is evaluated only when a revoke is pending.** 403 is not rare — this record
+already establishes that the token running Terraform is usually a cloud collaborator or owner rather
+than an organization admin — so warning on every 403 moves the always-on alarm from one branch to
+another rather than removing it. J.9 already rules where a check like this belongs: at the entry of
+the operation that would revoke, not in `ModifyPlan`. An apply that revokes nobody cannot clobber a
+group-derived grant, so the question is irrelevant and the check should neither run nor speak. An
+apply that will revoke gets the check, and a warning attached to a genuinely risky operation is an
+alarm rather than noise.
+
+This does not reopen J.9's uniformity argument, which governs **refusals** — a resource that refuses
+only when a given apply happens to need a revoke is harder to reason about. There is no refusal in the
+undetermined branch; only a warning is being scoped. The confirmed-present branch refuses uniformly,
+exactly as J.9 does.
+
+**A non-empty bindings list is the group case, confirmed rather than assumed.** Narrowing the refusal
+to group principals specifically was proposed, on the reasoning that a policy carrying only individual
+user bindings would not be this hazard. It collapses: the validation path treats every entry in a
+binding's principals as a user-group identifier unconditionally and rejects the request if any fails to
+resolve, so there is no user-principal variant and no type discriminator to inspect. A 200 with an
+empty list remains confirmed-absent.
 
 The rejected alternative is accepting the collision and documenting it. It fails because Terraform
 silently fighting another reconciler is not a disclosable cost — there is no plan output that shows
@@ -829,11 +862,27 @@ the test owns and destroys. Read criteria against the static cloud are fine.
 
 - **AC-20** A failed revoke records an `unmanaged_grants` entry, emits a warning naming the email and
   the reason, and the apply **succeeds**.
-- **AC-21** **Design blocker.** A fatal mid-reconcile failure writes the full planned `member` map to
-  state, records the shortfall, warns, and returns success **without** tripping "provider produced
-  inconsistent result after apply". If this cannot be met, the fatal-path design has no safe shape and
-  the never-error-after-a-write ruling must be revisited before any write path ships. This is not a
-  test to make pass; it is a question to answer.
+- **AC-21a** **ANSWERED — design blocker cleared.** Core permits the fatal-path shape: writing a full
+  planned collection to state after partial real writes, recording the shortfall, warning, and
+  returning success does **not** trip "provider produced inconsistent result after apply". Confirmed by
+  a real `resource.Test` against a throwaway provider built for this question alone, run early
+  deliberately because it needed no write path. The reasoning it verifies is about unknown-ness — with
+  no `Computed` sub-attribute, Core's plan for the collection is never unknown and equals configuration,
+  so writing the planned value back matches the plan — and that argument holds identically for a nested
+  map whose sub-attributes are `Required` or `Optional`. The never-error-after-a-write ruling therefore
+  has a safe shape and is not revisited.
+- **AC-21b** **NOT met by AC-21a, and the gap is specific.** The gate resource's collection is a flat
+  `MapAttribute` of strings; the real `member` is a `MapNestedAttribute` whose object carries
+  `base_role`, `deny_roles` and `projects`. Core compares consistency per attribute **path**,
+  recursively, so a nested object map has strictly more paths on which an implementation can write
+  something differing from the plan — and this resource does something non-trivial on two of them.
+  `deny_roles` deliberately keeps prior state's shape when the API returns empty, because the wire
+  cannot distinguish never-declared from declared-as-empty (`resource_cloud_access.go:1075-1091`); if
+  the fatal path emits null where the plan held an empty list, that path diverges and trips the exact
+  error AC-21 concerns. A flat string map cannot surface it. Re-assert against the real schema once a
+  write path exists, and target first a member whose planned `deny_roles` is an **empty list** — not
+  null and not populated, which is the narrowest input separating correct from broken here. `projects`
+  is the same class.
 - **AC-22** Following AC-21, the next refresh corrects state to reality and the next plan shows the
   remaining work.
 - **AC-23** No write path produces a tainted state. Exercised as the consequence rather than the
@@ -874,10 +923,12 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   therefore be exercised against members granted through the RBAC path; run against a legacy-only cloud
   AC-2 fails, and that is the criterion working rather than a defect in it.
 - **AC-32** A cloud carrying a group policy binding refuses `Create` and `Update` with a message naming
-  the binding, and `Delete` proceeds. All three branches of J.20's detection are covered: confirmed
-  present refuses, confirmed absent proceeds, and an undetermined result — the BETA endpoint answering
-  404 or 501 — proceeds **with a warning**. A test that exercises only the present and absent branches
-  leaves the branch most likely to occur in the field unexercised.
+  the binding, and `Delete` proceeds. All three branches of J.20's detection are covered with their
+  corrected response mapping: **200 with a non-empty bindings list** refuses, **404 or 200-with-empty**
+  proceeds *silently*, and **403 or any other non-2xx** proceeds *with a warning*. Two assertions are
+  easy to omit and are the point of the criterion: the confirmed-absent branch must emit **no** warning,
+  since a warning there fires on nearly every cloud; and the undetermined branch must be evaluated only
+  when a revoke is pending, so an apply that revokes nobody stays silent even under a 403.
 - **AC-33** A member list spanning more than one page is enumerated completely. Pagination on these
   endpoints is in the **query string**, and a request that omits it returns a valid first page with no
   error, so the regression is silent and its consequence is revoking everyone past the page boundary.
