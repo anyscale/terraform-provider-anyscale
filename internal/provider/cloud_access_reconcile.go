@@ -2,10 +2,13 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -39,6 +42,121 @@ import (
 //     usually a collaborator on the cloud it manages and frequently its owner,
 //     so without this the first apply can lock the operator out of the thing
 //     they are managing.
+
+// cloudAccessRetryInitialBackoff and cloudAccessRetryMaxBackoff are vars
+// rather than consts purely so tests can override them to milliseconds for
+// the duration of a test (save, set, defer-restore) instead of a unit test
+// actually waiting out real seconds - production code never changes them.
+// Same shape as resource_cloud.go's autoAddUserRetryInitialBackoff.
+var (
+	cloudAccessRetryInitialBackoff = 1 * time.Second
+	cloudAccessRetryMaxBackoff     = 8 * time.Second
+)
+
+const (
+	// cloudAccessRetryMaxAttempts is J.13's bound: at most three attempts per
+	// write, never unbounded.
+	cloudAccessRetryMaxAttempts   = 3
+	cloudAccessRetryBackoffFactor = 2.0
+)
+
+// cloudAccessRetryableError reports whether err is a genuinely transient
+// condition worth retrying (J.13): 429, 502, 503, 504, or a connection-level
+// failure (DoRequestRaw wraps client.DoRequest's own errors as "API request
+// failed: %w", never containing "unexpected status" at all, since those never
+// reached the point of getting an HTTP status back).
+//
+// Deliberately narrow. Every other 4xx - 403, 409, 422, 501 - is a terminal
+// decision, not a transient condition, and retrying a decision only converts
+// a clear diagnostic into a slow one. Retrying here is safe specifically
+// because of two properties already established elsewhere on this surface:
+// the roles write has SET semantics (live-confirmed as V8), so re-issuing an
+// identical write is idempotent, and the membership bootstrap already absorbs
+// its own conflict response (J.3). It would NOT be safe against a batch
+// endpoint, which is one more reason those stay unused here.
+func cloudAccessRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Structural check on the real numeric status, not a text match: DoRequestRaw's
+	// "unexpected status %d: %s" format embeds the raw response BODY after the
+	// code, so grepping for "unexpected status 503" would also match a body that
+	// happens to echo that text - a gateway or proxy relaying an upstream status,
+	// for instance - misclassifying an actual decision (a 4xx the backend meant)
+	// as transient. errors.As unwraps to the typed value regardless of how many
+	// times the error has been wrapped with %w.
+	var statusErr *UnexpectedStatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.StatusCode {
+		case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		default:
+			return false
+		}
+	}
+
+	// No UnexpectedStatusError to unwrap means the request never got as far as a
+	// response - client.DoRequest itself failed (DNS, connection refused, a
+	// timeout mid-request), which DoRequestRaw wraps as "API request failed: %w".
+	// That text match is safe: this prefix is written by exactly one call site in
+	// the whole provider and never embeds a response body, since there was no
+	// response to embed.
+	return strings.Contains(err.Error(), "API request failed")
+}
+
+// cloudAccessDoWriteRetry wraps DoRequestRaw with J.13's bounded retry policy
+// for this resource's write calls. A retry budget exhausted mid-reconcile is
+// a converge-and-record outcome (Ungranted or Unmanaged, plus a warning), not
+// an error - the never-error-after-a-successful-write rule admits no
+// exemption for retry exhaustion, since exhaustion is if anything MORE likely
+// once some writes have already landed than before.
+//
+// body is rewound (via io.Seeker, which every body constructed by
+// MarshalRequestBody satisfies) before each retry attempt after the first -
+// without this, a retried POST/PUT would send an empty body on its second
+// attempt, since the first attempt's read already consumed it. A nil body
+// (every DELETE call here) is unaffected: the type assertion on a nil
+// interface simply reports false and no rewind is attempted.
+func cloudAccessDoWriteRetry(
+	ctx context.Context, client *Client, method, path string, body io.Reader, expectedStatuses ...int,
+) ([]byte, error) {
+	seeker, _ := body.(io.Seeker)
+	backoff := cloudAccessRetryInitialBackoff
+
+	var lastResp []byte
+	var lastErr error
+	for attempt := 1; attempt <= cloudAccessRetryMaxAttempts; attempt++ {
+		if attempt > 1 && seeker != nil {
+			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
+				return nil, fmt.Errorf("could not rewind request body for retry attempt %d: %w", attempt, seekErr)
+			}
+		}
+
+		lastResp, lastErr = DoRequestRaw(ctx, client, method, path, body, expectedStatuses...)
+		if lastErr == nil || !cloudAccessRetryableError(lastErr) || attempt == cloudAccessRetryMaxAttempts {
+			return lastResp, lastErr
+		}
+
+		tflog.Warn(ctx, "Transient failure on cloud_access write, retrying", map[string]any{
+			"method": method, "path": path, "attempt": attempt, "backoff": backoff.String(),
+		})
+		select {
+		case <-ctx.Done():
+			// Named explicitly rather than returning lastErr bare: this is the
+			// reconcile's own timeout (J.13) or a canceled apply, not the transient
+			// condition that triggered the retry, and a caller recording this into
+			// Ungranted/unmanaged_grants should be able to say why in the warning.
+			return lastResp, fmt.Errorf("%w (after %d attempt(s), most recent failure: %s)", ctx.Err(), attempt, lastErr)
+		case <-time.After(backoff):
+		}
+		backoff = time.Duration(float64(backoff) * cloudAccessRetryBackoffFactor)
+		if backoff > cloudAccessRetryMaxBackoff {
+			backoff = cloudAccessRetryMaxBackoff
+		}
+	}
+	return lastResp, lastErr
+}
 
 // cloudAccessBridgePermissionLevel is the legacy permission_level used to
 // establish membership before a role can be written.
@@ -198,6 +316,17 @@ type cloudAccessReconcileResult struct {
 	// Unmanaged is one entry per grant that could not be revoked, in the order
 	// the revokes were attempted.
 	Unmanaged []CloudAccessUnmanagedGrantModel
+
+	// Ungranted is one entry per member the configuration declared but this
+	// reconcile could not grant, in the order the grants were attempted.
+	//
+	// This is deliberately its OWN channel, never folded into Unmanaged:
+	// Unmanaged means "someone still has access this configuration says they
+	// should not have" (an unfinished revoke), while Ungranted means "someone
+	// lacks access this configuration says they should have" (an unfinished
+	// grant) - opposite problems that would make length(unmanaged_grants) > 0
+	// ambiguous between them if merged into one attribute.
+	Ungranted []CloudAccessUnmanagedGrantModel
 }
 
 // unmanagedGrantsList converts the result into the Computed attribute's value.
@@ -207,6 +336,37 @@ func (res cloudAccessReconcileResult) unmanagedGrantsList() (types.List, diag.Di
 	elements := make([]attr.Value, 0, len(res.Unmanaged))
 	var diags diag.Diagnostics
 	for _, g := range res.Unmanaged {
+		obj, objDiags := types.ObjectValue(
+			map[string]attr.Type{
+				"email":      types.StringType,
+				"project_id": types.StringType,
+				"reason":     types.StringType,
+			},
+			map[string]attr.Value{
+				"email":      g.Email,
+				"project_id": g.ProjectID,
+				"reason":     g.Reason,
+			},
+		)
+		diags.Append(objDiags...)
+		if diags.HasError() {
+			return types.ListNull(cloudAccessUnmanagedGrantType()), diags
+		}
+		elements = append(elements, obj)
+	}
+	list, listDiags := types.ListValue(cloudAccessUnmanagedGrantType(), elements)
+	diags.Append(listDiags...)
+	return list, diags
+}
+
+// ungrantedMembersList converts Ungranted into the Computed attribute's value,
+// the grant-side twin of unmanagedGrantsList. Same never-null-never-unknown
+// discipline: a Computed list-of-objects left unknown has crashed this
+// provider before, so an empty result renders as an empty list, never null.
+func (res cloudAccessReconcileResult) ungrantedMembersList() (types.List, diag.Diagnostics) {
+	elements := make([]attr.Value, 0, len(res.Ungranted))
+	var diags diag.Diagnostics
+	for _, g := range res.Ungranted {
 		obj, objDiags := types.ObjectValue(
 			map[string]attr.Type{
 				"email":      types.StringType,
@@ -248,6 +408,20 @@ type cloudAccessReconcileOptions struct {
 	// somewhere to go back to; a destroy does not.
 	RefuseWhenAutoAddUserEnabled bool
 
+	// RefuseWhenGroupPolicyBound aborts before any write when the cloud carries a
+	// group policy binding (J.20). A separate, asynchronous reconciler flattens
+	// group membership into the same collaborator rows this resource reads, with
+	// nothing marking their origin, so this resource cannot tell a group-derived
+	// member from a manually granted one and would revoke it - and that other
+	// reconciler may then silently re-grant it later, on its own schedule,
+	// producing permanent non-convergence against a controller this resource
+	// cannot see or express.
+	//
+	// TRUE for an apply and FALSE for a destroy, same asymmetry and same reason as
+	// RefuseWhenAutoAddUserEnabled: refusing a destroy strands the resource in
+	// state with no exit but 'terraform state rm'.
+	RefuseWhenGroupPolicyBound bool
+
 	// PriorProjects is what state previously declared, keyed by folded email then
 	// project ID. It is the ONLY source of project revokes: a pair that was
 	// declared and is now dropped gets removed, while a role merely observed on an
@@ -280,6 +454,10 @@ func reconcileCloudAccess(
 
 	remote, err := listCloudAccessMembers(ctx, client, cloudID)
 	if err != nil {
+		if cloudRolesFeatureDisabled(err) {
+			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+"\n\nNo changes were made.")
+			return result, diags
+		}
 		diags.AddError(
 			"Could Not Read The Cloud's Current Members",
 			fmt.Sprintf("The current member list of cloud %s could not be read, so this apply cannot tell who needs to "+
@@ -341,19 +519,76 @@ func reconcileCloudAccess(
 		}
 	}
 
-	// GRANTS FIRST. See property 1 on this file: an apply that dies partway
-	// through should leave too much access rather than too little.
+	// The group-policy preflight runs ONLY when a revoke is pending, same entry
+	// point as auto_add_user above: an apply that revokes nobody cannot clobber a
+	// group-derived grant, so the check would be irrelevant noise on the common
+	// case of a cloud with no pending revokes. Unlike auto_add_user, an
+	// inconclusive answer here does NOT abort - see cloudAccessGroupPolicyBinding
+	// for why 403 is the expected, common failure on this BETA endpoint rather
+	// than a rare one, and J.20 in the design record for the full rationale.
+	if len(toRevoke) > 0 && opts.RefuseWhenGroupPolicyBound {
+		switch status, err := cloudAccessGroupPolicyBinding(ctx, client, cloudID); status {
+		case cloudAccessGroupPolicyPresent:
+			diags.AddError(
+				"Cloud Has A Group Policy Binding",
+				fmt.Sprintf("Cloud %s has at least one group policy binding, and this apply would revoke %d member(s) "+
+					"the configuration does not declare.\n\nA group binding is reconciled into this cloud's ordinary "+
+					"member list by a separate, asynchronous system - the same rows this resource reads, with nothing "+
+					"marking their origin. Revoking a group-derived member here does not remove the binding, so that "+
+					"system may silently re-grant it later, on its own schedule, entirely outside this configuration. "+
+					"This resource cannot express or repair the actual authority - the group binding itself - so it "+
+					"refuses rather than fight another controller indefinitely.\n\nRemove the group's policy binding on "+
+					"this cloud first, then retry.\n\nNo changes were made.", cloudID, len(toRevoke)),
+			)
+			return result, diags
+		case cloudAccessGroupPolicyUndetermined:
+			diags.AddWarning(
+				"Could Not Confirm This Cloud Has No Group Policy Binding",
+				fmt.Sprintf("This resource could not determine whether cloud %s carries a group policy binding before "+
+					"revoking %d member(s): %s\n\nIf a group binding exists, the asynchronous system that applies it may "+
+					"silently re-grant a member this apply revokes, outside Terraform's model entirely. Proceeding "+
+					"anyway: this endpoint is BETA and commonly returns 403 for a token that is not an organization "+
+					"admin, which on its own is not evidence a binding exists.", cloudID, len(toRevoke),
+					extractAPIErrorDetail(err)),
+			)
+		}
+	}
+
+	// GRANTS FIRST, and EVERY declared member is attempted regardless of an
+	// earlier failure in this same loop. See property 1 on this file: an apply
+	// that dies partway through should leave too much access rather than too
+	// little. A failed grant records into Ungranted and the loop continues -
+	// it is NOT fatal, and it must not be, for a reason sharper than that
+	// property: this reconcile must never return an error after it has
+	// already written real, successful state to the backend, because Core
+	// persists that as a TAINTED resource and the next apply becomes a
+	// destroy-then-recreate that revokes every member this apply DID manage to
+	// grant. A grant failure suppresses the DESTRUCTIVE half of this apply
+	// below (project drops and cloud revokes) - never the additive half.
+	// Continuing to attempt every other grant is additive and therefore safe
+	// under the SAME rule that already governs revokes: never fail to attempt
+	// what configuration asked for, only ever fail to un-apply.
 	for _, folded := range cloudAccessSortedMemberKeys(desired) {
 		m := desired[folded]
 		if grantDiags := grantCloudAccessMember(ctx, client, cloudID, m); grantDiags.HasError() {
-			diags.Append(grantDiags...)
-			// A failed grant IS fatal, unlike a failed revoke: the configuration
-			// asked for this access to exist and it does not, and continuing would
-			// then revoke other members on the strength of a member list this apply
-			// has already failed to establish.
-			return result, diags
+			result.Ungranted = append(result.Ungranted, CloudAccessUnmanagedGrantModel{
+				Email:     types.StringValue(m.Email),
+				ProjectID: types.StringNull(),
+				Reason:    types.StringValue(cloudAccessDiagsReason(grantDiags)),
+			})
+			continue
 		}
 	}
+
+	// A grant failure anywhere in this apply - cloud-scope above, or
+	// project-scope below - suppresses every DESTRUCTIVE action for the rest
+	// of this reconcile: project drops and cloud revokes. The reasoning is
+	// J.5's hazard applied to a genuinely unfinished intent rather than an
+	// ordering choice - revoking members outside the set this apply managed to
+	// establish could leave the cloud with less access than intended, in the
+	// worst case without an owner, on the strength of an end state this apply
+	// never actually reached.
+	anyGrantFailed := len(result.Ungranted) > 0
 
 	// PROJECT PASS, between the cloud grants and the cloud revokes. Before,
 	// because the backend refuses a project grant to someone with no role on the
@@ -366,31 +601,72 @@ func reconcileCloudAccess(
 		cascaded[cloudAccessFoldEmail(m.Email)] = true
 	}
 
-	projectUnmanaged, projectDiags := reconcileProjectRoles(ctx, client, cloudID, desired, opts.PriorProjects, cascaded)
+	projectUnmanaged, projectUngranted, projectDiags := reconcileProjectRoles(
+		ctx, client, cloudID, desired, opts.PriorProjects, cascaded, anyGrantFailed,
+	)
 	result.Unmanaged = append(result.Unmanaged, projectUnmanaged...)
+	result.Ungranted = append(result.Ungranted, projectUngranted...)
 	diags.Append(projectDiags...)
-	if projectDiags.HasError() {
-		// Same rule as a failed cloud grant: the configuration asked for access that
-		// does not exist, so the revoke pass must not run on a member list this apply
-		// has already failed to establish.
+	if diags.HasError() {
+		// Only a genuine READ failure reaches here (the re-read of cloud members or
+		// project roles that planning itself needs) - reconcileProjectRoles no
+		// longer returns an error for a project GRANT failure, which is recorded in
+		// Ungranted instead. A read failure this late is still dangerous: cloud
+		// grants above may already have succeeded, so this still risks the same
+		// taint this whole rewrite exists to avoid. It is left as a hard error
+		// anyway, deliberately, because there is no member list to reason about at
+		// all without it - there is nothing safe to record and nothing to skip
+		// noting. This is the one remaining gap the design record's "verification
+		// still owed" section should track until a plan/read failure this late is
+		// itself converted to a recorded, non-fatal outcome.
 		return result, diags
 	}
+	anyGrantFailed = anyGrantFailed || len(result.Ungranted) > 0
 
-	for _, m := range toRevoke {
-		if err := revokeCloudAccessMember(ctx, client, cloudID, m.IdentityID); err != nil {
-			// Recorded, not fatal. One unrevokable member must not block the whole
-			// set forever - see property 2 on this file.
+	if anyGrantFailed {
+		// The destructive half is suppressed, but silence would be worse than the
+		// grant problem alone: an operator reading only Ungranted would reasonably
+		// conclude the rest of the apply completed, when in fact every undeclared
+		// member this apply would otherwise have revoked still has access. Record
+		// each one, distinguishably, rather than leaving it unmentioned.
+		for _, m := range toRevoke {
 			result.Unmanaged = append(result.Unmanaged, CloudAccessUnmanagedGrantModel{
-				Email: types.StringValue(m.Email),
-				// Null rather than empty: this is the cloud-level grant, not a grant on
-				// some project, and the attribute's documented meaning for null is
-				// exactly that.
+				Email:     types.StringValue(m.Email),
 				ProjectID: types.StringNull(),
-				Reason:    types.StringValue(cloudAccessRevokeFailureReason(err)),
+				Reason: types.StringValue("skipped: a grant this apply attempted failed, so no revokes were attempted " +
+					"this apply - see ungranted_members for what failed"),
 			})
-			continue
 		}
-		tflog.Info(ctx, "Revoked undeclared cloud member", map[string]interface{}{"cloud_id": cloudID})
+	} else {
+		for _, m := range toRevoke {
+			if err := revokeCloudAccessMember(ctx, client, cloudID, m.IdentityID); err != nil {
+				// Recorded, not fatal. One unrevokable member must not block the whole
+				// set forever - see property 2 on this file.
+				result.Unmanaged = append(result.Unmanaged, CloudAccessUnmanagedGrantModel{
+					Email: types.StringValue(m.Email),
+					// Null rather than empty: this is the cloud-level grant, not a grant on
+					// some project, and the attribute's documented meaning for null is
+					// exactly that.
+					ProjectID: types.StringNull(),
+					Reason:    types.StringValue(cloudAccessRevokeFailureReason(err)),
+				})
+				continue
+			}
+			tflog.Info(ctx, "Revoked undeclared cloud member", map[string]interface{}{"cloud_id": cloudID})
+		}
+	}
+
+	if len(result.Ungranted) > 0 {
+		diags.AddWarning(
+			"Some Members Could Not Be Granted",
+			fmt.Sprintf("%d member(s) of cloud %s could not be granted the role this configuration declares, and they "+
+				"do not have it. They are recorded in ungranted_members with the reason for each.\n\nBecause a grant did "+
+				"not complete, this apply also skipped every revoke it would otherwise have attempted - see "+
+				"unmanaged_grants for who that affects. The apply converged rather than failing: erroring here after "+
+				"other members were already successfully granted would leave this resource's state tainted, and the "+
+				"next apply would then revoke everyone this one DID manage to grant. The next refresh will show the "+
+				"true state, and the next plan will retry what is still missing.", len(result.Ungranted), cloudID),
+		)
 	}
 
 	if len(result.Unmanaged) > 0 {
@@ -453,7 +729,7 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 		diags.AddError("Error Marshaling Request", err.Error())
 		return diags
 	}
-	if _, err := DoRequestRaw(
+	if _, err := cloudAccessDoWriteRetry(
 		ctx, client, "POST", fmt.Sprintf("/api/v2/clouds/%s/collaborators/users", cloudID), reqBody,
 		http.StatusOK, http.StatusNoContent,
 	); err != nil {
@@ -479,8 +755,21 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 
 	{
 		detail := extractAPIErrorDetail(roleErr)
+		// The role WRITE is gated by the other half of the same two-flag pair
+		// cloudRolesFeatureDisabled/cloudRolesDisabledDetail already names for the
+		// read side (cloudRolesFeatureDisabled matches on status text alone, so it
+		// is agnostic to which flag tripped). Every branch below still names its
+		// own consequence (pre-existing access untouched, or rollback outcome) so
+		// that information is not lost - only the summary/cause text changes.
+		featureGated := cloudRolesFeatureDisabled(roleErr)
 
 		if !weCreatedMembership {
+			if featureGated {
+				diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+fmt.Sprintf(
+					"\n\nThey were already a collaborator on cloud %s before this apply, and that pre-existing access was "+
+						"NOT modified or removed.", cloudID))
+				return diags
+			}
 			diags.AddError(
 				"Could Not Set Cloud Role",
 				fmt.Sprintf("Setting %s's role on cloud %s failed: %s\n\nThey were already a collaborator on this cloud "+
@@ -491,11 +780,23 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 
 		// Membership was created moments ago by this very call and the role write
 		// that was supposed to follow it failed. Roll back, rather than leave the
-		// bridge permission level in place as access nobody asked for.
-		if _, delErr := DoRequestRaw(
+		// bridge permission level in place as access nobody asked for. This runs
+		// regardless of featureGated: whether the write-flag is off or the write
+		// failed for any other reason, the bootstrap grant this call just made is
+		// still unintended access that must not be left behind.
+		if _, delErr := cloudAccessDoWriteRetry(
 			ctx, client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s/collaborators/%s", cloudID, identityID), nil,
 			http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 		); delErr != nil {
+			if featureGated {
+				diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+fmt.Sprintf(
+					"\n\nThis resource also tried to remove the cloud membership it had just created as a rollback, and "+
+						"that failed too: %s\n\nAs a result %s now holds an unintended %q permission level on cloud %s that "+
+						"Terraform did not manage to remove. Remove it manually (for example DELETE "+
+						"/api/v2/clouds/%s/collaborators/%s, or the equivalent console action) and retry.",
+					extractAPIErrorDetail(delErr), m.Email, cloudAccessBridgePermissionLevel, cloudID, cloudID, identityID))
+				return diags
+			}
 			diags.AddError(
 				"Could Not Set Cloud Role, And Rollback Also Failed",
 				fmt.Sprintf("Setting %s's role on cloud %s failed: %s\n\nThis resource then tried to remove the cloud "+
@@ -508,6 +809,12 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 			return diags
 		}
 
+		if featureGated {
+			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+
+				"\n\nThe cloud membership this resource had just created was rolled back successfully - no unintended "+
+				"access was left behind.")
+			return diags
+		}
 		diags.AddError(
 			"Could Not Set Cloud Role",
 			fmt.Sprintf("Setting %s's role on cloud %s failed: %s\n\nThe cloud membership this resource had just created "+
@@ -528,7 +835,7 @@ func setCloudAccessRole(ctx context.Context, client *Client, cloudID, userID, ba
 	if err != nil {
 		return fmt.Errorf("failed to marshal set cloud role request: %w", err)
 	}
-	_, err = DoRequestRaw(
+	_, err = cloudAccessDoWriteRetry(
 		ctx, client, "PUT", fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/%s/roles", cloudID, userID), reqBody,
 		http.StatusOK, http.StatusNoContent,
 	)
@@ -543,11 +850,24 @@ func setCloudAccessRole(ctx context.Context, client *Client, cloudID, userID, ba
 // state, and treating it as a failure would put a permanent entry in
 // unmanaged_grants for access that does not exist.
 func revokeCloudAccessMember(ctx context.Context, client *Client, cloudID, identityID string) error {
-	_, err := DoRequestRaw(
+	_, err := cloudAccessDoWriteRetry(
 		ctx, client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s/collaborators/%s", cloudID, identityID), nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 	)
 	return err
+}
+
+// cloudAccessDiagsReason extracts one human-readable reason from diagnostics
+// returned by an internal helper (grantCloudAccessMember), for recording into
+// Ungranted. Uses the first error's summary and detail; a single grant
+// attempt is not expected to produce more than one error diagnostic today.
+func cloudAccessDiagsReason(diags diag.Diagnostics) string {
+	for _, d := range diags {
+		if d.Severity() == diag.SeverityError {
+			return fmt.Sprintf("%s: %s", d.Summary(), d.Detail())
+		}
+	}
+	return "the grant failed for an unrecorded reason"
 }
 
 // cloudAccessRevokeFailureReason turns a failed revoke into the text that lands
@@ -585,6 +905,20 @@ func cloudAccessRevokeFailureReason(err error) string {
 // because a member added moments ago is not in that earlier snapshot and their
 // identity is needed to remove a project role. One extra list request buys
 // correctness for exactly the case a stale snapshot gets wrong.
+//
+// priorGrantsFailed is true when a CLOUD-scope grant already failed earlier in
+// this same reconcile. It is threaded through so that a project-scope revoke
+// is skipped for the same reason a cloud-scope one is: a grant failure
+// anywhere suppresses every destructive action in the apply, not only the
+// ones downstream of the specific failure. See reconcileCloudAccess.
+//
+// The two read failures below remain fatal - a known, tracked gap, not an
+// oversight. Converting a cloud grant failure to a recorded outcome was this
+// change's job; a READ failure this late (after cloud grants may have already
+// succeeded) still risks the identical taint this whole rewrite exists to
+// avoid, but there is no member list to plan against at all without it, so
+// there is nothing safe to record in its place. Track this in the design
+// record's verification-owed section rather than silently accepting it.
 func reconcileProjectRoles(
 	ctx context.Context,
 	client *Client,
@@ -592,23 +926,30 @@ func reconcileProjectRoles(
 	desired map[string]cloudAccessDesiredMember,
 	priorProjects map[string]map[string]string,
 	cascaded map[string]bool,
-) ([]CloudAccessUnmanagedGrantModel, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
+	priorGrantsFailed bool,
+) (unmanaged []CloudAccessUnmanagedGrantModel, ungranted []CloudAccessUnmanagedGrantModel, diags diag.Diagnostics) {
 	inScope := cloudAccessInScopeProjectIDs(desired, priorProjects)
 	if len(inScope) == 0 {
-		return nil, diags
+		return nil, nil, diags
 	}
 
 	members, err := listCloudAccessMembers(ctx, client, cloudID)
 	if err != nil {
-		diags.AddError(
-			"Could Not Re-Read Cloud Members Before Applying Project Roles",
-			fmt.Sprintf("The cloud-level changes were applied, but the member list could not be re-read, and project "+
-				"roles need it to resolve who to grant and revoke: %s\n\nProject roles were not changed.",
-				extractAPIErrorDetail(err)),
-		)
-		return nil, diags
+		// NOT fatal, deliberately - see cloudAccessUnplannedProjectShortfall. A read
+		// failure this late (cloud-scope grants above may already have succeeded)
+		// erroring here would taint the resource exactly like an unrecovered grant
+		// failure would - most likely cause in practice is the reconcile's own
+		// context deadline (J.13) firing while this read was in flight or retrying,
+		// which is a timeout, not a decision, and must converge the same way any
+		// other mid-reconcile shortfall does.
+		reason := "could not re-read the cloud's member list to plan project roles"
+		if cloudRolesFeatureDisabled(err) {
+			reason = cloudRolesDisabledDetail
+		} else {
+			reason = fmt.Sprintf("%s: %s", reason, extractAPIErrorDetail(err))
+		}
+		unmanaged, ungranted := cloudAccessUnplannedProjectShortfall(desired, priorProjects, cascaded, reason)
+		return unmanaged, ungranted, diags
 	}
 	identityByFoldedEmail := make(map[string]cloudAccessRemoteMember, len(members))
 	for _, m := range members {
@@ -617,19 +958,19 @@ func reconcileProjectRoles(
 
 	current, err := cloudAccessProjectRoles(ctx, client, inScope)
 	if err != nil {
-		// Read failure here is fatal rather than "assume nothing is granted": that
-		// assumption would re-issue every grant, which is harmless, AND treat every
-		// existing role as absent, which is not.
-		diags.AddError(
-			"Could Not Read Project Roles",
-			fmt.Sprintf("The projects this configuration manages could not be read, so it cannot tell which roles need "+
-				"changing: %s\n\nProject roles were not changed.", extractAPIErrorDetail(err)),
-		)
-		return nil, diags
+		// Same non-fatal treatment, same reason. The comment this replaced argued
+		// fatal over "assume nothing is granted", but that was never the choice -
+		// cloudAccessUnplannedProjectShortfall assumes NEITHER granted nor absent,
+		// it records every declared project role as not-yet-confirmed and lets the
+		// next apply re-attempt it, which is harmless for whatever already
+		// succeeded.
+		reason := fmt.Sprintf("could not read the projects this configuration manages: %s", extractAPIErrorDetail(err))
+		unmanaged, ungranted := cloudAccessUnplannedProjectShortfall(desired, priorProjects, cascaded, reason)
+		return unmanaged, ungranted, diags
 	}
 
 	plan := planProjectRoles(desired, priorProjects, current, identityByFoldedEmail, cascaded)
-	return applyProjectRoles(ctx, client, plan, identityByFoldedEmail)
+	return applyProjectRoles(ctx, client, plan, identityByFoldedEmail, priorGrantsFailed)
 }
 
 // cloudAccessInScopeProjectIDs is the union of the projects the configuration

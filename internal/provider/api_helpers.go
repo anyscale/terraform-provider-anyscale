@@ -27,6 +27,31 @@ import (
 // error body never does, so that's indistinguishable from "found but empty."
 var ErrNotFound = errors.New("resource not found")
 
+// UnexpectedStatusError carries the real numeric HTTP status code
+// DoRequestRaw/DoRequestAndParse received when it did not match the caller's
+// expectedStatuses, so a caller that needs to classify by status - a retry
+// policy, a feature-gate detection - can check StatusCode directly via
+// errors.As instead of matching the error text for a status-shaped substring
+// like "unexpected status 503". Text matching is unsafe there in a way it
+// is not for a fixed detail substring: the status code sits inside a format
+// string that ALSO embeds the raw response BODY, so a response whose body
+// happens to echo another status - a gateway or proxy relaying upstream
+// status text, for instance - would false-positive a text match on the
+// wrong code entirely.
+//
+// Error() deliberately reproduces the exact preexisting "unexpected status
+// %d: %s" text so every current text-matching caller keeps working
+// unchanged - this type is additive, layered under the existing string
+// format via %w, never a replacement for it.
+type UnexpectedStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *UnexpectedStatusError) Error() string {
+	return fmt.Sprintf("unexpected status %d: %s", e.StatusCode, e.Body)
+}
+
 // DoRequestAndParse performs an HTTP request, reads and closes the response body,
 // checks the status code, and unmarshals the JSON response into the provided type.
 // This combines the most common request pattern used throughout the provider.
@@ -93,6 +118,7 @@ func DoRequestRaw(
 
 	// Check status code
 	if !isStatusExpected(httpResp.StatusCode, expectedStatuses) {
+		statusErr := &UnexpectedStatusError{StatusCode: httpResp.StatusCode, Body: string(bodyBytes)}
 		if httpResp.StatusCode == http.StatusNotFound {
 			// Reuse the exact pre-sentinel phrasing ("unexpected status 404: ...")
 			// verbatim, not just a bare "404" digit. No production code depends on
@@ -103,9 +129,15 @@ func DoRequestRaw(
 			// asserts it, and the ExpectError regexp in
 			// acctest/ephemeral_service_credentials_acc_test.go. Reword this and
 			// both fail. errors.Is works via %w regardless of the trailing text.
-			return nil, fmt.Errorf("%w: unexpected status %d: %s", ErrNotFound, httpResp.StatusCode, string(bodyBytes))
+			//
+			// Two %w verbs (Go 1.20+): the resulting Error() text is byte-identical
+			// to the old single-format-string version, since ErrNotFound formats as
+			// "resource not found" and statusErr formats as "unexpected status 404:
+			// ...", concatenated by the same ": " - but now BOTH errors.Is(err,
+			// ErrNotFound) and errors.As(err, &statusErr) work against one value.
+			return nil, fmt.Errorf("%w: %w", ErrNotFound, statusErr)
 		}
-		return nil, fmt.Errorf("unexpected status %d: %s", httpResp.StatusCode, string(bodyBytes))
+		return nil, statusErr
 	}
 
 	return bodyBytes, nil
