@@ -15,32 +15,21 @@ import (
 )
 
 // Live write-path verification for anyscale_cloud_access - the five
-// (live)-marked acceptance criteria (AC-1, AC-6, AC-15, AC-17, AC-26) from
-// docs/decisions/rbac-surface-consolidation/README.md that CANNOT be proven
-// by a mock, because each one is a question about what the real backend does
-// with an authoritative write, not about what the provider sends.
+// (live)-marked acceptance criteria (AC-1, AC-6, AC-15, AC-17, AC-26) that
+// cannot be proven by a mock, since each asks what the real backend does
+// with an authoritative write, not what the provider sends.
 //
-// THESE RUN ONLY AGAINST A LOCAL, UNCOMMITTED FLIP of cloudAccessWriteEnabled
-// to true. The gate stays closed in every committed/merged state; this file
-// exists to produce the evidence that gates removing it, per the resolution
-// of the circular dependency recorded in the design doc (the gate cannot come
-// off until these pass, and they cannot run while it is closed - so the flip
-// is local, temporary, and its own commit-worthiness depends entirely on the
-// run this file produces).
+// Runs only against a local, uncommitted flip of cloudAccessWriteEnabled to
+// true - the gate stays closed in every committed/merged state.
 //
-// RULING A1 BINDS HARDER HERE than anywhere else in this provider: every test
-// below creates its OWN fresh ephemeral cloud via createEphemeralTestCloud and
-// destroys it afterward. NEVER the static tfp-test-aws-useast1-STATIC fixture -
-// an authoritative Create/Delete against it would revoke real people's real
-// access.
+// RULING A1 BINDS HARDER HERE than anywhere else: every test below creates
+// its OWN fresh ephemeral cloud and destroys it afterward. NEVER the static
+// tfp-test-aws-useast1-STATIC fixture - an authoritative Create/Delete
+// against it would revoke real people's real access.
 //
-// The test SUBJECT is ANYSCALE_TEST_USER_EMAIL, the designated no-cloud member
-// fixture (requireRealInfraTestUser, already hardened against self-modification
-// and org-owner hazards by the organization_user_role realinfra tests). Per
-// J.22's test-hygiene ruling, this file does NOT create a service account for
-// the "undeclared member to be revoked" role either - the CLI's delete command
-// works (confirmed live this session), but a leak-on-panic is still a leak, and
-// the fixture already covers what these tests need.
+// The test SUBJECT is ANYSCALE_TEST_USER_EMAIL, the designated no-cloud
+// member fixture (requireRealInfraTestUser) - never a freshly-created
+// service account, since a leak-on-panic there is still a leak.
 
 // cloudAccessLiveOOBMember performs an out-of-band grant on a cloud, bypassing
 // Terraform entirely - the legacy bootstrap-plus-permission-level path, which
@@ -653,16 +642,13 @@ func cloudAccessLiveRevokeProjectRole(t *testing.T, client *provider.Client, pro
 }
 
 // TestAccCloudAccessResource_LiveProjectRoleRequestShapes is AC-15's live
-// half only, per architect's split: does OUR request shape for granting and
-// revoking a project role actually work against the real API? It does not
-// drive anyscale_cloud_access or any reconcile logic at all - no
-// authoritative Create/Update/Delete runs anywhere near it, so it is safe
-// against the STATIC cloud (A1 is not engaged: nothing here can revoke an
-// undeclared cloud member, because this test never touches cloud-scope
+// half only: does our request shape for granting and revoking a project
+// role actually work against the real API? It does not drive
+// anyscale_cloud_access or any reconcile logic - no authoritative
+// Create/Update/Delete runs anywhere near it, so it is safe against the
+// STATIC cloud (A1 is not engaged: this test never touches cloud-scope
 // membership). It creates its own throwaway PROJECT under the static cloud,
-// grants and revokes a project role on it directly, and deletes the
-// project - the static cloud's own members and their access are never
-// touched.
+// grants and revokes a project role directly, then deletes the project.
 //
 // The other half of AC-15 (does the reconcile's drop-equals-revoke DECISION
 // LOGIC behave correctly - which projects are in scope, that a cascaded
