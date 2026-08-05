@@ -703,6 +703,116 @@ which for `deny_roles`. Do not assume the roles endpoint is the better source fo
 organization scope it is the better source for one field and the worse source for the other. Until
 this is answered, no documentation should promise that out-of-band role changes are detected.
 
+## Acceptance criteria for the write path (AC-1 – AC-30)
+
+Numbered `AC-` rather than continuing the legacy `criterion N` sequence, which runs to 31 and whose
+authoritative list is not in this repository — a collision there would be silent and unresolvable.
+
+Each criterion is stated so it can be exercised without reference to how the resource is built. Where
+a criterion needs a live backend, that is marked, and the distinction is not cosmetic: a mock cannot
+establish that a request shape is one the real API accepts, and this write path's request shapes were
+recovered from a deleted implementation rather than confirmed.
+
+**Two rules govern the set as a whole.**
+
+*A criterion guarding a regression is not met until it has been proven red.* Introduce the
+regression, confirm the test fails, revert byte-clean. This is repeated here because the failure it
+prevents has occurred on this exact surface: a `mount_targets` import test passed only because its
+mock omitted the field the fix concerned.
+
+*Live write coverage never runs against the shared static cloud.* An authoritative `Create` revokes
+every undeclared member, and that fixture's member list plausibly includes real identities including
+whoever is running the tests. Write criteria require a freshly created cloud whose entire member set
+the test owns and destroys. Read criteria against the static cloud are fine.
+
+**Read and import**
+
+- **AC-1** *(live)* A cold import of a cloud with several members populates `member` with exactly the
+  real member set minus the caller. Asserted with `ImportStateCheck` inside the import step, which is
+  the only place that sees what import actually recovered.
+- **AC-2** A configuration declaring exactly the imported members plans empty. Requires the two-test
+  shape of J.17; a three-step create-import-reapply sequence cannot prove it.
+- **AC-3** `projects` is populated only for configuration-named projects. A member holding a project
+  role on a project no configuration names reports none, per J.10.
+- **AC-4** `Read` removes the resource from state only on a genuine not-found. A 500 or a timeout
+  surfaces as a diagnostic and leaves state intact — criterion 31 applied to this resource.
+- **AC-5** A 501 from any path names both feature flags. A 501 surfacing as a generic read failure
+  fails this criterion, because it sends the operator to look at permissions or networking instead of
+  at the flags.
+
+**Create**
+
+- **AC-6** *(live)* `Create` against a cloud holding undeclared pre-existing members revokes them.
+- **AC-7** `Create` never revokes the caller, including when the caller is a pre-existing member and
+  is undeclared.
+- **AC-8** Declaring the caller in `member` is a plan-time error, raised from `ModifyPlan`. An
+  unresolvable caller identity skips the check without erroring and without counting as a pass.
+- **AC-9** `Create` and `Update` refuse on an `auto_add_user` cloud, and the message names the remedy
+  rather than only the condition.
+- **AC-10** `base_role = "owner"` with `deny_roles = ["cloud_read_only"]` is a plan-time error,
+  implemented as a literal equality test. A test that would also pass against an `OneOf` enum
+  validator does not meet this criterion, because a closed enum on `base_role` is itself a defect.
+- **AC-11** An empty `member` map without `allow_empty_member_set` is a plan-time error.
+
+**Update**
+
+- **AC-12** Within one apply, project drops and role changes on retained members are issued before
+  adds, and revokes last, per J.5. Assert on request ordering against a mock.
+- **AC-13** Re-applying an unchanged configuration produces an empty plan and issues no writes.
+- **AC-14** A role change on a retained member converges in one apply; the following plan is empty.
+- **AC-15** *(live)* Dropping a project entry from a member revokes that project role.
+- **AC-16** A member drop issues **no** subsequent project-scope revoke — the cloud-scope revoke
+  already cascaded. Assert that no such request was made; a 404 absorbed there would look like
+  success while hiding a false `unmanaged_grants` entry.
+
+**Delete**
+
+- **AC-17** *(live)* `Delete` revokes every managed member and leaves the caller's access intact.
+- **AC-18** `Delete` on an `auto_add_user` cloud attempts the revokes, records each failure, and does
+  not refuse — the deliberate asymmetry with AC-9, since refusing would strand the resource in state.
+- **AC-19** A failed `Delete` leaves state untouched and retries to an empty plan.
+
+**Partial failure and state**
+
+- **AC-20** A failed revoke records an `unmanaged_grants` entry, emits a warning naming the email and
+  the reason, and the apply **succeeds**.
+- **AC-21** **Design blocker.** A fatal mid-reconcile failure writes the full planned `member` map to
+  state, records the shortfall, warns, and returns success **without** tripping "provider produced
+  inconsistent result after apply". If this cannot be met, the fatal-path design has no safe shape and
+  the never-error-after-a-write ruling must be revisited before any write path ships. This is not a
+  test to make pass; it is a question to answer.
+- **AC-22** Following AC-21, the next refresh corrects state to reality and the next plan shows the
+  remaining work.
+- **AC-23** No write path produces a tainted state. Exercised as the consequence rather than the
+  mechanism: fail a write mid-reconcile and assert the next plan is **not** destroy-and-recreate.
+  Stating it this way matters — the mechanism is invisible from configuration, but a scheduled
+  recreate of a resource whose destroy revokes a whole member list is exactly the harm.
+- **AC-24** A recorded `unmanaged_grants` entry never suppresses a later attempt: with the backend
+  failure removed, the next apply converges and the attribute empties, per J.12.
+- **AC-25** Retry is bounded and selective, per J.13: a 429 followed by success converges, and a 403
+  is attempted exactly once. Assert the request count, not merely the outcome.
+
+**Drift**
+
+- **AC-26** *(live)* An out-of-band grant made through the roles path is detected on refresh and
+  revoked on the next apply.
+- **AC-27** **Conditional on J.19.** An out-of-band role change made through the legacy
+  `permission_level` path — which is what the CLI and console actually write — is detected on refresh.
+  If J.19 establishes that cloud scope carries the organization-scope read/write split, this criterion
+  is not met and cannot be met, and it converts into a documented limitation. It must not be quietly
+  dropped: the resource would then be blind to changes made through the only two administrative
+  surfaces most operators use.
+
+**Guards and consistency**
+
+- **AC-28** Two `member` keys differing only in case are rejected at plan time. Terraform's own
+  duplicate-key check is case-sensitive, so it does not cover this.
+- **AC-29** `unmanaged_grants` is empty after a fully successful apply, which is what makes
+  `length(...) > 0` a usable alarm rather than a permanent one.
+- **AC-30** The criteria above hold on at least one non-AWS compute stack, or this record states the
+  coverage limit explicitly. No cloud-provider-specific gate is known on these endpoints, but "no
+  gate found in source" and "confirmed on another stack" are different claims.
+
 ## Wire-shape facts the read path depends on
 
 Recorded separately from the rulings because these are properties of the API rather than decisions,
