@@ -1413,6 +1413,13 @@ the test owns and destroys. Read criteria against the static cloud are fine.
 - **AC-36** After a grant failure, the next refresh surfaces the shortfall and the following plan
   re-proposes the failed grant. This is what makes AC-35's write-the-planned-map safe rather than
   concealing; without it, the same apply looks identical to a clean one.
+
+  **Only the refresh half needs a test, and that is the whole criterion.** Given `Read` drops the
+  ungranted member and configuration still declares them, the plan proposes adding them by Terraform's
+  own diffing — Core's behavior, not this provider's, and AC-21c already establishes Core's side of the
+  contract. Recorded so an unproven-looking clause does not invite a redundant plan-level test. The half
+  that does need proving needs a **control**: a member whose grant succeeded must survive the same
+  refresh, or the assertion is satisfied equally by a `Read` that drops everyone.
 - **AC-34** Declaring an organization admin in `member` is an error raised at plan time, before any
   write is attempted, per J.22. Two assertions carry the criterion: that **no** mutation was issued, and
   that an unresolvable admin lookup skips the check without erroring and without being recorded as a
