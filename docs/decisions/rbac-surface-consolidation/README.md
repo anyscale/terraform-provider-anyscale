@@ -1126,12 +1126,19 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   **empty list** — not null and not populated — and a **partial-failure apply whose post-apply re-read
   genuinely differs from the plan**. The second is the sharper of the two, because it is the case the
   read-back prohibition under J.22 exists for. `projects` is the same class.
-- **AC-21c** The converse of AC-21a, which nothing has established. AC-21a proves only that writing a
-  value **matching** the plan succeeds; the whole read-back prohibition rests on the other direction —
-  that writing a value **differing** from the plan for a `Required` non-`Computed` attribute really does
-  trip the inconsistency error on a real Core, rather than being tolerated. That is buildable today
-  against a throwaway resource and needs no write path. **A rule justified only by the half that was
-  measured is a rule resting on an assumption**, and this one now carries several decisions.
+- **AC-21c** **CONFIRMED.** The converse of AC-21a, which nothing had established until it was built.
+  AC-21a proved only that writing a value **matching** the plan succeeds; the read-back prohibition rests
+  on the other direction — that writing a value **differing** from the plan for a `Required`
+  non-`Computed` attribute really does trip the inconsistency error rather than being tolerated. A real
+  `resource.Test` now writes one diverging entry as a stale-read-back stand-in and asserts Core's own
+  inconsistency error. So the rule rests on a measured mechanism in both directions rather than on the
+  half that happened to be convenient.
+
+  **Do not "improve" this test by giving it the real nested schema — that would confuse it with AC-21b.**
+  AC-21c is about **Core's** behavior, so a flat `Required` collection demonstrates the mechanism
+  completely; nesting adds more paths on which divergence can occur without changing whether divergence
+  is rejected. AC-21b is about **our implementation's** behavior, which is why it needs the real schema.
+  The two look similar and are asking different questions of different systems.
 - **AC-22** Following AC-21, the next refresh corrects state to reality and the next plan shows the
   remaining work.
 - **AC-23** No write path produces a tainted state. Exercised as the consequence rather than the
