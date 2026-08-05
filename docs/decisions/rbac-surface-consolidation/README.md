@@ -1250,9 +1250,29 @@ run's log is a **precondition** for merging the flip, not a follow-up to it.
 identity variable that makes them skip cleanly when unset — correct design, since pointing a destructive
 authoritative test at a borrowed identity is worse than skipping. But if that variable is unset in CI, the
 five skip forever there, and every later change to this resource shows green with the live write path
-unexercised. Record which it is. If unset, the honest follow-up is a scheduled job rather than a
-per-PR one, and the criteria are a one-time proof until that exists. **Marking a criterion "met" invites
-the reader to assume a pipeline re-checks it.**
+unexercised. **CONFIRMED STRUCTURAL, not merely unconfigured**: the variable appears in no
+workflow, and no repository secret exists that could supply it. So the five live criteria are a **one-time
+human proof with zero ongoing CI protection**, and **marking a criterion "met" invites the reader to assume
+a pipeline re-checks it.**
+
+Three consequences:
+
+- **It does not block the release.** The run is real evidence and satisfies the condition. The precedent is
+  genuine — the organization-user and invitation tests use this same fixture with the same
+  opt-in-and-skip design and shipped in v0.25.0.
+- **The precedent does not transfer on its own, and the asymmetry belongs on the record.** Those tests are
+  destructive to *one* member; this resource's failure mode is revoking a cloud's *entire* member list.
+  Same mechanism, blast radius different by orders of magnitude — so "we did it before" is exactly the
+  reasoning this document warns against elsewhere. It is sufficient here because the alternative is
+  blocking on infrastructure that does not exist, **not** because the risk is comparable.
+- **Any future change to this resource's write path requires re-running the five by hand**, until a
+  scheduled job exists. That obligation is recorded here rather than only in a report, because this is
+  where the next person will look.
+
+Adding the secret and wiring it into the scheduled workflow needs repository-administrator access, so it is
+a follow-up the team cannot close. Note also that there is no clever way around the fixture: a test cannot
+create its own disposable subject, because J.22 forbids creating service accounts it cannot delete and
+per-run invitations are rate-limited.
 
 *Names must match the CI shard regex or the test silently never runs.* The acceptance shard matches
 `TestAcc` + letters + `Resource`; a name omitting the `Resource` suffix neither runs nor fails. This bit
