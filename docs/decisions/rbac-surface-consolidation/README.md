@@ -436,6 +436,45 @@ whose only exit is `terraform state rm`.
 partial-failure recording, there is no batch roles write to begin with, and batching only the
 membership half saves N−1 of 2N calls while making the failure mode strictly worse.
 
+**Never return an error after a successful mutation. Error freely before the first write; never
+after it.** This is the rule that keeps `unmanaged_grants` meaning what it is supposed to mean, and
+it exists because of a verified Core behavior rather than a preference.
+
+A real `resource.Test` confirmed that Core does persist state written before an errored `Create` —
+but persists it **tainted**, so the following apply is a full destroy-and-recreate rather than a
+retriable reconcile. For a resource whose destroy revokes a cloud's entire member list, that turns
+one member's failure into a scheduled revoke of every member the apply *did* manage to write. It is
+the precise inverse of the containment `unmanaged_grants` exists to provide.
+
+The converge-and-record path is unaffected and was never at risk: a failed revoke records an entry
+and the apply **succeeds** with a warning, so there is no error and nothing taints. What the finding
+changes is the **fatal** path — an API outage partway through a reconcile — where the instinct to
+return the error is now actively wrong.
+
+On a fatal mid-reconcile failure: write the **full planned** member map to state, record everything
+not achieved in `unmanaged_grants`, warn loudly, and return success. State then matches the plan, so
+no inconsistent-result error arises; the next `Read` corrects state to reality; the next plan shows
+the remaining work and retries it. The cost is real and belongs on the page rather than buried here:
+between a failed apply and the next refresh, state claims members that were never actually granted.
+That is strictly better than the alternative and it is not free.
+
+Two boundaries on the rule, so it is not over-applied. Errors *before* any mutation should stay
+exactly as they are — caller resolution failing, the member list not listing, the `auto_add_user`
+preflight refusing — because none of them leave partial state and none can taint. And `Delete` is
+unaffected: a failed `Delete` that never calls `RemoveResource` leaves state untouched and retries
+to an empty plan, also confirmed by real test.
+
+`Update` takes the same rule for a weaker reason: taint is a create-time concept and a failed
+`Update` most likely does not taint at all, but that half could not be tested in isolation without a
+write path to drive it. The rule costs nothing and is correct under either answer, so it applies
+until someone has evidence to narrow it.
+
+**This makes the partial-write Framework/Core check load-bearing rather than a formality.** The
+fatal-path shape above depends entirely on writing a full planned map to state after partial
+real-world writes without tripping "provider produced inconsistent result after apply". If that
+check fails, the fatal path has no safe shape and this ruling must be revisited before any write
+path ships.
+
 **Every `unmanaged_grants` entry also emits a warning naming the email and the reason.** The schema's
 argument against a warning as the *only* channel — warnings recur on every plan and get scrolled past
 — is not an argument against having both. The attribute is the machine-readable alarm; the warning is
@@ -587,15 +626,29 @@ detail.
 **Framework and Core contract**, each needing a real `resource.Test` rather than a unit test, since
 framework source describes the mechanism without revealing every constraint Core enforces:
 
-1. Whether Core persists a state written via `resp.State` *before* an error return, in `Create`,
-   `Update`, and `Delete`. The partial-failure recording that `unmanaged_grants` depends on is built
-   entirely on this being true, and it is the item most likely to surprise — this repo's recorded
-   precedent is a design that read correctly in framework source and was rejected outright by Core at
-   plan time.
-2. That a `Computed` list-of-objects left unknown genuinely fails. Run the mutation; do not assume it
-   from the schema comment asserting it.
+1. **ANSWERED, and it changed the design rather than confirming it.** Core *does* persist state
+   written via `resp.State` before an error return — but on `Create` it persists it **tainted**, so
+   the next apply is a destroy-and-recreate rather than a retriable reconcile. The consequence, and
+   the never-error-after-a-write rule it forces, are in the reconcile rulings above. The `Delete`
+   half is clean: a failed `Delete` that never calls `RemoveResource` leaves state untouched and
+   retries to an empty plan. The `Update` half remains untested — it cannot be driven without a
+   write path — and should be closed once one exists.
+
+   Two things about *how* this was answered are worth keeping. It was expected to surprise us and it
+   did, in a direction nobody proposed. And it was caught because the first version of the test was
+   **wrong** — it assumed `Update` would run next, failed for real, and that failure is what
+   revealed the tainting. A test written to confirm the assumption would have passed and taught us
+   nothing. An earlier attempt to settle this from framework source concluded the opposite-shaped
+   answer for a defensible reason: the framework does put the state on the wire unconditionally. It
+   simply does not decide what Core writes to disk.
+2. **Answered** on the strength of this repo's own recorded history — a `Computed` list-of-objects
+   left unknown has failed here repeatedly. No new test required.
 3. That partial `member` writes followed by a full write on success do not trip "provider produced
-   inconsistent result after apply".
+   inconsistent result after apply". **No longer a formality.** Since item 1's answer, the entire
+   fatal-path design rests on this: writing a full planned map to state after partial real-world
+   writes is what avoids the taint, and if it trips an inconsistency error instead then the fatal
+   path has no safe shape. Sequence it after a write path exists to drive it, and treat a failure
+   here as a design blocker rather than a bug to work around.
 
 **A committed fixture hazard, recorded because its evidence no longer exists.** The import
 acceptance test for this resource pins the HTTP methods it expects on four routes, and two of those
