@@ -911,8 +911,22 @@ Three parts follow:
    needs. The relational listing's `permission_level` drifts against the real signal instead. **The
    field's known defect is what makes it the right choice here**, and an earlier instruction in this
    round said the opposite for the opposite question: the right source depends on which store the thing
-   being predicted lives in. Do not substitute the `is_admin` column, which is at best redundant and
-   possibly a stale migration-era backfill.
+   being predicted lives in.
+
+   **On the `is_admin` column, corrected.** It was briefly recorded here as possibly a stale
+   migration-era backfill. That was wrong — it is maintained live, written on owner promotion. The
+   correction does not restore it as the right signal, because the store-matching argument is unchanged:
+   maintained by the *relational* promotion path, its drift matches `permission_level`'s rather than the
+   group membership's. **One sub-question is genuinely open and would flip this** — if the
+   authorization-service write path *also* maintains `is_admin`, then the column is updated on ownership
+   changes by either route, which would make it a union signal and better than `base_role`, tracking the
+   target without inheriting the target's staleness. Settle it by reading whether that path writes both
+   the group and the column, or only the column alongside a relational change. Until then `base_role`
+   from the singular GET stands, labelled a proxy.
+
+   The mischaracterization is worth keeping visible for its shape rather than its content: it came from a
+   grep that found no current writers, which missed the real call site on a singular-versus-plural
+   function name. **A grep returning nothing is evidence only if the pattern could have matched.**
 3. **A refusal arriving mid-apply must remain visible on the next plan.** This is where two standing
    rules appear to collide — never error after a successful write, and never silently fail to apply what
    configuration declared — and visibility resolves it. For the affected member, state must not claim a
