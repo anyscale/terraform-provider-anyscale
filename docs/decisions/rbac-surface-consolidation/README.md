@@ -28,6 +28,10 @@ What this consolidation shipped, in one PR:
   empty-member-set `ModifyPlan` guard only. It is **not registered** in `provider.go` and its CRUD
   methods unconditionally refuse to run. It carries no changelog entry for the same reason: no
   registration, no docs page, no reachable user surface yet.
+  *(That describes what PR #228 shipped and is left as written. It is no longer the current state:
+  registration ahead of the write path was decided on 2026-08-04 — see the reconcile rulings below.
+  Anything downstream that keys off "unregistered", including the absence of a changelog entry,
+  changes with it.)*
 
 ## Vocabulary collisions
 
@@ -307,15 +311,41 @@ practice, both because it avoids the authority escalation and because adding a `
 is additive where widening authority is not. Recorded here so that "we need to detect out-of-band
 project grants" does not automatically get read as "we need the wider scope."
 
-**Open, and a user decision rather than an engineering one: whether dropping a project entry from a
-member revokes that project role.** The schema as committed already implies yes — `projects` is
-plain `Optional` with no `Computed`, which is Terraform's shape for "configuration wins, omission
-means absent" — and a no answer would leave the provider able to grant a project role but never
-remove one. It is nonetheless recorded as open because it is data-loss-shaped, and because it is
-*not* the same question as the settled member-set authority above. Note the asymmetry that makes it
-worth asking rather than assuming: `deny_roles` is also plain `Optional`, so omitting it removes a
-**restriction** and fails toward more access, while omitting `projects` removes a **grant** and fails
-toward less. One structural rule, opposite blast directions.
+**Decided by the user (2026-08-04): dropping a project entry from a member REVOKES that project
+role.** The schema as committed already implied it — `projects` is plain `Optional` with no
+`Computed`, which is Terraform's shape for "configuration wins, omission means absent" — and the
+alternative would have left the provider able to grant a project role but never remove one, which
+is to say unable to complete the revoke half of the journey this resource exists to serve.
+
+It was put to the user rather than decided in engineering because it is data-loss-shaped, and
+because it is *not* the same question as the member-set authority settled above. The asymmetry that
+made it worth asking is worth keeping on the record now that it is answered: `deny_roles` is also
+plain `Optional`, so omitting it removes a **restriction** and fails toward more access, while
+omitting `projects` removes a **grant** and fails toward less. One structural rule, opposite blast
+directions — which means a typo in each place does a different kind of damage, and the documentation
+should not describe them in one breath as though they behave alike.
+
+**Decided by the user (2026-08-04): `anyscale_cloud_access` registers while still read-only, ahead
+of the write path.** The deciding argument was not preference but testability: an unregistered
+resource cannot be acceptance-tested at all, because the test provider factory is built from the
+real provider with no seam for injecting resources, and the resource's one committed acceptance test
+had therefore never run. Leaving it unregistered would have deferred the read path's first genuine
+plan and apply into the same change as the write path, concentrating both risks in the dangerous
+one. The four unconditional refusals are what make this safe — a registered resource that refuses
+every write cannot revoke anyone, and that floor is enforced by code rather than by the resource
+merely being absent.
+
+Two obligations follow directly from registering, both of which exist only because a published
+documentation page now exists:
+
+- The description must state plainly that write operations are not implemented in this version, and
+  must carry the two-flag 501 warning this resource still lacks.
+- Carrying `projects` forward from prior state, which was an acceptable interim while unregistered,
+  is not acceptable once registered. The reason is sharper for a read-only resource rather than
+  softer: read-only is precisely the shape someone reaches for to *audit* access, and a carried
+  forward map reports a clean plan against project state that was never verified. Either the real
+  read lands with registration, or the page states that project roles are not refreshed and are an
+  import-time snapshot. Silence is the one option ruled out.
 
 **J.2 — the caller's own identity is excluded from the authoritative set, resolved via
 `GET /api/v2/userinfo`.** Never grant, revoke, or record it. The alternatives fail on their
