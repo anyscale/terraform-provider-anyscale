@@ -484,6 +484,34 @@ show. The asymmetry of costs settles it — being wrong toward an extra call cos
 conflict response per member per apply; being wrong the other way costs a user an unrepairable grant
 whose only exit is `terraform state rm`.
 
+**Revisited on evidence (2026-08-04). The ruling holds; one premise behind it is now known false.**
+The condition for reopening this was explicitly "with evidence, not reasoning", and evidence arrived,
+so it was reopened rather than deferred a second time.
+
+*The falsified premise, which matters more than the ruling and has the longer half-life.* The removed
+per-user resource carried a comment asserting that the API has **no** endpoint that both grants a
+role and establishes membership, which is why its `Create` always issued the legacy bootstrap first.
+Against this endpoint pair that is **false**: calling the roles write directly for a user with no
+prior relationship to the cloud succeeded, and both the roles listing and the membership search
+showed the user immediately afterward, with a legacy permission level auto-derived from the base
+role. Whatever was true when that comment was written, it is not true now. It is recorded here
+because a load-bearing premise sitting in a comment is exactly what a later change designs around
+without re-checking.
+
+*Why the ruling nonetheless stands.* The capture covers **one** starting state — a user with no prior
+relationship to that cloud. The bootstrap is defensive across all of them: a previously-removed user,
+a partially-established one, a directory-sync-managed identity, a service account. "The roles write
+establishes membership for a fresh user" is a narrower sentence than "the bootstrap is unnecessary",
+and the gap between them is precisely where a failure would live. The cost asymmetry above is
+untouched by the finding, and there is nothing on the other side of the trade worth buying — no one
+is constrained by create latency.
+
+*What would change it.* Not a repeat of the same case, which would add confidence to a result already
+believed. Vary the starting state: a user previously added and then revoked from that cloud, a
+service account, and if reachable an identity under directory sync. If the roles write establishes
+membership across those too, the case for dropping the bootstrap becomes strong rather than
+suggestive, and this should be revisited a third time.
+
 **Batch endpoints are not used.** Their all-or-nothing validation is hostile to per-member
 partial-failure recording, there is no batch roles write to begin with, and batching only the
 membership half saves N−1 of 2N calls while making the failure mode strictly worse.
