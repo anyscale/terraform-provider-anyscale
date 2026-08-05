@@ -31,14 +31,12 @@ const defaultCloudAccessTimeout = 5 * time.Minute
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
 //
-// REGISTERED READ-ONLY. Refresh and import are live; the three write methods
-// refuse. The reconcile they would call is fully implemented and tested and sits
-// behind cloudAccessWriteEnabled below.
-//
-// The read half was built and landed before the write half on purpose, and the
-// ordering is a safety property rather than convenience: a resource that can
-// only read cannot revoke anyone, so it could be reviewed and exercised against
-// real infrastructure with no way to cause harm.
+// FULL CRUD, WRITE PATH ENABLED. The read half was built and landed before the
+// write half on purpose, and the ordering was a safety property rather than
+// convenience: a resource that could only read could not revoke anyone, so it
+// was reviewable and exercisable against real infrastructure with no way to
+// cause harm - see cloudAccessWriteEnabled's own history for what enabling the
+// write path required.
 //
 // WHY THIS IS KEYED BY cloud_id AND NOT BY USER. Authority over a set requires
 // one resource owning that whole set, so the resource's key must be the set's
@@ -198,35 +196,30 @@ func (r *CloudAccessResource) Metadata(ctx context.Context, req resource.Metadat
 
 func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Reads and imports the **complete** member list of one Anyscale cloud, including each " +
-			"member's cloud role and the deny roles layered on it.\n\n" +
-			"~> **This version is read-only.** Create, update and delete are not implemented and fail with an " +
-			"explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage " +
-			"them through Terraform. Cloud-scoped role management has no writable provider surface until that " +
-			"lands.\n\n" +
-			"**What this version is for: drift detection - within limits stated plainly below, not assumed.** " +
-			"Declare the member list you expect, and `terraform plan` reports any difference between your " +
-			"configuration and reality it can actually see - it simply cannot correct one yet.\n\n" +
-			"Read the scope limits on `member`, `projects` and `unmanaged_grants` before relying on that, though - a " +
-			"clean plan is not the same as \"nobody has access you did not intend\", and it is not even proof " +
+		MarkdownDescription: "Manages the **complete** member list of one Anyscale cloud: cloud roles, deny " +
+			"roles, and each member's roles on the projects your configuration names.\n\n" +
+			"~> **This resource is authoritative.** Terraform owns who has access to this cloud. Any member not " +
+			"declared in `member` is **revoked** - including people granted access through the Anyscale console, " +
+			"and including on the **first** apply. That is the point of this resource - it is how you make " +
+			"Terraform the source of truth for a cloud's membership - but it means a mistake here removes real " +
+			"people's access. Read this whole page before your first apply against a production cloud.\n\n" +
+			"**Declare the member list you expect, and `terraform plan`/`apply` makes it so** - adding, changing, " +
+			"and revoking roles to match. Read the scope limits below before relying on a clean plan as complete " +
+			"assurance, though.\n\n" +
+			"A clean plan is not the same as \"nobody has access you did not intend\", and it is not proof " +
 			"nothing has changed out of band. Organization admins are invisible to the endpoint this reads, your " +
 			"own identity is excluded, project roles are compared only for the projects your configuration names, " +
-			"and - the sharpest limit - an administrator can change a member's role through the Anyscale console or " +
-			"CLI without this resource noticing at all. That legacy path writes through a different store than the " +
-			"one this resource reads, so a member promoted from `writer` to `owner` through the console reads back " +
-			"exactly as declared and plans clean, while actually holding a different role. The one direction this " +
-			"resource CAN see is a change crossing the `cloud_read_only` restriction specifically - see " +
-			"`deny_roles` below. Read a clean plan as confirmation of what this resource was able to check, not as " +
-			"confirmation of the member's actual role.\n\n" +
-			"That is also why `member` is Required on a resource that cannot write: handing over the full expected " +
-			"member list is not busywork here, it is the thing being compared against.\n\n" +
-			"~> **This resource is designed to be authoritative, and that is not yet in effect.** When the write " +
-			"path ships, Terraform will own who has access to this cloud, and any member not declared in `member` " +
-			"will be **revoked** - including people granted access through the Anyscale console, and including on " +
-			"the **first** apply. None of that happens in this version. It is stated here so the behavior is not a " +
-			"surprise when it arrives; read this page again before you first apply a change with it.\n\n" +
-			"~> **Two Computed attributes track write-path shortfalls once it ships, and they mean OPPOSITE " +
-			"things.** `unmanaged_grants` is someone who still has access this configuration says they should not " +
+			"and - the sharpest limit - an administrator can change a member's role through the Anyscale console " +
+			"or CLI without this resource noticing at all. That legacy path writes through a different store than " +
+			"the one this resource reads, so a member promoted from `writer` to `owner` through the console reads " +
+			"back exactly as declared and plans clean, while actually holding a different role. The one direction " +
+			"this resource CAN see is a change crossing the `cloud_read_only` restriction specifically - see " +
+			"`deny_roles` below. Read a clean plan as confirmation of what this resource was able to check, not " +
+			"as confirmation of the member's actual role.\n\n" +
+			"That is also why `member` is Required: it is this resource's whole authority, not an optional " +
+			"filter - omitting it is not meaningful on an authoritative resource.\n\n" +
+			"~> **Two Computed attributes track write-path shortfalls, and they mean OPPOSITE things.** " +
+			"`unmanaged_grants` is someone who still has access this configuration says they should not " +
 			"have (a revoke that could not complete). `ungranted_members` is someone who lacks access this " +
 			"configuration says they should have (a grant that could not complete). Neither ever influences " +
 			"planning - both are diagnostics only, alertable via `length(...) > 0`, and a shortfall in either one " +
@@ -247,14 +240,14 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"### A cloud carrying a group policy binding is a third structural refusal\n\n" +
 			"~> Alongside `auto_add_user` and an empty `member` map, a cloud with a group policy binding (set via " +
 			"the Anyscale Policy API, for example `anyscale policy set --resource-type cloud`) refuses `Create` and " +
-			"`Update` once the write path ships. A separate, asynchronous system flattens group membership into " +
-			"this cloud's ordinary member list - the same rows this resource reads, with nothing marking their " +
-			"origin - so an authoritative apply cannot tell a group-derived member from a manually granted one and " +
-			"would revoke it. That system may then silently re-grant the same member later, on its own schedule, " +
-			"entirely outside this configuration: permanent non-convergence against a controller this resource " +
-			"cannot see or express, not a one-time undisclosed revoke. `Delete` is the deliberate exception - it " +
-			"still attempts and records, the same asymmetry `auto_add_user` has, because refusing a destroy would " +
-			"strand the resource in state with no exit but `terraform state rm`.\n\n" +
+			"`Update`. A separate, asynchronous system flattens group membership into this cloud's ordinary member " +
+			"list - the same rows this resource reads, with nothing marking their origin - so an authoritative " +
+			"apply cannot tell a group-derived member from a manually granted one and would revoke it. That system " +
+			"may then silently re-grant the same member later, on its own schedule, entirely outside this " +
+			"configuration: permanent non-convergence against a controller this resource cannot see or express, " +
+			"not a one-time undisclosed revoke. `Delete` is the deliberate exception - it still attempts and " +
+			"records, the same asymmetry `auto_add_user` has, because refusing a destroy would strand the resource " +
+			"in state with no exit but `terraform state rm`.\n\n" +
 			"~> Detecting a binding is best-effort, not a guarantee - the check itself may be inconclusive (this " +
 			"endpoint is BETA and commonly returns 403 for a token that is not an organization admin), in which " +
 			"case this resource warns and proceeds rather than refusing on suspicion alone.\n\n" +
@@ -272,21 +265,20 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"you ask Anyscale support to enable it. Until it is enabled, manage cloud access through the Anyscale " +
 			"console or API.\n\n" +
 			"### Reviewing the plan will not protect you from the first apply\n\n" +
-			"~> When the write path ships, the members about to lose access on a first apply are ones Terraform has " +
-			"never read, so they appear **nowhere** in plan output. This is the one sharp edge on this resource that " +
-			"plan review genuinely cannot catch. The `for_each` warning below *is* plan-reviewable; this is not.\n\n" +
+			"~> The members about to lose access on a first apply are ones Terraform has never read, so they " +
+			"appear **nowhere** in plan output. This is the one sharp edge on this resource that plan review " +
+			"genuinely cannot catch. The `for_each` warning below *is* plan-reviewable; this is not.\n\n" +
 			"The worst realistic case: a cloud owner who is **not** an organization admin can be revoked on the " +
 			"first apply, with no protection but reviewing the plan before it runs. Organization admins are safe in " +
 			"BOTH directions, and deliberately rather than by accident of plumbing: they are invisible to the " +
-			"endpoint this resource reads, so it cannot revoke what it cannot see, and once the write path ships, " +
-			"declaring one in `member` is a plan-time error (see the organization-admin note on `member` below) - " +
-			"backed by the API itself independently refusing to change an organization admin's role at all. Two " +
-			"different mechanisms landing on the same guarantee, not a coincidence to rely on.\n\n" +
+			"endpoint this resource reads, so it cannot revoke what it cannot see, and declaring one in `member` " +
+			"is a plan-time error (see the organization-admin note on `member` below) - backed by the API itself " +
+			"independently refusing to change an organization admin's role at all. Two different mechanisms " +
+			"landing on the same guarantee, not a coincidence to rely on.\n\n" +
 			"Your own identity is excluded entirely: the identity Terraform authenticates as is never reported as a " +
 			"member and cannot be declared as one. That is scoped to whoever runs the apply, not to a list of " +
 			"protected people - another operator who is not declared here is still revoked.\n\n" +
 			"### The most dangerous mistake, stated plainly\n\n" +
-			"Also future behavior, for the same reason as above - this version destroys nothing. " +
 			"A typo in the `cloud_id` used as a `for_each` key is **not preventable by this resource**. " +
 			"Terraform sees one resource destroyed and another created, and destroying an " +
 			"`anyscale_cloud_access` correctly revokes that cloud's members - the provider cannot tell that " +
@@ -297,11 +289,7 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"A member's project roles live inside their entry because the backend requires a cloud grant " +
 			"before a project grant on the same cloud, and revoking the cloud grant cascades to the " +
 			"projects. Declaring a project role for someone with no cloud role is a plan-time error here " +
-			"rather than a confusing failure partway through an apply.\n\n" +
-			"~> **The attribute descriptions below describe this resource's full behavior, including the write " +
-			"operations that are not enabled in this version.** Reference docs get read by jumping to the attribute " +
-			"you are configuring, so the read-only note at the top of this page is easy to miss. Plan-time validation " +
-			"is the exception and does apply today: anything described below as rejected at plan time really is.",
+			"rather than a confusing failure partway through an apply.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -348,7 +336,7 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 					"duplicate check is case-sensitive, so this resource additionally rejects two keys that " +
 					"differ only in case - email identity is not case-sensitive and treating it as such is a " +
 					"known source of split, half-granted access.\n\n" +
-					"~> **Declaring an organization admin here is a plan-time error, once the write path ships.** " +
+					"~> **Declaring an organization admin here is a plan-time error.** " +
 					"The Anyscale API refuses to change an organization admin's role at all, and discovering that " +
 					"mid-apply - after another member's grant already succeeded - is not recoverable the way a " +
 					"revoke failure is. This check is best-effort: no field this resource can read predicts the " +
@@ -543,40 +531,50 @@ func (r *CloudAccessResource) Configure(ctx context.Context, req resource.Config
 // prior state is one Terraform has never read, so it appears nowhere in the plan
 // output. There is nothing to detect and no guard shape that fits; documentation
 // on the resource page is the only available mitigation.
-// cloudAccessWriteEnabled gates the write path for the read-only release.
+// cloudAccessWriteEnabled gates the write path. Now true - see the history
+// below for why it was ever false and what closing it required.
 //
-// WHY A GATE RATHER THAN SPLIT BRANCHES. The reconcile is complete and covered,
-// but this release ships read and import only, so that the one resource in this
-// provider that can revoke real people's access at scale is exercised against
-// real clouds before it is allowed to change anything. Deleting the reconcile to
-// express that and re-adding it later is the shape that loses work: this repo has
+// WHY IT WAS EVER A GATE RATHER THAN A SPLIT BRANCH: the reconcile was
+// complete and covered before this resource's first release, but that release
+// shipped read and import only, so that the one resource in this provider that
+// can revoke real people's access at scale was exercised against real clouds
+// before it was allowed to change anything. Deleting the reconcile to express
+// that and re-adding it later is the shape that loses work: this repo has
 // already had verified changes disappear between a scratch check and a landed
-// commit. Keeping it here, gated, makes enabling it a one-line diff plus the docs
-// change that must accompany it.
+// commit. Keeping it here, gated, made enabling it a one-line diff plus the
+// docs change that had to accompany it.
 //
-// WHAT ENABLING IT REQUIRES, so this is not flipped on a whim: the two 409
+// WHAT ENABLING IT REQUIRED, so it was not flipped on a whim: the two 409
 // envelopes that block a revoke confirmed against a live capture rather than a
-// backend source trace; confirmation that Terraform Core persists state written
-// before an error return, which unmanaged_grants depends on entirely; and the
-// resource page rewritten from "this version is read-only" to the authority
-// warnings it currently holds as future behavior; and a decision on whether the
-// two-step bootstrap in grantCloudAccessMember is still necessary, since a live
-// check has cast doubt on the premise it exists for (see the note there - it is a
-// simplification to make before shipping the write path, not after).
+// backend source trace (auto_add_user - confirmed; the directory-sync/Policy
+// API case - source-traced only, accepted as a documented limitation since it
+// is org-wide and not preflightable the way auto_add_user is); confirmation
+// that Terraform Core persists state written before an error return, which
+// unmanaged_grants depends on entirely; the resource page rewritten from
+// "this version is read-only" to the authority warnings it now describes as
+// current behavior; and five live acceptance criteria run against real
+// infrastructure (four passed live; the fifth's live half was unobtainable in
+// the test organization due to a tracked, external SpiceDB-tuple defect
+// unrelated to this resource, with its mock-provable half already met).
 //
-// One of those prerequisites came back with an answer that changes the design
-// rather than confirming it, and it is recorded here so enabling the gate cannot
-// skip past it: Core DOES persist state written before an errored Create, but it
-// persists it as TAINTED, so the next apply is a full destroy-then-recreate of
-// the resource rather than a retriable per-member reconcile. For this resource
-// that means a failed first apply schedules a destroy that revokes every member
-// it did manage to write. unmanaged_grants surviving the error is therefore not
-// sufficient on its own - the write path needs an answer for taint before it
-// ships.
+// One of those prerequisites came back with an answer that changed the design
+// rather than confirming it, and it is recorded here so a future re-read of
+// this history does not skip past it: Core DOES persist state written before
+// an errored Create, but it persists it as TAINTED, so the next apply would
+// have been a full destroy-then-recreate of the resource rather than a
+// retriable per-member reconcile - which for this resource meant a failed
+// first apply would schedule a destroy revoking every member it did manage to
+// write. That finding is why the reconcile never returns an error after a
+// successful write: every write method converges (records the shortfall,
+// warns, returns success) instead, and applyCloudAccess never re-reads and
+// writes back `member` after any apply, on any path - see its own doc comment
+// for the general rule this follows.
 //
-// A var rather than a const on purpose: as a const, every branch below folds away
-// and the reconcile reads as dead code to both the reader and the linter.
-var cloudAccessWriteEnabled = false
+// A var rather than a const on purpose: as a const, every branch below folds
+// away and the reconcile would read as dead code to both the reader and the
+// linter, which would have made it easy to miss during review that this gate
+// exists and is deliberate rather than accidental.
+var cloudAccessWriteEnabled = true
 
 // cloudAccessWriteDisabledSummary and Detail are the refusal the three write
 // methods return while the gate above is closed.
