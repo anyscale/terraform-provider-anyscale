@@ -668,11 +668,33 @@ natural place to notice the identity is special.
 free.** `resource_cloud_access.go:164` and `:305`. Terraform lists are order-sensitive, so a backend
 response ordering the values differently from configuration produces a diff on every plan forever.
 
-`SetAttribute` is the semantically correct shape: `deny_roles` is a set of restrictions and the order
-carries no meaning. Confirm the returned order live before changing it — the enum has exactly two
-members, so the hazard is narrow — but weigh that against J.18: this is a free change today and a
-breaking one after the first tag that contains the resource. The asymmetry, not the probability, is
-what should decide it.
+`SetAttribute` is the semantically correct shape — `deny_roles` is a set of restrictions and order
+carries no meaning — and under J.18 changing it is free today and breaking after the first tag.
+
+**Revised on further evidence: do not change the shape. Fix it by semantic comparison instead, and
+only if the order proves unstable.** `anyscale_organization_user_role` models its own `deny_roles` as
+a `types.List` and **shipped that way in v0.25.0**, so its shape is frozen. Converting only the cloud
+resource leaves two sibling attributes with the same name and the same semantics carrying different
+types, permanently — a real cost against a hazard that is still unmeasured.
+
+The sequencing that follows is cheap and settles it either way. **Confirm the returned order first**:
+one read of a member holding both enum values.
+
+- If the order is stable, keep `List`, matching the released sibling, and record that the choice was
+  examined rather than inherited.
+- If the order is unstable, that is a defect in **both** resources, and the shape change is the worse
+  of the two available fixes because it cannot be applied to the released one. Preserving configuration
+  order in state when the returned collection is set-equal fixes both, needs no schema change, and
+  breaks nobody. This provider already carries a semantic-equality plan modifier for an analogous
+  normalization problem, so the pattern exists rather than needing invention.
+
+Note what the correct normalization is not: sorting the value into state would diff forever against a
+configuration that lists the two values in the other order. The fix is to keep the practitioner's order
+when the sets are equal, not to impose a canonical one.
+
+**Consistency did not win here; a released constraint did.** The rule against propagating a flawed
+pattern for uniformity still holds — it simply does not apply until the pattern is shown to be flawed,
+and one read decides that.
 
 **J.17 — a configuration declaring exactly the imported members must plan empty after
 `terraform import`,** with `projects` covering only config-named projects per J.10.
