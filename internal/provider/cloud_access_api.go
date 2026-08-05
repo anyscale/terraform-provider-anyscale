@@ -359,3 +359,31 @@ func cloudAccessGroupPolicyBinding(ctx context.Context, client *Client, cloudID 
 	}
 	return cloudAccessGroupPolicyPresent, nil
 }
+
+// cloudAccessLikelyOrgAdmin reports whether email is PROBABLY an organization
+// admin, for J.22's best-effort ModifyPlan warning - see the doc comment on
+// refuseDeclaringOrgAdmins for why this is a proxy rather than the backend's
+// actual signal (live ORG_OWNER managed-group membership, which no provider-
+// facing API exposes) and why base_role from the SINGULAR
+// organization-collaborator GET is the proxy that goes stale in the same
+// direction as that signal, rather than permission_level from the list
+// endpoint.
+//
+// One call per invocation (resolveIdentityForEmail plus one singular GET),
+// deliberately not a full organization listing: a cloud's declared member set
+// is almost always far smaller than the whole organization, so this is
+// O(declared) at the call site in refuseDeclaringOrgAdmins rather than
+// O(organization) per plan.
+func cloudAccessLikelyOrgAdmin(ctx context.Context, client *Client, email string) (bool, error) {
+	_, userID, err := resolveIdentityForEmail(ctx, client, email)
+	if err != nil {
+		return false, err
+	}
+	singular, err := DoRequestAndParse[OrganizationCollaboratorSingularResponse](
+		ctx, client, "GET", fmt.Sprintf("/api/v2/organization_collaborators/%s", userID), nil, http.StatusOK,
+	)
+	if err != nil {
+		return false, err
+	}
+	return singular.Result.BaseRole == "owner", nil
+}

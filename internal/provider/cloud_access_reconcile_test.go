@@ -141,6 +141,29 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 		writeJSON(w, map[string]interface{}{"results": results, "metadata": emptyMeta})
 	})
 
+	// The singular GET, keyed by user_id - what cloudAccessLikelyOrgAdmin (J.22)
+	// actually reads base_role from. Kept driven by the same PermissionLevel
+	// field as the list handler above: for this mock's purposes, one signal per
+	// test identity is enough to say "this person is an org admin", even though
+	// the two endpoints have different real-world staleness properties.
+	mux.HandleFunc("/api/v2/organization_collaborators/", func(w http.ResponseWriter, r *http.Request) {
+		userID := strings.TrimPrefix(r.URL.Path, "/api/v2/organization_collaborators/")
+		for _, id := range m.orgMembers {
+			if id.UserID != userID {
+				continue
+			}
+			baseRole := id.PermissionLevel
+			if baseRole == "" {
+				baseRole = "collaborator"
+			}
+			writeJSON(w, map[string]interface{}{"result": map[string]interface{}{
+				"base_role": baseRole, "additional_roles": []string{},
+			}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
 	mux.HandleFunc(fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/search", cloudID),
 		func(w http.ResponseWriter, r *http.Request) {
 			results := []map[string]interface{}{}
@@ -567,12 +590,14 @@ func TestReconcileCloudAccess_FailedRevokeConvergesIntoUnmanagedGrants(t *testin
 	}
 }
 
-// TestReconcileCloudAccess_FailedGrantIsFatalBeforeAnyRevoke covers the
-// asymmetry between a failed grant and a failed revoke. A failed grant means the
-// access the configuration asked for does not exist, so continuing would revoke
-// other members on the strength of a member list this apply has already failed
-// to establish.
-func TestReconcileCloudAccess_FailedGrantIsFatalBeforeAnyRevoke(t *testing.T) {
+// TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords covers AC-35:
+// a grant failure records into Ungranted and warns rather than erroring - the
+// error would taint the Create/Update, and the next apply would then destroy
+// and recreate the resource, revoking every member this apply DID manage to
+// grant. What a grant failure DOES suppress is the destructive half of the
+// SAME apply: the cloud-scope revoke phase, whose skipped entries must still
+// surface, distinguishably, in Unmanaged rather than silently vanishing.
+func TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords(t *testing.T) {
 	const cloudID = "cld_grantfail"
 
 	mock := &cloudAccessReconcileMock{
@@ -586,21 +611,79 @@ func TestReconcileCloudAccess_FailedGrantIsFatalBeforeAnyRevoke(t *testing.T) {
 		failRoleWriteFor: map[string]bool{"incoming@example.com": true},
 	}
 
-	_, diags := reconcileCloudAccess(context.Background(),
+	result, diags := reconcileCloudAccess(context.Background(),
 		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
 		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}), cloudAccessApplyOptions())
-	if !diags.HasError() {
-		t.Fatal("expected an error: the configuration asked for access that does not exist after the apply")
+
+	// NOT an error: erroring here after any other member's grant had already
+	// succeeded would taint the resource and schedule a destroy-then-recreate
+	// that revokes everyone this apply DID manage to grant. The failure is
+	// recorded and warned about instead.
+	if diags.HasError() {
+		t.Fatalf("a failed grant must not error - it must record into Ungranted and warn, or the resource taints: %v", diags)
+	}
+	if len(result.Ungranted) != 1 || result.Ungranted[0].Email.ValueString() != "incoming@example.com" {
+		t.Fatalf("expected incoming@example.com in Ungranted, got: %+v", result.Ungranted)
 	}
 
 	if _, ok := mock.members["undeclared@example.com"]; !ok {
-		t.Errorf("an undeclared member was revoked even though the grant pass failed: %v - the revoke set was computed from a member list this apply never managed to establish", mock.memberEmails())
+		t.Errorf("an undeclared member was revoked even though a grant failed: %v - the destructive half of the apply must be suppressed on any grant failure", mock.memberEmails())
+	}
+	// The skipped revoke must still be VISIBLE, not merely absent, so an
+	// operator reading only Ungranted does not conclude the rest of the apply
+	// completed.
+	foundSkip := false
+	for _, u := range result.Unmanaged {
+		if u.Email.ValueString() == "undeclared@example.com" && strings.Contains(u.Reason.ValueString(), "skipped") {
+			foundSkip = true
+		}
+	}
+	if !foundSkip {
+		t.Errorf("expected undeclared@example.com recorded in Unmanaged with a skipped-because-a-grant-failed reason: %+v", result.Unmanaged)
 	}
 
 	// Membership created by the failed grant is rolled back, so no unintended
 	// bridge-level access is left behind.
 	if _, ok := mock.members["incoming@example.com"]; ok {
 		t.Errorf("the bootstrap membership created moments before the failed role write was not rolled back: %v", mock.memberEmails())
+	}
+}
+
+// TestReconcileCloudAccess_GrantLoopContinuesPastAFailure covers the other
+// half of AC-35: a grant failure must not stop the loop from attempting every
+// OTHER declared member. Grants are additive and per-member independent, so
+// skipping "b" because "a" failed would silently fail to attempt access the
+// configuration asked for - forbidden by the same rule that requires revokes
+// to keep going past one unrevokable member.
+func TestReconcileCloudAccess_GrantLoopContinuesPastAFailure(t *testing.T) {
+	const cloudID = "cld_grantfail_continue"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		members: map[string]cloudAccessMockMember{},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"alice@example.com": {IdentityID: "idn_a", UserID: "usr_a"},
+			"bob@example.com":   {IdentityID: "idn_b", UserID: "usr_b"},
+		},
+		failRoleWriteFor: map[string]bool{"alice@example.com": true},
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(
+			cloudAccessDesiredMember{Email: "alice@example.com", BaseRole: "writer"},
+			cloudAccessDesiredMember{Email: "bob@example.com", BaseRole: "writer"},
+		),
+		cloudAccessApplyOptions())
+
+	if diags.HasError() {
+		t.Fatalf("a grant failure must not error: %v", diags)
+	}
+	if len(result.Ungranted) != 1 || result.Ungranted[0].Email.ValueString() != "alice@example.com" {
+		t.Fatalf("expected only alice@example.com in Ungranted, got: %+v", result.Ungranted)
+	}
+	if mem, ok := mock.members["bob@example.com"]; !ok || len(mem.BaseRoles) == 0 || mem.BaseRoles[0] != "writer" {
+		t.Errorf("bob's grant was not attempted after alice's failed: %v", mock.memberEmails())
 	}
 }
 
@@ -657,23 +740,25 @@ func TestReconcileCloudAccess_FeatureGateOnRoleWriteSurfacesTwoFlagMessage(t *te
 		rolesWriteStatus: http.StatusNotImplemented,
 	}
 
-	_, diags := reconcileCloudAccess(context.Background(),
+	result, diags := reconcileCloudAccess(context.Background(),
 		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
 		cloudAccessDesired(cloudAccessDesiredMember{Email: "incoming@example.com", BaseRole: "owner"}),
 		cloudAccessApplyOptions())
 
-	if !diags.HasError() {
-		t.Fatal("expected an error: the role write 501'd")
+	// NOT an error: a grant failure is recorded into Ungranted and warned
+	// about, never erroring - see TestReconcileCloudAccess_FailedGrantSuppressesRevokesNotRecords.
+	if diags.HasError() {
+		t.Fatalf("a gated role write must not error: %v", diags)
 	}
-	if d := cloudAccessFindError(diags, "Could Not Set Cloud Role"); d != nil {
-		t.Fatalf("got the generic set-role-failure diagnostic instead of the feature-gate one: %s", d.Detail())
+	if cloudAccessFindError(diags, "Could Not Set Cloud Role") != nil {
+		t.Fatalf("got the generic set-role-failure diagnostic: %v", diags)
 	}
-	d := cloudAccessFindError(diags, cloudRolesDisabledSummary)
-	if d == nil {
-		t.Fatalf("expected the %q diagnostic: %v", cloudRolesDisabledSummary, diags)
+	if len(result.Ungranted) != 1 || result.Ungranted[0].Email.ValueString() != "incoming@example.com" {
+		t.Fatalf("expected incoming@example.com in Ungranted, got: %+v", result.Ungranted)
 	}
-	if !strings.Contains(d.Detail(), "two separate feature flags") {
-		t.Errorf("the detail does not name the two-flag ambiguity: %s", d.Detail())
+	reason := result.Ungranted[0].Reason.ValueString()
+	if !strings.Contains(reason, "two separate feature flags") {
+		t.Errorf("the recorded reason does not name the two-flag ambiguity: %s", reason)
 	}
 
 	// The bootstrap membership the failed role write left behind must still be
@@ -1129,7 +1214,7 @@ func TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins(t *testing.T) {
 		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
 			planWith("admin@example.com", "alice@example.com"))
 
-		d := cloudAccessFindError(diags, "Cannot Manage An Organization Admin's Cloud Access Here")
+		d := cloudAccessFindError(diags, "This Member Appears To Be An Organization Admin")
 		if d == nil {
 			t.Fatalf("expected the org-admin refusal: %v", diags)
 		}
@@ -1158,7 +1243,7 @@ func TestCloudAccessModifyPlan_RefusesDeclaringOrgAdmins(t *testing.T) {
 		mock := newMock()
 		diags := runCloudAccessModifyPlanWithClient(t, cloudAccessTestClient(t, mock.handler(t, cloudID)),
 			planWith("Admin@Example.com"))
-		if cloudAccessFindError(diags, "Cannot Manage An Organization Admin's Cloud Access Here") == nil {
+		if cloudAccessFindError(diags, "This Member Appears To Be An Organization Admin") == nil {
 			t.Errorf("a differently-cased spelling of the admin's address slipped past the check: %v", diags)
 		}
 	})

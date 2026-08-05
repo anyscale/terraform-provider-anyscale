@@ -130,6 +130,7 @@ func cloudAccessConfigModel(member types.Map) CloudAccessResourceModel {
 		AllowEmptyMemberSet: types.BoolValue(false),
 		Member:              member,
 		UnmanagedGrants:     types.ListNull(cloudAccessUnmanagedGrantObjectType()),
+		UngrantedMembers:    types.ListNull(cloudAccessUnmanagedGrantObjectType()),
 	}
 }
 

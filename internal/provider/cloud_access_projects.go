@@ -256,19 +256,27 @@ func sortedProjectIDs(m map[string]string) []string {
 	return out
 }
 
-// applyProjectRoles executes a project plan. Grants are fatal on failure and
-// revokes are recorded, the same asymmetry as the cloud pass: a failed grant
-// means access the configuration asked for does not exist, while one unrevokable
-// role must not block every other change forever.
+// applyProjectRoles executes a project plan.
+//
+// Grants are ALWAYS attempted, every one, regardless of an earlier failure in
+// this same loop - additive and safe under the same rule reconcileCloudAccess
+// follows for cloud-scope grants: never fail to attempt what configuration
+// asked for. A failed grant records into ungranted rather than aborting.
+//
+// Revokes are skipped ENTIRELY - none attempted - when priorGrantsFailed is
+// true (a cloud-scope grant already failed elsewhere in this reconcile) or
+// when a grant failed in the loop above. Each skipped revoke is still
+// recorded into unmanaged, with a reason distinguishing "skipped because a
+// grant failed" from an attempted-and-failed revoke, so the apply's warning
+// does not silently omit that these members still have access. When neither
+// condition holds, revokes run and record failures exactly as before.
 func applyProjectRoles(
 	ctx context.Context,
 	client *Client,
 	plan cloudAccessProjectPlan,
 	identityByFoldedEmail map[string]cloudAccessRemoteMember,
-) ([]CloudAccessUnmanagedGrantModel, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	var unmanaged []CloudAccessUnmanagedGrantModel
-
+	priorGrantsFailed bool,
+) (unmanaged []CloudAccessUnmanagedGrantModel, ungranted []CloudAccessUnmanagedGrantModel, diags diag.Diagnostics) {
 	for _, g := range plan.Grants {
 		if err := grantProjectRole(ctx, client, g.ProjectID, g.Email, g.Level); err != nil {
 			detail := extractAPIErrorDetail(err)
@@ -277,14 +285,26 @@ func applyProjectRoles(
 					"does not allow changing your own role on a project - have another project owner apply this "+
 					"configuration instead.", detail)
 			}
-			diags.AddError(
-				"Could Not Grant Project Role",
-				fmt.Sprintf("Granting %s the %q role on project %s failed: %s\n\nProject roles already written by this "+
-					"apply are left in place - each one is the state the configuration asked for.", g.Email, g.Level, g.ProjectID, detail),
-			)
-			return unmanaged, diags
+			ungranted = append(ungranted, CloudAccessUnmanagedGrantModel{
+				Email:     types.StringValue(g.Email),
+				ProjectID: types.StringValue(g.ProjectID),
+				Reason:    types.StringValue(detail),
+			})
+			continue
 		}
 		tflog.Info(ctx, "Granted project role", map[string]interface{}{"project_id": g.ProjectID, "level": g.Level})
+	}
+
+	if priorGrantsFailed || len(ungranted) > 0 {
+		for _, g := range plan.Revokes {
+			unmanaged = append(unmanaged, CloudAccessUnmanagedGrantModel{
+				Email:     types.StringValue(g.Email),
+				ProjectID: types.StringValue(g.ProjectID),
+				Reason: types.StringValue("skipped: a grant this apply attempted failed, so no revokes were attempted " +
+					"this apply - see ungranted_members for what failed"),
+			})
+		}
+		return unmanaged, ungranted, diags
 	}
 
 	for _, g := range plan.Revokes {
@@ -328,5 +348,5 @@ func applyProjectRoles(
 		tflog.Info(ctx, "Revoked project role", map[string]interface{}{"project_id": g.ProjectID})
 	}
 
-	return unmanaged, diags
+	return unmanaged, ungranted, diags
 }

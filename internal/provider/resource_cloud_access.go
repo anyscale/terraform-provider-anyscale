@@ -164,6 +164,7 @@ type CloudAccessResourceModel struct {
 	AllowEmptyMemberSet types.Bool   `tfsdk:"allow_empty_member_set"`
 	Member              types.Map    `tfsdk:"member"`
 	UnmanagedGrants     types.List   `tfsdk:"unmanaged_grants"`
+	UngrantedMembers    types.List   `tfsdk:"ungranted_members"`
 }
 
 // CloudAccessMemberModel is one entry of the member map, keyed by email.
@@ -381,6 +382,60 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 					},
 				},
 			},
+			"ungranted_members": schema.ListNestedAttribute{
+				Computed: true,
+				// The grant-side twin of unmanaged_grants, and deliberately a SEPARATE
+				// attribute rather than folded into it: unmanaged_grants means "someone
+				// still has access this configuration says they should not have" (an
+				// unfinished revoke), while this means "someone lacks access this
+				// configuration says they should have" (an unfinished grant) - opposite
+				// problems needing opposite responses, which `length(unmanaged_grants) >
+				// 0` alone could not distinguish if they shared one attribute.
+				//
+				// Populated when a grant fails partway through an apply. When that
+				// happens, this resource also skips every revoke it would otherwise have
+				// attempted in the same apply - see unmanaged_grants for who that affects,
+				// recorded there with a reason naming the skip. The apply still converges
+				// rather than failing: erroring after another member's grant already
+				// succeeded would leave state tainted, scheduling a destroy-then-recreate
+				// on the next apply that would revoke everyone this one DID manage to
+				// grant. Same discipline as unmanaged_grants, same reason it exists.
+				//
+				// Every branch that populates this must set it explicitly before the
+				// first State.Set - a Computed list-of-objects left unknown has crashed
+				// this provider before. No UseStateForUnknown: this tracks whether a
+				// grant failed, which genuinely changes between applies.
+				MarkdownDescription: "Members this apply could not grant the declared role, and why. Populated when a " +
+					"grant fails partway through an apply - the configuration asked for this access and this resource " +
+					"was not able to establish it.\n\n" +
+					"The apply still converges rather than failing, because erroring after another member's grant " +
+					"already succeeded would leave this resource's state tainted - the next apply would then destroy " +
+					"and recreate it, revoking every member this one DID manage to grant. Alert on this: " +
+					"`length(anyscale_cloud_access.x.ungranted_members) > 0` means someone is missing access this " +
+					"configuration says they should have.\n\n" +
+					"~> **When this is non-empty, this apply also skipped every revoke it would otherwise have " +
+					"attempted** - see `unmanaged_grants` for who that affects, recorded there with a reason naming " +
+					"the skip. A grant shortfall is treated as too dangerous a moment to also remove access.\n\n" +
+					"~> **State for the affected member(s) still shows the values this apply planned, not what was " +
+					"actually granted**, since writing anything else would itself produce an inconsistent-result error. " +
+					"The next `terraform plan` after a refresh shows the true gap and retries it.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"email": schema.StringAttribute{
+							Computed:            true,
+							MarkdownDescription: "Email of the member whose grant could not be established.",
+						},
+						"project_id": schema.StringAttribute{
+							Computed:            true,
+							MarkdownDescription: "Project the grant applies to, or null when it is the cloud-level grant.",
+						},
+						"reason": schema.StringAttribute{
+							Computed:            true,
+							MarkdownDescription: "What the API reported when the grant was attempted.",
+						},
+					},
+				},
+			},
 		},
 	}
 }
@@ -487,6 +542,7 @@ func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateReq
 	// rather than trying to create it a second time.
 	plan.ID = types.StringValue(plan.CloudID.ValueString())
 	plan.UnmanagedGrants = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
+	plan.UngrantedMembers = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -608,15 +664,19 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 		state.AllowEmptyMemberSet = types.BoolValue(false)
 	}
 
-	// unmanaged_grants records what the LAST APPLY could not revoke, which is not
-	// something any read can recompute - so a refresh preserves it rather than
-	// clearing it. Clearing it on refresh would silence an alert about access
-	// Terraform intends someone not to have, which is precisely the thing this
-	// attribute exists to keep visible. Null (again, the fresh-import shape)
-	// becomes an empty list, never left unknown: a Computed list-of-objects left
-	// unknown has crashed this provider before.
+	// unmanaged_grants records what the LAST APPLY could not revoke, and
+	// ungranted_members what it could not grant - neither is something any read
+	// can recompute, so a refresh preserves both rather than clearing them.
+	// Clearing either on refresh would silence an alert about a shortfall
+	// Terraform already knows about, which is precisely what these attributes
+	// exist to keep visible. Null (again, the fresh-import shape) becomes an
+	// empty list, never left unknown: a Computed list-of-objects left unknown
+	// has crashed this provider before.
 	if state.UnmanagedGrants.IsNull() || state.UnmanagedGrants.IsUnknown() {
 		state.UnmanagedGrants = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
+	}
+	if state.UngrantedMembers.IsNull() || state.UngrantedMembers.IsUnknown() {
+		state.UngrantedMembers = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -624,13 +684,13 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 
 // ImportState takes the cloud ID and lets Read populate the member list.
 //
-// The two provider-side attributes are set here rather than left null, because
+// The provider-side attributes are set here rather than left null, because
 // Read deliberately preserves whatever it finds in them and a null would
-// survive the refresh. Both land on the value the schema documents for an
+// survive the refresh. All land on the value the schema documents for an
 // import: allow_empty_member_set false (so an imported resource cannot empty a
 // cloud until someone opts in, which is why a config that sets true shows a
-// false -> true diff on its first plan), and unmanaged_grants empty (nothing has
-// been attempted yet, so nothing has failed).
+// false -> true diff on its first plan), and unmanaged_grants / ungranted_members
+// both empty (nothing has been attempted yet, so nothing has failed).
 func (r *CloudAccessResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	cloudID := strings.TrimSpace(req.ID)
 	if cloudID == "" {
@@ -646,6 +706,8 @@ func (r *CloudAccessResource) ImportState(ctx context.Context, req resource.Impo
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_id"), types.StringValue(cloudID))...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("allow_empty_member_set"), types.BoolValue(false))...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("unmanaged_grants"),
+		types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{}))...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("ungranted_members"),
 		types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{}))...)
 }
 
@@ -664,6 +726,7 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 
 	plan.ID = types.StringValue(plan.CloudID.ValueString())
 	plan.UnmanagedGrants = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
+	plan.UngrantedMembers = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -680,10 +743,30 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 
 // applyCloudAccess is the shared body of Create and Update.
 //
-// It re-reads the member list afterward rather than assuming the writes took
-// effect, so state reflects what the API reports rather than what this provider
-// intended. A member whose grant landed differently than requested shows up as a
-// diff on the next plan instead of being masked by an optimistic write-back.
+// DOES NOT RE-READ member (or projects) AFTER WRITING, on any path, and that is
+// a deliberate absence rather than a missing optimization. `member` is Required
+// with no Computed sub-fields, so Core requires the state this function returns
+// for it to equal the PLAN exactly - not approximately, not "usually". A
+// post-apply re-read can only do one of two things: return exactly the plan,
+// in which case writing it back accomplishes nothing, or return something
+// different, in which case writing it trips "provider produced inconsistent
+// result after apply". There is no outcome where re-reading helps. An earlier
+// version of this function did re-read and write back, and got away with it
+// only because a fully successful write usually reads back identical -
+// usually, not always: these reads come from the authorization service, and
+// nothing establishes the read is immediately consistent with the write, let
+// alone that every member's grant landed exactly as attempted. So `plan.Member`
+// is left exactly as the practitioner declared it, on every path, full stop.
+// `projects` is Optional with no Computed and falls under the identical
+// prohibition for the same reason.
+//
+// The general rule this follows: a post-apply write may only touch Computed
+// attributes (unmanaged_grants, ungranted_members here), because only their
+// planned value is Unknown - which is exactly the latitude Core extends to
+// them and does not extend to anything else. Drift in `member` or `projects`
+// is not lost by this - it is surfaced on the next Read/refresh instead of
+// optimistically corrected here, which is the same mechanism the fatal-path
+// design already relies on for a grant or revoke shortfall.
 func (r *CloudAccessResource) applyCloudAccess(
 	ctx context.Context,
 	plan *CloudAccessResourceModel,
@@ -713,82 +796,20 @@ func (r *CloudAccessResource) applyCloudAccess(
 	})
 	diags.Append(reconcileDiags...)
 
-	// unmanaged_grants is written even when the reconcile errored: a revoke that
-	// failed before the error is still access someone holds, and dropping the
-	// record because a later step failed would hide it.
+	// unmanaged_grants and ungranted_members are written even when the
+	// reconcile errored: a revoke or grant that failed before the error is
+	// still worth recording, and dropping it because a later step failed would
+	// hide it.
 	unmanaged, listDiags := result.unmanagedGrantsList()
 	diags.Append(listDiags...)
 	if !listDiags.HasError() {
 		plan.UnmanagedGrants = unmanaged
 	}
-	diags.Append(state.Set(ctx, plan)...)
-	if diags.HasError() {
-		return
+	ungranted, ungrantedListDiags := result.ungrantedMembersList()
+	diags.Append(ungrantedListDiags...)
+	if !ungrantedListDiags.HasError() {
+		plan.UngrantedMembers = ungranted
 	}
-
-	remote, err := listCloudAccessMembers(ctx, r.client, cloudID)
-	if err != nil {
-		diags.AddWarning(
-			"Could Not Re-Read Cloud Members After Applying",
-			fmt.Sprintf("The changes to cloud %s were applied, but reading the member list back failed: %s\n\nState "+
-				"holds the configured values rather than confirmed ones. The next plan re-reads and will show any "+
-				"difference.", cloudID, extractAPIErrorDetail(err)),
-		)
-		return
-	}
-
-	// The caller is excluded here for the same reason Read excludes them, and
-	// missing it here would be worse: state written by an apply that included the
-	// caller contradicts the plan directly, which Core rejects outright as
-	// "provider produced inconsistent result after apply".
-	//
-	// The identity is re-resolved rather than threaded down from the reconcile, so
-	// that this stays correct if the write-back is ever reached by another path. A
-	// failure to resolve it degrades to a warning rather than failing an apply that
-	// has already made its changes - unlike Read, there is nothing to retry here.
-	visible := remote
-	if caller, callerErr := fetchCloudAccessCallerIdentity(ctx, r.client); callerErr == nil {
-		visible = make([]cloudAccessRemoteMember, 0, len(remote))
-		for _, m := range remote {
-			if caller.matches(m) {
-				continue
-			}
-			visible = append(visible, m)
-		}
-	} else {
-		diags.AddWarning(
-			"Could Not Confirm The Calling Identity After Applying",
-			fmt.Sprintf("The changes to cloud %s were applied, but the identity Terraform is authenticated as could not "+
-				"be resolved for the read-back: %s\n\nIf that identity is a member of this cloud it may appear in state, "+
-				"which the next plan will propose removing and this resource will decline to remove. Re-run the plan; a "+
-				"successful refresh corrects it.", cloudID, extractAPIErrorDetail(callerErr)),
-		)
-	}
-
-	// The read-back covers the projects the configuration names, so state reflects
-	// what the projects report rather than what this apply intended. A grant that
-	// landed differently then shows as a diff on the next plan instead of being
-	// masked by an optimistic write-back.
-	//
-	// A failure here degrades to the configured values with a warning rather than
-	// failing: the writes already happened, so there is nothing to retry, and the
-	// next plan re-reads.
-	projectRoles, projectReadDiags := r.readScopedProjectRoles(ctx, plan.Member)
-	if projectReadDiags.HasError() {
-		diags.AddWarning(
-			"Could Not Re-Read Project Roles After Applying",
-			fmt.Sprintf("The changes to cloud %s were applied, but reading the project roles back failed. State holds the "+
-				"configured values rather than confirmed ones; the next plan re-reads and will show any difference.", cloudID),
-		)
-		projectRoles = nil
-	}
-
-	memberMap, convDiags := cloudAccessMembersToState(ctx, visible, plan.Member, projectRoles)
-	diags.Append(convDiags...)
-	if convDiags.HasError() {
-		return
-	}
-	plan.Member = memberMap
 	diags.Append(state.Set(ctx, plan)...)
 }
 
@@ -1374,17 +1395,36 @@ func (r *CloudAccessResource) refuseDeclaringTheCaller(ctx context.Context, plan
 // erroring after a successful write taints the Create, and recording it in
 // unmanaged_grants would misuse that attribute for a grant the configuration
 // asked for and never received, rather than an existing grant that could not
-// be revoked. So this must be caught before the first write, not converged
-// or warned about afterward.
+// be revoked. So this must be caught before the first write when possible -
+// see the important caveat below before relying on that.
+//
+// THIS IS A BEST-EFFORT EARLY WARNING, NOT A GUARANTEE (J.22, revised). The
+// backend's actual refusal is gated on ORG_OWNER managed-group membership in
+// the authorization service - a live SpiceDB check with no equivalent
+// provider-facing API. Nothing this resource can read predicts that signal
+// with certainty, so this check cannot be one either, and must not be
+// documented or relied on as if it were. The reconcile's own handling of a
+// mid-apply refusal (see the comment on the write-side check, not this one)
+// is what actually protects a practitioner if this early warning misses.
+//
+// The proxy used is base_role from the SINGULAR organization-collaborator GET
+// (/api/v2/organization_collaborators/{user_id}), one call per DECLARED
+// member rather than a full org listing - O(declared), not O(organization),
+// since a single cloud's member map is almost always far smaller than the
+// whole org. base_role from the singular GET is read from the same
+// authorization-service store ORG_OWNER lives in, so the two go stale
+// TOGETHER relative to a legacy permission_level-only change - which is
+// exactly the property a proxy wants. Deliberately NOT permission_level from
+// the list endpoint: that is relationally-served and can diverge from
+// ORG_OWNER in either direction after a legacy-path change.
 //
 // Same placement and same skip-if-unresolvable discipline as
 // refuseDeclaringTheCaller, and for the same two reasons: it needs an API
 // call, so it cannot live in ValidateConfig, which may run before the
-// provider is configured; and if the org-admin list cannot be read, the check
-// is SKIPPED rather than failed; a hard failure would turn a transient
-// listing blip into an unplannable configuration; the only thing lost is a
-// friendly plan-time message; the write itself still fails safely, since it
-// never runs against a member this check would have caught.
+// provider is configured; and if a given member's admin status cannot be
+// read, THAT MEMBER's check is skipped rather than failed - a hard failure
+// would turn a transient lookup blip into an unplannable configuration, and
+// the only thing lost is a friendly plan-time message for that one member.
 //
 // Unlike the caller, more than one declared member can be an org admin, so
 // every offending entry is reported rather than stopping at the first - one
@@ -1409,30 +1449,29 @@ func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan
 		return
 	}
 
-	collaborators, err := listAllOrganizationCollaborators(ctx, r.client, nil)
-	if err != nil {
-		return
-	}
-	admins := make(map[string]bool, len(collaborators))
-	for _, c := range collaborators {
-		if c.PermissionLevel == "owner" {
-			admins[cloudAccessFoldEmail(c.Email)] = true
-		}
-	}
-
 	for email := range member.Elements() {
-		if !admins[cloudAccessFoldEmail(email)] {
+		isAdmin, err := cloudAccessLikelyOrgAdmin(ctx, r.client, email)
+		if err != nil {
+			// Unresolvable for THIS member only - every other declared member is
+			// still checked. Most commonly this is simply "not an org member yet",
+			// which is not this check's business to report; the grant call surfaces
+			// that error on its own terms.
+			continue
+		}
+		if !isAdmin {
 			continue
 		}
 		diags.AddAttributeError(
 			path.Root("member").AtMapKey(email),
-			"Cannot Manage An Organization Admin's Cloud Access Here",
-			fmt.Sprintf("%q is an organization admin, and the cloud roles API refuses to change an organization admin's "+
-				"role. Remove that entry from member.\n\nOrganization admins are outside this resource's scope in both "+
-				"directions: the member-search endpoint this resource reads never reports them, so they are already "+
-				"invisible on refresh and never revoked - declaring one here would only ever fail the write, and "+
-				"discovering that after another member's grant already succeeded is exactly the situation this resource "+
-				"must never allow itself to reach.", email),
+			"This Member Appears To Be An Organization Admin",
+			fmt.Sprintf("%q appears to be an organization admin, based on the best available signal this resource can "+
+				"read - not a guarantee. If they are, the cloud roles API refuses to change an organization admin's role, "+
+				"and this resource has no way to recover from that failure mid-apply. Remove that entry from member.\n\n"+
+				"Organization admins are outside this resource's scope in both directions: the member-search endpoint "+
+				"this resource reads never reports them, so a real admin is already invisible on refresh and never "+
+				"revoked. Declaring one here would only ever fail the write - and discovering that after another "+
+				"member's grant already succeeded is exactly the situation this early check exists to catch, even "+
+				"though it cannot catch every case.", email),
 		)
 	}
 }

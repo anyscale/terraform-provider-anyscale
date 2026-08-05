@@ -198,6 +198,17 @@ type cloudAccessReconcileResult struct {
 	// Unmanaged is one entry per grant that could not be revoked, in the order
 	// the revokes were attempted.
 	Unmanaged []CloudAccessUnmanagedGrantModel
+
+	// Ungranted is one entry per member the configuration declared but this
+	// reconcile could not grant, in the order the grants were attempted.
+	//
+	// This is deliberately its OWN channel, never folded into Unmanaged:
+	// Unmanaged means "someone still has access this configuration says they
+	// should not have" (an unfinished revoke), while Ungranted means "someone
+	// lacks access this configuration says they should have" (an unfinished
+	// grant) - opposite problems that would make length(unmanaged_grants) > 0
+	// ambiguous between them if merged into one attribute.
+	Ungranted []CloudAccessUnmanagedGrantModel
 }
 
 // unmanagedGrantsList converts the result into the Computed attribute's value.
@@ -207,6 +218,37 @@ func (res cloudAccessReconcileResult) unmanagedGrantsList() (types.List, diag.Di
 	elements := make([]attr.Value, 0, len(res.Unmanaged))
 	var diags diag.Diagnostics
 	for _, g := range res.Unmanaged {
+		obj, objDiags := types.ObjectValue(
+			map[string]attr.Type{
+				"email":      types.StringType,
+				"project_id": types.StringType,
+				"reason":     types.StringType,
+			},
+			map[string]attr.Value{
+				"email":      g.Email,
+				"project_id": g.ProjectID,
+				"reason":     g.Reason,
+			},
+		)
+		diags.Append(objDiags...)
+		if diags.HasError() {
+			return types.ListNull(cloudAccessUnmanagedGrantType()), diags
+		}
+		elements = append(elements, obj)
+	}
+	list, listDiags := types.ListValue(cloudAccessUnmanagedGrantType(), elements)
+	diags.Append(listDiags...)
+	return list, diags
+}
+
+// ungrantedMembersList converts Ungranted into the Computed attribute's value,
+// the grant-side twin of unmanagedGrantsList. Same never-null-never-unknown
+// discipline: a Computed list-of-objects left unknown has crashed this
+// provider before, so an empty result renders as an empty list, never null.
+func (res cloudAccessReconcileResult) ungrantedMembersList() (types.List, diag.Diagnostics) {
+	elements := make([]attr.Value, 0, len(res.Ungranted))
+	var diags diag.Diagnostics
+	for _, g := range res.Ungranted {
 		obj, objDiags := types.ObjectValue(
 			map[string]attr.Type{
 				"email":      types.StringType,
@@ -394,19 +436,41 @@ func reconcileCloudAccess(
 		}
 	}
 
-	// GRANTS FIRST. See property 1 on this file: an apply that dies partway
-	// through should leave too much access rather than too little.
+	// GRANTS FIRST, and EVERY declared member is attempted regardless of an
+	// earlier failure in this same loop. See property 1 on this file: an apply
+	// that dies partway through should leave too much access rather than too
+	// little. A failed grant records into Ungranted and the loop continues -
+	// it is NOT fatal, and it must not be, for a reason sharper than that
+	// property: this reconcile must never return an error after it has
+	// already written real, successful state to the backend, because Core
+	// persists that as a TAINTED resource and the next apply becomes a
+	// destroy-then-recreate that revokes every member this apply DID manage to
+	// grant. A grant failure suppresses the DESTRUCTIVE half of this apply
+	// below (project drops and cloud revokes) - never the additive half.
+	// Continuing to attempt every other grant is additive and therefore safe
+	// under the SAME rule that already governs revokes: never fail to attempt
+	// what configuration asked for, only ever fail to un-apply.
 	for _, folded := range cloudAccessSortedMemberKeys(desired) {
 		m := desired[folded]
 		if grantDiags := grantCloudAccessMember(ctx, client, cloudID, m); grantDiags.HasError() {
-			diags.Append(grantDiags...)
-			// A failed grant IS fatal, unlike a failed revoke: the configuration
-			// asked for this access to exist and it does not, and continuing would
-			// then revoke other members on the strength of a member list this apply
-			// has already failed to establish.
-			return result, diags
+			result.Ungranted = append(result.Ungranted, CloudAccessUnmanagedGrantModel{
+				Email:     types.StringValue(m.Email),
+				ProjectID: types.StringNull(),
+				Reason:    types.StringValue(cloudAccessDiagsReason(grantDiags)),
+			})
+			continue
 		}
 	}
+
+	// A grant failure anywhere in this apply - cloud-scope above, or
+	// project-scope below - suppresses every DESTRUCTIVE action for the rest
+	// of this reconcile: project drops and cloud revokes. The reasoning is
+	// J.5's hazard applied to a genuinely unfinished intent rather than an
+	// ordering choice - revoking members outside the set this apply managed to
+	// establish could leave the cloud with less access than intended, in the
+	// worst case without an owner, on the strength of an end state this apply
+	// never actually reached.
+	anyGrantFailed := len(result.Ungranted) > 0
 
 	// PROJECT PASS, between the cloud grants and the cloud revokes. Before,
 	// because the backend refuses a project grant to someone with no role on the
@@ -419,31 +483,72 @@ func reconcileCloudAccess(
 		cascaded[cloudAccessFoldEmail(m.Email)] = true
 	}
 
-	projectUnmanaged, projectDiags := reconcileProjectRoles(ctx, client, cloudID, desired, opts.PriorProjects, cascaded)
+	projectUnmanaged, projectUngranted, projectDiags := reconcileProjectRoles(
+		ctx, client, cloudID, desired, opts.PriorProjects, cascaded, anyGrantFailed,
+	)
 	result.Unmanaged = append(result.Unmanaged, projectUnmanaged...)
+	result.Ungranted = append(result.Ungranted, projectUngranted...)
 	diags.Append(projectDiags...)
-	if projectDiags.HasError() {
-		// Same rule as a failed cloud grant: the configuration asked for access that
-		// does not exist, so the revoke pass must not run on a member list this apply
-		// has already failed to establish.
+	if diags.HasError() {
+		// Only a genuine READ failure reaches here (the re-read of cloud members or
+		// project roles that planning itself needs) - reconcileProjectRoles no
+		// longer returns an error for a project GRANT failure, which is recorded in
+		// Ungranted instead. A read failure this late is still dangerous: cloud
+		// grants above may already have succeeded, so this still risks the same
+		// taint this whole rewrite exists to avoid. It is left as a hard error
+		// anyway, deliberately, because there is no member list to reason about at
+		// all without it - there is nothing safe to record and nothing to skip
+		// noting. This is the one remaining gap the design record's "verification
+		// still owed" section should track until a plan/read failure this late is
+		// itself converted to a recorded, non-fatal outcome.
 		return result, diags
 	}
+	anyGrantFailed = anyGrantFailed || len(result.Ungranted) > 0
 
-	for _, m := range toRevoke {
-		if err := revokeCloudAccessMember(ctx, client, cloudID, m.IdentityID); err != nil {
-			// Recorded, not fatal. One unrevokable member must not block the whole
-			// set forever - see property 2 on this file.
+	if anyGrantFailed {
+		// The destructive half is suppressed, but silence would be worse than the
+		// grant problem alone: an operator reading only Ungranted would reasonably
+		// conclude the rest of the apply completed, when in fact every undeclared
+		// member this apply would otherwise have revoked still has access. Record
+		// each one, distinguishably, rather than leaving it unmentioned.
+		for _, m := range toRevoke {
 			result.Unmanaged = append(result.Unmanaged, CloudAccessUnmanagedGrantModel{
-				Email: types.StringValue(m.Email),
-				// Null rather than empty: this is the cloud-level grant, not a grant on
-				// some project, and the attribute's documented meaning for null is
-				// exactly that.
+				Email:     types.StringValue(m.Email),
 				ProjectID: types.StringNull(),
-				Reason:    types.StringValue(cloudAccessRevokeFailureReason(err)),
+				Reason: types.StringValue("skipped: a grant this apply attempted failed, so no revokes were attempted " +
+					"this apply - see ungranted_members for what failed"),
 			})
-			continue
 		}
-		tflog.Info(ctx, "Revoked undeclared cloud member", map[string]interface{}{"cloud_id": cloudID})
+	} else {
+		for _, m := range toRevoke {
+			if err := revokeCloudAccessMember(ctx, client, cloudID, m.IdentityID); err != nil {
+				// Recorded, not fatal. One unrevokable member must not block the whole
+				// set forever - see property 2 on this file.
+				result.Unmanaged = append(result.Unmanaged, CloudAccessUnmanagedGrantModel{
+					Email: types.StringValue(m.Email),
+					// Null rather than empty: this is the cloud-level grant, not a grant on
+					// some project, and the attribute's documented meaning for null is
+					// exactly that.
+					ProjectID: types.StringNull(),
+					Reason:    types.StringValue(cloudAccessRevokeFailureReason(err)),
+				})
+				continue
+			}
+			tflog.Info(ctx, "Revoked undeclared cloud member", map[string]interface{}{"cloud_id": cloudID})
+		}
+	}
+
+	if len(result.Ungranted) > 0 {
+		diags.AddWarning(
+			"Some Members Could Not Be Granted",
+			fmt.Sprintf("%d member(s) of cloud %s could not be granted the role this configuration declares, and they "+
+				"do not have it. They are recorded in ungranted_members with the reason for each.\n\nBecause a grant did "+
+				"not complete, this apply also skipped every revoke it would otherwise have attempted - see "+
+				"unmanaged_grants for who that affects. The apply converged rather than failing: erroring here after "+
+				"other members were already successfully granted would leave this resource's state tainted, and the "+
+				"next apply would then revoke everyone this one DID manage to grant. The next refresh will show the "+
+				"true state, and the next plan will retry what is still missing.", len(result.Ungranted), cloudID),
+		)
 	}
 
 	if len(result.Unmanaged) > 0 {
@@ -634,6 +739,19 @@ func revokeCloudAccessMember(ctx context.Context, client *Client, cloudID, ident
 	return err
 }
 
+// cloudAccessDiagsReason extracts one human-readable reason from diagnostics
+// returned by an internal helper (grantCloudAccessMember), for recording into
+// Ungranted. Uses the first error's summary and detail; a single grant
+// attempt is not expected to produce more than one error diagnostic today.
+func cloudAccessDiagsReason(diags diag.Diagnostics) string {
+	for _, d := range diags {
+		if d.Severity() == diag.SeverityError {
+			return fmt.Sprintf("%s: %s", d.Summary(), d.Detail())
+		}
+	}
+	return "the grant failed for an unrecorded reason"
+}
+
 // cloudAccessRevokeFailureReason turns a failed revoke into the text that lands
 // in unmanaged_grants. The three recognized cases are all situations a reader
 // cannot act on from the raw API detail alone.
@@ -669,6 +787,20 @@ func cloudAccessRevokeFailureReason(err error) string {
 // because a member added moments ago is not in that earlier snapshot and their
 // identity is needed to remove a project role. One extra list request buys
 // correctness for exactly the case a stale snapshot gets wrong.
+//
+// priorGrantsFailed is true when a CLOUD-scope grant already failed earlier in
+// this same reconcile. It is threaded through so that a project-scope revoke
+// is skipped for the same reason a cloud-scope one is: a grant failure
+// anywhere suppresses every destructive action in the apply, not only the
+// ones downstream of the specific failure. See reconcileCloudAccess.
+//
+// The two read failures below remain fatal - a known, tracked gap, not an
+// oversight. Converting a cloud grant failure to a recorded outcome was this
+// change's job; a READ failure this late (after cloud grants may have already
+// succeeded) still risks the identical taint this whole rewrite exists to
+// avoid, but there is no member list to plan against at all without it, so
+// there is nothing safe to record in its place. Track this in the design
+// record's verification-owed section rather than silently accepting it.
 func reconcileProjectRoles(
 	ctx context.Context,
 	client *Client,
@@ -676,19 +808,18 @@ func reconcileProjectRoles(
 	desired map[string]cloudAccessDesiredMember,
 	priorProjects map[string]map[string]string,
 	cascaded map[string]bool,
-) ([]CloudAccessUnmanagedGrantModel, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
+	priorGrantsFailed bool,
+) (unmanaged []CloudAccessUnmanagedGrantModel, ungranted []CloudAccessUnmanagedGrantModel, diags diag.Diagnostics) {
 	inScope := cloudAccessInScopeProjectIDs(desired, priorProjects)
 	if len(inScope) == 0 {
-		return nil, diags
+		return nil, nil, diags
 	}
 
 	members, err := listCloudAccessMembers(ctx, client, cloudID)
 	if err != nil {
 		if cloudRolesFeatureDisabled(err) {
 			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+"\n\nProject roles were not changed.")
-			return nil, diags
+			return nil, nil, diags
 		}
 		diags.AddError(
 			"Could Not Re-Read Cloud Members Before Applying Project Roles",
@@ -696,7 +827,7 @@ func reconcileProjectRoles(
 				"roles need it to resolve who to grant and revoke: %s\n\nProject roles were not changed.",
 				extractAPIErrorDetail(err)),
 		)
-		return nil, diags
+		return nil, nil, diags
 	}
 	identityByFoldedEmail := make(map[string]cloudAccessRemoteMember, len(members))
 	for _, m := range members {
@@ -713,11 +844,11 @@ func reconcileProjectRoles(
 			fmt.Sprintf("The projects this configuration manages could not be read, so it cannot tell which roles need "+
 				"changing: %s\n\nProject roles were not changed.", extractAPIErrorDetail(err)),
 		)
-		return nil, diags
+		return nil, nil, diags
 	}
 
 	plan := planProjectRoles(desired, priorProjects, current, identityByFoldedEmail, cascaded)
-	return applyProjectRoles(ctx, client, plan, identityByFoldedEmail)
+	return applyProjectRoles(ctx, client, plan, identityByFoldedEmail, priorGrantsFailed)
 }
 
 // cloudAccessInScopeProjectIDs is the union of the projects the configuration
