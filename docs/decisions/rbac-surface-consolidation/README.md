@@ -571,7 +571,7 @@ of trying. Because the read and write paths return the *identical* 501 detail st
 name both possibilities. `anyscale_cloud_access` does not currently carry any version of this
 warning and must gain one before it registers.
 
-## Contract rulings added for the full-CRUD round (J.11–J.21)
+## Contract rulings added for the full-CRUD round (J.11–J.22)
 
 The rulings above govern behavior that was designed before a write path existed. These cover the
 questions that only become answerable — or only become dangerous — once one does. They are recorded
@@ -725,8 +725,15 @@ which for `deny_roles`. Do not assume the roles endpoint is the better source fo
 organization scope it is the better source for one field and the worse source for the other. Until
 this is answered, no documentation should promise that out-of-band role changes are detected.
 
-**Provisional answer, derived rather than captured, and the split is sharper than at organization
-scope.** Three separately-established facts compose into it: the roles listing reads exclusively from
+**CONFIRMED LIVE, and the split is sharper than at organization scope.** The sequence below was run
+against an ephemeral cloud, since it alters a member's access: an RBAC `base_role` was written and read
+back, `permission_level` was then changed through the legacy collaborators endpoint and confirmed
+changed in the search response, and the roles listing was re-read. `base_role` was unchanged;
+`deny_roles` had gained the read-only entry. The cloud was destroyed afterwards and its deletion
+verified.
+
+Three separately-established facts predicted it, and are kept because the composition is what made the
+capture cheap and narrowly targeted: the roles listing reads exclusively from
 the authorization service's managed groups with no relational fallback; the legacy collaborator PUT
 changes `permission_level` in the relational store and toggles **only** the read-only deny group in
 the authorization service, never a base-role group; and both first-party administrative surfaces write
@@ -737,17 +744,24 @@ only that legacy path.
   move. For a member who never held an RBAC role that means null indefinitely (J.21). For a member who
   does hold one, it means `base_role` reports the **old** RBAC role indefinitely after an administrator
   changes their permission in the console — the same staleness as organization scope.
-- **`deny_roles` drift through the CLI or console is visible**, because the legacy PUT does toggle the
-  read-only deny group and that is where `deny_roles` is read from.
+- **The read-only restriction crossing its boundary is visible in `deny_roles`**, because the legacy
+  PUT does toggle the read-only deny group and that is where `deny_roles` is read from.
 
 So two fields inside one nested object have **opposite** drift-detection properties, and documentation
-must not describe them in one breath. AC-27 converts to a documented limitation for `base_role` and
-remains met for `deny_roles`.
+must not describe them in one breath. AC-27 converts to a documented limitation for `base_role`.
 
-**This is a composition of two source traces, which is reasoning and not capture, so gate 1 still
-applies.** The confirming sequence is narrow: on an ephemeral cloud with a disposable identity, write an
-RBAC `base_role`, read it back, change `permission_level` through the collaborators endpoint, and read
-`base_role` again. Not the static cloud — that would alter a real person's access.
+**State the `deny_roles` half narrowly; "`deny_roles` drift is detectable" overstates it in the
+direction that hurts someone.** The capture exercised `writer` → `permission_level = readonly`, so it
+confirms the read-only direction. A legacy change **between `write` and `owner` touches no deny group at
+all**, so `base_role` stays frozen *and* `deny_roles` stays empty — that change is invisible in both
+fields. What is detectable is the read-only restriction appearing or clearing, not out-of-band role
+changes in general.
+
+**One limit on the capture, recorded rather than glossed.** The test subject was a service account,
+because every human identity in the test organization was either the caller or an organization admin and
+both are guarded (see J.22). The mechanism — which store each endpoint reads and writes — has no
+identity-type branch that any trace found, so the result is expected to generalize; but it was confirmed
+on a service account, and this record does not claim more than that.
 
 **The larger question underneath J.19: which store decides EFFECTIVE access?** If authorization is
 enforced from the relational `permission_level` for legacy members and from authorization-service
@@ -844,7 +858,43 @@ declared as `writer` would read back as `collaborator` and diff anyway — the d
 record, which is inventing state to make a plan look clean. Null is the honest answer: this member has
 no RBAC role recorded, and the first write establishes one.
 
-## Acceptance criteria for the write path (AC-1 – AC-33)
+**J.22 — declaring an organization admin as a member is an error raised before the first write.** The
+backend refuses the roles write for such a member outright: *"You cannot modify an organization admin
+cloud role."* Observed live, alongside the already-known self-modification guard. This is the **fourth**
+structural constraint on this surface, after `auto_add_user`, directory sync, and group bindings.
+
+**What makes it a ruling rather than a footnote is where the failure would otherwise land.** Discovering
+it mid-reconcile forces a choice between two things this contract forbids. Returning the error taints
+the state, per the never-error-after-a-successful-write rule. Recording it in `unmanaged_grants` violates
+the asymmetry that governs that attribute: we may warn about what we could not **un**-apply, but must
+never silently fail to apply what configuration **declared**. A failed *grant* is not an
+`unmanaged_grants` case, and treating it as one would quietly convert a declared intent into a logged
+regret.
+
+So it is preflighted: raised in `ModifyPlan`, with the same placement reasoning and the same
+skip-if-unresolvable discipline as the caller check, since it needs an API call and errors before any
+mutation are explicitly permitted.
+
+The mirror side is already consistent, which is what makes this coherent rather than a special case:
+organization admins hold cloud roles while being filtered out of the member-search endpoint, so they are
+never revoked either. Admins are outside this resource's scope in **both** directions, exactly as the
+caller is — and for the same reason, that the backend refuses to let this resource touch them.
+
+**A test-fixture ruling that follows from how this was found.** The identity used to confirm J.19 was a
+newly created service account, chosen on the premise that no safe non-admin human identity existed. That
+premise was wrong: this repository designates one, `ANYSCALE_TEST_USER_EMAIL` — an existing accepted
+organization member kept for testing, with **no clouds assigned**. That is precisely the right shape
+here, because granting it access to an *ephemeral* cloud and revoking it again is fully reversible and
+touches no organization-level role. Its documentation sits under the organization-user tests and does not
+announce itself as usable for cloud scope, which is why the next person would make the same call.
+
+**Do not create service accounts a test cannot delete.** No `api/v2` delete path for them was found, and
+they do not appear in the organization-collaborator search, so one leaks per run — which is worse than
+leaking once. If a delete path exists only through the CLI, drive cleanup through the CLI rather than
+reverse-engineering an endpoint; if it exists nowhere, that is a reason not to create them in automation
+at all.
+
+## Acceptance criteria for the write path (AC-1 – AC-34)
 
 Numbered `AC-` rather than continuing the legacy `criterion N` sequence, which runs to 31 and whose
 authoritative list is not in this repository — a collision there would be silent and unresolvable.
@@ -984,6 +1034,11 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   easy to omit and are the point of the criterion: the confirmed-absent branch must emit **no** warning,
   since a warning there fires on nearly every cloud; and the undetermined branch must be evaluated only
   when a revoke is pending, so an apply that revokes nobody stays silent even under a 403.
+- **AC-34** Declaring an organization admin in `member` is an error raised at plan time, before any
+  write is attempted, per J.22. Two assertions carry the criterion: that **no** mutation was issued, and
+  that an unresolvable admin lookup skips the check without erroring and without being recorded as a
+  pass. A test that only asserts the error message would pass against an implementation that discovers
+  the problem mid-reconcile, which is the failure the ruling exists to prevent.
 - **AC-33** A member list spanning more than one page is enumerated completely. Pagination on these
   endpoints is in the **query string**, and a request that omits it returns a valid first page with no
   error, so the regression is silent and its consequence is revoking everyone past the page boundary.
