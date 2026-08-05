@@ -15,22 +15,22 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
 //
-// NOT YET REGISTERED in provider.go. Read and ImportState are implemented; the
-// three WRITE methods deliberately refuse to run. Registration happens once the
-// reconcile and its guards are complete, because this is the one resource in
-// the provider that can revoke real people's access to a real cloud at scale,
-// and a half-wired version of it is worse than none.
+// NOT YET REGISTERED in provider.go. Full CRUD at CLOUD scope is implemented;
+// PROJECT-scope writes are not, and a configuration that declares project roles
+// is refused rather than partly applied. Registration is a separate step - it
+// needs the project half, a docs page and examples - and until it happens none
+// of this is reachable by a practitioner.
 //
-// The read half is built and landed first on purpose, and the ordering is a
-// safety property rather than convenience: a resource that can only read cannot
-// revoke anyone, so it can be reviewed, tested and even exercised against real
-// infrastructure with no way to cause harm. Nothing here reaches a practitioner
-// until registration.
+// The read half was built and landed before the write half on purpose, and the
+// ordering is a safety property rather than convenience: a resource that can
+// only read cannot revoke anyone, so it could be reviewed and exercised against
+// real infrastructure with no way to cause harm.
 //
 // WHY THIS IS KEYED BY cloud_id AND NOT BY USER. Authority over a set requires
 // one resource owning that whole set, so the resource's key must be the set's
@@ -278,19 +278,40 @@ func (r *CloudAccessResource) Configure(ctx context.Context, req resource.Config
 	r.client = client
 }
 
-// cloudAccessNotWiredDetail is the refusal shared by the three write methods. It
-// exists so that this resource cannot act if it is registered before its guards
-// are finished - failing loudly beats a reconcile that runs without its
-// empty-set guard, its auto_add_user check or its adds-before-removes ordering.
+// Create reconciles the cloud to the configuration, revoking undeclared members
+// exactly as Update does.
 //
-// Read and ImportState are deliberately NOT covered by it: neither can revoke
-// anyone, so neither carries the risk this refusal is protecting against.
-const cloudAccessNotWiredDetail = "anyscale_cloud_access cannot yet write. Its schema, validation, refresh and " +
-	"import are in place, but its reconcile logic and revoke handling are not, so it must not be used to change " +
-	"access. This is a provider bug if you are seeing it in a released version - please report it."
-
+// Terraform is the source of truth for this cloud's member list from the FIRST
+// apply, not the second. Adopt-on-create-and-enforce-later was rejected: it
+// would make the resource's stated guarantee false for the entire life of the
+// first apply, and the moment it became true would be some unrelated later
+// change.
+//
+// The revoke this performs cannot appear in a plan, and that is a property of
+// Terraform rather than a gap here - a member in neither the configuration nor
+// prior state is one Terraform has never read, so it appears nowhere in the plan
+// output. There is nothing to detect and no guard shape that fits; documentation
+// on the resource page is the only available mitigation.
 func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	resp.Diagnostics.AddError("Cloud Access Writes Not Implemented", cloudAccessNotWiredDetail)
+	var plan CloudAccessResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// State is written before any API call, with every Computed attribute
+	// populated. The framework returns whatever Create put in resp.State
+	// alongside an error, so a resource that errors partway through a reconcile
+	// still lands in state with its id - which is what lets the next plan see it
+	// rather than trying to create it a second time.
+	plan.ID = types.StringValue(plan.CloudID.ValueString())
+	plan.UnmanagedGrants = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	r.applyCloudAccess(ctx, &plan, &resp.State, &resp.Diagnostics)
 }
 
 // Read refreshes the whole member list from the API.
@@ -401,12 +422,179 @@ func (r *CloudAccessResource) ImportState(ctx context.Context, req resource.Impo
 		types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{}))...)
 }
 
+// Update is the same reconcile as Create. There is no difference in behavior
+// between the two, only in when Terraform calls them.
 func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError("Cloud Access Writes Not Implemented", cloudAccessNotWiredDetail)
+	var plan CloudAccessResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	plan.ID = types.StringValue(plan.CloudID.ValueString())
+	plan.UnmanagedGrants = types.ListValueMust(cloudAccessUnmanagedGrantType(), []attr.Value{})
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	r.applyCloudAccess(ctx, &plan, &resp.State, &resp.Diagnostics)
 }
 
+// applyCloudAccess is the shared body of Create and Update.
+//
+// It re-reads the member list afterward rather than assuming the writes took
+// effect, so state reflects what the API reports rather than what this provider
+// intended. A member whose grant landed differently than requested shows up as a
+// diff on the next plan instead of being masked by an optimistic write-back.
+func (r *CloudAccessResource) applyCloudAccess(
+	ctx context.Context,
+	plan *CloudAccessResourceModel,
+	state *tfsdk.State,
+	diags *diag.Diagnostics,
+) {
+	cloudID := plan.CloudID.ValueString()
+
+	if r.refuseDeclaredProjectRoles(ctx, plan.Member, diags) {
+		return
+	}
+
+	desired, desiredDiags := cloudAccessDesiredMembers(ctx, plan.Member)
+	diags.Append(desiredDiags...)
+	if diags.HasError() {
+		return
+	}
+
+	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, desired, true)
+	diags.Append(reconcileDiags...)
+
+	// unmanaged_grants is written even when the reconcile errored: a revoke that
+	// failed before the error is still access someone holds, and dropping the
+	// record because a later step failed would hide it.
+	unmanaged, listDiags := result.unmanagedGrantsList()
+	diags.Append(listDiags...)
+	if !listDiags.HasError() {
+		plan.UnmanagedGrants = unmanaged
+	}
+	diags.Append(state.Set(ctx, plan)...)
+	if diags.HasError() {
+		return
+	}
+
+	remote, err := listCloudAccessMembers(ctx, r.client, cloudID)
+	if err != nil {
+		diags.AddWarning(
+			"Could Not Re-Read Cloud Members After Applying",
+			fmt.Sprintf("The changes to cloud %s were applied, but reading the member list back failed: %s\n\nState "+
+				"holds the configured values rather than confirmed ones. The next plan re-reads and will show any "+
+				"difference.", cloudID, extractAPIErrorDetail(err)),
+		)
+		return
+	}
+
+	memberMap, convDiags := cloudAccessMembersToState(ctx, remote, plan.Member)
+	diags.Append(convDiags...)
+	if convDiags.HasError() {
+		return
+	}
+	plan.Member = memberMap
+	diags.Append(state.Set(ctx, plan)...)
+}
+
+// refuseDeclaredProjectRoles blocks a configuration that declares project roles,
+// and reports true when it did.
+//
+// The reconcile writes cloud-scope grants only. Accepting a configuration that
+// declares projects and then not writing them would be a silent partial apply -
+// the plan would look satisfied while the project grants it described never
+// happened - which is materially worse than refusing, because nothing about a
+// clean plan invites anyone to check.
+func (r *CloudAccessResource) refuseDeclaredProjectRoles(ctx context.Context, member types.Map, diags *diag.Diagnostics) bool {
+	if member.IsNull() || member.IsUnknown() {
+		return false
+	}
+	entries := make(map[string]CloudAccessMemberModel, len(member.Elements()))
+	if entriesDiags := member.ElementsAs(ctx, &entries, false); entriesDiags.HasError() {
+		diags.Append(entriesDiags...)
+		return true
+	}
+	refused := false
+	for email, m := range entries {
+		if m.Projects.IsNull() || m.Projects.IsUnknown() || len(m.Projects.Elements()) == 0 {
+			continue
+		}
+		diags.AddAttributeError(
+			path.Root("member").AtMapKey(email).AtName("projects"),
+			"Project Roles Cannot Be Applied Yet",
+			fmt.Sprintf("Member %q declares project roles, but this resource can currently write cloud-scope roles only. "+
+				"Applying this configuration would grant the cloud role and silently skip the project roles, leaving a "+
+				"clean plan that describes access nobody has.\n\nRemove the projects attribute for now and manage project "+
+				"collaborators through the Anyscale console or API.", email),
+		)
+		refused = true
+	}
+	return refused
+}
+
+// Delete revokes the members this resource manages.
+//
+// This is the destroy in this provider with the largest blast radius, and it is
+// correct: the resource's authority IS the cloud's member list, so an absent
+// state for it means nobody has access through it. The sharp edge is that
+// Terraform cannot distinguish a deliberate removal from a for_each key typo -
+// mitigation for that lives outside the provider, in prevent_destroy on
+// production clouds, and is stated on the resource page.
+//
+// It revokes what STATE holds, not what the API currently reports. Someone
+// granted access out of band after the last apply is not this resource's to
+// remove on the way out: destroy removes what the resource had authority over,
+// and it never had authority over a member it never saw.
 func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	resp.Diagnostics.AddError("Cloud Access Writes Not Implemented", cloudAccessNotWiredDetail)
+	var state CloudAccessResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cloudID := state.CloudID.ValueString()
+	if cloudID == "" {
+		cloudID = state.ID.ValueString()
+	}
+
+	managed, diags := cloudAccessDesiredMembers(ctx, state.Member)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if len(managed) == 0 {
+		return
+	}
+
+	// An empty desired set with revokes enabled means "revoke everyone this
+	// resource knows about", which is exactly destroy's meaning here.
+	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, map[string]cloudAccessDesiredMember{}, true)
+	resp.Diagnostics.Append(reconcileDiags...)
+	if reconcileDiags.HasError() {
+		return
+	}
+
+	if len(result.Unmanaged) > 0 {
+		// Destroy cannot record this in unmanaged_grants - the resource is leaving
+		// state, so there is nowhere for the attribute to survive. A warning is the
+		// only channel left, and it must name the people involved: after this
+		// destroy completes there is no Terraform resource left to alert on.
+		var names []string
+		for _, g := range result.Unmanaged {
+			names = append(names, fmt.Sprintf("%s (%s)", g.Email.ValueString(), g.Reason.ValueString()))
+		}
+		resp.Diagnostics.AddWarning(
+			"Some Members Still Have Access After Destroy",
+			fmt.Sprintf("Destroying this resource could not revoke %d member(s) of cloud %s, and they still have "+
+				"access:\n\n%s\n\nUnlike an apply, a destroy cannot record this in unmanaged_grants - the resource is "+
+				"leaving state, so there will be no Terraform resource left to alert on. Remove them manually.",
+				len(result.Unmanaged), cloudID, strings.Join(names, "\n")),
+		)
+	}
 }
 
 // ValidateConfig enforces the invariants that can be checked from configuration

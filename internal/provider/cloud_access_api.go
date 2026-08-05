@@ -193,3 +193,47 @@ func listCloudAccessMembers(ctx context.Context, client *Client, cloudID string)
 	}
 	return members, nil
 }
+
+// CreateCloudCollaboratorRequest is the body of the legacy
+// POST /clouds/{cloud_id}/collaborators/users call used to establish
+// membership before a role can be written.
+type CreateCloudCollaboratorRequest struct {
+	Email           string `json:"email"`
+	PermissionLevel string `json:"permission_level"`
+}
+
+// SetCloudRolesRequest is the body of
+// PUT /clouds/{cloud_id}/collaborators/users/{user_id}/roles.
+//
+// DenyRoles is always sent, even when empty: the wire field is required, and
+// the call is an authoritative SET over the pair rather than an addition to it.
+type SetCloudRolesRequest struct {
+	BaseRole  string   `json:"base_role"`
+	DenyRoles []string `json:"deny_roles"`
+}
+
+// cloudAutoAddUserEnabled reports whether the cloud auto-enrolls every
+// organization member.
+//
+// Called at the entry of any operation that would REVOKE, on every apply, and
+// never cached from an earlier one - anyscale_cloud in the same configuration
+// can flip the flag, so a check made at create time can be invalidated by a
+// sibling resource. It is deliberately not consulted from ModifyPlan either;
+// plan must stay cheap and free of side effects.
+func cloudAutoAddUserEnabled(ctx context.Context, client *Client, cloudID string) (bool, error) {
+	cloudResp, err := DoRequestAndParse[CloudResponse](
+		ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK,
+	)
+	if err != nil {
+		return false, err
+	}
+	// DoRequestAndParse returns a nil result rather than an error for a 404 when
+	// that status is in its accepted list; it is not here, but the nil check is
+	// kept so that a future change to the accepted list cannot turn "cloud gone"
+	// into "auto_add_user is false", which would let a revoke pass proceed on a
+	// guard that never actually answered.
+	if cloudResp == nil {
+		return false, fmt.Errorf("%w: cloud %s", ErrNotFound, cloudID)
+	}
+	return cloudResp.Result.AutoAddUser, nil
+}
