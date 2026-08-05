@@ -30,33 +30,24 @@ import (
 const defaultCloudAccessTimeout = 5 * time.Minute
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
-//
-// FULL CRUD, WRITE PATH ENABLED. The read half was built and landed before the
-// write half on purpose, and the ordering was a safety property rather than
-// convenience: a resource that could only read could not revoke anyone, so it
-// was reviewable and exercisable against real infrastructure with no way to
-// cause harm - see cloudAccessWriteEnabled's own history for what enabling the
-// write path required.
+// Full CRUD, write path enabled - see cloudAccessWriteEnabled's own history.
 //
 // WHY THIS IS KEYED BY cloud_id AND NOT BY USER. Authority over a set requires
 // one resource owning that whole set, so the resource's key must be the set's
-// key. A per-user resource is structurally blind to a member it was never told
-// about - nothing in its Read can surface an entry with no corresponding config
-// block - so it could enforce "these are the clouds Alice belongs to" but never
-// "these are the members of cloud X". Only the second guarantee catches someone
-// added out-of-band, which is the entire point of authoritative mode.
+// key. A per-user resource can't surface a member it was never told about, so
+// it could enforce "these are the clouds Alice belongs to" but never "these
+// are the members of cloud X" - only the second guarantee catches someone
+// added out-of-band, the entire point of authoritative mode.
 //
-// THE NESTING IS A BACKEND INVARIANT, NOT A DISPLAY CHOICE. Projects live under
-// members rather than in a sibling resource because the backend enforces two
-// things that only a single nesting resource can check at plan time:
-//  1. A project role cannot exist without a cloud role on the same cloud. The
-//     backend 403s creating a project collaborator unless the grantee already
-//     passes a read-permission check on the parent cloud, and removing a cloud
-//     collaborator cascades to delete their permissions on that cloud's
-//     projects.
-//  2. A member carrying the cloud_read_only deny role can only hold readonly on
-//     that cloud's projects - anything else 422s. Split across two resources
-//     that surfaces as a confusing apply-time 422; here it is a plan-time error.
+// THE NESTING IS A BACKEND INVARIANT, NOT A DISPLAY CHOICE. Projects live
+// under members, not a sibling resource, because the backend enforces two
+// things only a single nesting resource can check at plan time:
+//  1. A project role cannot exist without a cloud role on the same cloud -
+//     the backend 403s a project grant without one, and revoking the cloud
+//     role cascades to delete project permissions too.
+//  2. A member carrying cloud_read_only can only hold readonly on that
+//     cloud's projects; anything else 422s. Split across two resources, that
+//     surfaces as a confusing apply-time 422; here it's a plan-time error.
 
 // cloudAccessReadOnlyDenyRole is the cloud deny role that constrains which
 // project roles a member may hold; cloudAccessReadOnlyProjectRole is the only
