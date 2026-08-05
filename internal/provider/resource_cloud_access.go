@@ -22,11 +22,10 @@ import (
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
 //
-// NOT YET REGISTERED in provider.go. Full CRUD at CLOUD scope is implemented;
-// PROJECT-scope writes are not, and a configuration that declares project roles
-// is refused rather than partly applied. Registration is a separate step - it
-// needs the project half, a docs page and examples - and until it happens none
-// of this is reachable by a practitioner.
+// NOT YET REGISTERED in provider.go. Full CRUD is implemented at both cloud and
+// project scope. Registration is a separate step - it needs a docs page,
+// examples and a changelog fragment - and until it happens none of this is
+// reachable by a practitioner.
 //
 // The read half was built and landed before the write half on purpose, and the
 // ordering is a safety property rather than convenience: a resource that can
@@ -324,7 +323,11 @@ func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	r.applyCloudAccess(ctx, &plan, &resp.State, &resp.Diagnostics)
+	// No prior state on a create, so no prior project declarations and therefore no
+	// project revokes. Undeclared roles on an in-scope project are not this
+	// resource's to remove - that is the authority boundary, not a create-only
+	// exception.
+	r.applyCloudAccess(ctx, &plan, types.MapNull(cloudAccessMemberType()), &resp.State, &resp.Diagnostics)
 }
 
 // Read refreshes the whole member list from the API.
@@ -489,7 +492,13 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	r.applyCloudAccess(ctx, &plan, &resp.State, &resp.Diagnostics)
+	var priorState CloudAccessResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &priorState)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	r.applyCloudAccess(ctx, &plan, priorState.Member, &resp.State, &resp.Diagnostics)
 }
 
 // applyCloudAccess is the shared body of Create and Update.
@@ -501,14 +510,11 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 func (r *CloudAccessResource) applyCloudAccess(
 	ctx context.Context,
 	plan *CloudAccessResourceModel,
+	priorMember types.Map,
 	state *tfsdk.State,
 	diags *diag.Diagnostics,
 ) {
 	cloudID := plan.CloudID.ValueString()
-
-	if r.refuseDeclaredProjectRoles(ctx, plan.Member, diags) {
-		return
-	}
 
 	desired, desiredDiags := cloudAccessDesiredMembers(ctx, plan.Member)
 	diags.Append(desiredDiags...)
@@ -516,9 +522,16 @@ func (r *CloudAccessResource) applyCloudAccess(
 		return
 	}
 
+	priorProjects, priorDiags := cloudAccessPriorProjectDeclarations(ctx, priorMember)
+	diags.Append(priorDiags...)
+	if diags.HasError() {
+		return
+	}
+
 	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, desired, cloudAccessReconcileOptions{
 		RevokeUndeclared:             true,
 		RefuseWhenAutoAddUserEnabled: true,
+		PriorProjects:                priorProjects,
 	})
 	diags.Append(reconcileDiags...)
 
@@ -574,51 +587,31 @@ func (r *CloudAccessResource) applyCloudAccess(
 		)
 	}
 
-	// nil project roles: an apply refuses a configuration that declares project
-	// roles, so nothing is in scope to read back. This becomes a real read when the
-	// project write path lands.
-	memberMap, convDiags := cloudAccessMembersToState(ctx, visible, plan.Member, nil)
+	// The read-back covers the projects the configuration names, so state reflects
+	// what the projects report rather than what this apply intended. A grant that
+	// landed differently then shows as a diff on the next plan instead of being
+	// masked by an optimistic write-back.
+	//
+	// A failure here degrades to the configured values with a warning rather than
+	// failing: the writes already happened, so there is nothing to retry, and the
+	// next plan re-reads.
+	projectRoles, projectReadDiags := r.readScopedProjectRoles(ctx, plan.Member)
+	if projectReadDiags.HasError() {
+		diags.AddWarning(
+			"Could Not Re-Read Project Roles After Applying",
+			fmt.Sprintf("The changes to cloud %s were applied, but reading the project roles back failed. State holds the "+
+				"configured values rather than confirmed ones; the next plan re-reads and will show any difference.", cloudID),
+		)
+		projectRoles = nil
+	}
+
+	memberMap, convDiags := cloudAccessMembersToState(ctx, visible, plan.Member, projectRoles)
 	diags.Append(convDiags...)
 	if convDiags.HasError() {
 		return
 	}
 	plan.Member = memberMap
 	diags.Append(state.Set(ctx, plan)...)
-}
-
-// refuseDeclaredProjectRoles blocks a configuration that declares project roles,
-// and reports true when it did.
-//
-// The reconcile writes cloud-scope grants only. Accepting a configuration that
-// declares projects and then not writing them would be a silent partial apply -
-// the plan would look satisfied while the project grants it described never
-// happened - which is materially worse than refusing, because nothing about a
-// clean plan invites anyone to check.
-func (r *CloudAccessResource) refuseDeclaredProjectRoles(ctx context.Context, member types.Map, diags *diag.Diagnostics) bool {
-	if member.IsNull() || member.IsUnknown() {
-		return false
-	}
-	entries := make(map[string]CloudAccessMemberModel, len(member.Elements()))
-	if entriesDiags := member.ElementsAs(ctx, &entries, false); entriesDiags.HasError() {
-		diags.Append(entriesDiags...)
-		return true
-	}
-	refused := false
-	for email, m := range entries {
-		if m.Projects.IsNull() || m.Projects.IsUnknown() || len(m.Projects.Elements()) == 0 {
-			continue
-		}
-		diags.AddAttributeError(
-			path.Root("member").AtMapKey(email).AtName("projects"),
-			"Project Roles Cannot Be Applied Yet",
-			fmt.Sprintf("Member %q declares project roles, but this resource can currently write cloud-scope roles only. "+
-				"Applying this configuration would grant the cloud role and silently skip the project roles, leaving a "+
-				"clean plan that describes access nobody has.\n\nRemove the projects attribute for now and manage project "+
-				"collaborators through the Anyscale console or API.", email),
-		)
-		refused = true
-	}
-	return refused
 }
 
 // Delete revokes the members this resource manages.
@@ -664,6 +657,9 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 			// revoke, records each failure and names the remedy, because refusing
 			// would strand the resource in state with no exit but 'terraform state rm'.
 			RefuseWhenAutoAddUserEnabled: false,
+			// No PriorProjects on a destroy: removing each cloud collaborator cascades
+			// to their permissions on that cloud's projects, so per-project revokes
+			// would only produce 404s to misreport as failures.
 		})
 	resp.Diagnostics.Append(reconcileDiags...)
 	if reconcileDiags.HasError() {

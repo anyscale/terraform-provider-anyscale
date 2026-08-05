@@ -87,6 +87,10 @@ type cloudAccessDesiredMember struct {
 	Email     string
 	BaseRole  string
 	DenyRoles []string
+	// Projects maps project ID to the role declared on it. Empty when the
+	// configuration declares none, which under this resource's scope means "no
+	// project roles are managed for this member", not "this member has none".
+	Projects map[string]string
 }
 
 // cloudAccessDesiredMembers reads the plan's member map into a map keyed by
@@ -242,6 +246,13 @@ type cloudAccessReconcileOptions struct {
 	// fails on each member and says exactly what to do about it. An apply has
 	// somewhere to go back to; a destroy does not.
 	RefuseWhenAutoAddUserEnabled bool
+
+	// PriorProjects is what state previously declared, keyed by folded email then
+	// project ID. It is the ONLY source of project revokes: a pair that was
+	// declared and is now dropped gets removed, while a role merely observed on an
+	// in-scope project is left alone. Nil on a create, which has no prior
+	// declarations and therefore no project revokes.
+	PriorProjects map[string]map[string]string
 }
 
 // reconcileCloudAccess makes cloudID's collaborator list match desired.
@@ -335,6 +346,27 @@ func reconcileCloudAccess(
 			// has already failed to establish.
 			return result, diags
 		}
+	}
+
+	// PROJECT PASS, between the cloud grants and the cloud revokes. Before,
+	// because the backend refuses a project grant to someone with no role on the
+	// parent cloud. Before the cloud revokes, because those cascade: removing a
+	// cloud collaborator recursively revokes their project permissions, so a member
+	// being dropped needs no per-project revokes and attempting them would produce
+	// 404s this resource would have to report as failures.
+	cascaded := make(map[string]bool, len(toRevoke))
+	for _, m := range toRevoke {
+		cascaded[cloudAccessFoldEmail(m.Email)] = true
+	}
+
+	projectUnmanaged, projectDiags := reconcileProjectRoles(ctx, client, cloudID, desired, opts.PriorProjects, cascaded)
+	result.Unmanaged = append(result.Unmanaged, projectUnmanaged...)
+	diags.Append(projectDiags...)
+	if projectDiags.HasError() {
+		// Same rule as a failed cloud grant: the configuration asked for access that
+		// does not exist, so the revoke pass must not run on a member list this apply
+		// has already failed to establish.
+		return result, diags
 	}
 
 	for _, m := range toRevoke {
@@ -523,4 +555,114 @@ func cloudAccessRevokeFailureReason(err error) string {
 			"the cloud's auto_add_user setting, and an organization that has directory sync enabled together with at least "+
 			"one Policy API role binding. Check both before treating this as a transient failure)", detail)
 	}
+}
+
+// reconcileProjectRoles is the project-scope pass, run after the cloud grants so
+// that every grantee already holds a role on the parent cloud.
+//
+// The member list is re-read here rather than reused from before the grants,
+// because a member added moments ago is not in that earlier snapshot and their
+// identity is needed to remove a project role. One extra list request buys
+// correctness for exactly the case a stale snapshot gets wrong.
+func reconcileProjectRoles(
+	ctx context.Context,
+	client *Client,
+	cloudID string,
+	desired map[string]cloudAccessDesiredMember,
+	priorProjects map[string]map[string]string,
+	cascaded map[string]bool,
+) ([]CloudAccessUnmanagedGrantModel, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	inScope := cloudAccessInScopeProjectIDs(desired, priorProjects)
+	if len(inScope) == 0 {
+		return nil, diags
+	}
+
+	members, err := listCloudAccessMembers(ctx, client, cloudID)
+	if err != nil {
+		diags.AddError(
+			"Could Not Re-Read Cloud Members Before Applying Project Roles",
+			fmt.Sprintf("The cloud-level changes were applied, but the member list could not be re-read, and project "+
+				"roles need it to resolve who to grant and revoke: %s\n\nProject roles were not changed.",
+				extractAPIErrorDetail(err)),
+		)
+		return nil, diags
+	}
+	identityByFoldedEmail := make(map[string]cloudAccessRemoteMember, len(members))
+	for _, m := range members {
+		identityByFoldedEmail[cloudAccessFoldEmail(m.Email)] = m
+	}
+
+	current, err := cloudAccessProjectRoles(ctx, client, inScope)
+	if err != nil {
+		// Read failure here is fatal rather than "assume nothing is granted": that
+		// assumption would re-issue every grant, which is harmless, AND treat every
+		// existing role as absent, which is not.
+		diags.AddError(
+			"Could Not Read Project Roles",
+			fmt.Sprintf("The projects this configuration manages could not be read, so it cannot tell which roles need "+
+				"changing: %s\n\nProject roles were not changed.", extractAPIErrorDetail(err)),
+		)
+		return nil, diags
+	}
+
+	plan := planProjectRoles(desired, priorProjects, current, identityByFoldedEmail, cascaded)
+	return applyProjectRoles(ctx, client, plan, identityByFoldedEmail)
+}
+
+// cloudAccessInScopeProjectIDs is the union of the projects the configuration
+// names and those state previously named, sorted.
+//
+// Prior-state projects are in scope even when no longer declared, which is the
+// whole mechanism by which a dropped project role becomes observable and therefore
+// removable. Config alone would make a drop unobservable.
+func cloudAccessInScopeProjectIDs(
+	desired map[string]cloudAccessDesiredMember,
+	priorProjects map[string]map[string]string,
+) []string {
+	seen := make(map[string]bool)
+	for _, m := range desired {
+		for projectID := range m.Projects {
+			seen[projectID] = true
+		}
+	}
+	for _, projects := range priorProjects {
+		for projectID := range projects {
+			seen[projectID] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for projectID := range seen {
+		out = append(out, projectID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// cloudAccessPriorProjectDeclarations reads what state previously declared, keyed
+// by folded email then project ID.
+func cloudAccessPriorProjectDeclarations(ctx context.Context, member types.Map) (map[string]map[string]string, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if member.IsNull() || member.IsUnknown() {
+		return nil, diags
+	}
+	entries := make(map[string]CloudAccessMemberModel, len(member.Elements()))
+	diags.Append(member.ElementsAs(ctx, &entries, false)...)
+	if diags.HasError() {
+		return nil, diags
+	}
+	out := make(map[string]map[string]string)
+	for email, m := range entries {
+		if m.Projects.IsNull() || m.Projects.IsUnknown() || len(m.Projects.Elements()) == 0 {
+			continue
+		}
+		var projects map[string]string
+		diags.Append(m.Projects.ElementsAs(ctx, &projects, false)...)
+		if diags.HasError() {
+			return nil, diags
+		}
+		out[cloudAccessFoldEmail(email)] = projects
+	}
+	return out, diags
 }
