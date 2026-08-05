@@ -1380,6 +1380,13 @@ the test owns and destroys. Read criteria against the static cloud are fine.
 - **AC-15** *(live)* Dropping a project entry from a member revokes that project role. **Split into two
   questions, because bundling them made it look blocked when only one half was.**
 
+  **Status: (a) is SPECIFIED AND PENDING, not obtained.** Recorded in those words because the first
+  description of this split said the live half was "obtained by" direct API exercise, which reads as past
+  tense where "obtainable by" was meant — and that one word turned an instruction into a finding, which then
+  reached a release record before it was caught. A report claiming live verification for something nobody ran
+  would be the most misleading artifact this work could produce. The fix belongs at the writing end: a reader
+  cannot recover a tense that was never there.
+
   *(a) Does the project-role revoke request work against the real API?* This is the count-bug question, the
   one mocks provably cannot answer, and it does **not** need the resource. Create a throwaway project on a
   cloud that can host one, grant the role to the test member directly, revoke it directly, delete the
