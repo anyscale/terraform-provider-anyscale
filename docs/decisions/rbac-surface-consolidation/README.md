@@ -242,8 +242,10 @@ Two further points are load-bearing for anyone touching this resource:
   over the pair, so it would clobber a base role a legacy write just wrote. `deny_roles` is
   Optional+Computed: omitting it leaves the org's existing value alone and stays on the ungated
   legacy endpoint (works everywhere); declaring it — including `[]` — routes to the gated roles
-  endpoint (501s in organizations without the feature, and unconditionally on Azure) and manages
-  the set authoritatively. This asymmetry with `cloud_user_role.deny_roles` (plain Optional, "omitted
+  endpoint (501s in organizations without the feature) and manages the set authoritatively. **This
+  sentence previously added "and unconditionally on Azure". That was unsubstantiated and has been
+  removed — see the Azure entry under verification owed.** This asymmetry with
+  `cloud_user_role.deny_roles` (plain Optional, "omitted
   means none") is deliberate: porting the cloud contract to org scope would force every org apply
   onto the gated endpoint. Adopting an existing member through this resource is also the intended
   migration path off an older, ad hoc access-management script — the write must be authoritative
@@ -687,12 +689,31 @@ detail.
    careful backend trace predicted the wire exactly. That is evidence about how far such traces can
    be trusted here; it is not licence to skip the next one, since a trace that happened to be right
    and a trace that was verified are still different things.
-6. **Whether the cloud-scope roles endpoints are unconditionally 501 on Azure deployments.** This was
-   asserted while drafting the reconcile rulings and is **not** substantiated: the two-flag warning
-   recovered from the removed resource says nothing about Azure, and the flag name does not appear in
-   the backend service paths where such a gate would live. Treat "this resource cannot function on an
-   Azure cloud" as unverified. It matters disproportionately because, if true, it belongs on the
-   resource page rather than in a footnote.
+6. **Whether the roles endpoints are unconditionally 501 on Azure deployments — at EITHER scope.
+   Unsubstantiated, and it reached released documentation before anyone checked.**
+
+   Every 501 site on both surfaces gates on a feature flag and none reads the cloud provider: at
+   cloud scope, a read-only-role flag and two SpiceDB checks for cloud member and cloud role; at
+   organization scope, a SpiceDB dual-write check for organization role and a workspace-blocking
+   flag. Organization scope was checked *separately* rather than inferred from the cloud-scope
+   result, since they are different services and the claim could have held in one and not the other.
+
+   **The limit of that finding, stated so it is not over-read.** Absence of an Azure condition in
+   code does not prove the claim false. Flag targeting could exclude Azure organizations as
+   operational configuration, which is invisible here and would make the *outcome* true. What it
+   does establish is that the stated *mechanism* is wrong: "unavailable regardless of the feature
+   flag" contradicts a gate that is entirely the feature flag, and "support cannot change that" is
+   advice against contacting the people most likely able to change flag targeting.
+
+   **Do not try to settle this by testing.** There is no Azure cloud available, Azure infrastructure
+   creation is not authorized, and the answer most likely lives with whoever owns the flag targeting
+   rather than in any repository. The correct action is to stop asserting it, not to prove it.
+
+   How it spread is the part worth keeping: it was copied out of `anyscale_organization_user_role`,
+   which states it in several places and is already released, on the reasoning that an existing
+   claim in this repository is a source. It is not. Each copy also strengthened it — the derived
+   version added absolute emphasis and the instruction not to contact support, neither of which
+   appeared in the original.
 7. **CLOSED, and the cascade is real.** Confirmed live: an identity added as both a cloud
    collaborator and a project collaborator, revoked at cloud scope only, had its project
    collaborator entry gone on the next read with no project-scope delete issued. The reconcile must
