@@ -220,6 +220,12 @@ would otherwise have attempted (recorded in `unmanaged_grants` with a reason nam
 than removing access at the same moment it can't confirm who should have it - the next `apply`
 retries everything still outstanding.
 
+Project-role **writes** can fail for reasons that never show up on a project-role **read**, on the
+very same project at the very same moment - a clean `plan` or a successful import is no guarantee
+that granting or revoking on that project will succeed. When that happens it's `ungranted_members`
+or `unmanaged_grants` that tells you, with the reason from the API attached, not a difference
+you'd otherwise have any way to see coming.
+
 Project roles nest inside each member (`member[*].projects`) rather than living in a sibling
 resource, because the backend enforces two things only a single nesting resource can check at plan
 time instead of surfacing as a confusing `apply`-time failure: a project role cannot exist without a
