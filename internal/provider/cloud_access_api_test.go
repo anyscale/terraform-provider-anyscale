@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -600,5 +601,58 @@ func TestCloudAccessMembersToState_RefreshesProjectRolesInScope(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCloudRolesFeatureDisabled pins the 501 detector, and the reason it needs a
+// test is the negative cases: it is a substring match on the status text, and a
+// match that is too loose relabels an unrelated failure as a feature gate, which
+// sends a practitioner to Anyscale support for a problem support cannot see.
+func TestCloudRolesFeatureDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil is not a feature gate", err: nil, want: false},
+		{
+			name: "a 501 is the feature gate",
+			err:  fmt.Errorf("unexpected status 501: not implemented"),
+			want: true,
+		},
+		{
+			// The two nearest neighbours. A 500 is a real failure and a 401 is an auth
+			// problem; labelling either as "ask support to enable a feature" is worse
+			// than a raw error.
+			name: "a 500 is a real failure",
+			err:  fmt.Errorf("unexpected status 500: boom"),
+			want: false,
+		},
+		{
+			name: "a 401 is not a feature gate",
+			err:  fmt.Errorf("unexpected status 401: unauthorized"),
+			want: false,
+		},
+		{
+			// A body that merely mentions 501 must not trip it - the match is on the
+			// status phrase, not on the digits appearing anywhere.
+			name: "the digits appearing in a body do not count",
+			err:  fmt.Errorf("unexpected status 400: value 501 is out of range"),
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cloudRolesFeatureDisabled(tc.err); got != tc.want {
+				t.Errorf("got %v, want %v for %v", got, tc.want, tc.err)
+			}
+		})
+	}
+
+	// Both conditions must be named. A diagnostic mentioning only the feature flag
+	// sends an Azure user to support for something support cannot turn on.
+	for _, want := range []string{"feature", "Azure", "console"} {
+		if !strings.Contains(cloudRolesDisabledDetail, want) {
+			t.Errorf("the 501 detail does not mention %q: %s", want, cloudRolesDisabledDetail)
+		}
 	}
 }

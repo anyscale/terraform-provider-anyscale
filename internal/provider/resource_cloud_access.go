@@ -22,10 +22,9 @@ import (
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
 //
-// NOT YET REGISTERED in provider.go. Full CRUD is implemented at both cloud and
-// project scope. Registration is a separate step - it needs a docs page,
-// examples and a changelog fragment - and until it happens none of this is
-// reachable by a practitioner.
+// REGISTERED READ-ONLY. Refresh and import are live; the three write methods
+// refuse. The reconcile they would call is fully implemented and tested and sits
+// behind cloudAccessWriteEnabled below.
 //
 // The read half was built and landed before the write half on purpose, and the
 // ordering is a safety property rather than convenience: a resource that can
@@ -61,6 +60,28 @@ const (
 	cloudAccessReadOnlyDenyRole    = "cloud_read_only"
 	cloudAccessReadOnlyProjectRole = "readonly"
 )
+
+// cloudRolesFeatureDisabled reports whether an error is the cloud roles
+// endpoint's feature gate rather than a real failure.
+//
+// TWO independent conditions produce the same 501 and neither is visible from a
+// plan: an organization without the roles feature enabled, and Azure, where the
+// endpoint is unavailable regardless of the flag. Naming both is the point - a
+// diagnostic that mentions only the feature flag sends an Azure user to support
+// for something support cannot turn on.
+//
+// Matched on the status text DoRequestRaw produces, since that helper does not
+// return the status code itself. Same approach as the organization-scope
+// equivalent.
+func cloudRolesFeatureDisabled(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "unexpected status 501")
+}
+
+const cloudRolesDisabledDetail = "The cloud roles API is not enabled for this organization, so this resource cannot " +
+	"read a cloud's member roles. Two separate conditions produce this and they need different responses: the " +
+	"organization roles feature may not be enabled, which Anyscale support can turn on; or the cloud is on Azure, " +
+	"where this endpoint is unavailable regardless of the feature flag and support cannot change that. Manage cloud " +
+	"and project access through the Anyscale console or API in either case."
 
 // cloudAccessProjectWriteRole is the project-scope spelling of the write tier;
 // cloudAccessCloudWriteRole is the cloud-scope spelling of an unrelated role
@@ -126,12 +147,34 @@ func (r *CloudAccessResource) Metadata(ctx context.Context, req resource.Metadat
 
 func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages the **complete** member list of one Anyscale cloud.\n\n" +
-			"~> **This resource is authoritative.** Terraform owns who has access to this cloud. Any member " +
-			"not declared in `member` is **revoked** on the next apply, including people granted access " +
-			"through the Anyscale console. That is the point of this resource - it is how you make Terraform " +
-			"the source of truth - but it means a mistake here removes real people's access.\n\n" +
+		MarkdownDescription: "Reads and imports the **complete** member list of one Anyscale cloud, including each " +
+			"member's cloud role and the deny roles layered on it.\n\n" +
+			"~> **This version is read-only.** Create, update and delete are not implemented and fail with an " +
+			"explicit error. You can import an existing cloud's members and refresh them; you cannot yet manage " +
+			"them through Terraform. Cloud-scoped role management has no writable provider surface until that " +
+			"lands.\n\n" +
+			"~> **This resource is designed to be authoritative, and that is not yet in effect.** When the write " +
+			"path ships, Terraform will own who has access to this cloud, and any member not declared in `member` " +
+			"will be **revoked** - including people granted access through the Anyscale console, and including on " +
+			"the **first** apply. None of that happens in this version. It is stated here so the behavior is not a " +
+			"surprise when it arrives; read this page again before you first apply a change with it.\n\n" +
+			"### Not available in every organization\n\n" +
+			"~> This resource reads the cloud roles API, which returns `501` in two separate situations: an " +
+			"organization that does not have the roles feature enabled, and **any** cloud on **Azure**, where the " +
+			"endpoint is unavailable regardless of that feature flag. The first can be turned on by Anyscale support; " +
+			"the second cannot. Use the Anyscale console or API to manage cloud access in either case.\n\n" +
+			"### Reviewing the plan will not protect you from the first apply\n\n" +
+			"~> When the write path ships, the members about to lose access on a first apply are ones Terraform has " +
+			"never read, so they appear **nowhere** in plan output. This is the one sharp edge on this resource that " +
+			"plan review genuinely cannot catch. The `for_each` warning below *is* plan-reviewable; this is not.\n\n" +
+			"The worst realistic case: a cloud owner who is **not** an organization admin can be revoked on the " +
+			"first apply. Organization admins happen to be safe, but only by accident of plumbing - they are " +
+			"invisible to the endpoint this resource reads, so it cannot revoke what it cannot see.\n\n" +
+			"Your own identity is excluded entirely: the identity Terraform authenticates as is never reported as a " +
+			"member and cannot be declared as one. That is scoped to whoever runs the apply, not to a list of " +
+			"protected people - another operator who is not declared here is still revoked.\n\n" +
 			"### The most dangerous mistake, stated plainly\n\n" +
+			"Also future behavior, for the same reason as above - this version destroys nothing. " +
 			"A typo in the `cloud_id` used as a `for_each` key is **not preventable by this resource**. " +
 			"Terraform sees one resource destroyed and another created, and destroying an " +
 			"`anyscale_cloud_access` correctly revokes that cloud's members - the provider cannot tell that " +
@@ -304,7 +347,63 @@ func (r *CloudAccessResource) Configure(ctx context.Context, req resource.Config
 // prior state is one Terraform has never read, so it appears nowhere in the plan
 // output. There is nothing to detect and no guard shape that fits; documentation
 // on the resource page is the only available mitigation.
+// cloudAccessWriteEnabled gates the write path for the read-only release.
+//
+// WHY A GATE RATHER THAN SPLIT BRANCHES. The reconcile is complete and covered,
+// but this release ships read and import only, so that the one resource in this
+// provider that can revoke real people's access at scale is exercised against
+// real clouds before it is allowed to change anything. Deleting the reconcile to
+// express that and re-adding it later is the shape that loses work: this repo has
+// already had verified changes disappear between a scratch check and a landed
+// commit. Keeping it here, gated, makes enabling it a one-line diff plus the docs
+// change that must accompany it.
+//
+// WHAT ENABLING IT REQUIRES, so this is not flipped on a whim: the two 409
+// envelopes that block a revoke confirmed against a live capture rather than a
+// backend source trace; confirmation that Terraform Core persists state written
+// before an error return, which unmanaged_grants depends on entirely; and the
+// resource page rewritten from "this version is read-only" to the authority
+// warnings it currently holds as future behavior.
+//
+// One of those prerequisites came back with an answer that changes the design
+// rather than confirming it, and it is recorded here so enabling the gate cannot
+// skip past it: Core DOES persist state written before an errored Create, but it
+// persists it as TAINTED, so the next apply is a full destroy-then-recreate of
+// the resource rather than a retriable per-member reconcile. For this resource
+// that means a failed first apply schedules a destroy that revokes every member
+// it did manage to write. unmanaged_grants surviving the error is therefore not
+// sufficient on its own - the write path needs an answer for taint before it
+// ships.
+//
+// A var rather than a const on purpose: as a const, every branch below folds away
+// and the reconcile reads as dead code to both the reader and the linter.
+var cloudAccessWriteEnabled = false
+
+// cloudAccessWriteDisabledSummary and Detail are the refusal the three write
+// methods return while the gate above is closed.
+const (
+	cloudAccessWriteDisabledSummary = "Cloud Access Is Read-Only In This Provider Version"
+	cloudAccessWriteDisabledDetail  = "anyscale_cloud_access can refresh and import a cloud's member list, but cannot " +
+		"yet change it. Remove this resource from your plan, or use it only to read - importing is supported.\n\n" +
+		"Manage cloud and project access through the Anyscale console or API until the write path ships. It is withheld " +
+		"deliberately rather than incomplete: this resource is authoritative over a cloud's whole member list, so its " +
+		"write path revokes real people's access, and it is being validated against real clouds before it is allowed to."
+)
+
+// refuseWriteWhileReadOnly reports true when it has refused.
+func (r *CloudAccessResource) refuseWriteWhileReadOnly(diags *diag.Diagnostics) bool {
+	if cloudAccessWriteEnabled {
+		return false
+	}
+	diags.AddError(cloudAccessWriteDisabledSummary, cloudAccessWriteDisabledDetail)
+	return true
+}
+
 func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if r.refuseWriteWhileReadOnly(&resp.Diagnostics) {
+		return
+	}
+
 	var plan CloudAccessResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -387,6 +486,10 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 
 	remote, err := listCloudAccessMembers(ctx, r.client, cloudID)
 	if err != nil {
+		if cloudRolesFeatureDisabled(err) {
+			resp.Diagnostics.AddError("Cloud Roles API Not Available", cloudRolesDisabledDetail)
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			// The cloud itself is gone, which takes its member list with it. This is
 			// the only branch that drops the resource from state.
@@ -479,6 +582,10 @@ func (r *CloudAccessResource) ImportState(ctx context.Context, req resource.Impo
 // Update is the same reconcile as Create. There is no difference in behavior
 // between the two, only in when Terraform calls them.
 func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if r.refuseWriteWhileReadOnly(&resp.Diagnostics) {
+		return
+	}
+
 	var plan CloudAccessResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -628,6 +735,10 @@ func (r *CloudAccessResource) applyCloudAccess(
 // remove on the way out: destroy removes what the resource had authority over,
 // and it never had authority over a member it never saw.
 func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	if r.refuseWriteWhileReadOnly(&resp.Diagnostics) {
+		return
+	}
+
 	var state CloudAccessResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
