@@ -571,6 +571,44 @@ of trying. Because the read and write paths return the *identical* 501 detail st
 name both possibilities. `anyscale_cloud_access` does not currently carry any version of this
 warning and must gain one before it registers.
 
+## Discrepancies found across the CLI, console, API spec, backend and provider
+
+Collected in one place because they were discovered separately and each is easy to rediscover. Every one
+was traced or captured during this round; none is inferred from another.
+
+1. **Vocabulary differs between the surfaces a practitioner uses.** Both first-party administrative
+   surfaces operate on the legacy three-value permission level (`owner`/`write`/`readonly`), while this
+   resource manages RBAC roles (`owner`/`writer`/`collaborator`/…). Same concept, two vocabularies, and
+   cloud roles say `writer` where project roles say `write`.
+2. **The CLI cannot express what the provider can.** Its collaborator command is add-only and batch-only
+   via a YAML file; there is no documented CLI path for an RBAC role change.
+3. **A source trace and observed behavior disagree, and the observation wins.** The roles listing reads
+   only the authorization service and the legacy create path traces as a purely relational insert — yet a
+   legacy-created member appears in the roles listing immediately. The mechanism was never found. Recorded
+   as behavior confirmed twice, mechanism unexplained.
+4. **The two representations of one fact diverge after a legacy write.** A legacy alter changes the
+   permission level and never updates the RBAC role, so the same member's role reads differently depending
+   on which surface is asked (J.19).
+5. **What enforces access is not what this resource reads.** Enforcement is relational; the resource reads
+   the authorization service. They agree for writes this resource makes, because those dual-write, and
+   diverge for changes made through the legacy path.
+6. **A docstring contradicts its own code.** The directory-sync revoke blocker's docstring says it raises
+   403; the code raises 409. A fixture built from the prose would let a broken revoke path pass green.
+7. **The API spec did not disclose a hard request limit.** The collaborator search rejects `count` above 50
+   with a 422, which nothing in the published spec surfaced — routes and shapes were confirmed against it,
+   and the cap only appeared when a real request was made.
+8. **Pagination caps are endpoint-specific, not a provider-wide convention.** The compute-templates search
+   accepts `count=100`; the collaborator search rejects it. Copying a working value between endpoints is
+   what produced item 7.
+9. **Three different signals all mean "organization admin," and the one the backend guard uses is none of
+   the obvious two.** The guard checks authorization-service group membership; a relational `is_admin`
+   column exists and is maintained on the relational promotion path; and the organization permission level
+   is a third. No two are guaranteed to agree (J.22).
+10. **Shipped documentation claimed behavior the code does not have.** The resource page advertised drift
+    detection that does not hold across the legacy path, and described `unmanaged_grants` as listing only
+    attempted revokes, which the grant-failure fix falsified. Both were generated from schema descriptions
+    rather than hand-written, so neither was visible as a documentation edit.
+
 ## The contract, stated plainly
 
 Everything else in this document is a reasoning trail. This section is the contract itself, for a reader
