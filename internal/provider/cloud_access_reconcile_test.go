@@ -884,3 +884,56 @@ func TestCloudAccessRead_FailsWhenTheCallerCannotBeIdentified(t *testing.T) {
 		t.Fatalf("expected the caller-identity error: without that identity this refresh cannot know which member to omit, and reporting everyone produces a state that contradicts the plan. Got: %v", diags)
 	}
 }
+
+// TestCloudAccessRevokeFailureReason covers the text that lands in
+// unmanaged_grants, which is the only thing an operator gets to act on when a
+// revoke fails.
+//
+// The unrecognized case matters most. Two settings block collaborator removal
+// outright - the cloud's auto_add_user, and an organization with directory sync
+// plus at least one Policy API role binding - and both report a conflict, so they
+// are distinguishable only by wording. A reworded message on either side falls
+// through to the default, and a default that returned the bare detail would leave
+// the operator with a conflict and no idea which of the two they hit.
+func TestCloudAccessRevokeFailureReason(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		detail      string
+		wantPhrases []string
+	}{
+		{
+			name:        "auto_add_user names the cloud setting",
+			detail:      "Users cannot be removed from clouds which have auto add users enabled.",
+			wantPhrases: []string{"auto_add_user"},
+		},
+		{
+			name:        "self-removal names who has to do it instead",
+			detail:      "You cannot remove yourself from the cloud",
+			wantPhrases: []string{"another cloud owner"},
+		},
+		{
+			name:        "the Policy API case points at the CLI that owns it",
+			detail:      "This organization uses the Policy API",
+			wantPhrases: []string{"anyscale policy set"},
+		},
+		{
+			name:   "an unrecognized failure names both structural blockers",
+			detail: "some conflict nobody has seen before",
+			wantPhrases: []string{
+				"some conflict nobody has seen before",
+				"auto_add_user",
+				"directory sync",
+				"Policy API",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cloudAccessRevokeFailureReason(fmt.Errorf("unexpected status 409: %s", tc.detail))
+			for _, want := range tc.wantPhrases {
+				if !strings.Contains(got, want) {
+					t.Errorf("the reason does not mention %q: %s", want, got)
+				}
+			}
+		})
+	}
+}

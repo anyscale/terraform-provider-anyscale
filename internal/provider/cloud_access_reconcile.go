@@ -60,8 +60,25 @@ const cloudAccessBridgePermissionLevel = "readonly"
 const cloudAccessAlreadyHasPermissionsSubstring = "already has permissions for this cloud"
 
 // cloudAccessAutoAddUserSubstring is the detail substring the backend returns
-// when a cloud's auto_add_user setting blocks removing a collaborator.
+// when a cloud's auto_add_user setting blocks removing a collaborator. The full
+// detail is "Users cannot be removed from clouds which have auto add users
+// enabled." and the status is 409.
+//
+// Source-traced against the removal handler, not captured live. The substring is
+// the stable part of that sentence; matching the whole thing would break on a
+// reworded message, and matching less would risk a false positive.
 const cloudAccessAutoAddUserSubstring = "auto add users enabled"
+
+// cloudAccessPolicyAPISubstring identifies the OTHER structural revoke blocker:
+// an organization with directory sync enabled AND at least one Policy API role
+// binding refuses to remove any non-service-account member. Unlike
+// auto_add_user this is organization-wide rather than per-cloud, there is no
+// endpoint to preflight it against, and it returns the SAME 409 status - so the
+// two are only distinguishable by their detail text.
+//
+// anyscale_organization_invitation documents the identical condition on the
+// invite path; SCIM alone does not trigger it.
+const cloudAccessPolicyAPISubstring = "Policy API"
 
 // cloudAccessDesiredMember is one member as the configuration declares them.
 type cloudAccessDesiredMember struct {
@@ -481,6 +498,14 @@ func revokeCloudAccessMember(ctx context.Context, client *Client, cloudID, ident
 // cloudAccessRevokeFailureReason turns a failed revoke into the text that lands
 // in unmanaged_grants. The three recognized cases are all situations a reader
 // cannot act on from the raw API detail alone.
+// cloudAccessRevokeFailureReason turns a failed revoke into the text that lands
+// in unmanaged_grants.
+//
+// The unrecognized case names BOTH structural blockers rather than returning the
+// raw detail alone, because they return the same 409 status and differ only in
+// wording - so a reworded message on either side would otherwise leave an
+// operator with a bare conflict and no idea which of the two they hit. Naming
+// both is honest about the ambiguity; guessing one would not be.
 func cloudAccessRevokeFailureReason(err error) string {
 	detail := extractAPIErrorDetail(err)
 	switch {
@@ -490,10 +515,12 @@ func cloudAccessRevokeFailureReason(err error) string {
 	case strings.Contains(detail, "cannot remove yourself"):
 		return fmt.Sprintf("%s (Anyscale does not allow removing your own cloud access; another cloud owner must apply "+
 			"this change)", detail)
-	case strings.Contains(detail, "Policy API"):
+	case strings.Contains(detail, cloudAccessPolicyAPISubstring):
 		return fmt.Sprintf("%s (this organization's cloud permissions are managed outside Terraform via 'anyscale policy "+
 			"set'; see https://docs.anyscale.com/reference/cli/policy#policy-cli)", detail)
 	default:
-		return detail
+		return fmt.Sprintf("%s (two settings are known to block collaborator removal outright and both report a conflict: "+
+			"the cloud's auto_add_user setting, and an organization that has directory sync enabled together with at least "+
+			"one Policy API role binding. Check both before treating this as a transient failure)", detail)
 	}
 }
