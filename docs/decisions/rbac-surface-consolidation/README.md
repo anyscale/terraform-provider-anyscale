@@ -1400,6 +1400,23 @@ the test owns and destroys. Read criteria against the static cloud are fine.
   a round where mock-only request shapes were twice found silently wrong, that is the single largest
   unverified surface remaining, and it is stated here rather than left to be inferred from a green suite.
 
+  **The READ is unaffected — confirmed, and it decides the shape of the limitation.** `GET` on a project's
+  collaborators returns 200 on the same project whose write 403s. So the skew's consequence is
+  **loud and contained**: a configuration that names a project still refreshes normally, and only an apply
+  that would grant or revoke a project role fails. Had the read been refused too, declaring any project role
+  would have broken the whole resource on every refresh, which is a different product rather than a
+  documented limitation.
+
+  *One observation from that check, recorded with its likely explanation rather than left dangling.* The
+  collaborators endpoint reported **zero** collaborators on a project whose own `owners` field lists five
+  people. The likely reading is that `owners` includes organization admins holding implicit ownership while
+  the collaborators endpoint reports explicit grants only — which would be consistent with J.22, since admins
+  are outside this resource's scope in both directions, and would make the discrepancy correct rather than a
+  gap. **Unconfirmed.** If that reading is wrong, the project read can under-report on an *in-scope* project,
+  and the consequence is an invisible project grant this resource would neither see nor revoke — the same
+  blindness J.10 accepts for out-of-scope projects, arriving for a different reason and without having been
+  chosen.
+
   *Superseded status note, kept because the error is instructive:* this was first recorded as specified and
   pending, after being briefly reported as already obtained. Recorded in those words because the first
   description of this split said the live half was "obtained by" direct API exercise, which reads as past
