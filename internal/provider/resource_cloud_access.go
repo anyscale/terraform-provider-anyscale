@@ -63,11 +63,19 @@ const (
 // cloudRolesFeatureDisabled reports whether an error is the cloud roles
 // endpoint's feature gate rather than a real failure.
 //
-// TWO independent conditions produce the same 501 and neither is visible from a
-// plan: an organization without the roles feature enabled, and Azure, where the
-// endpoint is unavailable regardless of the flag. Naming both is the point - a
-// diagnostic that mentions only the feature flag sends an Azure user to support
-// for something support cannot turn on.
+// TWO SEPARATE FEATURE FLAGS gate this API - one for reading roles and one for
+// writing them - and both return byte-identical 501 detail. So a 501 says the
+// feature is not enabled but does NOT say which half is missing, and a diagnostic
+// that names only one of them would send someone looking for the wrong thing.
+//
+// An earlier version of this comment, and of the diagnostic below, claimed the
+// endpoint is unavailable on Azure regardless of the flags. That was unsourced and
+// is not what the backend does: all three 501 sites gate on a feature flag and
+// none of them reads the cloud provider. It may still be true in practice - the
+// flags may simply never be enabled for Azure deployments - but that is a
+// different claim with no evidence behind it, and the version that shipped told
+// Azure users support could not help them, which would talk a customer out of a
+// feature they might be able to have.
 //
 // Matched on the status text DoRequestRaw produces, since that helper does not
 // return the status code itself. Same approach as the organization-scope
@@ -77,10 +85,10 @@ func cloudRolesFeatureDisabled(err error) bool {
 }
 
 const cloudRolesDisabledDetail = "The cloud roles API is not enabled for this organization, so this resource cannot " +
-	"read a cloud's member roles. Two separate conditions produce this and they need different responses: the " +
-	"organization roles feature may not be enabled, which Anyscale support can turn on; or the cloud is on Azure, " +
-	"where this endpoint is unavailable regardless of the feature flag and support cannot change that. Manage cloud " +
-	"and project access through the Anyscale console or API in either case."
+	"read a cloud's member roles.\n\nReading roles and writing them are gated by two separate feature flags that " +
+	"return the same response, so this error does not say which of the two is missing - mention both when you ask. " +
+	"Contact Anyscale support to have the cloud roles API enabled for your organization. Until then, manage cloud and " +
+	"project access through the Anyscale console or API."
 
 // cloudAccessProjectWriteRole is the project-scope spelling of the write tier;
 // cloudAccessCloudWriteRole is the cloud ROLES spelling of an unrelated role
@@ -188,10 +196,11 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 			"whole organization on its member list, and the first apply that takes authority over it revokes everyone " +
 			"the configuration does not declare. Review that plan carefully.\n\n" +
 			"### Not available in every organization\n\n" +
-			"~> This resource reads the cloud roles API, which returns `501` in two separate situations: an " +
-			"organization that does not have the roles feature enabled, and **any** cloud on **Azure**, where the " +
-			"endpoint is unavailable regardless of that feature flag. The first can be turned on by Anyscale support; " +
-			"the second cannot. Use the Anyscale console or API to manage cloud access in either case.\n\n" +
+			"~> This resource reads the cloud roles API, which returns `501` in organizations that do not have " +
+			"that feature enabled. Reading roles and writing them are gated by **two separate feature flags** which " +
+			"return the same response, so a `501` does not tell you which of the two you are missing - mention both when " +
+			"you ask Anyscale support to enable it. Until it is enabled, manage cloud access through the Anyscale " +
+			"console or API.\n\n" +
 			"### Reviewing the plan will not protect you from the first apply\n\n" +
 			"~> When the write path ships, the members about to lose access on a first apply are ones Terraform has " +
 			"never read, so they appear **nowhere** in plan output. This is the one sharp edge on this resource that " +

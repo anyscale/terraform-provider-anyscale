@@ -648,11 +648,18 @@ func TestCloudRolesFeatureDisabled(t *testing.T) {
 		})
 	}
 
-	// Both conditions must be named. A diagnostic mentioning only the feature flag
-	// sends an Azure user to support for something support cannot turn on.
-	for _, want := range []string{"feature", "Azure", "console"} {
+	// The detail must name the two-flag ambiguity and point somewhere actionable.
+	// It must NOT name Azure: an earlier version claimed the endpoint is unavailable
+	// there regardless of the flags and told users support could not help, which is
+	// unsourced - every backend 501 site gates on a feature flag and none reads the
+	// cloud provider. This asserts the absence too, so the claim cannot come back by
+	// someone re-adding the "helpful" detail.
+	for _, want := range []string{"two separate feature flags", "support", "console"} {
 		if !strings.Contains(cloudRolesDisabledDetail, want) {
 			t.Errorf("the 501 detail does not mention %q: %s", want, cloudRolesDisabledDetail)
 		}
+	}
+	if strings.Contains(cloudRolesDisabledDetail, "Azure") {
+		t.Errorf("the 501 detail names Azure, which no backend 501 site gates on: %s - if there is a real source for Azure behavior it must be attributed and hedged, not stated absolutely", cloudRolesDisabledDetail)
 	}
 }

@@ -11,7 +11,7 @@ description: |-
   ~> Worth knowing before you enable that flag: turning auto_add_user on for a cloud that already has organization members retroactively adds all of them as collaborators immediately, not only members added afterwards. Enabling it is itself a grant to everyone in the organization.
   Turning it back off does not remove the collaborators it already added - it only stops further additions and unblocks removal. So a cloud that has ever had auto_add_user enabled starts out with your whole organization on its member list, and the first apply that takes authority over it revokes everyone the configuration does not declare. Review that plan carefully.
   Not available in every organization
-  ~> This resource reads the cloud roles API, which returns 501 in two separate situations: an organization that does not have the roles feature enabled, and any cloud on Azure, where the endpoint is unavailable regardless of that feature flag. The first can be turned on by Anyscale support; the second cannot. Use the Anyscale console or API to manage cloud access in either case.
+  ~> This resource reads the cloud roles API, which returns 501 in organizations that do not have that feature enabled. Reading roles and writing them are gated by two separate feature flags which return the same response, so a 501 does not tell you which of the two you are missing - mention both when you ask Anyscale support to enable it. Until it is enabled, manage cloud access through the Anyscale console or API.
   Reviewing the plan will not protect you from the first apply
   ~> When the write path ships, the members about to lose access on a first apply are ones Terraform has never read, so they appear nowhere in plan output. This is the one sharp edge on this resource that plan review genuinely cannot catch. The for_each warning below is plan-reviewable; this is not.
   The worst realistic case: a cloud owner who is not an organization admin can be revoked on the first apply. Organization admins happen to be safe, but only by accident of plumbing - they are invisible to the endpoint this resource reads, so it cannot revoke what it cannot see.
@@ -41,7 +41,7 @@ Turning it back off does **not** remove the collaborators it already added - it 
 
 ### Not available in every organization
 
-~> This resource reads the cloud roles API, which returns `501` in two separate situations: an organization that does not have the roles feature enabled, and **any** cloud on **Azure**, where the endpoint is unavailable regardless of that feature flag. The first can be turned on by Anyscale support; the second cannot. Use the Anyscale console or API to manage cloud access in either case.
+~> This resource reads the cloud roles API, which returns `501` in organizations that do not have that feature enabled. Reading roles and writing them are gated by **two separate feature flags** which return the same response, so a `501` does not tell you which of the two you are missing - mention both when you ask Anyscale support to enable it. Until it is enabled, manage cloud access through the Anyscale console or API.
 
 ### Reviewing the plan will not protect you from the first apply
 
