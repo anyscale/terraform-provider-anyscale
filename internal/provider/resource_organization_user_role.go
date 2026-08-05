@@ -143,6 +143,10 @@ func setOrganizationPermissionLevel(ctx context.Context, client *Client, identit
 // support about a feature they might be able to have. Corrected here; the same
 // claim on cloud_access's equivalent function carries the fuller trace.
 //
+// DO NOT DELETE THIS PARAGRAPH even though it describes an absence. This is the
+// claim's origin file - it was copied from here onto cloud_access - so removing
+// this record is exactly what would let it come back a third time.
+//
 // Matched on the status text DoRequestRaw produces, since the helper does not
 // return the status code itself.
 func orgRolesFeatureDisabled(err error) bool {
