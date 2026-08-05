@@ -602,9 +602,11 @@ rather than a gap (J.21). A genuine not-found removes the resource from state; a
 diagnostic (criterion 31).
 
 **Drift.** An out-of-band grant or revoke through the RBAC path is detected. A role change made through the
-CLI or console is **not** — those write the legacy path, and `base_role` does not move (J.19). The read-only
-restriction crossing its boundary *is* visible in `deny_roles`. State this per-field; the two behave
-oppositely.
+CLI or console is detected only if it crosses the read-only boundary, which moves `deny_roles`; `base_role`
+itself is frozen at creation and never moves on a legacy write (J.19, J.21). So a console change between
+`write` and `owner` is invisible in **both** fields — including a promotion to `owner`, which is a
+privilege-escalation blind spot rather than a reporting one. Any change a practitioner does declare is
+repaired by a normal apply, in both stores; there is no self-heal on refresh, because `Read` never writes.
 
 **Refusals, all before any write.** `auto_add_user` enabled (J.9), a group policy binding present (J.20),
 an organization admin declared (J.22), `owner` combined with `cloud_read_only` (J.7), an empty `member` map
@@ -971,11 +973,38 @@ path never revisits it. The read really is authorization-service-only, as traced
   console shows something else. That is the reports-a-compliance-it-cannot-verify failure rejected under
   J.10, arriving by a third door.
 
-**Limits, recorded because the original ruling over-read a source trace and the correction must not repeat
-it.** One capture, one identity, a service account, created with a single permission level. Whether it
-holds for a human identity is untested, and the create-side mechanism is unexplained — the legacy create
-path traces as a relational insert with no authorization-service call. The fallback hypothesis is excluded
-by deduction from two observations rather than by its own capture.
+**Both named limits are now closed, and the gap is narrower and sharper than either version above.**
+
+*Not identity-specific.* The same create-then-alter sequence on a human identity produced an identical
+result: the roles listing populated at create, frozen across a legacy alter, with the deny role moving.
+
+*A stale `base_role` IS repairable, and the repair is real rather than cosmetic.* Writing the role through
+the RBAC path corrected the roles listing **and** moved the relational permission level back — on a member
+with prior legacy history, which independently re-confirms the dual-write property that closed the
+enforcement question. So the gap is **detection-only**. Stated precisely: this resource has no repair
+mechanism, and it cannot self-heal on refresh, because `Read` never writes. Repair is simply what a normal
+apply already does, applied here — once a practitioner declares the correct role, the resource makes it
+true in both stores.
+
+**What remains invisible is exactly one class of change, and it is the privilege-relevant one.** Compose
+J.19's per-field split with the frozen-at-creation behavior:
+
+- A console change **crossing the read-only boundary** is visible — not through `base_role`, which stays
+  frozen, but through `deny_roles`, which moves. It produces a real diff, and applying repairs both fields.
+- A console change **between `write` and `owner`** touches no deny group and does not move `base_role`. It
+  is invisible in **both** fields: no diff, no repair, and the resource reports converged while enforcement
+  says otherwise.
+
+**Say the dangerous direction out loud in the documentation.** A member promoted to `owner` in the console
+stays `owner`, undetected, while state and plan both say `writer`. That is a privilege-escalation blind
+spot rather than a reporting inconvenience, and it is the one drift case this resource cannot surface at
+all. The mitigation available is a practitioner declaring roles explicitly and applying, which repairs
+whatever the console did — but they have no signal telling them to.
+
+**The correction's own limits, recorded because the original ruling over-read a source trace.** The
+create-side mechanism remains unexplained: the legacy create path traces as a relational insert with no
+authorization-service call. The read-time-fallback hypothesis is excluded by deduction from two
+observations rather than by its own capture.
 
 **The original ruling follows, superseded in its premise but not in its reasoning about
 derivation.** A member holding only a legacy grant reads back with `base_role` null, and that is correct;
