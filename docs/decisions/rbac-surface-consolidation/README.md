@@ -117,10 +117,18 @@ follow, and the resource's own page must carry all three:
    first-apply revoke is not: the members about to lose access are ones Terraform has never read,
    so they appear nowhere in the plan output. A page that offers plan review as the general
    mitigation for this resource's sharp edges, without excluding this case, actively misleads.
-2. **The caller's own identity must be excluded from the authoritative set.** The token running
-   Terraform is usually a collaborator on the cloud it manages and frequently its owner, so an
-   authoritative Create would otherwise attempt to revoke the operator on the first apply. It must
-   land before or with the reconcile rather than as later tidying.
+2. **The caller's own identity must be excluded from the authoritative set — and it does NOT
+   prevent a lockout. Do not write that it does.** The exclusion prevents a revoke that the backend
+   would refuse anyway from being *attempted on every apply*, which would park a permanent entry in
+   `unmanaged_grants` and destroy the value of an alarm this resource tells users to watch. That is
+   the whole reason, and it is sufficient. The token running Terraform is usually a collaborator on
+   the cloud it manages and frequently its owner, so an authoritative Create would otherwise attempt
+   this on the first apply. It must land before or with the reconcile rather than as later tidying.
+
+   This warning leads the entry because the false version has already propagated once. A correction
+   recorded further down was read past, and "the first apply could revoke the operator's own access"
+   reached a published guide within hours of being corrected here. It is the more dramatic sentence
+   and it is the one that travels.
 
    **Correction (2026-08-04): this was previously justified as preventing a self-inflicted lockout,
    and that justification is wrong.** The backend refuses self-removal on its own —
@@ -419,6 +427,20 @@ release.
 The flag structurally blocks every revoke, so the resource cannot honor its authority claim there.
 Refusing uniformly is a contract statement rather than a per-apply judgment: a resource that works
 only when a given apply happens not to need a revoke is harder to reason about than one that refuses.
+
+**That argument undersells the ruling, and a live finding shows why.** Enabling `auto_add_user` on a
+cloud that already has organization members retroactively adds **all of them** as collaborators,
+immediately — not merely future members. Confirmed against a real cloud, and documented nowhere.
+Combine that with the flag blocking every revoke and the resource being authoritative, and the
+outcome is not a degraded mode but a permanently broken one: every apply would attempt to revoke
+every member of the organization, fail on all of them, and produce one `unmanaged_grants` entry per
+person. The honest reason for refusing is that the resource cannot function on such a cloud at all.
+
+Two consequences follow. The refusal message must say *why* and name the remedy — disable the flag,
+then retry — because an operator has no way to derive that from a refusal alone. And the retroactive
+grant deserves its own line on the resource page: enabling that flag on an already-populated cloud
+is itself a silent grant of access to everyone in the organization, which is worth knowing whether
+or not Terraform manages that cloud.
 `Delete` is the deliberate exception, because refusing it would strand the resource in state with no
 exit but `terraform state rm` — attempt the revokes, record every failure, and name the real remedy
 (disable the flag on the cloud, then retry).
@@ -601,23 +623,26 @@ detail.
    ships on this assumption; the project endpoints are new to this design and inherit nothing.
 4. J.3's underlying question: does the membership bootstrap conflict for a roles-write-only user, or
    does it repair the missing membership edge?
-5. The exact error envelope of the `auto_add_user` conflict, byte-for-byte, so that fixtures match
-   what the API really sends rather than what a fixture author expected. The status and detail
-   string are now source-traced (see the revoke blockers above), which narrows this to confirming
-   the wrapper the API actually puts on the wire rather than discovering the shape — it does not
-   close it. A source trace and a capture answer different questions, and the fixture has to match
-   the second.
+5. **CLOSED.** The `auto_add_user` conflict envelope was captured live against a disposable cloud
+   and matches the source trace byte-for-byte: 409, detail "Users cannot be removed from clouds
+   which have auto add users enabled." Worth noting as a datum in its own right — on this surface, a
+   careful backend trace predicted the wire exactly. That is evidence about how far such traces can
+   be trusted here; it is not licence to skip the next one, since a trace that happened to be right
+   and a trace that was verified are still different things.
 6. **Whether the cloud-scope roles endpoints are unconditionally 501 on Azure deployments.** This was
    asserted while drafting the reconcile rulings and is **not** substantiated: the two-flag warning
    recovered from the removed resource says nothing about Azure, and the flag name does not appear in
    the backend service paths where such a gate would live. Treat "this resource cannot function on an
    Azure cloud" as unverified. It matters disproportionately because, if true, it belongs on the
    resource page rather than in a footnote.
-7. That removing a cloud collaborator really does leave no orphaned project grants. The cascade is
-   traced as far as the handler's stated contract and its call into the batch delete helper; the
-   helper's own body is not. The reconcile is being designed to *skip* per-project revokes on a
-   member drop on the strength of this, so a wrong answer leaves real project access in place after
-   Terraform has reported it removed.
+7. **CLOSED, and the cascade is real.** Confirmed live: an identity added as both a cloud
+   collaborator and a project collaborator, revoked at cloud scope only, had its project
+   collaborator entry gone on the next read with no project-scope delete issued. The reconcile must
+   therefore **not** attempt a project-scope revoke after a cloud-scope revoke of the same member —
+   the grant is already gone, and the attempt would either 404 or hit nothing, and a 404 misread as
+   a failure would produce a false `unmanaged_grants` alarm. The same capture incidentally
+   re-confirmed that the identity ID is consistent across the cloud and project collaborator
+   endpoints.
 8. Whether the directory-sync blocker behaves as traced — that it spares service accounts, that it
    requires a Policy API binding rather than merely a directory ID, and that it surfaces as a 409
    distinguishable from the `auto_add_user` one. This blocker was found late, is not in any earlier
