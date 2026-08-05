@@ -849,6 +849,13 @@ func (r *OrganizationUserRoleResource) ImportState(ctx context.Context, req reso
 // setOrganizationRoles above). Relocated from resource_cloud_user_role.go, which shared
 // this exact same Optional-not-Computed-list contract before that resource was removed;
 // this is now its only caller.
+//
+// APPLY-TIME ONLY. ElementsAs errors on an unknown element, which at APPLY time
+// cannot happen - every value is resolved by then - but at VALIDATE or PLAN time
+// is the ordinary shape of a value interpolated from another resource. Calling
+// this from a ValidateConfig would report a legitimate configuration as invalid.
+// resolvedStringListValues in resource_cloud_access.go is the plan-time-safe
+// counterpart; note it can prove a value present but never absent.
 func stringListToSlice(ctx context.Context, l types.List) ([]string, diag.Diagnostics) {
 	if l.IsNull() || l.IsUnknown() {
 		return []string{}, nil
