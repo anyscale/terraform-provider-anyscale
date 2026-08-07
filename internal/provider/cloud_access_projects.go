@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -311,6 +312,43 @@ func sortedProjectIDs(m map[string]string) []string {
 	return out
 }
 
+// cloudAccessProjectWrite403Reason names both known causes of a 403 from a
+// project-scope write route (the batch_create grant, the per-collaborator
+// PUT, or the DELETE) without picking between them. Message only - the
+// caller already converges and records this as ungranted/unmanaged (see
+// applyProjectRoles below), so this must never become a hard error or a
+// retry: a 403 is a decision, not a transient condition, and J.13 forbids
+// retrying one.
+//
+// Fires on ANY 403 from these routes, not on a detail substring: the real
+// body is a bare "Permission denied" with nothing to distinguish on. The
+// token check is named first as what to check first, not as a claim about
+// which cause is more likely - we have no measurement of that, and in the
+// one organization where we have any evidence at all it runs the other way.
+// Ordering conveys the practical priority without asserting a distribution.
+// The other cause - this project's owner grant missing from the
+// authorization service, a known backend condition that can also leave the
+// project undeletable - is a question for whoever administers the
+// organization's feature flags, not the practitioner's token, and this
+// error alone cannot tell the two apart.
+//
+// Project-scope only, deliberately not folded into cloudAccessRevokeFailureReason
+// (the cloud-scope equivalent): cloud-scope already has its own distinguishable
+// 409 causes (auto_add_user, Policy API) and no matching 403 condition:
+// merging the two would fire this message on an unrelated cloud-scope failure.
+func cloudAccessProjectWrite403Reason(err error) string {
+	detail := extractAPIErrorDetail(err)
+	var statusErr *UnexpectedStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusForbidden {
+		return detail
+	}
+	return fmt.Sprintf("%s (two things are known to cause this. Check first whether the token being used has "+
+		"permission to manage collaborators on this project. Also possible: this project's owner grant is "+
+		"missing from the authorization service, a known backend condition that can also leave the project "+
+		"undeletable - a question for whoever administers this organization's feature flags, not something "+
+		"this configuration did. This error alone cannot distinguish the two)", detail)
+}
+
 // applyProjectRoles executes a project plan.
 //
 // Grants are ALWAYS attempted, every one, regardless of an earlier failure in
@@ -335,10 +373,13 @@ func applyProjectRoles(
 	for _, g := range plan.Grants {
 		if err := grantProjectRole(ctx, client, g.ProjectID, g.Email, g.Level); err != nil {
 			detail := extractAPIErrorDetail(err)
-			if strings.Contains(detail, projectCollaboratorSelfModifySubstring) {
+			switch {
+			case strings.Contains(detail, projectCollaboratorSelfModifySubstring):
 				detail = fmt.Sprintf("%s\n\nThis email resolves to the identity Terraform is authenticated as. Anyscale "+
 					"does not allow changing your own role on a project - have another project owner apply this "+
 					"configuration instead.", detail)
+			default:
+				detail = cloudAccessProjectWrite403Reason(err)
 			}
 			ungranted = append(ungranted, CloudAccessUnmanagedGrantModel{
 				Email:     types.StringValue(g.Email),
@@ -396,7 +437,7 @@ func applyProjectRoles(
 			unmanaged = append(unmanaged, CloudAccessUnmanagedGrantModel{
 				Email:     types.StringValue(remote.Email),
 				ProjectID: types.StringValue(g.ProjectID),
-				Reason:    types.StringValue(cloudAccessRevokeFailureReason(err)),
+				Reason:    types.StringValue(cloudAccessProjectWrite403Reason(err)),
 			})
 			continue
 		}

@@ -161,7 +161,24 @@ type applyProjectRolesTestMock struct {
 	// current membership.
 	collaborators map[string]map[string]string
 	failGrantFor  map[string]bool // keyed by email
+
+	// failGrantWith403For / failRevokeWith403For (keyed by email / identityID)
+	// return the REAL captured 403 body - {"error":{"detail":"Permission
+	// denied"}} - rather than an invented one, per AC-37.
+	failGrantWith403For  map[string]bool
+	failRevokeWith403For map[string]bool
+	// failReadWith403 makes the collaborator-list GET 403 too, for AC-38: the
+	// read path must get an ordinary diagnostic, not the dual-cause message.
+	failReadWith403 bool
 }
+
+// cloudAccessProjectMockRealPermissionDenied403 is the ACTUAL body captured
+// live from POST .../collaborators/users/batch_create and DELETE
+// .../collaborators/{identity_id} on both a fresh and a month-old project -
+// bare, with nothing to distinguish a token-permission problem from the
+// known backend condition. A fixture returning anything else would validate
+// a diagnostic against a response the real API never sends.
+const cloudAccessProjectMockRealPermissionDenied403 = `{"error":{"detail":"Permission denied"}}`
 
 func (m *applyProjectRolesTestMock) handler(t *testing.T) http.Handler {
 	t.Helper()
@@ -193,6 +210,11 @@ func (m *applyProjectRolesTestMock) handler(t *testing.T) http.Handler {
 					writeJSON(w, map[string]interface{}{"error": map[string]interface{}{"detail": "grant exploded"}})
 					return
 				}
+				if m.failGrantWith403For[e.Value.Email] {
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte(cloudAccessProjectMockRealPermissionDenied403))
+					return
+				}
 				if m.collaborators[projectID] == nil {
 					m.collaborators[projectID] = map[string]string{}
 				}
@@ -200,6 +222,11 @@ func (m *applyProjectRolesTestMock) handler(t *testing.T) http.Handler {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case rest == "collaborators/users" && r.Method == http.MethodGet:
+			if m.failReadWith403 {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(cloudAccessProjectMockRealPermissionDenied403))
+				return
+			}
 			results := []map[string]interface{}{}
 			for email, id := range m.collaborators[projectID] {
 				results = append(results, map[string]interface{}{
@@ -210,6 +237,11 @@ func (m *applyProjectRolesTestMock) handler(t *testing.T) http.Handler {
 			writeJSON(w, map[string]interface{}{"results": results, "metadata": map[string]interface{}{"next_paging_token": nil}})
 		case strings.HasPrefix(rest, "collaborators/") && r.Method == http.MethodDelete:
 			identityID := strings.TrimPrefix(rest, "collaborators/")
+			if m.failRevokeWith403For[identityID] {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(cloudAccessProjectMockRealPermissionDenied403))
+				return
+			}
 			for email, id := range m.collaborators[projectID] {
 				if id == identityID {
 					delete(m.collaborators[projectID], email)
@@ -349,5 +381,142 @@ func TestCloudAccessUnplannedProjectShortfall(t *testing.T) {
 	}
 	if !strings.Contains(ungranted[0].Reason.ValueString(), "read timed out") {
 		t.Errorf("expected the reason to be carried through: %s", ungranted[0].Reason.ValueString())
+	}
+}
+
+// cloudAccessAssertBothCausesOrdered is AC-37's core assertion: the reason
+// names both known causes of a project-scope write 403, with the token-
+// permission check before the backend-condition explanation. Anchored on
+// short, stable tokens ("permission" / "authorization service") rather than
+// full phrases, since a legitimate rewording of the surrounding prose must
+// not fail this test. If this ever needs loosening, loosen the ANCHOR
+// tokens, never remove the ordering comparison itself.
+func cloudAccessAssertBothCausesOrdered(t *testing.T, reason string) {
+	t.Helper()
+	permissionIdx := strings.Index(reason, "permission")
+	backendIdx := strings.Index(reason, "authorization service")
+	if permissionIdx == -1 {
+		t.Errorf("reason does not mention the token-permission cause: %q", reason)
+	}
+	if backendIdx == -1 {
+		t.Errorf("reason does not mention the authorization-service/backend cause: %q", reason)
+	}
+	if permissionIdx != -1 && backendIdx != -1 && permissionIdx > backendIdx {
+		t.Errorf("the ordinary cause (permission) must come before the backend condition, got permission at %d, "+
+			"backend condition at %d: %q", permissionIdx, backendIdx, reason)
+	}
+}
+
+// TestApplyProjectRoles_GrantWrite403NamesBothCausesAndConverges is AC-37 on
+// the grant path: a 403 from the real, captured wire shape names both known
+// causes without picking, and the apply still succeeds with the failure
+// recorded in ungranted_members - a test that only checked the message
+// would pass an implementation that started erroring instead.
+func TestApplyProjectRoles_GrantWrite403NamesBothCausesAndConverges(t *testing.T) {
+	mock := &applyProjectRolesTestMock{
+		collaborators:       map[string]map[string]string{},
+		failGrantWith403For: map[string]bool{"alice@example.com": true},
+	}
+	server := httptest.NewServer(mock.handler(t))
+	t.Cleanup(server.Close)
+	client := &Client{BaseURL: server.URL, Token: "test-token", HTTPClient: server.Client()}
+
+	plan := cloudAccessProjectPlan{
+		Grants: []cloudAccessProjectGrant{{ProjectID: "prj_1", Email: "alice@example.com", Level: "write"}},
+	}
+
+	unmanaged, ungranted, diags := applyProjectRoles(context.Background(), client, plan, nil, false)
+	if diags.HasError() {
+		t.Fatalf("a 403 on a project-scope grant must not error the apply: %v", diags)
+	}
+	if len(unmanaged) != 0 {
+		t.Errorf("expected no unmanaged entries from a grant failure alone: %+v", unmanaged)
+	}
+	if len(ungranted) != 1 || ungranted[0].Email.ValueString() != "alice@example.com" {
+		t.Fatalf("expected alice@example.com recorded in ungranted_members: %+v", ungranted)
+	}
+	cloudAccessAssertBothCausesOrdered(t, ungranted[0].Reason.ValueString())
+}
+
+// TestApplyProjectRoles_RevokeWrite403NamesBothCausesAndConverges is AC-37 on
+// the revoke path (the per-collaborator DELETE), the other write route the
+// diagnostic must cover.
+func TestApplyProjectRoles_RevokeWrite403NamesBothCausesAndConverges(t *testing.T) {
+	mock := &applyProjectRolesTestMock{
+		collaborators: map[string]map[string]string{
+			"prj_1": {"toremove@example.com": "idn_toremove"},
+		},
+		failRevokeWith403For: map[string]bool{"idn_toremove": true},
+	}
+	server := httptest.NewServer(mock.handler(t))
+	t.Cleanup(server.Close)
+	client := &Client{BaseURL: server.URL, Token: "test-token", HTTPClient: server.Client()}
+
+	plan := cloudAccessProjectPlan{
+		Revokes: []cloudAccessProjectGrant{{ProjectID: "prj_1", Email: "toremove@example.com"}},
+	}
+	identityByFoldedEmail := map[string]cloudAccessRemoteMember{
+		"toremove@example.com": {Email: "toremove@example.com", UserID: "usr_toremove"},
+	}
+
+	unmanaged, ungranted, diags := applyProjectRoles(context.Background(), client, plan, identityByFoldedEmail, false)
+	if diags.HasError() {
+		t.Fatalf("a 403 on a project-scope revoke must not error the apply: %v", diags)
+	}
+	if len(ungranted) != 0 {
+		t.Errorf("expected no ungranted entries from a revoke failure alone: %+v", ungranted)
+	}
+	if len(unmanaged) != 1 || unmanaged[0].Email.ValueString() != "toremove@example.com" {
+		t.Fatalf("expected toremove@example.com recorded in unmanaged_grants: %+v", unmanaged)
+	}
+	cloudAccessAssertBothCausesOrdered(t, unmanaged[0].Reason.ValueString())
+}
+
+// TestCloudAccessProjectWrite403Reason_MutationProof is a permanent,
+// fast-running guard against the same regression the manual mutation proof
+// already confirmed once (temporarily short-circuiting
+// cloudAccessProjectWrite403Reason to `return detail`, byte-identical revert
+// after: both write-path tests above went red with exactly "reason does not
+// mention the token-permission cause" / "...backend cause", confirming the
+// assertion is not a placebo). This test keeps that check running on every
+// build without hand-editing source: it directly compares the real
+// function's output against what a naive bypass would produce.
+func TestCloudAccessProjectWrite403Reason_MutationProof(t *testing.T) {
+	statusErr := &UnexpectedStatusError{StatusCode: http.StatusForbidden, Body: cloudAccessProjectMockRealPermissionDenied403}
+
+	real := cloudAccessProjectWrite403Reason(statusErr)
+	cloudAccessAssertBothCausesOrdered(t, real) // must pass - this is the real function.
+
+	bypassed := extractAPIErrorDetail(statusErr) // what a naive "just pass the detail through" would produce.
+	t.Run("bypassed_diagnostic_fails_the_assertion", func(t *testing.T) {
+		mockT := &testing.T{}
+		cloudAccessAssertBothCausesOrdered(mockT, bypassed)
+		if !mockT.Failed() {
+			t.Fatal("the bypassed (detail-only) reason unexpectedly satisfied cloudAccessAssertBothCausesOrdered - " +
+				"the ordering assertion is not distinguishing the real diagnostic from no diagnostic at all")
+		}
+	})
+}
+
+// TestListProjectCollaborators_403IsAnOrdinaryDiagnostic is AC-38: the read
+// path (GET .../collaborators/users) gets no dual-cause branch. A 403 there
+// surfaces as an ordinary error - specifically, it must NOT contain the
+// backend-condition language the write-path diagnostic adds, since firing
+// there would describe a condition the read path cannot actually detect.
+func TestListProjectCollaborators_403IsAnOrdinaryDiagnostic(t *testing.T) {
+	mock := &applyProjectRolesTestMock{
+		collaborators:   map[string]map[string]string{},
+		failReadWith403: true,
+	}
+	server := httptest.NewServer(mock.handler(t))
+	t.Cleanup(server.Close)
+	client := &Client{BaseURL: server.URL, Token: "test-token", HTTPClient: server.Client()}
+
+	_, err := listProjectCollaborators(context.Background(), client, "prj_1")
+	if err == nil {
+		t.Fatal("expected an error from a 403 read, got none")
+	}
+	if strings.Contains(err.Error(), "authorization service") {
+		t.Errorf("the read path must not carry the write-path's dual-cause diagnostic: %v", err)
 	}
 }
