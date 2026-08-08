@@ -684,6 +684,27 @@ predate the write path and which were made with it in view.
 
 **J.18 comes first because it changes what the other rulings cost.**
 
+> **Status note, 2026-08-07 — J.18 is spent. The `cloudAccessWriteEnabled` gate has been removed.**
+>
+> The constraint below was met, not abandoned: the write path was enabled (#261) before any tag, so
+> no released version ever contained a read-only-only `anyscale_cloud_access`. With writes
+> permanently on, the gate variable could no longer be false, and a gate that cannot close is not a
+> safety mechanism — it is an unreachable branch keeping a refusal diagnostic alive that claimed the
+> write path had not shipped. Gate, refusal constants, and `refuseWriteWhileReadOnly` were removed
+> together.
+>
+> One hazard J.18 does **not** address was closed separately, and the distinction matters: J.18
+> governs *when* read and write ship. It says nothing about the Create ruling's own finding that an
+> authoritative first apply revokes people who appear nowhere in the plan and that this has no
+> available signal. `ModifyPlan` now supplies one — on create it names every member who would lose
+> access, warns rather than errors, reports explicitly when the member list could not be read instead
+> of appearing clean, and states that organization admins are unlistable (and equally unrevokable, so
+> its reach matches the apply's).
+>
+> **The reasoning below is left exactly as written.** It records why the gate existed and what
+> removing it required, which is not recoverable from code that no longer contains it. Read it as
+> history, not as current state.
+
 **J.18 — the read-only resource has never been released, and that must remain true until the write
 path ships.** `git tag --contains 5a220b1` is empty; the latest tag reachable from `main` is
 `v0.25.1`, which predates PR #260. `anyscale_cloud_access` therefore exists only on unreleased
