@@ -12,12 +12,14 @@
 # call; equivalently, you can import the same member instead:
 #   terraform import anyscale_organization_user.existing_user user@example.com
 #
-# This resource cannot create members - people join by invitation (see
-# anyscale_organization_invitation). It also cannot remove them: destroying
-# this resource for an adopted member (both examples below) removes nothing
-# from the organization - they keep full access, and a warning says so.
-# Revoking a real member has to happen from the Anyscale console; this
-# provider does not have that capability today.
+# If the declared person is not already a member, applying this resource
+# sends them an invitation - a human must still accept it before they
+# actually have access (see anyscale_organization_invitation, which offers
+# finer control over an invitation's own lifecycle). This resource cannot
+# remove members, though: destroying it for an adopted member (both
+# examples below) removes nothing from the organization - they keep full
+# access, and a warning says so. Revoking a real member has to happen from
+# the Anyscale console; this provider does not have that capability today.
 resource "anyscale_organization_user" "existing_user" {
   email = "user@example.com"
 }

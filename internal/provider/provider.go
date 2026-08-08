@@ -139,11 +139,11 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewComputeConfigResource,
 		NewCloudResourceResource,
 		NewCloudResource,
-		// anyscale_cloud_access is registered READ-ONLY: refresh and import work,
-		// and the three write methods refuse with an explicit error. See the
-		// cloudAccessWriteEnabled comment in resource_cloud_access.go for why the
-		// write path ships in its own release rather than this one. The design is
-		// in docs/decisions/rbac-surface-consolidation/README.md.
+		// anyscale_cloud_access is authoritative from the first apply: Create,
+		// Update and Delete manage real cloud access, and any member not declared
+		// is revoked. ModifyPlan discloses that revoke on create by naming who
+		// would lose access, since Read has never shown them any other way. See
+		// docs/decisions/rbac-surface-consolidation/README.md for the design.
 		NewCloudAccessResource,
 		NewProjectResource,
 		NewOrganizationInvitationResource,

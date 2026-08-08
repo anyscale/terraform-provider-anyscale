@@ -1,0 +1,16 @@
+```
+release-note:fixed
+resource/anyscale_organization_user: Fix the example's claim that this resource "cannot create members - people join by invitation" - it has invited a not-yet-member since v0.25.0. The example now describes the actual behavior: applying this resource for a non-member sends them an invitation, which they must still accept before they have access.
+```
+```
+release-note:fixed
+provider: README.md described anyscale_organization_user as "Organization collaborators (adopts or imports existing members; manages membership and role)" - the resource was renamed from anyscale_organization_collaborator, no longer manages role (that moved to anyscale_organization_user_role in v0.25.0), and understates its scope since it now invites. Corrected, and anyscale_organization_user_role - previously absent from README entirely - is now listed.
+```
+```
+release-note:fixed
+provider: The RBAC guide and the schema descriptions of anyscale_organization_user, anyscale_organization_user_role, anyscale_organization_invitation, and both organization_user data sources had no cross-links to each other, so a reader landing on any one page had no way to discover the others. Each now links to the RBAC guide, and the provider's landing page gains a guide index linking to it.
+```
+```
+release-note:fixed
+provider: The RBAC guide and the organization_user_workflow example described a for_each over a list of emails as merely "the closest thing to managing a group this provider has today," implying it was a workaround. It is the idiomatic pattern for managing a team's membership and roles together, and is now described as such; the example also now uses one locals map as the single source of truth for both the invitation and role loops rather than two independently-maintained lists.
+```

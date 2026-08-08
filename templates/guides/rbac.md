@@ -34,6 +34,45 @@ under incompatible authority models (one row vs. the whole set), and running bot
 cloud would mean `anyscale_cloud_access` silently revoking members `anyscale_cloud_user_role` thinks
 it still manages. There was never a version where declaring both was safe.
 
+## Managing a team without a group resource
+
+Anyscale groups exist (`/api/v2/user_groups`, org-scoped, with create/delete/set-roles) but cannot
+yet be populated - group membership is written only by WorkOS directory-sync events, and directory
+sync is not yet available to customers. A group nobody can join has nothing for a group resource to
+usefully wrap, which is why there is no `anyscale_group` resource here today. The recommended
+pattern is a `locals` map, keyed by email, that drives both the invitation loop and the role loop:
+
+```hcl
+locals {
+  ml_team = {
+    "dev1@example.com" = "collaborator"
+    "dev2@example.com" = "collaborator"
+    "lead@example.com" = "owner"
+  }
+}
+
+resource "anyscale_organization_invitation" "team_members" {
+  for_each = local.ml_team
+  email    = each.key
+}
+
+resource "anyscale_organization_user_role" "team_member_roles" {
+  for_each  = local.ml_team
+  email     = each.key
+  base_role = each.value
+}
+```
+
+One map is the single source of truth for the whole team: adding a teammate is one line, in one
+place, and every resource that reads the map follows. This is the idiomatic Terraform answer for
+this shape, not a workaround for a missing primitive. See the full staged workflow - invitation,
+then role, once the invitation is accepted - in
+[`examples/resources/organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/organization_user_workflow).
+
+`anyscale_organization_user_role` requires an already-accepted member, so the role loop above
+cannot apply in the same run as the invitation loop for someone who has not yet accepted - stage
+it as a second `apply` once invitations are accepted, not a sign anything here is incomplete.
+
 ## The vocabulary problem
 
 The organization, cloud, and project scopes don't just use different words for access levels - they

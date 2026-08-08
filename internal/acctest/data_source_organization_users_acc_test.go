@@ -10,6 +10,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
+// TestAccOrganizationUsersDataSource_Basic previously asserted only that
+// "users.#" was set, which holds even for an empty list - a data source that
+// returned zero rows, or rows with every field left empty, would pass
+// identically to a correctly working one. Replaced with a falsifiable
+// assertion per the RBAC test-gap review: every returned row must have a
+// non-empty id and email, which fails if the data source returns rows it did
+// not actually populate.
 func TestAccOrganizationUsersDataSource_Basic(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -21,12 +28,53 @@ func TestAccOrganizationUsersDataSource_Basic(t *testing.T) {
 			{
 				Config: testAccOrganizationUsersDataSourceBasicConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Should return at least some users
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_users.test", "users.#"),
+					testAccCheckAllOrgUsersHaveIDAndEmail("data.anyscale_organization_users.test"),
 				),
 			},
 		},
 	})
+}
+
+// orgUsersRowCount parses and validates usersResourceName's "users.#", shared
+// by every check below that scans the list by index - all of them need the
+// same resource lookup, count parse, and non-empty guard before their loop.
+func orgUsersRowCount(s *terraform.State, usersResourceName string) (*terraform.ResourceState, int, error) {
+	rs, ok := s.RootModule().Resources[usersResourceName]
+	if !ok {
+		return nil, 0, fmt.Errorf("resource not found: %s", usersResourceName)
+	}
+	count, err := strconv.Atoi(rs.Primary.Attributes["users.#"])
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to parse users.#: %w", err)
+	}
+	if count == 0 {
+		return nil, 0, fmt.Errorf("expected at least one user (the current user), got 0")
+	}
+	return rs, count, nil
+}
+
+// testAccCheckAllOrgUsersHaveIDAndEmail asserts every row in usersResourceName's
+// "users" list has a non-empty id and email - falsifiable against a data
+// source that returns unpopulated rows, unlike a bare users.# presence check.
+func testAccCheckAllOrgUsersHaveIDAndEmail(usersResourceName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, count, err := orgUsersRowCount(s, usersResourceName)
+		if err != nil {
+			return err
+		}
+		for i := 0; i < count; i++ {
+			id := rs.Primary.Attributes[fmt.Sprintf("users.%d.id", i)]
+			email := rs.Primary.Attributes[fmt.Sprintf("users.%d.email", i)]
+			if id == "" {
+				return fmt.Errorf("users.%d.id is empty - row was returned but not populated", i)
+			}
+			if email == "" {
+				return fmt.Errorf("users.%d.email is empty - row was returned but not populated", i)
+			}
+		}
+		return nil
+	}
 }
 
 func TestAccOrganizationUsersDataSource_UserFieldsPopulated(t *testing.T) {
@@ -158,16 +206,9 @@ func testAccCheckAllOrgUsersEmailContains(usersResourceName, filterResourceName,
 		}
 		filterValue := strings.ToLower(filterRS.Primary.Attributes[filterAttr])
 
-		rs, ok := s.RootModule().Resources[usersResourceName]
-		if !ok {
-			return fmt.Errorf("resource not found: %s", usersResourceName)
-		}
-		count, err := strconv.Atoi(rs.Primary.Attributes["users.#"])
+		rs, count, err := orgUsersRowCount(s, usersResourceName)
 		if err != nil {
-			return fmt.Errorf("failed to parse users.#: %w", err)
-		}
-		if count == 0 {
-			return fmt.Errorf("expected at least one user (the current user), got 0")
+			return err
 		}
 		for i := 0; i < count; i++ {
 			email := strings.ToLower(rs.Primary.Attributes[fmt.Sprintf("users.%d.email", i)])
@@ -189,16 +230,9 @@ func testAccCheckAllOrgUsersNameContains(usersResourceName, filterResourceName, 
 		}
 		filterValue := strings.ToLower(filterRS.Primary.Attributes[filterAttr])
 
-		rs, ok := s.RootModule().Resources[usersResourceName]
-		if !ok {
-			return fmt.Errorf("resource not found: %s", usersResourceName)
-		}
-		count, err := strconv.Atoi(rs.Primary.Attributes["users.#"])
+		rs, count, err := orgUsersRowCount(s, usersResourceName)
 		if err != nil {
-			return fmt.Errorf("failed to parse users.#: %w", err)
-		}
-		if count == 0 {
-			return fmt.Errorf("expected at least one user (the current user), got 0")
+			return err
 		}
 		for i := 0; i < count; i++ {
 			name := strings.ToLower(rs.Primary.Attributes[fmt.Sprintf("users.%d.name", i)])

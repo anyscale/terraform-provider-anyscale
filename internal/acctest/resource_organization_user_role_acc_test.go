@@ -1,6 +1,7 @@
 package acctest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // mockOrgUserRoleServer is a scripted stand-in for the organization
@@ -301,18 +303,22 @@ resource "anyscale_organization_user_role" "mock" {
 // value-only check and still contradict R9's "never asserted authority"
 // contract).
 //
-// CURRENTLY FAILS against the shipped code, and that failure is the finding:
-// denyRolesDeclared(state.DenyRoles) in Delete checks STATE, but Read always
+// Was a red acceptance criterion, not a passing test, when first written:
+// denyRolesDeclared(state.DenyRoles) in Delete checked STATE, but Read always
 // repopulates state.DenyRoles from the observed backend value regardless of
 // what config declared, and a destroy refreshes (Reads) first - so by the
-// time Delete runs, state.DenyRoles is essentially never null, the omitted
-// branch never fires, and destroy clears deny_roles unconditionally.
+// time Delete ran, state.DenyRoles was essentially never null, the omitted
+// branch never fired, and destroy cleared deny_roles unconditionally.
 // resource.DeleteRequest has no Config/Plan field (framework-verified via go
-// doc) to check instead. This is the acceptance criterion for the fix, not a
-// broken test to work around - leave it red until Delete's authority check
-// is rebuilt on something that survives into Delete (e.g. resp.Private set
-// during Create/Update, per the proposed fix), then it should go green
-// with no change to the assertions themselves.
+// doc) to check instead.
+//
+// Fixed since: Create and Update now derive the routing decision from
+// req.Config (denyRolesDeclaredInConfig), not Plan or State, and persist it to
+// resp.Private (recordDenyRolesDeclared); Delete reads it back via
+// denyRolesWereDeclared(ctx, req.Private) - a value that survives into Delete
+// unchanged by refresh. Verified 2026-08-07: this test passes today, and the
+// mutation this comment used to describe (basing the check on state) would
+// fail it again if reintroduced. No change to the assertions themselves.
 func TestAccOrganizationUserRoleResource_DestroyLeavesOmittedDenyRolesUntouched(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -369,11 +375,16 @@ resource "anyscale_organization_user_role" "mock" {
 // ungated legacy one - the exact failure Optional+Computed was chosen to
 // avoid, reintroduced by the UseStateForUnknown fix for plan stability.
 //
-// CURRENTLY FAILS against the shipped code for the same reason as the
-// Delete test above: the fix is to select the path from Config in both
-// Create and Update, not Plan. Distinguishing the two paths by mock call
+// Was a red acceptance criterion for the same reason as the Delete test
+// above, when first written: the fix is to select the path from Config in
+// both Create and Update, not Plan. Distinguishing the two paths by mock call
 // count (not just the end value) is deliberate - a value-preserving SET
 // through the wrong endpoint would still pass a value-only check.
+//
+// Fixed since: both Create and Update call denyRolesDeclaredInConfig(ctx,
+// req.Config) and pass the result into writeOrganizationRole - never derived
+// from Plan, which UseStateForUnknown would otherwise carry forward from a
+// prior declaration. Verified 2026-08-07: this test passes today.
 func TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesStaysOnLegacyPath(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -587,4 +598,231 @@ resource "anyscale_organization_user_role" "mock" {
 			},
 		},
 	})
+}
+
+// TestAccOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles is
+// this resource's first import test. ImportState was implemented with zero
+// import coverage before this - the largest untested implemented path on the
+// surface per the RBAC assessment.
+//
+// What this test can and cannot prove, verified directly rather than assumed:
+// `terraform import` always performs an automatic Read (refresh) immediately
+// after ImportState, so whatever ImportState itself wrote to state is
+// overwritten by Read's own result before ImportStateCheck ever sees it -
+// confirmed empirically by mutating ImportState to set deny_roles to an empty
+// list and observing ImportStateCheck still receive the real value. So this
+// test does NOT isolate ImportState's hydration from Read's (that pair is
+// covered separately - see TestOrganizationUserRoleImportState_RecoversFromSingularEndpoint
+// in the provider package, which calls ImportState directly with no refresh
+// involved). What this test DOES prove, and did not exist at all before it:
+// that `terraform import <email>` resolves the right collaborator end to end
+// - the two-ID (identity_id/user_id) resolution, the schema round-trip, and
+// ImportStateVerify's comparison against Create's own state all actually
+// work for this resource, none of which a unit test calling ImportState
+// directly would exercise.
+func TestAccOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	mock.baseRole = "collaborator"
+	mock.additionalRoles = []string{"image_reader"}
+	const addr = "anyscale_organization_user_role.mock"
+
+	config := testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
+resource "anyscale_organization_user_role" "mock" {
+  email      = %[1]q
+  base_role  = "collaborator"
+  deny_roles = ["image_reader"]
+}
+`, mock.email)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "base_role", "collaborator"),
+					resource.TestCheckResourceAttr(addr, "deny_roles.#", "1"),
+				),
+			},
+			{
+				ResourceName:      addr,
+				ImportState:       true,
+				ImportStateId:     mock.email,
+				ImportStateVerify: true,
+				// ImportStateCheck runs in the same throwaway import directory as the
+				// import itself (see TF_IMPORTSTATEPERSIST notes in CLAUDE.md), so it
+				// sees what ImportState actually recovered rather than what Create left
+				// behind - the PLACEBO guard this test needs, since ImportStateVerify
+				// alone would still pass if ImportState silently returned Create's own
+				// cached values instead of making its own API calls.
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected exactly 1 imported instance, got %d", len(states))
+					}
+					s := states[0]
+					if s.Attributes["base_role"] != "collaborator" {
+						return fmt.Errorf("expected imported base_role=collaborator, got %q", s.Attributes["base_role"])
+					}
+					if s.Attributes["deny_roles.#"] != "1" || s.Attributes["deny_roles.0"] != "image_reader" {
+						return fmt.Errorf("expected imported deny_roles=[image_reader] (from the singular endpoint, not the list's hardcoded empty), got attrs: %v", s.Attributes)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// TestAccOrganizationUserRoleResource_ColdImportThenDestroyLeavesDenyRolesUntouched
+// covers the documented, deliberate consequence of ImportState never writing
+// the orgUserRoleDenyRolesDeclaredKey private-state entry: denyRolesWereDeclared
+// defaults to false when the key is absent, so a resource that was imported and
+// then destroyed WITHOUT an intervening Create/Update never clears deny_roles,
+// even though state shows them populated. That default is documented in
+// denyRolesWereDeclared's own comment as the safe direction (under-act, not
+// over-act) but had no test proving it holds through a real import - only
+// through Create, which always does record the key.
+func TestAccOrganizationUserRoleResource_ColdImportThenDestroyLeavesDenyRolesUntouched(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	mock.baseRole = "owner"
+	mock.additionalRoles = []string{"image_reader"}
+	const addr = "anyscale_organization_user_role.mock"
+
+	config := testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
+resource "anyscale_organization_user_role" "mock" {
+  email      = %[1]q
+  base_role  = "owner"
+  deny_roles = ["image_reader"]
+}
+`, mock.email)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Cold import as the FIRST step, against a resource pre-seeded on the
+				// mock backend out of band (never created through this Terraform run) -
+				// the only way to observe what ImportState alone leaves in private
+				// state, per CLAUDE.md's note that ImportStatePersist is required for
+				// this and refuses an address already managed in the working directory.
+				ResourceName:       addr,
+				ImportState:        true,
+				ImportStateId:      mock.email,
+				ImportStatePersist: true,
+				Config:             config,
+			},
+		},
+	})
+
+	baseRole, additionalRoles := mock.snapshot()
+	t.Logf("post-cold-import-destroy backend state: base_role=%s additional_roles=%v", baseRole, additionalRoles)
+	if baseRole != "owner" {
+		t.Fatalf("expected base_role left as owner, got %q", baseRole)
+	}
+	if len(additionalRoles) != 1 || additionalRoles[0] != "image_reader" {
+		t.Fatalf("expected deny_roles left untouched at [image_reader] since a cold import never recorded authority over them, got %v", additionalRoles)
+	}
+}
+
+// TestAccOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift is this
+// surface's first refresh-drift test: no test anywhere in the RBAC review
+// mutated the backend out of band and asserted the next plan is non-empty,
+// for any of the three registered resources. Mock-server, not real API, per
+// the RBAC test-gap review - mutating a real backend out of band mid-test
+// means touching a shared disposable identity with no sweeper to restore it,
+// which is exactly finding 5's hazard, and a mock gives a deterministic
+// backend-side change to assert against.
+//
+// Uses a custom plan check on the "before" value of base_role specifically,
+// not ExpectKnownValue or a bare ExpectNonEmptyPlan alone - confirmed the hard
+// way while writing this test. ExpectNonEmptyPlan alone passed against a
+// completely masked drift (Read discarding the backend's real value and
+// keeping the prior state's "collaborator"), because deny_roles' own
+// Optional+Computed/UseStateForUnknown shape produces a plan-shaped diff on
+// every refresh regardless of base_role - an incidental non-empty plan for an
+// unrelated reason. ExpectKnownValue on the planned base_role is equally
+// unfalsifiable here: config declares "collaborator" either way, so the
+// planned AFTER value is "collaborator" whether or not Read actually noticed
+// the drift. Only asserting the plan's BEFORE value is "owner" proves Read
+// carried the real backend value into state ahead of the plan.
+func TestAccOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	mock.baseRole = "collaborator"
+	const addr = "anyscale_organization_user_role.mock"
+
+	config := testAccProviderBlock(httpServer.URL) + fmt.Sprintf(`
+resource "anyscale_organization_user_role" "mock" {
+  email     = %[1]q
+  base_role = "collaborator"
+}
+`, mock.email)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(addr, "base_role", "collaborator"),
+			},
+			{
+				// Out-of-band change, equivalent to an admin changing the role
+				// through the console or CLI between applies. Mutating the mock
+				// directly, not through this resource, is the point. RefreshState
+				// alone proves the refresh itself surfaces the drift as a non-empty
+				// plan; it cannot also carry ConfigPlanChecks (mutually exclusive
+				// with Config in this framework version), so the specific-value
+				// assertion is on the step below instead.
+				PreConfig: func() {
+					mock.baseRole = "owner"
+				},
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				RefreshPlanChecks: resource.RefreshPlanChecks{
+					PostRefresh: []plancheck.PlanCheck{
+						expectPlanBeforeValue{addr: addr, attr: "base_role", want: "owner"},
+					},
+				},
+			},
+		},
+	})
+}
+
+// expectPlanBeforeValue asserts a resource's pre-change ("before") value for a
+// single top-level string attribute in the plan. Neither
+// plancheck.ExpectKnownValue (which reads the planned AFTER value) nor
+// ExpectNonEmptyPlan (which does not look at any specific attribute) can
+// distinguish "the plan changed this attribute because of real drift" from
+// "the plan is non-empty for an unrelated reason, and this attribute was
+// never actually re-read" - see the comment on
+// TestAccOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift for how
+// that gap was actually caught, not assumed.
+type expectPlanBeforeValue struct {
+	addr string
+	attr string
+	want string
+}
+
+func (e expectPlanBeforeValue) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	for _, rc := range req.Plan.ResourceChanges {
+		if rc.Address != e.addr {
+			continue
+		}
+		before, ok := rc.Change.Before.(map[string]interface{})
+		if !ok {
+			resp.Error = fmt.Errorf("%s: plan Before is not an object: %#v", e.addr, rc.Change.Before)
+			return
+		}
+		got, _ := before[e.attr].(string)
+		if got != e.want {
+			resp.Error = fmt.Errorf("%s: plan Before[%s] = %q, want %q - the refresh did not carry the real backend value into state", e.addr, e.attr, got, e.want)
+		}
+		return
+	}
+	resp.Error = fmt.Errorf("no plan change found for resource %s", e.addr)
 }
