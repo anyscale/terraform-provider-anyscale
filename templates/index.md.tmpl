@@ -51,4 +51,21 @@ The provider resolves an API token in the following order:
 The first one found wins; later methods are only checked if earlier ones are unset. See the
 [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate a token.
 
+## Guides
+
+Getting started:
+
+- [Create a VM Cloud](guides/create-a-vm-cloud.md) - register an AWS VM cloud with Anyscale from scratch.
+- [Create a GCP VM Cloud](guides/create-a-vm-cloud-gcp.md) - register a GCP VM cloud with Anyscale from scratch.
+- [Create a Kubernetes Cloud](guides/create-a-kubernetes-cloud.md) - register an AWS EKS cloud, including the Anyscale Operator and Gateway install.
+- [Kitchen Sink: A Tour of the Full Provider Surface](guides/kitchen-sink-tour.md) - every resource and data source this provider registers, wired together.
+
+Behavior & limitations:
+
+- [RBAC: Roles Across Organizations, Clouds, and Projects](guides/rbac.md) - how access control is split across the organization, cloud, and project scopes.
+- [Cloud Resources: Provider Support, Naming, and Known Limitations](guides/cloud-resources.md) - cloud provider support and naming differences between the Cloud resources and data sources.
+- [Compute Config: Versioning, Identity, and Write-Only Fields](guides/compute-config.md) - the versioning model and identity attributes behind the schema table.
+- [Container Images: Build vs. Register, Identity, and Lifecycle](guides/container-images.md) - build vs. register workflows and the `name_version` identifier.
+- [Project: Collaborator Removal and Known Limitations](guides/project.md) - why `anyscale_project`'s `collaborator` block was removed in v0.25.0 and where project access is managed instead.
+
 {{ .SchemaMarkdown | trimspace }}

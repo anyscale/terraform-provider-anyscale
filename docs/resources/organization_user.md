@@ -17,7 +17,7 @@ description: |-
   Directory-synced (SCIM) organizations
   If your organization has directory sync enabled and has opted into the Policy API, the Anyscale backend refuses to create invitations at all - this resource can still adopt and read existing members, but cannot add anyone, because your identity provider owns membership.
   Both conditions are required. A SCIM-enabled organization that has no Policy API bindings still uses the per-user path and can be invited through normally.
-  -> Roles are managed separately by anyscale_organization_user_role, which owns base_role and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role.
+  -> Roles are managed separately by anyscale_organization_user_role, which owns base_role and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role. See the RBAC guide ../guides/rbac.md for how access control is split across organizations, clouds, and projects.
 ---
 
 # anyscale_organization_user (Resource)
@@ -51,7 +51,7 @@ If your organization has directory sync enabled **and** has opted into the Polic
 
 Both conditions are required. A SCIM-enabled organization that has no Policy API bindings still uses the per-user path and can be invited through normally.
 
--> **Roles are managed separately** by `anyscale_organization_user_role`, which owns `base_role` and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role.
+-> **Roles are managed separately** by `anyscale_organization_user_role`, which owns `base_role` and the organization's deny roles. The two resources are deliberately split so only one of them ever writes a member's role. See the [RBAC guide](../guides/rbac.md) for how access control is split across organizations, clouds, and projects.
 
 ## Example Usage
 
@@ -70,12 +70,14 @@ Both conditions are required. A SCIM-enabled organization that has no Policy API
 # call; equivalently, you can import the same member instead:
 #   terraform import anyscale_organization_user.existing_user user@example.com
 #
-# This resource cannot create members - people join by invitation (see
-# anyscale_organization_invitation). It also cannot remove them: destroying
-# this resource for an adopted member (both examples below) removes nothing
-# from the organization - they keep full access, and a warning says so.
-# Revoking a real member has to happen from the Anyscale console; this
-# provider does not have that capability today.
+# If the declared person is not already a member, applying this resource
+# sends them an invitation - a human must still accept it before they
+# actually have access (see anyscale_organization_invitation, which offers
+# finer control over an invitation's own lifecycle). This resource cannot
+# remove members, though: destroying it for an adopted member (both
+# examples below) removes nothing from the organization - they keep full
+# access, and a warning says so. Revoking a real member has to happen from
+# the Anyscale console; this provider does not have that capability today.
 resource "anyscale_organization_user" "existing_user" {
   email = "user@example.com"
 }
