@@ -30,7 +30,7 @@ import (
 const defaultCloudAccessTimeout = 5 * time.Minute
 
 // anyscale_cloud_access - AUTHORITATIVE over one cloud's entire member list.
-// Full CRUD, write path enabled - see cloudAccessWriteEnabled's own history.
+// Full CRUD, write path enabled unconditionally.
 //
 // WHY THIS IS KEYED BY cloud_id AND NOT BY USER. Authority over a set requires
 // one resource owning that whole set, so the resource's key must be the set's
@@ -512,39 +512,10 @@ func (r *CloudAccessResource) Configure(ctx context.Context, req resource.Config
 // members exactly as Update does - Terraform is authoritative from the first
 // apply, not the second. The revoke never appears in a plan: a member in
 // neither config nor prior state is one Terraform has never read, so there
-// is nothing to diff against. The resource page is the only mitigation.
-//
-// cloudAccessWriteEnabled gates the write path. See
-// docs/decisions/rbac-surface-consolidation/README.md (J.18) for why it
-// existed and what enabling it required. A var rather than a const so the
-// branches below don't fold away as dead code under the linter.
-var cloudAccessWriteEnabled = true
-
-// cloudAccessWriteDisabledSummary and Detail are the refusal the three write
-// methods return while the gate above is closed.
-const (
-	cloudAccessWriteDisabledSummary = "Cloud Access Is Read-Only In This Provider Version"
-	cloudAccessWriteDisabledDetail  = "anyscale_cloud_access can refresh and import a cloud's member list, but cannot " +
-		"yet change it. Remove this resource from your plan, or use it only to read - importing is supported.\n\n" +
-		"Manage cloud and project access through the Anyscale console or API until the write path ships. It is withheld " +
-		"deliberately rather than incomplete: this resource is authoritative over a cloud's whole member list, so its " +
-		"write path revokes real people's access, and it is being validated against real clouds before it is allowed to."
-)
-
-// refuseWriteWhileReadOnly reports true when it has refused.
-func (r *CloudAccessResource) refuseWriteWhileReadOnly(diags *diag.Diagnostics) bool {
-	if cloudAccessWriteEnabled {
-		return false
-	}
-	diags.AddError(cloudAccessWriteDisabledSummary, cloudAccessWriteDisabledDetail)
-	return true
-}
-
+// is nothing to diff against. discloseFirstApplyRevoke (ModifyPlan) is the
+// mitigation for that - see its own comment - and the resource page states
+// the same limit for anyone reading state rather than a plan.
 func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	if r.refuseWriteWhileReadOnly(&resp.Diagnostics) {
-		return
-	}
-
 	var plan CloudAccessResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -738,10 +709,6 @@ func (r *CloudAccessResource) ImportState(ctx context.Context, req resource.Impo
 // Update is the same reconcile as Create. There is no difference in behavior
 // between the two, only in when Terraform calls them.
 func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	if r.refuseWriteWhileReadOnly(&resp.Diagnostics) {
-		return
-	}
-
 	var plan CloudAccessResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -842,10 +809,6 @@ func (r *CloudAccessResource) applyCloudAccess(
 // remove on the way out: destroy removes what the resource had authority over,
 // and it never had authority over a member it never saw.
 func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	if r.refuseWriteWhileReadOnly(&resp.Diagnostics) {
-		return
-	}
-
 	var state CloudAccessResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -1277,12 +1240,31 @@ func resolvedStringListValues(l types.List) []string {
 // omitted map from an empty one, since the accident produces exactly the empty
 // one - the opt-in has to live outside the data path it protects.
 func (r *CloudAccessResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Resolved once and threaded through both guards below that use it, rather
+	// than each independently calling GET /api/v2/userinfo - the caller check
+	// and the disclosure warning both run on the same create plan, and this is
+	// the only thing they'd otherwise both fetch.
+	var caller cloudAccessCallerIdentity
+	var callerErr error
+	if r.client != nil && !req.Plan.Raw.IsNull() {
+		caller, callerErr = fetchCloudAccessCallerIdentity(ctx, r.client)
+	}
+
 	// The caller check runs before the create/destroy short-circuit below, because
 	// declaring the caller is wrong on a create too - the empty-member-set guard is
 	// the thing that only makes sense with prior state, not this.
 	if !req.Plan.Raw.IsNull() {
-		r.refuseDeclaringTheCaller(ctx, req.Plan, &resp.Diagnostics)
+		r.refuseDeclaringTheCaller(ctx, req.Plan, caller, callerErr, &resp.Diagnostics)
 		r.refuseDeclaringOrgAdmins(ctx, req.Plan, &resp.Diagnostics)
+	}
+
+	// State null + Plan non-null is specifically a create: the one case where
+	// Read has never run against this cloud, so nothing has ever shown the
+	// practitioner who is about to be revoked. An update's revoke is already
+	// visible as an ordinary plan diff against prior state; this warning would
+	// be redundant there and is deliberately scoped out.
+	if req.State.Raw.IsNull() && !req.Plan.Raw.IsNull() {
+		r.discloseFirstApplyRevoke(ctx, req.Plan, caller, &resp.Diagnostics)
 	}
 
 	// No prior state means a create: there are no members to revoke, so an empty
@@ -1368,7 +1350,9 @@ func (r *CloudAccessResource) ModifyPlan(ctx context.Context, req resource.Modif
 // apply is safe during that apply. A colleague who ran it last week and is not
 // declared in the configuration is still revoked, correctly - that is the
 // resource's contract.
-func (r *CloudAccessResource) refuseDeclaringTheCaller(ctx context.Context, plan tfsdk.Plan, diags *diag.Diagnostics) {
+func (r *CloudAccessResource) refuseDeclaringTheCaller(
+	ctx context.Context, plan tfsdk.Plan, caller cloudAccessCallerIdentity, callerErr error, diags *diag.Diagnostics,
+) {
 	if r.client == nil {
 		return
 	}
@@ -1381,8 +1365,7 @@ func (r *CloudAccessResource) refuseDeclaringTheCaller(ctx context.Context, plan
 		return
 	}
 
-	caller, err := fetchCloudAccessCallerIdentity(ctx, r.client)
-	if err != nil || caller.Email == "" {
+	if callerErr != nil || caller.Email == "" {
 		return
 	}
 	callerEmail := cloudAccessFoldEmail(caller.Email)
@@ -1467,6 +1450,127 @@ func (r *CloudAccessResource) refuseDeclaringOrgAdmins(ctx context.Context, plan
 				"though it cannot catch every case.", email),
 		)
 	}
+}
+
+// discloseFirstApplyRevoke names, at plan time, every remote member of this
+// cloud who is not declared in the plan's member map - the set Create's
+// authoritative reconcile is about to revoke, on THIS apply, before Read has
+// ever shown them to the practitioner any other way.
+//
+// Always a Warning, never an Error: a legitimate first apply over a cloud
+// nobody has managed with Terraform before must still be able to proceed.
+// This exists to make that apply's consequences visible, not to block it.
+//
+// Skips (rather than warns) when cloud_id or member is unresolved - both are
+// Required attributes that can still be Unknown when computed from another
+// resource, and there is nothing to read yet; Terraform re-plans once they
+// are known and this runs again then.
+//
+// caller is resolved once by ModifyPlan and passed in rather than fetched
+// here, since refuseDeclaringTheCaller needs the same identity on the same
+// plan; a caller that could not be resolved arrives as the zero value, which
+// cloudAccessFirstApplyRevokeSet's use of it below already treats as "matches
+// nobody" - the same safer-failure-direction behavior as before, without a
+// second GET /api/v2/userinfo to get it.
+func (r *CloudAccessResource) discloseFirstApplyRevoke(
+	ctx context.Context, plan tfsdk.Plan, caller cloudAccessCallerIdentity, diags *diag.Diagnostics,
+) {
+	if r.client == nil {
+		return
+	}
+
+	var cloudID types.String
+	if getDiags := plan.GetAttribute(ctx, path.Root("cloud_id"), &cloudID); getDiags.HasError() {
+		return
+	}
+	if cloudID.IsUnknown() || cloudID.ValueString() == "" {
+		return
+	}
+
+	var member types.Map
+	if getDiags := plan.GetAttribute(ctx, path.Root("member"), &member); getDiags.HasError() {
+		return
+	}
+	if member.IsUnknown() {
+		return
+	}
+
+	// A null or empty member map is not skipped here the way the other guards
+	// skip it - declaring nobody is exactly the case where every remote member
+	// would be revoked, so it is the case this warning most needs to fire for.
+	declared := make(map[string]bool, len(member.Elements()))
+	for email := range member.Elements() {
+		declared[cloudAccessFoldEmail(email)] = true
+	}
+
+	revoked, determined, err := cloudAccessFirstApplyRevokeSet(ctx, r.client, cloudID.ValueString(), declared, caller)
+	if !determined {
+		// FAILS LOUDLY rather than skipping silently - a silent skip here would
+		// recreate the exact undisclosed-revoke hazard this warning exists to
+		// remove, while looking identical in plan output to "nobody else has
+		// access". Same determined-flag shape as organizationRequiresSSO, for the
+		// same reason: false-because-checked and false-because-could-not-check
+		// must never collapse into the same value.
+		diags.AddWarning(
+			"Cloud Access Disclosure Did Not Run",
+			fmt.Sprintf("This create is authoritative and will revoke any existing member of cloud %s not declared "+
+				"in `member`, including on this first apply - but the current member list could not be read, so this "+
+				"plan CANNOT NAME who that would be. Reading it failed: %s\n\n"+
+				"Nothing here blocks the apply. If you proceed, it does so without the protection this warning "+
+				"exists to provide. Re-run `terraform plan` once the read succeeds, and review who it names, before "+
+				"applying against a cloud you have not already reviewed some other way.",
+				cloudID.ValueString(), extractAPIErrorDetail(err)),
+		)
+		return
+	}
+	if len(revoked) == 0 {
+		return
+	}
+
+	diags.AddWarning(
+		"This Apply Will Revoke Existing Cloud Members",
+		fmt.Sprintf("Cloud %s currently has %d member(s) with access who are NOT declared in `member`: %s\n\n"+
+			"Because this resource is authoritative over the cloud's whole member list, creating it revokes all of "+
+			"them - on this first apply, before any earlier plan has ever shown them to you. Add any who should "+
+			"keep access to `member` before applying.\n\n"+
+			"This list cannot include organization admins: the endpoint it is read from never reports them, so a "+
+			"real admin is invisible here in exactly the same way they are invisible to Create's own reconcile - "+
+			"neither can see or revoke one. This warning's coverage therefore matches what this apply can actually "+
+			"affect.", cloudID.ValueString(), len(revoked), strings.Join(revoked, ", ")),
+	)
+}
+
+// cloudAccessFirstApplyRevokeSet returns the remote members of cloudID who are
+// not in declared (folded emails) and are not caller - the set Create's
+// reconcile would revoke. Same exclusion logic as reconcileCloudAccess's own
+// toRevoke computation (cloud_access_reconcile.go), including caller.matches,
+// but over an email-only declared set rather than the reconcile's full
+// per-member role data, since this only ever names who, never writes a role.
+//
+// A caller that could not be resolved arrives as the zero value; matches
+// returns false for it against any member, so the caller (if present in
+// remote) is reported here rather than silently dropped - the safer failure
+// direction, since the caller already knows they are running this apply.
+//
+// determined=false means the member-list read itself failed and revoked must
+// not be trusted or treated as "read and found nobody"; callers must branch on
+// determined before looking at revoked, not on len(revoked) or err alone.
+func cloudAccessFirstApplyRevokeSet(
+	ctx context.Context, client *Client, cloudID string, declared map[string]bool, caller cloudAccessCallerIdentity,
+) (revoked []string, determined bool, err error) {
+	remote, err := listCloudAccessMembers(ctx, client, cloudID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	for _, m := range remote {
+		if caller.matches(m) || declared[cloudAccessFoldEmail(m.Email)] {
+			continue
+		}
+		revoked = append(revoked, m.Email)
+	}
+	sort.Strings(revoked)
+	return revoked, true, nil
 }
 
 // readScopedProjectRoles reads the collaborators of every project already named
