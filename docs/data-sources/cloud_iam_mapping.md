@@ -28,7 +28,7 @@ Reads the current dataplane IAM mapping of one Anyscale cloud deployment - the o
 - `fallback_rule` (String) What happens when no rule in `rules` matches: `CLOUD_DEFAULT` or `FAIL`. Null when `rules` is empty.
 - `id` (String) `<cloud_id>/<cloud_resource_id>`.
 - `mode` (String) The mapping's server-derived mode, currently always `CUSTOMER_MANAGED` once any rule exists. Null when `rules` is empty.
-- `rules` (Attributes List) The mapping's rules, in the order they are evaluated - the first matching rule wins. Empty when the cloud has no mapping configured. (see [below for nested schema](#nestedatt--rules))
+- `rules` (Attributes List) The mapping's rules, in the order they are evaluated - the first matching rule wins. Null when the cloud has no mapping configured. (see [below for nested schema](#nestedatt--rules))
 
 <a id="nestedatt--rules"></a>
 ### Nested Schema for `rules`

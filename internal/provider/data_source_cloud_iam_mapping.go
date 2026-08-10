@@ -69,7 +69,7 @@ func (d *CloudIAMMappingDataSource) Schema(ctx context.Context, req datasource.S
 			"rules": schema.ListNestedAttribute{
 				Computed: true,
 				MarkdownDescription: "The mapping's rules, in the order they are evaluated - the first matching " +
-					"rule wins. Empty when the cloud has no mapping configured.",
+					"rule wins. Null when the cloud has no mapping configured.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"selector": schema.StringAttribute{
