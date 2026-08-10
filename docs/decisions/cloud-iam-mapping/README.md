@@ -321,42 +321,36 @@ raw endpoint calls, *not* through the provider):
 | --- | --- |
 | `dataplane_iam_mapping` on an unmapped cloud | literally `{}` — not null, not absent |
 | PUT resending `user_tag_annotation_prefix` alongside a new rule | both survive; independent GET agrees |
+| **PUT omitting `user_tag_annotation_prefix` entirely** (negative control) | **field comes back absent — the backend CLOBBERS it** |
 | `mode` on write | server-stamps `CUSTOMER_MANAGED` |
 | **Destroy: non-empty spec with `rules` omitted** | **mapping cleared, prefix intact, no 400** |
 
-That last row is the decisive one: it closes the empty-spec no-op trap with evidence rather than
-reasoning.
+Two of those rows carry the weight. The destroy row closes the empty-spec no-op trap with evidence
+rather than reasoning. The negative-control row establishes that the read-modify-write is
+**necessary, not merely defensive** — the collateral-wipe hazard this design is built around is real,
+observed on a live cloud, rather than inferred from source.
 
-**Not run, and load-bearing:**
+Together with the regression test that asserts on the **outgoing PUT request body** — proving the
+client always resends the prefix it read, and mutation-proven by deleting the resend line — those two
+halves form a complete proof: the client always resends, and the server destroys the field when it
+does not. Neither half alone would do it. (An earlier revision of this document claimed the missing
+control left that regression test able to "pass for the wrong reason." That was wrong: the test's
+assertion target is the request body, not anything the mock reflects back, so its validity never
+depended on the control. The control establishes necessity, which is a different and narrower thing.)
 
-1. **The `user_tag_annotation_prefix` negative control** — no capture omits the prefix, so nothing
-   observed establishes that omitting it *clears* the field.
+**Still not run — the one real gap:**
 
-   What this does **not** undermine: the preservation regression test asserts on the **outgoing PUT
-   request body** the client constructs, not on anything the mock reflects back. It proves "the write
-   always resends the prefix it read," which holds regardless of how the backend treats an omitted
-   field, and it is mutation-proven — deleting the resend line makes it fail. So the test protects
-   the invariant on its own terms and does not depend on this capture. An earlier revision of this
-   document argued the missing control left that test able to "pass for the wrong reason"; that was
-   wrong, and the reason it was wrong is the assertion target.
-
-   What the control would still buy, and it is narrower: confirmation that resending is *necessary*
-   rather than merely defensive — i.e. that the hazard the design is built around is real. Source
-   says it is: `cloud_config_service.go:56-58` assigns the field unconditionally from the decoded
-   change, so an omitted field decodes to the zero value and overwrites, which rests on undisputed Go
-   and `encoding/json` semantics. Skipping the capture on that basis is permissible under the repo's
-   own gate policy **only if stated explicitly**, which is what this paragraph is. The practical
-   consequence of being wrong is small: the resend would be redundant rather than dangerous.
-2. **The resource-level lifecycle and import acceptance tests** — never run against a real cloud,
+1. **The resource-level lifecycle and import acceptance tests** — never run against a real cloud,
    because the environment lacked working AWS/GCP credentials (an Anyscale API token alone is not
    enough). Consequence, stated plainly: **no `terraform apply` has ever been executed against this
    resource.** Everything green so far is source-tracing, unit tests, mock-server tests, and raw-API
    captures. Acceptance criteria 1–6, 9 and 10 above are therefore *specified and unexercised*, and
    the two-test import shape in criterion 9 in particular has never run.
 
-Neither gap is a reason to redesign anything. Both are reasons not to describe this as verified
+This gap is not a reason to redesign anything. It is a reason not to describe the feature as verified
 end-to-end, and criterion 9's import coverage should be treated as outstanding work rather than
-satisfied.
+satisfied. Both API-level gates are closed with logged evidence; what remains unexercised is the
+provider's own plan/apply path, which no amount of further mock coverage substitutes for.
 
 ## Alternatives rejected
 
