@@ -110,11 +110,36 @@ func TestCloudAccessMockRefusesUnrevokableRevoke(t *testing.T) {
 	// ordinary member must still be revokable. Without this, a mock that
 	// refused EVERY revoke would satisfy every check above while being just
 	// as broken - the resource could never revoke anyone.
+	//
+	// Granting goes through the real two-call shape the resource actually
+	// uses (grantCloudAccessMember): the bootstrap POST establishes
+	// membership first, then the roles PUT sets base_role/deny_roles by
+	// user_id - there is no email field on the roles PUT at all
+	// (SetCloudRolesRequest is {base_role, deny_roles}), and the grantee is
+	// identified by the user_id path segment alone. alice@example.com is
+	// seeded in this server's orgMembers with user_id usr_mock_alice; using a
+	// literal "usr_alice" here would silently grant a different, unrelated
+	// user_id.
 	const ordinary = "alice@example.com"
+	const ordinaryUserID = "usr_mock_alice"
+	bootstrap, err := server.Client().Do(mustNewRequest(t,
+		http.MethodPost,
+		fmt.Sprintf("%s/api/v2/clouds/%s/collaborators/users", server.URL, cloudAccessMockCloudID),
+		`{"email":"`+ordinary+`","permission_level":"readonly"}`,
+	))
+	if err != nil {
+		t.Fatalf("bootstrap membership for %s: %v", ordinary, err)
+	}
+	_, _ = io.Copy(io.Discard, bootstrap.Body)
+	_ = bootstrap.Body.Close()
+	if bootstrap.StatusCode != http.StatusOK {
+		t.Fatalf("bootstrap membership for %s: status %d, want 200", ordinary, bootstrap.StatusCode)
+	}
+
 	grant, err := server.Client().Do(mustNewRequest(t,
 		http.MethodPut,
-		fmt.Sprintf("%s/api/v2/clouds/%s/collaborators/users/usr_alice/roles", server.URL, cloudAccessMockCloudID),
-		`{"email":"`+ordinary+`","permission_level":"write"}`,
+		fmt.Sprintf("%s/api/v2/clouds/%s/collaborators/users/%s/roles", server.URL, cloudAccessMockCloudID, ordinaryUserID),
+		`{"base_role":"write","deny_roles":[]}`,
 	))
 	if err != nil {
 		t.Fatalf("grant %s: %v", ordinary, err)
