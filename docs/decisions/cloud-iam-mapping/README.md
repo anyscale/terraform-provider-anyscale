@@ -338,19 +338,39 @@ control left that regression test able to "pass for the wrong reason." That was 
 assertion target is the request body, not anything the mock reflects back, so its validity never
 depended on the control. The control establishes necessity, which is a different and narrower thing.)
 
-**Still not run — the one real gap:**
+**Exercised through the provider against a real cloud** (real ephemeral AWS VM cloud, provisioned
+from `examples/aws-vm-basic`, destroyed afterwards and confirmed 404 from the API — never the shared
+static fixture):
 
-1. **The resource-level lifecycle and import acceptance tests** — never run against a real cloud,
-   because the environment lacked working AWS/GCP credentials (an Anyscale API token alone is not
-   enough). Consequence, stated plainly: **no `terraform apply` has ever been executed against this
-   resource.** Everything green so far is source-tracing, unit tests, mock-server tests, and raw-API
-   captures. Acceptance criteria 1–6, 9 and 10 above are therefore *specified and unexercised*, and
-   the two-test import shape in criterion 9 in particular has never run.
+| Criterion | How it was exercised |
+| --- | --- |
+| 1, 3 — create, then in-place update | create with one rule, then update a rule's `value` and add a second; both planned in place, no replacement |
+| 2 — order preserved | asserted positionally on `rules.0` / `rules.1` after the update |
+| 5 — destroy reverts for real | `CheckDestroy` re-reads the config **from the API** and asserts `rules` cleared, rather than inferring it from absence in state |
+| 9 — import round-trip | the **two-test shape**: import as the *first* step with `ImportStatePersist` and an `ImportStateCheck` assertion inside that step, for **both** ID forms (`<cloud_id>/<cloud_resource_id>` and bare `<cloud_id>` exercising the real primary-resolution path); plus a separate two-`Config`-step plan-stability test with no import step |
 
-This gap is not a reason to redesign anything. It is a reason not to describe the feature as verified
-end-to-end, and criterion 9's import coverage should be treated as outstanding work rather than
-satisfied. Both API-level gates are closed with logged evidence; what remains unexercised is the
-provider's own plan/apply path, which no amount of further mock coverage substitutes for.
+The mapping is seeded **out of band with a raw PUT** before each import test, which is what makes the
+import genuinely cold — Terraform cannot both create the object and cold-import it, since `terraform
+import` refuses an address already managed in that working directory.
+
+The `CheckDestroy` row is the one that matters most: it is the only assertion in the whole suite that
+would catch the empty-spec no-op *through the provider*, because a destroy that silently does nothing
+still leaves state perfectly clean.
+
+**Remaining, and both narrow:**
+
+1. **Criterion 10 (ambiguous primary) is unit-covered only.** Forcing a real cloud with zero or
+   multiple `is_default` deployments was judged not cost-justified. Reasonable, and recorded here so
+   it is not later mistaken for real-infra coverage.
+2. **This suite is an on-demand harness, not continuous protection.** It skips without
+   `ANYSCALE_TEST_REAL_INFRA` and skips again unless a real cloud with a default cloud resource is
+   already available — it does not provision one, because that needs real assumable cloud IAM roles.
+   So the honest characterization is "verified once, reproducible on demand," not "guarded on every
+   PR." The mock-backed plan-stability acceptance tests *are* continuous, and they match CI's
+   `^TestAcc[A-Za-z]+Resource` shard so they genuinely run rather than silently never running.
+
+Nothing here is a reason to redesign. Every acceptance criterion except 10 now has real evidence
+behind it at the layer it was written for.
 
 ## Alternatives rejected
 
