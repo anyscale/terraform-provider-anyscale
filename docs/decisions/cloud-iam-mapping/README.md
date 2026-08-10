@@ -167,8 +167,26 @@ as a block on `anyscale_cloud_resource`, whose config blocks are deliberately no
 
 `dataplane_iam_mapping` has **no `omitempty`** (`cloud_config_model.go:19`), so `GET` always emits
 the key — as `{}` when unset (the CLI's own documented example output shows
-`"dataplane_iam_mapping": {}`, `cloud_commands.py:1236`). Map `{}` to null/empty rather than letting
-it materialize as an empty-rules diff, per the repo's null-vs-empty contract.
+`"dataplane_iam_mapping": {}`, `cloud_commands.py:1236`).
+
+**Null is canonical for "no rules," and an explicit empty list must be rejected at plan time.**
+An earlier revision of this document said to map `{}` to "null/empty" without choosing, which is not
+a specification — it permits both spellings while the API can represent only one, and the resulting
+gap is a plan that never converges. Concretely: `rules` is non-Computed, so a config declaring
+`rules = []` diffs against a `Read` that returns null on every plan, forever.
+
+So:
+
+- `Read` returns a **null** list when the mapping has no rules. Never an empty-but-non-nil list — a
+  cloud that never had a mapping would otherwise show a phantom empty-rules diff.
+- A config **omitting** `rules` is valid and meaningful: it asserts "this cloud has no IAM mapping,"
+  and because `Read` is real, someone adding rules out of band shows up as drift.
+- A config setting `rules = []` explicitly is **rejected in `ValidateConfig`**, with a diagnostic
+  pointing at omitting the attribute or destroying the resource. It is the same intent spelled a way
+  the API cannot round-trip.
+
+Do not "fix" this by making `rules` `Optional + Computed` to absorb the difference — that would
+silence the diff by hiding whether the practitioner's declared rules are actually in effect.
 
 **Update** — same `PUT`. Every rule and `fallback_rule` is mutable in place; resend the full desired
 list. No replacement is needed for any mapping change, and none should be used —
@@ -258,6 +276,10 @@ Written against observable behavior, so they can be exercised without reference 
    omits the field.
 7. **`fallback_rule` with no rules is rejected at plan time**, with a diagnostic naming the
    conflict — not accepted-then-silently-dropped.
+7a. **An explicit `rules = []` is rejected at plan time.** Separately, a config that *omits* `rules`
+   applies and then produces an **empty second plan** — two `Config`-only steps, no import. This is
+   the plan-stability test for the null-canonical rule above; without it the empty-list case
+   regresses silently into a permanent diff.
 8. **Invalid selector key / `workload-type` value is rejected at plan time**, without an API call.
 9. **Import round-trip.** Both `<cloud_id>/<cloud_resource_id>` and bare `<cloud_id>` import to a
    no-op plan for a config declaring the live rules. Per repo policy this needs the **two-test**
