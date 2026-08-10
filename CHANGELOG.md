@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-08-10
+
+### Breaking Changes
+
+- resource/anyscale_cloud_user_role: Removed and no longer available. Existing state can't be decoded, so run `terraform state rm` on any instance before upgrading - that only stops Terraform tracking it and does not change anyone's access. Running `terraform destroy` or removing the block and applying does revoke real access.
+
+### New Resources
+
+- resource/anyscale_cloud_access: Manage one Anyscale cloud's complete member list - each member's base_role, deny_roles, and their roles on the projects your configuration names. This resource is authoritative: anyone not declared in `member` is revoked, including on the first apply. `terraform plan` on a create names everyone that first apply would revoke; if it can't read the current members, it says so rather than looking clean. Manage each cloud from exactly one `anyscale_cloud_access` instance - two instances managing the same cloud revoke each other's members indefinitely, with no error from either. Drift detection has a real limit: a role changed through the console or CLI writes through a different store than this resource reads, so most such changes plan clean while the real role has moved. `unmanaged_grants` and `ungranted_members` are Computed diagnostics for a revoke or grant that couldn't complete - alert on `length(...) > 0` for either. See the resource documentation for the full structural-refusal list, the two-feature-flag gating behind a `501`, and other detail this note doesn't repeat.
+
+### Fixed
+
+- resource/anyscale_service: `terraform destroy` (and the destroy-then-create recovery it enables after a failed `apply`) no longer fails when the service is in an error state (`UNHEALTHY`, `SYSTEM_FAILURE`, or `USER_ERROR_FAILURE`); Delete now only treats those states as terminal while waiting for `RUNNING`, not `TERMINATED`, since a service being torn down can legitimately pass through an error state on its way to gone.
+- resource/anyscale_container_image_build: `terraform plan` no longer leaves an externally-archived container image build in state forever - Read's archived check looked at only a backend field this resource type never populates, so an image archived outside Terraform (console, or another Terraform run) was never removed from state.
+- resource/anyscale_container_image_registry: `terraform plan` no longer leaves an externally-archived container image registry in state forever - Read's archived check looked at only a backend field this resource type never populates, so an image archived outside Terraform (console, or another Terraform run) was never removed from state.
+- data-source/anyscale_container_image: Looking up a container image by name can no longer resolve to an archived image left behind by an archive-then-recreate-with-the-same-name sequence; archived rows are now actually excluded from the match instead of a broken check silently including them.
+- data-source/anyscale_container_images: `is_archived` now reflects whether a listed container image is actually archived; the check behind it looked at only a backend field this resource type never populates, so every image was reported as not archived regardless of its real state.
+- resource/anyscale_container_image_registry: `name` no longer forces a destroy-and-recreate on import, or on the next plan for a resource already in state, when a configuration omits it; `name` is now Computed, filled from the Create API response when omitted and recovered on Read when null, so both a fresh cold import and an existing resource created under a prior version self-heal without a re-import.
+- resource/anyscale_organization_user: The `id` attribute is the member email address, while the identically-named data source keys `id` on the identity ID. Neither page said so. The two agreed until v0.25.0 re-keyed this resource from identity ID to email; the documentation was not updated to note the resulting divergence. Both `id` attributes now state it, and point at `email` as the value this resource accepts.
+- data-source/anyscale_organization_user: The `id` attribute is the user identity ID, while the identically-named resource keys `id` on the email address. Neither page said so. The two agreed until v0.25.0 re-keyed the resource from identity ID to email; the documentation was not updated to note the resulting divergence. Both `id` attributes now state it, and this data source now points at its own `email` attribute as the value the resource accepts.
+- resource/anyscale_organization_user: Fix examples that taught importing by identity_id (which the resource rejects; import and the more common direct-declare-and-adopt path both use email) and that incorrectly implied destroying this resource removes the person from the organization (it does not - destroy is a no-op for an adopted member, matching the resource's own documented behavior).
+- resource/anyscale_organization_invitation: Fix an example pointing readers at a nonexistent permission_level argument on anyscale_organization_user for role-granting; the correct surface is anyscale_organization_user_role.base_role.
+- resource/anyscale_organization_user_role: Remove an unsourced claim that the organization roles API is unavailable on Azure regardless of the feature flag. The backend gates this endpoint on a feature flag alone; there is no Azure-specific check. No behavior change - only user-facing text (schema descriptions, the 501 error detail, and an example comment) was corrected.
+- resource/anyscale_organization_user: The example no longer claims this resource "cannot create members - people join by invitation." Applying it for a non-member sends them an invitation (since v0.25.0), which they must still accept before they have access.
+- provider: README now describes anyscale_organization_user accurately - it manages membership only, since role management moved to anyscale_organization_user_role in v0.25.0 - and lists anyscale_organization_user_role, previously missing entirely.
+- provider: anyscale_organization_user, anyscale_organization_user_role, anyscale_organization_invitation, and both organization_user data sources now link to the RBAC guide. The provider's landing page also gains an index linking to all nine guides, previously undiscoverable from any resource page.
+- provider: The RBAC guide and the organization_user_workflow example now present a locals map driving both the invitation and role loops as the idiomatic pattern for managing a team, not a workaround, as previously implied.
+
 ## [0.25.1] - 2026-08-04
 
 ### Fixed
@@ -991,7 +1019,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.25.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.26.0
 [0.25.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.25.1
 [0.25.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.25.0
 [0.24.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.24.1
