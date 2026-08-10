@@ -305,10 +305,51 @@ both are Gate 1 (API response shape), and neither is satisfied by a second sourc
    leaves it intact, and — as the negative control — that one omitting it does clear it. The second
    half is what proves the test can fail.
 
-Testability, per the validation lane: the **data source** may safely read the shared static test
-cloud. The **resource's** Create/Update/Destroy must run against a dedicated ephemeral cloud — an
-authoritative overwrite of a shared fixture's IAM mapping is exactly the shared-fixture mutation the
-repo forbids.
+Testability: the **data source** may safely read the shared static test cloud. The **resource's**
+Create/Update/Destroy must run against a dedicated ephemeral cloud — an authoritative overwrite of a
+shared fixture's IAM mapping is exactly the shared-fixture mutation the repo forbids.
+
+### Verification status as of this revision
+
+Recorded because "reviewed" and "verified" are different claims, and the difference here is not
+academic.
+
+**Confirmed against the real API** (logged request/response, dedicated ephemeral cloud, torn down;
+raw endpoint calls, *not* through the provider):
+
+| Fact | Result |
+| --- | --- |
+| `dataplane_iam_mapping` on an unmapped cloud | literally `{}` — not null, not absent |
+| PUT resending `user_tag_annotation_prefix` alongside a new rule | both survive; independent GET agrees |
+| `mode` on write | server-stamps `CUSTOMER_MANAGED` |
+| **Destroy: non-empty spec with `rules` omitted** | **mapping cleared, prefix intact, no 400** |
+
+That last row is the decisive one: it closes the empty-spec no-op trap with evidence rather than
+reasoning.
+
+**Not run, and load-bearing:**
+
+1. **The `user_tag_annotation_prefix` negative control** — no capture omits the prefix, so nothing
+   observed establishes that omitting it *clears* the field. This is not a correctness risk in
+   shipped code (the write always resends it), but it is what would certify the **mock** behind the
+   preservation regression test. "The prefix survived" is equally consistent with a backend that
+   clobbers an omitted prefix and with one that preserves it regardless; both produce the captures
+   above. If the second is true, that regression test passes for the wrong reason and does not
+   actually protect against a future maintainer dropping the resend. Source says the first is true —
+   `cloud_config_service.go:56-58` assigns the field unconditionally from the decoded change, so an
+   omitted field decodes to the zero value and overwrites — which rests on undisputed Go and
+   `encoding/json` semantics. Skipping the capture on that basis is permissible under the repo's own
+   gate policy **only if stated explicitly**, which is what this paragraph is.
+2. **The resource-level lifecycle and import acceptance tests** — never run against a real cloud,
+   because the environment lacked working AWS/GCP credentials (an Anyscale API token alone is not
+   enough). Consequence, stated plainly: **no `terraform apply` has ever been executed against this
+   resource.** Everything green so far is source-tracing, unit tests, mock-server tests, and raw-API
+   captures. Acceptance criteria 1–6, 9 and 10 above are therefore *specified and unexercised*, and
+   the two-test import shape in criterion 9 in particular has never run.
+
+Neither gap is a reason to redesign anything. Both are reasons not to describe this as verified
+end-to-end, and criterion 9's import coverage should be treated as outstanding work rather than
+satisfied.
 
 ## Alternatives rejected
 
