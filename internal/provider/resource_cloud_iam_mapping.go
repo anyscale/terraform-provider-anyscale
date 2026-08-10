@@ -130,8 +130,10 @@ func (r *CloudIAMMappingResource) Schema(ctx context.Context, req resource.Schem
 				MarkdownDescription: "The mapping's rules, evaluated in order - **the first matching rule wins, " +
 					"so order is semantic configuration, not incidental**. Reordering two rules in configuration " +
 					"produces a real plan diff, and that is intentional: it can change which IAM identity a " +
-					"workload receives. An empty or omitted list clears the mapping (equivalent to destroying this " +
-					"resource without removing it from configuration).",
+					"workload receives. Omit this attribute entirely to declare that this cloud has no IAM mapping - " +
+					"`Read` will show drift if one is added out of band. An explicit empty list (`rules = []`) is " +
+					"**rejected at plan time**: `null` is the only representation of \"no mapping\" this provider " +
+					"models, so an empty list could never converge to a stable plan.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"selector": schema.StringAttribute{
@@ -216,7 +218,25 @@ func (r *CloudIAMMappingResource) ValidateConfig(ctx context.Context, req resour
 		return
 	}
 
-	rulesEmpty := config.Rules.IsNull() || len(config.Rules.Elements()) == 0
+	// An explicit empty list can never converge: Read canonicalizes "no
+	// mapping" to null (dataplaneIAMMappingRulesToState), and rules is not
+	// Computed, so a config asserting rules = [] would diff against that
+	// null state on every single plan, forever. null is the only
+	// representation of "no mapping" this provider models - reject the
+	// other spelling here rather than let it ship silently.
+	if !config.Rules.IsNull() && len(config.Rules.Elements()) == 0 {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("rules"),
+			"rules must not be an explicit empty list",
+			"An explicit empty list (`rules = []`) never produces a stable plan: this provider canonicalizes "+
+				"\"no mapping\" to null on every Read, and rules is not Computed, so an empty-list config would "+
+				"diff against that null state forever. Omit this attribute entirely to declare that this cloud "+
+				"has no IAM mapping, or destroy this resource if one currently exists.",
+		)
+		return
+	}
+
+	rulesEmpty := config.Rules.IsNull()
 
 	if rulesEmpty {
 		if !config.FallbackRule.IsNull() && !config.FallbackRule.IsUnknown() {
