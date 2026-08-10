@@ -97,14 +97,14 @@ func cloudIAMMappingFindError(diags diag.Diagnostics, summary string) diag.Diagn
 	return nil
 }
 
-// TestCloudIAMMappingValidateConfig_ExplicitEmptyRulesRejected is Finding 1's
-// regression test (architect's integration review of 738752a): rules = []
-// can never converge, because Read canonicalizes "no mapping" to null and
-// rules is not Computed, so an empty-list config would diff against that
-// null state on every plan forever. This test FAILS against the version of
-// ValidateConfig that only checked len(Elements())==0 without also
-// distinguishing IsNull() - confirmed by temporarily reverting to that
-// shape and observing this test go red before restoring the fix.
+// TestCloudIAMMappingValidateConfig_ExplicitEmptyRulesRejected guards
+// against rules = [] ever being accepted: it can never converge, because
+// Read canonicalizes "no mapping" to null and rules is not Computed, so an
+// empty-list config would diff against that null state on every plan
+// forever. This test FAILS against a version of ValidateConfig that only
+// checks len(Elements())==0 without also distinguishing IsNull() - confirmed
+// by temporarily reverting to that shape and observing this test go red
+// before restoring the fix.
 func TestCloudIAMMappingValidateConfig_ExplicitEmptyRulesRejected(t *testing.T) {
 	diags := runCloudIAMMappingValidateConfig(t, cloudIAMMappingConfigModel(cloudIAMMappingEmptyRules(), types.StringNull()))
 
