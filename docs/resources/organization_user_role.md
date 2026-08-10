@@ -8,7 +8,7 @@ description: |-
   Destroying this resource does not revert base_role
   Destroy leaves the member at whatever base_role they currently have, and emits a warning naming them and that role. It does not demote them, because an organization member always has some base role - there is no "no role" state to return them to - and demoting an organization owner removes their implicit permissions across every cloud in the organization. If deny_roles was declared, destroy does clear it to empty, since an empty deny set is a real, reachable state this resource took authority over.
   A consequence worth stating plainly: because email forces replacement, correcting a typo in email leaves the previously-named person at the role Terraform gave them, permanently. Terraform destroys the old resource and creates a new one, and the destroy does not revert the role. Review the plan; the provider cannot distinguish a typo from a deliberate change of subject.
-  Organization roles are not cloud roles. The vocabularies differ and the same words mean different things at different scopes - collaborator is an organization base role and a cloud base role with different meanings. See the RBAC guide before mixing them.
+  Organization roles are not cloud roles. The vocabularies differ and the same words mean different things at different scopes - collaborator is an organization base role and a cloud base role with different meanings. See the RBAC guide ../guides/rbac.md before mixing them.
   deny_roles requires a feature that is not enabled in every organization. Managing base_role alone uses an endpoint that works everywhere. See the deny_roles description.
 ---
 
@@ -24,7 +24,7 @@ Destroy leaves the member at whatever `base_role` they currently have, and emits
 
 A consequence worth stating plainly: because `email` forces replacement, **correcting a typo in `email` leaves the previously-named person at the role Terraform gave them**, permanently. Terraform destroys the old resource and creates a new one, and the destroy does not revert the role. Review the plan; the provider cannot distinguish a typo from a deliberate change of subject.
 
-**Organization roles are not cloud roles.** The vocabularies differ and the same words mean different things at different scopes - `collaborator` is an organization base role *and* a cloud base role with different meanings. See the RBAC guide before mixing them.
+**Organization roles are not cloud roles.** The vocabularies differ and the same words mean different things at different scopes - `collaborator` is an organization base role *and* a cloud base role with different meanings. See the [RBAC guide](../guides/rbac.md) before mixing them.
 
 **`deny_roles` requires a feature that is not enabled in every organization.** Managing `base_role` alone uses an endpoint that works everywhere. See the `deny_roles` description.
 

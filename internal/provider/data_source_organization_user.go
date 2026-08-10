@@ -76,7 +76,7 @@ func (d *OrganizationUserDataSource) Schema(ctx context.Context, req datasource.
 
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.\n\n" +
-			"The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below.",
+			"The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below, and the [RBAC guide](../guides/rbac.md) for the fuller picture across scopes.",
 		Attributes: attributes,
 	}
 }

@@ -16,30 +16,53 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccCloudAccessResourceImportRoundTrip is the Criterion 1 import proof for
-// anyscale_cloud_access, written AHEAD of the resource per the ruling that
-// tests come before the reconcile logic they will guard. It is skipped today
-// because the write path is gated off, not because the resource is missing -
-// it is registered and its read path is live. See the t.Skip's own reason
-// before re-enabling it: the fixture's premise needs reworking, not just the
-// skip removed.
+// TestAccCloudAccessResourceImportRoundTrip is the Criterion 1 import proof
+// for anyscale_cloud_access. Originally written AHEAD of the resource on a
+// premise that turned out to be BACKWARDS once the real implementation
+// existed to check it against, and this comment is the corrected version -
+// see the git history for what it used to claim, rather than trusting a
+// paraphrase here.
 //
-// WHY THIS RESOURCE NEEDS ITS OWN IMPORT PROOF, HARDER THAN ANY OTHER.
+// THE RULING (recorded here so nobody "fixes" it back): import
+// recovers the FULL visible remote population, unfiltered - including
+// members the practitioner never declared anywhere. There is no "declared
+// set" for import to filter against in the first place: ImportState sets
+// id/cloud_id/allow_empty_member_set/unmanaged_grants/ungranted_members
+// directly and never touches `member` at all; the framework's automatic
+// post-import Read populates it via cloudAccessMembersToState with an EMPTY
+// prior, so every visible member comes back, with no way to distinguish
+// "declared" from "not" because nothing has been declared yet.
+//
+// Filtering import to some subset would be actively unsafe, not merely
+// different: state would then claim the cloud holds only the people already
+// known about, the plan would show no diff for anyone else, and they would be
+// revoked on the next apply with nothing to warn about it - the exact
+// invisible-revoke hazard this release's plan-time disclosure work exists to
+// close, except on the practitioner who did everything right and imported
+// first. Unfiltered import is what makes the plan honest: state holds the
+// true population, so a config that omits someone is a real, visible diff you
+// see before applying, not a silent future revoke. This matches
+// docs/resources/cloud_access.md's own import guidance verbatim ("import
+// first, write your configuration to match what came back... terraform plan
+// will show you the difference if it doesn't") - that guidance already
+// assumed unfiltered import, so no doc change was needed once the code
+// matched it.
+//
+// WHY THIS RESOURCE STILL NEEDS ITS OWN IMPORT PROOF, HARDER THAN MOST.
 // anyscale_cloud_access is AUTHORITATIVE over a cloud's ENTIRE member list:
 // anyone present on the cloud but absent from `member` is revoked on the next
-// apply. That inverts the usual import hazard. Everywhere else in this
-// provider, an import that fails to recover a value produces a spurious
-// replace (see resource_cloud_import_storage_acc_test.go). Here, an import
-// that recovers TOO MUCH - members the configuration does not declare - lands
-// state whose next plan proposes REVOKING REAL HUMANS' ACCESS to a real cloud.
-// The blast radius of getting import wrong on this resource is people locked
-// out, not infrastructure churn.
+// apply. So the failure mode this test guards against is the opposite of a
+// missing-value bug - it is import recovering TOO LITTLE (silently dropping a
+// real member), which would look identical to a correctly filtered import
+// right up until the next apply revoked someone nobody meant to touch.
 //
 // THE ASSERTION LIVES IN STEP 2's ImportStateCheck, and neither neighbouring
 // step can substitute for it:
-//   - ImportStateVerify compares imported state against what Create produced.
-//     If Create and ImportState are wrong the same way (both slurping the full
-//     backend list into `member`) it compares a bug to itself and passes.
+//   - ImportStateVerify is deliberately OFF: it would compare imported state
+//     against what Create produced, and those two are SUPPOSED to differ now
+//     (Create wrote 2 declared members; import correctly recovers all 3
+//     visible ones) - a verify comparing them would fail on the very
+//     divergence this test exists to prove is correct.
 //   - A trailing no-op plan step cannot see imported state at all.
 //     terraform-plugin-testing runs an ImportState step in a THROWAWAY working
 //     directory and discards it unless ImportStatePersist is set (its own doc
@@ -74,11 +97,11 @@ import (
 // and unit-covered by TestReconcileCloudAccess_AutoAddUserBlocksRevokes and
 // TestReconcileCloudAccess_DestroyDoesNotRefuseOnAutoAddUser, which set the
 // flag true on a mock cloud AND make the revoke path 409, per J.9. Unit-level
-// is the current ceiling only because the write gate (cloudAccessWriteEnabled)
-// is closed - Create and Update cannot run through the real resource at all
-// yet. AC-9 requires this refusal proven through the real resource once the
-// gate opens; that acceptance coverage is still owed and belongs in this file
-// or a sibling, not assumed satisfied by the unit tests above.
+// is the current ceiling not because of any gate - the write path runs
+// through the real resource in this file already - but because nobody has
+// written the acceptance test yet. AC-9 requires this refusal proven through
+// the real resource; that acceptance coverage is still owed and belongs in
+// this file or a sibling, not assumed satisfied by the unit tests above.
 //
 // No assertion here because this fixture's mock cloud carries
 // auto_add_user=false and its revoke path never 409s - a mock that ignores
@@ -117,6 +140,22 @@ type mockCloudAccessServer struct {
 	// Listed members are never deleted, however often revoke is called - that
 	// is what survives an authoritative Create. See the header.
 	unrevokable map[string]string
+	// orgMembers is the ORGANIZATION's membership, distinct from the cloud's
+	// members above - resolveIdentityForEmail (grantCloudAccessMember's first
+	// call) resolves against organization membership, not cloud membership,
+	// since a cloud role can only be granted to someone already in the org.
+	orgMembers map[string]struct{ identityID, userID string }
+	// callerUserID/callerEmail back /api/v2/userinfo, which
+	// fetchCloudAccessCallerIdentity requires unconditionally before any
+	// reconcile - without it every apply fails at "Could Not Identify The
+	// Calling Identity" before touching any cloud endpoint at all.
+	callerUserID, callerEmail string
+	// projectCollaborators is per-project-scoped state: projectID -> lowercased
+	// email -> {identity_id, permission_level}. Distinct from members above,
+	// which is cloud-scoped. Tracks the real granted permission_level, not a
+	// hardcoded value, the same way s.members/s.orgMembers track what was
+	// actually written rather than fabricating a constant on read.
+	projectCollaborators map[string]map[string]struct{ identityID, permissionLevel string }
 }
 
 // newMockCloudAccessServer serves the cloud-collaborator surface
@@ -181,6 +220,20 @@ func newMockCloudAccessServer(t *testing.T) *httptest.Server {
 		unrevokable: map[string]string{
 			cloudAccessMockImplicitMember: cloudAccessMockUnrevokableReason,
 		},
+		// alice and bob must already be organization members - a cloud role can
+		// only be granted to an existing org member (grantCloudAccessMember's
+		// first call, resolveIdentityForEmail, resolves against org
+		// membership, not cloud membership).
+		orgMembers: map[string]struct{ identityID, userID string }{
+			"alice@example.com": {identityID: "ide_mock_alice", userID: "usr_mock_alice"},
+			"bob@example.com":   {identityID: "ide_mock_bob", userID: "usr_mock_bob"},
+		},
+		// Deliberately a distinct identity from every declared/implicit member
+		// above, so the caller-exclusion logic never overlaps with what this
+		// test is asserting about alice/bob/the implicit member.
+		callerUserID:         "usr_mock_caller",
+		callerEmail:          "caller@example.com",
+		projectCollaborators: map[string]map[string]struct{ identityID, permissionLevel string }{},
 	}
 	server := httptest.NewServer(http.HandlerFunc(s.handle))
 	t.Cleanup(server.Close)
@@ -202,9 +255,34 @@ func (s *mockCloudAccessServer) handle(w http.ResponseWriter, r *http.Request) {
 	// this never matches the real (GET-only) .../collaborators/roles path.
 	isRolesWrite := collabRoot && strings.Contains(path, "/users/") && strings.HasSuffix(path, "/roles")
 
+	// The bootstrap membership route is POST .../collaborators/users - no
+	// "/search" suffix and no user_id segment, distinct from both the list
+	// route (which DOES have "/search") and the roles-write route (which has a
+	// user_id and "/roles" suffix).
+	isBootstrapMembership := collabRoot && r.Method == http.MethodPost && strings.HasSuffix(path, "/collaborators/users")
+
+	// The granular per-user roles READ is GET .../collaborators/roles - no
+	// "/users/" segment at all, which is exactly what distinguishes it from
+	// the roles WRITE route (isRolesWrite, above) despite both ending in
+	// "/roles". listCloudAccessMembers joins this onto the search results for
+	// base_role/deny_roles; without it every member's roles come back empty
+	// and base_role lands null on every member - confirmed the hard way, by
+	// this exact gap making base_role silently vanish from imported state.
+	isRolesRead := collabRoot && r.Method == http.MethodGet && strings.HasSuffix(path, "/collaborators/roles") && !strings.Contains(path, "/users/")
+
 	switch {
+	case r.Method == http.MethodGet && path == "/api/v2/userinfo":
+		s.handleUserinfo(w)
+	case r.Method == http.MethodGet && path == "/api/v2/organization_collaborators":
+		s.handleOrgCollaborators(w, r)
+	case strings.HasPrefix(path, "/api/v2/projects/"):
+		s.handleProjects(w, r)
+	case isRolesRead:
+		s.handleRolesRead(w)
 	case r.Method == http.MethodPost && collabRoot && strings.HasSuffix(path, "/collaborators/users/search"):
 		s.handleList(w)
+	case isBootstrapMembership:
+		s.handleBootstrapMembership(w, r)
 	case isRolesWrite && r.Method == http.MethodPut:
 		s.handleGrant(w, r)
 	case r.Method == http.MethodDelete && collabRoot:
@@ -226,6 +304,110 @@ func (s *mockCloudAccessServer) handle(w http.ResponseWriter, r *http.Request) {
 // Read implementation that parses the wrong fields and 404s/mis-decodes in
 // production - the same mock-realism gap this file's own header comment
 // warns about.
+// handleUserinfo backs fetchCloudAccessCallerIdentity, which every reconcile
+// calls unconditionally and first - a missing handler here fails every apply
+// at "Could Not Identify The Calling Identity" before any cloud endpoint is
+// ever reached, regardless of what else the mock gets right.
+func (s *mockCloudAccessServer) handleUserinfo(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+		"id":    s.callerUserID,
+		"email": s.callerEmail,
+	}})
+}
+
+// handleOrgCollaborators backs resolveIdentityForEmail, which
+// grantCloudAccessMember calls before any cloud-scoped write - a cloud role
+// can only be granted to someone who is already an organization member.
+// Real shape: OrganizationCollaboratorsListResponse, matching
+// listAllOrganizationCollaborators' pagination contract (results + metadata).
+func (s *mockCloudAccessServer) handleOrgCollaborators(w http.ResponseWriter, r *http.Request) {
+	emailFilter := strings.ToLower(r.URL.Query().Get("email"))
+	type result struct {
+		ID              string   `json:"id"`
+		UserID          *string  `json:"user_id"`
+		Email           string   `json:"email"`
+		PermissionLevel string   `json:"permission_level"`
+		BaseRole        string   `json:"base_role"`
+		AdditionalRoles []string `json:"additional_roles"`
+	}
+	var results []result
+	for email, ids := range s.orgMembers {
+		if emailFilter != "" && strings.ToLower(email) != emailFilter {
+			continue
+		}
+		userID := ids.userID
+		results = append(results, result{
+			ID: ids.identityID, UserID: &userID, Email: email,
+			PermissionLevel: "collaborator", BaseRole: "collaborator", AdditionalRoles: []string{},
+		})
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"results":  results,
+		"metadata": map[string]any{"total": len(results), "next_paging_token": nil},
+	})
+}
+
+// handleBootstrapMembership backs the unconditional bootstrap POST
+// grantCloudAccessMember always issues before the roles PUT - see that
+// function's own comment for why it runs first and unconditionally. Answers
+// the real "already a member" signal
+// (cloudAccessAlreadyHasPermissionsSubstring) when the target already has a
+// cloud membership row, exactly as the real API does, so the reconcile's
+// "tolerate already-a-member" branch is genuinely exercised rather than
+// assumed.
+func (s *mockCloudAccessServer) handleBootstrapMembership(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email           string `json:"email"`
+		PermissionLevel string `json:"permission_level"`
+	}
+	body, _ := io.ReadAll(r.Body)
+	_ = json.Unmarshal(body, &req)
+	email := strings.ToLower(req.Email)
+
+	if _, exists := s.members[email]; exists {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"detail": fmt.Sprintf("%s already has permissions for this cloud", email)})
+		return
+	}
+
+	ids, ok := s.orgMembers[email]
+	userID := "usr_mock_" + strings.NewReplacer("@", "_at_", ".", "_").Replace(email)
+	if ok {
+		userID = ids.userID
+	}
+	s.members[email] = map[string]any{
+		"email":            email,
+		"user_id":          userID,
+		"permission_level": req.PermissionLevel,
+		"deny_roles":       []string{},
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{"result": s.members[email]})
+}
+
+// handleRolesRead backs GET /api/v2/clouds/{cloud_id}/collaborators/roles,
+// the granular per-user role read listCloudAccessMembers joins onto the
+// search results. Real shape: cloudUserRolesListResponse
+// ({results: [{user_id, base_roles, deny_roles}], metadata}).
+func (s *mockCloudAccessServer) handleRolesRead(w http.ResponseWriter) {
+	results := make([]map[string]any, 0, len(s.members))
+	for _, m := range s.members {
+		denyRoles, _ := m["deny_roles"].([]string)
+		results = append(results, map[string]any{
+			"user_id":    m["user_id"],
+			"base_roles": []string{fmt.Sprint(m["permission_level"])},
+			"deny_roles": denyRoles,
+		})
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"results":  results,
+		"metadata": map[string]any{"next_paging_token": nil},
+	})
+}
+
 func (s *mockCloudAccessServer) handleList(w http.ResponseWriter) {
 	emails := make([]string, 0, len(s.members))
 	for email := range s.members {
@@ -253,47 +435,42 @@ func (s *mockCloudAccessServer) handleList(w http.ResponseWriter) {
 	})
 }
 
+// handleGrant serves the roles PUT, which carries no grantee identifier in
+// its body at all - SetCloudRolesRequest is only {base_role, deny_roles}. The
+// grantee is the user_id path segment (.../collaborators/users/{user_id}/roles),
+// which the caller already established via the bootstrap POST
+// (handleBootstrapMembership) before this call ever runs.
 func (s *mockCloudAccessServer) handleGrant(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	// .../clouds/{cloud_id}/collaborators/users/{user_id}/roles
+	userID := parts[len(parts)-2]
+
 	var req struct {
-		Email           string   `json:"email"`
-		Identity        string   `json:"identity"`
-		Role            string   `json:"role"`
-		PermissionLevel string   `json:"permission_level"`
-		DenyRoles       []string `json:"deny_roles"`
+		BaseRole  string   `json:"base_role"`
+		DenyRoles []string `json:"deny_roles"`
 	}
 	body, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(body, &req)
 
-	email := strings.ToLower(req.Email)
-	if email == "" {
-		email = strings.ToLower(req.Identity)
+	for email, m := range s.members {
+		if fmt.Sprint(m["user_id"]) == userID {
+			m["permission_level"] = req.BaseRole
+			denyRoles := req.DenyRoles
+			if denyRoles == nil {
+				denyRoles = []string{}
+			}
+			m["deny_roles"] = denyRoles
+			s.members[email] = m
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": m})
+			return
+		}
 	}
-	if email == "" {
-		// Loud failure rather than a silent no-op: if the real request body
-		// names the grantee differently, this mock is out of date and the
-		// implementer must see that, not get a green test.
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"detail":"mock could not find a grantee email in the grant request body"}`))
-		return
-	}
-	role := req.PermissionLevel
-	if role == "" {
-		role = req.Role
-	}
-	denyRoles := req.DenyRoles
-	if denyRoles == nil {
-		denyRoles = []string{}
-	}
-	member := map[string]any{
-		"email":            email,
-		"user_id":          "usr_mock_" + strings.NewReplacer("@", "_at_", ".", "_").Replace(email),
-		"permission_level": role,
-		"deny_roles":       denyRoles,
-	}
-	s.members[email] = member
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{"result": member})
+	// Loud failure rather than a silent no-op: a roles PUT against a user_id
+	// with no prior membership row means the bootstrap step didn't run (or
+	// this mock is out of date), and the real implementer must see that.
+	w.WriteHeader(http.StatusBadRequest)
+	_, _ = fmt.Fprintf(w, `{"detail":"mock has no membership row for user_id %s - the bootstrap POST should have created one first"}`, userID)
 }
 
 // handleRevoke deletes by trailing path segment or ?email=, matching either
@@ -311,7 +488,12 @@ func (s *mockCloudAccessServer) handleRevoke(w http.ResponseWriter, r *http.Requ
 		key = strings.ToLower(parts[len(parts)-1])
 	}
 	for email, member := range s.members {
-		if email == key || strings.EqualFold(fmt.Sprint(member["user_id"]), key) {
+		// The real identity_id this resource reads off the search response is
+		// "ide_mock_" + user_id (see handleList) - match on that form too, not
+		// just a bare email or user_id, since revokeCloudAccessMember is always
+		// called with the identity_id.
+		if email == key || strings.EqualFold(fmt.Sprint(member["user_id"]), key) ||
+			strings.EqualFold("ide_mock_"+fmt.Sprint(member["user_id"]), key) {
 			if reason, blocked := s.unrevokable[email]; blocked {
 				// Status and body are REPRESENTATIVE, not Gate-1 confirmed -
 				// see cloudAccessMockUnrevokableReason. Assert the behavioral
@@ -352,15 +534,66 @@ func (s *mockCloudAccessServer) handleGetCloud(w http.ResponseWriter, path strin
 	}})
 }
 
-func TestAccCloudAccessResourceImportRoundTrip(t *testing.T) {
-	t.Skip("anyscale_cloud_access is registered and its read path is live, but the write path is gated off " +
-		"(cloudAccessWriteEnabled), so the apply steps below cannot run yet. DO NOT simply delete this skip when the " +
-		"gate opens: this fixture's premise is void. It depends on an undeclared pre-existing member surviving all " +
-		"three steps, and an authoritative Create revokes that member at step one - so re-enabling it as-is produces a " +
-		"red test that looks like a broken resource and is actually a broken fixture. Rework the premise with the write " +
-		"path; the cleanest route is making that member's revoke FAIL in the mock so it legitimately persists via " +
-		"unmanaged_grants, which also exercises converge-and-record.")
+// handleProjects backs project-scoped role reconcile
+// (cloud_access_projects.go): reading a project's collaborators, granting via
+// batch_create, and revoking. Real routes and shapes confirmed against
+// cloud_access_projects_test.go's own mock in the provider package.
+func (s *mockCloudAccessServer) handleProjects(w http.ResponseWriter, r *http.Request) {
+	trailing := strings.TrimPrefix(r.URL.Path, "/api/v2/projects/")
+	parts := strings.SplitN(trailing, "/", 2)
+	projectID := parts[0]
+	rest := ""
+	if len(parts) > 1 {
+		rest = parts[1]
+	}
 
+	switch {
+	case rest == "collaborators/users" && r.Method == http.MethodGet:
+		results := []map[string]any{}
+		for email, c := range s.projectCollaborators[projectID] {
+			results = append(results, map[string]any{
+				"id":               c.identityID,
+				"value":            map[string]any{"id": "usr_" + email, "email": email},
+				"permission_level": c.permissionLevel,
+			})
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": results, "metadata": map[string]any{"next_paging_token": nil}})
+	case rest == "collaborators/users/batch_create" && r.Method == http.MethodPost:
+		var entries []struct {
+			Value struct {
+				Email string `json:"email"`
+			} `json:"value"`
+			PermissionLevel string `json:"permission_level"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &entries)
+		if s.projectCollaborators[projectID] == nil {
+			s.projectCollaborators[projectID] = map[string]struct{ identityID, permissionLevel string }{}
+		}
+		for _, e := range entries {
+			email := strings.ToLower(e.Value.Email)
+			s.projectCollaborators[projectID][email] = struct{ identityID, permissionLevel string }{
+				identityID: "ide_mock_" + email, permissionLevel: e.PermissionLevel,
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case strings.HasPrefix(rest, "collaborators/") && r.Method == http.MethodDelete:
+		identityID := strings.TrimPrefix(rest, "collaborators/")
+		for email, c := range s.projectCollaborators[projectID] {
+			if c.identityID == identityID {
+				delete(s.projectCollaborators[projectID], email)
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case strings.HasPrefix(rest, "collaborators/") && r.Method == http.MethodPut:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, `{"detail":"not found"}`, http.StatusNotFound)
+	}
+}
+
+func TestAccCloudAccessResourceImportRoundTrip(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	server := newMockCloudAccessServer(t)
@@ -427,7 +660,20 @@ resource "anyscale_cloud_access" "test" {
 					resource.TestCheckResourceAttr(resourceName, "unmanaged_grants.0.email", cloudAccessMockImplicitMember),
 					resource.TestCheckResourceAttrSet(resourceName, "unmanaged_grants.0.reason"),
 				),
-				ExpectNonEmptyPlan: false,
+				// TRUE, not false, and confirmed as the correct expectation rather
+				// than assumed: Create itself writes `member` as exactly the
+				// declared set (alice, bob), matching the checks above, but
+				// resource.Test's own automatic post-apply refresh calls Read,
+				// which rebuilds `member` from every VISIBLE remote member -
+				// including cloud-owner, since its revoke never actually
+				// succeeds and it remains on the backend. That refresh therefore
+				// surfaces a real, permanent diff proposing to revoke cloud-owner
+				// again, which is correct: "the next apply retries everything
+				// still outstanding" is this resource's own documented contract
+				// for unmanaged_grants, and an unrevokable member means that
+				// retry can never converge. A false expectation here was this
+				// test's own bug, not evidence of one in the resource.
+				ExpectNonEmptyPlan: true,
 			},
 			{
 				// Step 2: import against a backend holding MORE members than
@@ -439,30 +685,34 @@ resource "anyscale_cloud_access" "test" {
 				// recovered, since this step's state is discarded when it
 				// ends. See the header for why neither ImportStateVerify nor a
 				// later plan step can stand in.
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateId:     cloudAccessMockCloudID,
-				ImportStateVerify: true,
+				//
+				// ImportStateVerify is deliberately OFF, not an oversight: it
+				// compares imported state against step 1's Create state, and
+				// those two are now SUPPOSED to differ - Create wrote 2
+				// members, import correctly recovers all 3 visible ones. A
+				// verify comparing them would fail on the very divergence this
+				// test exists to prove is correct, not catch a regression.
+				ResourceName:  resourceName,
+				ImportState:   true,
+				ImportStateId: cloudAccessMockCloudID,
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected 1 imported instance state, got %d", len(states))
 					}
 					attrs := states[0].Attributes
 
-					// THE assertion this whole file exists for: import must
-					// recover ONLY the declared members. Recovering the
-					// undeclared backend grant into `member` would make the
-					// next real apply propose revoking a real person.
-					if got := attrs["member.%"]; got != "2" {
-						return fmt.Errorf("imported member.%% = %q, want \"2\" - import must recover only the two declared members, never the undeclared backend grant (%s)", got, cloudAccessMockImplicitMember)
+					// See the file header for the ruling this enforces: import
+					// recovers the full visible population, unfiltered.
+					if got := attrs["member.%"]; got != "3" {
+						return fmt.Errorf("imported member.%% = %q, want \"3\" - import must recover every visible member, including the undeclared backend grant (%s), not just what a prior config happened to declare", got, cloudAccessMockImplicitMember)
 					}
-					for _, want := range []string{"alice@example.com", "bob@example.com"} {
+					for _, want := range []string{"alice@example.com", "bob@example.com", cloudAccessMockImplicitMember} {
 						if _, ok := attrs["member."+want+".base_role"]; !ok {
-							return fmt.Errorf("imported state is missing declared member %s", want)
+							return fmt.Errorf("imported state is missing member %s", want)
 						}
 					}
-					if _, found := attrs["member."+cloudAccessMockImplicitMember+".base_role"]; found {
-						return fmt.Errorf("import recovered the undeclared backend member %s into `member` - the next apply would propose revoking real access", cloudAccessMockImplicitMember)
+					if got := attrs["member."+cloudAccessMockImplicitMember+".base_role"]; got != "owner" {
+						return fmt.Errorf("imported member.%s.base_role = %q, want \"owner\"", cloudAccessMockImplicitMember, got)
 					}
 					// DELIBERATE GAP: unmanaged_grants is not asserted here.
 					// Import performs no revoke, so whether a fresh import
@@ -472,34 +722,35 @@ resource "anyscale_cloud_access" "test" {
 					// in with the PR-B implementation, not before.
 					return nil
 				},
-				ImportStateVerifyIgnore: []string{
-					// R8 exemption, and the only permitted entry in this list.
-					// allow_empty_member_set has no backend representation at
-					// all - it is a provider-side safety interlock carrying a
-					// schema Default - so import can never recover it and it
-					// always lands at the default. Every other attribute,
-					// `member` above all, must round-trip exactly; adding one
-					// here would silence the thing this test exists to prove.
-					"allow_empty_member_set",
-				},
 			},
 			{
-				// Step 3: NOT the import assertion, despite what an earlier
-				// version of this comment claimed. Step 2's state is discarded
-				// when step 2 ends, so this plan is computed against what
-				// step 1's CREATE left - it cannot see imported state at all
-				// (see the header). Kept because it does prove something real
-				// and adjacent: that Create's own converged state, including a
-				// populated unmanaged_grants, replans as a clean no-op rather
-				// than churning on the member it failed to revoke. A resource
-				// that re-proposed that revoke every plan would be caught
-				// here. The import claim belongs to step 2's ImportStateCheck.
+				// Step 3: NOT the import assertion. Step 2's state is
+				// discarded when step 2 ends, so this plan is computed
+				// against what step 1's CREATE left - it cannot see imported
+				// state at all (see the header). The import claim belongs to
+				// step 2's ImportStateCheck.
+				//
+				// NOT a no-op, and confirmed as the correct expectation
+				// rather than assumed (same lesson as step 1's
+				// ExpectNonEmptyPlan): this plan's own refresh calls Read,
+				// which reports cloud-owner back into `member` since their
+				// revoke never succeeds, and config still doesn't declare
+				// them - a real, standing diff proposing to revoke them
+				// again. J.12 in the consolidation record: unmanaged_grants
+				// is diagnostics only and never influences planning, and
+				// every plan re-attempts everything still undone. What this
+				// step actually proves is narrower and still real: the
+				// SHAPE of that diff is an in-place update (attempting the
+				// revoke again), never a replace or a destroy - a resource
+				// that turned an unrevokable member into resource
+				// replacement would be caught here.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop),
+						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionUpdate),
 					},
 				},
+				ExpectNonEmptyPlan: true,
 			},
 		},
 	})

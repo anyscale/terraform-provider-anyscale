@@ -19,8 +19,8 @@ import (
 // cannot be proven by a mock, since each asks what the real backend does
 // with an authoritative write, not what the provider sends.
 //
-// Runs only against a local, uncommitted flip of cloudAccessWriteEnabled to
-// true - the gate stays closed in every committed/merged state.
+// The write path is unconditional; these run against the real resource on any
+// build.
 //
 // RULING A1 BINDS HARDER HERE than anywhere else: every test below creates
 // its OWN fresh ephemeral cloud and destroys it afterward. NEVER the static

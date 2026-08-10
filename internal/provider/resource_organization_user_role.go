@@ -239,7 +239,7 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 			"role. Review the plan; the provider cannot distinguish a typo from a deliberate change of subject.\n\n" +
 			"**Organization roles are not cloud roles.** The vocabularies differ and the same words mean different " +
 			"things at different scopes - `collaborator` is an organization base role *and* a cloud base role with " +
-			"different meanings. See the RBAC guide before mixing them.\n\n" +
+			"different meanings. See the [RBAC guide](../guides/rbac.md) before mixing them.\n\n" +
 			"**`deny_roles` requires a feature that is not enabled in every organization.** Managing `base_role` " +
 			"alone uses an endpoint that works everywhere. See the `deny_roles` description.",
 		Attributes: map[string]schema.Attribute{

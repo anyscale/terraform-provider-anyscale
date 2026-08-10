@@ -77,7 +77,7 @@ func (d *OrganizationUsersDataSource) Schema(ctx context.Context, req datasource
 
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_user` resources, or filtering users by email or account type.\n\n" +
-			"The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below.",
+			"The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below, and the [RBAC guide](../guides/rbac.md) for the fuller picture across scopes.",
 
 		Attributes: map[string]schema.Attribute{
 			"email": schema.StringAttribute{

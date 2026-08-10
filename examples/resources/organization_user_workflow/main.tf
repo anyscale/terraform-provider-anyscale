@@ -84,15 +84,27 @@ output "invitation_expires_at" {
 #   description = "Email of the managed member"
 # }
 
-# Example: Invite multiple users at once. Every invitation still grants only default
-# collaborator access -- if "lead@example.com" should end up as an owner, that happens in step 2
-# (via anyscale_organization_user_role), after they accept, same as any other promotion.
+# Managing a team: one locals map as the single source of truth for both the invitation
+# loop below and the role loop further down. This is the idiomatic Terraform pattern for
+# a "team" or "group" here, not a workaround -- Anyscale groups exist but cannot yet be
+# populated (membership is written only by directory sync, not yet available to
+# customers), so there is nothing for a group resource to usefully wrap today. Adding a
+# teammate is one line, in one place, and every resource that reads this map follows. See
+# the RBAC guide's section on managing a team this way for the full argument.
+locals {
+  ml_team = {
+    "dev1@example.com" = "collaborator"
+    "dev2@example.com" = "collaborator"
+    "lead@example.com" = "owner"
+  }
+}
+
+# Invite every team member. Every invitation still grants only default collaborator access
+# regardless of the role in local.ml_team -- the API has no way to set a different role at
+# invite time. The role loop below is where "lead@example.com" actually becomes an owner,
+# after they accept, same as any other promotion.
 resource "anyscale_organization_invitation" "team_members" {
-  for_each = toset([
-    "dev1@example.com",
-    "dev2@example.com",
-    "lead@example.com",
-  ])
+  for_each = local.ml_team
 
   email = each.key
 }
@@ -110,18 +122,14 @@ output "team_invitations" {
   description = "Status of all team member invitations"
 }
 
-# Once each team member above has accepted, this is the closest thing to managing a
-# "group" this provider has today -- there is no group resource, so a for_each over a
-# list of emails granting a role per person is the actual answer (see Step 2 above for
-# the single-member version of this same resource). Uncomment once every invitation
-# above is accepted.
+# Once every invitation above has been accepted, grant each team member their role from
+# the SAME map that drove the invitations -- commented out because
+# anyscale_organization_user_role requires an already-accepted member and so cannot apply
+# in the same run as the invitations above, not because anything here is incomplete.
+# Uncomment once every invitation above is accepted.
 #
 # resource "anyscale_organization_user_role" "team_member_roles" {
-#   for_each = {
-#     "dev1@example.com" = "collaborator"
-#     "dev2@example.com" = "collaborator"
-#     "lead@example.com" = "owner"
-#   }
+#   for_each = local.ml_team
 #
 #   email     = each.key
 #   base_role = each.value

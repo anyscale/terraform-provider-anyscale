@@ -1499,13 +1499,11 @@ func TestCloudAccessRevokeFailureReason(t *testing.T) {
 // stay invisible forever - the next refresh has to recover it, so the
 // following plan re-proposes the grant rather than converging on a lie.
 //
-// Chains applyCloudAccess (the AC-35 scenario) into Read directly - the
-// write gate stays closed throughout, since neither call goes through
-// Create/Update's refuseWriteWhileReadOnly check. Asserting the refreshed
-// member map omits the failed grant is a deliberate proxy for a real
-// Terraform plan (which can't run while the gate is closed): it proves
-// exactly what forces a non-empty plan - state no longer matching what the
-// unchanged config declares.
+// Chains applyCloudAccess (the AC-35 scenario) into Read directly, rather
+// than through Create/Update, for unit-test isolation and speed. Asserting
+// the refreshed member map omits the failed grant is a deliberate proxy for a
+// real Terraform plan: it proves exactly what forces a non-empty plan - state
+// no longer matching what the unchanged config declares.
 func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 	const cloudID = "cld_grantfail_refresh"
 

@@ -4,14 +4,14 @@ page_title: "anyscale_organization_users Data Source - terraform-provider-anysca
 subcategory: ""
 description: |-
   Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving id values before importing anyscale_organization_user resources, or filtering users by email or account type.
-  The organization role model is migrating from a single permission_level to base_role plus additional_roles - see those attributes below.
+  The organization role model is migrating from a single permission_level to base_role plus additional_roles - see those attributes below, and the RBAC guide ../guides/rbac.md for the fuller picture across scopes.
 ---
 
 # anyscale_organization_users (Data Source)
 
 Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_user` resources, or filtering users by email or account type.
 
-The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below.
+The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below, and the [RBAC guide](../guides/rbac.md) for the fuller picture across scopes.
 
 ## Example Usage
 

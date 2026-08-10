@@ -56,6 +56,14 @@ type mockOrgUserRoleServer struct {
 	lastRolesRaw      string
 	rolesEndpoint501  bool
 	rolesEndpoint501D string
+
+	// selfModification, when true, makes every write endpoint (legacy PUT, roles
+	// PUT) answer 403 with the real backend's own self-modification detail text
+	// instead of performing the write. Named after the production predicate it
+	// exists to exercise: orgSelfModification matches on the substring "your own"
+	// in the detail, which is exactly what the real backend sends and exactly what
+	// no acceptance-test fixture had ever produced before this test existed.
+	selfModification bool
 }
 
 // orgUserRoleMemberFixture is one organization member's backend state. Named with the
@@ -220,6 +228,15 @@ func (s *mockOrgUserRoleServer) handleSetRoles(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if s.selfModification {
+		// Real backend text, confirmed against
+		// organization_collaborators_service.py's _validate_user_for_role_change
+		// guard, which set_roles shares with the legacy endpoint.
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = fmt.Fprint(w, `{"error":{"detail":"You cannot modify your own permission level."}}`)
+		return
+	}
+
 	m := s.memberByUserIDLocked(userID)
 	if m == nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -245,6 +262,12 @@ func (s *mockOrgUserRoleServer) handleSetPermissionLevel(w http.ResponseWriter, 
 	_ = json.Unmarshal(raw, &body)
 	captured := body
 	s.lastLegacyBody = &captured
+
+	if s.selfModification {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = fmt.Fprint(w, `{"error":{"detail":"You cannot modify your own permission level."}}`)
+		return
+	}
 
 	m := s.memberByIdentityIDLocked(identityID)
 	if m == nil {
@@ -899,5 +922,153 @@ func TestResolveIdentityForEmail_NotFoundErrors(t *testing.T) {
 	_, _, err := resolveIdentityForEmail(context.Background(), client, "nobody@example.com")
 	if err == nil {
 		t.Fatal("expected an error for an email with no matching org member, got nil")
+	}
+}
+
+// TestOrganizationUserRoleWrite_SelfModification_LegacyPath confirms the
+// orgSelfModification guard actually fires on the ungated legacy write path
+// (denyRolesDeclared=false) and produces the explanatory diagnostic rather than
+// a raw 403 passthrough. Before this test, orgSelfModification and its two
+// AddError call sites in writeOrganizationRole had zero coverage - the function
+// comment even argues the underlying guard "can only ever be discovered against
+// the real API," which is true of the BACKEND's decision but not of this
+// provider's own error classification: given a 403 with the real detail text,
+// nothing here needs to know "who am I" to verify the diagnostic is right.
+func TestOrganizationUserRoleWrite_SelfModification_LegacyPath(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
+	mock.seedMember("self@example.com", "ide_self", "usr_self", "collaborator", nil)
+	mock.selfModification = true
+
+	model := OrganizationUserRoleResourceModel{
+		Email:    types.StringValue("self@example.com"),
+		BaseRole: types.StringValue("owner"),
+	}
+
+	diags := r.writeOrganizationRole(context.Background(), &model, "ide_self", "usr_self", false)
+	assertSelfModificationDiagnostic(t, diags)
+}
+
+// TestOrganizationUserRoleWrite_SelfModification_RolesPath is the same guard on
+// the gated roles path (denyRolesDeclared=true), which is a structurally
+// different call (setOrganizationRoles, not setOrganizationPermissionLevel) and
+// so is not exercised by the legacy-path test above.
+func TestOrganizationUserRoleWrite_SelfModification_RolesPath(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
+	mock.seedMember("self@example.com", "ide_self", "usr_self", "collaborator", nil)
+	mock.selfModification = true
+
+	model := OrganizationUserRoleResourceModel{
+		Email:     types.StringValue("self@example.com"),
+		BaseRole:  types.StringValue("owner"),
+		DenyRoles: orgDenyRolesList("image_reader"),
+	}
+
+	diags := r.writeOrganizationRole(context.Background(), &model, "ide_self", "usr_self", true)
+	assertSelfModificationDiagnostic(t, diags)
+}
+
+// TestOrganizationUserRoleDelete_SelfModification_ClearingDenyRoles covers the
+// guard on Destroy's own write - clearing deny_roles is itself a call to the
+// gated roles endpoint, and the resource's own comment on
+// orgSelfModificationDetail claims this case explicitly ("this also applies on
+// destroy when deny_roles were declared"). That claim had no test.
+func TestOrganizationUserRoleDelete_SelfModification_ClearingDenyRoles(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
+	mock.seedMember("self@example.com", "ide_self", "usr_self", "owner", []string{"image_reader"})
+	mock.selfModification = true
+
+	state := OrganizationUserRoleResourceModel{
+		Email:    types.StringValue("self@example.com"),
+		UserID:   types.StringValue("usr_self"),
+		BaseRole: types.StringValue("owner"),
+	}
+
+	diags := r.deleteOrganizationRole(context.Background(), state, true)
+	assertSelfModificationDiagnostic(t, diags)
+}
+
+// assertSelfModificationDiagnostic is shared by the three tests above: each
+// exercises a different call site, but all three must produce the exact same
+// summary and detail text, since orgSelfModificationDetail is a single shared
+// constant precisely so the explanation is worded consistently regardless of
+// which write path triggered it.
+func assertSelfModificationDiagnostic(t *testing.T, diags diag.Diagnostics) {
+	t.Helper()
+	if !diags.HasError() {
+		t.Fatal("expected an error when the backend refuses a self-modification, got none")
+	}
+	for _, d := range diags {
+		if d.Summary() == "Cannot Modify Your Own Organization Role" {
+			if d.Detail() != orgSelfModificationDetail {
+				t.Errorf("got detail %q, want the exact orgSelfModificationDetail constant", d.Detail())
+			}
+			return
+		}
+	}
+	t.Errorf("expected a diagnostic summarized \"Cannot Modify Your Own Organization Role\", got: %v", diags)
+}
+
+// TestOrgSelfModification_DoesNotMisclassifyAnUnrelatedForbidden is the negative
+// case for the same guard: a 403 that is NOT the self-modification refusal (the
+// real backend also 403s for a support-user target and several other reasons,
+// per this function's own comment) must fall through to the generic diagnostic,
+// not be mislabeled as "cannot modify your own role." A guard that matched on
+// bare status code instead of the real detail text would pass every test above
+// while failing this one.
+func TestOrgSelfModification_DoesNotMisclassifyAnUnrelatedForbidden(t *testing.T) {
+	err := &UnexpectedStatusError{
+		StatusCode: http.StatusForbidden,
+		Body:       `{"error":{"detail":"You cannot modify a support user's permission level."}}`,
+	}
+	if orgSelfModification(err) {
+		t.Error("an unrelated 403 (support-user guard) was misclassified as self-modification")
+	}
+}
+
+// TestOrganizationUserRoleImportState_RecoversFromSingularEndpoint calls
+// ImportState directly, bypassing resource.Test/terraform import entirely.
+// That is deliberate, not a style choice: real Terraform always performs an
+// automatic Read immediately after import, and since Read hydrates
+// deny_roles from the exact same singular-endpoint call ImportState uses,
+// an ImportState-only regression (e.g. reading roles off the list response
+// instead) would be silently overwritten by that follow-up Read before an
+// acceptance test's ImportStateCheck ever saw it - confirmed empirically
+// while writing TestAccOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles
+// in internal/acctest. This test is the one place that actually isolates
+// ImportState's own hydration.
+func TestOrganizationUserRoleImportState_RecoversFromSingularEndpoint(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
+	mock.seedMember("import@example.com", "ide_import", "usr_import", "owner", []string{"image_reader"})
+
+	req := resource.ImportStateRequest{ID: "import@example.com"}
+	resp := newImportStateResponse(t, r)
+
+	r.ImportState(context.Background(), req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+
+	var state OrganizationUserRoleResourceModel
+	resp.Diagnostics.Append(resp.State.Get(context.Background(), &state)...)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected error reading back state: %v", resp.Diagnostics)
+	}
+
+	if state.IdentityID.ValueString() != "ide_import" || state.UserID.ValueString() != "usr_import" {
+		t.Errorf("got identity_id=%q user_id=%q, want ide_import/usr_import", state.IdentityID.ValueString(), state.UserID.ValueString())
+	}
+	if state.BaseRole.ValueString() != "owner" {
+		t.Errorf("got base_role=%q, want owner", state.BaseRole.ValueString())
+	}
+	denyRoles, diags := stringListToSlice(context.Background(), state.DenyRoles)
+	if diags.HasError() {
+		t.Fatalf("unexpected error reading deny_roles: %v", diags)
+	}
+	if len(denyRoles) != 1 || denyRoles[0] != "image_reader" {
+		t.Errorf("got deny_roles=%v, want [image_reader] (from the singular endpoint, not the list's hardcoded empty)", denyRoles)
 	}
 }

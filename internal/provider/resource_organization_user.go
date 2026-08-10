@@ -128,7 +128,8 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 			"per-user path and can be invited through normally.\n\n" +
 			"-> **Roles are managed separately** by `anyscale_organization_user_role`, which owns `base_role` and the " +
 			"organization's deny roles. The two resources are deliberately split so only one of them ever writes a " +
-			"member's role.",
+			"member's role. See the [RBAC guide](../guides/rbac.md) for how access control is split across " +
+			"organizations, clouds, and projects.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
