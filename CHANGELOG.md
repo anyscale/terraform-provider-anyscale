@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-- resource/anyscale_cloud_user_role: Removed and no longer available. Existing state can't be decoded, so run `terraform state rm` on any instance before upgrading - that only stops Terraform tracking it and does not change anyone's access. Running `terraform destroy` or removing the block and applying does revoke real access.
+- resource/anyscale_cloud_user_role: Removed and no longer available. Existing state can't be decoded, so run `terraform state rm` on any instance before upgrading - that only stops Terraform tracking it and does not change anyone's access. Running `terraform destroy` or removing the block and applying does revoke real access. Cloud-scoped role management now lives in the new `anyscale_cloud_access` resource below, but it is not a drop-in substitution: `anyscale_cloud_access` is authoritative over a cloud's **entire** member list, not one user's role, so declaring only the members you had `anyscale_cloud_user_role` blocks for revokes everyone else on that cloud on the first apply. Declare every member who should keep access before applying.
 
 ### New Resources
 
