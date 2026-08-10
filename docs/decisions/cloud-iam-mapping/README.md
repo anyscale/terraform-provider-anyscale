@@ -330,16 +330,23 @@ reasoning.
 **Not run, and load-bearing:**
 
 1. **The `user_tag_annotation_prefix` negative control** — no capture omits the prefix, so nothing
-   observed establishes that omitting it *clears* the field. This is not a correctness risk in
-   shipped code (the write always resends it), but it is what would certify the **mock** behind the
-   preservation regression test. "The prefix survived" is equally consistent with a backend that
-   clobbers an omitted prefix and with one that preserves it regardless; both produce the captures
-   above. If the second is true, that regression test passes for the wrong reason and does not
-   actually protect against a future maintainer dropping the resend. Source says the first is true —
-   `cloud_config_service.go:56-58` assigns the field unconditionally from the decoded change, so an
-   omitted field decodes to the zero value and overwrites — which rests on undisputed Go and
-   `encoding/json` semantics. Skipping the capture on that basis is permissible under the repo's own
-   gate policy **only if stated explicitly**, which is what this paragraph is.
+   observed establishes that omitting it *clears* the field.
+
+   What this does **not** undermine: the preservation regression test asserts on the **outgoing PUT
+   request body** the client constructs, not on anything the mock reflects back. It proves "the write
+   always resends the prefix it read," which holds regardless of how the backend treats an omitted
+   field, and it is mutation-proven — deleting the resend line makes it fail. So the test protects
+   the invariant on its own terms and does not depend on this capture. An earlier revision of this
+   document argued the missing control left that test able to "pass for the wrong reason"; that was
+   wrong, and the reason it was wrong is the assertion target.
+
+   What the control would still buy, and it is narrower: confirmation that resending is *necessary*
+   rather than merely defensive — i.e. that the hazard the design is built around is real. Source
+   says it is: `cloud_config_service.go:56-58` assigns the field unconditionally from the decoded
+   change, so an omitted field decodes to the zero value and overwrites, which rests on undisputed Go
+   and `encoding/json` semantics. Skipping the capture on that basis is permissible under the repo's
+   own gate policy **only if stated explicitly**, which is what this paragraph is. The practical
+   consequence of being wrong is small: the resend would be redundant rather than dangerous.
 2. **The resource-level lifecycle and import acceptance tests** — never run against a real cloud,
    because the environment lacked working AWS/GCP credentials (an Anyscale API token alone is not
    enough). Consequence, stated plainly: **no `terraform apply` has ever been executed against this
