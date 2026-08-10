@@ -1,8 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_organization_user: Fix examples that taught importing by identity_id (which the resource rejects; import and the more common direct-declare-and-adopt path both use email) and that incorrectly implied destroying this resource removes the person from the organization (it does not - destroy is a no-op for an adopted member, matching the resource's own documented behavior).
-```
-```
-release-note:fixed
-resource/anyscale_organization_invitation: Fix an example pointing readers at a nonexistent permission_level argument on anyscale_organization_user for role-granting; the correct surface is anyscale_organization_user_role.base_role.
-```

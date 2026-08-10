@@ -1,4 +1,0 @@
-```
-release-note:breaking-change
-resource/anyscale_cloud_user_role: Removed and no longer available. Existing state can't be decoded, so run `terraform state rm` on any instance before upgrading - that only stops Terraform tracking it and does not change anyone's access. Running `terraform destroy` or removing the block and applying does revoke real access.
-```

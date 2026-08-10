@@ -1,8 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_organization_user: The `id` attribute is the member email address, while the identically-named data source keys `id` on the identity ID. Neither page said so. The two agreed until v0.25.0 re-keyed this resource from identity ID to email; the documentation was not updated to note the resulting divergence. Both `id` attributes now state it, and point at `email` as the value this resource accepts.
-```
-```
-release-note:fixed
-data-source/anyscale_organization_user: The `id` attribute is the user identity ID, while the identically-named resource keys `id` on the email address. Neither page said so. The two agreed until v0.25.0 re-keyed the resource from identity ID to email; the documentation was not updated to note the resulting divergence. Both `id` attributes now state it, and this data source now points at its own `email` attribute as the value the resource accepts.
-```

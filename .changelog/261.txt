@@ -1,8 +1,0 @@
-```
-release-note:new-resource
-resource/anyscale_cloud_access: Manage one Anyscale cloud's complete member list - each member's base_role, deny_roles, and their roles on the projects your configuration names. This resource is authoritative: anyone not declared in `member` is revoked, including on the first apply. `terraform plan` on a create names everyone that first apply would revoke; if it can't read the current members, it says so rather than looking clean. Manage each cloud from exactly one `anyscale_cloud_access` instance - two instances managing the same cloud revoke each other's members indefinitely, with no error from either. Drift detection has a real limit: a role changed through the console or CLI writes through a different store than this resource reads, so most such changes plan clean while the real role has moved. `unmanaged_grants` and `ungranted_members` are Computed diagnostics for a revoke or grant that couldn't complete - alert on `length(...) > 0` for either. See the resource documentation for the full structural-refusal list, the two-feature-flag gating behind a `501`, and other detail this note doesn't repeat.
-```
-```
-release-note:fixed
-resource/anyscale_organization_user_role: Remove an unsourced claim that the organization roles API is unavailable on Azure regardless of the feature flag. The backend gates this endpoint on a feature flag alone; there is no Azure-specific check. No behavior change - only user-facing text (schema descriptions, the 501 error detail, and an example comment) was corrected.
-```
