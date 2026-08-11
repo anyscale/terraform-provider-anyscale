@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-08-11
+
+### New Resources
+
+- resource/anyscale_cloud_iam_mapping: manage the ordered dataplane IAM mapping rules for a cloud deployment, including destroy-as-revert.
+
+### New Data Sources
+
+- data-source/anyscale_cloud_iam_mapping: read a cloud deployment's dataplane IAM mapping rules.
+
 ## [0.26.0] - 2026-08-10
 
 ### Breaking Changes
@@ -1019,7 +1029,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.27.0
 [0.26.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.26.0
 [0.25.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.25.1
 [0.25.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.25.0
