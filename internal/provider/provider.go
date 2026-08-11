@@ -145,6 +145,7 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		// would lose access, since Read has never shown them any other way. See
 		// docs/decisions/rbac-surface-consolidation/README.md for the design.
 		NewCloudAccessResource,
+		NewCloudIAMMappingResource,
 		NewProjectResource,
 		NewOrganizationInvitationResource,
 		NewOrganizationUserResource,
@@ -172,6 +173,7 @@ func (p *AnyscaleProvider) EphemeralResources(ctx context.Context) []func() ephe
 func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewCloudDataSource,
+		NewCloudIAMMappingDataSource,
 		NewCloudsDataSource,
 		NewComputeConfigDataSource,
 		NewContainerImageDataSource,
