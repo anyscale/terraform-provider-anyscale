@@ -1,0 +1,7 @@
+```release-note:new-resource
+resource/anyscale_cloud_iam_mapping: manage the ordered dataplane IAM mapping rules for a cloud deployment, including destroy-as-revert.
+```
+
+```release-note:new-data-source
+data-source/anyscale_cloud_iam_mapping: read a cloud deployment's dataplane IAM mapping rules.
+```
