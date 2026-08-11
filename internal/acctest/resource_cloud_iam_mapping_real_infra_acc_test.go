@@ -240,9 +240,11 @@ resource "anyscale_cloud_iam_mapping" "test" {
 // TestAccCloudIAMMappingResource_RealCloud_ColdImport_BareCloudID is Test
 // A's second ID form: a bare cloud_id, which must resolve the primary
 // cloud_resource itself (resolvePrimaryCloudResourceID's real code path,
-// not the mocked one exercised by the unit tests). Reuses the mapping the
-// compound-ID test seeded - both tests target the same real deployment's
-// config, which is idempotent to import from either ID form.
+// not the mocked one exercised by the unit tests). Seeds its own mapping
+// out of band rather than relying on the compound-ID test's - the two are
+// independent tests, each runnable alone under -run, even though both
+// happen to target the same real deployment's config with an idempotent
+// overwrite.
 func TestAccCloudIAMMappingResource_RealCloud_ColdImport_BareCloudID(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	cloudID, cloudResourceID := requireRealIAMMappingTestCloud(t)
