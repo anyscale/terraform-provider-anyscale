@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1677,5 +1678,68 @@ func TestApplyCloudAccess_NeverWritesADifferentMemberThanPlanned(t *testing.T) {
 			"result matching the mock's override (%v) means applyCloudAccess read the roles GET back into "+
 			"state instead of writing the plan verbatim, which is exactly the regression this guard exists to catch",
 			got, []string{cloudAccessReadOnlyDenyRole})
+	}
+}
+
+// TestCloudAccessDesiredMembers_TranslatesProjects covers the member map ->
+// desired translation, which no other test exercises: every reconcile test
+// builds cloudAccessDesiredMember literals directly and skips it.
+//
+// Dropping projects here is silent in both directions. With Projects nil the
+// project pass plans no grants, records nothing in ungranted_members because
+// nothing was attempted, and - once prior state carries the same projects -
+// plans a REVOKE for each, a declared role being indistinguishable from a
+// dropped one.
+func TestCloudAccessDesiredMembers_TranslatesProjects(t *testing.T) {
+	desired, diags := cloudAccessDesiredMembers(context.Background(), cloudAccessMemberMap(map[string]attr.Value{
+		"Alice@Example.com": cloudAccessMember("writer", cloudAccessNoDenyRoles(),
+			cloudAccessProjects(map[string]string{"prj_1": "write", "prj_2": "readonly"})),
+		"bob@example.com": cloudAccessMember("collaborator", cloudAccessNoDenyRoles(), cloudAccessNoProjects()),
+	}))
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+
+	alice, ok := desired[cloudAccessFoldEmail("Alice@Example.com")]
+	if !ok {
+		t.Fatalf("alice missing from desired: %+v", desired)
+	}
+	want := map[string]string{"prj_1": "write", "prj_2": "readonly"}
+	if !maps.Equal(alice.Projects, want) {
+		t.Fatalf("declared project roles did not survive translation: got %v, want %v", alice.Projects, want)
+	}
+
+	// Undeclared must stay empty: project authority is scoped to what the
+	// configuration names.
+	if bob := desired["bob@example.com"]; len(bob.Projects) != 0 {
+		t.Errorf("undeclared projects became %v, which would put this member's project roles in scope", bob.Projects)
+	}
+}
+
+// TestPlanProjectRoles_TranslatedConfigPlansGrantNotRevoke is the behavioral
+// half: prior state and configuration agreeing must plan the grant and no
+// revoke. Against untranslated desired this planned a revoke of every declared
+// role instead.
+func TestPlanProjectRoles_TranslatedConfigPlansGrantNotRevoke(t *testing.T) {
+	desired, diags := cloudAccessDesiredMembers(context.Background(), cloudAccessMemberMap(map[string]attr.Value{
+		"alice@example.com": cloudAccessMember("writer", cloudAccessNoDenyRoles(),
+			cloudAccessProjects(map[string]string{"prj_1": "write"})),
+	}))
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+
+	priorProjects := map[string]map[string]string{"alice@example.com": {"prj_1": "write"}}
+
+	plan := planProjectRoles(desired, priorProjects,
+		map[string]map[string]string{"prj_1": {}},
+		map[string]cloudAccessRemoteMember{"alice@example.com": {Email: "alice@example.com", UserID: "usr_a"}},
+		map[string]bool{})
+
+	if len(plan.Revokes) != 0 {
+		t.Fatalf("a still-declared project role must never be planned for revoke, got: %+v", plan.Revokes)
+	}
+	if len(plan.Grants) != 1 || plan.Grants[0].ProjectID != "prj_1" || plan.Grants[0].Level != "write" {
+		t.Fatalf("expected one grant of write on prj_1, got: %+v", plan.Grants)
 	}
 }
