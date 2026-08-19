@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"testing"
 
@@ -463,15 +464,16 @@ func TestAccCloudResource_MountPathPVCConflict(t *testing.T) {
 
 // TestAccCloudResource_MountPathPVCDefaultNoMisfire is the negative
 // counterpart to TestAccCloudResource_MountPathPVCConflict: a config that
-// sets persistent_volume_claim and leaves mount_path OMITTED (relying on the
-// schema's own Computed+Default) must NOT trip the new ConflictsWith - the
-// validator must fire only on the user's raw config (which schema
-// Validators evaluate directly, before Default is applied), not on the
-// resolved plan value. Needs a real Create to prove this (ConflictsWith is
-// framework-internal machinery, not something a plain Go unit test can
-// exercise), so this runs against a mock server rather than real infra -
-// see newC3MockCloudServer/testAccProviderBlock in
-// resource_cloud_c3_lifecycle_acc_test.go.
+// sets persistent_volume_claim and leaves mount_path OMITTED must NOT trip
+// the new ConflictsWith - the validator must fire only on the user's raw
+// config (which schema Validators evaluate directly, before any plan
+// modifier runs), not on the resolved plan value. Needs a real Create to
+// prove this (ConflictsWith is framework-internal machinery, not something
+// a plain Go unit test can exercise), so this runs against a mock server
+// rather than real infra - see newC3MockCloudServer/testAccProviderBlock in
+// resource_cloud_c3_lifecycle_acc_test.go. mount_path itself resolves to
+// null (D1 - no schema Default, and the mock backend returns no file_storage
+// at all here), not the old fabricated "/mnt/shared".
 func TestAccCloudResource_MountPathPVCDefaultNoMisfire(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -520,13 +522,154 @@ resource "anyscale_cloud" "test" {
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.persistent_volume_claim", "ray-shared-pvc"),
-					// The schema default still applies normally - proves the new
-					// ConflictsWith evaluated the raw (mount_path-omitted) config,
-					// not the post-default plan value, exactly as the
-					// review required.
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.mount_path", "/mnt/shared"),
+					// mount_path stays null - proves the new ConflictsWith
+					// evaluated the raw (mount_path-omitted) config, not a
+					// resolved plan value, exactly as the review required.
+					resource.TestCheckNoResourceAttr("anyscale_cloud.test", "file_storage.mount_path"),
 				),
 				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
+// newMountPathMockCloudServer builds a mock like newC3MockCloudServer, but
+// with an add_resource response that DOES carry file_storage - the shared
+// helper's stub never does, so it can't exercise the Create-time
+// mergeFileStorageDerivedFields resolution the two tests below need.
+func newMountPathMockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, addResourceFileStorageJSON string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/v2/clouds", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		switch r.Method {
+		case http.MethodPost:
+			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
+		case http.MethodGet:
+			_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+		default:
+			t.Errorf("unexpected method %s on /api/v2/clouds", r.Method)
+		}
+	})
+	mux.HandleFunc("/api/v2/clouds/"+cloudID, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected method %s on /api/v2/clouds/%s", r.Method, cloudID)
+		}
+	})
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/resources", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"results": %s, "metadata": {"total": 1, "next_paging_token": null}}`, resourcesJSON)
+	})
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/add_resource", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_mock_default", "cloud_resource_id": "cldrsrc_mock_default", "file_storage": %s}}`, addResourceFileStorageJSON)
+	})
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/machine_pools", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"results": [], "metadata": {"total": 0, "next_paging_token": null}}`)
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestAccCloudResource_MountPathOmittedDoesNotForceReplace pins D1's Gate 2:
+// a real resource.Test proving the Framework/Core plan-modifier contract,
+// since a plain mapping-function unit test can't exercise it. Before D1,
+// mount_path carried only RequiresReplace(): an Optional+Computed attribute
+// the config omits plans to Unknown on every subsequent apply, and
+// RequiresReplace treats "planned Unknown, prior state known" as a
+// difference - forcing a destroy-and-recreate of an already-live cloud on
+// every single plan, with no real config change.
+// stringplanmodifier.UseStateForUnknown(), placed before RequiresReplace()
+// in PlanModifiers, resolves the Unknown to the prior state value first, so
+// RequiresReplace sees no diff - mirroring the pre-existing mount_targets
+// list attribute's identical ordering.
+func TestAccCloudResource_MountPathOmittedDoesNotForceReplace(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const cloudID = "cld_mountpath_omit_noreplace_mock"
+	cloudJSON := fmt.Sprintf(`{
+		"id": %[1]q, "name": "mountpath-omit-noreplace", "provider": "GCP", "region": "us-central1",
+		"status": "ready", "state": "ACTIVE", "compute_stack": "VM"
+	}`, cloudID)
+	resourcesJSON := `[{
+		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
+		"compute_stack": "VM", "region": "us-central1",
+		"gcp_config": {
+			"project_id": "my-gcp-project",
+			"provider_name": "projects/my-gcp-project/serviceAccounts/anyscale@my-gcp-project.iam.gserviceaccount.com",
+			"vpc_name": "vpc-mountpath",
+			"subnet_names": ["subnet-mountpath"],
+			"anyscale_service_account_email": "anyscale@my-gcp-project.iam.gserviceaccount.com",
+			"cluster_service_account_email": "cluster@my-gcp-project.iam.gserviceaccount.com"
+		},
+		"object_storage": {"bucket_name": "tfacc-mountpath-omit-bucket"},
+		"file_storage": {"file_storage_id": "filestore-omit-test", "mount_path": "/mnt/filestore-real"}
+	}]`
+	addResourceFileStorageJSON := `{"file_storage_id": "filestore-omit-test", "mount_path": "/mnt/filestore-real"}`
+
+	server := newMountPathMockCloudServer(t, cloudID, cloudJSON, resourcesJSON, addResourceFileStorageJSON)
+	resourceName := "anyscale_cloud.test"
+	config := testAccProviderBlock(server.URL) + `
+resource "anyscale_cloud" "test" {
+  name           = "mountpath-omit-noreplace"
+  cloud_provider = "GCP"
+  compute_stack  = "VM"
+  region         = "us-central1"
+
+  gcp_config {
+    project_id                     = "my-gcp-project"
+    provider_name                  = "projects/my-gcp-project/serviceAccounts/anyscale@my-gcp-project.iam.gserviceaccount.com"
+    vpc_name                       = "vpc-mountpath"
+    subnet_names                   = ["subnet-mountpath"]
+    controlplane_service_account_email = "anyscale@my-gcp-project.iam.gserviceaccount.com"
+    dataplane_service_account_email    = "cluster@my-gcp-project.iam.gserviceaccount.com"
+  }
+
+  object_storage {
+    bucket_name = "tfacc-mountpath-omit-bucket"
+  }
+
+  # mount_path deliberately omitted - the backend resolves and returns a
+  # real value; this config never sets it.
+  file_storage {
+    file_storage_id = "filestore-omit-test"
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Create resolves mount_path from the real add_resource
+				// response (D1's mergeFileStorageDerivedFields path), not a
+				// fabricated default.
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "file_storage.file_storage_id", "filestore-omit-test"),
+					resource.TestCheckResourceAttr(resourceName, "file_storage.mount_path", "/mnt/filestore-real"),
+				),
+				ExpectNonEmptyPlan: false,
+			},
+			{
+				// G2.1: re-applying the SAME config (mount_path still
+				// omitted) must plan a no-op, not a forced replace.
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop),
+					},
+				},
 			},
 		},
 	})

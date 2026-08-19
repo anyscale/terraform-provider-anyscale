@@ -522,9 +522,22 @@ func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
 		if !ok {
 			t.Fatalf("file_storage.mount_path is not a schema.StringAttribute (got %T)", fileStorageBlock.Attributes["mount_path"])
 		}
-		if !hasPlanModifierDescription(mountPath.PlanModifiers, descRequiresReplace) {
+		if mountPath.Default != nil {
+			t.Error("file_storage.mount_path must not have a Default - D1 stopped fabricating a value for it")
+		}
+		usfuIdx := indexOfPlanModifierDescription(mountPath.PlanModifiers, descUseStateForUnknown)
+		rrIdx := indexOfPlanModifierDescription(mountPath.PlanModifiers, descRequiresReplace)
+		if usfuIdx == -1 {
+			t.Error("file_storage.mount_path must include stringplanmodifier.UseStateForUnknown() (D1) - " +
+				"defensive parity with mount_targets' Optional+Computed handling")
+		}
+		if rrIdx == -1 {
 			t.Errorf("file_storage.mount_path must include stringplanmodifier.RequiresReplace() — same swallowed-edit " +
 				"bug as kubernetes_config (task 861aaf10)")
+		}
+		if usfuIdx != -1 && rrIdx != -1 && usfuIdx > rrIdx {
+			t.Errorf("file_storage.mount_path: UseStateForUnknown (index %d) must be declared BEFORE "+
+				"RequiresReplace (index %d) - matches the mount_targets declaration order", usfuIdx, rrIdx)
 		}
 	})
 
@@ -581,9 +594,22 @@ func TestCloudMountTargetsHardenedFieldsRequireReplace(t *testing.T) {
 		if !ok {
 			t.Fatalf("file_storage.mount_path is not a schema.StringAttribute (got %T)", fileStorageBlock.Attributes["mount_path"])
 		}
-		if !hasPlanModifierDescription(mountPath.PlanModifiers, descRequiresReplace) {
+		if mountPath.Default != nil {
+			t.Error("file_storage.mount_path must not have a Default - D1 stopped fabricating a value for it")
+		}
+		usfuIdx := indexOfPlanModifierDescription(mountPath.PlanModifiers, descUseStateForUnknown)
+		rrIdx := indexOfPlanModifierDescription(mountPath.PlanModifiers, descRequiresReplace)
+		if usfuIdx == -1 {
+			t.Error("file_storage.mount_path must include stringplanmodifier.UseStateForUnknown() (D1) - " +
+				"defensive parity with mount_targets' Optional+Computed handling")
+		}
+		if rrIdx == -1 {
 			t.Errorf("file_storage.mount_path must include stringplanmodifier.RequiresReplace() — same swallowed-edit " +
 				"bug as anyscale_cloud_resource (task 861aaf10)")
+		}
+		if usfuIdx != -1 && rrIdx != -1 && usfuIdx > rrIdx {
+			t.Errorf("file_storage.mount_path: UseStateForUnknown (index %d) must be declared BEFORE "+
+				"RequiresReplace (index %d) - matches the mount_targets declaration order", usfuIdx, rrIdx)
 		}
 	})
 

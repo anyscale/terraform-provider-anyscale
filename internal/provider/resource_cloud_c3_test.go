@@ -415,7 +415,7 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		}
 	})
 
-	t.Run("AWS: file_storage.mount_path empty from the API resolves to the schema default (L2)", func(t *testing.T) {
+	t.Run("AWS: file_storage.mount_path empty from the API resolves to null, not a fabricated default (D1)", func(t *testing.T) {
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack: "VM",
 			AWSConfig:    &AWSConfig{VPCID: "vpc-real"},
@@ -430,8 +430,8 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 
 		var fsModel FileStorageModel
 		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
-		if fsModel.MountPath.ValueString() != fileStorageDefaultMountPath {
-			t.Errorf("file_storage.MountPath = %q, want %q - AWS has no real backend field, so this must resolve to the schema default rather than collapse to empty (L2)", fsModel.MountPath.ValueString(), fileStorageDefaultMountPath)
+		if !fsModel.MountPath.IsNull() {
+			t.Errorf("file_storage.MountPath = %q, want null - AWS has no real backend field for it, and D1 stopped fabricating fileStorageDefaultMountPath", fsModel.MountPath.ValueString())
 		}
 	})
 
