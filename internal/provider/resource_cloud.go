@@ -13,6 +13,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -894,7 +895,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		plan.IsEmptyCloud = types.BoolValue(isEmptyCloud)
 
 		// Read the existing cloud to populate state
-		if err := r.readCloudState(ctx, existingCloudID, &plan); err != nil {
+		if err := r.readCloudState(ctx, existingCloudID, &plan, nil); err != nil {
 			resp.Diagnostics.AddError("Read Error", fmt.Sprintf("Failed to read existing cloud: %s", err.Error()))
 			return
 		}
@@ -1060,7 +1061,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		tflog.Info(ctx, "Created empty cloud - resources should be added via anyscale_cloud_resource", map[string]any{"id": cloudID})
 
 		// Read back to get final state
-		if err := r.readCloudState(ctx, cloudID, &plan); err != nil {
+		if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 			resp.Diagnostics.AddError("Read Error", err.Error())
 			return
 		}
@@ -1138,7 +1139,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	// Read back final state
-	if err := r.readCloudState(ctx, cloudID, &plan); err != nil {
+	if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 		resp.Diagnostics.AddError("Read Error", err.Error())
 		return
 	}
@@ -1158,7 +1159,7 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	cloudID := state.ID.ValueString()
 	tflog.Info(ctx, "Reading Anyscale Cloud", map[string]any{"id": cloudID})
 
-	if err := r.readCloudState(ctx, cloudID, &state); err != nil {
+	if err := r.readCloudState(ctx, cloudID, &state, &resp.Diagnostics); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Cloud not found, removing from state", map[string]any{"id": cloudID})
 			resp.State.RemoveResource(ctx)
@@ -1192,7 +1193,7 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	tflog.Info(ctx, "Cloud updated successfully", map[string]any{"id": cloudID})
 
 	// Read back updated state
-	if err := r.readCloudState(ctx, cloudID, &plan); err != nil {
+	if err := r.readCloudState(ctx, cloudID, &plan, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud after update", err)
 		return
 	}
@@ -1704,8 +1705,13 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 	return nil
 }
 
-// readCloudState reads the cloud from the API and updates the state model
-func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, state *CloudResourceModel) error {
+// readCloudState reads the cloud from the API and updates the state model.
+//
+// driftDiags is D3's opt-in hook: nil from Create/Update, which must not warn
+// on file_storage drift mid-apply (Create can legitimately see the pre-D1
+// mount_path residue resolve, and a just-applied Update has nothing to warn
+// about yet). Read passes &resp.Diagnostics so the warning actually surfaces.
+func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, state *CloudResourceModel, driftDiags *diag.Diagnostics) error {
 	resp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
 	if err != nil {
 		return err
@@ -1802,6 +1808,13 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 			state.ComputeStack = types.StringValue(defaultResource.ComputeStack)
 		} else if cloudResp.Result.ComputeStack != "" {
 			state.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
+		}
+
+		// D3: same defaultResource this block already resolved for
+		// compute_stack carries the live file_storage to compare against
+		// state - zero extra API calls. Only Read wires driftDiags non-nil.
+		if driftDiags != nil && defaultResource != nil {
+			driftDiags.Append(checkFileStorageDrift(ctx, state.FileStorage, defaultResource.FileStorage, fmt.Sprintf("cloud %s", cloudID))...)
 		}
 	}
 

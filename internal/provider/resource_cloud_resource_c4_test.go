@@ -36,7 +36,7 @@ func TestReadCloudResource_K8sOperatorStatusDetailsDecodesWithoutError(t *testin
 	r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
 	var state CloudResourceResourceModel
 
-	if err := r.readCloudResource(context.Background(), "cloud-id", "k8s-resource", &state); err != nil {
+	if err := r.readCloudResource(context.Background(), "cloud-id", "k8s-resource", &state, nil); err != nil {
 		t.Fatalf("unexpected decode error (this is exactly the pre-fix failure mode): %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestReadCloudResource_VMResourceHasNullOperatorFields(t *testing.T) {
 	r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
 	var state CloudResourceResourceModel
 
-	if err := r.readCloudResource(context.Background(), "cloud-id", "vm-resource", &state); err != nil {
+	if err := r.readCloudResource(context.Background(), "cloud-id", "vm-resource", &state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -95,7 +95,7 @@ func TestReadCloudResource_K8sResourceNotYetReportedHasNullOperatorDetails(t *te
 	r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
 	var state CloudResourceResourceModel
 
-	if err := r.readCloudResource(context.Background(), "cloud-id", "k8s-pending", &state); err != nil {
+	if err := r.readCloudResource(context.Background(), "cloud-id", "k8s-pending", &state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

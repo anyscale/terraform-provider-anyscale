@@ -2,11 +2,13 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 // This file converts API config structs (AWSConfig, GCPConfig, ...) into the
@@ -515,6 +517,125 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 	obj, d := types.ObjectValue(fileStorageAttrTypes(), patched)
 	diags.Append(d...)
 	return obj, diags
+}
+
+// checkFileStorageDrift is D3: Read-only visibility into how the live
+// cloud's file_storage has diverged from state, in both directions - a
+// field state declares that live no longer has, or has a different value
+// for, is "declared-but-dropped"; a field live has that state never
+// declared is "live-but-undeclared". It only appends warnings and never
+// writes to fileStorage - the config blocks stay recover-only-on-import
+// (see this file's header comment on C3-v2), so this is a mitigation, not a
+// fix. Full drift management needs file_storage converted from a Block to
+// an Attribute, which the ratified design explicitly deferred as breaking.
+//
+// Suppression: state written before D1 (mount_path Optional+Computed, no
+// fabricated default) still carries fileStorageDefaultMountPath even on
+// AWS, which has no backend field for mount_path at all and never returns
+// one. Comparing that residue against a genuinely empty live value would
+// warn on every plan for every pre-D1 user. Narrow on purpose - only
+// mount_path, only when live is empty AND state is exactly
+// fileStorageDefaultMountPath - so a GCP user who really configured
+// "/mnt/shared" and lost it on the backend still gets the warning.
+func checkFileStorageDrift(ctx context.Context, fileStorage types.Object, live *FileStorage, label string) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	var state FileStorageModel
+	if !fileStorage.IsNull() && !fileStorage.IsUnknown() {
+		d := fileStorage.As(ctx, &state, basetypes.ObjectAsOptions{})
+		diags.Append(d...)
+		if diags.HasError() {
+			return diags
+		}
+	}
+
+	var liveMountPath, livePVC, liveDriver, liveFileStorageID string
+	var liveMountTargets []MountTarget
+	if live != nil {
+		liveFileStorageID = live.FileStorageID
+		liveMountPath = live.MountPath
+		livePVC = live.PersistentVolumeClaim
+		liveDriver = live.CSIEphemeralVolumeDriver
+		liveMountTargets = live.MountTargets
+	}
+
+	stateMountTargets, d := formatMountTargetsModel(ctx, state.MountTargets)
+	diags.Append(d...)
+	if diags.HasError() {
+		return diags
+	}
+
+	fields := []struct {
+		name, stateValue, liveValue string
+	}{
+		{"file_storage_id", state.FileStorageID.ValueString(), liveFileStorageID},
+		{"mount_path", state.MountPath.ValueString(), liveMountPath},
+		{"persistent_volume_claim", state.PersistentVolumeClaim.ValueString(), livePVC},
+		{"csi_ephemeral_volume_driver", state.CSIEphemeralVolumeDriver.ValueString(), liveDriver},
+		{"mount_targets", stateMountTargets, formatMountTargets(liveMountTargets)},
+	}
+
+	var drifted []string
+	for _, f := range fields {
+		if f.name == "mount_path" && liveMountPath == "" && f.stateValue == fileStorageDefaultMountPath {
+			continue
+		}
+		if f.stateValue == f.liveValue {
+			continue
+		}
+		direction := "live-but-undeclared"
+		if f.stateValue != "" {
+			direction = "declared-but-dropped"
+		}
+		drifted = append(drifted, fmt.Sprintf("  - %s: state=%q live=%q (%s)", f.name, f.stateValue, f.liveValue, direction))
+	}
+
+	if len(drifted) == 0 {
+		return diags
+	}
+
+	diags.AddWarning(
+		"file_storage Has Drifted From The Live Cloud",
+		fmt.Sprintf("%s's file_storage no longer matches the live cloud:\n%s\n\nThis block is not managed on "+
+			"refresh - nothing was written to state, and Terraform will not correct this on its own. Reconciling "+
+			"it today requires replacing the resource (file_storage forces replacement on change).",
+			label, strings.Join(drifted, "\n")),
+	)
+
+	return diags
+}
+
+// formatMountTargetsModel renders the state-side mount_targets list with the
+// exact "addr@zone" join formatMountTargets uses for the API-side
+// []MountTarget, so checkFileStorageDrift can compare the two with a plain
+// string equality check.
+func formatMountTargetsModel(ctx context.Context, list types.List) (string, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if list.IsNull() || list.IsUnknown() {
+		return "", diags
+	}
+
+	var models []MountTargetModel
+	d := list.ElementsAs(ctx, &models, false)
+	diags.Append(d...)
+	if diags.HasError() {
+		return "", diags
+	}
+
+	parts := make([]string, 0, len(models))
+	for _, m := range models {
+		parts = append(parts, m.Address.ValueString()+"@"+m.Zone.ValueString())
+	}
+	return strings.Join(parts, ","), diags
+}
+
+// formatMountTargets is formatMountTargetsModel for the API's []MountTarget.
+func formatMountTargets(mountTargets []MountTarget) string {
+	parts := make([]string, 0, len(mountTargets))
+	for _, mt := range mountTargets {
+		parts = append(parts, mt.Address+"@"+mt.Zone)
+	}
+	return strings.Join(parts, ",")
 }
 
 // requiredImportConfigBlocks recovers every config block ImportState can

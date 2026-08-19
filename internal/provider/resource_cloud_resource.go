@@ -12,6 +12,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -908,7 +909,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	// Read back the resource to get all computed fields
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &plan); err != nil {
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &plan, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource after creation", err)
 		return
 	}
@@ -933,7 +934,7 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 
 	tflog.Info(ctx, "Reading Anyscale Cloud Resource", map[string]any{"cloud_id": cloudID, "name": resourceName})
 
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &state); err != nil {
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, &resp.Diagnostics); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Cloud resource not found, removing from state", map[string]any{"cloud_id": cloudID, "name": resourceName})
 			resp.State.RemoveResource(ctx)
@@ -964,7 +965,7 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &state); err != nil {
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource", err)
 		return
 	}
@@ -1081,8 +1082,12 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// readCloudResource reads a cloud resource from the API and updates the state model
-func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel) error {
+// readCloudResource reads the cloud resource from the API and updates the
+// state model.
+//
+// driftDiags is D3's opt-in hook: nil from Create/Update (see readCloudState
+// in resource_cloud.go, same reasoning), &resp.Diagnostics from Read.
+func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel, driftDiags *diag.Diagnostics) error {
 	// listCloudResources pages through every page rather than just the first:
 	// Read calls this and removes the resource from state on a "not found", so
 	// a resource whose name only appears past page 1 would otherwise be
@@ -1142,6 +1147,12 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		state.IsPrivate = types.BoolValue(true)
 	} else {
 		state.IsPrivate = types.BoolValue(false)
+	}
+
+	// D3: foundResource is already this resource's live snapshot - zero
+	// extra API calls. Only Read wires driftDiags non-nil.
+	if driftDiags != nil {
+		driftDiags.Append(checkFileStorageDrift(ctx, state.FileStorage, foundResource.FileStorage, fmt.Sprintf("cloud_resource %s:%s", cloudID, resourceName))...)
 	}
 
 	tflog.Info(ctx, "Cloud resource read successfully", map[string]any{"cloud_id": cloudID, "name": resourceName})
