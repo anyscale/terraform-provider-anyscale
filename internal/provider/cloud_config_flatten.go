@@ -417,8 +417,9 @@ const fileStorageDefaultMountPath = "/mnt/shared"
 // schema), which makes recovering it here safe again: a recovered value
 // against an omitting config is absorbed by Computed instead of diffing.
 // The create path is unaffected either way - expandFileStorage still sends
-// a config-supplied mount_targets to the backend, and an explicit config
-// change still forces replacement.
+// a config-supplied mount_targets to the backend. An explicit config change
+// is now an in-place update, not a replacement: D2 removed RequiresReplace
+// from every file_storage attribute and added the resources-PUT write path.
 //
 // persistent_volume_claim/csi_ephemeral_volume_driver have no Default and no
 // AWS-specific quirk - still recovered exactly as the API carries them,
