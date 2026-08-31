@@ -35,6 +35,7 @@ var (
 	_ resource.ResourceWithConfigure      = &CloudResource{}
 	_ resource.ResourceWithImportState    = &CloudResource{}
 	_ resource.ResourceWithValidateConfig = &CloudResource{}
+	_ resource.ResourceWithModifyPlan     = &CloudResource{}
 )
 
 // NewCloudResource returns a new cloud resource.
@@ -536,17 +537,13 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"file_storage_id": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "The file storage ID (EFS ID, Filestore name, etc.).",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
 					},
 					"mount_path": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "The mount path for the file storage. Only meaningful for GCP Filestore and Azure/Generic NFS-backed clouds - it reaches no backend field on any provider for a `persistent_volume_claim`/`csi_ephemeral_volume_driver` config, and AWS EFS-backed clouds have no backend field for it at all (and reject the value at plan time). Null when the backend has no value for it - never fabricated. Recovered from the live value at import time on GCP, Azure, and Generic, where the backend genuinely stores one. Known limitation on GCP: if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share name and silently overwrites this value - GCP still ends up with a valid path, just not necessarily this one. Because `file_storage` isn't refreshed from the API on any later read (a prior refresh attempt caused a state-consistency regression), Terraform state keeps showing whatever value import recovered even after the backend overwrites it again, and `terraform plan` won't surface that later drift. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (neither has a backend mount_path field either) - set at most one. Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The mount path for the file storage. Only meaningful for GCP Filestore and Azure/Generic NFS-backed clouds - it reaches no backend field on any provider for a `persistent_volume_claim`/`csi_ephemeral_volume_driver` config, and AWS EFS-backed clouds have no backend field for it at all (and reject the value at plan time). Null when the backend has no value for it - never fabricated. Recovered from the live value at import time on GCP, Azure, and Generic, where the backend genuinely stores one. Known limitation on GCP: if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share name and silently overwrites this value - GCP still ends up with a valid path, just not necessarily this one. Because `file_storage` isn't refreshed from the API on any later read (a prior refresh attempt caused a state-consistency regression), Terraform state keeps showing whatever value import recovered even after the backend overwrites it again, and `terraform plan` won't surface that later drift. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (neither has a backend mount_path field either) - set at most one.",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.UseStateForUnknown(),
-							stringplanmodifier.RequiresReplace(),
 						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
@@ -558,9 +555,6 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"persistent_volume_claim": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only). Mutually exclusive with `csi_ephemeral_volume_driver` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
 								path.MatchRoot("file_storage").AtName("csi_ephemeral_volume_driver"),
@@ -571,9 +565,6 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"csi_ephemeral_volume_driver": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only). Mutually exclusive with `persistent_volume_claim` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
 								path.MatchRoot("file_storage").AtName("persistent_volume_claim"),
@@ -584,10 +575,9 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"mount_targets": schema.ListNestedAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both. Derived automatically from `file_storage_id` when left unset - the backend auto-discovers the real address (and zone, where applicable) once the EFS/Filestore resource exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself, such as referencing a sibling EFS/Filestore module output at create time (see the aws-vm/gcp-vm examples). Because `file_storage` isn't refreshed from the API on any later read, the recovered value is a frozen create/import-time snapshot - if the backend-discovered address ever changes out of band, Terraform state and `terraform plan` won't surface that later drift.",
+						MarkdownDescription: "List of mount targets with address and optional zone. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both. Derived automatically from `file_storage_id` when left unset - the backend auto-discovers the real address (and zone, where applicable) once the EFS/Filestore resource exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself, such as referencing a sibling EFS/Filestore module output at create time (see the aws-vm/gcp-vm examples). Because `file_storage` isn't refreshed from the API on any later read, the recovered value is a frozen create/import-time snapshot - if the backend-discovered address ever changes out of band, Terraform state and `terraform plan` won't surface that later drift.",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.UseStateForUnknown(),
-							listplanmodifier.RequiresReplace(),
 						},
 						NestedObject: schema.NestedAttributeObject{
 							Attributes: map[string]schema.Attribute{
@@ -1173,6 +1163,25 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 }
 
 // Update updates the resource and sets the updated Terraform state on success.
+// ModifyPlan surfaces the Anyscale-managed file_storage refusal at plan time rather than letting
+// the apply discover it - see D2 in docs/decisions/cloud-file-storage-lifecycle/README.md.
+func (r *CloudResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Null state is a create and null plan is a destroy; neither updates file_storage.
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var plan, state CloudResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	refuseFileStorageChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
+		state.ID.ValueString(), state.CloudResourceID.ValueString(), plan.FileStorage, state.FileStorage)
+}
+
 func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state CloudResourceModel
 
@@ -1184,6 +1193,16 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	cloudID := plan.ID.ValueString()
 	tflog.Info(ctx, "Updating Anyscale Cloud", map[string]any{"id": cloudID})
+
+	// Issue the resources PUT before updateMutableFields - see D2 in
+	// docs/decisions/cloud-file-storage-lifecycle/README.md. No transaction spans these calls, so
+	// the failure-prone one (running clusters can 400 this) goes first.
+	updateFileStorageIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
+		plan.FileStorage, state.FileStorage, plan.IsPrivateCloud.ValueBool(),
+		state.CloudProvider.ValueString(), state.ComputeStack.ValueString(), state.Region.ValueString())
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	if err := r.updateMutableFields(ctx, cloudID, plan, state); err != nil {
 		AddAPIError(&resp.Diagnostics, "update cloud", err)

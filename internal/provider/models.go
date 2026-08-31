@@ -94,6 +94,31 @@ type CloudDeploymentRequest struct {
 	// are set during cloud creation (POST /api/v2/clouds), NOT during add_resource
 }
 
+// CloudResourceUpdateRequest is the request body for PUT /api/v2/clouds/{cloud_id}/resources -
+// sent as a bare JSON list (a single object 422s with "value is not a valid list"). Purpose-built
+// rather than reusing CloudDeploymentRequest/CloudDeploymentResult: see D2 in
+// docs/decisions/cloud-file-storage-lifecycle/README.md. CloudDeploymentRequest has no
+// cloud_resource_id, carries an unwanted Name field, and (load-bearing) types NetworkingMode as a
+// bare non-nullable string; D2 needs that field to serialize as a literal JSON null for a public
+// deployment, which only a pointer can express.
+//
+// Every field must be populated per the frozen D2 spec's enumerated list: omitting a required one
+// silently wipes it server-side, and including an unrequired one can just as easily wipe
+// something else, or 400 outright (a provider-config block belonging to a different compute
+// stack). See buildCloudResourceUpdateRequest (cloud_resource_update.go) for the only intended
+// constructor.
+type CloudResourceUpdateRequest struct {
+	CloudResourceID  string            `json:"cloud_resource_id"`
+	Provider         string            `json:"provider"`
+	ComputeStack     string            `json:"compute_stack"`
+	Region           string            `json:"region"`
+	NetworkingMode   *string           `json:"networking_mode"`
+	FileStorage      *FileStorage      `json:"file_storage,omitempty"`
+	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
+	GCPConfig        *GCPConfig        `json:"gcp_config,omitempty"`
+	KubernetesConfig *KubernetesConfig `json:"kubernetes_config,omitempty"`
+}
+
 // ObjectStorage represents object storage configuration (S3, GCS, Azure Blob, S3-compatible)
 type ObjectStorage struct {
 	BucketName string  `json:"bucket_name"`
@@ -144,6 +169,13 @@ type GCPConfig struct {
 	FirewallPolicyNames         []string `json:"firewall_policy_names,omitempty"`
 	MemorystoreInstanceName     string   `json:"memorystore_instance_name,omitempty"`
 	MemorystoreEndpoint         string   `json:"memorystore_endpoint,omitempty"`
+
+	// Set only on Anyscale-managed clouds (created with `anyscale cloud setup`), which the backend
+	// refuses to update at all. Not modelled in the Terraform schema - read from the live GET solely
+	// to refuse a file_storage change at plan time instead of at apply time. The AWS equivalent is
+	// AWSConfig.CloudFormationID.
+	DeploymentManagerID     *string `json:"deployment_manager_id,omitempty"`
+	InfrastructureManagerID *string `json:"infrastructure_manager_id,omitempty"`
 }
 
 // AzureConfig represents Azure-specific cloud configuration. tenant_id is the
