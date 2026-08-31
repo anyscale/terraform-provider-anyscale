@@ -597,8 +597,9 @@ func checkFileStorageDrift(ctx context.Context, fileStorage types.Object, live *
 	diags.AddWarning(
 		"file_storage Has Drifted From The Live Cloud",
 		fmt.Sprintf("%s's file_storage no longer matches the live cloud:\n%s\n\nThis block is not managed on "+
-			"refresh - nothing was written to state, and Terraform will not correct this on its own. Reconciling "+
-			"it today requires replacing the resource (file_storage forces replacement on change).",
+			"refresh - nothing was written to state, and Terraform will not correct this on its own. file_storage "+
+			"can now be reconciled in place: declare the value you want and apply, or re-import to adopt the "+
+			"live one.",
 			label, strings.Join(drifted, "\n")),
 	)
 
