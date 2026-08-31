@@ -129,6 +129,13 @@ cd examples/aws-vm-basic/ && terraform plan && terraform apply   # no init neede
     framework Blocks cannot be `Computed`. Keep the *consequence*, drop the mechanism.
   - **Rewrite, never append.** These strings reach their worst state by accretion — each fix adds a
     clause and none removes one. When behavior changes, restate the whole description as it now is.
+  - **Do not reflow a long description into paragraphs — it renders broken, and it is not the fix.**
+    A blank line inside a `MarkdownDescription` does not paragraph-break within the attribute's list
+    item: CommonMark's list-continuation rule ends the list there, so one attribute fragments into
+    several broken lists. Measured on a real attempt: 13 words shorter, 10 lines *longer* per page.
+    Keep each description a single unbroken paragraph and cut content, or move it to a guide.
+  - **Measure the rendered page, not the diff.** `make docs` then read `docs/resources/*.md`. Source
+    that looks tidier can render worse, and word count can fall while line count rises.
   - **What earns length:** anything that changes what a practitioner does. A value that can be
     silently overwritten, an attribute rejected at plan time on one provider, an exception to a rule
     stated elsewhere. Cut narration and history; keep consequences.
