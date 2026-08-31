@@ -329,17 +329,17 @@ A few more things worth knowing:
   diff, no regression, just no backfill) — a fresh create or a re-import is what picks up the value
   from here forward.
 - **`file_storage.mount_path` only recovers a real value on GCP, Azure, and Generic.** AWS has no
-  backend field for it at all, so the `/mnt/shared` you see there is always the schema default, never
-  something recovered from the API — import leaves it to that default, exactly as before. GCP,
+  backend field for it at all, so `mount_path` is null there and never fabricated — import leaves it
+  null, and a configuration that omits it keeps it null. GCP,
   Azure, and Generic do store a real value, so import recovers whatever the backend actually holds —
   import reflects that reality rather than resetting to a default it would otherwise conflict with.
   On GCP specifically, if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share
   name and silently overwrites whatever `mount_path` you configured (see the `mount_path` attribute
   reference for the full mechanics); import now recovers whatever value that auto-discovery already
   produced. One consequence worth knowing: if you're importing such a cloud and your `.tf` leaves
-  `mount_path` unset (relying on the `/mnt/shared` default), import instead recovers the real
+  `mount_path` unset (so state would otherwise hold null), import instead recovers the real
   auto-discovered value, so your next `plan` shows a one-time reconcile diff on `mount_path` rather
-  than silently defaulting to a path the backend isn't actually using. This is strictly better than
+  than leaving state blind to the path the backend is actually using. This is strictly better than
   before this fix, when `file_storage` wasn't recovered at import at all; it's a one-time consequence
   of the pre-existing GCP auto-discovery behavior, not a new limitation of its own.
 - **`file_storage.mount_targets` is Computed and recovers cleanly at import, whether or not your
@@ -351,9 +351,10 @@ A few more things worth knowing:
   state, rather than the field staying permanently null. `mount_targets` remains a valid input when
   creating a new cloud through Terraform, sourcing the address from your EFS/Filestore module output
   (see the aws-vm or gcp-vm example) — setting it explicitly is compared against the real value as
-  normal, and a genuine change still correctly proposes a replace. As with the rest of
-  `file_storage`, this value isn't refreshed from the API on any later read, so it's a frozen
-  create/import-time snapshot even though it's Computed.
+  normal, and a genuine change is now applied in place — no `file_storage` change forces a
+  replacement any more. As with the rest of `file_storage`, this value isn't refreshed from the API
+  on any later read, so it's a frozen create/import-time snapshot even though it's Computed;
+  `terraform plan` does warn when it has drifted from the live cloud.
 - **`compute_stack` is read from the cloud's own attached resource, not just the cloud-level
   summary field.** `GET /clouds/{id}` includes its own `compute_stack`, but that value is
   backend-derived from whichever resource the API considers primary, and defaults to `VM` if it
