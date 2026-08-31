@@ -113,8 +113,25 @@ cd examples/aws-vm-basic/ && terraform plan && terraform apply   # no init neede
   null-vs-empty-string distinction is a user-facing contract; collapsing it is a bug.
 - Report config/auth problems with `resp.Diagnostics.AddError`. No panics, no fatal logs.
 - Schema `MarkdownDescription` strings are what `tfplugindocs` publishes — explain non-obvious
-  behavior inline (why a data source takes no arguments, why an attribute can be `null`, what a
-  value is for), don't just label the field. `anyscale_organization` is a good example.
+  behavior (why a data source takes no arguments, why an attribute can be `null`, what a value is
+  for), don't just label the field. `anyscale_organization` is a good example.
+- **Optimize published docs for brevity. Clear and direct beats complete.** Both humans and AI agents
+  read these pages, and both need signal rather than narrative — a reader scanning for what an
+  attribute does should not have to parse a paragraph of accumulated caveat to find it.
+  - **An attribute's description covers that attribute.** Anything explaining a *shared model* —
+    lifecycle, refresh semantics, how a block behaves as a whole — belongs in `templates/guides/*.md`
+    with a link from the attribute, not restated per attribute.
+  - **Two smells that mean the text belongs in a guide:** the same explanation appears on more than
+    one attribute (or on the same attribute of two resources — that is four copies), or a single
+    description runs past roughly 60 words. Neither is a hard limit; both are prompts to check
+    whether you are documenting the field or the model.
+  - **Omit provider internals.** A practitioner needs "this is not refreshed from the API", not that
+    framework Blocks cannot be `Computed`. Keep the *consequence*, drop the mechanism.
+  - **Rewrite, never append.** These strings reach their worst state by accretion — each fix adds a
+    clause and none removes one. When behavior changes, restate the whole description as it now is.
+  - **What earns length:** anything that changes what a practitioner does. A value that can be
+    silently overwritten, an attribute rejected at plan time on one provider, an exception to a rule
+    stated elsewhere. Cut narration and history; keep consequences.
 - **`docs/` is output, not source.** Doc edits belong in the schema's `MarkdownDescription`, in
   `templates/index.md.tmpl` (landing page), or in `templates/guides/*.md` — then `make docs`. Editing
   `docs/` directly gets overwritten on the next regeneration.
