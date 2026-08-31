@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_cloud, resource/anyscale_cloud_resource: `file_storage` changes (including adding or removing a `persistent_volume_claim`) now update the cloud in place instead of forcing it to be destroyed and recreated, and drift on `file_storage` is now surfaced during `terraform plan` instead of only on re-import.
+```
