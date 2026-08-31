@@ -493,28 +493,47 @@ func TestComputeConfigCC6DataSourceTopologyParity(t *testing.T) {
 	}
 }
 
-// TestCloudResourceHardenedFieldsRequireReplace pins task 861aaf10's fix: on
-// anyscale_cloud_resource, Update() is a no-op (it re-reads state but never
-// calls the API), so any nested file_storage attribute without
-// RequiresReplace silently swallows an edit — the plan diff never converges
-// because nothing ever tells Terraform the change needs a replace. This
-// catches that regression class in milliseconds instead of needing the
-// real-AWS-infra acceptance tests (SkipIfNoRealInfra) to ever run.
+// assertFileStorageUpdatableInPlace pins D2's contract on either cloud
+// resource's file_storage block: no attribute in it may carry
+// RequiresReplace.
 //
-// The kubernetes_config coverage this test originally had is gone along
-// with the 5 fields task #8 removed (see
-// TestFlattenKubernetesConfig_APIBackedFieldsPopulate for why) - nothing
-// left to pin, since the fields don't exist.
+// This inverts what these tests asserted before D2. The old contract came
+// from task 861aaf10, whose premise was that Update() never called the API
+// for file_storage, so an attribute without RequiresReplace silently
+// swallowed the edit. D2 gave file_storage a real Update path
+// (updateFileStorageIfChanged), which makes RequiresReplace the bug rather
+// than the fix: it plans destroy-and-recreate of a live cloud for a change
+// the API accepts in place. Reintroducing one is the regression now, so the
+// guard tests for its absence.
 //
-// anyscale_cloud's identical duplicated file_storage shape is covered
-// separately by TestCloudMountTargetsHardenedFieldsRequireReplace below,
-// closing the previously-tracked gap (task 02118d55).
-func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
-	s := schemaOf(t, &CloudResourceResource{})
+// The pins that survive D2 unchanged are kept: mount_path must still have no
+// Default and must keep UseStateForUnknown (D1), and mount_targets must stay
+// Optional+Computed with UseStateForUnknown.
+//
+// Both resources build this block independently, field-for-field identical,
+// so both call this rather than keeping two near-identical copies of it.
+func assertFileStorageUpdatableInPlace(t *testing.T, s schema.Schema) {
+	t.Helper()
 
 	fileStorageBlock, ok := s.Blocks["file_storage"].(schema.SingleNestedBlock)
 	if !ok {
 		t.Fatalf("file_storage is not a schema.SingleNestedBlock (got %T)", s.Blocks["file_storage"])
+	}
+
+	// Named explicitly rather than ranged over the map, so an attribute added
+	// to the block without being considered here shows up as a failure.
+	for _, name := range []string{"file_storage_id", "mount_path", "persistent_volume_claim", "csi_ephemeral_volume_driver"} {
+		t.Run("file_storage."+name, func(t *testing.T) {
+			attr, ok := fileStorageBlock.Attributes[name].(schema.StringAttribute)
+			if !ok {
+				t.Fatalf("file_storage.%s is not a schema.StringAttribute (got %T)", name, fileStorageBlock.Attributes[name])
+			}
+			if indexOfPlanModifierDescription(attr.PlanModifiers, descRequiresReplace) != -1 {
+				t.Errorf("file_storage.%s must NOT include stringplanmodifier.RequiresReplace() - D2 made "+
+					"file_storage updatable in place, so this plans a destroy-and-recreate of a live cloud for a "+
+					"change the Anyscale API accepts on the existing one", name)
+			}
+		})
 	}
 
 	t.Run("file_storage.mount_path", func(t *testing.T) {
@@ -522,16 +541,17 @@ func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
 		if !ok {
 			t.Fatalf("file_storage.mount_path is not a schema.StringAttribute (got %T)", fileStorageBlock.Attributes["mount_path"])
 		}
-		if !hasPlanModifierDescription(mountPath.PlanModifiers, descRequiresReplace) {
-			t.Errorf("file_storage.mount_path must include stringplanmodifier.RequiresReplace() — same swallowed-edit " +
-				"bug as kubernetes_config (task 861aaf10)")
+		if mountPath.Default != nil {
+			t.Error("file_storage.mount_path must not have a Default - D1 stopped fabricating a value for it")
+		}
+		if indexOfPlanModifierDescription(mountPath.PlanModifiers, descUseStateForUnknown) == -1 {
+			t.Error("file_storage.mount_path must include stringplanmodifier.UseStateForUnknown() (D1) - " +
+				"defensive parity with mount_targets' Optional+Computed handling")
 		}
 	})
 
-	// mount_targets is now Optional+Computed (see
-	// mount_targets_state_compat_test.go for the Block-to-Attribute
-	// rationale). This subtest pins the new attribute shape, replacing the
-	// old ListNestedBlock pin (task 861aaf10).
+	// mount_targets is Optional+Computed (see mount_targets_state_compat_test.go
+	// for the Block-to-Attribute rationale).
 	t.Run("file_storage.mount_targets", func(t *testing.T) {
 		mountTargets, ok := fileStorageBlock.Attributes["mount_targets"].(schema.ListNestedAttribute)
 		if !ok {
@@ -544,68 +564,22 @@ func TestCloudResourceHardenedFieldsRequireReplace(t *testing.T) {
 		if !mountTargets.Optional {
 			t.Error("file_storage.mount_targets must remain Optional - a config may still set it explicitly")
 		}
-		usfuIdx := indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descUseStateForUnknown)
-		rrIdx := indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descRequiresReplace)
-		if usfuIdx == -1 {
+		if indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descUseStateForUnknown) == -1 {
 			t.Error("file_storage.mount_targets must include listplanmodifier.UseStateForUnknown()")
 		}
-		if rrIdx == -1 {
-			t.Error("file_storage.mount_targets must include listplanmodifier.RequiresReplace() - the provider has " +
-				"no in-place update path for it (task 861aaf10)")
-		}
-		if usfuIdx != -1 && rrIdx != -1 && usfuIdx > rrIdx {
-			t.Errorf("file_storage.mount_targets: UseStateForUnknown (index %d) must be declared BEFORE "+
-				"RequiresReplace (index %d) - the backwards order silently reproduces the replace-on-import bug "+
-				"this fix exists to close, see indexOfPlanModifierDescription's doc comment", usfuIdx, rrIdx)
+		if indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descRequiresReplace) != -1 {
+			t.Error("file_storage.mount_targets must NOT include listplanmodifier.RequiresReplace() - see " +
+				"assertFileStorageUpdatableInPlace's doc comment")
 		}
 	})
 }
 
-// TestCloudMountTargetsHardenedFieldsRequireReplace is
-// TestCloudResourceHardenedFieldsRequireReplace's sibling for anyscale_cloud
-// - closing task 02118d55, the previously-tracked gap where only
-// anyscale_cloud_resource had this pinned. anyscale_cloud carries the
-// identical duplicated file_storage shape (both resources build their
-// schema independently, field-for-field identical), so the same
-// swallowed-edit risk applies here too.
-func TestCloudMountTargetsHardenedFieldsRequireReplace(t *testing.T) {
-	s := schemaOf(t, &CloudResource{})
+func TestCloudResourceFileStorageUpdatableInPlace(t *testing.T) {
+	assertFileStorageUpdatableInPlace(t, schemaOf(t, &CloudResourceResource{}))
+}
 
-	fileStorageBlock, ok := s.Blocks["file_storage"].(schema.SingleNestedBlock)
-	if !ok {
-		t.Fatalf("file_storage is not a schema.SingleNestedBlock (got %T)", s.Blocks["file_storage"])
-	}
-
-	t.Run("file_storage.mount_path", func(t *testing.T) {
-		mountPath, ok := fileStorageBlock.Attributes["mount_path"].(schema.StringAttribute)
-		if !ok {
-			t.Fatalf("file_storage.mount_path is not a schema.StringAttribute (got %T)", fileStorageBlock.Attributes["mount_path"])
-		}
-		if !hasPlanModifierDescription(mountPath.PlanModifiers, descRequiresReplace) {
-			t.Errorf("file_storage.mount_path must include stringplanmodifier.RequiresReplace() — same swallowed-edit " +
-				"bug as anyscale_cloud_resource (task 861aaf10)")
-		}
-	})
-
-	t.Run("file_storage.mount_targets", func(t *testing.T) {
-		mountTargets, ok := fileStorageBlock.Attributes["mount_targets"].(schema.ListNestedAttribute)
-		if !ok {
-			t.Fatalf("file_storage.mount_targets is not a schema.ListNestedAttribute (got %T)", fileStorageBlock.Attributes["mount_targets"])
-		}
-		if !mountTargets.Computed {
-			t.Error("file_storage.mount_targets must be Computed - it self-heals already-imported state via " +
-				"UseStateForUnknown instead of staying a frozen, never-recovered null forever")
-		}
-		usfuIdx := indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descUseStateForUnknown)
-		rrIdx := indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descRequiresReplace)
-		if usfuIdx == -1 || rrIdx == -1 {
-			t.Fatalf("file_storage.mount_targets must include both UseStateForUnknown and RequiresReplace (got usfuIdx=%d rrIdx=%d)", usfuIdx, rrIdx)
-		}
-		if usfuIdx > rrIdx {
-			t.Errorf("file_storage.mount_targets: UseStateForUnknown (index %d) must be declared BEFORE "+
-				"RequiresReplace (index %d) - same ordering hazard as anyscale_cloud_resource", usfuIdx, rrIdx)
-		}
-	})
+func TestCloudFileStorageUpdatableInPlace(t *testing.T) {
+	assertFileStorageUpdatableInPlace(t, schemaOf(t, &CloudResource{}))
 }
 
 // TestKubernetesConfigInertFieldsAreDeprecated (C5's original deprecation

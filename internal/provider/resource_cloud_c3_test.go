@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -99,7 +101,7 @@ func TestReadCloudState_NeverTouchesAlreadyPopulatedConfigBlock(t *testing.T) {
 		GCPConfig:     types.ObjectNull(gcpConfigAttrTypes()),
 	}
 
-	if err := r.readCloudState(context.Background(), "cloud-1", state); err != nil {
+	if err := r.readCloudState(context.Background(), "cloud-1", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -151,7 +153,7 @@ func TestReadCloudState_NeverInjectsIntoNullConfigBlock(t *testing.T) {
 		FileStorage:      types.ObjectNull(fileStorageAttrTypes()),
 	}
 
-	if err := r.readCloudState(context.Background(), "cloud-k8s", state); err != nil {
+	if err := r.readCloudState(context.Background(), "cloud-k8s", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -198,7 +200,7 @@ func TestReadCloudState_ComputedFieldsStillBackfillOnImport(t *testing.T) {
 		AWSConfig:       types.ObjectNull(awsConfigAttrTypes()),
 	}
 
-	if err := r.readCloudState(context.Background(), "cloud-2", state); err != nil {
+	if err := r.readCloudState(context.Background(), "cloud-2", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -245,7 +247,7 @@ func TestReadCloudState_EmptyCloudStaysEmptyEvenAfterResourceAttached(t *testing
 		CloudProvider:   types.StringValue("AWS"),
 	}
 
-	if err := r.readCloudState(context.Background(), "cloud-3", state); err != nil {
+	if err := r.readCloudState(context.Background(), "cloud-3", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -276,7 +278,7 @@ func TestReadCloudState_CredentialsNeverPopulated(t *testing.T) {
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 	state := &CloudResourceModel{ID: types.StringValue("cloud-4"), Credentials: types.StringNull()}
 
-	if err := r.readCloudState(context.Background(), "cloud-4", state); err != nil {
+	if err := r.readCloudState(context.Background(), "cloud-4", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -301,7 +303,7 @@ func TestReadCloudResource_NeverTouchesAlreadyPopulatedConfigBlock(t *testing.T)
 	originalAWSConfig := buildAWSConfigState(t, "vpc-ORIGINAL")
 	state := &CloudResourceResourceModel{AWSConfig: originalAWSConfig}
 
-	if err := r.readCloudResource(context.Background(), "cloud-id", "r1", state); err != nil {
+	if err := r.readCloudResource(context.Background(), "cloud-id", "r1", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -326,7 +328,7 @@ func TestReadCloudResource_NeverInjectsIntoNullConfigBlock(t *testing.T) {
 		AWSConfig: types.ObjectNull(awsConfigAttrTypes()),
 	}
 
-	if err := r.readCloudResource(context.Background(), "cloud-id", "r1", state); err != nil {
+	if err := r.readCloudResource(context.Background(), "cloud-id", "r1", state, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -415,7 +417,7 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 		}
 	})
 
-	t.Run("AWS: file_storage.mount_path empty from the API resolves to the schema default (L2)", func(t *testing.T) {
+	t.Run("AWS: file_storage.mount_path empty from the API resolves to null, not a fabricated default (D1)", func(t *testing.T) {
 		defaultResource := &CloudDeploymentResult{
 			ComputeStack: "VM",
 			AWSConfig:    &AWSConfig{VPCID: "vpc-real"},
@@ -430,8 +432,8 @@ func TestRequiredImportConfigBlocks_VMPopulatesProviderBlockPlusStorage(t *testi
 
 		var fsModel FileStorageModel
 		blocks["file_storage"].As(ctx, &fsModel, basetypes.ObjectAsOptions{})
-		if fsModel.MountPath.ValueString() != fileStorageDefaultMountPath {
-			t.Errorf("file_storage.MountPath = %q, want %q - AWS has no real backend field, so this must resolve to the schema default rather than collapse to empty (L2)", fsModel.MountPath.ValueString(), fileStorageDefaultMountPath)
+		if !fsModel.MountPath.IsNull() {
+			t.Errorf("file_storage.MountPath = %q, want null - AWS has no real backend field for it, and D1 stopped fabricating fileStorageDefaultMountPath", fsModel.MountPath.ValueString())
 		}
 	})
 
@@ -652,4 +654,200 @@ func TestCloudResourceImportState_RecoversRequiredBlockEndToEnd(t *testing.T) {
 	if state.FileStorage.IsNull() {
 		t.Error("FileStorage is null after ImportState - customer-reported bug: file_storage must now be recovered on every stack, including K8S")
 	}
+}
+
+// --- readCloudState: file_storage drift warning (D3) ---
+//
+// checkFileStorageDrift is diagnostics-only (see its doc comment) - these
+// tests assert both the warning content and, separately, that state.FileStorage
+// itself is never touched, since that second property is exactly what keeps
+// this feature clear of the C3-v2/C12 plan-consistency trap the rest of this
+// file guards.
+
+// buildFileStorageState is a small builder for a fully-populated file_storage
+// Object, standing in for "what state already has before Read runs".
+func buildFileStorageState(t *testing.T, cfg *FileStorage) types.Object {
+	t.Helper()
+	obj, diags := flattenFileStorage(context.Background(), cfg)
+	if diags.HasError() {
+		t.Fatalf("failed to build test file_storage: %v", diags)
+	}
+	return obj
+}
+
+func TestReadCloudState_FileStorageDriftWarning(t *testing.T) {
+	t.Run("declared-but-dropped: live cloud lost file_storage entirely", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Path {
+			case "/api/v2/clouds/cloud-fs-1":
+				_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-fs-1", "name": "prod", "provider": "GCP", "region": "us-central1"}}`)
+			case "/api/v2/clouds/cloud-fs-1/resources":
+				_, _ = fmt.Fprint(w, `{
+					"results": [{"name": "default", "is_default": true, "provider": "GCP"}],
+					"metadata": {"total": 1, "next_paging_token": null}
+				}`)
+			default:
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		original := &FileStorage{
+			FileStorageID: "fs_abc123",
+			MountPath:     "/data",
+			MountTargets:  []MountTarget{{Address: "10.0.0.1", Zone: "us-central1-a"}},
+		}
+		state := &CloudResourceModel{
+			ID:            types.StringValue("cloud-fs-1"),
+			IsEmptyCloud:  types.BoolValue(false),
+			CloudProvider: types.StringValue("GCP"),
+			AWSConfig:     types.ObjectNull(awsConfigAttrTypes()),
+			GCPConfig:     types.ObjectNull(gcpConfigAttrTypes()),
+			FileStorage:   buildFileStorageState(t, original),
+		}
+		originalFileStorage := state.FileStorage
+
+		var diags diag.Diagnostics
+		if err := r.readCloudState(context.Background(), "cloud-fs-1", state, &diags); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if diags.WarningsCount() == 0 {
+			t.Fatal("expected a drift warning when the live cloud dropped file_storage entirely, got none")
+		}
+		warning := diags.Warnings()[0]
+		for _, want := range []string{"fs_abc123", "declared-but-dropped", "cloud cloud-fs-1"} {
+			if !strings.Contains(warning.Summary()+warning.Detail(), want) {
+				t.Errorf("warning missing %q\nsummary: %s\ndetail: %s", want, warning.Summary(), warning.Detail())
+			}
+		}
+		if !state.FileStorage.Equal(originalFileStorage) {
+			t.Errorf("state.FileStorage was modified by the drift check - D3 must be diagnostics-only.\nbefore: %#v\nafter:  %#v", originalFileStorage, state.FileStorage)
+		}
+	})
+
+	t.Run("live-but-undeclared: live cloud has file_storage the config never declared", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Path {
+			case "/api/v2/clouds/cloud-fs-2":
+				_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-fs-2", "name": "prod", "provider": "GCP", "region": "us-central1"}}`)
+			case "/api/v2/clouds/cloud-fs-2/resources":
+				_, _ = fmt.Fprint(w, `{
+					"results": [{"name": "default", "is_default": true, "provider": "GCP", "file_storage": {"file_storage_id": "fs_live999", "mount_path": "/live"}}],
+					"metadata": {"total": 1, "next_paging_token": null}
+				}`)
+			default:
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{
+			ID:            types.StringValue("cloud-fs-2"),
+			IsEmptyCloud:  types.BoolValue(false),
+			CloudProvider: types.StringValue("GCP"),
+			AWSConfig:     types.ObjectNull(awsConfigAttrTypes()),
+			GCPConfig:     types.ObjectNull(gcpConfigAttrTypes()),
+			FileStorage:   types.ObjectNull(fileStorageAttrTypes()),
+		}
+
+		var diags diag.Diagnostics
+		if err := r.readCloudState(context.Background(), "cloud-fs-2", state, &diags); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if diags.WarningsCount() == 0 {
+			t.Fatal("expected a drift warning when the live cloud has file_storage the config never declared, got none")
+		}
+		warning := diags.Warnings()[0]
+		for _, want := range []string{"fs_live999", "live-but-undeclared"} {
+			if !strings.Contains(warning.Summary()+warning.Detail(), want) {
+				t.Errorf("warning missing %q\nsummary: %s\ndetail: %s", want, warning.Summary(), warning.Detail())
+			}
+		}
+		if !state.FileStorage.IsNull() {
+			t.Error("state.FileStorage was populated by the drift check - D3 must be diagnostics-only, config blocks stay recover-only-on-import")
+		}
+	})
+
+	t.Run("suppressed: pre-D1 default mount_path residue against AWS's real empty value - no warning", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Path {
+			case "/api/v2/clouds/cloud-fs-3":
+				_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-fs-3", "name": "prod", "provider": "AWS", "region": "us-east-2"}}`)
+			case "/api/v2/clouds/cloud-fs-3/resources":
+				// AWS has no backend field for mount_path at all - live comes
+				// back empty; everything else matches what pre-D1 state
+				// already has, so nothing here is real drift.
+				_, _ = fmt.Fprint(w, `{
+					"results": [{"name": "default", "is_default": true, "provider": "AWS", "file_storage": {"file_storage_id": "fs_same"}}],
+					"metadata": {"total": 1, "next_paging_token": null}
+				}`)
+			default:
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{
+			ID:            types.StringValue("cloud-fs-3"),
+			IsEmptyCloud:  types.BoolValue(false),
+			CloudProvider: types.StringValue("AWS"),
+			AWSConfig:     types.ObjectNull(awsConfigAttrTypes()),
+			GCPConfig:     types.ObjectNull(gcpConfigAttrTypes()),
+			FileStorage: buildFileStorageState(t, &FileStorage{
+				FileStorageID: "fs_same",
+				MountPath:     fileStorageDefaultMountPath, // pre-D1 fabricated residue
+			}),
+		}
+
+		var diags diag.Diagnostics
+		if err := r.readCloudState(context.Background(), "cloud-fs-3", state, &diags); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if diags.WarningsCount() != 0 {
+			t.Errorf("expected no warning for pre-D1 mount_path residue against AWS's real empty value, got: %v", diags.Warnings())
+		}
+	})
+
+	t.Run("nil driftDiags (Create/Update call sites) skips the check even when state and live disagree", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Path {
+			case "/api/v2/clouds/cloud-fs-4":
+				_, _ = fmt.Fprint(w, `{"result": {"id": "cloud-fs-4", "name": "prod", "provider": "GCP", "region": "us-central1"}}`)
+			case "/api/v2/clouds/cloud-fs-4/resources":
+				_, _ = fmt.Fprint(w, `{
+					"results": [{"name": "default", "is_default": true, "provider": "GCP"}],
+					"metadata": {"total": 1, "next_paging_token": null}
+				}`)
+			default:
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{
+			ID:            types.StringValue("cloud-fs-4"),
+			IsEmptyCloud:  types.BoolValue(false),
+			CloudProvider: types.StringValue("GCP"),
+			AWSConfig:     types.ObjectNull(awsConfigAttrTypes()),
+			GCPConfig:     types.ObjectNull(gcpConfigAttrTypes()),
+			FileStorage:   buildFileStorageState(t, &FileStorage{FileStorageID: "fs_would_warn", MountPath: "/data"}),
+		}
+
+		// nil is exactly what Create/Update pass - see the call sites in
+		// resource_cloud.go. This must not panic and must not touch state.
+		if err := r.readCloudState(context.Background(), "cloud-fs-4", state, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }

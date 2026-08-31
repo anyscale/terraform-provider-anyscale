@@ -12,6 +12,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -20,7 +21,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -34,6 +34,7 @@ var (
 	_ resource.ResourceWithConfigure      = &CloudResourceResource{}
 	_ resource.ResourceWithImportState    = &CloudResourceResource{}
 	_ resource.ResourceWithValidateConfig = &CloudResourceResource{}
+	_ resource.ResourceWithModifyPlan     = &CloudResourceResource{}
 )
 
 // statusDeprecationMessage documented status (removed at v1->v2, see
@@ -553,17 +554,13 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"file_storage_id": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "The file storage ID (EFS ID, Filestore name, etc.).",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
 					},
 					"mount_path": schema.StringAttribute{
 						Optional:            true,
 						Computed:            true,
-						Default:             stringdefault.StaticString(fileStorageDefaultMountPath),
-						MarkdownDescription: "The mount path for the file storage. Only meaningful for GCP Filestore and Azure/Generic NFS-backed clouds - AWS EFS-backed clouds have no backend field for it and reject the value at plan time. Recovered from the live value at import time on GCP, Azure, and Generic, where the backend genuinely stores one; left to the schema default on AWS, since no backend field exists there to recover from. Known limitation on GCP: if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share name and silently overwrites this value - GCP still ends up with a valid path, just not necessarily this one. Because `file_storage` isn't refreshed from the API on any later read (a prior refresh attempt caused a state-consistency regression), Terraform state keeps showing whatever value import recovered even after the backend overwrites it again, and `terraform plan` won't surface that later drift. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (neither has a backend mount_path field either) - set at most one. Changing this requires replacement; the provider has no in-place update path for it.",
+						MarkdownDescription: "The mount path for the file storage. Only meaningful on GCP Filestore and Azure/Generic NFS-backed clouds; AWS rejects it at plan time, and it is ignored for `persistent_volume_claim`/`csi_ephemeral_volume_driver` configs. Null when the backend has no value - never fabricated - and recovered from the live value at import. On GCP, if `mount_targets` is unset Anyscale auto-discovers the Filestore share and overwrites this value. `file_storage` is not refreshed on read, so state keeps the import-time value; `terraform plan` warns when it drifts, except for a legacy `/mnt/shared` value that the backend has no counterpart for. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver`.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
+							stringplanmodifier.UseStateForUnknown(),
 						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
@@ -575,9 +572,6 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"persistent_volume_claim": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only). Mutually exclusive with `csi_ephemeral_volume_driver` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
 								path.MatchRoot("file_storage").AtName("csi_ephemeral_volume_driver"),
@@ -588,9 +582,6 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"csi_ephemeral_volume_driver": schema.StringAttribute{
 						Optional:            true,
 						MarkdownDescription: "CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only). Mutually exclusive with `persistent_volume_claim` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.",
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
-						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
 								path.MatchRoot("file_storage").AtName("persistent_volume_claim"),
@@ -601,10 +592,9 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"mount_targets": schema.ListNestedAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. This is the NFS-style mount mechanism; mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver` (the Kubernetes-native shared-storage mechanisms) - do not set both. Derived automatically from `file_storage_id` when left unset - the backend auto-discovers the real address (and zone, where applicable) once the EFS/Filestore resource exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself, such as referencing a sibling EFS/Filestore module output at create time (see the aws-vm/gcp-vm examples). Because `file_storage` isn't refreshed from the API on any later read, the recovered value is a frozen create/import-time snapshot - if the backend-discovered address ever changes out of band, Terraform state and `terraform plan` won't surface that later drift.",
+						MarkdownDescription: "Mount targets, each an address with an optional zone. The NFS-style mechanism; mutually exclusive with the Kubernetes-native `persistent_volume_claim`/`csi_ephemeral_volume_driver`. Derived from `file_storage_id` when unset - the backend discovers the address once the EFS/Filestore resource exists. Set it only to pin a value, e.g. a sibling EFS/Filestore module output (see the aws-vm/gcp-vm examples). `file_storage` is not refreshed on read, so this is a create/import-time snapshot; `terraform plan` warns if the address later changes. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value.",
 						PlanModifiers: []planmodifier.List{
 							listplanmodifier.UseStateForUnknown(),
-							listplanmodifier.RequiresReplace(),
 						},
 						NestedObject: schema.NestedAttributeObject{
 							Attributes: map[string]schema.Attribute{
@@ -909,7 +899,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	// Read back the resource to get all computed fields
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &plan); err != nil {
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &plan, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource after creation", err)
 		return
 	}
@@ -934,7 +924,7 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 
 	tflog.Info(ctx, "Reading Anyscale Cloud Resource", map[string]any{"cloud_id": cloudID, "name": resourceName})
 
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &state); err != nil {
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, &resp.Diagnostics); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Cloud resource not found, removing from state", map[string]any{"cloud_id": cloudID, "name": resourceName})
 			resp.State.RemoveResource(ctx)
@@ -948,24 +938,55 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 }
 
 // Update updates the resource and sets the updated Terraform state on success.
-func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// Most fields are ForceNew, so limited updates possible
-	tflog.Info(ctx, "Cloud resource update called - most fields are ForceNew")
+// ModifyPlan surfaces the Anyscale-managed file_storage refusal at plan time rather than letting
+// the apply discover it - see D2 in docs/decisions/cloud-file-storage-lifecycle/README.md.
+func (r *CloudResourceResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Null state is a create and null plan is a destroy; neither updates file_storage.
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
 
-	var state CloudResourceResourceModel
+	var plan, state CloudResourceResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Just re-read to refresh state
+	cloudID, _, err := parseCloudResourceID(state.ID.ValueString())
+	if err != nil {
+		// A malformed ID is Update's problem to report, not a plan-time refusal's.
+		return
+	}
+
+	refuseFileStorageChangeOnManagedCloud(ctx, r.client, &resp.Diagnostics,
+		cloudID, state.CloudResourceID.ValueString(), plan.FileStorage, state.FileStorage)
+}
+
+func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Most fields are ForceNew; file_storage is the one in-place-updatable field.
+	var plan, state CloudResourceResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	cloudID, resourceName, err := parseCloudResourceID(state.ID.ValueString())
 	if err != nil {
 		AddConfigError(&resp.Diagnostics, "Parse Error", err.Error())
 		return
 	}
 
-	if err := r.readCloudResource(ctx, cloudID, resourceName, &state); err != nil {
+	// See D2 in docs/decisions/cloud-file-storage-lifecycle/README.md.
+	updateFileStorageIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
+		plan.FileStorage, state.FileStorage, plan.IsPrivate.ValueBool(),
+		state.CloudProvider.ValueString(), state.ComputeStack.ValueString(), state.Region.ValueString())
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource", err)
 		return
 	}
@@ -1082,8 +1103,12 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// readCloudResource reads a cloud resource from the API and updates the state model
-func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel) error {
+// readCloudResource reads the cloud resource from the API and updates the
+// state model.
+//
+// driftDiags is D3's opt-in hook: nil from Create/Update (see readCloudState
+// in resource_cloud.go, same reasoning), &resp.Diagnostics from Read.
+func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel, driftDiags *diag.Diagnostics) error {
 	// listCloudResources pages through every page rather than just the first:
 	// Read calls this and removes the resource from state on a "not found", so
 	// a resource whose name only appears past page 1 would otherwise be
@@ -1143,6 +1168,12 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		state.IsPrivate = types.BoolValue(true)
 	} else {
 		state.IsPrivate = types.BoolValue(false)
+	}
+
+	// D3: foundResource is already this resource's live snapshot - zero
+	// extra API calls. Only Read wires driftDiags non-nil.
+	if driftDiags != nil {
+		driftDiags.Append(checkFileStorageDrift(ctx, state.FileStorage, foundResource.FileStorage, fmt.Sprintf("cloud_resource %s:%s", cloudID, resourceName))...)
 	}
 
 	tflog.Info(ctx, "Cloud resource read successfully", map[string]any{"cloud_id": cloudID, "name": resourceName})

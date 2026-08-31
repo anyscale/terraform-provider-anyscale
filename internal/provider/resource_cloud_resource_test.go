@@ -902,7 +902,7 @@ func TestReadCloudResource_NotFoundSentinel(t *testing.T) {
 		defer server.Close()
 
 		r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
-		err := r.readCloudResource(context.Background(), "cld_gone", "some-resource", &CloudResourceResourceModel{})
+		err := r.readCloudResource(context.Background(), "cld_gone", "some-resource", &CloudResourceResourceModel{}, nil)
 		if err == nil {
 			t.Fatal("readCloudResource returned nil error for a gone cloud, want a non-nil error wrapping ErrNotFound")
 		}
@@ -926,7 +926,7 @@ func TestReadCloudResource_NotFoundSentinel(t *testing.T) {
 		defer server.Close()
 
 		r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
-		err := r.readCloudResource(context.Background(), "cld_live", "missing-resource", &CloudResourceResourceModel{})
+		err := r.readCloudResource(context.Background(), "cld_live", "missing-resource", &CloudResourceResourceModel{}, nil)
 		if err == nil {
 			t.Fatal("readCloudResource returned nil error for a scan miss, want a non-nil error wrapping ErrNotFound")
 		}

@@ -40,7 +40,7 @@ func TestReadCloudResource_PagesBeyondFirstPage(t *testing.T) {
 	}
 
 	var state CloudResourceResourceModel
-	err := r.readCloudResource(context.Background(), "cloud-id", "resource-2", &state)
+	err := r.readCloudResource(context.Background(), "cloud-id", "resource-2", &state, nil)
 	if err != nil {
 		t.Fatalf("expected to find resource-2 on page 2, got error: %v", err)
 	}

@@ -30,12 +30,11 @@ import (
 //     copying it verbatim would write a non-null region into state against
 //     a config that never set one, forcing the exact same destroy-and-
 //     recreate this test exists to catch, just relocated to a new attribute.
-//   - L2 (file_storage.mount_path default collapse): AWS has no real
-//     backend field for mount_path. resourcesJSON's file_storage
-//     deliberately omits mount_path (empty, as the real API returns for
-//     AWS) - copying that empty value verbatim would collapse the Computed
-//     schema default ("/mnt/shared") to "", which is itself a spurious diff
-//     against a freshly-created cloud that never touched the field.
+//   - L2 (file_storage.mount_path): AWS has no real backend field for
+//     mount_path at all - resourcesJSON's file_storage deliberately omits
+//     it, matching what the real AWS API returns. D1 stopped fabricating a
+//     default for this case, so both create and import must resolve it to
+//     null; this test proves the two paths agree.
 //
 // Step 1 creates against the mock and captures real applied state. Step 2
 // imports: ImportStateVerify must match that state EXACTLY - unlike the
@@ -101,7 +100,8 @@ resource "anyscale_cloud" "test" {
     bucket_name = "my-bucket"
   }
 
-  # Customer mirror: file_storage_id only - mount_path left to the schema default.
+  # Customer mirror: file_storage_id only - mount_path omitted (resolves to
+  # null; AWS has no backend field for it).
   file_storage {
     file_storage_id = "fs-storagetest123"
   }
@@ -118,7 +118,7 @@ resource "anyscale_cloud" "test" {
 					resource.TestCheckResourceAttr(resourceName, "object_storage.bucket_name", "my-bucket"),
 					resource.TestCheckNoResourceAttr(resourceName, "object_storage.region"),
 					resource.TestCheckResourceAttr(resourceName, "file_storage.file_storage_id", "fs-storagetest123"),
-					resource.TestCheckResourceAttr(resourceName, "file_storage.mount_path", "/mnt/shared"),
+					resource.TestCheckNoResourceAttr(resourceName, "file_storage.mount_path"),
 				),
 				ExpectNonEmptyPlan: false,
 			},

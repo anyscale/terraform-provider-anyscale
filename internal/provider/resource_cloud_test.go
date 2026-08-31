@@ -765,7 +765,7 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 
 		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 		state := &CloudResourceModel{}
-		if err := r.readCloudState(ctx, "cld_test", state); err != nil {
+		if err := r.readCloudState(ctx, "cld_test", state, nil); err != nil {
 			t.Fatalf("readCloudState returned error: %v", err)
 		}
 
@@ -793,7 +793,7 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 
 		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 		state := &CloudResourceModel{}
-		if err := r.readCloudState(ctx, "cld_empty", state); err != nil {
+		if err := r.readCloudState(ctx, "cld_empty", state, nil); err != nil {
 			t.Fatalf("readCloudState returned error: %v", err)
 		}
 
@@ -821,7 +821,7 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 
 		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 		state := &CloudResourceModel{}
-		if err := r.readCloudState(ctx, "cld_fail", state); err != nil {
+		if err := r.readCloudState(ctx, "cld_fail", state, nil); err != nil {
 			t.Fatalf("readCloudState returned error: %v", err)
 		}
 
@@ -858,7 +858,7 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 
 		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 		state := &CloudResourceModel{}
-		if err := r.readCloudState(ctx, "cld_cli", state); err != nil {
+		if err := r.readCloudState(ctx, "cld_cli", state, nil); err != nil {
 			t.Fatalf("readCloudState returned error: %v", err)
 		}
 
@@ -889,7 +889,7 @@ func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
 
 		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
 		state := &CloudResourceModel{}
-		if err := r.readCloudState(ctx, "cld_multi", state); err != nil {
+		if err := r.readCloudState(ctx, "cld_multi", state, nil); err != nil {
 			t.Fatalf("readCloudState returned error: %v", err)
 		}
 
@@ -918,7 +918,7 @@ func TestReadCloudState_NotFoundSentinel(t *testing.T) {
 	defer server.Close()
 
 	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
-	err := r.readCloudState(context.Background(), "cld_gone", &CloudResourceModel{})
+	err := r.readCloudState(context.Background(), "cld_gone", &CloudResourceModel{}, nil)
 	if err == nil {
 		t.Fatal("readCloudState returned nil error for a real 404, want a non-nil error wrapping ErrNotFound")
 	}

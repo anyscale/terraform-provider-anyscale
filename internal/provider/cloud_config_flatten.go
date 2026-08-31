@@ -2,11 +2,13 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 // This file converts API config structs (AWSConfig, GCPConfig, ...) into the
@@ -388,32 +390,22 @@ func flattenObjectStorage(cfg *ObjectStorage, provider string) (types.Object, di
 	return obj, diags
 }
 
-// fileStorageDefaultMountPath is file_storage.mount_path's schema Default
-// (stringdefault.StaticString in resource_cloud.go/resource_cloud_resource.go)
-// and also what flattenFileStorage resolves to for a provider with no real
-// backend field for it (see flattenFileStorage) - one constant so the two
-// can never drift apart.
+// fileStorageDefaultMountPath is the mount_path value pre-D1 schema
+// versions defaulted to; resource_cloud_upgrade.go and
+// resource_cloud_resource_upgrade.go still reference it as their frozen
+// schema's Default. The live schema no longer fabricates this value - see
+// flattenFileStorage.
 const fileStorageDefaultMountPath = "/mnt/shared"
 
 // flattenFileStorage populates file_storage from the API's FileStorage.
 //
-// L2: mount_path is Optional+Computed with a static Default, unlike a plain
-// Optional field recovered on import - nulling it here is NOT the safe move
-// the way it is for a plain Optional field. ImportStateVerify runs directly against
-// whatever this function writes, with no intervening plan (Defaults are a
-// PlanResourceChange-only mechanism - terraform-plugin-framework's
-// TransformDefaults, internal/fwschemadata/data_default.go - never invoked
-// by ImportResourceState or ReadResource), so a null written here would
-// still read back as null immediately after import, not as "/mnt/shared" -
-// a real mismatch against the freshly-created state a customer's own
-// ImportStateVerify would catch. AWS has no backend field for mount_path at
-// all (validateMountPathSupported rejects a user ever setting one), so the
-// API value is empty - resolve straight to fileStorageDefaultMountPath
-// there, the same value a config that never sets it would already show.
-// GCP/Azure/Generic DO carry a real value - recover it verbatim, or a later
-// plan diffs against backend-only drift. Net rule (same as the contract's):
-// recover mount_path only when the API actually returns a non-empty value,
-// else resolve to the default directly.
+// L2: mount_path is Optional+Computed with no Default (D1 - the provider
+// stopped fabricating a value for it). It is recovered verbatim like every
+// other field below; an empty API value resolves to null rather than
+// fileStorageDefaultMountPath. AWS has no backend field for mount_path at
+// all (validateMountPathSupported rejects a user ever setting one), so it
+// always resolves to null there. GCP/Azure/Generic carry a real value and
+// round-trip it unchanged.
 //
 // L3: mount_targets IS recovered here again, reversing the v0.15.2-through-
 // v0.16.1 history - v0.15.2/PR #180 recovered it verbatim; v0.16.1/PR #189
@@ -425,8 +417,9 @@ const fileStorageDefaultMountPath = "/mnt/shared"
 // schema), which makes recovering it here safe again: a recovered value
 // against an omitting config is absorbed by Computed instead of diffing.
 // The create path is unaffected either way - expandFileStorage still sends
-// a config-supplied mount_targets to the backend, and an explicit config
-// change still forces replacement.
+// a config-supplied mount_targets to the backend. An explicit config change
+// is now an in-place update, not a replacement: D2 removed RequiresReplace
+// from every file_storage attribute and added the resources-PUT write path.
 //
 // persistent_volume_claim/csi_ephemeral_volume_driver have no Default and no
 // AWS-specific quirk - still recovered exactly as the API carries them,
@@ -437,10 +430,7 @@ func flattenFileStorage(ctx context.Context, cfg *FileStorage) (types.Object, di
 		return types.ObjectNull(fileStorageAttrTypes()), diags
 	}
 
-	mountPath := types.StringValue(fileStorageDefaultMountPath)
-	if cfg.MountPath != "" {
-		mountPath = types.StringValue(cfg.MountPath)
-	}
+	mountPath := stringOrNull(cfg.MountPath)
 
 	mountTargets, d := flattenMountTargets(cfg.MountTargets)
 	diags.Append(d...)
@@ -485,15 +475,16 @@ func flattenMountTargets(mountTargets []MountTarget) (types.List, diag.Diagnosti
 }
 
 // mergeFileStorageDerivedFields is mergeAWSDerivedFields for
-// file_storage.mount_targets - same fill-when-omitted rule, same
-// Create-only call site, same nil-derived-resolves-Unknown-to-null
-// reasoning for the early pre-add_resource State.Set, generalized from a
-// scalar field to a list via flattenMountTargets. derived is the
-// add_resource response's own FileStorage, whose MountTargets the backend
-// gates on "unset" the identical way as memorydb/memorystore (EFS/Filestore
+// file_storage.mount_targets and mount_path - same fill-when-omitted rule,
+// same Create-only call site, same nil-derived-resolves-Unknown-to-null
+// reasoning for the early pre-add_resource State.Set. mount_targets gates
+// on "unset" the identical way as memorydb/memorystore (EFS/Filestore
 // auto-discovery - see clouds_resource.py's _populate_aws_values/
-// _populate_gcp_values). Returns fileStorage unchanged if it is null (no
-// file_storage in this plan).
+// _populate_gcp_values); mount_path is Optional+Computed with no Default
+// (D1), so it must resolve here too or Terraform errors on an
+// unknown Computed value after apply. derived is the add_resource
+// response's own FileStorage. Returns fileStorage unchanged if it is null
+// (no file_storage in this plan).
 func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorage) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if fileStorage.IsNull() || fileStorage.IsUnknown() {
@@ -516,9 +507,137 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 		patched["mount_targets"] = mountTargets
 	}
 
+	if v, ok := patched["mount_path"]; ok && (v.IsNull() || v.IsUnknown()) {
+		var apiMountPath string
+		if derived != nil {
+			apiMountPath = derived.MountPath
+		}
+		patched["mount_path"] = stringOrNull(apiMountPath)
+	}
+
 	obj, d := types.ObjectValue(fileStorageAttrTypes(), patched)
 	diags.Append(d...)
 	return obj, diags
+}
+
+// checkFileStorageDrift is D3: Read-only visibility into how the live
+// cloud's file_storage has diverged from state, in both directions - a
+// field state declares that live no longer has, or has a different value
+// for, is "declared-but-dropped"; a field live has that state never
+// declared is "live-but-undeclared". It only appends warnings and never
+// writes to fileStorage - the config blocks stay recover-only-on-import
+// (see this file's header comment on C3-v2), so this is a mitigation, not a
+// fix. Full drift management needs file_storage converted from a Block to
+// an Attribute, which the ratified design explicitly deferred as breaking.
+//
+// Suppression: state written before D1 (mount_path Optional+Computed, no
+// fabricated default) still carries fileStorageDefaultMountPath even on
+// AWS, which has no backend field for mount_path at all and never returns
+// one. Comparing that residue against a genuinely empty live value would
+// warn on every plan for every pre-D1 user. Narrow on purpose - only
+// mount_path, only when live is empty AND state is exactly
+// fileStorageDefaultMountPath - so a GCP user who really configured
+// "/mnt/shared" and lost it on the backend still gets the warning.
+func checkFileStorageDrift(ctx context.Context, fileStorage types.Object, live *FileStorage, label string) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	var state FileStorageModel
+	if !fileStorage.IsNull() && !fileStorage.IsUnknown() {
+		d := fileStorage.As(ctx, &state, basetypes.ObjectAsOptions{})
+		diags.Append(d...)
+		if diags.HasError() {
+			return diags
+		}
+	}
+
+	var liveMountPath, livePVC, liveDriver, liveFileStorageID string
+	var liveMountTargets []MountTarget
+	if live != nil {
+		liveFileStorageID = live.FileStorageID
+		liveMountPath = live.MountPath
+		livePVC = live.PersistentVolumeClaim
+		liveDriver = live.CSIEphemeralVolumeDriver
+		liveMountTargets = live.MountTargets
+	}
+
+	stateMountTargets, d := formatMountTargetsModel(ctx, state.MountTargets)
+	diags.Append(d...)
+	if diags.HasError() {
+		return diags
+	}
+
+	fields := []struct {
+		name, stateValue, liveValue string
+	}{
+		{"file_storage_id", state.FileStorageID.ValueString(), liveFileStorageID},
+		{"mount_path", state.MountPath.ValueString(), liveMountPath},
+		{"persistent_volume_claim", state.PersistentVolumeClaim.ValueString(), livePVC},
+		{"csi_ephemeral_volume_driver", state.CSIEphemeralVolumeDriver.ValueString(), liveDriver},
+		{"mount_targets", stateMountTargets, formatMountTargets(liveMountTargets)},
+	}
+
+	var drifted []string
+	for _, f := range fields {
+		if f.name == "mount_path" && liveMountPath == "" && f.stateValue == fileStorageDefaultMountPath {
+			continue
+		}
+		if f.stateValue == f.liveValue {
+			continue
+		}
+		direction := "live-but-undeclared"
+		if f.stateValue != "" {
+			direction = "declared-but-dropped"
+		}
+		drifted = append(drifted, fmt.Sprintf("  - %s: state=%q live=%q (%s)", f.name, f.stateValue, f.liveValue, direction))
+	}
+
+	if len(drifted) == 0 {
+		return diags
+	}
+
+	diags.AddWarning(
+		"file_storage Has Drifted From The Live Cloud",
+		fmt.Sprintf("%s's file_storage no longer matches the live cloud:\n%s\n\nThis block is not managed on "+
+			"refresh - nothing was written to state, and Terraform will not correct this on its own. file_storage "+
+			"can now be reconciled in place: declare the value you want and apply, or re-import to adopt the "+
+			"live one.",
+			label, strings.Join(drifted, "\n")),
+	)
+
+	return diags
+}
+
+// formatMountTargetsModel renders the state-side mount_targets list with the
+// exact "addr@zone" join formatMountTargets uses for the API-side
+// []MountTarget, so checkFileStorageDrift can compare the two with a plain
+// string equality check.
+func formatMountTargetsModel(ctx context.Context, list types.List) (string, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if list.IsNull() || list.IsUnknown() {
+		return "", diags
+	}
+
+	var models []MountTargetModel
+	d := list.ElementsAs(ctx, &models, false)
+	diags.Append(d...)
+	if diags.HasError() {
+		return "", diags
+	}
+
+	parts := make([]string, 0, len(models))
+	for _, m := range models {
+		parts = append(parts, m.Address.ValueString()+"@"+m.Zone.ValueString())
+	}
+	return strings.Join(parts, ","), diags
+}
+
+// formatMountTargets is formatMountTargetsModel for the API's []MountTarget.
+func formatMountTargets(mountTargets []MountTarget) string {
+	parts := make([]string, 0, len(mountTargets))
+	for _, mt := range mountTargets {
+		parts = append(parts, mt.Address+"@"+mt.Zone)
+	}
+	return strings.Join(parts, ",")
 }
 
 // requiredImportConfigBlocks recovers every config block ImportState can
