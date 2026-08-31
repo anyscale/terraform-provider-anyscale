@@ -336,12 +336,11 @@ A few more things worth knowing:
   On GCP specifically, if `mount_targets` isn't also set, Anyscale auto-discovers the Filestore share
   name and silently overwrites whatever `mount_path` you configured (see the `mount_path` attribute
   reference for the full mechanics); import now recovers whatever value that auto-discovery already
-  produced. One consequence worth knowing: if you're importing such a cloud and your `.tf` leaves
-  `mount_path` unset (so state would otherwise hold null), import instead recovers the real
-  auto-discovered value, so your next `plan` shows a one-time reconcile diff on `mount_path` rather
-  than leaving state blind to the path the backend is actually using. This is strictly better than
-  before this fix, when `file_storage` wasn't recovered at import at all; it's a one-time consequence
-  of the pre-existing GCP auto-discovery behavior, not a new limitation of its own.
+  produced. A `.tf` that leaves `mount_path` unset plans cleanly against that recovered value with no
+  diff: the attribute is `Optional+Computed`, so a configuration that omits it adopts whatever is
+  already in state. Before this fix a config-omitted `mount_path` resolved to a `/mnt/shared` schema
+  default instead, which conflicted with the real value and produced a spurious diff; removing that
+  default is what closed it.
 - **`file_storage.mount_targets` is Computed and recovers cleanly at import, whether or not your
   configuration sets it.** As of v0.17.0, `mount_targets` changed from a block to a list-of-objects
   attribute specifically so it could be genuinely Computed — the backend-discovered address (and
