@@ -25,7 +25,10 @@ resource "anyscale_container_image_build" "inline" {
     RUN pip install --no-cache-dir pandas scikit-learn
   EOT
 
-  build_timeout = "30m"
+  timeouts {
+    create = "30m"
+    update = "30m"
+  }
 }
 
 # Build from a Containerfile checked into the repo, scoped to a project.
@@ -44,7 +47,12 @@ output "build_image_uri" {
 
 output "build_status" {
   value       = anyscale_container_image_build.inline.build_status
-  description = "The current status of the build (pending, in_progress, succeeded, failed, cancelled)"
+  description = "The current status of the build (pending, in_progress, succeeded, failed, pending_cancellation, canceled)"
+}
+
+output "build_image_digest" {
+  value       = anyscale_container_image_build.inline.digest
+  description = "The content digest of the built image (e.g. sha256:...); changes when a new build revision is created"
 }
 ```
 
@@ -53,25 +61,34 @@ output "build_status" {
 
 ### Required
 
-- `name` (String) The name for the container image (cluster environment).
+- `name` (String) The name for the container image (cluster environment). Changing this replaces the resource.
 
 ### Optional
 
-- `build_timeout` (String) Maximum time to wait for the build to complete (e.g., `30m`, `1h`). Defaults to `30m`.
 - `containerfile` (String) The content of the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile_path`. Updating this value triggers a new build revision.
 - `containerfile_path` (String) Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`. Updating this value triggers a new build revision.
-- `project_id` (String) The ID of the project to associate this container image with.
+- `project_id` (String) The ID of the project to associate this container image with. Changing this replaces the resource.
+- `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
 ### Read-Only
 
 - `build_id` (String) The unique identifier of the build. Changes when a new build is created.
-- `build_status` (String) The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).
+- `build_status` (String) The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).
 - `created_at` (String) Timestamp when the build was created. Changes when a new build is created.
+- `digest` (String) The content digest of the built container image (e.g. `sha256:...`). May occasionally be briefly empty immediately after creation, or after an update that triggers a new build, if the build is still settling.
 - `id` (String) The unique identifier of the cluster environment.
 - `image_uri` (String) The URI of the built container image.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
 - `ray_version` (String) The Ray version used in the build.
 - `revision` (Number) The revision number of the container image build. Increments with each new build.
+
+<a id="nestedblock--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) Maximum time to wait for the initial build to complete (e.g. `30m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.
+- `update` (String) Maximum time to wait for a new build triggered by a `containerfile`/`containerfile_path` change to complete. Same default as `create`. Not consulted when an update changes only this `timeouts` block itself (no new build is triggered in that case).
 
 ## Import
 

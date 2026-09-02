@@ -20,10 +20,7 @@ import (
 
 func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	// Skip by default to avoid rate limits (20 invitations per 24 hours)
 	// Set ANYSCALE_TEST_INVITATIONS=1 to run these tests
@@ -35,7 +32,7 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 	testEmail := UniqueName(t, "invite-basic") + "@example.com"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckInvitationDestroy,
 		Steps: []resource.TestStep{
@@ -72,10 +69,7 @@ func TestAccOrganizationInvitationResource_Basic(t *testing.T) {
 
 func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	// Skip by default to avoid rate limits (20 invitations per 24 hours)
 	if os.Getenv("ANYSCALE_TEST_INVITATIONS") == "" {
@@ -87,7 +81,7 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 	testEmail2 := UniqueName(t, "invite-replace2") + "@example.com"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckInvitationDestroy,
 		Steps: []resource.TestStep{
@@ -122,10 +116,7 @@ func TestAccOrganizationInvitationResource_RequiresReplace(t *testing.T) {
 
 func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("TF_ACC") == "" {
-		t.Skip("Acceptance tests skipped unless env 'TF_ACC' is set")
-		return
-	}
+	SkipIfNotAcceptanceTest(t)
 
 	// Skip by default to avoid rate limits (20 invitations per 24 hours)
 	if os.Getenv("ANYSCALE_TEST_INVITATIONS") == "" {
@@ -136,7 +127,7 @@ func TestAccOrganizationInvitationResource_Delete(t *testing.T) {
 	testEmail := UniqueName(t, "invite-delete") + "@example.com"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheckAuth(t) },
+		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckInvitationDestroy,
 		Steps: []resource.TestStep{
@@ -331,19 +322,4 @@ func verifyInvitationDestroyed(client *provider.Client, invitationID string) err
 	}
 
 	return nil
-}
-
-// PreCheckAuth checks for authentication without requiring cloud ID
-func PreCheckAuth(t *testing.T) {
-	// Check for authentication
-	token := os.Getenv("ANYSCALE_CLI_TOKEN")
-	if token == "" {
-		// Try credentials file
-		if _, err := provider.GetAuthToken(); err != nil {
-			t.Fatalf("ANYSCALE_CLI_TOKEN must be set or ~/.anyscale/credentials.json must exist for acceptance tests")
-		}
-	}
-
-	// Verify the token actually works; skip cleanly on expired/invalid secret.
-	ValidateAuthOrSkip(t)
 }

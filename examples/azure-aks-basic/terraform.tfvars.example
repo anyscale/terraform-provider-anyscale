@@ -1,0 +1,15 @@
+# Base variables for the azure-aks-basic example.
+#
+# azure_subscription_id and azure_location have no default and must be
+# supplied - copy this file to terraform.tfvars (already gitignored) and
+# fill in your own subscription, or pass -var-file=terraform.tfvars.example
+# directly:
+#
+#   terraform apply -var-file=terraform.tfvars.example
+#
+# Everything else in variables.tf has a working default and does not need to
+# be set here. See gpu_node_pool_configs in variables.tf if you want GPU node
+# pools beyond the default single T4 entry.
+
+azure_subscription_id = "00000000-0000-0000-0000-000000000000"
+azure_location        = "eastus2"

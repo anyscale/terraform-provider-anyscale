@@ -22,7 +22,7 @@ var sensitiveFields = []string{
 	"controlplane_iam_role_arn",
 	"dataplane_iam_role_arn",
 	"anyscale_iam_role_id",
-	"managed_identity_id",
+	"tenant_id",
 }
 
 // SanitizeJSONForLog sanitizes a JSON string by redacting sensitive fields.

@@ -1,5 +1,7 @@
 package provider
 
+import "encoding/json"
+
 // Cloud API Models
 
 // CreateCloudRequest is the request body for creating a cloud
@@ -8,6 +10,21 @@ type CreateCloudRequest struct {
 	Provider    string `json:"provider,omitempty"`
 	Region      string `json:"region,omitempty"`
 	Credentials string `json:"credentials,omitempty"`
+
+	// IsPrivateCloud must be set here: the backend has no route to change it
+	// after creation (update_cloud_sql_alchemy takes no such parameter), so
+	// this POST is the only place it can ever be set - never omitempty,
+	// matching the CLI's WriteCloud, which always sends it explicitly rather
+	// than relying on the server-side false default.
+	IsPrivateCloud bool `json:"is_private_cloud"`
+
+	// IsPrivateServiceCloud mirrors the CLI exactly: register_gcp_cloud
+	// always sends it (true or false); register_aws_cloud and
+	// register_azure_or_generic_cloud never reference it at all. A pointer
+	// with omitempty is required to express that distinction on the wire -
+	// a plain bool would either drop an explicit GCP "false" or leak a
+	// spurious value into every non-GCP request.
+	IsPrivateServiceCloud *bool `json:"is_private_service_cloud,omitempty"`
 }
 
 // CloudResponse represents a cloud in the Anyscale API
@@ -34,12 +51,9 @@ type CloudResult struct {
 	Credentials                    string      `json:"credentials"`
 	Config                         CloudConfig `json:"config"`
 	IsK8s                          bool        `json:"is_k8s"`
-	IsAIOA                         bool        `json:"is_aioa"`
 	AvailabilityZones              []string    `json:"availability_zones"`
-	IsBringYourOwnResource         bool        `json:"is_bring_your_own_resource"`
 	IsPrivateCloud                 bool        `json:"is_private_cloud"`
 	ClusterManagementStackVersion  string      `json:"cluster_management_stack_version"`
-	IsPrivateServiceCloud          bool        `json:"is_private_service_cloud"`
 	AutoAddUser                    bool        `json:"auto_add_user"`
 	LineageTrackingEnabled         bool        `json:"lineage_tracking_enabled"`
 	ExternalID                     *string     `json:"external_id"`
@@ -80,6 +94,31 @@ type CloudDeploymentRequest struct {
 	// are set during cloud creation (POST /api/v2/clouds), NOT during add_resource
 }
 
+// CloudResourceUpdateRequest is the request body for PUT /api/v2/clouds/{cloud_id}/resources -
+// sent as a bare JSON list (a single object 422s with "value is not a valid list"). Purpose-built
+// rather than reusing CloudDeploymentRequest/CloudDeploymentResult: see D2 in
+// docs/decisions/cloud-file-storage-lifecycle/README.md. CloudDeploymentRequest has no
+// cloud_resource_id, carries an unwanted Name field, and (load-bearing) types NetworkingMode as a
+// bare non-nullable string; D2 needs that field to serialize as a literal JSON null for a public
+// deployment, which only a pointer can express.
+//
+// Every field must be populated per the frozen D2 spec's enumerated list: omitting a required one
+// silently wipes it server-side, and including an unrequired one can just as easily wipe
+// something else, or 400 outright (a provider-config block belonging to a different compute
+// stack). See buildCloudResourceUpdateRequest (cloud_resource_update.go) for the only intended
+// constructor.
+type CloudResourceUpdateRequest struct {
+	CloudResourceID  string            `json:"cloud_resource_id"`
+	Provider         string            `json:"provider"`
+	ComputeStack     string            `json:"compute_stack"`
+	Region           string            `json:"region"`
+	NetworkingMode   *string           `json:"networking_mode"`
+	FileStorage      *FileStorage      `json:"file_storage,omitempty"`
+	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
+	GCPConfig        *GCPConfig        `json:"gcp_config,omitempty"`
+	KubernetesConfig *KubernetesConfig `json:"kubernetes_config,omitempty"`
+}
+
 // ObjectStorage represents object storage configuration (S3, GCS, Azure Blob, S3-compatible)
 type ObjectStorage struct {
 	BucketName string  `json:"bucket_name"`
@@ -104,17 +143,18 @@ type MountTarget struct {
 
 // AWSConfig represents AWS-specific cloud configuration
 type AWSConfig struct {
-	VPCID                   string   `json:"vpc_id"`
-	SubnetIDs               []string `json:"subnet_ids"`
-	Zones                   []string `json:"zones,omitempty"`
-	SecurityGroupIDs        []string `json:"security_group_ids"`
-	AnyscaleIAMRoleID       string   `json:"anyscale_iam_role_id"`
-	ExternalID              string   `json:"external_id,omitempty"`
-	ClusterIAMRoleID        string   `json:"cluster_iam_role_id"`
-	MemoryDBClusterName     *string  `json:"memorydb_cluster_name,omitempty"`
-	MemoryDBClusterARN      *string  `json:"memorydb_cluster_arn,omitempty"`
-	MemoryDBClusterEndpoint *string  `json:"memorydb_cluster_endpoint,omitempty"`
-	CloudFormationID        *string  `json:"cloudformation_id,omitempty"`
+	VPCID                    string   `json:"vpc_id"`
+	SubnetIDs                []string `json:"subnet_ids"`
+	Zones                    []string `json:"zones,omitempty"`
+	SecurityGroupIDs         []string `json:"security_group_ids"`
+	AnyscaleIAMRoleID        string   `json:"anyscale_iam_role_id"`
+	ExternalID               string   `json:"external_id,omitempty"`
+	ClusterIAMRoleID         string   `json:"cluster_iam_role_id"`
+	ClusterInstanceProfileID *string  `json:"cluster_instance_profile_id,omitempty"`
+	MemoryDBClusterName      *string  `json:"memorydb_cluster_name,omitempty"`
+	MemoryDBClusterARN       *string  `json:"memorydb_cluster_arn,omitempty"`
+	MemoryDBClusterEndpoint  *string  `json:"memorydb_cluster_endpoint,omitempty"`
+	CloudFormationID         *string  `json:"cloudformation_id,omitempty"`
 }
 
 // GCPConfig represents GCP-specific cloud configuration
@@ -129,15 +169,28 @@ type GCPConfig struct {
 	FirewallPolicyNames         []string `json:"firewall_policy_names,omitempty"`
 	MemorystoreInstanceName     string   `json:"memorystore_instance_name,omitempty"`
 	MemorystoreEndpoint         string   `json:"memorystore_endpoint,omitempty"`
+
+	// Set only on Anyscale-managed clouds (created with `anyscale cloud setup`), which the backend
+	// refuses to update at all. Not modelled in the Terraform schema - read from the live GET solely
+	// to refuse a file_storage change at plan time instead of at apply time. The AWS equivalent is
+	// AWSConfig.CloudFormationID.
+	DeploymentManagerID     *string `json:"deployment_manager_id,omitempty"`
+	InfrastructureManagerID *string `json:"infrastructure_manager_id,omitempty"`
 }
 
-// AzureConfig represents Azure-specific cloud configuration
+// AzureConfig represents Azure-specific cloud configuration. tenant_id is the
+// ONLY field the Anyscale API accepts here (confirmed against
+// backend/server/api/base/models/cloud_deployment.py's AzureConfig model) -
+// Azure clouds are Kubernetes-only; there is no VM-shaped Azure config the
+// way AWSConfig/GCPConfig carry VPC/subnet/IAM details, because AKS setup
+// creates no VNet/subnet resources of its own and real auth is operator
+// workload-identity federation, not this field. A prior version of this
+// struct declared subscription_id/resource_group_name/vnet_name/subnet_name/
+// managed_identity_id, none of which exist in the real request/response
+// contract; every attempt to apply it hard-errored before ever reaching the
+// API, so removing them is not a functional break for any real user.
 type AzureConfig struct {
-	SubscriptionID    string `json:"subscription_id"`
-	ResourceGroupName string `json:"resource_group_name"`
-	VNetName          string `json:"vnet_name"`
-	SubnetName        string `json:"subnet_name"`
-	ManagedIdentityID string `json:"managed_identity_id"`
+	TenantID string `json:"tenant_id,omitempty"`
 }
 
 // KubernetesConfig represents Kubernetes-specific cloud configuration for API requests.
@@ -156,28 +209,6 @@ type KubernetesConfig struct {
 	RedisEndpoint string `json:"redis_endpoint,omitempty"`
 }
 
-// KubernetesConfigFull represents the full Kubernetes configuration including
-// fields stored in Terraform state but not sent to the API.
-type KubernetesConfigFull struct {
-	KubernetesConfig
-
-	// The following fields are stored in Terraform state for reference/outputs
-	// but are NOT sent to the Anyscale API
-
-	// Namespace for Anyscale operator (defaults to "anyscale")
-	Namespace string `json:"-"`
-
-	// Ingress settings
-	IngressHost string `json:"-"`
-
-	// Cloud-specific cluster identifiers
-	ClusterName string `json:"-"` // AWS EKS cluster name
-	Context     string `json:"-"` // K8s context name
-
-	// Legacy/generic fields
-	KubeconfigPath string `json:"-"`
-}
-
 // CloudDeploymentResponse represents the response from adding a cloud resource
 type CloudDeploymentResponse struct {
 	Result CloudDeploymentResult `json:"result"`
@@ -185,26 +216,46 @@ type CloudDeploymentResponse struct {
 
 // CloudDeploymentResult is the actual deployment data
 type CloudDeploymentResult struct {
-	CloudResourceID         string            `json:"cloud_resource_id"`
-	CloudDeploymentID       string            `json:"cloud_deployment_id"`
-	Name                    string            `json:"name"`
-	Provider                string            `json:"provider"`
-	ComputeStack            string            `json:"compute_stack"`
-	Region                  string            `json:"region"`
-	NetworkingMode          string            `json:"networking_mode"`
-	ObjectStorage           *ObjectStorage    `json:"object_storage"`
-	FileStorage             *FileStorage      `json:"file_storage"`
-	AWSConfig               *AWSConfig        `json:"aws_config"`
-	GCPConfig               *GCPConfig        `json:"gcp_config"`
-	AzureConfig             *AzureConfig      `json:"azure_config"`
-	KubernetesConfig        *KubernetesConfig `json:"kubernetes_config"`
-	CreatedAt               string            `json:"created_at"`
-	IsDefault               bool              `json:"is_default"`
-	OperatorStatus          *string           `json:"operator_status"`
-	OperatorStatusDetails   *string           `json:"operator_status_details"`
-	AutoAddUser             *bool             `json:"auto_add_user,omitempty"`
-	LineageTrackingEnabled  *bool             `json:"lineage_tracking_enabled,omitempty"`
-	IsAggregatedLogsEnabled *bool             `json:"is_aggregated_logs_enabled,omitempty"`
+	CloudResourceID         string                 `json:"cloud_resource_id"`
+	Name                    string                 `json:"name"`
+	Provider                string                 `json:"provider"`
+	ComputeStack            string                 `json:"compute_stack"`
+	Region                  string                 `json:"region"`
+	NetworkingMode          string                 `json:"networking_mode"`
+	ObjectStorage           *ObjectStorage         `json:"object_storage"`
+	FileStorage             *FileStorage           `json:"file_storage"`
+	AWSConfig               *AWSConfig             `json:"aws_config"`
+	GCPConfig               *GCPConfig             `json:"gcp_config"`
+	AzureConfig             *AzureConfig           `json:"azure_config"`
+	KubernetesConfig        *KubernetesConfig      `json:"kubernetes_config"`
+	CreatedAt               string                 `json:"created_at"`
+	IsDefault               bool                   `json:"is_default"`
+	OperatorStatus          *string                `json:"operator_status"`
+	OperatorStatusDetails   *OperatorStatusDetails `json:"operator_status_details"`
+	AutoAddUser             *bool                  `json:"auto_add_user,omitempty"`
+	LineageTrackingEnabled  *bool                  `json:"lineage_tracking_enabled,omitempty"`
+	IsAggregatedLogsEnabled *bool                  `json:"is_aggregated_logs_enabled,omitempty"`
+}
+
+// OperatorStatusDetails carries Kubernetes Anyscale Operator health details,
+// present once a K8s cloud_resource's operator has reported in. Previously
+// typed as *string on CloudDeploymentResult, which failed to decode as soon
+// as the API returned this object (C4/F2 investigation) - the API has always
+// returned an object here, never a string.
+type OperatorStatusDetails struct {
+	OperatorVersion *string               `json:"operator_version"`
+	CheckResults    []OperatorCheckResult `json:"check_results"`
+	ReportedAt      *string               `json:"reported_at"`
+}
+
+// OperatorCheckResult is a single named health check the operator reports,
+// e.g. connectivity or permissions checks. Not yet surfaced as its own
+// schema attribute (deferred per CLOUD-SYNC-DESIGN.md C4) - decoded here so
+// it doesn't need touching again when it is.
+type OperatorCheckResult struct {
+	Name    *string `json:"name"`
+	Status  *string `json:"status"`
+	Details *string `json:"details"`
 }
 
 // CloudDeploymentsResponse represents the response from listing cloud deployments
@@ -245,10 +296,13 @@ type ProjectsListResponse struct {
 
 // ProjectResult is the actual project data
 type ProjectResult struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	Description     *string `json:"description"`
-	ParentCloudID   string  `json:"parent_cloud_id"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	// DS-PROJ-1: genuinely Optional[str] server-side; shared by both data
+	// sources and resource_project.go's Read - all three must map it via
+	// StringPointerValue, never collapse a null cloud association to "".
+	ParentCloudID   *string `json:"parent_cloud_id"`
 	CreatorID       *string `json:"creator_id,omitempty"`
 	CreatedAt       string  `json:"created_at"`
 	LastUsedCloudID *string `json:"last_used_cloud_id,omitempty"`
@@ -256,18 +310,13 @@ type ProjectResult struct {
 	DirectoryName   string  `json:"directory_name"`
 }
 
-// ProjectCollaboratorBatchRequest for batch creating collaborators
-type ProjectCollaboratorBatchRequest []ProjectCollaboratorEntry
-
-// ProjectCollaboratorEntry represents a single collaborator for request
-type ProjectCollaboratorEntry struct {
-	Value struct {
-		Email string `json:"email"`
-	} `json:"value"`
-	PermissionLevel string `json:"permission_level"` // "owner", "writer", "readonly"
-}
-
-// ProjectCollaboratorListResponse for listing collaborators
+// ProjectCollaboratorListResponse for listing collaborators. Read-only: the
+// anyscale_project RESOURCE no longer manages collaborators (the collaborator
+// block was removed in v0.25.0; there is no in-provider replacement yet, so
+// project collaborators are managed through the console or API), so the
+// batch-create/update request models that went with it are gone too. The
+// anyscale_project DATA SOURCE still reports the project's collaborators, and
+// is the only consumer of this type and ProjectCollaboratorResult below.
 type ProjectCollaboratorListResponse struct {
 	Results  []ProjectCollaboratorResult `json:"results"`
 	Metadata struct {
@@ -284,11 +333,6 @@ type ProjectCollaboratorResult struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	} `json:"value"`
-	PermissionLevel string `json:"permission_level"`
-}
-
-// ProjectCollaboratorUpdateRequest for updating a single collaborator's permission
-type ProjectCollaboratorUpdateRequest struct {
 	PermissionLevel string `json:"permission_level"`
 }
 
@@ -314,6 +358,25 @@ type OrganizationInvitationResult struct {
 	AcceptedAt     *string `json:"accepted_at"` // null if not accepted
 }
 
+// OrganizationInvitationsListResponse represents the response from
+// GET /api/v2/organization_invitations.
+//
+// Both of the backend's code paths for this endpoint - with and without an
+// email query parameter - filter on `expires_at > now() AND accepted_at IS
+// NULL` (organization_invitations_dao.find_invitation and
+// list_pending_invitations respectively), so Results only ever contains
+// PENDING invitations. An expired or accepted one is reachable only by
+// GET /api/v2/organization_invitations/{id}. That asymmetry is load-bearing
+// for the organization_user resource's read ordering; do not treat an empty
+// Results as "this address was never invited".
+type OrganizationInvitationsListResponse struct {
+	Results  []OrganizationInvitationResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
 // Organization Collaborator API Models
 
 // UpdateOrganizationCollaboratorRequest is the request body for updating a collaborator
@@ -330,6 +393,23 @@ type OrganizationCollaboratorResult struct {
 	Name            *string `json:"name"`             // Can be null
 	PermissionLevel string  `json:"permission_level"` // "owner" or "collaborator"
 	CreatedAt       string  `json:"created_at"`
+
+	// DS-OU-2: permission_level above is deprecated backend-side in favor of these
+	// two - base_role is a required enum (never null); additional_roles is a
+	// required list (can be empty, never null). Both traced against
+	// product backend/server/api/product/models/organization_collaborators.py.
+	BaseRole        string   `json:"base_role"`
+	AdditionalRoles []string `json:"additional_roles"`
+}
+
+// OrganizationCollaboratorSingularResponse represents the response from GET
+// /api/v2/organization_collaborators/{user_id} - the only read path that can
+// return a real, non-empty additional_roles (the list/GET formatter, in
+// organizations_formatter.py, hardcodes it to an empty slice unconditionally).
+// Keyed by user_id, not identity_id - some collaborators have no user_id and
+// cannot use this path at all; see hydrateCollaboratorRoles's graceful fallback.
+type OrganizationCollaboratorSingularResponse struct {
+	Result OrganizationCollaboratorResult `json:"result"`
 }
 
 // OrganizationCollaboratorsListResponse represents the response from listing collaborators
@@ -339,43 +419,6 @@ type OrganizationCollaboratorsListResponse struct {
 		Total           int     `json:"total"`
 		NextPagingToken *string `json:"next_paging_token"`
 	} `json:"metadata"`
-}
-
-// Policy Binding API Models
-
-// SetPolicyBindingRequest is the request body for setting policy bindings
-type SetPolicyBindingRequest struct {
-	Bindings []PolicyBindingEntry `json:"bindings"`
-}
-
-// PolicyBindingEntry represents a single role binding
-type PolicyBindingEntry struct {
-	RoleName   string   `json:"role_name"`
-	Principals []string `json:"principals"` // List of user group IDs (ug_*)
-}
-
-// PolicyBindingResponse represents a single policy binding from the API
-type PolicyBindingResponse struct {
-	Result PolicyBindingResult `json:"result"`
-}
-
-// PolicyBindingResult represents the policy data
-type PolicyBindingResult struct {
-	Bindings   []PolicyBindingEntry `json:"bindings"`
-	SyncStatus *string              `json:"sync_status,omitempty"`
-}
-
-// PolicyBindingsListResponse represents the response from listing all policies
-type PolicyBindingsListResponse struct {
-	Results []PolicyBindingWithMetadata `json:"results"`
-}
-
-// PolicyBindingWithMetadata includes resource identification
-type PolicyBindingWithMetadata struct {
-	ResourceID   string               `json:"resource_id"`
-	ResourceType string               `json:"resource_type"`
-	Bindings     []PolicyBindingEntry `json:"bindings"`
-	SyncStatus   string               `json:"sync_status"`
 }
 
 // Machine Pool API Models
@@ -456,47 +499,53 @@ type DetachMachinePoolFromCloudResponse struct {
 	Result struct{} `json:"result"`
 }
 
-// Container Image / Cluster Environment API Models (/ext/v0)
+// Container Image / Application Template API Models (/api/v2)
+//
+// The Anyscale API calls this resource "application_template" (and its versioned
+// builds "builds"); the provider's user-facing "container image" resources/data
+// sources translate to/from this shape at the boundary (see resource_container_image_*.go
+// and data_source_container_image*.go), keeping Terraform-facing attribute names
+// (e.g. cluster_environment_id) stable across the ext/v0 -> api/v2 migration.
 
-// CreateClusterEnvironmentRequest is the request body for creating a cluster environment
-// POST /ext/v0/cluster_environments/
-type CreateClusterEnvironmentRequest struct {
+// CreateApplicationTemplateRequest is the request body for creating an application template from a Containerfile
+// POST /api/v2/application_templates/
+type CreateApplicationTemplateRequest struct {
 	Name          string  `json:"name"`
 	Containerfile string  `json:"containerfile,omitempty"`
 	ProjectID     *string `json:"project_id,omitempty"`
 }
 
-// CreateClusterEnvironmentBuildRequest is the request body for creating a new build for an existing cluster environment
-// POST /ext/v0/cluster_environment_builds/
-type CreateClusterEnvironmentBuildRequest struct {
-	ClusterEnvironmentID string  `json:"cluster_environment_id"`
-	Containerfile        string  `json:"containerfile,omitempty"`
-	DockerImageName      *string `json:"docker_image_name,omitempty"`
-	RegistryLoginSecret  *string `json:"registry_login_secret,omitempty"`
-	RayVersion           *string `json:"ray_version,omitempty"`
+// CreateBuildRequest is the request body for creating a new build for an existing application template
+// POST /api/v2/builds/
+type CreateBuildRequest struct {
+	ApplicationTemplateID string  `json:"application_template_id"`
+	Containerfile         string  `json:"containerfile,omitempty"`
+	DockerImageName       *string `json:"docker_image_name,omitempty"`
+	RegistryLoginSecret   *string `json:"registry_login_secret,omitempty"`
+	RayVersion            *string `json:"ray_version,omitempty"`
 }
 
-// CreateBYODClusterEnvironmentRequest is the request body for creating a BYOD cluster environment
-// POST /ext/v0/cluster_environments/byod
-type CreateBYODClusterEnvironmentRequest struct {
-	Name       string                                 `json:"name"`
-	ConfigJSON CreateBYODClusterEnvironmentConfigJSON `json:"config_json"`
-	Anonymous  bool                                   `json:"anonymous,omitempty"`
+// CreateBYODApplicationTemplateRequest is the request body for creating a BYOD application template
+// POST /api/v2/application_templates/byod
+type CreateBYODApplicationTemplateRequest struct {
+	Name       string                                  `json:"name"`
+	ConfigJSON CreateBYODApplicationTemplateConfigJSON `json:"config_json"`
+	Anonymous  bool                                    `json:"anonymous,omitempty"`
 }
 
-// CreateBYODClusterEnvironmentConfigJSON is the config_json for BYOD cluster environment creation
-type CreateBYODClusterEnvironmentConfigJSON struct {
+// CreateBYODApplicationTemplateConfigJSON is the config_json for BYOD application template creation
+type CreateBYODApplicationTemplateConfigJSON struct {
 	DockerImage         string            `json:"docker_image"`
 	RayVersion          string            `json:"ray_version"`
 	EnvVars             map[string]string `json:"env_vars,omitempty"`
 	RegistryLoginSecret *string           `json:"registry_login_secret,omitempty"`
 }
 
-// CreateBYODClusterEnvironmentBuildRequest is the request body for creating a BYOD build
-// POST /ext/v0/cluster_environment_builds/byod
-type CreateBYODClusterEnvironmentBuildRequest struct {
-	ClusterEnvironmentID string                        `json:"cluster_environment_id"`
-	ConfigJSON           CreateBYODAppConfigConfigJSON `json:"config_json"`
+// CreateBYODBuildRequest is the request body for creating a BYOD build
+// POST /api/v2/builds/byod
+type CreateBYODBuildRequest struct {
+	ApplicationTemplateID string                        `json:"application_template_id"`
+	ConfigJSON            CreateBYODAppConfigConfigJSON `json:"config_json"`
 }
 
 // CreateBYODAppConfigConfigJSON is the config_json for BYOD build creation
@@ -507,99 +556,325 @@ type CreateBYODAppConfigConfigJSON struct {
 	RegistryLoginSecret *string           `json:"registry_login_secret,omitempty"`
 }
 
-// ClusterEnvironmentResponse represents a single cluster environment from the API
-type ClusterEnvironmentResponse struct {
-	Result ClusterEnvironmentResult `json:"result"`
+// ApplicationTemplateResponse represents a single application template from the API
+type ApplicationTemplateResponse struct {
+	Result ApplicationTemplateResult `json:"result"`
 }
 
-// ClusterEnvironmentsListResponse represents the response from listing cluster environments
-type ClusterEnvironmentsListResponse struct {
-	Results  []ClusterEnvironmentResult `json:"results"`
+// ApplicationTemplatesListResponse represents the response from listing application templates
+// GET /api/v2/application_templates/
+type ApplicationTemplatesListResponse struct {
+	Results  []ApplicationTemplateResult `json:"results"`
 	Metadata struct {
 		Total           int     `json:"total"`
 		NextPagingToken *string `json:"next_paging_token"`
 	} `json:"metadata"`
 }
 
-// ClusterEnvironmentResult represents a cluster environment from the API
-// Matches the /ext/v0/cluster_environments/ endpoint response
-type ClusterEnvironmentResult struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	ProjectID      *string `json:"project_id,omitempty"`
-	OrganizationID string  `json:"organization_id,omitempty"`
-	CreatorID      string  `json:"creator_id"`
-	CreatedAt      string  `json:"created_at"`
-	LastModifiedAt string  `json:"last_modified_at,omitempty"`
-	DeletedAt      *string `json:"deleted_at,omitempty"`
-	Anonymous      bool    `json:"anonymous"`
-	IsDefault      bool    `json:"is_default"`
+// ApplicationTemplateResult represents an application template from the API.
+// Matches both the /api/v2/application_templates/{id} and list endpoint responses.
+// LatestBuild is only populated on those decorated responses (never on a bare
+// create response), and only carries enough to resolve the latest build's ID
+// contract-based -- full build detail still requires GET /api/v2/builds/{id}.
+type ApplicationTemplateResult struct {
+	ID             string           `json:"id"`
+	Name           string           `json:"name"`
+	ProjectID      *string          `json:"project_id,omitempty"`
+	OrganizationID string           `json:"organization_id,omitempty"`
+	CreatorID      string           `json:"creator_id"`
+	CreatedAt      string           `json:"created_at"`
+	LastModifiedAt string           `json:"last_modified_at,omitempty"`
+	DeletedAt      *string          `json:"deleted_at,omitempty"`
+	ArchivedAt     *string          `json:"archived_at,omitempty"`
+	Anonymous      bool             `json:"anonymous"`
+	IsDefault      bool             `json:"is_default"`
+	LatestBuild    *MiniBuildResult `json:"latest_build,omitempty"`
+	// DS-IMG-4: CloudID is genuinely Optional[str] server-side (AppConfig.cloud_id);
+	// IsExperimental is a plain bool with a backend default, never null.
+	CloudID        *string `json:"cloud_id,omitempty"`
+	IsExperimental bool    `json:"is_experimental"`
 }
 
-// IsArchived returns true if the cluster environment has been deleted/archived
-func (c *ClusterEnvironmentResult) IsArchived() bool {
-	return c.DeletedAt != nil && *c.DeletedAt != ""
+// IsArchived returns true if the application template has been archived or deleted.
+// The real archive endpoint (POST /api/v2/application_templates/{id}/archive) sets
+// ArchivedAt, not DeletedAt - confirmed via a live GET on a template archived weeks
+// earlier: archived_at carried a real timestamp while deleted_at was still null.
+// DeletedAt has no known live producer for this resource type today (application
+// templates have no permanent-delete API - see resource_container_image_build.go's
+// Delete), but it is a real field the API sends, so it stays checked for whenever
+// that changes rather than silently going stale the day it starts being set.
+func (a *ApplicationTemplateResult) IsArchived() bool {
+	return (a.ArchivedAt != nil && *a.ArchivedAt != "") || (a.DeletedAt != nil && *a.DeletedAt != "")
 }
 
-// ClusterEnvironmentBuildResponse represents a single cluster environment build from the API
-// GET /ext/v0/cluster_environment_builds/{id}
-type ClusterEnvironmentBuildResponse struct {
-	Result ClusterEnvironmentBuildResult `json:"result"`
+// MiniBuildResult is the summarized latest-build reference embedded on a decorated
+// application template response.
+type MiniBuildResult struct {
+	ID       string `json:"id"`
+	Revision int    `json:"revision"`
+	Status   string `json:"status"`
+	// DS-IMG-2: both genuinely Optional[str] server-side (MiniBuild.docker_image_name/
+	// cloud_id) - present on the SAME embedded object both DS already fetch for free,
+	// so the plural gains a per-item image_uri with zero extra calls, and the singular
+	// can populate image_uri without needing the second GET /builds/{id} call (still
+	// made for digest/ray_version/etc, just no longer required for this one field).
+	DockerImageName *string `json:"docker_image_name,omitempty"`
+	CloudID         *string `json:"cloud_id,omitempty"`
 }
 
-// ClusterEnvironmentBuildOperationResponse represents the response from creating a build (async operation)
-// POST /ext/v0/cluster_environment_builds/
-type ClusterEnvironmentBuildOperationResponse struct {
-	Result ClusterEnvironmentBuildResult `json:"result"`
+// BuildResponse represents a single build from the API. Returned by both
+// POST /api/v2/builds/ (create, bare) and GET /api/v2/builds/{id} (decorated get);
+// ByodRayVersion is only populated by the latter.
+type BuildResponse struct {
+	Result BuildResult `json:"result"`
 }
 
-// ClusterEnvironmentBuildsListResponse represents the response from listing builds
-// GET /ext/v0/cluster_environment_builds/?cluster_environment_id=...
-type ClusterEnvironmentBuildsListResponse struct {
-	Results  []ClusterEnvironmentBuildResult `json:"results"`
+// BuildsListResponse represents the response from listing builds
+type BuildsListResponse struct {
+	Results  []BuildResult `json:"results"`
 	Metadata struct {
 		Total           int     `json:"total"`
 		NextPagingToken *string `json:"next_paging_token"`
 	} `json:"metadata"`
 }
 
-// ClusterEnvironmentBuildResult represents a cluster environment build from the API
-type ClusterEnvironmentBuildResult struct {
-	ID                   string  `json:"id"`
-	ClusterEnvironmentID string  `json:"cluster_environment_id"`
-	Containerfile        *string `json:"containerfile,omitempty"`
-	DockerImageName      *string `json:"docker_image_name,omitempty"`
-	RegistryLoginSecret  *string `json:"registry_login_secret,omitempty"`
-	RayVersion           *string `json:"ray_version,omitempty"`
-	Revision             int     `json:"revision"`
-	CreatorID            string  `json:"creator_id"`
-	ErrorMessage         *string `json:"error_message,omitempty"`
-	Status               string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, cancelled
-	CreatedAt            string  `json:"created_at"`
-	LastModifiedAt       string  `json:"last_modified_at"`
-	IsBYOD               bool    `json:"is_byod"`
-	CloudID              *string `json:"cloud_id,omitempty"`
-	Digest               *string `json:"digest,omitempty"`
+// BuildResult represents a build from the API.
+type BuildResult struct {
+	ID                    string  `json:"id"`
+	ApplicationTemplateID string  `json:"application_template_id"`
+	Containerfile         *string `json:"containerfile,omitempty"`
+	DockerImageName       *string `json:"docker_image_name,omitempty"`
+	RegistryLoginSecret   *string `json:"registry_login_secret,omitempty"`
+	RayVersion            *string `json:"ray_version,omitempty"`
+	ByodRayVersion        *string `json:"byod_ray_version,omitempty"`
+	Revision              int     `json:"revision"`
+	CreatorID             string  `json:"creator_id"`
+	ErrorMessage          *string `json:"error_message,omitempty"`
+	Status                string  `json:"status"` // pending, in_progress, succeeded, failed, pending_cancellation, canceled
+	CreatedAt             string  `json:"created_at"`
+	LastModifiedAt        string  `json:"last_modified_at"`
+	IsBYOD                bool    `json:"is_byod"`
+	CloudID               *string `json:"cloud_id,omitempty"`
+	Digest                *string `json:"digest,omitempty"`
 }
 
-// ClusterEnvironmentsSearchQuery is the request body for POST /ext/v0/cluster_environments/search
-type ClusterEnvironmentsSearchQuery struct {
-	ProjectID        *string    `json:"project_id,omitempty"`
-	CreatorID        *string    `json:"creator_id,omitempty"`
-	Name             *TextQuery `json:"name,omitempty"`
-	ImageName        *TextQuery `json:"image_name,omitempty"`
-	Paging           PageQuery  `json:"paging"`
-	IncludeArchived  bool       `json:"include_archived"`
-	IncludeAnonymous bool       `json:"include_anonymous"`
+// ResolvedRayVersion returns the most specific Ray version available for this build:
+// byod_ray_version when present, otherwise the plain ray_version field. Both ultimately
+// trace back to the ray_version the client supplied at creation (BYOD's docker image
+// content itself is never inspected server-side): byod_ray_version is the backend's
+// legacy base-image round-trip of that value (see _get_byod_base_image /
+// get_ray_version in the product backend), which is normally byte-identical to the
+// original input but can differ for Ray 2.7.x, where the backend may silently prefer an
+// "optimized" base-image variant. ray_version is the plain field set on
+// Containerfile-based (non-BYOD) builds, parsed from the Containerfile's FROM line.
+// Neither field is validated here -- an odd stored value is returned as-is rather than
+// producing an error or null.
+func (b *BuildResult) ResolvedRayVersion() *string {
+	if b.ByodRayVersion != nil {
+		return b.ByodRayVersion
+	}
+	return b.RayVersion
 }
 
-// TextQuery represents a text search filter
-type TextQuery struct {
-	Contains string `json:"contains"`
+// Service API Models
+
+// ServiceResponse represents a single service from the Anyscale API (GET /api/v2/services-v2/{id}).
+type ServiceResponse struct {
+	Result ServiceResult `json:"result"`
 }
 
-// PageQuery represents pagination parameters
-type PageQuery struct {
-	Count       int     `json:"count,omitempty"`
-	PagingToken *string `json:"paging_token,omitempty"`
+// ServicesListResponse represents the response from listing services (GET /api/v2/services-v2/).
+//
+// The backend's list item model (DecoratedListServiceAPIModel) is a strict superset of the get
+// item model (DecoratedProductionServiceV2APIModel) - the only extra field is `type`, which this
+// provider deliberately does not expose (redundant discriminator; this router only ever deals in
+// V2 services). So ServiceResult below is shared, unchanged, by both this and ServiceResponse.
+type ServicesListResponse struct {
+	Results  []ServiceResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// ServiceResult is the actual service data, shared by both the singular GET and plural LIST
+// responses (see ServicesListResponse's doc comment for why one struct covers both), AND by the
+// anyscale_service_credentials ephemeral resource (ephemeral_service_credentials.go).
+//
+// AuthToken/SecondaryAuthToken are parsed here ONLY for that ephemeral resource's Open method to
+// read directly - confirmed on the wire at BaseProductionServiceV2Model (services_base_api_models.py)
+// as real, always-present (present-as-null, never omitted) Optional[str] fields. Do NOT wire either
+// into populateServiceDataSourceModel/populateServiceResourceModelComputed or the
+// ServiceDataSourceModel/ServiceResourceModel schemas - both of those paths persist to Terraform
+// state, which is exactly the leak this ephemeral resource exists to avoid (the same "excluded
+// entirely rather than included-and-marked-Sensitive" ruling this provider applies to API keys
+// generally, now satisfied via the ephemeral resource instead of omission).
+//
+// Deliberately absent fields, each a documented gap rather than an oversight:
+//   - versions: deprecated upstream in favor of primary_version/canary_version.
+//   - type (ServiceType): list-only field; redundant discriminator since this router is V2-only.
+//   - creator (MiniUser object): flat CreatorID is kept instead, consistent with this provider's
+//     existing choice to defer a nested creator object on anyscale_cloud for the same reason
+//     (low value once creator_id is already surfaced).
+type ServiceResult struct {
+	ID                 string  `json:"id"`
+	Name               string  `json:"name"`
+	Description        *string `json:"description"`
+	ProjectID          string  `json:"project_id"`
+	CloudID            string  `json:"cloud_id"`
+	CreatorID          string  `json:"creator_id"`
+	CreatedAt          string  `json:"created_at"`
+	EndedAt            *string `json:"ended_at"`
+	Hostname           string  `json:"hostname"`
+	BaseURL            string  `json:"base_url"`
+	CurrentState       string  `json:"current_state"`
+	GoalState          string  `json:"goal_state"`
+	AutoRolloutEnabled bool    `json:"auto_rollout_enabled"`
+	IsMultiVersion     bool    `json:"is_multi_version"`
+	ErrorMessage       *string `json:"error_message"`
+
+	// AuthToken/SecondaryAuthToken: see the doc comment above - ephemeral-resource use ONLY.
+	AuthToken          *string `json:"auth_token"`
+	SecondaryAuthToken *string `json:"secondary_auth_token"`
+
+	// ServiceObservabilityURLs and PrimaryVersion are pointers, not value structs, despite
+	// nominally being "always present" per the backend model: CONFIRMED via a real CI
+	// acceptance-test run against a real service (TestAccServiceDataSource_ByID, "Path:
+	// service_observability_urls", "Received null value") - not a theoretical concern, not a
+	// race with a concurrent test. A value struct cannot represent that absence at all (JSON
+	// null silently decodes to a zero-value struct with empty-string fields, which is wrong
+	// data, not just a missing-null-handling crash) - a pointer makes the absence explicit and
+	// checkable, matching CanaryVersion/ServiceStatusChecklist's already-correct pattern for
+	// their own nullability.
+	ServiceObservabilityURLs *ServiceObservabilityURLsResult `json:"service_observability_urls"`
+
+	PrimaryVersion *ServiceVersionResult `json:"primary_version"`
+	CanaryVersion  *ServiceVersionResult `json:"canary_version"`
+
+	ServiceStatusChecklist *ServiceStatusChecklistResult `json:"service_status_checklist"`
+}
+
+// ServiceObservabilityURLsResult mirrors the backend's ServiceObservabilityUrls - all 4 fields
+// are genuinely optional server-side (nullable dashboard URLs).
+type ServiceObservabilityURLsResult struct {
+	ServiceDashboardURL                  *string `json:"service_dashboard_url"`
+	ServiceDashboardEmbeddingURL         *string `json:"service_dashboard_embedding_url"`
+	ServeDeploymentDashboardURL          *string `json:"serve_deployment_dashboard_url"`
+	ServeDeploymentDashboardEmbeddingURL *string `json:"serve_deployment_dashboard_embedding_url"`
+}
+
+// ServiceVersionResult mirrors the backend's ProductionServiceV2VersionModel, used for both
+// PrimaryVersion and CanaryVersion. RayServeConfig is required upstream (always present, never
+// JSON null) but kept as json.RawMessage rather than a typed struct or map[string]interface{}:
+// the backend model is `extra=Extra.allow`, a fully open/dynamic blob with no fixed schema, and
+// this is a Computed (read-only) field with no HCL-authoring side, so a plain JSON-text passthrough
+// avoids both an unnecessary typed model and a re-marshal step.
+//
+// Deliberately absent: ray_gcs_external_storage_config, tracing_config - niche/advanced per-version
+// configs, scoped out as a documented gap, follow up on demand.
+type ServiceVersionResult struct {
+	ID               string          `json:"id"`
+	CreatedAt        string          `json:"created_at"`
+	Version          string          `json:"version"`
+	CurrentState     string          `json:"current_state"`
+	Weight           int64           `json:"weight"`
+	CurrentWeight    *int64          `json:"current_weight"`
+	TargetWeight     *int64          `json:"target_weight"`
+	BuildID          string          `json:"build_id"`
+	ComputeConfigID  string          `json:"compute_config_id"`
+	ProductionJobIDs []string        `json:"production_job_ids"`
+	ConnectionIDs    []string        `json:"connection_ids"`
+	RayServeConfig   json.RawMessage `json:"ray_serve_config"`
+}
+
+// ServiceStatusChecklistResult mirrors the backend's ServiceStatusChecklist. Modeled as lists
+// rather than maps upstream (per the backend's own comment) to work around an old
+// openapi-generator recursion limitation - kept as lists here too rather than reshaping into a
+// map, so the provider's shape matches the wire shape exactly.
+type ServiceStatusChecklistResult struct {
+	Shared     []StatusChecklistItemResult `json:"shared"`
+	PerVersion []VersionChecklistResult    `json:"per_version"`
+}
+
+// VersionChecklistResult is the per-version group of checklist items within a
+// ServiceStatusChecklistResult.
+type VersionChecklistResult struct {
+	VersionID string                      `json:"version_id"`
+	Items     []StatusChecklistItemResult `json:"items"`
+}
+
+// StatusChecklistItemResult mirrors the backend's StatusChecklistItem - one row in a service's
+// per-component status breakdown (e.g. "Cluster", "Load Balancer").
+type StatusChecklistItemResult struct {
+	Kind       string  `json:"kind"`
+	Label      string  `json:"label"`
+	State      string  `json:"state"`
+	Message    string  `json:"message"`
+	VersionID  *string `json:"version_id"`
+	ObservedAt *string `json:"observed_at"`
+}
+
+// ─── System Cluster (system_workload API) ──────────────────────────────
+
+// DescribeSystemWorkloadResponse wraps POST /api/v2/system_workload/{cloud_id}/describe's
+// response envelope.
+type DescribeSystemWorkloadResponse struct {
+	Result DescribeSystemWorkloadResult `json:"result"`
+}
+
+// DescribeSystemWorkloadResult is the ONLY authoritative source of System Cluster status in
+// this provider (see system_workload_helpers.go's package doc comment for why
+// decorated_sessions' own state/status fields must never be treated as this). Status is the
+// backend's ClusterState enum (PascalCase: "Running", "StartingUp", ... - 10 values); nil is
+// possible before a cluster has ever been created.
+//
+// Deliberately absent: workload_names ([]SystemWorkloadName) - this provider always hardcodes
+// a single workload (see systemWorkloadNameRayObsEventsAPIService) and never exposes it as
+// configurable, so the response's own echo of it back is not useful state.
+type DescribeSystemWorkloadResult struct {
+	ClusterID              *string `json:"cluster_id"`
+	WorkloadServiceURL     *string `json:"workload_service_url"`
+	WorkloadServiceURLAuth *string `json:"workload_service_url_auth"`
+	Status                 *string `json:"status"`
+	IsEnabled              bool    `json:"is_enabled"`
+}
+
+// DecoratedSessionsListResponse is the list response from GET /api/v2/decorated_sessions/,
+// used only by findSystemWorkloadCluster as a side-effect-free existence oracle.
+type DecoratedSessionsListResponse struct {
+	Results  []DecoratedSessionResult `json:"results"`
+	Metadata struct {
+		Total           int     `json:"total"`
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// DecoratedSessionResult is intentionally a narrow slice of the real DecoratedSession model -
+// used ONLY to answer "does this cloud's System Cluster session already exist, and what is its
+// id", never for status (see findSystemWorkloadCluster). Both CloudID (a plain inherited scalar
+// per source) and Cloud (the "decorated"/expanded form) are modeled defensively since which one
+// actually serializes on the wire is a live_verify_item, not yet confirmed against a real
+// response as of this writing - MatchesCloud checks both so the client-side cloud filter works
+// either way. State/Status are deliberately NOT modeled here at all: they are two different,
+// differently-cased enums (SessionState/ClusterStatus) from describe's own ClusterState, and
+// this provider must never surface either as System Cluster status.
+type DecoratedSessionResult struct {
+	ID              string  `json:"id"`
+	CloudID         *string `json:"cloud_id"`
+	IsSystemCluster bool    `json:"is_system_cluster"`
+	Cloud           *struct {
+		ID string `json:"id"`
+	} `json:"cloud"`
+}
+
+// MatchesCloud reports whether this session belongs to cloudID, checking both the plain
+// cloud_id scalar and the expanded cloud object (see the doc comment above for why both).
+func (r DecoratedSessionResult) MatchesCloud(cloudID string) bool {
+	if r.CloudID != nil && *r.CloudID == cloudID {
+		return true
+	}
+	if r.Cloud != nil && r.Cloud.ID == cloudID {
+		return true
+	}
+	return false
 }

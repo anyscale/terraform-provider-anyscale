@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -13,7 +14,10 @@ import (
 )
 
 // Ensure AnyscaleProvider satisfies various provider interfaces.
-var _ provider.Provider = &AnyscaleProvider{}
+var (
+	_ provider.Provider                       = &AnyscaleProvider{}
+	_ provider.ProviderWithEphemeralResources = &AnyscaleProvider{}
+)
 
 // AnyscaleProvider defines the provider implementation for the Framework.
 type AnyscaleProvider struct {
@@ -53,9 +57,9 @@ func (p *AnyscaleProvider) Schema(ctx context.Context, req provider.SchemaReques
 				Description: "The Anyscale API URL. Can also be set via ANYSCALE_API_URL, ANYSCALE_API_HOST, or ANYSCALE_HOST environment variables (checked in that order). Defaults to https://console.anyscale.com",
 			},
 			"token": schema.StringAttribute{
-				Optional:    true,
-				Sensitive:   true,
-				Description: "The Anyscale API token. Can also be set via ANYSCALE_CLI_TOKEN environment variable or read from ~/.anyscale/credentials.json.",
+				Optional:            true,
+				Sensitive:           true,
+				MarkdownDescription: "The Anyscale API token. Can also be set via ANYSCALE_CLI_TOKEN environment variable or read from ~/.anyscale/credentials.json. See the [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate one.",
 			},
 		},
 	}
@@ -123,9 +127,10 @@ func (p *AnyscaleProvider) Configure(ctx context.Context, req provider.Configure
 	// definition, not three.
 	client := NewClientWithToken(apiURL, token)
 
-	// Make the client available to resources and data sources
+	// Make the client available to resources, data sources, and ephemeral resources
 	resp.DataSourceData = client
 	resp.ResourceData = client
+	resp.EphemeralResourceData = client
 }
 
 // Resources defines the resources implemented in the provider.
@@ -134,14 +139,33 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewComputeConfigResource,
 		NewCloudResourceResource,
 		NewCloudResource,
+		// anyscale_cloud_access is authoritative from the first apply: Create,
+		// Update and Delete manage real cloud access, and any member not declared
+		// is revoked. ModifyPlan discloses that revoke on create by naming who
+		// would lose access, since Read has never shown them any other way. See
+		// docs/decisions/rbac-surface-consolidation/README.md for the design.
+		NewCloudAccessResource,
+		NewCloudIAMMappingResource,
 		NewProjectResource,
 		NewOrganizationInvitationResource,
-		NewOrganizationCollaboratorResource,
-		NewPolicyBindingResource,
+		NewOrganizationUserResource,
+		NewOrganizationUserRoleResource,
+		NewOrganizationDefaultCloudResource,
 		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
 		// NewGlobalResourceSchedulerResource,
 		NewContainerImageBuildResource,
 		NewContainerImageRegistryResource,
+		NewServiceResource,
+		NewSystemClusterResource,
+	}
+}
+
+// EphemeralResources defines the ephemeral resources implemented in the provider. This is the
+// provider's first use of the primitive - see ephemeral_service_credentials.go's doc comment for
+// the pattern.
+func (p *AnyscaleProvider) EphemeralResources(ctx context.Context) []func() ephemeral.EphemeralResource {
+	return []func() ephemeral.EphemeralResource{
+		NewServiceCredentialsEphemeralResource,
 	}
 }
 
@@ -149,19 +173,20 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewCloudDataSource,
+		NewCloudIAMMappingDataSource,
 		NewCloudsDataSource,
 		NewComputeConfigDataSource,
 		NewContainerImageDataSource,
 		NewContainerImagesDataSource,
+		NewOrganizationDataSource,
 		NewOrganizationUserDataSource,
 		NewOrganizationUsersDataSource,
-		NewPolicyBindingDataSource,
-		NewPolicyBindingsDataSource,
 		NewProjectDataSource,
 		NewProjectsDataSource,
+		NewServiceDataSource,
+		NewServicesDataSource,
+		NewSystemClusterDataSource,
 		NewUserDataSource,
-		NewUserGroupDataSource,
-		NewUserGroupsDataSource,
 		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
 		// NewGlobalResourceSchedulerDataSource,
 		// NewGlobalResourceSchedulersDataSource,

@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: GitHub release notes are now curated from CHANGELOG.md via per-PR changelog fragments instead of auto-generated from commit messages.
-```

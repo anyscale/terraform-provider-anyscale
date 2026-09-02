@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -66,78 +67,54 @@ func (d *ProjectDataSource) Metadata(ctx context.Context, req datasource.Metadat
 
 // Schema defines the schema for the data source.
 func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		MarkdownDescription: "Fetches details about an Anyscale Project by ID or name.",
-
-		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the project. Either `id` or `name` must be specified.",
-			},
-			"name": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The name of the project. Either `id` or `name` must be specified.",
-			},
-			"cloud_id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The cloud ID this project belongs to. Can be used as a filter when looking up by name.",
-			},
-			"cloud_name": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The cloud name this project belongs to. Can be used as a filter when looking up by name. Will be resolved to cloud_id.",
-			},
-			"description": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Description of the project.",
-			},
-			"creator_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the user who created the project.",
-			},
-			"created_at": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Timestamp when the project was created.",
-			},
-			"last_used_cloud_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the cloud last used by this project.",
-			},
-			"is_default": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is the default project for the organization.",
-			},
-			"directory_name": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The directory name used for this project's storage.",
-			},
-			"collaborators": schema.ListNestedAttribute{
-				Computed:            true,
-				MarkdownDescription: "List of collaborators with access to this project.",
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"email": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Email address of the collaborator.",
-						},
-						"permission_level": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Permission level: 'owner', 'writer', or 'readonly'.",
-						},
-						"identity_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The identity ID of the collaborator.",
-						},
-						"user_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The user ID of the collaborator.",
-						},
-					},
+	attributes := projectSharedAttributes()
+	attributes["id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the project. Either `id` or `name` must be specified.",
+	}
+	attributes["name"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The name of the project. Either `id` or `name` must be specified. If multiple projects have the same name, the most recently created one will be returned.",
+	}
+	attributes["cloud_id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The cloud ID this project belongs to. Can be used as a filter when looking up by name. Null if the project has no associated cloud reported by the API.",
+	}
+	attributes["cloud_name"] = schema.StringAttribute{
+		Optional:            true,
+		MarkdownDescription: "The cloud name this project belongs to. Can be used as a filter when looking up by name. Will be resolved to cloud_id.",
+	}
+	attributes["collaborators"] = schema.ListNestedAttribute{
+		Computed:            true,
+		MarkdownDescription: "List of collaborators with access to this project.",
+		NestedObject: schema.NestedAttributeObject{
+			Attributes: map[string]schema.Attribute{
+				"email": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "Email address of the collaborator.",
+				},
+				"permission_level": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "Permission level: `owner`, `write`, or `readonly`.",
+				},
+				"identity_id": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "The identity ID of the collaborator.",
+				},
+				"user_id": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "The user ID of the collaborator.",
 				},
 			},
 		},
+	}
+
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "Fetches details about an Anyscale Project by ID or name.",
+		Attributes:          attributes,
 	}
 }
 
@@ -177,17 +154,9 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	}
 
 	// Resolve cloud_name to cloud_id if provided
-	cloudID := config.CloudID.ValueString()
-	if !config.CloudName.IsNull() {
-		cloudName := config.CloudName.ValueString()
-		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
-
-		resolvedID, err := ResolveCloudNameToID(ctx, d.client, cloudName)
-		if err != nil {
-			AddAPIError(&resp.Diagnostics, "resolve cloud name", err)
-			return
-		}
-		cloudID = resolvedID
+	cloudID, ok := resolveCloudIDFilter(ctx, d.client, config.CloudID, config.CloudName, &resp.Diagnostics)
+	if !ok {
+		return
 	}
 
 	// Determine lookup strategy
@@ -234,27 +203,15 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	// Populate config
 	config.ID = types.StringValue(project.ID)
 	config.Name = types.StringValue(project.Name)
-	config.CloudID = types.StringValue(project.ParentCloudID)
+	// DS-PROJ-1: parent_cloud_id is genuinely nullable server-side.
+	config.CloudID = types.StringPointerValue(project.ParentCloudID)
 
-	if project.Description != nil {
-		config.Description = types.StringValue(*project.Description)
-	} else {
-		config.Description = types.StringNull()
-	}
-
-	if project.CreatorID != nil {
-		config.CreatorID = types.StringValue(*project.CreatorID)
-	} else {
-		config.CreatorID = types.StringNull()
-	}
-
+	// X-1: all three are already *string - StringPointerValue directly
+	// instead of a verbose if-nil-else block.
+	config.Description = types.StringPointerValue(project.Description)
+	config.CreatorID = types.StringPointerValue(project.CreatorID)
 	config.CreatedAt = types.StringValue(project.CreatedAt)
-
-	if project.LastUsedCloudID != nil {
-		config.LastUsedCloudID = types.StringValue(*project.LastUsedCloudID)
-	} else {
-		config.LastUsedCloudID = types.StringNull()
-	}
+	config.LastUsedCloudID = types.StringPointerValue(project.LastUsedCloudID)
 
 	config.IsDefault = types.BoolValue(project.IsDefault)
 	config.DirectoryName = types.StringValue(project.DirectoryName)
@@ -288,26 +245,14 @@ func (d *ProjectDataSource) findProjectByName(ctx context.Context, name string, 
 		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
 
-	// Find exact name match
-	var matchedProjectID string
-	var latestCreatedAt string
-	matchCount := 0
-
-	for _, project := range results {
-		if project.Name == name {
-			matchCount++
-			if matchedProjectID == "" || project.CreatedAt > latestCreatedAt {
-				matchedProjectID = project.ID
-				latestCreatedAt = project.CreatedAt
-			}
-		}
-	}
-
+	matchedProjectID := PickMostRecentMatch(ctx, "project", name, results,
+		func(p ProjectResult) bool { return p.Name == name },
+		func(p ProjectResult) string { return p.ID },
+		func(p ProjectResult) string { return p.CreatedAt },
+	)
 	if matchedProjectID == "" {
 		return "", fmt.Errorf("no project found with name '%s'", name)
 	}
-
-	WarnIfMultipleMatches(ctx, "project", name, matchCount, matchedProjectID)
 
 	return matchedProjectID, nil
 }
@@ -318,9 +263,8 @@ func (d *ProjectDataSource) getProject(ctx context.Context, projectID string) (*
 		ctx, d.client, "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil, http.StatusOK,
 	)
 	if err != nil {
-		// Check for 404
-		if err.Error() == "unexpected status 404: {\"detail\":\"Project not found\"}" {
-			return nil, fmt.Errorf("project not found")
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: project not found", ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to get project: %w", err)
 	}
@@ -329,17 +273,27 @@ func (d *ProjectDataSource) getProject(ctx context.Context, projectID string) (*
 }
 
 // getCollaborators fetches the list of collaborators for a project.
+//
+// Pages through every page rather than just the first, so a project with
+// more collaborators than fit on one page doesn't silently drop the rest.
 func (d *ProjectDataSource) getCollaborators(ctx context.Context, projectID string) ([]ProjectDataSourceCollaboratorModel, error) {
-	collabResp, err := DoRequestAndParse[ProjectCollaboratorListResponse](
-		ctx, d.client, "GET", fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil, http.StatusOK,
+	results, err := PaginatedRequest(
+		ctx, d.client, fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil,
+		func(body []byte) ([]ProjectCollaboratorResult, *string, error) {
+			var listResp ProjectCollaboratorListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal collaborators response: %w", err)
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collaborators: %w", err)
 	}
 
 	// Map to model
-	collaborators := make([]ProjectDataSourceCollaboratorModel, 0, len(collabResp.Results))
-	for _, collab := range collabResp.Results {
+	collaborators := make([]ProjectDataSourceCollaboratorModel, 0, len(results))
+	for _, collab := range results {
 		collaborators = append(collaborators, ProjectDataSourceCollaboratorModel{
 			Email:           types.StringValue(collab.Value.Email),
 			PermissionLevel: types.StringValue(collab.PermissionLevel),

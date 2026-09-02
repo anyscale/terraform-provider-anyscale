@@ -3,13 +3,13 @@
 page_title: "anyscale_container_image_registry Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads.
+  Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Every configurable attribute requires replacing the resource; there is no in-place update.
   ~> Note: When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting include_archived = true on the anyscale_container_images data source.
 ---
 
 # anyscale_container_image_registry (Resource)
 
-Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads.
+Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Every configurable attribute requires replacing the resource; there is no in-place update.
 
 ~> **Note:** When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting `include_archived = true` on the `anyscale_container_images` data source.
 
@@ -33,9 +33,14 @@ resource "anyscale_container_image_registry" "private_ecr" {
 }
 
 # Outputs
-output "registry_cluster_environment_id" {
-  value       = anyscale_container_image_registry.public.cluster_environment_id
-  description = "The cluster environment (app config) ID created to hold this image"
+output "registry_id" {
+  value       = anyscale_container_image_registry.public.id
+  description = "The durable ID of the cluster environment (app config) created to hold this image"
+}
+
+output "registry_image_digest" {
+  value       = anyscale_container_image_registry.public.digest
+  description = "The content digest of this image's current latest successful build (e.g. sha256:...); like build_id, revision, and name_version, it can change on a later refresh if a new build supersedes this one"
 }
 ```
 
@@ -48,17 +53,17 @@ output "registry_cluster_environment_id" {
 
 ### Optional
 
-- `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated.
-- `ray_version` (String) The Ray version to associate with this image (e.g., `2.9.0`). If not specified, the latest available Ray version will be used.
+- `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated and recorded here after create/import - the generated value is not derivable from config (it embeds a timestamp), so it lives only in state.
+- `ray_version` (String) The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; the API rejects unsupported values at creation time. If not specified, a supported default is used automatically.
 - `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries.
 
 ### Read-Only
 
-- `build_id` (String) The unique identifier of the build.
+- `build_id` (String) The unique identifier of the latest build for this image.
 - `build_status` (String) The status of the build (typically `succeeded` for registered images).
-- `cluster_environment_id` (String) The ID of the cluster environment (app config) that holds this image.
 - `created_at` (String) Timestamp when the build was created.
-- `id` (String) The unique identifier of the build (same as build_id).
+- `digest` (String) The content digest of this image's current latest successful build (e.g. `sha256:...`). May occasionally be briefly empty immediately after creation if the build is still settling. Like `build_id`, `revision`, and `name_version`, it reflects whichever build is currently latest for the underlying cluster environment, and can change on a later refresh if a new build supersedes this one outside this resource's own apply.
+- `id` (String) The unique identifier of the cluster environment holding this image. Earlier provider versions used the build ID here instead; existing state is migrated automatically, but any tooling that stored the old build-id value out of band (e.g. a `terraform output`) must use `id` going forward.
 - `is_byod` (Boolean) Whether this is a BYOD (Bring Your Own Docker) image. Always true for registered images.
 - `name_version` (String) The name and revision formatted as `name:revision` for use with Anyscale APIs.
 - `revision` (Number) The revision number of the container image.
@@ -70,6 +75,6 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the build ID
-terraform import anyscale_container_image_registry.example bld_abc123
+# Import using the cluster environment ID
+terraform import anyscale_container_image_registry.example cenv_abc123
 ```

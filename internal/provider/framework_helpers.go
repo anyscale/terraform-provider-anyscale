@@ -10,145 +10,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// DynamicMapToInterface converts a types.Map with types.DynamicType elements
-// to a map[string]interface{} for use with the Anyscale API.
-// This is used for the flags field which supports mixed types (strings, numbers, booleans).
-func DynamicMapToInterface(ctx context.Context, dynamicMap types.Map) (map[string]interface{}, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	if dynamicMap.IsNull() || dynamicMap.IsUnknown() {
-		return nil, diags
-	}
-
-	result := make(map[string]interface{})
-	elements := dynamicMap.Elements()
-
-	for key, value := range elements {
-		dynamicValue, ok := value.(types.Dynamic)
-		if !ok {
-			diags.AddError(
-				"Type Conversion Error",
-				fmt.Sprintf("Expected types.Dynamic for key '%s', got %T", key, value),
-			)
-			continue
-		}
-
-		underlyingValue := dynamicValue.UnderlyingValue()
-
-		switch v := underlyingValue.(type) {
-		case types.String:
-			if !v.IsNull() && !v.IsUnknown() {
-				result[key] = v.ValueString()
-			}
-		case types.Number:
-			if !v.IsNull() && !v.IsUnknown() {
-				bigFloat := v.ValueBigFloat()
-				// Check if it's an integer
-				if bigFloat.IsInt() {
-					intVal, _ := bigFloat.Int64()
-					result[key] = intVal
-				} else {
-					float64Val, _ := bigFloat.Float64()
-					result[key] = float64Val
-				}
-			}
-		case types.Bool:
-			if !v.IsNull() && !v.IsUnknown() {
-				result[key] = v.ValueBool()
-			}
-		case types.Int64:
-			if !v.IsNull() && !v.IsUnknown() {
-				result[key] = v.ValueInt64()
-			}
-		default:
-			diags.AddWarning(
-				"Unsupported Type",
-				fmt.Sprintf("Key '%s' has unsupported type %T, skipping", key, underlyingValue),
-			)
-		}
-	}
-
-	return result, diags
-}
-
-// InterfaceMapToDynamic converts a map[string]interface{} from the API
-// to a types.Map with types.DynamicType elements for use in Terraform state.
-func InterfaceMapToDynamic(ctx context.Context, input map[string]interface{}) (types.Map, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	if len(input) == 0 {
-		return types.MapNull(types.DynamicType), diags
-	}
-
-	elements := make(map[string]attr.Value)
-
-	for key, value := range input {
-		var dynamicValue types.Dynamic
-
-		switch v := value.(type) {
-		case string:
-			dynamicValue = types.DynamicValue(types.StringValue(v))
-		case float64:
-			dynamicValue = types.DynamicValue(types.NumberValue(big.NewFloat(v)))
-		case int64:
-			dynamicValue = types.DynamicValue(types.Int64Value(v))
-		case int:
-			dynamicValue = types.DynamicValue(types.Int64Value(int64(v)))
-		case bool:
-			dynamicValue = types.DynamicValue(types.BoolValue(v))
-		case nil:
-			// Skip null values
-			continue
-		default:
-			diags.AddWarning(
-				"Unsupported API Value Type",
-				fmt.Sprintf("Key '%s' has unsupported type %T, skipping", key, v),
-			)
-			continue
-		}
-
-		elements[key] = dynamicValue
-	}
-
-	if len(elements) == 0 {
-		return types.MapNull(types.DynamicType), diags
-	}
-
-	mapValue, mapDiags := types.MapValue(types.DynamicType, elements)
-	diags.Append(mapDiags...)
-	return mapValue, diags
-}
-
-// Float64MapToInterface converts a types.Map with Float64Type elements
-// to a map[string]interface{} for use with the Anyscale API.
-func Float64MapToInterface(ctx context.Context, float64Map types.Map) (map[string]interface{}, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	if float64Map.IsNull() || float64Map.IsUnknown() {
-		return nil, diags
-	}
-
-	result := make(map[string]interface{})
-	elements := float64Map.Elements()
-
-	for key, value := range elements {
-		float64Value, ok := value.(types.Float64)
-		if !ok {
-			diags.AddError(
-				"Type Conversion Error",
-				fmt.Sprintf("Expected types.Float64 for key '%s', got %T", key, value),
-			)
-			continue
-		}
-
-		if !float64Value.IsNull() && !float64Value.IsUnknown() {
-			result[key] = float64Value.ValueFloat64()
-		}
-	}
-
-	return result, diags
-}
-
 // InterfaceMapToFloat64 converts a map[string]interface{} from the API
 // to a types.Map with Float64Type elements for use in Terraform state.
 func InterfaceMapToFloat64(ctx context.Context, input map[string]interface{}) (types.Map, diag.Diagnostics) {
@@ -191,36 +52,6 @@ func InterfaceMapToFloat64(ctx context.Context, input map[string]interface{}) (t
 	mapValue, mapDiags := types.MapValue(types.Float64Type, elements)
 	diags.Append(mapDiags...)
 	return mapValue, diags
-}
-
-// StringMapToInterface converts a types.Map with StringType elements
-// to a map[string]interface{} for use with the Anyscale API.
-func StringMapToInterface(ctx context.Context, stringMap types.Map) (map[string]interface{}, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	if stringMap.IsNull() || stringMap.IsUnknown() {
-		return nil, diags
-	}
-
-	result := make(map[string]interface{})
-	elements := stringMap.Elements()
-
-	for key, value := range elements {
-		stringValue, ok := value.(types.String)
-		if !ok {
-			diags.AddError(
-				"Type Conversion Error",
-				fmt.Sprintf("Expected types.String for key '%s', got %T", key, value),
-			)
-			continue
-		}
-
-		if !stringValue.IsNull() && !stringValue.IsUnknown() {
-			result[key] = stringValue.ValueString()
-		}
-	}
-
-	return result, diags
 }
 
 // InterfaceMapToString converts a map[string]interface{} from the API
@@ -374,6 +205,24 @@ func convertAttrValueToInterface(val attr.Value) interface{} {
 			}
 			return result
 		}
+	case types.Tuple:
+		// HCL infers a list of object literals inside a Dynamic-typed attribute as a Tuple, not
+		// a List - Terraform's dynamic type system uses Tuple whenever elements could in
+		// principle have different shapes, which every object literal list does. Without this
+		// case, a real ray_serve_config's `applications` (always a list of objects) fell through
+		// to the nil default below, silently sending the backend `"applications": null` instead
+		// of the real list - confirmed as a real P1 via a real-infra apply (the mock suite never
+		// caught it because every mock config used an empty list, which types as List, not
+		// Tuple). Converts identically to the List case; Tuple otherwise behaves the same for
+		// this JSON-conversion purpose.
+		if !v.IsNull() && !v.IsUnknown() {
+			elements := v.Elements()
+			result := make([]interface{}, 0, len(elements))
+			for _, elem := range elements {
+				result = append(result, convertAttrValueToInterface(elem))
+			}
+			return result
+		}
 	case types.Map:
 		if !v.IsNull() && !v.IsUnknown() {
 			elements := v.Elements()
@@ -447,15 +296,27 @@ func interfaceToAttrValue(value interface{}) (attr.Value, attr.Type) {
 	case bool:
 		return types.BoolValue(v), types.BoolType
 	case []interface{}:
+		// Tuple, not List: a literal HCL array under a Dynamic-typed
+		// attribute has no declared element type to coerce into, so
+		// Terraform Core evaluates it as a tuple (independently-tracked
+		// per-element types), never a list, regardless of whether the
+		// elements happen to look uniform. A List-shaped recovered value
+		// can never reach an empty plan against that -- List and Tuple are
+		// different concrete types to the framework even with identical
+		// visible content. Tracking each element's real type here (instead
+		// of the previous single elemType, which took whichever element
+		// happened to run last in the loop) also fixes a second latent bug:
+		// a genuinely mixed-type array previously got every element coerced
+		// to that last element's type.
 		elements := make([]attr.Value, 0, len(v))
-		var elemType attr.Type = types.StringType // Default
+		elemTypes := make([]attr.Type, 0, len(v))
 		for _, elem := range v {
 			elemValue, et := interfaceToAttrValue(elem)
 			elements = append(elements, elemValue)
-			elemType = et // Use the type of the last element
+			elemTypes = append(elemTypes, et)
 		}
-		listValue, _ := types.ListValue(elemType, elements)
-		return listValue, types.ListType{ElemType: elemType}
+		tupleValue, _ := types.TupleValue(elemTypes, elements)
+		return tupleValue, types.TupleType{ElemTypes: elemTypes}
 	case map[string]interface{}:
 		attrs := make(map[string]attr.Value)
 		attrTypes := make(map[string]attr.Type)

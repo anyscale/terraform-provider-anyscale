@@ -160,36 +160,50 @@ resource "anyscale_compute_config" "advanced" {
   ]
 }
 
-# Multi-resource compute config example (experimental)
-# Note: This requires multiple cloud resources to be configured
+# Multi-resource compute config example - one compute config spanning more
+# than one cloud resource on the same cloud, via additional_resources. The
+# top-level attributes describe the primary cloud resource (this cloud's
+# default, since cloud_resource is left unset); each additional_resources
+# entry describes one more, targeted by its own required cloud_resource name.
+# See the Compute Config guide's "additional_resources" section for the
+# current limitations (no reorder-stability, cold-import primary/additional
+# split is not intent-based, and the data source does not expose this yet).
 
-# Uncomment if you have multiple cloud resources configured
+# Uncomment if your cloud has more than one anyscale_cloud_resource configured
 # resource "anyscale_compute_config" "multi_resource" {
-#   name       = "${var.cloud_name}-multi-resource-compute"
-#   cloud_id   = anyscale_cloud.primary.id
-#   project_id = var.anyscale_project_id
+#   name     = "${var.cloud_name}-multi-resource-compute"
+#   cloud_id = anyscale_cloud.primary.id
 #
-#   head_node {
+#   head_node = {
 #     instance_type = "m5.2xlarge"
-#
-#     # Target specific deployment
-#     cloud_deployment {
-#       region = "us-west-2"
-#       provider = "aws"
-#     }
 #   }
 #
-#   worker_nodes {
-#     instance_type = "m5.4xlarge"
-#     min_nodes     = 1
-#     max_nodes     = 5
-#
-#     # Target specific deployment
-#     cloud_deployment {
-#       region = "us-west-2"
-#       provider = "aws"
+#   worker_nodes = [
+#     {
+#       instance_type = "m5.4xlarge"
+#       min_nodes     = 1
+#       max_nodes     = 5
 #     }
-#   }
+#   ]
+#
+#   # One more cloud resource on the same cloud, targeted explicitly by name
+#   additional_resources = [
+#     {
+#       cloud_resource = anyscale_cloud_resource.secondary.name
+#
+#       head_node = {
+#         instance_type = "m5.2xlarge"
+#       }
+#
+#       worker_nodes = [
+#         {
+#           instance_type = "m5.4xlarge"
+#           min_nodes     = 1
+#           max_nodes     = 5
+#         }
+#       ]
+#     }
+#   ]
 # }
 
 # Simple compute config example

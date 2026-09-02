@@ -2,6 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -61,6 +65,24 @@ func TestParseCloudResourceID(t *testing.T) {
 	}
 }
 
+// stringPtrsEqual compares two *string for equality, treating nil and a
+// pointer to "" as distinct (matching how stringPtrOrNull/expand* treat an
+// absent value differently from an explicit empty string).
+func stringPtrsEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// stringPtrDeref renders a *string for a test failure message.
+func stringPtrDeref(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
+}
+
 func TestExpandAWSConfig(t *testing.T) {
 	ctx := context.Background()
 
@@ -74,16 +96,17 @@ func TestExpandAWSConfig(t *testing.T) {
 			name: "full config with subnet_ids_to_az",
 			obj: types.ObjectValueMust(
 				map[string]attr.Type{
-					"vpc_id":                    types.StringType,
-					"subnet_ids":                types.ListType{ElemType: types.StringType},
-					"subnet_ids_to_az":          types.MapType{ElemType: types.StringType},
-					"security_group_ids":        types.ListType{ElemType: types.StringType},
-					"controlplane_iam_role_arn": types.StringType,
-					"dataplane_iam_role_arn":    types.StringType,
-					"external_id":               types.StringType,
-					"memorydb_cluster_name":     types.StringType,
-					"memorydb_cluster_arn":      types.StringType,
-					"memorydb_cluster_endpoint": types.StringType,
+					"vpc_id":                      types.StringType,
+					"subnet_ids":                  types.ListType{ElemType: types.StringType},
+					"subnet_ids_to_az":            types.MapType{ElemType: types.StringType},
+					"security_group_ids":          types.ListType{ElemType: types.StringType},
+					"controlplane_iam_role_arn":   types.StringType,
+					"dataplane_iam_role_arn":      types.StringType,
+					"cluster_instance_profile_id": types.StringType,
+					"external_id":                 types.StringType,
+					"memorydb_cluster_name":       types.StringType,
+					"memorydb_cluster_arn":        types.StringType,
+					"memorydb_cluster_endpoint":   types.StringType,
 				},
 				map[string]attr.Value{
 					"vpc_id":     types.StringValue("vpc-123"),
@@ -102,12 +125,13 @@ func TestExpandAWSConfig(t *testing.T) {
 							types.StringValue("sg-222"),
 						},
 					),
-					"controlplane_iam_role_arn": types.StringValue("arn:aws:iam::123456789012:role/anyscale-controlplane"),
-					"dataplane_iam_role_arn":    types.StringValue("arn:aws:iam::123456789012:role/anyscale-dataplane"),
-					"external_id":               types.StringValue("external-123"),
-					"memorydb_cluster_name":     types.StringValue("anyscale-memorydb"),
-					"memorydb_cluster_arn":      types.StringValue("arn:aws:memorydb:us-east-2:123456789012:cluster/anyscale-memorydb"),
-					"memorydb_cluster_endpoint": types.StringValue("anyscale-memorydb.abc123.memorydb.us-east-2.amazonaws.com:6379"),
+					"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::123456789012:role/anyscale-controlplane"),
+					"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::123456789012:role/anyscale-dataplane"),
+					"cluster_instance_profile_id": types.StringValue("arn:aws:iam::123456789012:instance-profile/anyscale-dataplane"),
+					"external_id":                 types.StringValue("external-123"),
+					"memorydb_cluster_name":       types.StringValue("anyscale-memorydb"),
+					"memorydb_cluster_arn":        types.StringValue("arn:aws:memorydb:us-east-2:123456789012:cluster/anyscale-memorydb"),
+					"memorydb_cluster_endpoint":   types.StringValue("anyscale-memorydb.abc123.memorydb.us-east-2.amazonaws.com:6379"),
 				},
 			),
 			want: &AWSConfig{
@@ -117,7 +141,11 @@ func TestExpandAWSConfig(t *testing.T) {
 				SecurityGroupIDs:  []string{"sg-111", "sg-222"},
 				AnyscaleIAMRoleID: "arn:aws:iam::123456789012:role/anyscale-controlplane",
 				ClusterIAMRoleID:  "arn:aws:iam::123456789012:role/anyscale-dataplane",
-				ExternalID:        "external-123",
+				ClusterInstanceProfileID: func() *string {
+					s := "arn:aws:iam::123456789012:instance-profile/anyscale-dataplane"
+					return &s
+				}(),
+				ExternalID: "external-123",
 				MemoryDBClusterName: func() *string {
 					s := "anyscale-memorydb"
 					return &s
@@ -137,16 +165,17 @@ func TestExpandAWSConfig(t *testing.T) {
 			name: "minimal config with subnet_ids list",
 			obj: types.ObjectValueMust(
 				map[string]attr.Type{
-					"vpc_id":                    types.StringType,
-					"subnet_ids":                types.ListType{ElemType: types.StringType},
-					"subnet_ids_to_az":          types.MapType{ElemType: types.StringType},
-					"security_group_ids":        types.ListType{ElemType: types.StringType},
-					"controlplane_iam_role_arn": types.StringType,
-					"dataplane_iam_role_arn":    types.StringType,
-					"external_id":               types.StringType,
-					"memorydb_cluster_name":     types.StringType,
-					"memorydb_cluster_arn":      types.StringType,
-					"memorydb_cluster_endpoint": types.StringType,
+					"vpc_id":                      types.StringType,
+					"subnet_ids":                  types.ListType{ElemType: types.StringType},
+					"subnet_ids_to_az":            types.MapType{ElemType: types.StringType},
+					"security_group_ids":          types.ListType{ElemType: types.StringType},
+					"controlplane_iam_role_arn":   types.StringType,
+					"dataplane_iam_role_arn":      types.StringType,
+					"cluster_instance_profile_id": types.StringType,
+					"external_id":                 types.StringType,
+					"memorydb_cluster_name":       types.StringType,
+					"memorydb_cluster_arn":        types.StringType,
+					"memorydb_cluster_endpoint":   types.StringType,
 				},
 				map[string]attr.Value{
 					"vpc_id": types.StringValue("vpc-456"),
@@ -164,12 +193,13 @@ func TestExpandAWSConfig(t *testing.T) {
 							types.StringValue("sg-aaa"),
 						},
 					),
-					"controlplane_iam_role_arn": types.StringValue("arn:aws:iam::999:role/cp"),
-					"dataplane_iam_role_arn":    types.StringValue("arn:aws:iam::999:role/dp"),
-					"external_id":               types.StringNull(),
-					"memorydb_cluster_name":     types.StringNull(),
-					"memorydb_cluster_arn":      types.StringNull(),
-					"memorydb_cluster_endpoint": types.StringNull(),
+					"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::999:role/cp"),
+					"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::999:role/dp"),
+					"cluster_instance_profile_id": types.StringNull(),
+					"external_id":                 types.StringNull(),
+					"memorydb_cluster_name":       types.StringNull(),
+					"memorydb_cluster_arn":        types.StringNull(),
+					"memorydb_cluster_endpoint":   types.StringNull(),
 				},
 			),
 			want: &AWSConfig{
@@ -178,6 +208,58 @@ func TestExpandAWSConfig(t *testing.T) {
 				SecurityGroupIDs:  []string{"sg-aaa"},
 				AnyscaleIAMRoleID: "arn:aws:iam::999:role/cp",
 				ClusterIAMRoleID:  "arn:aws:iam::999:role/dp",
+			},
+			wantErr: false,
+		},
+		{
+			// Regression guard for the Optional+Computed Unknown-at-Create gap: memorydb_cluster_arn
+			// and memorydb_cluster_endpoint are Optional+Computed (config-omitted -> Unknown on a
+			// fresh Create, not Null - there is no prior state for UseStateForUnknown to carry
+			// forward). Before the explicit IsUnknown() guard, an IsNull()-only check read Unknown
+			// as user-supplied and called ValueString() on it, producing a non-nil pointer to "" -
+			// which would have been sent to the API as an explicit empty string instead of omitted.
+			name: "unset Optional+Computed fields plan Unknown at Create, not Null",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"vpc_id":                      types.StringType,
+					"subnet_ids":                  types.ListType{ElemType: types.StringType},
+					"subnet_ids_to_az":            types.MapType{ElemType: types.StringType},
+					"security_group_ids":          types.ListType{ElemType: types.StringType},
+					"controlplane_iam_role_arn":   types.StringType,
+					"dataplane_iam_role_arn":      types.StringType,
+					"cluster_instance_profile_id": types.StringType,
+					"external_id":                 types.StringType,
+					"memorydb_cluster_name":       types.StringType,
+					"memorydb_cluster_arn":        types.StringType,
+					"memorydb_cluster_endpoint":   types.StringType,
+				},
+				map[string]attr.Value{
+					"vpc_id":                      types.StringValue("vpc-789"),
+					"subnet_ids":                  types.ListValueMust(types.StringType, []attr.Value{types.StringValue("subnet-ccc")}),
+					"subnet_ids_to_az":            types.MapNull(types.StringType),
+					"security_group_ids":          types.ListValueMust(types.StringType, []attr.Value{types.StringValue("sg-ccc")}),
+					"controlplane_iam_role_arn":   types.StringValue("arn:aws:iam::111:role/cp"),
+					"dataplane_iam_role_arn":      types.StringValue("arn:aws:iam::111:role/dp"),
+					"cluster_instance_profile_id": types.StringNull(),
+					"external_id":                 types.StringNull(),
+					"memorydb_cluster_name":       types.StringValue("anyscale-memorydb"),
+					"memorydb_cluster_arn":        types.StringUnknown(),
+					"memorydb_cluster_endpoint":   types.StringUnknown(),
+				},
+			),
+			want: &AWSConfig{
+				VPCID:             "vpc-789",
+				SubnetIDs:         []string{"subnet-ccc"},
+				SecurityGroupIDs:  []string{"sg-ccc"},
+				AnyscaleIAMRoleID: "arn:aws:iam::111:role/cp",
+				ClusterIAMRoleID:  "arn:aws:iam::111:role/dp",
+				MemoryDBClusterName: func() *string {
+					s := "anyscale-memorydb"
+					return &s
+				}(),
+				// Must stay nil, not a pointer to "" - that is the whole guard being proven here.
+				MemoryDBClusterARN:      nil,
+				MemoryDBClusterEndpoint: nil,
 			},
 			wantErr: false,
 		},
@@ -213,6 +295,18 @@ func TestExpandAWSConfig(t *testing.T) {
 				}
 				if got.ClusterIAMRoleID != tt.want.ClusterIAMRoleID {
 					t.Errorf("expandAWSConfig() ClusterIAMRoleID = %v, want %v", got.ClusterIAMRoleID, tt.want.ClusterIAMRoleID)
+				}
+				if !stringPtrsEqual(got.ClusterInstanceProfileID, tt.want.ClusterInstanceProfileID) {
+					t.Errorf("expandAWSConfig() ClusterInstanceProfileID = %v, want %v", stringPtrDeref(got.ClusterInstanceProfileID), stringPtrDeref(tt.want.ClusterInstanceProfileID))
+				}
+				if !stringPtrsEqual(got.MemoryDBClusterName, tt.want.MemoryDBClusterName) {
+					t.Errorf("expandAWSConfig() MemoryDBClusterName = %v, want %v", stringPtrDeref(got.MemoryDBClusterName), stringPtrDeref(tt.want.MemoryDBClusterName))
+				}
+				if !stringPtrsEqual(got.MemoryDBClusterARN, tt.want.MemoryDBClusterARN) {
+					t.Errorf("expandAWSConfig() MemoryDBClusterARN = %v, want %v", stringPtrDeref(got.MemoryDBClusterARN), stringPtrDeref(tt.want.MemoryDBClusterARN))
+				}
+				if !stringPtrsEqual(got.MemoryDBClusterEndpoint, tt.want.MemoryDBClusterEndpoint) {
+					t.Errorf("expandAWSConfig() MemoryDBClusterEndpoint = %v, want %v", stringPtrDeref(got.MemoryDBClusterEndpoint), stringPtrDeref(tt.want.MemoryDBClusterEndpoint))
 				}
 				// Verify SubnetIDs (order may vary for map-based input)
 				if len(got.SubnetIDs) != len(tt.want.SubnetIDs) {
@@ -386,11 +480,6 @@ func TestExpandKubernetesConfig(t *testing.T) {
 					"anyscale_operator_iam_identity": types.StringType,
 					"zones":                          types.ListType{ElemType: types.StringType},
 					"redis_endpoint":                 types.StringType,
-					"namespace":                      types.StringType,
-					"ingress_host":                   types.StringType,
-					"cluster_name":                   types.StringType,
-					"context":                        types.StringType,
-					"kubeconfig_path":                types.StringType,
 				},
 				map[string]attr.Value{
 					"anyscale_operator_iam_identity": types.StringValue("arn:aws:iam::123456789012:role/anyscale-operator"),
@@ -401,12 +490,7 @@ func TestExpandKubernetesConfig(t *testing.T) {
 							types.StringValue("us-east-2b"),
 						},
 					),
-					"redis_endpoint":  types.StringValue("redis.ray-system.svc.cluster.local:6379"),
-					"namespace":       types.StringValue("anyscale-prod"),
-					"ingress_host":    types.StringValue("anyscale.example.com"),
-					"cluster_name":    types.StringValue("my-eks-cluster"),
-					"context":         types.StringNull(),
-					"kubeconfig_path": types.StringNull(),
+					"redis_endpoint": types.StringValue("redis.ray-system.svc.cluster.local:6379"),
 				},
 			),
 			want: &KubernetesConfig{
@@ -423,21 +507,11 @@ func TestExpandKubernetesConfig(t *testing.T) {
 					"anyscale_operator_iam_identity": types.StringType,
 					"zones":                          types.ListType{ElemType: types.StringType},
 					"redis_endpoint":                 types.StringType,
-					"namespace":                      types.StringType,
-					"ingress_host":                   types.StringType,
-					"cluster_name":                   types.StringType,
-					"context":                        types.StringType,
-					"kubeconfig_path":                types.StringType,
 				},
 				map[string]attr.Value{
 					"anyscale_operator_iam_identity": types.StringValue("operator@project.iam.gserviceaccount.com"),
 					"zones":                          types.ListNull(types.StringType),
 					"redis_endpoint":                 types.StringNull(),
-					"namespace":                      types.StringValue("anyscale"),
-					"ingress_host":                   types.StringNull(),
-					"cluster_name":                   types.StringNull(),
-					"context":                        types.StringNull(),
-					"kubeconfig_path":                types.StringNull(),
 				},
 			),
 			want: &KubernetesConfig{
@@ -570,6 +644,77 @@ func TestExpandObjectStorage(t *testing.T) {
 	}
 }
 
+func TestExpandAzureConfig(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name    string
+		obj     types.Object
+		want    *AzureConfig
+		wantErr bool
+	}{
+		{
+			name: "tenant_id set",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"tenant_id": types.StringType,
+				},
+				map[string]attr.Value{
+					"tenant_id": types.StringValue("11111111-1111-1111-1111-111111111111"),
+				},
+			),
+			want: &AzureConfig{
+				TenantID: "11111111-1111-1111-1111-111111111111",
+			},
+			wantErr: false,
+		},
+		{
+			name: "tenant_id unset - azure_config is optional per the AKS design",
+			obj: types.ObjectValueMust(
+				map[string]attr.Type{
+					"tenant_id": types.StringType,
+				},
+				map[string]attr.Value{
+					"tenant_id": types.StringNull(),
+				},
+			),
+			want: &AzureConfig{
+				TenantID: "",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "null object",
+			obj:     types.ObjectNull(map[string]attr.Type{}),
+			want:    nil,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandAzureConfig(ctx, tt.obj)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("expandAzureConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.want == nil && got != nil {
+				t.Errorf("expandAzureConfig() = %v, want nil", got)
+				return
+			}
+			if tt.want != nil {
+				if got == nil {
+					t.Errorf("expandAzureConfig() = nil, want non-nil")
+					return
+				}
+				if got.TenantID != tt.want.TenantID {
+					t.Errorf("expandAzureConfig() TenantID = %v, want %v", got.TenantID, tt.want.TenantID)
+				}
+			}
+		})
+	}
+}
+
 func TestExpandFileStorage(t *testing.T) {
 	ctx := context.Background()
 
@@ -583,8 +728,10 @@ func TestExpandFileStorage(t *testing.T) {
 			name: "full EFS config with mount targets",
 			obj: types.ObjectValueMust(
 				map[string]attr.Type{
-					"file_storage_id": types.StringType,
-					"mount_path":      types.StringType,
+					"file_storage_id":             types.StringType,
+					"mount_path":                  types.StringType,
+					"persistent_volume_claim":     types.StringType,
+					"csi_ephemeral_volume_driver": types.StringType,
 					"mount_targets": types.ListType{
 						ElemType: types.ObjectType{
 							AttrTypes: map[string]attr.Type{
@@ -595,8 +742,10 @@ func TestExpandFileStorage(t *testing.T) {
 					},
 				},
 				map[string]attr.Value{
-					"file_storage_id": types.StringValue("fs-12345678"),
-					"mount_path":      types.StringValue("/mnt/efs"),
+					"file_storage_id":             types.StringValue("fs-12345678"),
+					"mount_path":                  types.StringValue("/mnt/efs"),
+					"persistent_volume_claim":     types.StringValue("ray-shared-pvc"),
+					"csi_ephemeral_volume_driver": types.StringNull(),
 					"mount_targets": types.ListValueMust(
 						types.ObjectType{
 							AttrTypes: map[string]attr.Type{
@@ -630,8 +779,9 @@ func TestExpandFileStorage(t *testing.T) {
 				},
 			),
 			want: &FileStorage{
-				FileStorageID: "fs-12345678",
-				MountPath:     "/mnt/efs",
+				FileStorageID:         "fs-12345678",
+				MountPath:             "/mnt/efs",
+				PersistentVolumeClaim: "ray-shared-pvc",
 				MountTargets: []MountTarget{
 					{
 						Address: "fs-12345678.efs.us-east-2.amazonaws.com",
@@ -649,8 +799,10 @@ func TestExpandFileStorage(t *testing.T) {
 			name: "minimal config without mount targets",
 			obj: types.ObjectValueMust(
 				map[string]attr.Type{
-					"file_storage_id": types.StringType,
-					"mount_path":      types.StringType,
+					"file_storage_id":             types.StringType,
+					"mount_path":                  types.StringType,
+					"persistent_volume_claim":     types.StringType,
+					"csi_ephemeral_volume_driver": types.StringType,
 					"mount_targets": types.ListType{
 						ElemType: types.ObjectType{
 							AttrTypes: map[string]attr.Type{
@@ -661,8 +813,10 @@ func TestExpandFileStorage(t *testing.T) {
 					},
 				},
 				map[string]attr.Value{
-					"file_storage_id": types.StringValue("filestore-instance"),
-					"mount_path":      types.StringValue("/mnt/shared"),
+					"file_storage_id":             types.StringValue("filestore-instance"),
+					"mount_path":                  types.StringValue("/mnt/shared"),
+					"persistent_volume_claim":     types.StringNull(),
+					"csi_ephemeral_volume_driver": types.StringValue("ephemeral.csi.example.com"),
 					"mount_targets": types.ListNull(types.ObjectType{
 						AttrTypes: map[string]attr.Type{
 							"address": types.StringType,
@@ -672,8 +826,9 @@ func TestExpandFileStorage(t *testing.T) {
 				},
 			),
 			want: &FileStorage{
-				FileStorageID: "filestore-instance",
-				MountPath:     "/mnt/shared",
+				FileStorageID:            "filestore-instance",
+				MountPath:                "/mnt/shared",
+				CSIEphemeralVolumeDriver: "ephemeral.csi.example.com",
 			},
 			wantErr: false,
 		},
@@ -707,10 +862,76 @@ func TestExpandFileStorage(t *testing.T) {
 				if got.MountPath != tt.want.MountPath {
 					t.Errorf("expandFileStorage() MountPath = %v, want %v", got.MountPath, tt.want.MountPath)
 				}
+				if got.PersistentVolumeClaim != tt.want.PersistentVolumeClaim {
+					t.Errorf("expandFileStorage() PersistentVolumeClaim = %v, want %v", got.PersistentVolumeClaim, tt.want.PersistentVolumeClaim)
+				}
+				if got.CSIEphemeralVolumeDriver != tt.want.CSIEphemeralVolumeDriver {
+					t.Errorf("expandFileStorage() CSIEphemeralVolumeDriver = %v, want %v", got.CSIEphemeralVolumeDriver, tt.want.CSIEphemeralVolumeDriver)
+				}
 				if len(got.MountTargets) != len(tt.want.MountTargets) {
 					t.Errorf("expandFileStorage() MountTargets length = %v, want %v", len(got.MountTargets), len(tt.want.MountTargets))
 				}
 			}
 		})
 	}
+}
+
+// The case-normalization regression test that lived here against addProviderConfig
+// (TestAddProviderConfig_LowercaseProviderNormalizes, added in the PR that fixed the bug) moved
+// to TestBuildProviderConfig_RequiredCombos in cloud_helpers_test.go's "lowercase and mixed-case
+// provider still match" subtest, once addProviderConfig itself was consolidated into
+// buildProviderConfig (workbench #6) - same coverage, now against the function that actually
+// exists.
+
+// TestReadCloudResource_NotFoundSentinel guards readCloudResource's ErrNotFound wrap. It has
+// two distinct not-found conditions and used to return a fresh, unwrapped error for both: the
+// 404 case discarded the ErrNotFound wrap its inner listCloudResources call already carried,
+// while the scan-miss case never had one, since that list call succeeded and simply returned
+// nothing matching. errors.Is(err, ErrNotFound) was always false either way, even though the
+// strings.Contains(err.Error(), "not found") check at Read's call site happened to still match
+// both cases' literal text.
+func TestReadCloudResource_NotFoundSentinel(t *testing.T) {
+	t.Run("cloud itself gone (404 on the underlying list call)", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v2/clouds/cld_gone/resources" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}))
+		defer server.Close()
+
+		r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.readCloudResource(context.Background(), "cld_gone", "some-resource", &CloudResourceResourceModel{}, nil)
+		if err == nil {
+			t.Fatal("readCloudResource returned nil error for a gone cloud, want a non-nil error wrapping ErrNotFound")
+		}
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("errors.Is(err, ErrNotFound) = false for a gone cloud, want true (err: %v)", err)
+		}
+	})
+
+	t.Run("cloud exists, named resource is not in the list (client-side scan miss, not an HTTP 404)", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v2/clouds/cld_live/resources" {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{
+					Results:  []CloudDeploymentResult{{Name: "some-other-resource"}},
+					Metadata: DeploymentMetadata{Total: 1},
+				})
+				return
+			}
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}))
+		defer server.Close()
+
+		r := &CloudResourceResource{client: NewClientWithToken(server.URL, "test-token")}
+		err := r.readCloudResource(context.Background(), "cld_live", "missing-resource", &CloudResourceResourceModel{}, nil)
+		if err == nil {
+			t.Fatal("readCloudResource returned nil error for a scan miss, want a non-nil error wrapping ErrNotFound")
+		}
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("errors.Is(err, ErrNotFound) = false for a scan miss, want true (err: %v)", err)
+		}
+	})
 }

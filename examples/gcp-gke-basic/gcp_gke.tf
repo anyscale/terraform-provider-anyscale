@@ -166,7 +166,7 @@ module "gke" {
 
   project_id = var.google_project_id
   name       = var.gke_cluster_name
-  region     = var.google_region
+  region     = var.gcp_region
   zones      = [data.google_compute_zones.available.names[0], data.google_compute_zones.available.names[1]]
 
   network           = google_compute_network.anyscale.name
@@ -210,7 +210,7 @@ resource "google_compute_subnetwork" "anyscale" {
   name          = "${var.gke_cluster_name}-subnet"
   ip_cidr_range = "10.0.0.0/16"
   network       = google_compute_network.anyscale.id
-  region        = var.google_region
+  region        = var.gcp_region
 
   secondary_ip_range {
     range_name    = "${var.gke_cluster_name}-subnet-pods"
@@ -224,7 +224,7 @@ resource "google_compute_subnetwork" "anyscale" {
 }
 
 # Allow common external ingress traffic (HTTPS, SSH, ICMP)
-resource "google_compute_firewall" "allow-common-ingress" {
+resource "google_compute_firewall" "allow_common_ingress" {
   #checkov:skip=CKV_GCP_2: "Ensure Google compute firewall ingress does not allow unrestricted ssh access"
 
   name    = "${var.gke_cluster_name}-allow-common-ingress"
@@ -246,7 +246,7 @@ resource "google_compute_firewall" "allow-common-ingress" {
 
 # Allow all internal traffic within VPC.
 # VPC by default only allows all internal traffic on the same subnet.
-resource "google_compute_firewall" "allow-internal" {
+resource "google_compute_firewall" "allow_internal" {
   #checkov:skip=CKV2_GCP_12: "GCP compute firewall ingress allow access to all ports"
 
   name    = "${var.gke_cluster_name}-allow-internal"

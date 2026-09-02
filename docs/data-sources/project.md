@@ -45,10 +45,10 @@ output "project_description_by_id" {
 
 ### Optional
 
-- `cloud_id` (String) The cloud ID this project belongs to. Can be used as a filter when looking up by name.
+- `cloud_id` (String) The cloud ID this project belongs to. Can be used as a filter when looking up by name. Null if the project has no associated cloud reported by the API.
 - `cloud_name` (String) The cloud name this project belongs to. Can be used as a filter when looking up by name. Will be resolved to cloud_id.
 - `id` (String) The unique identifier of the project. Either `id` or `name` must be specified.
-- `name` (String) The name of the project. Either `id` or `name` must be specified.
+- `name` (String) The name of the project. Either `id` or `name` must be specified. If multiple projects have the same name, the most recently created one will be returned.
 
 ### Read-Only
 
@@ -57,7 +57,7 @@ output "project_description_by_id" {
 - `creator_id` (String) The ID of the user who created the project.
 - `description` (String) Description of the project.
 - `directory_name` (String) The directory name used for this project's storage.
-- `is_default` (Boolean) Whether this is the default project for the organization.
+- `is_default` (Boolean) Whether this is the default project for its cloud. Anyscale creates one default project per cloud, not one per organization.
 - `last_used_cloud_id` (String) The ID of the cloud last used by this project.
 
 <a id="nestedatt--collaborators"></a>
@@ -67,5 +67,5 @@ Read-Only:
 
 - `email` (String) Email address of the collaborator.
 - `identity_id` (String) The identity ID of the collaborator.
-- `permission_level` (String) Permission level: 'owner', 'writer', or 'readonly'.
+- `permission_level` (String) Permission level: `owner`, `write`, or `readonly`.
 - `user_id` (String) The user ID of the collaborator.

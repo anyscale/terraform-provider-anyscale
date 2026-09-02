@@ -8,6 +8,9 @@ resource "anyscale_cloud" "primary" {
   region         = var.aws_region
   compute_stack  = "VM"
 
+  is_private_cloud = var.is_private_cloud
+  auto_add_user    = var.auto_add_user
+
   # AWS Configuration
   aws_config {
     vpc_id           = module.aws_anyscale_v2.anyscale_vpc_id

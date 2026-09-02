@@ -8,11 +8,15 @@ import (
 	"testing"
 )
 
-// TestGetCollaborators_PagesBeyondFirstPage is a regression test for task
-// a41c8e2d: getCollaborators used to fetch a single, unpaginated page, so a
-// project with more collaborators than fit on one page would silently drop
-// the rest on every read/sync.
-func TestGetCollaborators_PagesBeyondFirstPage(t *testing.T) {
+// TestDataSourceGetCollaborators_PagesBeyondFirstPage is the design contract's
+// AC3 (F2): the singular anyscale_project data source's getCollaborators used
+// to call DoRequestAndParse directly (first page only), unlike the plural
+// anyscale_projects data source's fetchProjects, which paginates. A project
+// with more collaborators than fit on one page silently dropped the rest from
+// the data source's output. (The resource-side twin of this test went away
+// with the anyscale_project resource's collaborator block in v0.25.0 - the
+// data source is now the only surface that reads collaborators.)
+func TestDataSourceGetCollaborators_PagesBeyondFirstPage(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
@@ -27,17 +31,17 @@ func TestGetCollaborators_PagesBeyondFirstPage(t *testing.T) {
 		}
 
 		_, _ = fmt.Fprint(w, `{
-			"results": [{"id": "identity-2", "value": {"id": "user-2", "email": "b@example.com"}, "permission_level": "writer"}],
+			"results": [{"id": "identity-2", "value": {"id": "user-2", "email": "b@example.com"}, "permission_level": "write"}],
 			"metadata": {"total": 2, "next_paging_token": null}
 		}`)
 	}))
 	defer server.Close()
 
-	r := &ProjectResource{
+	d := &ProjectDataSource{
 		client: NewClientWithToken(server.URL, "test-token"),
 	}
 
-	collaborators, err := r.getCollaborators(context.Background(), "project-id")
+	collaborators, err := d.getCollaborators(context.Background(), "project-id")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

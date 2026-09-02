@@ -2,28 +2,13 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"net/http"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
-
-// AddHTTPError adds a diagnostic error for an HTTP response with an unexpected status.
-// It formats the error message to include the status code and response body.
-//
-// Example usage:
-//
-//	if httpResp.StatusCode != http.StatusOK {
-//	    AddHTTPError(&resp.Diagnostics, "Get Project", httpResp.StatusCode, bodyBytes)
-//	    return
-//	}
-func AddHTTPError(diags *diag.Diagnostics, operation string, statusCode int, body []byte) {
-	diags.AddError(
-		fmt.Sprintf("%s Failed", operation),
-		fmt.Sprintf("API returned status %d: %s", statusCode, string(body)),
-	)
-}
 
 // AddAPIError adds a diagnostic error for a general API operation failure.
 // Use this for errors from the HTTP client or other non-status-code errors.
@@ -60,82 +45,50 @@ func AddJSONError(diags *diag.Diagnostics, operation string, dataType string, er
 //
 // Example usage:
 //
-//	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
-//	    AddConfigError(&resp.Diagnostics, "Cloud Reference Required",
-//	        "Either 'cloud_id' or 'cloud_name' must be specified.")
+//	if plan.SomeRequiredField.IsNull() {
+//	    AddConfigError(&resp.Diagnostics, "Required Field Missing",
+//	        "SomeRequiredField must be specified.")
 //	    return
 //	}
 func AddConfigError(diags *diag.Diagnostics, summary string, detail string) {
 	diags.AddError(summary, detail)
 }
 
-// HandleAPIError is a comprehensive helper that checks HTTP status codes and
-// adds appropriate diagnostic errors. Returns true if an error occurred.
+// extractAPIErrorDetail pulls the backend's own error detail message out of an
+// error produced by DoRequestRaw/DoRequestAndParse (formatted as "unexpected
+// status %d: %s", where %s is the raw response body), so a caller can present
+// Anyscale's own error text instead of that wrapper plus a raw JSON dump.
 //
-// If expectedStatuses is empty, it defaults to checking for http.StatusOK.
+// The real wire shape is nested - {"error": {"detail": "...", ...}} - traced
+// against api_common.py's HTTPException handler (`ErrorResponse(error=Error(detail=exc.detail))`)
+// and the Error/ErrorResponse Pydantic models in api/common/models/base.py.
+// Every AnyscaleHTTPException (which every raised detail in this provider's
+// traced 403s/400s is) goes through this handler - it is not a bare top-level
+// {"detail": "..."}, which would silently under-parse to an empty Detail and
+// fall through to the raw wrapper every time.
 //
-// Example usage:
-//
-//	if HandleAPIError(ctx, &resp.Diagnostics, "create project", httpResp, bodyBytes, http.StatusCreated) {
-//	    return
-//	}
-func HandleAPIError(
-	ctx context.Context,
-	diags *diag.Diagnostics,
-	operation string,
-	httpResp *http.Response,
-	body []byte,
-	expectedStatuses ...int,
-) bool {
-	// Default to http.StatusOK if no expected statuses provided
-	if len(expectedStatuses) == 0 {
-		expectedStatuses = []int{http.StatusOK}
+// Falls back to the full wrapped error text if the body isn't this shape.
+// Preferred over per-message string-matching: it surfaces every distinct
+// backend error for an endpoint cleanly and uniformly, including ones not
+// specifically anticipated by the caller.
+func extractAPIErrorDetail(err error) string {
+	msg := err.Error()
+
+	idx := strings.Index(msg, "{")
+	if idx == -1 {
+		return msg
 	}
 
-	// Check if status is expected
-	statusExpected := false
-	for _, expected := range expectedStatuses {
-		if httpResp.StatusCode == expected {
-			statusExpected = true
-			break
-		}
+	var body struct {
+		Error struct {
+			Detail string `json:"detail"`
+		} `json:"error"`
+	}
+	if jsonErr := json.Unmarshal([]byte(msg[idx:]), &body); jsonErr != nil || body.Error.Detail == "" {
+		return msg
 	}
 
-	if !statusExpected {
-		// Log the error for debugging
-		tflog.Error(ctx, "Unexpected HTTP status", map[string]any{
-			"operation":       operation,
-			"status_code":     httpResp.StatusCode,
-			"expected_status": expectedStatuses,
-			"response":        SanitizeJSONForLog(string(body)),
-		})
-
-		AddHTTPError(diags, operation, httpResp.StatusCode, body)
-		return true
-	}
-
-	return false
-}
-
-// HandleNotFoundError checks if an HTTP response is a 404 and adds an appropriate error.
-// This is useful for Read operations where a 404 means the resource no longer exists.
-// Returns true if it was a 404 error.
-//
-// Example usage:
-//
-//	if HandleNotFoundError(&resp.Diagnostics, "project", httpResp.StatusCode) {
-//	    resp.State.RemoveResource(ctx)
-//	    return
-//	}
-func HandleNotFoundError(diags *diag.Diagnostics, resourceType string, statusCode int) bool {
-	if statusCode == http.StatusNotFound {
-		diags.AddError(
-			"Resource Not Found",
-			fmt.Sprintf("The %s was not found (404). It may have been deleted outside of Terraform.", resourceType),
-		)
-		return true
-	}
-	return false
+	return body.Error.Detail
 }
 
 // WarnIfMultipleMatches logs a warning if multiple matches were found.

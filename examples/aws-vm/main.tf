@@ -1,6 +1,6 @@
 # AWS VM Test Scenario
 # Consolidated example with optional EFS and MemoryDB
-# Uses split pattern: empty cloud + cloud_resource
+# Uses multi-resource cloud pattern: empty cloud + cloud_resource
 
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "primary" {
@@ -10,8 +10,8 @@ resource "anyscale_cloud" "primary" {
   auto_add_user    = var.auto_add_user
 
   # Cloud-level settings (optional)
-  enable_lineage_tracking = true
-  enable_log_ingestion    = true
+  lineage_tracking_enabled = true
+  aggregated_logs_enabled  = true
 
   # No aws_config, object_storage, or file_storage blocks
   # This creates an "empty" cloud - resources attached via anyscale_cloud_resource
@@ -20,6 +20,8 @@ resource "anyscale_cloud" "primary" {
 
 # Step 2: Attach cloud resource with configuration
 resource "anyscale_cloud_resource" "primary" {
+  name = var.cloud_name
+
   cloud_id      = anyscale_cloud.primary.id
   region        = var.aws_region
   compute_stack = "VM"
@@ -53,11 +55,10 @@ resource "anyscale_cloud_resource" "primary" {
     for_each = var.enable_efs ? [1] : []
     content {
       file_storage_id = module.aws_anyscale_v2.anyscale_efs_id
-      mount_path      = "/mnt/shared"
 
-      mount_targets {
+      mount_targets = [{
         address = module.aws_anyscale_v2.anyscale_efs_mount_target_ips[0]
-      }
+      }]
     }
   }
 

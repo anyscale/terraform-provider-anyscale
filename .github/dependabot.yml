@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # Keep the SHA-pinned GitHub Actions across .github/workflows/ up to date.
+  # Dependabot updates both the pinned commit SHA and the trailing `# vX.Y.Z`
+  # version comment together, so the pins added to these workflows stay current
+  # without hand-editing. Patch + minor bumps are grouped into a single PR to
+  # cut review noise; majors open their own PR (they can carry breaking changes).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    # skip-changelog: Dependabot PRs have no user-facing provider effect, so the
+    # changelog-gate is satisfied by this label instead of a .changelog fragment
+    # (which Dependabot can't author). dependencies/github_actions preserve the
+    # labels Dependabot would otherwise apply by default.
+    labels:
+      - "dependencies"
+      - "github_actions"
+      - "skip-changelog"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Go module dependency updates. Same grouping rationale: patch + minor land
+  # together, majors are reviewed individually.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    labels:
+      - "dependencies"
+      - "go"
+      - "skip-changelog"
+    schedule:
+      interval: "weekly"
+    groups:
+      gomod-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

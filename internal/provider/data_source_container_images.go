@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -35,6 +37,11 @@ type ContainerImagesDataSourceModel struct {
 	ProjectID       types.String `tfsdk:"project_id"`
 	IncludeArchived types.Bool   `tfsdk:"include_archived"`
 
+	// DS-IMG-3 (Phase B): new filters, both genuinely distinct params the
+	// backend already accepts.
+	ImageNameContains types.String `tfsdk:"image_name_contains"`
+	CloudID           types.String `tfsdk:"cloud_id"`
+
 	// Computed output
 	ContainerImages []ContainerImageSummaryModel `tfsdk:"container_images"`
 }
@@ -50,6 +57,14 @@ type ContainerImageSummaryModel struct {
 	LatestBuildStatus types.String `tfsdk:"latest_build_status"`
 	Revision          types.Int64  `tfsdk:"revision"`
 	NameVersion       types.String `tfsdk:"name_version"`
+
+	// DS-IMG-2/DS-IMG-4 (Phase B): shared with the singular via
+	// containerImageSharedAttributes.
+	ImageURI       types.String `tfsdk:"image_uri"`
+	CloudID        types.String `tfsdk:"cloud_id"`
+	IsDefault      types.Bool   `tfsdk:"is_default"`
+	IsExperimental types.Bool   `tfsdk:"is_experimental"`
+	LastModifiedAt types.String `tfsdk:"last_modified_at"`
 }
 
 // Metadata returns the data source type name.
@@ -59,6 +74,28 @@ func (d *ContainerImagesDataSource) Metadata(ctx context.Context, req datasource
 
 // Schema defines the schema for the data source.
 func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	itemAttributes := containerImageSharedAttributes()
+	itemAttributes["id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the container image.",
+	}
+	itemAttributes["name"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The name of the container image.",
+	}
+	itemAttributes["is_archived"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this container image is archived.",
+	}
+	itemAttributes["latest_build_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The ID of the latest build for this container image. Null if no build has been triggered yet.",
+	}
+	itemAttributes["latest_build_status"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`). Null if no build has been triggered yet.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Lists and filters Anyscale container images (cluster environments). This data source returns a list of container images with their latest build information.",
 
@@ -66,6 +103,13 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 			"name_contains": schema.StringAttribute{
 				Optional:            true,
 				MarkdownDescription: "Filter container images by partial name match.",
+			},
+			// DS-IMG-3 (Phase B): a second, distinct filter from name_contains -
+			// this matches the underlying base/BYOD image name, not the
+			// user-given template name.
+			"image_name_contains": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Filter container images by a partial match on the underlying base or BYOD image name (distinct from `name_contains`, which matches the user-given template name).",
 			},
 			"creator_id": schema.StringAttribute{
 				Optional:            true,
@@ -75,6 +119,10 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 				Optional:            true,
 				MarkdownDescription: "Filter container images by project ID.",
 			},
+			"cloud_id": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Filter container images by cloud ID.",
+			},
 			"include_archived": schema.BoolAttribute{
 				Optional:            true,
 				MarkdownDescription: "Whether to include archived container images in results. Defaults to false.",
@@ -83,44 +131,7 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 				Computed:            true,
 				MarkdownDescription: "List of container images matching the filters.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The unique identifier of the cluster environment.",
-						},
-						"name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name of the container image.",
-						},
-						"creator_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the user who created this container image.",
-						},
-						"created_at": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Timestamp when the container image was created.",
-						},
-						"is_archived": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this container image is archived.",
-						},
-						"latest_build_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the latest build for this container image.",
-						},
-						"latest_build_status": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).",
-						},
-						"revision": schema.Int64Attribute{
-							Computed:            true,
-							MarkdownDescription: "The revision number of the latest build.",
-						},
-						"name_version": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
-						},
-					},
+					Attributes: itemAttributes,
 				},
 			},
 		},
@@ -153,42 +164,40 @@ func (d *ContainerImagesDataSource) Read(ctx context.Context, req datasource.Rea
 		return
 	}
 
-	// Build search query request body
-	query := ClusterEnvironmentsSearchQuery{
-		IncludeArchived:  false,
-		IncludeAnonymous: false,
-		Paging: PageQuery{
-			Count: 100,
-		},
-	}
+	// Build query parameters for GET /api/v2/application_templates/
+	params := url.Values{}
 
 	if !config.NameContains.IsNull() && config.NameContains.ValueString() != "" {
-		query.Name = &TextQuery{
-			Contains: config.NameContains.ValueString(),
-		}
+		params.Set("name_contains", config.NameContains.ValueString())
+	}
+
+	// DS-IMG-3 (Phase B): distinct from name_contains above.
+	if !config.ImageNameContains.IsNull() && config.ImageNameContains.ValueString() != "" {
+		params.Set("image_name_contains", config.ImageNameContains.ValueString())
 	}
 
 	if !config.CreatorID.IsNull() && config.CreatorID.ValueString() != "" {
-		creatorID := config.CreatorID.ValueString()
-		query.CreatorID = &creatorID
+		params.Set("creator_id", config.CreatorID.ValueString())
 	}
 
 	if !config.ProjectID.IsNull() && config.ProjectID.ValueString() != "" {
-		projectID := config.ProjectID.ValueString()
-		query.ProjectID = &projectID
+		params.Set("project_id", config.ProjectID.ValueString())
 	}
 
-	// Set include_archived (defaults to false if not specified)
-	if !config.IncludeArchived.IsNull() {
-		query.IncludeArchived = config.IncludeArchived.ValueBool()
+	if !config.CloudID.IsNull() && config.CloudID.ValueString() != "" {
+		params.Set("cloud_id", config.CloudID.ValueString())
 	}
 
-	tflog.Debug(ctx, "Fetching container images with search query", map[string]any{
-		"include_archived": query.IncludeArchived,
+	// include_archived defaults to false if not specified
+	includeArchived := !config.IncludeArchived.IsNull() && config.IncludeArchived.ValueBool()
+	params.Set("include_archived", strconv.FormatBool(includeArchived))
+
+	tflog.Debug(ctx, "Fetching container images", map[string]any{
+		"include_archived": includeArchived,
 	})
 
 	// Fetch container images
-	containerImages, err := d.fetchContainerImages(ctx, query)
+	containerImages, err := d.fetchContainerImages(ctx, params)
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "list container images", err)
 		return
@@ -205,134 +214,57 @@ func (d *ContainerImagesDataSource) Read(ctx context.Context, req datasource.Rea
 
 // Helper functions
 
-// fetchContainerImages fetches container images using POST /ext/v0/cluster_environments/search, handling pagination automatically.
-func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, query ClusterEnvironmentsSearchQuery) ([]ContainerImageSummaryModel, error) {
-	var allResults []ClusterEnvironmentResult
-
-	// Handle pagination
-	for {
-		reqBody, err := MarshalRequestBody(query)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal search query: %w", err)
-		}
-
-		listResp, err := DoRequestAndParse[ClusterEnvironmentsListResponse](
-			ctx,
-			d.client,
-			"POST",
-			"/ext/v0/cluster_environments/search",
-			reqBody,
-			http.StatusOK,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list cluster environments: %w", err)
-		}
-
-		allResults = append(allResults, listResp.Results...)
-
-		// Check for next page
-		if listResp.Metadata.NextPagingToken == nil || *listResp.Metadata.NextPagingToken == "" {
-			break
-		}
-
-		// Update paging token for next request
-		query.Paging.PagingToken = listResp.Metadata.NextPagingToken
+// fetchContainerImages fetches container images from GET /api/v2/application_templates/, handling pagination automatically.
+// Each result's latest build summary (id/revision/status) is embedded directly on the decorated
+// application template, so no per-item build lookup is required.
+func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, params url.Values) ([]ContainerImageSummaryModel, error) {
+	results, err := PaginatedRequest(ctx, d.client, "/api/v2/application_templates/", params,
+		func(body []byte) ([]ApplicationTemplateResult, *string, error) {
+			var listResp ApplicationTemplatesListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, err
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list application templates: %w", err)
 	}
 
-	// Fetch build details for each cluster environment
-	allImages := make([]ContainerImageSummaryModel, 0, len(allResults))
-	for _, env := range allResults {
+	allImages := make([]ContainerImageSummaryModel, 0, len(results))
+	for _, tmpl := range results {
 		imageModel := ContainerImageSummaryModel{
-			ID:         types.StringValue(env.ID),
-			Name:       types.StringValue(env.Name),
-			CreatedAt:  types.StringValue(env.CreatedAt),
-			IsArchived: types.BoolValue(env.IsArchived()),
+			ID:         types.StringValue(tmpl.ID),
+			Name:       types.StringValue(tmpl.Name),
+			CreatedAt:  types.StringValue(tmpl.CreatedAt),
+			IsArchived: types.BoolValue(tmpl.IsArchived()),
+			// DS-IMG-4 (Phase B): template-level fields, always available.
+			CloudID:        types.StringPointerValue(tmpl.CloudID),
+			IsDefault:      types.BoolValue(tmpl.IsDefault),
+			IsExperimental: types.BoolValue(tmpl.IsExperimental),
+			LastModifiedAt: stringOrNull(tmpl.LastModifiedAt),
 		}
 
-		if env.CreatorID != "" {
-			imageModel.CreatorID = types.StringValue(env.CreatorID)
-		} else {
-			imageModel.CreatorID = types.StringNull()
-		}
+		imageModel.CreatorID = stringOrNull(tmpl.CreatorID)
 
-		// Fetch the latest build for this cluster environment
-		buildID, err := d.getLatestBuildID(ctx, env.ID)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
-				"cluster_environment_id": env.ID,
-				"error":                  err.Error(),
-			})
-		}
-
-		if buildID != "" {
-			imageModel.LatestBuildID = types.StringValue(buildID)
-
-			// Fetch build details
-			build, err := d.getBuild(ctx, buildID)
-			if err != nil {
-				tflog.Warn(ctx, "Failed to get build details", map[string]any{
-					"build_id": buildID,
-					"error":    err.Error(),
-				})
-				imageModel.LatestBuildStatus = types.StringNull()
-				imageModel.Revision = types.Int64Null()
-				imageModel.NameVersion = types.StringNull()
-			} else {
-				imageModel.LatestBuildStatus = types.StringValue(build.Status)
-				imageModel.Revision = types.Int64Value(int64(build.Revision))
-				imageModel.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", env.Name, build.Revision))
-			}
+		if tmpl.LatestBuild != nil {
+			imageModel.LatestBuildID = types.StringValue(tmpl.LatestBuild.ID)
+			imageModel.LatestBuildStatus = types.StringValue(tmpl.LatestBuild.Status)
+			imageModel.Revision = types.Int64Value(int64(tmpl.LatestBuild.Revision))
+			imageModel.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", tmpl.Name, tmpl.LatestBuild.Revision))
+			// DS-IMG-2 (Phase B): free per-item image_uri, no extra call - the
+			// embedded latest_build summary already carries docker_image_name.
+			imageModel.ImageURI = types.StringPointerValue(tmpl.LatestBuild.DockerImageName)
 		} else {
 			imageModel.LatestBuildID = types.StringNull()
 			imageModel.LatestBuildStatus = types.StringNull()
 			imageModel.Revision = types.Int64Null()
 			imageModel.NameVersion = types.StringNull()
+			imageModel.ImageURI = types.StringNull()
 		}
 
 		allImages = append(allImages, imageModel)
 	}
 
 	return allImages, nil
-}
-
-// getBuild fetches build details by ID.
-func (d *ContainerImagesDataSource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
-	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
-		ctx,
-		d.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get build %s: %w", buildID, err)
-	}
-
-	return &buildResp.Result, nil
-}
-
-// getLatestBuildID fetches the latest build ID for a cluster environment.
-func (d *ContainerImagesDataSource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
-	// Note: The Anyscale API may return 201 for GET build endpoints
-	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
-		ctx,
-		d.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to list builds for cluster environment %s: %w", clusterEnvID, err)
-	}
-
-	if len(buildsResp.Results) == 0 {
-		return "", nil // No builds yet - not an error
-	}
-
-	return buildsResp.Results[0].ID, nil
 }

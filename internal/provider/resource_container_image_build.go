@@ -2,18 +2,18 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -28,9 +28,10 @@ const buildPollInterval = 10 * time.Second
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                = &ContainerImageBuildResource{}
-	_ resource.ResourceWithConfigure   = &ContainerImageBuildResource{}
-	_ resource.ResourceWithImportState = &ContainerImageBuildResource{}
+	_ resource.Resource                 = &ContainerImageBuildResource{}
+	_ resource.ResourceWithConfigure    = &ContainerImageBuildResource{}
+	_ resource.ResourceWithImportState  = &ContainerImageBuildResource{}
+	_ resource.ResourceWithUpgradeState = &ContainerImageBuildResource{}
 )
 
 // NewContainerImageBuildResource creates a new container image build resource.
@@ -49,11 +50,11 @@ type ContainerImageBuildResourceModel struct {
 	ID types.String `tfsdk:"id"`
 
 	// User-provided attributes
-	Name              types.String `tfsdk:"name"`               // Required
-	Containerfile     types.String `tfsdk:"containerfile"`      // Inline content (mutually exclusive with containerfile_path)
-	ContainerfilePath types.String `tfsdk:"containerfile_path"` // File path (mutually exclusive with containerfile)
-	ProjectID         types.String `tfsdk:"project_id"`         // Optional
-	BuildTimeout      types.String `tfsdk:"build_timeout"`      // Optional, default 30m
+	Name              types.String   `tfsdk:"name"`               // Required
+	Containerfile     types.String   `tfsdk:"containerfile"`      // Inline content (mutually exclusive with containerfile_path)
+	ContainerfilePath types.String   `tfsdk:"containerfile_path"` // File path (mutually exclusive with containerfile)
+	ProjectID         types.String   `tfsdk:"project_id"`         // Optional
+	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 
 	// Computed attributes
 	BuildID     types.String `tfsdk:"build_id"`
@@ -61,6 +62,7 @@ type ContainerImageBuildResourceModel struct {
 	ImageURI    types.String `tfsdk:"image_uri"`
 	RayVersion  types.String `tfsdk:"ray_version"`
 	Revision    types.Int64  `tfsdk:"revision"`
+	Digest      types.String `tfsdk:"digest"`
 	NameVersion types.String `tfsdk:"name_version"` // Formatted as "name:revision" for use with Anyscale APIs
 	CreatedAt   types.String `tfsdk:"created_at"`
 }
@@ -73,6 +75,7 @@ func (r *ContainerImageBuildResource) Metadata(ctx context.Context, req resource
 // Schema defines the schema for the resource.
 func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version: 1,
 		MarkdownDescription: `Builds a container image from a Containerfile (Dockerfile). Use this resource to create custom container images for Anyscale workloads.
 
 ~> **Note:** When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting ` + "`include_archived = true`" + ` on the ` + "`anyscale_container_images`" + ` data source.`,
@@ -89,7 +92,7 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			// User-provided attributes
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name for the container image (cluster environment).",
+				MarkdownDescription: "The name for the container image (cluster environment). Changing this replaces the resource.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -110,16 +113,10 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			},
 			"project_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The ID of the project to associate this container image with.",
+				MarkdownDescription: "The ID of the project to associate this container image with. Changing this replaces the resource.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
-			},
-			"build_timeout": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString("30m"),
-				MarkdownDescription: "Maximum time to wait for the build to complete (e.g., `30m`, `1h`). Defaults to `30m`.",
 			},
 
 			// Computed attributes - these change when containerfile is updated
@@ -129,7 +126,7 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			},
 			"build_status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).",
+				MarkdownDescription: "The current status of the build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`).",
 			},
 			"image_uri": schema.StringAttribute{
 				Computed:            true,
@@ -143,6 +140,10 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 				Computed:            true,
 				MarkdownDescription: "The revision number of the container image build. Increments with each new build.",
 			},
+			"digest": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`). May occasionally be briefly empty immediately after creation, or after an update that triggers a new build, if the build is still settling.",
+			},
 			"name_version": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
@@ -151,6 +152,14 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 				Computed:            true,
 				MarkdownDescription: "Timestamp when the build was created. Changes when a new build is created.",
 			},
+		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create:            true,
+				Update:            true,
+				CreateDescription: "Maximum time to wait for the initial build to complete (e.g. `30m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.",
+				UpdateDescription: "Maximum time to wait for a new build triggered by a `containerfile`/`containerfile_path` change to complete. Same default as `create`. Not consulted when an update changes only this `timeouts` block itself (no new build is triggered in that case).",
+			}),
 		},
 	}
 }
@@ -171,6 +180,20 @@ func (r *ContainerImageBuildResource) Configure(ctx context.Context, req resourc
 	r.client = client
 }
 
+// populateBuildFields maps a completed BuildResult into the model's build-derived fields.
+// Shared by Create and Update, which perform this identical mapping once their respective
+// build finishes.
+func populateBuildFields(model *ContainerImageBuildResourceModel, build *BuildResult) {
+	model.BuildID = types.StringValue(build.ID)
+	model.BuildStatus = types.StringValue(build.Status)
+	model.CreatedAt = types.StringValue(build.CreatedAt)
+	model.ImageURI = types.StringPointerValue(build.DockerImageName)
+	model.RayVersion = types.StringPointerValue(build.RayVersion)
+	model.Revision = types.Int64Value(int64(build.Revision))
+	model.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", model.Name.ValueString(), build.Revision))
+	model.Digest = types.StringPointerValue(build.Digest)
+}
+
 // Create creates the resource and sets the initial Terraform state.
 func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan ContainerImageBuildResourceModel
@@ -188,15 +211,14 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	// Parse timeout
-	timeout, err := r.parseTimeout(plan.BuildTimeout.ValueString())
-	if err != nil {
-		AddConfigError(&resp.Diagnostics, "Invalid Build Timeout", err.Error())
+	timeout, diags := plan.Timeouts.Create(ctx, defaultBuildTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	// Build create request
-	createReq := CreateClusterEnvironmentRequest{
+	createReq := CreateApplicationTemplateRequest{
 		Name:          plan.Name.ValueString(),
 		Containerfile: containerfileContent,
 	}
@@ -218,12 +240,12 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		"timeout": timeout.String(),
 	})
 
-	// Create the cluster environment (which triggers a build)
-	clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
+	// Create the application template (which triggers a build)
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 		ctx,
 		r.client,
 		"POST",
-		"/ext/v0/cluster_environments/",
+		"/api/v2/application_templates/",
 		reqBody,
 		http.StatusOK,
 		http.StatusCreated,
@@ -233,19 +255,20 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	result := clusterEnvResp.Result
-	clusterEnvID := result.ID
+	result := templateResp.Result
+	templateID := result.ID
 
-	tflog.Info(ctx, "Cluster environment created, waiting for build", map[string]any{
-		"cluster_environment_id": clusterEnvID,
+	tflog.Info(ctx, "Application template created, waiting for build", map[string]any{
+		"cluster_environment_id": templateID,
 		"name":                   result.Name,
 	})
 
-	// Set the cluster environment ID immediately
-	plan.ID = types.StringValue(clusterEnvID)
+	// Set the application template ID immediately
+	plan.ID = types.StringValue(templateID)
 
-	// Get the build ID by listing builds for this cluster environment
-	buildID, err := r.getLatestBuildID(ctx, clusterEnvID)
+	// Resolve the build the create just triggered. The create response is bare (no
+	// latest_build), so this re-fetches the template in its decorated form.
+	buildID, err := r.getLatestBuildID(ctx, templateID)
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "get build ID", err)
 		return
@@ -253,7 +276,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 
 	tflog.Debug(ctx, "Found build ID", map[string]any{
 		"build_id":               buildID,
-		"cluster_environment_id": clusterEnvID,
+		"cluster_environment_id": templateID,
 	})
 
 	plan.BuildID = types.StringValue(buildID)
@@ -262,7 +285,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 	// waiting on the (potentially long-running) build. Without this, a build
 	// timeout/failure below would leave the cluster environment orphaned in
 	// the backend with no Terraform record to destroy it.
-	for _, computed := range []*types.String{&plan.BuildStatus, &plan.ImageURI, &plan.RayVersion, &plan.NameVersion, &plan.CreatedAt} {
+	for _, computed := range []*types.String{&plan.BuildStatus, &plan.ImageURI, &plan.RayVersion, &plan.NameVersion, &plan.CreatedAt, &plan.Digest} {
 		if computed.IsUnknown() {
 			*computed = types.StringNull()
 		}
@@ -282,32 +305,23 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
+	// The backend can report a build as "succeeded" slightly before its digest is
+	// populated (see waitForBuildDigest) - wait for it to settle so Create reliably
+	// returns a non-null digest in the common case, rather than depending on a later
+	// refresh to fill it in.
+	build, digestSettled := waitForBuildDigest(ctx, r.client, build)
+	if !digestSettled {
+		AddDigestNotSettledWarning(&resp.Diagnostics, build.ID)
+	}
+
 	tflog.Info(ctx, "Container image build completed", map[string]any{
 		"build_id":               buildID,
-		"cluster_environment_id": clusterEnvID,
+		"cluster_environment_id": templateID,
 		"status":                 build.Status,
 	})
 
 	// Map response to model
-	plan.BuildID = types.StringValue(build.ID)
-	plan.BuildStatus = types.StringValue(build.Status)
-	plan.CreatedAt = types.StringValue(build.CreatedAt)
-
-	if build.DockerImageName != nil {
-		plan.ImageURI = types.StringValue(*build.DockerImageName)
-	} else {
-		plan.ImageURI = types.StringNull()
-	}
-
-	if build.RayVersion != nil {
-		plan.RayVersion = types.StringValue(*build.RayVersion)
-	} else {
-		plan.RayVersion = types.StringNull()
-	}
-
-	// Set revision and name_version
-	plan.Revision = types.Int64Value(int64(build.Revision))
-	plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), build.Revision))
+	populateBuildFields(&plan, build)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -323,76 +337,53 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 		return
 	}
 
-	clusterEnvID := state.ID.ValueString()
+	templateID := state.ID.ValueString()
 
-	tflog.Debug(ctx, "Reading container image build", map[string]any{"cluster_environment_id": clusterEnvID})
+	tflog.Debug(ctx, "Reading container image build", map[string]any{"cluster_environment_id": templateID})
 
-	// Get cluster environment details
-	clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environments/%s", clusterEnvID),
-		nil,
-		http.StatusOK,
-	)
+	// Get application template details (decorated: carries latest_build for free)
+	template, err := r.getApplicationTemplate(ctx, templateID)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			tflog.Warn(ctx, "Cluster environment not found, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
+		if errors.Is(err, ErrNotFound) {
+			tflog.Warn(ctx, "Application template not found, removing from state", map[string]any{"cluster_environment_id": templateID})
 			resp.State.RemoveResource(ctx)
 			return
 		}
 
-		AddAPIError(&resp.Diagnostics, "read cluster environment", err)
+		AddAPIError(&resp.Diagnostics, "read application template", err)
 		return
 	}
 
-	result := clusterEnvResp.Result
-
 	// Check if archived
-	if result.IsArchived() {
-		tflog.Warn(ctx, "Cluster environment is archived, removing from state", map[string]any{"cluster_environment_id": clusterEnvID})
+	if template.IsArchived() {
+		tflog.Warn(ctx, "Application template is archived, removing from state", map[string]any{"cluster_environment_id": templateID})
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	// Update name from cluster environment (important for import)
-	state.Name = types.StringValue(result.Name)
+	// Update name from application template (important for import)
+	state.Name = types.StringValue(template.Name)
 
-	// Get the build ID from state or by listing builds
+	// Get the build ID from state, falling back to the template's own latest_build
+	// reference (already fetched above, no extra call needed).
 	var buildID string
 	if !state.BuildID.IsNull() {
 		buildID = state.BuildID.ValueString()
+	} else if template.LatestBuild != nil {
+		buildID = template.LatestBuild.ID
 	} else {
-		// List builds to get the latest
-		buildID, err = r.getLatestBuildID(ctx, clusterEnvID)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-				"error":                  err.Error(),
-			})
-		}
+		tflog.Warn(ctx, "Application template has no builds", map[string]any{"cluster_environment_id": templateID})
 	}
 
 	// If we have a build ID, get build details
 	if buildID != "" {
-		// Note: The Anyscale API returns 201 for GET build endpoints
-		buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
-			ctx,
-			r.client,
-			"GET",
-			fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
-			nil,
-			http.StatusOK,
-			http.StatusCreated,
-		)
+		build, err := r.getBuild(ctx, buildID)
 		if err != nil {
 			tflog.Warn(ctx, "Failed to get build details", map[string]any{
 				"build_id": buildID,
 				"error":    err.Error(),
 			})
 		} else {
-			build := buildResp.Result
 			state.BuildID = types.StringValue(build.ID)
 			state.BuildStatus = types.StringValue(build.Status)
 			state.CreatedAt = types.StringValue(build.CreatedAt)
@@ -407,7 +398,11 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 
 			// Set revision and name_version
 			state.Revision = types.Int64Value(int64(build.Revision))
-			state.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", result.Name, build.Revision))
+			state.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", template.Name, build.Revision))
+
+			if build.Digest != nil {
+				state.Digest = types.StringValue(*build.Digest)
+			}
 		}
 	}
 
@@ -430,8 +425,27 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	// Check if containerfile has changed
 	containerfileChanged := !plan.Containerfile.Equal(state.Containerfile) || !plan.ContainerfilePath.Equal(state.ContainerfilePath)
 
-	// If containerfile hasn't changed, just update state (timeout may have changed)
+	// If containerfile hasn't changed, skip triggering a new build (timeouts may have
+	// changed) - containerfileChanged deliberately never compares Timeouts (same as it
+	// never compared the old flat BuildTimeout), so a timeouts-only change never triggers
+	// a new build.
+	//
+	// Still need a fresh GET to populate the computed outputs before persisting (mirrors
+	// resource_service.go's H2/H5 handling of the same shape): every Computed attribute
+	// here has no UseStateForUnknown plan modifier, so all of them (build_status,
+	// created_at, digest, image_uri, name_version, ray_version, revision) are Unknown in
+	// this plan once anything triggers Update at all - confirmed by a real acceptance run
+	// failing with "provider produced invalid result" before this fix, not assumed. This
+	// bug pre-dates PR2 (any build_timeout-only change would have hit it too - nothing
+	// ever tested that path before), surfaced by the PR2 test that closes exactly that
+	// coverage gap.
 	if !containerfileChanged {
+		build, err := r.getBuild(ctx, state.BuildID.ValueString())
+		if err != nil {
+			AddAPIError(&resp.Diagnostics, "read build", err)
+			return
+		}
+		populateBuildFields(&plan, build)
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
@@ -447,19 +461,18 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	// Parse timeout
-	timeout, err := r.parseTimeout(plan.BuildTimeout.ValueString())
-	if err != nil {
-		AddConfigError(&resp.Diagnostics, "Invalid Build Timeout", err.Error())
+	timeout, diags := plan.Timeouts.Update(ctx, defaultBuildTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	clusterEnvID := state.ID.ValueString()
+	templateID := state.ID.ValueString()
 
-	// Create a new build for the existing cluster environment
-	createBuildReq := CreateClusterEnvironmentBuildRequest{
-		ClusterEnvironmentID: clusterEnvID,
-		Containerfile:        containerfileContent,
+	// Create a new build for the existing application template
+	createBuildReq := CreateBuildRequest{
+		ApplicationTemplateID: templateID,
+		Containerfile:         containerfileContent,
 	}
 
 	reqBody, err := MarshalRequestBody(createBuildReq)
@@ -469,11 +482,11 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	}
 
 	// POST to create new build
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildOperationResponse](
+	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		r.client,
 		"POST",
-		"/ext/v0/cluster_environment_builds/",
+		"/api/v2/builds/",
 		reqBody,
 		http.StatusOK,
 		http.StatusCreated,
@@ -487,7 +500,7 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 
 	tflog.Info(ctx, "New build created, waiting for completion", map[string]any{
 		"build_id":               buildID,
-		"cluster_environment_id": clusterEnvID,
+		"cluster_environment_id": templateID,
 	})
 
 	// Wait for build to complete
@@ -497,9 +510,16 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
+	// See the matching comment in Create: wait for the digest to settle rather than
+	// depending on a later refresh to fill it in.
+	build, digestSettled := waitForBuildDigest(ctx, r.client, build)
+	if !digestSettled {
+		AddDigestNotSettledWarning(&resp.Diagnostics, build.ID)
+	}
+
 	tflog.Info(ctx, "Container image build completed", map[string]any{
 		"build_id":               buildID,
-		"cluster_environment_id": clusterEnvID,
+		"cluster_environment_id": templateID,
 		"status":                 build.Status,
 		"revision":               build.Revision,
 	})
@@ -508,25 +528,7 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	plan.ID = state.ID
 
 	// Map response to model
-	plan.BuildID = types.StringValue(build.ID)
-	plan.BuildStatus = types.StringValue(build.Status)
-	plan.CreatedAt = types.StringValue(build.CreatedAt)
-
-	if build.DockerImageName != nil {
-		plan.ImageURI = types.StringValue(*build.DockerImageName)
-	} else {
-		plan.ImageURI = types.StringNull()
-	}
-
-	if build.RayVersion != nil {
-		plan.RayVersion = types.StringValue(*build.RayVersion)
-	} else {
-		plan.RayVersion = types.StringNull()
-	}
-
-	// Set revision and name_version
-	plan.Revision = types.Int64Value(int64(build.Revision))
-	plan.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", plan.Name.ValueString(), build.Revision))
+	populateBuildFields(&plan, build)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -544,48 +546,7 @@ func (r *ContainerImageBuildResource) Delete(ctx context.Context, req resource.D
 
 	clusterEnvID := state.ID.ValueString()
 
-	tflog.Info(ctx, "Archiving cluster environment for container image build", map[string]any{
-		"cluster_environment_id": clusterEnvID,
-	})
-
-	// Archive the cluster environment
-	// Note: The /ext/v0/cluster_environments/ endpoint do not have DELETE, so we use POST /api/v2/application_templates/{id}/archive
-	_, err := DoRequestRaw(
-		ctx,
-		r.client,
-		"POST",
-		fmt.Sprintf("/api/v2/application_templates/%s/archive", clusterEnvID),
-		nil,
-		http.StatusOK,
-		http.StatusNoContent,
-		http.StatusNotFound,
-		http.StatusBadRequest,
-	)
-	if err != nil {
-		// Check if already archived/deleted
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-			tflog.Info(ctx, "Cluster environment already archived or deleted", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-			})
-			return
-		}
-
-		// Check if this is a default cluster environment that cannot be archived
-		// This happens when using Anyscale's official images (e.g., anyscale/ray:*)
-		if strings.Contains(err.Error(), "Cannot archive a default cluster environment") {
-			tflog.Info(ctx, "Cluster environment is a default environment and cannot be archived (this is expected for Anyscale-provided images)", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-			})
-			return
-		}
-
-		AddAPIError(&resp.Diagnostics, "archive cluster environment", err)
-		return
-	}
-
-	tflog.Info(ctx, "Cluster environment archived successfully", map[string]any{
-		"cluster_environment_id": clusterEnvID,
-	})
+	archiveClusterEnvironment(ctx, r.client, clusterEnvID, &resp.Diagnostics)
 }
 
 // ImportState imports the resource into Terraform state.
@@ -615,45 +576,42 @@ func (r *ContainerImageBuildResource) resolveContainerfile(plan *ContainerImageB
 	return "", fmt.Errorf("either containerfile or containerfile_path must be specified")
 }
 
-// parseTimeout parses a timeout string (e.g., "30m", "1h") into a time.Duration.
-func (r *ContainerImageBuildResource) parseTimeout(timeoutStr string) (time.Duration, error) {
-	if timeoutStr == "" {
-		return defaultBuildTimeout, nil
-	}
-
-	duration, err := time.ParseDuration(timeoutStr)
+// getLatestBuildID resolves the latest build ID for an application template
+// contract-based, via the template's own latest_build reference. A bare create
+// response never carries latest_build, so this always re-fetches the decorated
+// template rather than trusting a builds-list call's ordering.
+func (r *ContainerImageBuildResource) getLatestBuildID(ctx context.Context, templateID string) (string, error) {
+	template, err := r.getApplicationTemplate(ctx, templateID)
 	if err != nil {
-		return 0, fmt.Errorf("invalid timeout format '%s': %w", timeoutStr, err)
+		return "", err
 	}
 
-	return duration, nil
+	if template.LatestBuild == nil {
+		return "", fmt.Errorf("no builds found for application template %s", templateID)
+	}
+
+	return template.LatestBuild.ID, nil
 }
 
-// getLatestBuildID fetches the latest build ID for a cluster environment.
-func (r *ContainerImageBuildResource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
-	// List builds for this cluster environment
-	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
+// getApplicationTemplate fetches the decorated application template by ID.
+func (r *ContainerImageBuildResource) getApplicationTemplate(ctx context.Context, templateID string) (*ApplicationTemplateResult, error) {
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
+		fmt.Sprintf("/api/v2/application_templates/%s", templateID),
 		nil,
 		http.StatusOK,
-		http.StatusCreated,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to list builds: %w", err)
+		return nil, fmt.Errorf("failed to get application template %s: %w", templateID, err)
 	}
 
-	if len(buildsResp.Results) == 0 {
-		return "", fmt.Errorf("no builds found for cluster environment %s", clusterEnvID)
-	}
-
-	return buildsResp.Results[0].ID, nil
+	return &templateResp.Result, nil
 }
 
 // waitForBuild polls the build status until it reaches a terminal state.
-func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID string, timeout time.Duration) (*ClusterEnvironmentBuildResult, error) {
+func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID string, timeout time.Duration) (*BuildResult, error) {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
@@ -674,35 +632,52 @@ func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID 
 			"status":   build.Status,
 		})
 
-		switch build.Status {
-		case "succeeded":
-			return build, nil
-		case "failed":
-			if build.ErrorMessage != nil && *build.ErrorMessage != "" {
-				return nil, fmt.Errorf("build failed: %s", *build.ErrorMessage)
-			}
-			return nil, fmt.Errorf("build failed")
-		case "cancelled":
-			return nil, fmt.Errorf("build was cancelled")
-		case "pending", "in_progress", "pending_cancellation":
-			// Continue polling
-			time.Sleep(buildPollInterval)
-		default:
-			return nil, fmt.Errorf("unknown build status: %s", build.Status)
+		done, statusErr := evaluateBuildStatus(build)
+		if statusErr != nil {
+			return nil, statusErr
 		}
+		if done {
+			return build, nil
+		}
+		time.Sleep(buildPollInterval)
 	}
 
 	return nil, fmt.Errorf("build timed out after %v", timeout)
 }
 
+// evaluateBuildStatus classifies a build's current status into a terminal outcome or an
+// in-progress state that should keep polling. done is true once no further polling is useful;
+// err is set for a terminal failure/cancellation, nil for terminal success or while in progress.
+//
+// The backend's real wire value for a cancelled build is "canceled" (one L, per the
+// BuildStatus/ClusterEnvironmentBuildStatus enums). "cancelled" (two L) is also accepted here
+// defensively so an unexpected respelling never falls through to the unknown-status error.
+func evaluateBuildStatus(build *BuildResult) (done bool, err error) {
+	switch build.Status {
+	case "succeeded":
+		return true, nil
+	case "failed":
+		if build.ErrorMessage != nil && *build.ErrorMessage != "" {
+			return true, fmt.Errorf("build failed: %s", *build.ErrorMessage)
+		}
+		return true, fmt.Errorf("build failed")
+	case "canceled", "cancelled":
+		return true, fmt.Errorf("build was cancelled")
+	case "pending", "in_progress", "pending_cancellation":
+		return false, nil
+	default:
+		return true, fmt.Errorf("unknown build status: %s", build.Status)
+	}
+}
+
 // getBuild fetches the current build details.
-func (r *ContainerImageBuildResource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
+func (r *ContainerImageBuildResource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
+	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		r.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
+		fmt.Sprintf("/api/v2/builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,

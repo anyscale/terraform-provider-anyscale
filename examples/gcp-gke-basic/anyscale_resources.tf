@@ -20,6 +20,8 @@ locals {
 module "anyscale_cloudstorage" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # Example code intentionally tracks latest module version, see checkov:skip above.
+  # tflint-ignore: terraform_module_pinned_source
   source         = "github.com/anyscale/terraform-google-anyscale-cloudfoundation-modules//modules/google-anyscale-cloudstorage"
   module_enabled = true
 
@@ -37,13 +39,15 @@ module "anyscale_cloudstorage" {
 # Get available zones in the region
 data "google_compute_zones" "available" {
   project = var.google_project_id
-  region  = var.google_region
+  region  = var.gcp_region
   status  = "UP"
 }
 
 module "anyscale_filestore" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # Example code intentionally tracks latest module version, see checkov:skip above.
+  # tflint-ignore: terraform_module_pinned_source
   source         = "github.com/anyscale/terraform-google-anyscale-cloudfoundation-modules//modules/google-anyscale-filestore"
   module_enabled = var.enable_filestore
 

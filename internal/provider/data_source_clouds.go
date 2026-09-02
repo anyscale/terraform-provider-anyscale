@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -41,24 +42,26 @@ type CloudsDataSourceModel struct {
 
 // CloudSummaryModel represents a cloud in the list.
 type CloudSummaryModel struct {
-	ID                      types.String `tfsdk:"id"`
-	Name                    types.String `tfsdk:"name"`
-	CloudProvider           types.String `tfsdk:"cloud_provider"`
-	ComputeStack            types.String `tfsdk:"compute_stack"`
-	Region                  types.String `tfsdk:"region"`
-	Status                  types.String `tfsdk:"status"`
-	State                   types.String `tfsdk:"state"`
-	CreatedAt               types.String `tfsdk:"created_at"`
-	CreatorID               types.String `tfsdk:"creator_id"`
-	IsDefault               types.Bool   `tfsdk:"is_default"`
-	IsK8s                   types.Bool   `tfsdk:"is_k8s"`
-	IsAIOA                  types.Bool   `tfsdk:"is_aioa"`
-	IsBringYourOwnResource  types.Bool   `tfsdk:"is_bring_your_own_resource"`
-	IsPrivateCloud          types.Bool   `tfsdk:"is_private_cloud"`
-	IsPrivateServiceCloud   types.Bool   `tfsdk:"is_private_service_cloud"`
-	AutoAddUser             types.Bool   `tfsdk:"auto_add_user"`
-	LineageTrackingEnabled  types.Bool   `tfsdk:"lineage_tracking_enabled"`
-	IsAggregatedLogsEnabled types.Bool   `tfsdk:"is_aggregated_logs_enabled"`
+	ID                     types.String `tfsdk:"id"`
+	Name                   types.String `tfsdk:"name"`
+	CloudProvider          types.String `tfsdk:"cloud_provider"`
+	ComputeStack           types.String `tfsdk:"compute_stack"`
+	Region                 types.String `tfsdk:"region"`
+	Status                 types.String `tfsdk:"status"`
+	State                  types.String `tfsdk:"state"`
+	CreatedAt              types.String `tfsdk:"created_at"`
+	CreatorID              types.String `tfsdk:"creator_id"`
+	IsDefault              types.Bool   `tfsdk:"is_default"`
+	IsK8s                  types.Bool   `tfsdk:"is_k8s"`
+	IsPrivateCloud         types.Bool   `tfsdk:"is_private_cloud"`
+	AutoAddUser            types.Bool   `tfsdk:"auto_add_user"`
+	LineageTrackingEnabled types.Bool   `tfsdk:"lineage_tracking_enabled"`
+	AggregatedLogsEnabled  types.Bool   `tfsdk:"aggregated_logs_enabled"`
+
+	// DS-CLOUD-5 (Phase B), via cloudSharedAttributes.
+	AvailabilityZones types.List   `tfsdk:"availability_zones"`
+	Version           types.String `tfsdk:"version"`
+	ExternalID        types.String `tfsdk:"external_id"`
 }
 
 // Metadata returns the data source type name.
@@ -68,8 +71,56 @@ func (d *CloudsDataSource) Metadata(ctx context.Context, req datasource.Metadata
 
 // Schema defines the schema for the data source.
 func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	itemAttributes := cloudSharedAttributes()
+	itemAttributes["id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the cloud.",
+	}
+	itemAttributes["name"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The name of the cloud.",
+	}
+	itemAttributes["is_k8s"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this cloud uses Kubernetes.",
+	}
+	// Uniform <noun>_enabled naming, shared with the singular anyscale_cloud
+	// data source and the anyscale_cloud resource. lineage_tracking_enabled
+	// already matched this plural data source's pre-existing name (both
+	// previously called it enable_lineage_tracking on the resource/singular
+	// DS). aggregated_logs_enabled is a rename on THIS plural data source
+	// too, as of this release - it previously matched the backend's own
+	// is_aggregated_logs_enabled (the resource/singular DS instead called it
+	// enable_log_ingestion), but the backend-exact name became the lone
+	// is_-prefixed outlier once the other two surfaces unified on
+	// <noun>_enabled, so all three surfaces adopt aggregated_logs_enabled
+	// together in this same release. See CHANGELOG.md and
+	// schema_shared_attributes.go's cloudSharedAttributes doc comment for
+	// the naming-unification history.
+	itemAttributes["lineage_tracking_enabled"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
+	}
+	itemAttributes["aggregated_logs_enabled"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Renamed from is_aggregated_logs_enabled in this release for uniform <noun>_enabled naming with lineage_tracking_enabled - see CHANGELOG.md for the migration note.",
+	}
+	// Deliberately NOT shared with the singular anyscale_cloud data source via
+	// cloudSharedAttributes, despite the identical field name: the two are
+	// computed differently on the backend. The singular's GET /clouds/{id}
+	// checks this specific cloud directly. This plural list endpoint instead
+	// resolves ONE default-cloud candidate for the whole request through a
+	// fallback chain (org default, then the caller's last-used cloud, then
+	// the first cloud the caller can see) and stamps that single result onto
+	// every row - so a caller who cannot see the org's real default cloud can
+	// see a DIFFERENT cloud marked is_default here.
+	itemAttributes["is_default"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this cloud is the organization's default cloud. Unlike the singular `anyscale_cloud` data source's `is_default`, this is not a direct per-cloud comparison: the backend resolves one default-cloud candidate for the whole list request through a fallback chain (the org's real default, then the caller's last-used cloud, then the first cloud the caller can see) and marks that one cloud's row `is_default = true` across the response. If the caller cannot see whichever cloud is the org's actual default, a different cloud in this list can read `is_default = true` even though it is not the real org default. Do not use this field to determine which cloud is the org default - use the `anyscale_cloud` data source's `is_default` for a specific cloud, which has no such fallback.",
+	}
+
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information.",
+		MarkdownDescription: "Lists and filters Anyscale Clouds. This data source returns a list of clouds with summary information. The per-cloud `cloud_resource_id` is deliberately omitted here to avoid an extra API call per cloud in the list - use the `anyscale_cloud` data source or the `anyscale_cloud`/`anyscale_cloud_resource` resources to look it up.",
 
 		Attributes: map[string]schema.Attribute{
 			"name_contains": schema.StringAttribute{
@@ -88,80 +139,7 @@ func (d *CloudsDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 				Computed:            true,
 				MarkdownDescription: "List of clouds matching the filters.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The unique identifier of the cloud.",
-						},
-						"name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name of the cloud.",
-						},
-						"cloud_provider": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The cloud provider (AWS, GCP, AZURE, or GENERIC).",
-						},
-						"compute_stack": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The compute stack (VM or K8S).",
-						},
-						"region": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The region where the cloud is deployed.",
-						},
-						"status": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The operational status of the cloud.",
-						},
-						"state": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The lifecycle state of the cloud.",
-						},
-						"created_at": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Timestamp when the cloud was created.",
-						},
-						"creator_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the user who created the cloud.",
-						},
-						"is_default": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is the default cloud for the organization.",
-						},
-						"is_k8s": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this cloud uses Kubernetes.",
-						},
-						"is_aioa": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is an AIOA (Anyscale In Your Own Account) cloud.",
-						},
-						"is_bring_your_own_resource": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this cloud allows bringing your own resources.",
-						},
-						"is_private_cloud": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is a private cloud.",
-						},
-						"is_private_service_cloud": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is a private service cloud.",
-						},
-						"auto_add_user": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether users are automatically added to this cloud.",
-						},
-						"lineage_tracking_enabled": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
-						},
-						"is_aggregated_logs_enabled": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
-						},
-					},
+					Attributes: itemAttributes,
 				},
 			},
 		},
@@ -196,19 +174,12 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	// Build query parameters
+	// DS-CLOUD-1: GET /api/v2/clouds only accepts "name" (substring) server-side -
+	// there is no provider or region query param on this endpoint at all, so those
+	// two are applied as client-side post-filters below instead, over every page.
 	params := url.Values{}
-
 	if !config.NameContains.IsNull() {
-		params.Add("name_contains", config.NameContains.ValueString())
-	}
-
-	if !config.CloudProvider.IsNull() {
-		params.Add("provider", config.CloudProvider.ValueString())
-	}
-
-	if !config.Region.IsNull() {
-		params.Add("region", config.Region.ValueString())
+		params.Add("name", config.NameContains.ValueString())
 	}
 
 	tflog.Debug(ctx, "Fetching clouds with filters", map[string]any{
@@ -216,7 +187,7 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	})
 
 	// Fetch clouds
-	clouds, err := d.fetchClouds(ctx, params)
+	clouds, err := d.fetchClouds(ctx, params, config.CloudProvider.ValueString(), config.Region.ValueString())
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "list clouds", err)
 		return
@@ -231,8 +202,11 @@ func (d *CloudsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
 
-// fetchClouds fetches clouds with the given query parameters, handling pagination if needed.
-func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values) ([]CloudSummaryModel, error) {
+// fetchClouds fetches clouds matching the server-side name substring filter (params), handling
+// pagination, then applies cloudProvider/region as client-side post-filters (DS-CLOUD-1: the
+// backend has no provider/region query params on this endpoint). Either post-filter is skipped
+// when its argument is "".
+func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values, cloudProvider, region string) ([]CloudSummaryModel, error) {
 	// Use PaginatedRequest helper to fetch all clouds
 	cloudResults, err := PaginatedRequest(ctx, d.client, "/api/v2/clouds", params,
 		func(body []byte) ([]CloudResult, *string, error) {
@@ -247,28 +221,49 @@ func (d *CloudsDataSource) fetchClouds(ctx context.Context, params url.Values) (
 		return nil, err
 	}
 
-	// Convert CloudResults to CloudSummaryModels
+	// Convert CloudResults to CloudSummaryModels, applying the provider/region
+	// post-filters as we go. cloud_provider matches case-insensitively (PR #91
+	// fixed the same case-sensitivity trap for addProviderConfig; a user typing
+	// "aws" should match a stored "AWS" here too).
 	allClouds := make([]CloudSummaryModel, 0, len(cloudResults))
 	for _, cloud := range cloudResults {
+		if cloudProvider != "" && !strings.EqualFold(cloud.Provider, cloudProvider) {
+			continue
+		}
+		if region != "" && cloud.Region != region {
+			continue
+		}
+
+		azList, azDiags := types.ListValueFrom(ctx, types.StringType, cloud.AvailabilityZones)
+		if azDiags.HasError() {
+			return nil, fmt.Errorf("failed to convert availability_zones for cloud %s: %v", cloud.ID, azDiags)
+		}
+
 		cloudModel := CloudSummaryModel{
-			ID:                      types.StringValue(cloud.ID),
-			Name:                    types.StringValue(cloud.Name),
-			CloudProvider:           types.StringValue(cloud.Provider),
-			ComputeStack:            types.StringValue(cloud.ComputeStack),
-			Region:                  types.StringValue(cloud.Region),
-			Status:                  types.StringValue(cloud.Status),
-			State:                   types.StringValue(cloud.State),
-			CreatedAt:               types.StringValue(cloud.CreatedAt),
-			CreatorID:               types.StringValue(cloud.CreatorID),
-			IsDefault:               types.BoolValue(cloud.IsDefault),
-			IsK8s:                   types.BoolValue(cloud.IsK8s),
-			IsAIOA:                  types.BoolValue(cloud.IsAIOA),
-			IsBringYourOwnResource:  types.BoolValue(cloud.IsBringYourOwnResource),
-			IsPrivateCloud:          types.BoolValue(cloud.IsPrivateCloud),
-			IsPrivateServiceCloud:   types.BoolValue(cloud.IsPrivateServiceCloud),
-			AutoAddUser:             types.BoolValue(cloud.AutoAddUser),
-			LineageTrackingEnabled:  types.BoolValue(cloud.LineageTrackingEnabled),
-			IsAggregatedLogsEnabled: types.BoolValue(cloud.IsAggregatedLogsEnabled),
+			ID:            types.StringValue(cloud.ID),
+			Name:          types.StringValue(cloud.Name),
+			CloudProvider: types.StringValue(cloud.Provider),
+			ComputeStack:  types.StringValue(cloud.ComputeStack),
+			Region:        types.StringValue(cloud.Region),
+			// DS-CLOUD-3: align with the singular's null-guarding. status/state
+			// are non-Optional enum fields on the backend Cloud model today (always
+			// populated, per backend/server/api/base/models/clouds.py), so this
+			// currently never observes a real empty value - kept for defensive
+			// parity with the singular DS's identical guard, and so both DS behave
+			// the same way if that ever changes.
+			Status:                 stringOrNull(cloud.Status),
+			State:                  stringOrNull(cloud.State),
+			CreatedAt:              types.StringValue(cloud.CreatedAt),
+			CreatorID:              types.StringValue(cloud.CreatorID),
+			IsDefault:              types.BoolValue(cloud.IsDefault),
+			IsK8s:                  types.BoolValue(cloud.IsK8s),
+			IsPrivateCloud:         types.BoolValue(cloud.IsPrivateCloud),
+			AutoAddUser:            types.BoolValue(cloud.AutoAddUser),
+			LineageTrackingEnabled: types.BoolValue(cloud.LineageTrackingEnabled),
+			AggregatedLogsEnabled:  types.BoolValue(cloud.IsAggregatedLogsEnabled),
+			AvailabilityZones:      azList,
+			Version:                types.StringValue(cloud.Version),
+			ExternalID:             types.StringPointerValue(cloud.ExternalID),
 		}
 		allClouds = append(allClouds, cloudModel)
 	}

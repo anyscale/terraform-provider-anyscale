@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,15 +37,36 @@ type CloudDataSourceModel struct {
 	Name types.String `tfsdk:"name"`
 
 	// Computed outputs
-	CloudProvider         types.String `tfsdk:"cloud_provider"`
-	Region                types.String `tfsdk:"region"`
-	Status                types.String `tfsdk:"status"`
-	State                 types.String `tfsdk:"state"`
-	IsEmptyCloud          types.Bool   `tfsdk:"is_empty_cloud"`
-	CloudDeploymentID     types.String `tfsdk:"cloud_deployment_id"`
-	AutoAddUser           types.Bool   `tfsdk:"auto_add_user"`
-	EnableLineageTracking types.Bool   `tfsdk:"enable_lineage_tracking"`
-	EnableLogIngestion    types.Bool   `tfsdk:"enable_log_ingestion"`
+	CloudProvider          types.String `tfsdk:"cloud_provider"`
+	Region                 types.String `tfsdk:"region"`
+	Status                 types.String `tfsdk:"status"`
+	State                  types.String `tfsdk:"state"`
+	IsEmptyCloud           types.Bool   `tfsdk:"is_empty_cloud"`
+	CloudResourceID        types.String `tfsdk:"cloud_resource_id"`
+	AutoAddUser            types.Bool   `tfsdk:"auto_add_user"`
+	LineageTrackingEnabled types.Bool   `tfsdk:"lineage_tracking_enabled"`
+	AggregatedLogsEnabled  types.Bool   `tfsdk:"aggregated_logs_enabled"`
+
+	// C2: parity with the plural anyscale_clouds data source's per-item
+	// fields. lineage_tracking_enabled/aggregated_logs_enabled above were
+	// the odd ones out here until this provider's naming-unification rename -
+	// this singular data source (and the anyscale_cloud resource) previously
+	// called them enable_lineage_tracking/enable_log_ingestion, while the
+	// plural anyscale_clouds data source always used the backend's own names.
+	// Now identical on both sides; see CHANGELOG.md for the migration note.
+	ComputeStack   types.String `tfsdk:"compute_stack"`
+	CreatedAt      types.String `tfsdk:"created_at"`
+	CreatorID      types.String `tfsdk:"creator_id"`
+	IsDefault      types.Bool   `tfsdk:"is_default"`
+	IsPrivateCloud types.Bool   `tfsdk:"is_private_cloud"`
+
+	// DS-CLOUD-4/DS-CLOUD-5: parity fields added to both anyscale_cloud and
+	// anyscale_clouds via cloudSharedAttributes (is_k8s is schema-only shared,
+	// not part of that map - see the Schema function).
+	IsK8s             types.Bool   `tfsdk:"is_k8s"`
+	AvailabilityZones types.List   `tfsdk:"availability_zones"`
+	Version           types.String `tfsdk:"version"`
+	ExternalID        types.String `tfsdk:"external_id"`
 }
 
 // Metadata returns the data source type name.
@@ -54,59 +76,51 @@ func (d *CloudDataSource) Metadata(ctx context.Context, req datasource.MetadataR
 
 // Schema defines the data source schema.
 func (d *CloudDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	attributes := cloudSharedAttributes()
+	attributes["id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the cloud. Either `id` or `name` must be specified.",
+	}
+	attributes["name"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The name of the cloud. Either `id` or `name` must be specified. If multiple clouds have the same name, the most recently created one will be returned.",
+	}
+	attributes["is_empty_cloud"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this is an empty cloud (created without embedded resource configuration).",
+	}
+	attributes["cloud_resource_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique cloud resource ID assigned by Anyscale for this cloud's default resource. This is what you pass to the Anyscale operator during installation for a K8S cloud. Null for a genuinely empty cloud (no resources attached yet).",
+	}
+	// Uniform attribute name with the plural anyscale_clouds data source's
+	// own lineage_tracking_enabled/aggregated_logs_enabled - this data
+	// source (and the anyscale_cloud resource) previously called these
+	// enable_lineage_tracking/enable_log_ingestion, while the plural data
+	// source called the second one is_aggregated_logs_enabled; see
+	// CHANGELOG.md and schema_shared_attributes.go's cloudSharedAttributes
+	// doc comment for the naming-unification history.
+	attributes["lineage_tracking_enabled"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether lineage tracking is enabled for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_lineage_tracking` on both this data source and the `anyscale_cloud` resource; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
+	}
+	attributes["aggregated_logs_enabled"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud. Uniform `<noun>_enabled` naming with its sibling `lineage_tracking_enabled` - a previous provider version called this `enable_log_ingestion` on this data source and the `anyscale_cloud` resource, then briefly `is_aggregated_logs_enabled` (matching the backend's own field name and the plural `anyscale_clouds` data source at the time) before settling here. See CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.",
+	}
+	// DS-CLOUD-4: parity with the plural's is_k8s. Schema-only shared text (not
+	// hoisted into cloudSharedAttributes, since the plural's own copy is
+	// defined directly on its item attributes too, not through that map).
+	attributes["is_k8s"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this cloud uses Kubernetes.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Use this data source to retrieve information about an existing Anyscale Cloud. You can look up a cloud by its ID or name.",
-
-		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the cloud. Either `id` or `name` must be specified.",
-			},
-			"name": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The name of the cloud. Either `id` or `name` must be specified. If multiple clouds have the same name, the most recently created one will be returned.",
-			},
-
-			// Computed fields
-			"cloud_provider": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The cloud provider (AWS, GCP, AZURE, or GENERIC).",
-			},
-			"region": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The region where the cloud is deployed.",
-			},
-			"status": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The operational status of the cloud (e.g., ready, pending, failed).",
-			},
-			"state": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The lifecycle state of the cloud (e.g., ACTIVE, CREATING, FAILED).",
-			},
-			"is_empty_cloud": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is an empty cloud (created without embedded resource configuration).",
-			},
-			"cloud_deployment_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The cloud deployment ID. For K8S clouds, this is passed to the Anyscale operator during installation.",
-			},
-			"auto_add_user": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether users are automatically added to this cloud.",
-			},
-			"enable_lineage_tracking": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether lineage tracking is enabled for this cloud.",
-			},
-			"enable_log_ingestion": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether aggregated log ingestion is enabled for this cloud.",
-			},
-		},
+		Attributes:          attributes,
 	}
 }
 
@@ -118,7 +132,7 @@ func (d *CloudDataSource) Configure(ctx context.Context, req datasource.Configur
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Unexpected Data Source Configure Type",
 			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
@@ -139,7 +153,7 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 
 	// Validate that either ID or Name is provided
 	if config.ID.IsNull() && config.Name.IsNull() {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Missing Required Attribute",
 			"Either 'id' or 'name' must be specified to look up a cloud.",
 		)
@@ -160,15 +174,12 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 
 		cloudID, err = d.findCloudByName(ctx, name)
 		if err != nil {
-			resp.Diagnostics.AddError(
-				"Cloud Lookup Failed",
-				fmt.Sprintf("Failed to find cloud with name '%s': %s", name, err.Error()),
-			)
+			AddAPIError(&resp.Diagnostics, fmt.Sprintf("find cloud with name '%s'", name), err)
 			return
 		}
 
 		if cloudID == "" {
-			resp.Diagnostics.AddError(
+			AddConfigError(&resp.Diagnostics,
 				"Cloud Not Found",
 				fmt.Sprintf("No cloud found with name '%s'", name),
 			)
@@ -176,142 +187,142 @@ func (d *CloudDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		}
 	}
 
-	// Fetch cloud details from API
-	apiResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
-	if err != nil {
-		tflog.Error(ctx, "Failed to fetch cloud", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", err.Error())
-		return
-	}
-	defer func() {
-		if closeErr := apiResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
+	if err := d.readCloudIntoModel(ctx, cloudID, &config); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			AddConfigError(&resp.Diagnostics,
+				"Cloud Not Found",
+				fmt.Sprintf("Cloud with ID '%s' not found in Anyscale", cloudID),
+			)
+			return
 		}
-	}()
-
-	if apiResp.StatusCode == http.StatusNotFound {
-		resp.Diagnostics.AddError(
-			"Cloud Not Found",
-			fmt.Sprintf("Cloud with ID '%s' not found in Anyscale", cloudID),
-		)
+		AddAPIError(&resp.Diagnostics, "read cloud", err)
 		return
 	}
-
-	body, err := io.ReadAll(apiResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", err.Error())
-		return
-	}
-
-	if apiResp.StatusCode != http.StatusOK {
-		resp.Diagnostics.AddError(
-			"API Error",
-			fmt.Sprintf("Failed to read cloud: %s - %s", apiResp.Status, string(body)),
-		)
-		return
-	}
-
-	var cloudResp CloudResponse
-	if err := json.Unmarshal(body, &cloudResp); err != nil {
-		resp.Diagnostics.AddError("JSON Unmarshal Error", err.Error())
-		return
-	}
-
-	// Populate the data source model
-	config.ID = types.StringValue(cloudResp.Result.ID)
-	config.Name = types.StringValue(cloudResp.Result.Name)
-	config.CloudProvider = types.StringValue(cloudResp.Result.Provider)
-	config.Region = types.StringValue(cloudResp.Result.Region)
-
-	// Status and State
-	if cloudResp.Result.Status != "" {
-		config.Status = types.StringValue(cloudResp.Result.Status)
-	} else {
-		config.Status = types.StringNull()
-	}
-
-	if cloudResp.Result.State != "" {
-		config.State = types.StringValue(cloudResp.Result.State)
-	} else {
-		config.State = types.StringNull()
-	}
-
-	// Boolean flags - check if they exist in response
-	// Default to false if not present
-	config.AutoAddUser = types.BoolValue(false)
-	config.EnableLineageTracking = types.BoolValue(false)
-	config.EnableLogIngestion = types.BoolValue(false)
-	config.IsEmptyCloud = types.BoolValue(false)
-
-	// Cloud deployment ID - might not be present
-	config.CloudDeploymentID = types.StringNull()
 
 	tflog.Info(ctx, "Successfully retrieved cloud", map[string]any{
 		"id":       cloudID,
-		"name":     cloudResp.Result.Name,
-		"provider": cloudResp.Result.Provider,
-		"region":   cloudResp.Result.Region,
+		"name":     config.Name.ValueString(),
+		"provider": config.CloudProvider.ValueString(),
+		"region":   config.Region.ValueString(),
 	})
 
 	// Set state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
 
-// findCloudByName looks for a cloud with the given name
+// readCloudIntoModel fetches a cloud by ID and populates every computed field
+// on the model from the live API response - no field is left at a hardcoded
+// placeholder. is_empty_cloud and cloud_resource_id require a second call
+// (the cloud payload itself doesn't carry them) using the same resource-listing
+// semantics anyscale_cloud_resource relies on.
+func (d *CloudDataSource) readCloudIntoModel(ctx context.Context, cloudID string, config *CloudDataSourceModel) error {
+	apiResp, err := d.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	if err != nil {
+		return fmt.Errorf("API request failed: %w", err)
+	}
+	defer CloseBody(ctx, apiResp.Body)
+
+	if apiResp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%w: cloud not found", ErrNotFound)
+	}
+
+	body, err := io.ReadAll(apiResp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if apiResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to read cloud: %s - %s", apiResp.Status, string(body))
+	}
+
+	var cloudResp CloudResponse
+	if err := json.Unmarshal(body, &cloudResp); err != nil {
+		return fmt.Errorf("failed to parse JSON response: %w", err)
+	}
+
+	config.ID = types.StringValue(cloudResp.Result.ID)
+	config.Name = types.StringValue(cloudResp.Result.Name)
+	config.CloudProvider = types.StringValue(cloudResp.Result.Provider)
+	config.Region = types.StringValue(cloudResp.Result.Region)
+
+	// DS-CLOUD-3: shared with the plural DS's identical guard (stringOrNull) so
+	// the two behave the same way, not just similarly.
+	config.Status = stringOrNull(cloudResp.Result.Status)
+	config.State = stringOrNull(cloudResp.Result.State)
+
+	// Cloud-level boolean settings come straight off the cloud payload.
+	config.AutoAddUser = types.BoolValue(cloudResp.Result.AutoAddUser)
+	config.LineageTrackingEnabled = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
+	config.AggregatedLogsEnabled = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
+
+	// C2: parity fields with the plural anyscale_clouds data source - mapped
+	// the same unconditional way plural's fetchClouds does, so the two
+	// report identical values for the same cloud rather than diverging on
+	// edge cases like an empty compute_stack from a pre-field-existing cloud.
+	config.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
+	config.CreatedAt = types.StringValue(cloudResp.Result.CreatedAt)
+	config.CreatorID = types.StringValue(cloudResp.Result.CreatorID)
+	config.IsDefault = types.BoolValue(cloudResp.Result.IsDefault)
+	config.IsPrivateCloud = types.BoolValue(cloudResp.Result.IsPrivateCloud)
+
+	// DS-CLOUD-4/DS-CLOUD-5 (Phase B parity fields). is_k8s/version are plain
+	// bool/string on the backend Cloud model (always populated, no null case).
+	// external_id is genuinely Optional[str] server-side (validated to start
+	// with "org_" when set) - StringPointerValue so an unset external_id is
+	// Terraform null, never "".
+	config.IsK8s = types.BoolValue(cloudResp.Result.IsK8s)
+	config.Version = types.StringValue(cloudResp.Result.Version)
+	config.ExternalID = types.StringPointerValue(cloudResp.Result.ExternalID)
+
+	azList, azDiags := types.ListValueFrom(ctx, types.StringType, cloudResp.Result.AvailabilityZones)
+	if azDiags.HasError() {
+		return fmt.Errorf("failed to convert availability_zones: %v", azDiags)
+	}
+	config.AvailabilityZones = azList
+
+	// is_empty_cloud and cloud_resource_id aren't on the cloud payload itself -
+	// derive them from the cloud's resources the same way anyscale_cloud_resource
+	// does: no resources attached at all means the empty-cloud pattern is in
+	// effect; the default/primary resource (if any) carries the resource ID.
+	resources, err := listCloudResources(ctx, d.client, cloudID)
+	if err != nil {
+		return fmt.Errorf("failed to list cloud resources: %w", err)
+	}
+
+	config.IsEmptyCloud = types.BoolValue(len(resources) == 0)
+
+	if defaultResource := findDefaultInCloudResources(resources); defaultResource != nil {
+		config.CloudResourceID = types.StringValue(defaultResource.CloudResourceID)
+	} else {
+		config.CloudResourceID = types.StringNull()
+	}
+
+	return nil
+}
+
+// findCloudByName looks for a cloud with the given name, across every page of
+// GET /api/v2/clouds rather than just the first (DS-CLOUD-2/X-4: a valid name
+// used to resolve to "not found" once an org's cloud list exceeded one page).
+// On duplicate names, picks the most recently created match (X-2).
 func (d *CloudDataSource) findCloudByName(ctx context.Context, name string) (string, error) {
-	resp, err := d.client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to list clouds: %s - %s", resp.Status, string(body))
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", err
-	}
-
-	// Find clouds with matching name
-	// If multiple exist, return the most recently created one
-	var matchedCloudID string
-	var latestCreatedAt string
-
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == name {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
+	results, err := PaginatedRequest(ctx, d.client, "/api/v2/clouds", nil,
+		func(body []byte) ([]CloudResult, *string, error) {
+			var cloudsResp CloudsListResponse
+			if err := json.Unmarshal(body, &cloudsResp); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
 			}
-		}
+			return cloudsResp.Results, cloudsResp.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to list clouds: %w", err)
 	}
 
-	if matchedCloudID != "" && len(cloudsResp.Results) > 1 {
-		// Log warning if multiple clouds with same name exist
-		tflog.Warn(ctx, "Multiple clouds found with same name, returning most recent", map[string]any{
-			"name":       name,
-			"cloud_id":   matchedCloudID,
-			"created_at": latestCreatedAt,
-		})
-	}
+	matchedCloudID := PickMostRecentMatch(ctx, "cloud", name, results,
+		func(c CloudResult) bool { return c.Name == name },
+		func(c CloudResult) string { return c.ID },
+		func(c CloudResult) string { return c.CreatedAt },
+	)
 
 	return matchedCloudID, nil
 }

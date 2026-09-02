@@ -25,7 +25,7 @@ and Terraform state compatibility may change before the first stable release.
 
 We welcome bug reports and feedback as the provider evolves toward a stable v1.0 release.
 
-This beta provider requires Terraform v1.8 or newer.
+This beta provider requires Terraform v1.10 or newer.
 
 ```hcl
 terraform {
@@ -49,10 +49,23 @@ provider "anyscale" {
 ## Current Beta Capabilities
 
 - Currently supported resources:
-  - Anyscale Clouds with self contained deployment pattern
-  - Cloud resource deployments with split deployment pattern
+  - Anyscale Clouds with the all-in-one deployment pattern (embedded resource configuration)
+  - Cloud resource deployments with the multi-resource cloud pattern
   - Compute configurations
+  - Container images (build from a Containerfile, or register existing images from a registry)
+  - Services (deploy Ray Serve applications and roll out new versions)
   - Projects
+  - Organization invitations
+  - Organization users (invites new people or adopts existing members; membership only)
+  - Organization user roles (grants an organization-level role, with optional container-image deny roles)
+- Currently supported data sources:
+  - Clouds (single lookup and list/filter)
+  - Projects (single lookup and list/filter)
+  - Compute configurations
+  - Container images (single lookup and list/filter)
+  - Services (single lookup and list/filter)
+  - The current authenticated user and their connected organization
+  - Organization users (single lookup and list/filter)
 - **Automatic Detection**: Cloud provider and region auto-detected from configuration blocks
 - **Flexible Authentication**: Environment variable, credentials file, or provider configuration
 
@@ -108,8 +121,7 @@ provider_installation {
 terraform {
   required_providers {
     anyscale = {
-      source  = "anyscale/anyscale"
-      version = "~> 0.1"
+      source = "anyscale/anyscale"
     }
   }
 }
@@ -136,7 +148,9 @@ See the [`examples/`](examples/) directory for complete, working examples:
 - **GCP VM**: [`examples/gcp-vm-basic/`](examples/gcp-vm-basic/) - Basic GCP VM cloud with compute config examples
 - **AWS EKS**: [`examples/aws-eks-basic/`](examples/aws-eks-basic/) - AWS EKS Kubernetes cloud
 - **GCP GKE**: [`examples/gcp-gke-basic/`](examples/gcp-gke-basic/) - GCP GKE Kubernetes cloud
-- **Split Deployment**: [`examples/aws-vm-basic-resource/`](examples/aws-vm-basic-resource/) - Empty cloud with separate resource deployment
+- **Azure AKS**: [`examples/azure-aks-basic/`](examples/azure-aks-basic/) - Azure AKS Kubernetes cloud (schema-validated only - see the example's README for status)
+- **Multi-Resource Cloud**: [`examples/aws-vm-basic-resource/`](examples/aws-vm-basic-resource/) - Empty cloud with separate resource deployment
+- **Kitchen Sink**: [`examples/kitchen-sink/`](examples/kitchen-sink/) - Comprehensive multi-cloud build mixing VM and EKS resources on one cloud, plus every resource and data source this provider registers
 
 ## Versioning
 
@@ -145,6 +159,22 @@ Until the provider reaches a 1.0 release:
 - Any release prior to v1.0 may include breaking changes without a major version bump.
 - Resource schemas may change.
 - Terraform state migrations may be required.
+
+### Minor vs. patch releases
+
+Within the 0.x line, the version bump follows mechanically from the changelog fragment types a release
+contains (see [`.changelog/`](.changelog/)), not a case-by-case severity judgment:
+
+- A release with at least one `breaking-change` fragment is a **minor** bump. `breaking-change` covers
+  anything that forces an existing configuration to be edited, produces a plan diff that did not exist
+  before, or replaces a resource that previously updated in place — regardless of how safe, small, or
+  clearly-deserved the underlying fix is.
+- A release with no `breaking-change` fragments (only `added`, `fixed`, `deprecated`, or similar) is a
+  **patch** bump.
+
+For example, renaming a broken attribute that never worked, or adding `RequiresReplace` to stop a
+silent orphaned-resource bug, both still count as `breaking-change` and therefore ship as minor: the
+fragment type tracks the effect on existing configurations, not whether the change was a bug fix.
 
 ## Feedback
 

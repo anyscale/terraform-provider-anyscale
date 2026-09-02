@@ -77,14 +77,87 @@ test: ## Run unit tests
 	@echo "==> Running unit tests..."
 	$(GO) test ./... -v -timeout 120s
 
+# ----------------------------------------------------------------------------
+# Acceptance-test credential resolution -- FAILS CLOSED.
+#
+# The acctest token is read from the macOS Keychain, and an empty read REFUSES to
+# run rather than falling through to a pre-set $$ANYSCALE_CLI_TOKEN or to
+# ~/.anyscale/credentials.json. That silent fall-through is the bug this exists to
+# stop, not a convenience being removed: a token is scoped to exactly one
+# organization and the provider has no org selector, so a stale credential and a
+# correct one both "work". A full suite ran against the wrong org on 2026-08-02
+# and left four real AWS clouds behind with nothing in the output to say so.
+#
+# Every part of the shape below is deliberate:
+#   - resolved INSIDE the recipe, never with := at parse time, so `make help` and
+#     every non-acctest target stay Keychain-free (no auth prompt to run `make`)
+#   - the using recipe line is @-prefixed, so the token never reaches make's echo
+#   - exported once; `go test` and any nested shell inherit it, so one ~36ms read
+#   - deliberately OVERRIDES an already-set $$ANYSCALE_CLI_TOKEN. Pointing at the
+#     wrong org is precisely the failure being prevented, so the Keychain wins
+#   - macOS-only by construction: where `security` is absent the read is empty and
+#     the target refuses loudly with instructions, which is the fail-closed path
+#
+# Scope boundary, stated so it is not over-read: this guards the `make` targets
+# only. CI does not use them (.github/workflows/ci.yml:197,210 call `go test`
+# directly, with its own correctly-scoped secret), and anyone invoking
+# `go test ./internal/acctest/` by hand still bypasses this entirely.
+# ----------------------------------------------------------------------------
+ACCTEST_TOKEN_SERVICE ?= anyscale-tfacc
+# Overridable ONLY so the test matrix can exercise the non-macOS branch from a Mac.
+ACCTEST_KEYCHAIN_CMD ?= security
+
+define resolve_acctest_token
+	if ! command -v $(ACCTEST_KEYCHAIN_CMD) >/dev/null 2>&1; then \
+		if [ -z "$$ANYSCALE_CLI_TOKEN" ]; then \
+			echo "ERROR: no macOS Keychain on this platform, and ANYSCALE_CLI_TOKEN is unset." >&2; \
+			echo "       Provide it from the CI secret store. Refusing to run without a token." >&2; \
+			exit 1; \
+		fi; \
+		echo "==> No Keychain here; using ANYSCALE_CLI_TOKEN from the environment ($${#ANYSCALE_CLI_TOKEN} chars)"; \
+	else \
+	ANYSCALE_CLI_TOKEN="$$($(ACCTEST_KEYCHAIN_CMD) find-generic-password -s $(ACCTEST_TOKEN_SERVICE) -w 2>/dev/null || true)"; \
+	if [ -z "$$ANYSCALE_CLI_TOKEN" ]; then \
+		echo "ERROR: no acceptance-test token in the macOS Keychain." >&2; \
+		echo "       service: $(ACCTEST_TOKEN_SERVICE)" >&2; \
+		echo "" >&2; \
+		echo "Refusing to run. Falling back to \$$ANYSCALE_CLI_TOKEN or" >&2; \
+		echo "~/.anyscale/credentials.json is exactly how a previous acceptance run" >&2; \
+		echo "created real clouds in the wrong organization, silently." >&2; \
+		echo "" >&2; \
+		echo "Store the token -- use this form, it is the only one that keeps a" >&2; \
+		echo "full-length token intact (the interactive -w prompt silently truncates" >&2; \
+		echo "at 128 chars via readpassphrase(3); piping to stdin stores nothing," >&2; \
+		echo "since security reads /dev/tty):" >&2; \
+		echo "" >&2; \
+		echo "  security add-generic-password -a \"\$$USER\" -s $(ACCTEST_TOKEN_SERVICE) -U -w \"\$$ANYSCALE_CLI_TOKEN\"" >&2; \
+		echo "" >&2; \
+		echo "Sourcing the value from a variable already in scope keeps the literal" >&2; \
+		echo "token out of shell history; it is briefly visible in this user's own" >&2; \
+		echo "process list, which is the accepted tradeoff for not truncating." >&2; \
+		echo "" >&2; \
+		exit 1; \
+	fi; \
+	echo "==> Acctest token resolved from Keychain (service: $(ACCTEST_TOKEN_SERVICE), $${#ANYSCALE_CLI_TOKEN} chars)"; \
+	fi; \
+	export ANYSCALE_CLI_TOKEN; \
+	if [ $${#ANYSCALE_CLI_TOKEN} -eq 128 ]; then \
+		echo "==> WARNING: token is exactly 128 chars, which is the readpassphrase(3)" >&2; \
+		echo "==>          truncation length, not a natural token length. If auth fails" >&2; \
+		echo "==>          with a 401, re-store it with the -w \"\$$VALUE\" argv form above." >&2; \
+	fi;
+endef
+
 .PHONY: testacc
-testacc: ## Run acceptance tests (requires TF_ACC=1)
+testacc: ## Run acceptance tests (requires TF_ACC=1; token from Keychain, fails closed)
 	@echo "==> Running acceptance tests..."
+	@$(resolve_acctest_token) \
 	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 120m -parallel $(PARALLEL)
 
 .PHONY: testacc-cover
-testacc-cover: ## Run acceptance tests with coverage
+testacc-cover: ## Run acceptance tests with coverage (token from Keychain, fails closed)
 	@echo "==> Running acceptance tests with coverage..."
+	@$(resolve_acctest_token) \
 	TF_ACC=1 $(GO) test ./... -v -timeout 120m -parallel $(PARALLEL) -coverprofile=coverage.out -covermode=atomic
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "==> Coverage report: coverage.html"
@@ -138,6 +211,34 @@ fmt: ## Format Go code
 vet: ## Run go vet
 	@echo "==> Running go vet..."
 	$(GO) vet ./...
+
+.PHONY: validate-examples
+# validate-examples depends on `build` so the named provider binary exists for dev_overrides to
+# load; the terraform validate stage needs dev_overrides active (see CLAUDE.md local dev workflow).
+validate-examples: build ## Validate every examples/ dir: terraform fmt, tflint, and terraform validate where runnable
+	@echo "==> Checking terraform fmt across examples/..."
+	@terraform fmt -check -recursive -diff examples/
+	@echo "==> Running tflint (repo config) across every examples/ subdirectory with .tf files..."
+	@fail=0; \
+	for d in $$(find examples -name "*.tf" -exec dirname {} \; | sort -u); do \
+		out=$$(cd "$$d" && tflint --config="$(CURDIR)/.tflint.hcl" 2>&1); \
+		if [ -n "$$out" ]; then echo "--- tflint: $$d ---"; echo "$$out"; fail=1; fi; \
+	done; \
+	echo "==> Running terraform init + validate on complete runnable examples (no credentials needed, no apply)..."; \
+	for d in $$(find examples -maxdepth 1 -mindepth 1 -type d); do \
+		if grep -lq required_providers "$$d"/*.tf 2>/dev/null; then \
+			out=$$( (cd "$$d" && rm -rf .terraform .terraform.lock.hcl && terraform init -backend=false && terraform validate -no-color) 2>&1 ); \
+			rc=$$?; \
+			(cd "$$d" && rm -rf .terraform .terraform.lock.hcl); \
+			if [ $$rc -ne 0 ]; then \
+				echo "--- FAILED: $$d ---"; echo "$$out" | tail -20; fail=1; \
+			else \
+				echo "OK: $$d"; \
+			fi; \
+		fi; \
+	done; \
+	if [ $$fail -ne 0 ]; then echo "==> validate-examples FAILED - see output above"; exit 1; fi; \
+	echo "==> validate-examples: all checks passed"
 
 # ============================================================================
 # DEPENDENCIES
@@ -361,22 +462,31 @@ test-aws-eks-basic: build ## Test AWS EKS basic (K8S)
 	  SUFFIX=$${GITHUB_RUN_ID:-$$(date +%s)-$$$$}; \
 	  STATE=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfstate; \
 	  CLOUD=tfacc-aws-eks-basic-$$SUFFIX; \
+	  EKSNAME=tfacc-eks-$$SUFFIX; \
+	  TAGVARS=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$$SUFFIX.tfvars.json; \
+	  printf "{\"tags\":{\"Environment\":\"test\",\"workload\":\"tf-provider-e2e-test\",\"Test\":\"true\",\"Repo\":\"terraform-kubernetes-anyscale-foundation-modules\",\"Example\":\"aws/eks-public\"}}" > $$TAGVARS; \
 	  cd examples/aws-eks-basic; \
-	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD || true" EXIT; \
-	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD'
+	  trap "terraform destroy -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD -var=eks_cluster_name=$$EKSNAME -var-file=$$TAGVARS || true; rm -f $$TAGVARS" EXIT; \
+	  terraform apply -auto-approve -state=$$STATE -var=cloud_name=$$CLOUD -var=eks_cluster_name=$$EKSNAME -var-file=$$TAGVARS'
 
 .PHONY: apply-aws-eks-basic
 apply-aws-eks-basic: build ## Apply AWS EKS basic only (override SUFFIX=<id> to pair with destroy)
 	@mkdir -p $(BUILD_DIR)
+	@printf '{"tags":{"Environment":"test","workload":"tf-provider-e2e-test","Test":"true","Repo":"terraform-kubernetes-anyscale-foundation-modules","Example":"aws/eks-public"}}' \
+	  > $(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfvars.json
 	cd examples/aws-eks-basic && terraform apply -auto-approve \
 	  -state=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfstate \
-	  -var=cloud_name=tfacc-aws-eks-basic-$(SUFFIX)
+	  -var=cloud_name=tfacc-aws-eks-basic-$(SUFFIX) \
+	  -var=eks_cluster_name=tfacc-eks-$(SUFFIX) \
+	  -var-file=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfvars.json
 
 .PHONY: destroy-aws-eks-basic
 destroy-aws-eks-basic: ## Destroy AWS EKS basic (must match SUFFIX used by apply)
 	cd examples/aws-eks-basic && terraform destroy -auto-approve \
 	  -state=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfstate \
-	  -var=cloud_name=tfacc-aws-eks-basic-$(SUFFIX)
+	  -var=cloud_name=tfacc-aws-eks-basic-$(SUFFIX) \
+	  -var=eks_cluster_name=tfacc-eks-$(SUFFIX) \
+	  -var-file=$(CURDIR)/$(BUILD_DIR)/aws-eks-basic-$(SUFFIX).tfvars.json
 
 # ============================================================================
 # TERRAFORM TESTING - GCP VM
@@ -546,7 +656,7 @@ release: ## Create and publish a release (requires GPG_FINGERPRINT env var)
 # ============================================================================
 # CHANGELOG
 # ============================================================================
-# Fragment-based changelog automation. See .crystl/quest/changelog-release-contract.md
+# Fragment-based changelog automation. See RELEASING.md
 # and tools/changelog-build/.
 
 .PHONY: changelog-build
@@ -583,11 +693,20 @@ endef
 # whoever happens to have an admin bypass.
 
 .PHONY: changelog-release
+# Target-specific variable, not a plain shell `branch=...` capture: each
+# recipe line below runs in its OWN subshell (Make's default, no .ONESHELL),
+# so a shell variable set on one line is gone by the next. $(START_BRANCH)
+# is evaluated once by Make itself and textually substituted into every
+# line that references it, surviving across all of them - confirmed live
+# during the v0.1.2 release, where the plain-shell-variable version failed
+# the final `git checkout "$$branch"` with an empty pathspec (cosmetic only:
+# it ran after the finalize/branch/push/PR steps, which had already
+# succeeded, so it never blocked an actual release).
+changelog-release: START_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 changelog-release: ## Open a PR that finalizes CHANGELOG.md for a release (usage: make changelog-release VERSION=0.1.0)
 	$(call require_semver_version,changelog-release)
-	@branch="$$(git rev-parse --abbrev-ref HEAD)"; \
-	if [ "$$branch" != "main" ]; then \
-		echo "ERROR: run 'make changelog-release' from main (currently on $$branch)"; \
+	@if [ "$(START_BRANCH)" != "main" ]; then \
+		echo "ERROR: run 'make changelog-release' from main (currently on $(START_BRANCH))"; \
 		exit 1; \
 	fi
 	@if ! git diff --quiet || ! git diff --quiet --cached; then \
@@ -603,7 +722,7 @@ changelog-release: ## Open a PR that finalizes CHANGELOG.md for a release (usage
 	gh pr create --title "chore: finalize CHANGELOG.md for v$(VERSION)" \
 		--body "Mechanical: renames Unreleased to v$(VERSION) and dates it. Every entry in it already went through review as its own .changelog/ fragment PR; this just reorganizes them. Merge before running 'make tag VERSION=$(VERSION)'." \
 		--base main
-	git checkout "$$branch"
+	git checkout "$(START_BRANCH)"
 	@echo "==> Get that PR reviewed and merged, THEN run: make tag VERSION=$(VERSION)"
 
 .PHONY: tag
@@ -621,6 +740,12 @@ tag: ## Create and push a release tag once CHANGELOG.md is finalized on main (us
 	@if ! grep "^## \[" CHANGELOG.md | grep -qF "[$(VERSION)]"; then \
 		echo "ERROR: CHANGELOG.md has no '## [$(VERSION)]' section on this branch."; \
 		echo "Run 'make changelog-release VERSION=$(VERSION)' and merge that PR first."; \
+		exit 1; \
+	fi
+	@leftover="$$(find .changelog -maxdepth 1 -name '*.txt' 2>/dev/null | head -1)"; \
+	if [ -n "$$leftover" ]; then \
+		echo "ERROR: .changelog/ still has an unconsumed fragment (e.g. $$leftover)."; \
+		echo "It would silently roll into the NEXT release. Run 'make changelog-release VERSION=$(VERSION)' and merge that PR so all fragments are folded into CHANGELOG.md before tagging."; \
 		exit 1; \
 	fi
 	@echo "==> Creating tag v$(VERSION)..."

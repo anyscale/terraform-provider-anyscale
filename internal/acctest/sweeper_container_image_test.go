@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,37 +15,32 @@ import (
 )
 
 func init() {
-	// Both build and registry resources back the same cluster_environments API,
-	// so one F covers both. Registering twice keeps `terraform-plugin-testing`
-	// happy when callers ask for one resource by name.
+	// Both build and registry resources back the same application_templates
+	// API (resource_container_image_registry.go creates via POST
+	// /api/v2/application_templates/byod and deletes via the same archive call
+	// this sweeper makes), so one F covers both. Registering twice keeps
+	// `terraform-plugin-testing` happy when callers ask for one resource by
+	// name. Note: `terraform-plugin-testing`'s sweeper dedup keys on Name, not
+	// on the F func pointer, so both registrations run (sweepContainerImages
+	// executes twice per `make sweep`) - harmless since it is idempotent, but
+	// worth knowing before "simplifying" this to one registration.
 	resource.AddTestSweepers("anyscale_container_image_build", &resource.Sweeper{
 		Name: "anyscale_container_image_build",
-		F:    sweepContainerImages,
+		// A leaked anyscale_service holds a build_id open, so it must sweep first - see
+		// sweeper_service_test.go. Belt-and-suspenders here specifically: this sweeper only
+		// archives (no permanent delete API exists for builds), so it does not actually have a
+		// hard in-use delete-ordering constraint the way project/compute_config do, but the edge
+		// costs nothing and keeps the graph consistent if that ever changes.
+		Dependencies: []string{"anyscale_service"},
+		F:            sweepContainerImages,
 	})
 	resource.AddTestSweepers("anyscale_container_image_registry", &resource.Sweeper{
 		Name: "anyscale_container_image_registry",
-		F:    sweepContainerImages,
+		// Same in-use ordering as the build registration above - a leaked
+		// anyscale_service can hold a registry's application_template open too.
+		Dependencies: []string{"anyscale_service"},
+		F:            sweepContainerImages,
 	})
-}
-
-var sweepContainerImagePrefixes = []string{"tfacc-", "tf-test-", "tfprovider-"}
-
-const sweepContainerImageDefaultMinAge = 2 * time.Hour
-
-type sweepContainerImageResult struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	CreatedAt string  `json:"created_at"`
-	DeletedAt *string `json:"deleted_at"`
-	Anonymous bool    `json:"anonymous"`
-	IsDefault bool    `json:"is_default"`
-}
-
-type sweepContainerImageListResponse struct {
-	Results  []sweepContainerImageResult `json:"results"`
-	Metadata struct {
-		NextPagingToken *string `json:"next_paging_token"`
-	} `json:"metadata"`
 }
 
 func sweepContainerImages(_ string) error {
@@ -55,21 +50,17 @@ func sweepContainerImages(_ string) error {
 		return nil
 	}
 
-	minAge := sweepContainerImageDefaultMinAge
-	if raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE"); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil {
-			return fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, parseErr)
-		}
-		minAge = parsed
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
+	if err != nil {
+		return err
 	}
 	cutoff := time.Now().Add(-minAge)
 
 	ctx := context.Background()
 
 	seen := make(map[string]struct{})
-	var candidates []sweepContainerImageResult
-	for _, prefix := range sweepContainerImagePrefixes {
+	var candidates []provider.ApplicationTemplateResult
+	for _, prefix := range sweepableResourcePrefixes {
 		results, listErr := searchContainerImagesByContains(ctx, client, prefix)
 		if listErr != nil {
 			return listErr
@@ -92,7 +83,7 @@ func sweepContainerImages(_ string) error {
 		if c.Anonymous || c.IsDefault {
 			continue
 		}
-		if !hasAnyPrefix(c.Name, sweepContainerImagePrefixes) {
+		if !hasAnyPrefix(c.Name, sweepableResourcePrefixes) {
 			continue
 		}
 
@@ -106,9 +97,18 @@ func sweepContainerImages(_ string) error {
 			continue
 		}
 
-		if c.DeletedAt != nil && *c.DeletedAt != "" {
+		if c.IsArchived() {
 			alreadyArchivedCount++
-			log.Printf("[sweep:anyscale_container_image] KEEP %s (%s): already archived at %s (no permanent delete API)", c.ID, c.Name, *c.DeletedAt)
+			// ArchivedAt is the real producer (see IsArchived's doc comment); DeletedAt has none
+			// today but is checked defensively, so it - not ArchivedAt - could in principle be the
+			// one that's set. Report whichever is actually non-empty rather than assuming.
+			archivedWhen := ""
+			if c.ArchivedAt != nil && *c.ArchivedAt != "" {
+				archivedWhen = *c.ArchivedAt
+			} else if c.DeletedAt != nil {
+				archivedWhen = *c.DeletedAt
+			}
+			log.Printf("[sweep:anyscale_container_image] KEEP %s (%s): already archived at %s (no permanent delete API)", c.ID, c.Name, archivedWhen)
 			continue
 		}
 
@@ -129,58 +129,32 @@ func sweepContainerImages(_ string) error {
 	return nil
 }
 
-func searchContainerImagesByContains(ctx context.Context, client *provider.Client, contains string) ([]sweepContainerImageResult, error) {
-	var all []sweepContainerImageResult
-	var pagingToken *string
+// searchContainerImagesByContains lists application templates via api/v2 (GET,
+// pagination as query params: name_contains + paging_token), not the ext/v0
+// cluster_environments/search endpoint (POST, pagination inside the body) this
+// used to call. include_archived=true is passed so already-archived rows are
+// still visible for the alreadyArchivedCount bookkeeping below; there is no
+// api/v2 include_anonymous filter (unlike ext/v0), but that is harmless here
+// since sweepContainerImages already filters out c.Anonymous/c.IsDefault
+// client-side -- the only effect of its absence is more rows to filter
+// client-side, never fewer, so it cannot cause a silent-truncation leak.
+func searchContainerImagesByContains(ctx context.Context, client *provider.Client, contains string) ([]provider.ApplicationTemplateResult, error) {
+	params := url.Values{}
+	params.Set("name_contains", contains)
+	params.Set("include_archived", "true")
 
-	for {
-		payload := map[string]interface{}{
-			"name":              map[string]string{"contains": contains},
-			"include_archived":  true,
-			"include_anonymous": false,
-			"paging":            map[string]interface{}{"count": 100},
-		}
-		if pagingToken != nil && *pagingToken != "" {
-			payload["paging"] = map[string]interface{}{
-				"count":        100,
-				"paging_token": *pagingToken,
+	return provider.PaginatedRequest(ctx, client, "/api/v2/application_templates/", params,
+		func(body []byte) ([]provider.ApplicationTemplateResult, *string, error) {
+			var page provider.ApplicationTemplatesListResponse
+			if err := json.Unmarshal(body, &page); err != nil {
+				return nil, nil, err
 			}
-		}
-
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("marshal container image search payload: %w", err)
-		}
-
-		resp, err := client.DoRequest(ctx, "POST", "/ext/v0/cluster_environments/search", strings.NewReader(string(body)))
-		if err != nil {
-			return nil, fmt.Errorf("search container images: %w", err)
-		}
-		respBody, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("read container image search response: %w", readErr)
-		}
-		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("search container images: status %d: %s", resp.StatusCode, truncateBody(string(respBody), 256))
-		}
-
-		var page sweepContainerImageListResponse
-		if err := json.Unmarshal(respBody, &page); err != nil {
-			return nil, fmt.Errorf("parse container image search response: %w", err)
-		}
-		all = append(all, page.Results...)
-
-		if page.Metadata.NextPagingToken == nil || *page.Metadata.NextPagingToken == "" {
-			break
-		}
-		pagingToken = page.Metadata.NextPagingToken
-	}
-
-	return all, nil
+			return page.Results, page.Metadata.NextPagingToken, nil
+		},
+	)
 }
 
-func sweepArchiveContainerImage(ctx context.Context, client *provider.Client, c sweepContainerImageResult) error {
+func sweepArchiveContainerImage(ctx context.Context, client *provider.Client, c provider.ApplicationTemplateResult) error {
 	if isSweepDryRun() {
 		log.Printf("[sweep:anyscale_container_image] DRY-RUN would ARCHIVE %s (%s)", c.ID, c.Name)
 		return nil

@@ -1,0 +1,525 @@
+package provider
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// TestEvaluateServiceState is the exhaustive, HTTP-free proof of the wait loop's state
+// classification (contract §5b): every traced ServiceEventCurrentState bucket, against both
+// possible targets (RUNNING for Create/Update, TERMINATED for Delete), plus the "anything else"
+// continue-polling default. evaluateServiceState is a pure function, so this needs no mock
+// server at all.
+func TestEvaluateServiceState(t *testing.T) {
+	errMsg := "backend blew up"
+	emptyErrMsg := ""
+
+	cases := []struct {
+		name         string
+		currentState string
+		errorMessage *string
+		target       string
+		wantDone     bool
+		wantErr      bool
+		wantErrText  string // substring, only checked when wantErr
+	}{
+		// Success: current_state matches target, for both real targets this provider uses.
+		{"reaches RUNNING target", "RUNNING", nil, serviceStateRunning, true, false, ""},
+		{"reaches TERMINATED target", "TERMINATED", nil, serviceStateTerminated, true, false, ""},
+
+		// Error buckets (is_error) while waiting for RUNNING (Create/Update): terminal failure,
+		// done=true, err surfaces error_message.
+		{"UNHEALTHY with error_message", "UNHEALTHY", &errMsg, serviceStateRunning, true, true, errMsg},
+		{"SYSTEM_FAILURE with error_message", "SYSTEM_FAILURE", &errMsg, serviceStateRunning, true, true, errMsg},
+		{"USER_ERROR_FAILURE with error_message", "USER_ERROR_FAILURE", &errMsg, serviceStateRunning, true, true, errMsg},
+		// error_message nil or empty must still produce an error (done=true), just without
+		// appending a message the backend never sent - a nil-pointer dereference here would be
+		// the failure mode this specifically guards against.
+		{"UNHEALTHY with nil error_message", "UNHEALTHY", nil, serviceStateRunning, true, true, "UNHEALTHY"},
+		{"SYSTEM_FAILURE with empty-string error_message", "SYSTEM_FAILURE", &emptyErrMsg, serviceStateRunning, true, true, "SYSTEM_FAILURE"},
+		// Error buckets are NOT terminal while waiting for TERMINATED (Delete path) - a service
+		// being torn down can legitimately pass through an error state on its way to gone, and
+		// forcing a hard error here would make Delete itself fail on exactly the resources most
+		// in need of being deleted. Cover all three is_error buckets, not just one.
+		{"UNHEALTHY while waiting for TERMINATED (delete path) continues, no hard error", "UNHEALTHY", &errMsg, serviceStateTerminated, false, false, ""},
+		{"SYSTEM_FAILURE while waiting for TERMINATED (delete path) continues, no hard error", "SYSTEM_FAILURE", &errMsg, serviceStateTerminated, false, false, ""},
+		{"USER_ERROR_FAILURE while waiting for TERMINATED (delete path) continues, no hard error", "USER_ERROR_FAILURE", &errMsg, serviceStateTerminated, false, false, ""},
+
+		// Continue buckets (is_updating + TERMINATING): keep polling, no error, regardless of target.
+		{"STARTING continues (waiting for RUNNING)", "STARTING", nil, serviceStateRunning, false, false, ""},
+		{"UPDATING continues", "UPDATING", nil, serviceStateRunning, false, false, ""},
+		{"ROLLING_OUT continues", "ROLLING_OUT", nil, serviceStateRunning, false, false, ""},
+		{"ROLLING_BACK continues", "ROLLING_BACK", nil, serviceStateRunning, false, false, ""},
+		{"TERMINATING continues (waiting for TERMINATED)", "TERMINATING", nil, serviceStateTerminated, false, false, ""},
+		// STARTING is also a legitimate intermediate state while waiting for TERMINATED to
+		// arrive later (e.g. a service was mid-rollout when terminate was requested).
+		{"STARTING continues (waiting for TERMINATED)", "STARTING", nil, serviceStateTerminated, false, false, ""},
+
+		// Contract §F6: an unrecognized current_state is NOT a hard error. CONTINUE was
+		// deliberately chosen over fail-fast here, since the loop is already timeout-bounded
+		// (so continuing is not an infinite poll) and the asymmetry favors it - hard-erroring on a
+		// new, benign, not-yet-modeled transitional state would break a healthy service's every
+		// apply until the provider is patched, which is not user-recoverable, whereas continuing
+		// just waits it out (or eventually times out naming the last-seen state if it truly never
+		// resolves). Production code also tflog.Warns on this branch (waitForServiceStateWithTiming,
+		// service_helpers.go), which a return-value table test can't observe here.
+		{"unrecognized state continues (does not hard-error), contract §F6", "SOME_FUTURE_STATE_NOT_YET_MODELED", nil, serviceStateRunning, false, false, ""},
+		{"empty current_state continues (does not hard-error), contract §F6", "", nil, serviceStateRunning, false, false, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &ServiceResult{ID: "svc_test", CurrentState: tc.currentState, ErrorMessage: tc.errorMessage}
+
+			done, err := evaluateServiceState(service, tc.target)
+
+			if done != tc.wantDone {
+				t.Errorf("done = %v, want %v", done, tc.wantDone)
+			}
+			if tc.wantErr && err == nil {
+				t.Fatalf("err = nil, want an error containing %q", tc.wantErrText)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), tc.wantErrText) {
+				t.Errorf("err = %q, want it to contain %q", err.Error(), tc.wantErrText)
+			}
+		})
+	}
+}
+
+// realCapturedClusterFailureMessage is the verbatim backend message from a real, manually
+// diagnosed UNHEALTHY service (see the fixture-cloud identity investigation this session) - the
+// exact text a real user would need to see to self-diagnose, rather than resorting to a manual
+// API call the way this session had to.
+const realCapturedClusterFailureMessage = "Failed to create a cluster because the user who " +
+	"created it has either been removed from the organization or has had their permissions " +
+	"revoked. Resume the schedule to continue."
+
+// TestEvaluateServiceState_ChecklistFallback proves the service_status_checklist fallback added
+// after this session's real diagnosis: the backend can leave the top-level error_message null
+// while the actual, actionable cause lives only in a checklist item. The fixture below is the
+// REAL captured shape (not a synthetic guess) from that diagnosis - two RUNNING shared items with
+// messages, an UNHEALTHY CLUSTER item with the real message, an UNHEALTHY APPLICATION item with
+// an EMPTY message, and a STARTING TARGET_NODE_GROUP item that also carries a message. That one
+// fixture exercises all three skip conditions the extraction must get right, simultaneously:
+// RUNNING (not an error state) must be skipped even with a message; STARTING (not an error
+// state) must be skipped even with a message; an error-state item with an EMPTY message must be
+// skipped. Only the CLUSTER item satisfies both conditions (error state AND non-empty message)
+// and must be the one that surfaces.
+func TestEvaluateServiceState_ChecklistFallback(t *testing.T) {
+	realChecklist := &ServiceStatusChecklistResult{
+		Shared: []StatusChecklistItemResult{
+			{Kind: "LB_RESOURCES", Label: "Load Balancer resources", State: "RUNNING",
+				Message: "Load balancer has been initialized and is ready for use by downstream services"},
+			{Kind: "DNS", Label: "DNS record", State: "RUNNING", Message: "DNS is ready"},
+		},
+		PerVersion: []VersionChecklistResult{
+			{
+				VersionID: "srv_hzeqeiivlp9h3g9wiq6tzz9tu4",
+				Items: []StatusChecklistItemResult{
+					{Kind: "CLUSTER", Label: "Cluster", State: "UNHEALTHY", Message: realCapturedClusterFailureMessage},
+					{Kind: "APPLICATION", Label: "Application", State: "UNHEALTHY", Message: ""},
+					{Kind: "TARGET_NODE_GROUP", Label: "Load Balancer Target Node Group", State: "STARTING",
+						Message: "Health-checking for new service version"},
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		name               string
+		checklist          *ServiceStatusChecklistResult
+		wantErrContains    string
+		wantErrNotContains []string
+	}{
+		{
+			name:            "real capture: surfaces only CLUSTER's message",
+			checklist:       realChecklist,
+			wantErrContains: "CLUSTER: " + realCapturedClusterFailureMessage,
+			wantErrNotContains: []string{
+				"LB_RESOURCES", "DNS", "TARGET_NODE_GROUP", "APPLICATION:",
+			},
+		},
+		{
+			name:            "nil checklist falls back to the bare state message, no panic",
+			checklist:       nil,
+			wantErrContains: "service entered UNHEALTHY state",
+		},
+		{
+			name: "checklist with no qualifying items falls back to the bare state message",
+			checklist: &ServiceStatusChecklistResult{
+				Shared: []StatusChecklistItemResult{
+					{Kind: "DNS", State: "RUNNING", Message: "DNS is ready"},
+				},
+			},
+			wantErrContains: "service entered UNHEALTHY state",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &ServiceResult{
+				ID:                     "svc_test",
+				CurrentState:           "UNHEALTHY",
+				ErrorMessage:           nil, // top-level empty - the fallback's whole reason to exist
+				ServiceStatusChecklist: tc.checklist,
+			}
+
+			done, err := evaluateServiceState(service, serviceStateRunning)
+
+			if !done {
+				t.Fatalf("done = false, want true (terminal error bucket)")
+			}
+			if err == nil {
+				t.Fatalf("err = nil, want an error containing %q", tc.wantErrContains)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContains) {
+				t.Errorf("err = %q, want it to contain %q", err.Error(), tc.wantErrContains)
+			}
+			for _, notWant := range tc.wantErrNotContains {
+				if strings.Contains(err.Error(), notWant) {
+					t.Errorf("err = %q, must NOT contain %q (that item should have been skipped)", err.Error(), notWant)
+				}
+			}
+		})
+	}
+}
+
+// serviceStatePollTestServer serves GET /api/v2/services-v2/{id} with a scripted sequence of
+// current_state values: states[0] on the first request, states[1] on the second, and so on;
+// once the sequence is exhausted, it keeps repeating the last entry. Models a real rollout's
+// state transitions (e.g. STARTING, STARTING, RUNNING) one poll at a time, the same shape
+// digestPollTestServer (container_image_helpers_test.go) uses for the build-digest settle race.
+func serviceStatePollTestServer(t *testing.T, serviceID string, states []string, errorMessage *string) (server *httptest.Server, requestCount *int32) {
+	t.Helper()
+	var count int32
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := int(atomic.AddInt32(&count, 1))
+		idx := n - 1
+		if idx >= len(states) {
+			idx = len(states) - 1
+		}
+		result := ServiceResult{ID: serviceID, CurrentState: states[idx]}
+		if serviceErrorStates[states[idx]] {
+			result.ErrorMessage = errorMessage
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(ServiceResponse{Result: result})
+	}))
+	t.Cleanup(server.Close)
+	return server, &count
+}
+
+// TestWaitForServiceStateWithTiming_SettlesAtRunning proves the Create/Update path: a service
+// that reports STARTING for a couple of polls before reaching RUNNING must be waited out, not
+// just checked once - the >=3-request assertion is what actually proves the loop polls
+// repeatedly rather than trusting a single GET.
+func TestWaitForServiceStateWithTiming_SettlesAtRunning(t *testing.T) {
+	server, requestCount := serviceStatePollTestServer(t, "svc_running", []string{"STARTING", "STARTING", "RUNNING"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_running", serviceStateRunning, 200*time.Millisecond, 5*time.Millisecond)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if service == nil || service.CurrentState != "RUNNING" {
+		t.Fatalf("service = %+v, want CurrentState RUNNING", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got < 3 {
+		t.Errorf("requestCount = %d, want at least 3 (2 STARTING polls before RUNNING)", got)
+	}
+}
+
+// TestWaitForServiceStateWithTiming_SettlesAtTerminated proves the Delete path's own target
+// bucket (TERMINATED), distinct from Create/Update's RUNNING - the one place the three call
+// sites actually differ.
+func TestWaitForServiceStateWithTiming_SettlesAtTerminated(t *testing.T) {
+	server, requestCount := serviceStatePollTestServer(t, "svc_terminating", []string{"TERMINATING", "TERMINATED"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_terminating", serviceStateTerminated, 200*time.Millisecond, 5*time.Millisecond)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if service == nil || service.CurrentState != "TERMINATED" {
+		t.Fatalf("service = %+v, want CurrentState TERMINATED", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got < 2 {
+		t.Errorf("requestCount = %d, want at least 2 (1 TERMINATING poll before TERMINATED)", got)
+	}
+}
+
+// TestWaitForServiceStateWithTiming_RecoversFromErrorStateWhileTerminating proves the actual bug
+// this guards against: a service that surfaces a transient is_error bucket mid-termination must
+// not fail the Delete - it must keep polling through the error state and succeed once TERMINATED
+// is actually reached. Before the target-aware guard in evaluateServiceState, this exact sequence
+// returned an error on the first USER_ERROR_FAILURE poll, so Delete itself could never complete
+// for a service stuck this way - the only way "out" was also blocked.
+func TestWaitForServiceStateWithTiming_RecoversFromErrorStateWhileTerminating(t *testing.T) {
+	server, requestCount := serviceStatePollTestServer(t, "svc_recovering", []string{"USER_ERROR_FAILURE", "USER_ERROR_FAILURE", "TERMINATED"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_recovering", serviceStateTerminated, 200*time.Millisecond, 5*time.Millisecond)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v (an is_error bucket observed while waiting for TERMINATED must not fail the wait)", err)
+	}
+	if service == nil || service.CurrentState != "TERMINATED" {
+		t.Fatalf("service = %+v, want CurrentState TERMINATED", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got < 3 {
+		t.Errorf("requestCount = %d, want at least 3 (2 USER_ERROR_FAILURE polls before TERMINATED)", got)
+	}
+}
+
+// TestWaitForServiceStateWithTiming_TimesOutOnErrorStateWhileTerminating proves the timeout
+// backstop still holds for the CONTINUE path above: a service permanently stuck in an is_error
+// bucket while being torn down must still fail the wait once the timeout elapses (naming the
+// last-seen state), not poll forever - the fix must not trade a false failure for a real hang.
+func TestWaitForServiceStateWithTiming_TimesOutOnErrorStateWhileTerminating(t *testing.T) {
+	server, requestCount := serviceStatePollTestServer(t, "svc_stuck_error_terminating", []string{"SYSTEM_FAILURE"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_stuck_error_terminating", serviceStateTerminated, 17*time.Millisecond, 5*time.Millisecond)
+
+	if err == nil {
+		t.Fatal("err = nil, want a timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("err = %q, want it to mention timing out", err.Error())
+	}
+	if service == nil || service.CurrentState != "SYSTEM_FAILURE" {
+		t.Fatalf("service = %+v, want the last-observed SYSTEM_FAILURE service returned alongside the timeout error", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got == 0 {
+		t.Error("requestCount = 0, want at least one poll before timing out")
+	}
+}
+
+// TestWaitForServiceStateWithTiming_SurfacesSystemFailure is the AC-R4 headline error-path
+// proof: a rollout that fails must surface as a returned error carrying error_message, not a
+// silent success or a hang - proven through the real polling loop (STARTING first), not just
+// evaluateServiceState in isolation.
+func TestWaitForServiceStateWithTiming_SurfacesSystemFailure(t *testing.T) {
+	wantMsg := "container crashed on startup"
+	server, requestCount := serviceStatePollTestServer(t, "svc_failed", []string{"STARTING", "SYSTEM_FAILURE"}, &wantMsg)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_failed", serviceStateRunning, 200*time.Millisecond, 5*time.Millisecond)
+
+	if err == nil {
+		t.Fatal("err = nil, want an error (service entered SYSTEM_FAILURE)")
+	}
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Errorf("err = %q, want it to contain the surfaced error_message %q", err.Error(), wantMsg)
+	}
+	// The last-observed service must still be returned alongside the error (not nil) - the
+	// resource's Create/Update needs it to report current_state/error_message in diagnostics.
+	if service == nil || service.CurrentState != "SYSTEM_FAILURE" {
+		t.Fatalf("service = %+v, want the last-observed SYSTEM_FAILURE service returned alongside the error", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got < 2 {
+		t.Errorf("requestCount = %d, want at least 2 (1 STARTING poll before the failure surfaces)", got)
+	}
+}
+
+// TestWaitForServiceStateWithTiming_SurfacesUnhealthyAndUserErrorFailure covers the other two
+// is_error buckets end-to-end through the real loop (evaluateServiceState's own table test
+// already proves the classification in isolation; this proves the loop actually stops and
+// propagates for these two specific buckets too, not just SYSTEM_FAILURE).
+func TestWaitForServiceStateWithTiming_SurfacesUnhealthyAndUserErrorFailure(t *testing.T) {
+	for _, state := range []string{"UNHEALTHY", "USER_ERROR_FAILURE"} {
+		t.Run(state, func(t *testing.T) {
+			msg := "failure: " + state
+			server, _ := serviceStatePollTestServer(t, "svc_"+strings.ToLower(state), []string{state}, &msg)
+			client := NewClientWithToken(server.URL, "test-token")
+
+			service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_x", serviceStateRunning, 200*time.Millisecond, 5*time.Millisecond)
+
+			if err == nil {
+				t.Fatalf("err = nil, want an error for %s", state)
+			}
+			if !strings.Contains(err.Error(), msg) {
+				t.Errorf("err = %q, want it to contain %q", err.Error(), msg)
+			}
+			if service == nil || service.CurrentState != state {
+				t.Fatalf("service = %+v, want CurrentState %s", service, state)
+			}
+		})
+	}
+}
+
+// TestWaitForServiceStateWithTiming_TimesOutOnUnrecognizedState proves the specific safety
+// argument behind contract §F6 (see TestEvaluateServiceState): treating an unrecognized
+// current_state as CONTINUE instead of a hard error is only safe because the timeout backstop
+// still catches a state that genuinely never resolves. A service stuck forever on some
+// not-yet-modeled state must still fail the apply eventually (naming that state), not hang
+// past the caller's timeout.
+func TestWaitForServiceStateWithTiming_TimesOutOnUnrecognizedState(t *testing.T) {
+	server, requestCount := serviceStatePollTestServer(t, "svc_unrecognized_stuck", []string{"SOME_FUTURE_STATE_NOT_YET_MODELED"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_unrecognized_stuck", serviceStateRunning, 17*time.Millisecond, 5*time.Millisecond)
+
+	if err == nil {
+		t.Fatal("err = nil, want a timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("err = %q, want it to mention timing out (an unrecognized state must not hard-error immediately per §F6, but must still time out rather than hang forever)", err.Error())
+	}
+	if service == nil || service.CurrentState != "SOME_FUTURE_STATE_NOT_YET_MODELED" {
+		t.Fatalf("service = %+v, want the last-observed unrecognized-state service returned alongside the timeout error", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got < 2 {
+		t.Errorf("requestCount = %d, want at least 2 (proves it actually polled/continued rather than stopping on the first unrecognized response)", got)
+	}
+}
+
+// TestWaitForServiceStateWithTiming_TimesOut proves a rollout that never settles gives up
+// gracefully within the caller's timeout rather than hanging - critical since a stuck
+// ROLLING_OUT must not leave a Terraform apply blocked forever.
+func TestWaitForServiceStateWithTiming_TimesOut(t *testing.T) {
+	server, requestCount := serviceStatePollTestServer(t, "svc_stuck", []string{"ROLLING_OUT"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	start := time.Now()
+	service, err := waitForServiceStateWithTiming(context.Background(), client, "svc_stuck", serviceStateRunning, 17*time.Millisecond, 5*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("err = nil, want a timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("err = %q, want it to mention timing out", err.Error())
+	}
+	if service == nil || service.CurrentState != "ROLLING_OUT" {
+		t.Fatalf("service = %+v, want the last-observed ROLLING_OUT service returned alongside the timeout error", service)
+	}
+	if got := atomic.LoadInt32(requestCount); got == 0 {
+		t.Error("requestCount = 0, want at least one poll before timing out")
+	}
+	// Sanity bound so a regression that ignores the timeout entirely (e.g. falls through to
+	// waiting the interval's max or some unrelated constant) fails loudly instead of just
+	// running slow - this must give up within roughly one interval of the deadline, not seconds.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("elapsed = %s, want well under 500ms (timeout=17ms, interval=5ms) - looks like it did not actually honor the short timeout", elapsed)
+	}
+}
+
+// TestWaitForServiceStateWithTiming_ContextCancelled proves an already-cancelled context (e.g.
+// Terraform interrupting the apply) stops the wait instead of spending the full timeout
+// polling. Unlike waitForBuildDigestWithTiming (which checks ctx.Done() before its first
+// request and so makes exactly zero calls), this loop's first getServiceByID call is
+// unconditional - unfired at ctx.Done() until the eventual server round-trip - so what this
+// actually proves is that Go's context-aware HTTP client fails the request promptly and the
+// loop propagates that error rather than looping past it, NOT that zero network calls occur.
+// Documented deliberately so a future reader does not assume both wait helpers share the exact
+// same "zero calls on cancellation" guarantee - they do not, by construction.
+func TestWaitForServiceStateWithTiming_ContextCancelled(t *testing.T) {
+	server, _ := serviceStatePollTestServer(t, "svc_cancelled", []string{"STARTING"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	service, err := waitForServiceStateWithTiming(ctx, client, "svc_cancelled", serviceStateRunning, time.Second, time.Millisecond)
+
+	if err == nil {
+		t.Fatal("err = nil, want an error (context already cancelled)")
+	}
+	// getServiceByID's own request fails against the cancelled context, so this returns
+	// (nil, err) - NOT (service, err) - unlike the timeout/error-bucket paths above, which
+	// always have a real last-observed service to return alongside the error. A caller that
+	// unconditionally dereferences the returned service on ANY error would panic specifically
+	// on this path.
+	if service != nil {
+		t.Errorf("service = %+v, want nil on a request-level failure (context cancelled before any successful GET)", service)
+	}
+}
+
+// TestGetServiceByID_HitsServicesV2Endpoint pins the same real mount-path bug class the data
+// source already hit once (service-api-mount-path-services-v2-not-services) at this new call
+// site: getServiceByID is shared by the wait loop AND the resource's own Read, so a regression
+// here would silently 404 both.
+func TestGetServiceByID_HitsServicesV2Endpoint(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(ServiceResponse{Result: ServiceResult{ID: "svc_path_test", CurrentState: "RUNNING"}})
+	}))
+	defer server.Close()
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := getServiceByID(context.Background(), client, "svc_path_test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if service.ID != "svc_path_test" {
+		t.Errorf("ID = %q, want svc_path_test", service.ID)
+	}
+	wantPath := "/api/v2/services-v2/svc_path_test"
+	if gotPath != wantPath {
+		t.Errorf("request path = %q, want %q (the hyphenated -v2 mount path, not /api/v2/services)", gotPath, wantPath)
+	}
+}
+
+// TestGetServiceByID_NotFoundSentinel pins the property resource_service.go's and
+// data_source_service.go's Read now depend on: getServiceByID goes through DoRequestAndParse
+// with StatusOK as the only expected status, so a real 404 is wrapped into ErrNotFound and
+// propagated unchanged. That was always true of the helper - what changed is that those call
+// sites now test for it with errors.Is rather than by matching the error's text.
+func TestGetServiceByID_NotFoundSentinel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error": {"detail": "service not found"}}`))
+	}))
+	defer server.Close()
+	client := NewClientWithToken(server.URL, "test-token")
+
+	_, err := getServiceByID(context.Background(), client, "svc_gone")
+	if err == nil {
+		t.Fatal("getServiceByID returned nil error for a real 404, want a non-nil error wrapping ErrNotFound")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("errors.Is(err, ErrNotFound) = false for a real 404, want true (err: %v)", err)
+	}
+}
+
+// TestWaitForServiceState_PinsRealInterval proves the thin production wrapper actually pins
+// defaultServiceRolloutPollInterval rather than e.g. accidentally passing 0 (which would busy-
+// loop) or forgetting to wire it at all. Does not wait a real 10s: instead confirms a service
+// already in RUNNING settles on the very first poll (no interval sleep needed either way), then
+// separately asserts the pinned constant's value directly so a change to the real production
+// timing is a deliberate, visible diff rather than silent.
+func TestWaitForServiceState_PinsRealInterval(t *testing.T) {
+	if defaultServiceRolloutPollInterval != 10*time.Second {
+		t.Fatalf("defaultServiceRolloutPollInterval = %s, want 10s (contract §5b production timing) - if this changed deliberately, update this assertion too", defaultServiceRolloutPollInterval)
+	}
+
+	server, requestCount := serviceStatePollTestServer(t, "svc_already_running", []string{"RUNNING"}, nil)
+	client := NewClientWithToken(server.URL, "test-token")
+
+	service, err := waitForServiceState(context.Background(), client, "svc_already_running", serviceStateRunning, time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if service.CurrentState != "RUNNING" {
+		t.Errorf("CurrentState = %q, want RUNNING", service.CurrentState)
+	}
+	if got := atomic.LoadInt32(requestCount); got != 1 {
+		t.Errorf("requestCount = %d, want exactly 1 (already RUNNING on the first poll, no interval sleep needed to observe this)", got)
+	}
+}

@@ -3,7 +3,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -51,7 +54,15 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "has kubernetes_config only (not embedded)",
+			// Regression test for F2/C12: aws_config/gcp_config are optional
+			// for K8S clouds (see addCloudResource), so kubernetes_config
+			// alone is a valid, complete all-in-one config - it must count as
+			// embedded. Before C12 this asserted false, which is the exact
+			// bug that misclassified K8S-only clouds as empty, skipped
+			// addCloudResource entirely, and surfaced as "Provider produced
+			// inconsistent result after apply: .compute_stack: was K8S, but
+			// now VM" (F2).
+			name: "has kubernetes_config only (embedded - K8S needs no aws/gcp_config)",
 			plan: CloudResourceModel{
 				KubernetesConfig: types.ObjectValueMust(
 					map[string]attr.Type{},
@@ -61,7 +72,7 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 				GCPConfig:   types.ObjectNull(map[string]attr.Type{}),
 				AzureConfig: types.ObjectNull(map[string]attr.Type{}),
 			},
-			expected: false,
+			expected: true,
 		},
 		{
 			name: "has object_storage only (not embedded)",
@@ -110,6 +121,20 @@ func TestHasEmbeddedResourceConfig(t *testing.T) {
 				t.Errorf("hasEmbeddedResourceConfig() = %v, expected %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+// TestRegionRequiredForCreateError is a regression test for C13: a K8S-only
+// all-in-one cloud (no aws_config, so no subnet-based inference, and no
+// longer treated as empty since C12) with no explicit region would otherwise
+// reach addCloudResource with region="" - a confusing API-level failure
+// instead of a clear provider-level one.
+func TestRegionRequiredForCreateError(t *testing.T) {
+	if summary, detail, hasError := regionRequiredForCreateError(""); !hasError || summary == "" || detail == "" {
+		t.Errorf("regionRequiredForCreateError(\"\") = (%q, %q, %v), want a non-empty error", summary, detail, hasError)
+	}
+	if summary, detail, hasError := regionRequiredForCreateError("us-east-1"); hasError || summary != "" || detail != "" {
+		t.Errorf("regionRequiredForCreateError(\"us-east-1\") = (%q, %q, %v), want no error", summary, detail, hasError)
 	}
 }
 
@@ -220,6 +245,152 @@ func TestGenerateRandomStringUniqueness(t *testing.T) {
 		}
 		seen[result] = true
 	}
+}
+
+// TestGetOrGenerateCredentials_WasPlaceholderSignal is a regression test for
+// C9: getOrGenerateCredentials used to fabricate a placeholder credential
+// with no signal to the caller at all, so a broken all-in-one cloud (config
+// present, credential un-derivable) applied silently. wasPlaceholder must
+// distinguish "fabricated" from "real/derived" so the caller (Create) can
+// warn only for the suspicious case and stay silent for a genuinely empty
+// cloud.
+func TestGetOrGenerateCredentials_WasPlaceholderSignal(t *testing.T) {
+	ctx := context.Background()
+	r := &CloudResource{}
+
+	t.Run("explicit credentials: not a placeholder", func(t *testing.T) {
+		plan := &CloudResourceModel{Credentials: types.StringValue("arn:aws:iam::123:role/real")}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - explicit credentials were provided")
+		}
+		if creds != "arn:aws:iam::123:role/real" {
+			t.Errorf("creds = %v, want the explicit value", creds)
+		}
+	})
+
+	t.Run("derived from aws_config: not a placeholder", func(t *testing.T) {
+		awsObj, diags := flattenAWSConfig(ctx, &AWSConfig{AnyscaleIAMRoleID: "arn:aws:iam::123:role/derived"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test aws_config: %v", diags)
+		}
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: awsObj}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - a credential was derivable from aws_config")
+		}
+		if creds != "arn:aws:iam::123:role/derived" {
+			t.Errorf("creds = %v, want the derived value", creds)
+		}
+	})
+
+	t.Run("K8S compute_stack on AWS: derived from kubernetes_config, not a placeholder", func(t *testing.T) {
+		// aws_config is genuinely absent here - not "present but empty" - since a
+		// K8S-on-AWS all-in-one cloud has no aws_config block at all, only
+		// kubernetes_config. Before this fix, getOrGenerateCredentials had no AWS
+		// case for this and fell straight through to the placeholder branch,
+		// firing a "set aws_config.controlplane_iam_role_arn" warning that does
+		// not apply to K8S clouds - confirmed live during native-B's real EKS
+		// validation (aws-eks-basic, compute_stack = K8S).
+		k8sObj, diags := flattenKubernetesConfig(ctx, &KubernetesConfig{AnyscaleOperatorIAMIdentity: "arn:aws:iam::123:role/eks-operator"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test kubernetes_config: %v", diags)
+		}
+		plan := &CloudResourceModel{
+			Credentials:      types.StringNull(),
+			AWSConfig:        types.ObjectNull(awsConfigAttrTypes()),
+			KubernetesConfig: k8sObj,
+		}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - a credential was derivable from kubernetes_config")
+		}
+		if creds != "arn:aws:iam::123:role/eks-operator" {
+			t.Errorf("creds = %v, want the operator identity from kubernetes_config", creds)
+		}
+	})
+
+	t.Run("K8S compute_stack on GCP: derived from kubernetes_config as valid JSON, not a placeholder", func(t *testing.T) {
+		// Real backend trace (clouds_resource.py): GCP is the ONE
+		// provider that actually parses this field - json.loads(cloud.credentials)
+		// then reads provider_id/project_id/service_account_email out of it. A
+		// bare string (the AWS/Azure K8S fallback shape) fails that parse and
+		// breaks GCP+K8S cloud creation outright - this test exists because an
+		// earlier version of this fix got that wrong (mirrored AWS's bare-string
+		// return for GCP too) and native-B only ever exercised AWS EKS, not GKE,
+		// so the bug went unexercised until this test.
+		k8sObj, diags := flattenKubernetesConfig(ctx, &KubernetesConfig{AnyscaleOperatorIAMIdentity: "gke-operator@my-project.iam.gserviceaccount.com"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test kubernetes_config: %v", diags)
+		}
+		plan := &CloudResourceModel{
+			Credentials:      types.StringNull(),
+			GCPConfig:        types.ObjectNull(gcpConfigAttrTypes()),
+			KubernetesConfig: k8sObj,
+		}
+		creds, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "GCP", false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wasPlaceholder {
+			t.Error("wasPlaceholder = true, want false - a credential was derivable from kubernetes_config")
+		}
+		var parsed map[string]string
+		if err := json.Unmarshal([]byte(creds), &parsed); err != nil {
+			t.Fatalf("creds is not valid JSON (this is exactly what breaks GCP+K8S cloud creation): %v\ncreds = %q", err, creds)
+		}
+		for _, key := range []string{"provider_id", "project_id", "service_account_email"} {
+			if parsed[key] == "" {
+				t.Errorf("parsed[%q] is empty, want a non-empty placeholder/derived value", key)
+			}
+		}
+		if parsed["service_account_email"] != "gke-operator@my-project.iam.gserviceaccount.com" {
+			t.Errorf("service_account_email = %q, want the operator identity from kubernetes_config", parsed["service_account_email"])
+		}
+	})
+
+	t.Run("all-in-one with config present but no derivable role: placeholder AND suspicious", func(t *testing.T) {
+		// aws_config is present (all-in-one, not empty cloud) but its
+		// controlplane_iam_role_arn was left unset - exactly the
+		// forgot-the-role case C9 exists to catch.
+		awsObj, diags := flattenAWSConfig(ctx, &AWSConfig{VPCID: "vpc-123"})
+		if diags.HasError() {
+			t.Fatalf("failed to build test aws_config: %v", diags)
+		}
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: awsObj}
+		_, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", false /* isEmptyCloud */)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !wasPlaceholder {
+			t.Error("wasPlaceholder = false, want true - no role was derivable, a placeholder must have been generated")
+		}
+		// The caller decides whether to warn using wasPlaceholder && !isEmptyCloud;
+		// this case has isEmptyCloud=false, so the caller WOULD warn - verified
+		// separately, this test only pins the signal itself.
+	})
+
+	t.Run("pure empty cloud: placeholder but expected, not suspicious", func(t *testing.T) {
+		plan := &CloudResourceModel{Credentials: types.StringNull(), AWSConfig: types.ObjectNull(awsConfigAttrTypes())}
+		_, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, plan, "AWS", true /* isEmptyCloud */)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !wasPlaceholder {
+			t.Error("wasPlaceholder = false, want true - no config and no explicit credentials means a placeholder is generated")
+		}
+		// Again: the caller's isEmptyCloud=true here means it stays silent
+		// despite wasPlaceholder=true - this is the BYOC/multi-resource cloud pattern case.
+	})
 }
 
 // Test AWS placeholder credential generation
@@ -560,5 +731,198 @@ func TestComputeStackValidation(t *testing.T) {
 				t.Errorf("validation result = %v, expected %v", isValid, tt.shouldBeValid)
 			}
 		})
+	}
+}
+
+// TestReadCloudState_ComputeStackFromDefaultResource is the regression proof
+// for the user-reported import bug: GET /clouds/{id}'s own compute_stack is
+// backend-derived and can disagree with the cloud's actual primary resource
+// (defaulting to VM when the backend doesn't recognize one) - readCloudState
+// must prefer the default resource's own compute_stack, the same source
+// requiredImportConfigBlocks already trusts, falling back to the cloud-level
+// field only when there is no default resource at all.
+func TestReadCloudState_ComputeStackFromDefaultResource(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("cloud-level says VM, default resource says K8S - resource wins", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_test":
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_test", Name: "test-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "VM", // cloud-level derivation disagrees with the real resource below
+				}})
+			case "/api/v2/clouds/cld_test/resources":
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
+					{IsDefault: true, ComputeStack: "K8S"},
+				}})
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_test", state, nil); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "K8S" {
+			t.Errorf("ComputeStack = %q, want %q (from the default resource, not the cloud-level VM default)", got, "K8S")
+		}
+	})
+
+	t.Run("genuinely empty cloud, zero resources - falls back to cloud-level field", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_empty":
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_empty", Name: "empty-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "VM",
+				}})
+			case "/api/v2/clouds/cld_empty/resources":
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{}})
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_empty", state, nil); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "VM" {
+			t.Errorf("ComputeStack = %q, want %q (no default resource to consult, cloud-level fallback is correct)", got, "VM")
+		}
+	})
+
+	t.Run("resources list call fails - falls back to cloud-level field, does not error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_fail":
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_fail", Name: "fail-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "K8S",
+				}})
+			case "/api/v2/clouds/cld_fail/resources":
+				w.WriteHeader(http.StatusInternalServerError)
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_fail", state, nil); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "K8S" {
+			t.Errorf("ComputeStack = %q, want %q (resources call failed, must still fall back to the cloud-level value)", got, "K8S")
+		}
+	})
+
+	// This is the exact shape flagged in re-review: the user's real
+	// repro was a single EKS resource registered via the CLI (never
+	// Terraform-created) then cold-imported. If that resource's is_default
+	// flag is not true - unconfirmed either way against the real backend,
+	// hence hardening rather than assuming - the original fix would silently
+	// fall through to the cloud-level VM default and the user's bug would
+	// persist even with that fix in place.
+	t.Run("single resource, none flagged is_default (cold CLI-created import) - uses the sole resource anyway", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_cli":
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_cli", Name: "cli-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "VM", // cloud-level derivation flips to VM, same as the user's report
+				}})
+			case "/api/v2/clouds/cld_cli/resources":
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
+					{IsDefault: false, ComputeStack: "K8S"}, // NOT flagged default
+				}})
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_cli", state, nil); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "K8S" {
+			t.Errorf("ComputeStack = %q, want %q (exactly one resource exists - no ambiguity, must be used regardless of is_default)", got, "K8S")
+		}
+	})
+
+	t.Run("multiple resources, none flagged is_default - genuinely ambiguous, falls back to cloud-level (no guessing)", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v2/clouds/cld_multi":
+				_ = json.NewEncoder(w).Encode(CloudResponse{Result: CloudResult{
+					ID: "cld_multi", Name: "multi-cloud", Provider: "AWS", Region: "us-east-2",
+					ComputeStack: "VM",
+				}})
+			case "/api/v2/clouds/cld_multi/resources":
+				_ = json.NewEncoder(w).Encode(CloudDeploymentsResponse{Results: []CloudDeploymentResult{
+					{IsDefault: false, ComputeStack: "K8S"},
+					{IsDefault: false, ComputeStack: "VM"},
+				}})
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		state := &CloudResourceModel{}
+		if err := r.readCloudState(ctx, "cld_multi", state, nil); err != nil {
+			t.Fatalf("readCloudState returned error: %v", err)
+		}
+
+		if got := state.ComputeStack.ValueString(); got != "VM" {
+			t.Errorf("ComputeStack = %q, want %q (genuinely ambiguous with 2+ resources and no default flagged - must not guess which one, cloud-level fallback is correct here)", got, "VM")
+		}
+	})
+}
+
+// TestReadCloudState_NotFoundSentinel guards readCloudState's ErrNotFound wrap: it hand-rolls
+// its own request (bypassing DoRequestRaw/DoRequestAndParse entirely) and used to return a bare
+// fmt.Errorf("cloud not found") on a real 404, with no %w wrap - errors.Is(err, ErrNotFound)
+// was always false against it, even though the pre-existing strings.Contains(err.Error(),
+// "not found") check at Read's call site happened to still match the literal text. This does
+// not exercise Read() itself (RemoveResource requires a full tfsdk.State/schema harness this
+// file does not otherwise build), just the sentinel property the call site now depends on.
+func TestReadCloudState_NotFoundSentinel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/clouds/cld_gone" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"detail": "cloud not found"}`)
+			return
+		}
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+	err := r.readCloudState(context.Background(), "cld_gone", &CloudResourceModel{}, nil)
+	if err == nil {
+		t.Fatal("readCloudState returned nil error for a real 404, want a non-nil error wrapping ErrNotFound")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("errors.Is(err, ErrNotFound) = false for a real 404, want true (err: %v)", err)
 	}
 }

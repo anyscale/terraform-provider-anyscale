@@ -50,10 +50,37 @@ func TestParseFragmentContent_MultipleBlocksPerFile(t *testing.T) {
 	}
 }
 
+func TestParseFragmentContent_NewEphemeralResourceAndNewActionTypes(t *testing.T) {
+	content := "```\nrelease-note:new-ephemeral-resource\nephemeral-resource/anyscale_service_credentials: Fetch a running Service's live auth token without ever writing it to state.\n```\n\n```\nrelease-note:new-action\naction/anyscale_system_cluster_terminate: Terminate a System Cluster's underlying compute imperatively.\n```\n"
+	entries, err := parseFragmentContent("210.txt", content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	if entries[0].Type != TypeNewEphemeralResource || entries[1].Type != TypeNewAction {
+		t.Fatalf("got types %q, %q, want %q, %q", entries[0].Type, entries[1].Type, TypeNewEphemeralResource, TypeNewAction)
+	}
+}
+
 func TestParseFragmentContent_UnknownTypeErrors(t *testing.T) {
 	content := "```\nrelease-note:enhancement\nsomething\n```\n"
 	if _, err := parseFragmentContent("1.txt", content); err == nil {
 		t.Fatal("expected an error for an unrecognized type, got nil")
+	}
+}
+
+func TestParseFragmentContent_UnknownTypeErrorListsNewTypes(t *testing.T) {
+	content := "```\nrelease-note:enhancement\nsomething\n```\n"
+	_, err := parseFragmentContent("1.txt", content)
+	if err == nil {
+		t.Fatal("expected an error for an unrecognized type, got nil")
+	}
+	for _, want := range []string{"new-ephemeral-resource", "new-action"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention valid type %q — the error message must stay in sync with typeOrder", err.Error(), want)
+		}
 	}
 }
 
@@ -68,6 +95,20 @@ func TestParseFragmentContent_UnterminatedFenceErrors(t *testing.T) {
 	content := "```\nrelease-note:added\nsomething"
 	if _, err := parseFragmentContent("1.txt", content); err == nil {
 		t.Fatal("expected an error for an unterminated fence, got nil")
+	}
+}
+
+func TestRenderSection_NewEphemeralResourceAndNewActionHeadingsAndOrder(t *testing.T) {
+	entries := []Entry{
+		{Type: TypeAdded, Text: "add one"},
+		{Type: TypeNewAction, Text: "action one"},
+		{Type: TypeNewResource, Text: "resource one"},
+		{Type: TypeNewEphemeralResource, Text: "ephemeral one"},
+	}
+	got := RenderSection(entries)
+	want := "### New Resources\n\n- resource one\n\n### New Ephemeral Resources\n\n- ephemeral one\n\n### New Actions\n\n- action one\n\n### Added\n\n- add one\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
 
@@ -139,9 +180,33 @@ func TestFold_NoNextHeadingReplacesToEOF(t *testing.T) {
 	}
 }
 
-func TestFold_MissingMarkerErrors(t *testing.T) {
-	if _, err := Fold("# Changelog\n\nno marker here\n", "x"); err == nil {
-		t.Fatal("expected an error when ## [Unreleased] is missing, got nil")
+func TestFold_MissingMarkerInsertsFreshOneBeforeNewestVersion(t *testing.T) {
+	// Finalize no longer leaves a standing empty ## [Unreleased] behind, so this
+	// is the normal state of CHANGELOG.md between releases. A real fragment to
+	// fold must still produce a correct, freshly-created Unreleased section,
+	// placed immediately above the newest version heading.
+	changelog := "# Changelog\n\nintro\n\n## [0.2.0] - 2026-08-01\n\nstuff\n"
+	got, err := Fold(changelog, "### Added\n\n- new thing\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "# Changelog\n\nintro\n\n## [Unreleased]\n\n### Added\n\n- new thing\n\n## [0.2.0] - 2026-08-01\n\nstuff\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestFold_MissingMarkerAndEmptyBodyIsANoOp(t *testing.T) {
+	// No Unreleased heading, and nothing to fold: don't manufacture an empty
+	// heading just to have one - that's the exact cosmetic problem this design
+	// avoids. The changelog is returned byte-for-byte unchanged.
+	changelog := "# Changelog\n\n## [0.2.0] - 2026-08-01\n\nstuff\n"
+	got, err := Fold(changelog, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != changelog {
+		t.Errorf("expected no-op, got:\n%q\nwant:\n%q", got, changelog)
 	}
 }
 
@@ -161,19 +226,224 @@ func TestFold_RunningTwiceWithSameInputIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestFinalize_RenamesUnreleasedAndInsertsFreshOne(t *testing.T) {
+func TestFinalize_RenamesUnreleasedInPlaceWithNoFreshOne(t *testing.T) {
+	// The changelog must lead with the newest real version - no empty
+	// ## [Unreleased] placeholder left standing above it. Fold is what brings
+	// Unreleased back, the next time there is a real fragment to fold in.
 	changelog := "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
 	newChangelog, notes, err := Finalize(changelog, "0.2.0", "2026-08-01")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantChangelog := "# Changelog\n\n## [Unreleased]\n\n## [0.2.0] - 2026-08-01\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
+	wantChangelog := "# Changelog\n\n## [0.2.0] - 2026-08-01\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
 	if newChangelog != wantChangelog {
 		t.Errorf("changelog:\ngot:\n%q\nwant:\n%q", newChangelog, wantChangelog)
+	}
+	if strings.Contains(newChangelog, unreleasedMarker) {
+		t.Errorf("no ## [Unreleased] heading should remain after finalize:\n%s", newChangelog)
 	}
 	wantNotes := "### Added\n\n- new thing"
 	if notes != wantNotes {
 		t.Errorf("notes:\ngot:\n%q\nwant:\n%q", notes, wantNotes)
+	}
+}
+
+func TestFinalize_UpdatesFooterLinks(t *testing.T) {
+	// Real anyscale footer, drifted exactly as CHANGELOG.md is today: [Unreleased]
+	// still compares from v0.1.1 and there's no [0.2.0] tag link yet.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Added\n\n- new thing\n\n" +
+		"## [0.1.1] - 2026-07-06\n\nold content\n\n" +
+		"[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD\n" +
+		"[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n" +
+		"[0.0.1-dev]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1-dev\n"
+
+	newChangelog, _, err := Finalize(changelog, "0.2.0", "2026-08-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// [Unreleased] must now compare FROM the new version, and the old compare
+	// base (v0.1.1) must be gone from the Unreleased line.
+	wantUnreleased := "[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.2.0...HEAD"
+	if !strings.Contains(newChangelog, wantUnreleased+"\n") {
+		t.Errorf("expected rewritten Unreleased compare line %q, got changelog:\n%s", wantUnreleased, newChangelog)
+	}
+	if strings.Contains(newChangelog, "compare/v0.1.1...HEAD") {
+		t.Errorf("stale compare base v0.1.1 should no longer appear on the Unreleased line:\n%s", newChangelog)
+	}
+
+	// A new [0.2.0] tag link must be inserted immediately below [Unreleased]
+	// (newest-first), and the previous version links must be preserved.
+	wantTag020 := "[0.2.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.2.0"
+	if !strings.Contains(newChangelog, wantTag020+"\n") {
+		t.Errorf("expected new tag link %q in footer, got:\n%s", wantTag020, newChangelog)
+	}
+	if !strings.Contains(newChangelog, "[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n") {
+		t.Errorf("existing [0.1.1] link must be preserved:\n%s", newChangelog)
+	}
+	if !strings.Contains(newChangelog, "[0.0.1-dev]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1-dev\n") {
+		t.Errorf("existing [0.0.1-dev] link must be preserved:\n%s", newChangelog)
+	}
+
+	// Ordering: the whole footer block must be newest-first, exactly.
+	wantFooter := wantUnreleased + "\n" +
+		wantTag020 + "\n" +
+		"[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n" +
+		"[0.0.1-dev]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.0.1-dev\n"
+	if !strings.HasSuffix(newChangelog, wantFooter) {
+		t.Errorf("footer ordering/content wrong.\ngot changelog:\n%s\nwant footer suffix:\n%s", newChangelog, wantFooter)
+	}
+}
+
+func TestFinalize_FooterBaseURLIsParsedNotHardcoded(t *testing.T) {
+	// A completely different repo host/owner. If the base URL were hardcoded to
+	// the anyscale one, these assertions would fail.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Fixed\n\n- a bug\n\n" +
+		"## [1.0.0] - 2026-01-01\n\nstuff\n\n" +
+		"[Unreleased]: https://gitlab.example.com/team/widget/compare/v1.0.0...HEAD\n" +
+		"[1.0.0]: https://gitlab.example.com/team/widget/releases/tag/v1.0.0\n"
+
+	newChangelog, _, err := Finalize(changelog, "1.1.0", "2026-02-02")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantUnreleased := "[Unreleased]: https://gitlab.example.com/team/widget/compare/v1.1.0...HEAD"
+	wantTag := "[1.1.0]: https://gitlab.example.com/team/widget/releases/tag/v1.1.0"
+	if !strings.Contains(newChangelog, wantUnreleased+"\n") {
+		t.Errorf("base URL not derived from footer; expected %q in:\n%s", wantUnreleased, newChangelog)
+	}
+	if !strings.Contains(newChangelog, wantTag+"\n") {
+		t.Errorf("base URL not derived from footer; expected %q in:\n%s", wantTag, newChangelog)
+	}
+	if strings.Contains(newChangelog, "anyscale") {
+		t.Errorf("footer must not contain a hardcoded anyscale URL:\n%s", newChangelog)
+	}
+}
+
+func TestFinalize_NoFooterSectionLeavesBodyIntact(t *testing.T) {
+	// No reference-link footer at all. Documented behavior: leave the changelog
+	// body correct and do NOT fabricate a footer (we can't derive the repo URL).
+	changelog := "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
+
+	newChangelog, notes, err := Finalize(changelog, "0.2.0", "2026-08-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The body transform (rename in place, no fresh Unreleased) must still be correct...
+	wantChangelog := "# Changelog\n\n## [0.2.0] - 2026-08-01\n\n### Added\n\n- new thing\n\n## [0.1.1] - 2026-07-06\n\nold content\n"
+	if newChangelog != wantChangelog {
+		t.Errorf("body should be finalized unchanged when there is no footer.\ngot:\n%q\nwant:\n%q", newChangelog, wantChangelog)
+	}
+	// ...and no footer link definitions should have been fabricated.
+	if strings.Contains(newChangelog, "compare/") || strings.Contains(newChangelog, "releases/tag/") {
+		t.Errorf("no footer should be fabricated when none exists:\n%s", newChangelog)
+	}
+	if notes != "### Added\n\n- new thing" {
+		t.Errorf("release notes wrong: %q", notes)
+	}
+}
+
+func TestFinalize_FooterBaseFallsBackToTagURL(t *testing.T) {
+	// The [Unreleased] line is present but its target is NOT a parseable
+	// compare URL (here it just points at a bare tree URL). The base URL must
+	// then be derived from the [1.0.0] tag line instead, proving the fallback
+	// path is real and not dead code.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Fixed\n\n- a bug\n\n" +
+		"## [1.0.0] - 2026-01-01\n\nstuff\n\n" +
+		"[Unreleased]: https://example.org/acme/thing/tree/main\n" +
+		"[1.0.0]: https://example.org/acme/thing/releases/tag/v1.0.0\n"
+
+	newChangelog, _, err := Finalize(changelog, "1.1.0", "2026-02-02")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantUnreleased := "[Unreleased]: https://example.org/acme/thing/compare/v1.1.0...HEAD"
+	wantTag := "[1.1.0]: https://example.org/acme/thing/releases/tag/v1.1.0"
+	if !strings.Contains(newChangelog, wantUnreleased+"\n") {
+		t.Errorf("expected base derived from tag URL in Unreleased line %q, got:\n%s", wantUnreleased, newChangelog)
+	}
+	if !strings.Contains(newChangelog, wantTag+"\n") {
+		t.Errorf("expected new tag link %q, got:\n%s", wantTag, newChangelog)
+	}
+}
+
+func TestFinalize_FooterWithNoDerivableBaseLeftUnchanged(t *testing.T) {
+	// An [Unreleased] line exists but there is NO compare URL and NO tag line to
+	// derive a base URL from. We can't safely edit it, so the footer (and body)
+	// must be left exactly as-is rather than emitting a malformed URL.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Fixed\n\n- a bug\n\n" +
+		"## [1.0.0] - 2026-01-01\n\nstuff\n\n" +
+		"[Unreleased]: see the git log\n"
+
+	newChangelog, _, err := Finalize(changelog, "1.1.0", "2026-02-02")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasSuffix(newChangelog, "[Unreleased]: see the git log\n") {
+		t.Errorf("footer with no derivable base URL must be left unchanged, got:\n%s", newChangelog)
+	}
+	if strings.Contains(newChangelog, "compare/") || strings.Contains(newChangelog, "releases/tag/") {
+		t.Errorf("must not fabricate URLs when no base is derivable:\n%s", newChangelog)
+	}
+}
+
+func TestFinalize_FooterMaintenanceIsIdempotentInSpirit(t *testing.T) {
+	// Finalizing X.Y.Z, then re-finalizing the SAME X.Y.Z against the produced
+	// footer, must leave a consistent footer: [Unreleased] still compares from
+	// X.Y.Z and the [X.Y.Z] tag link is present exactly once (no duplicate, no
+	// drift). This proves the footer transform re-parses stably.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Added\n\n- new thing\n\n" +
+		"## [0.1.1] - 2026-07-06\n\nold\n\n" +
+		"[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD\n" +
+		"[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n"
+
+	once, _, err := Finalize(changelog, "0.2.0", "2026-08-01")
+	if err != nil {
+		t.Fatalf("first Finalize: %v", err)
+	}
+	// Re-run updateFooterLinks directly for the same version against the already
+	// finalized footer: this is the "re-parsing is stable" property.
+	twiceFooter := updateFooterLinks(once, "0.2.0")
+
+	wantUnreleasedCount := strings.Count(twiceFooter, "compare/v0.2.0...HEAD")
+	if wantUnreleasedCount != 1 {
+		t.Errorf("expected exactly one Unreleased compare-from-0.2.0 line, got %d:\n%s", wantUnreleasedCount, twiceFooter)
+	}
+	tagCount := strings.Count(twiceFooter, "[0.2.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.2.0")
+	if tagCount != 1 {
+		t.Errorf("expected exactly one [0.2.0] tag link after re-parse, got %d:\n%s", tagCount, twiceFooter)
+	}
+	if strings.Contains(twiceFooter, "compare/v0.1.1...HEAD") {
+		t.Errorf("re-parse must not resurrect the stale v0.1.1 compare base:\n%s", twiceFooter)
+	}
+}
+
+func TestFinalize_ReleaseNotesExcludeFooterLinks(t *testing.T) {
+	// The releaseNotes value must be the section body only — never any footer
+	// link definitions, even when a footer is present and gets maintained.
+	changelog := "# Changelog\n\n" +
+		"## [Unreleased]\n\n### Added\n\n- new thing\n\n" +
+		"## [0.1.1] - 2026-07-06\n\nold\n\n" +
+		"[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.1.1...HEAD\n" +
+		"[0.1.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.1.1\n"
+
+	_, notes, err := Finalize(changelog, "0.2.0", "2026-08-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if notes != "### Added\n\n- new thing" {
+		t.Errorf("release notes must be the section body only, got:\n%q", notes)
+	}
+	if strings.Contains(notes, "compare/") || strings.Contains(notes, "releases/tag/") || strings.Contains(notes, "[Unreleased]:") {
+		t.Errorf("release notes must not contain footer link definitions, got:\n%q", notes)
 	}
 }
 
@@ -240,10 +510,14 @@ func TestExtract_UnknownVersionErrors(t *testing.T) {
 }
 
 func TestParseFragments_EndToEndAndDeterministicOrder(t *testing.T) {
+	// Bodies carry a "provider: " component prefix (rather than bare "fix
+	// from PR N") purely to satisfy parseFragmentContent's component-prefix
+	// validation — this test's own subject is filename-based ordering, not
+	// prefix content, so the prefix itself is incidental to what's asserted.
 	dir := t.TempDir()
-	writeFragment(t, dir, "100.txt", "```\nrelease-note:fixed\nfix from PR 100\n```\n")
-	writeFragment(t, dir, "7.txt", "```\nrelease-note:fixed\nfix from PR 7\n```\n")
-	writeFragment(t, dir, "42.txt", "```\nrelease-note:fixed\nfix from PR 42\n```\n")
+	writeFragment(t, dir, "100.txt", "```\nrelease-note:fixed\nprovider: fix from PR 100\n```\n")
+	writeFragment(t, dir, "7.txt", "```\nrelease-note:fixed\nprovider: fix from PR 7\n```\n")
+	writeFragment(t, dir, "42.txt", "```\nrelease-note:fixed\nprovider: fix from PR 42\n```\n")
 
 	entries, err := ParseFragments(dir)
 	if err != nil {
@@ -253,7 +527,7 @@ func TestParseFragments_EndToEndAndDeterministicOrder(t *testing.T) {
 		t.Fatalf("got %d entries, want 3", len(entries))
 	}
 	got := []string{entries[0].Text, entries[1].Text, entries[2].Text}
-	want := []string{"fix from PR 7", "fix from PR 42", "fix from PR 100"}
+	want := []string{"provider: fix from PR 7", "provider: fix from PR 42", "provider: fix from PR 100"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("entry %d: got %q, want %q (numeric PR order)", i, got[i], want[i])

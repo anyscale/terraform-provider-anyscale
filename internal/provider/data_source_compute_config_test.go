@@ -1,247 +1,681 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestComputeConfigLookupValidation tests validation of ID vs Name lookup
-func TestComputeConfigLookupValidation(t *testing.T) {
-	tests := []struct {
-		name      string
-		id        types.String
-		cfgName   types.String
-		wantError bool
-		errorMsg  string
-	}{
-		{
-			name:      "ID provided",
-			id:        types.StringValue("ccfg_123"),
-			cfgName:   types.StringNull(),
-			wantError: false,
-		},
-		{
-			name:      "name provided",
-			id:        types.StringNull(),
-			cfgName:   types.StringValue("my-config"),
-			wantError: false,
-		},
-		{
-			name:      "neither provided",
-			id:        types.StringNull(),
-			cfgName:   types.StringNull(),
-			wantError: true,
-			errorMsg:  "Either 'id' or 'name' must be specified",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate validation logic from Read method
-			hasID := !tt.id.IsNull()
-			hasName := !tt.cfgName.IsNull()
-
-			var gotError bool
-			var gotErrorMsg string
-
-			if !hasID && !hasName {
-				gotError = true
-				gotErrorMsg = "Either 'id' or 'name' must be specified"
-			}
-
-			if gotError != tt.wantError {
-				t.Errorf("validation error = %v, wantError %v", gotError, tt.wantError)
-			}
-
-			if tt.wantError && gotErrorMsg != tt.errorMsg {
-				t.Errorf("error message = %v, want %v", gotErrorMsg, tt.errorMsg)
-			}
-		})
+// computeConfigDataSourceLookupFixture builds a minimal valid by-id lookup
+// plan: every Object/List/Map/Dynamic-typed attribute must be explicitly
+// typed-null (matching the schema's exact attr types), not left at its Go
+// zero value, or tfsdk.Config.Set rejects it with a Value Conversion Error.
+func computeConfigDataSourceLookupFixture(id string) ComputeConfigDataSourceModel {
+	return ComputeConfigDataSourceModel{
+		ID:                     types.StringValue(id),
+		Versions:               types.ListNull(types.Int64Type),
+		Zones:                  types.ListNull(types.StringType),
+		HeadNode:               types.ObjectNull(nodeConfigAttrTypes()),
+		WorkerNodes:            types.ListNull(types.ObjectType{AttrTypes: workerNodeConfigAttrTypes()}),
+		MinResources:           types.MapNull(types.Float64Type),
+		MaxResources:           types.MapNull(types.Float64Type),
+		Flags:                  types.DynamicNull(),
+		AdvancedInstanceConfig: types.DynamicNull(),
+		AdditionalResources:    types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()}),
 	}
 }
 
-// TestComputeConfigCloudFiltering tests cloud ID and name filtering
-func TestComputeConfigCloudFiltering(t *testing.T) {
-	tests := []struct {
-		name            string
-		cloudID         types.String
-		cloudName       types.String
-		expectedCloudID string
-	}{
-		{
-			name:            "cloud_id provided",
-			cloudID:         types.StringValue("cld_123"),
-			cloudName:       types.StringNull(),
-			expectedCloudID: "cld_123",
-		},
-		{
-			name:            "cloud_name provided (resolved)",
-			cloudID:         types.StringNull(),
-			cloudName:       types.StringValue("my-cloud"),
-			expectedCloudID: "cld_456", // Simulated resolved ID
-		},
-		{
-			name:            "neither provided",
-			cloudID:         types.StringNull(),
-			cloudName:       types.StringNull(),
-			expectedCloudID: "",
-		},
+// runComputeConfigDataSourceRead drives ComputeConfigDataSource's real Read()
+// method end-to-end against a model representing the user's config, the same
+// pattern as runContainerImageDataSourceRead/runProjectDataSourceRead.
+func runComputeConfigDataSourceRead(t *testing.T, d *ComputeConfigDataSource, model ComputeConfigDataSourceModel) (ComputeConfigDataSourceModel, diag.Diagnostics) {
+	t.Helper()
+	ctx := context.Background()
+
+	var schemaResp datasource.SchemaResponse
+	d.Schema(ctx, datasource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Simulate cloud filtering logic
-			cloudID := ""
-			if !tt.cloudID.IsNull() {
-				cloudID = tt.cloudID.ValueString()
-			} else if !tt.cloudName.IsNull() {
-				// Simulated resolution
-				cloudID = "cld_456"
+	state := tfsdk.State{Schema: schemaResp.Schema}
+	setDiags := state.Set(ctx, &model)
+	if setDiags.HasError() {
+		t.Fatalf("failed to build config fixture: %v", setDiags)
+	}
+	config := tfsdk.Config(state)
+
+	readResp := &datasource.ReadResponse{
+		State: tfsdk.State(config),
+	}
+	d.Read(ctx, datasource.ReadRequest{Config: config}, readResp)
+
+	if readResp.Diagnostics.HasError() {
+		return ComputeConfigDataSourceModel{}, readResp.Diagnostics
+	}
+
+	var result ComputeConfigDataSourceModel
+	getDiags := readResp.State.Get(ctx, &result)
+	if getDiags.HasError() {
+		t.Fatalf("failed to decode result state: %v", getDiags)
+	}
+	return result, readResp.Diagnostics
+}
+
+// TestComputeConfigRead_HitsAPIV2Endpoint is the CC5b GET-migration proof:
+// Read()'s by-id lookup must hit api/v2/compute_templates, not the deprecated
+// ext/v0/cluster_computes. The mock's catch-all failure handler on any other
+// path is what makes this load-bearing - it would fail if either the old GET
+// path or the old search path were still hit.
+func TestComputeConfigRead_HitsAPIV2Endpoint(t *testing.T) {
+	const configID = "cpt_abc123"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/compute_templates/"+configID:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"result": {
+				"id": "` + configID + `", "name": "tfacc-cc-v2", "version": 3,
+				"created_at": "2024-01-01T00:00:00Z", "last_modified_at": "2024-01-02T00:00:00Z",
+				"config": {}
+			}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/compute_templates/search":
+			// fetchComputeConfigVersions still runs and errors are only
+			// warned/tolerated, but serve it properly so this test proves a
+			// clean end-to-end Read, not a Read that happens to succeed despite
+			// a swallowed versions-fetch error. CC5b migrated this call from
+			// POST /ext/v0/cluster_computes/search to this endpoint (#113) -
+			// matched on path only (not the count/paging_token query string)
+			// since this test doesn't exercise pagination itself; see
+			// TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody
+			// for the dedicated query-vs-body proof.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"results": [{"id": "` + configID + `", "name": "tfacc-cc-v2", "version": 3}], "metadata": {"next_paging_token": null}}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	result, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture(configID))
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if result.ID.ValueString() != configID {
+		t.Errorf("id = %q, want %q", result.ID.ValueString(), configID)
+	}
+	if result.Name.ValueString() != "tfacc-cc-v2" {
+		t.Errorf("name = %q, want %q", result.Name.ValueString(), "tfacc-cc-v2")
+	}
+	if result.Version.ValueInt64() != 3 {
+		t.Errorf("version = %d, want 3", result.Version.ValueInt64())
+	}
+}
+
+// TestComputeConfigRead_NotFoundByID_ProducesAPIError confirms the not-found
+// path still works, unchanged, after the URL migration: only http.StatusOK is
+// accepted (deliberately not widened to also accept http.StatusNotFound - see
+// the comment on the GET call in data_source_compute_config.go), so a real 404
+// fails isStatusExpected and produces a genuine error, not a silently-empty
+// success.
+func TestComputeConfigRead_NotFoundByID_ProducesAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail": "compute template not found"}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+	_, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture("cpt_missing"))
+	if !diags.HasError() {
+		t.Fatal("expected an error on a 404, got none")
+	}
+}
+
+// dynamicObjectAttrs unwraps a types.Dynamic asserted to hold a types.Object,
+// the shape InterfaceToDynamic always produces for a non-empty map. Fails the
+// test immediately on null/unknown/wrong-type rather than returning a zero
+// value, since every caller here is asserting real content is present.
+func dynamicObjectAttrs(t *testing.T, d types.Dynamic) map[string]attr.Value {
+	t.Helper()
+	if d.IsNull() || d.IsUnknown() {
+		t.Fatalf("dynamic value is null or unknown, want an object with real content")
+	}
+	obj, ok := d.UnderlyingValue().(types.Object)
+	if !ok {
+		t.Fatalf("dynamic underlying value = %T, want types.Object", d.UnderlyingValue())
+	}
+	return obj.Attributes()
+}
+
+// TestComputeConfigRead_ClusterLevelFieldParity is the DS-CC-7 proof: the five
+// cluster-level fields that used to be resource-only (cloud_resource,
+// min_resources, max_resources, top-level flags, top-level
+// advanced_instance_config - see the Compute Config guide's former "Known
+// limitations" section) round-trip through the data source correctly in both
+// directions - present in the API response, and absent.
+//
+// The "present" fixture deliberately reuses the exact payload shape
+// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI already
+// validated live against the real backend (disable_gpu_health_checks/
+// allow-cross-zone-autoscaling/min_resources/max_resources as flags, and a
+// TagSpecifications advanced_instance_config containing a nested list of
+// tag objects), rather than a fresh invented shape, for two reasons: it is
+// known-real, and TagSpecifications is a list of OBJECTS containing another
+// list of objects (Tags) - the exact shape that HCL/the framework infers as
+// nested types.Tuple, not types.List, and that silently null-ed out before
+// the CC15 fix. An empty or scalar-only fixture would not exercise that path
+// at all (see the CC15 memory: "An empty-list mock config proves nothing").
+func TestComputeConfigRead_ClusterLevelFieldParity(t *testing.T) {
+	const configID = "cpt_parity1"
+
+	newServer := func(t *testing.T, configJSON string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/compute_templates/"+configID:
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"result": {
+					"id": "` + configID + `", "name": "tfacc-cc-parity", "version": 1,
+					"created_at": "2024-01-01T00:00:00Z", "last_modified_at": "2024-01-02T00:00:00Z",
+					"config": ` + configJSON + `
+				}}`))
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v2/compute_templates/search":
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"results": [{"id": "` + configID + `", "name": "tfacc-cc-parity", "version": 1}], "metadata": {"next_paging_token": null}}`))
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/clouds/cld_1":
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"result": {"id": "cld_1", "name": "tfacc-cloud-parity"}}`))
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+				w.WriteHeader(http.StatusNotFound)
 			}
+		}))
+	}
 
-			if cloudID != tt.expectedCloudID {
-				t.Errorf("cloudID = %v, want %v", cloudID, tt.expectedCloudID)
-			}
-		})
+	t.Run("present", func(t *testing.T) {
+		server := newServer(t, `{
+			"cloud_id": "cld_1",
+			"deployment_configs": [{
+				"cloud_deployment": "my-cloud-resource",
+				"flags": {
+					"min_resources": {"CPU": 4},
+					"max_resources": {"CPU": 100},
+					"allow-cross-zone-autoscaling": true,
+					"disable_gpu_health_checks": true
+				},
+				"advanced_configurations_json": {
+					"TagSpecifications": [{
+						"ResourceType": "instance",
+						"Tags": [{"Key": "team", "Value": "ml-platform"}]
+					}]
+				}
+			}]
+		}`)
+		defer server.Close()
+
+		d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+		result, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture(configID))
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+
+		if got, want := result.CloudResource.ValueString(), "my-cloud-resource"; got != want {
+			t.Errorf("cloud_resource = %q, want %q", got, want)
+		}
+
+		minEls := result.MinResources.Elements()
+		if cpu, ok := minEls["CPU"].(types.Float64); !ok || cpu.ValueFloat64() != 4 {
+			t.Errorf("min_resources[CPU] = %#v, want 4", minEls["CPU"])
+		}
+		maxEls := result.MaxResources.Elements()
+		if cpu, ok := maxEls["CPU"].(types.Float64); !ok || cpu.ValueFloat64() != 100 {
+			t.Errorf("max_resources[CPU] = %#v, want 100", maxEls["CPU"])
+		}
+
+		flagsAttrs := dynamicObjectAttrs(t, result.Flags)
+		if len(flagsAttrs) != 1 {
+			t.Fatalf("flags has %d entries %v, want exactly 1 (disable_gpu_health_checks only) - "+
+				"min_resources/max_resources/allow-cross-zone-autoscaling must be stripped since "+
+				"each already has its own attribute", len(flagsAttrs), flagsAttrs)
+		}
+		if b, ok := flagsAttrs["disable_gpu_health_checks"].(types.Bool); !ok || !b.ValueBool() {
+			t.Errorf("flags.disable_gpu_health_checks = %#v, want true", flagsAttrs["disable_gpu_health_checks"])
+		}
+
+		advAttrs := dynamicObjectAttrs(t, result.AdvancedInstanceConfig)
+		tagSpecs, ok := advAttrs["TagSpecifications"].(types.Tuple)
+		if !ok {
+			t.Fatalf("advanced_instance_config.TagSpecifications = %#v (type %T), want types.Tuple - "+
+				"nil/wrong-type here means the API response's list-of-objects silently dropped, "+
+				"the CC15 failure shape", advAttrs["TagSpecifications"], advAttrs["TagSpecifications"])
+		}
+		if len(tagSpecs.Elements()) != 1 {
+			t.Fatalf("len(TagSpecifications) = %d, want 1", len(tagSpecs.Elements()))
+		}
+		tagSpecObj, ok := tagSpecs.Elements()[0].(types.Object)
+		if !ok {
+			t.Fatalf("TagSpecifications[0] = %T, want types.Object", tagSpecs.Elements()[0])
+		}
+		if rt, ok := tagSpecObj.Attributes()["ResourceType"].(types.String); !ok || rt.ValueString() != "instance" {
+			t.Errorf("TagSpecifications[0].ResourceType = %#v, want \"instance\"", tagSpecObj.Attributes()["ResourceType"])
+		}
+		tagsTuple, ok := tagSpecObj.Attributes()["Tags"].(types.Tuple)
+		if !ok || len(tagsTuple.Elements()) != 1 {
+			t.Fatalf("TagSpecifications[0].Tags = %#v, want a 1-element types.Tuple (nested list of objects)", tagSpecObj.Attributes()["Tags"])
+		}
+		tagObj, ok := tagsTuple.Elements()[0].(types.Object)
+		if !ok {
+			t.Fatalf("Tags[0] = %T, want types.Object", tagsTuple.Elements()[0])
+		}
+		if key, ok := tagObj.Attributes()["Key"].(types.String); !ok || key.ValueString() != "team" {
+			t.Errorf("Tags[0].Key = %#v, want \"team\"", tagObj.Attributes()["Key"])
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		server := newServer(t, `{"cloud_id": "cld_1"}`)
+		defer server.Close()
+
+		d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+		result, diags := runComputeConfigDataSourceRead(t, d, computeConfigDataSourceLookupFixture(configID))
+		if diags.HasError() {
+			t.Fatalf("unexpected error: %v", diags)
+		}
+
+		if !result.CloudResource.IsNull() {
+			t.Errorf("cloud_resource = %#v, want null", result.CloudResource)
+		}
+		if !result.MinResources.IsNull() {
+			t.Errorf("min_resources = %#v, want null", result.MinResources)
+		}
+		if !result.MaxResources.IsNull() {
+			t.Errorf("max_resources = %#v, want null", result.MaxResources)
+		}
+		if !result.Flags.IsNull() {
+			t.Errorf("flags = %#v, want null", result.Flags)
+		}
+		if !result.AdvancedInstanceConfig.IsNull() {
+			t.Errorf("advanced_instance_config = %#v, want null", result.AdvancedInstanceConfig)
+		}
+	})
+}
+
+// This file previously only "tested" hand-copied re-implementations of the
+// data source's logic (e.g. re-running the same if-statement inline in the
+// test rather than calling findComputeConfigByName), so a real bug in the
+// actual functions would never have been caught. These now drive the real,
+// unexported methods against an httptest server standing in for the
+// Anyscale API - the same pattern api_helpers_test.go already established
+// in this package, just applied to the two data-source methods with real
+// logic worth pinning: multi-match resolution and version collection.
+
+// TestFindComputeConfigByName_MultipleMatchesReturnsMostRecent exercises the
+// real findComputeConfigByName, not a re-implementation of its loop: the
+// search API can return more than one compute config for the same name
+// (e.g. created in different clouds, or historical duplicates), and the
+// documented behavior is "most recently created wins".
+func TestFindComputeConfigByName_MultipleMatchesReturnsMostRecent(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results": [
+			{"id": "ccfg_older", "name": "test-config", "created_at": "2024-01-01T00:00:00Z", "anonymous": false},
+			{"id": "ccfg_newer", "name": "test-config", "created_at": "2024-06-01T00:00:00Z", "anonymous": false}
+		]}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.findComputeConfigByName(ctx, "test-config", "")
+	if err != nil {
+		t.Fatalf("findComputeConfigByName() error = %v", err)
+	}
+	if got != "ccfg_newer" {
+		t.Errorf("findComputeConfigByName() = %q, want %q (the more recently created match)", got, "ccfg_newer")
 	}
 }
 
-// TestComputeConfigFieldMapping tests mapping of API fields to model
-func TestComputeConfigFieldMapping(t *testing.T) {
-	model := ComputeConfigDataSourceModel{
-		ID:                     types.StringValue("ccfg_123"),
-		ConfigID:               types.StringValue("ccfg_123"),
-		Name:                   types.StringValue("my-config"),
-		NameVersion:            types.StringValue("my-config:3"),
-		CloudID:                types.StringValue("cld_456"),
-		CloudName:              types.StringValue("my-cloud"),
-		Region:                 types.StringValue("us-west-2"),
-		IdleTerminationMinutes: types.Int64Value(120),
-		MaximumUptimeMinutes:   types.Int64Value(480),
-		EnableCrossZoneScaling: types.BoolValue(true),
-		AutoSelectWorkerConfig: types.BoolValue(false),
-		ProjectID:              types.StringValue("prj_789"),
-		Version:                types.Int64Value(3),
-		CreatedAt:              types.StringValue("2024-01-01T00:00:00Z"),
-		LastModifiedAt:         types.StringValue("2024-01-02T00:00:00Z"),
-		Versions:               types.ListNull(types.Int64Type), // Would be populated from API
-	}
+// TestFindComputeConfigByName_NotFound proves the real function returns an
+// empty string with no error when the search API finds nothing, which the
+// caller in Read() relies on to report a clean "not found" diagnostic rather
+// than a confusing generic error.
+func TestFindComputeConfigByName_NotFound(t *testing.T) {
+	ctx := context.Background()
 
-	// Verify all fields are correctly set
-	if model.ID.ValueString() != "ccfg_123" {
-		t.Errorf("ID = %v, want 'ccfg_123'", model.ID.ValueString())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results": []}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.findComputeConfigByName(ctx, "does-not-exist", "")
+	if err != nil {
+		t.Fatalf("findComputeConfigByName() error = %v, want nil", err)
 	}
-	if model.ConfigID.ValueString() != "ccfg_123" {
-		t.Errorf("ConfigID = %v, want 'ccfg_123'", model.ConfigID.ValueString())
-	}
-	if model.NameVersion.ValueString() != "my-config:3" {
-		t.Errorf("NameVersion = %v, want 'my-config:3'", model.NameVersion.ValueString())
-	}
-	if model.Region.ValueString() != "us-west-2" {
-		t.Errorf("Region = %v, want 'us-west-2'", model.Region.ValueString())
-	}
-	if model.IdleTerminationMinutes.ValueInt64() != 120 {
-		t.Errorf("IdleTerminationMinutes = %v, want 120", model.IdleTerminationMinutes.ValueInt64())
-	}
-	if model.EnableCrossZoneScaling.ValueBool() != true {
-		t.Errorf("EnableCrossZoneScaling = %v, want true", model.EnableCrossZoneScaling.ValueBool())
-	}
-	if model.Version.ValueInt64() != 3 {
-		t.Errorf("Version = %v, want 3", model.Version.ValueInt64())
+	if got != "" {
+		t.Errorf("findComputeConfigByName() = %q, want empty string for no match", got)
 	}
 }
 
-// TestComputeConfigBooleanDefaults tests default values for boolean fields
-func TestComputeConfigBooleanDefaults(t *testing.T) {
-	model := ComputeConfigDataSourceModel{
-		EnableCrossZoneScaling: types.BoolValue(false), // Should default to false
-		AutoSelectWorkerConfig: types.BoolValue(false), // Should default to false
-	}
+// TestFindComputeConfigByName_FiltersByCloudID confirms cloud_id is actually
+// forwarded into the search payload when provided - a regression here would
+// silently ignore the cloud_id filter and could resolve to a same-named
+// config on the wrong cloud.
+func TestFindComputeConfigByName_FiltersByCloudID(t *testing.T) {
+	ctx := context.Background()
+	var sawCloudIDFilter bool
 
-	if model.EnableCrossZoneScaling.ValueBool() != false {
-		t.Errorf("EnableCrossZoneScaling = %v, want false (default)", model.EnableCrossZoneScaling.ValueBool())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"cloud_id":"cld_target"`) {
+			sawCloudIDFilter = true
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results": [{"id": "ccfg_1", "name": "test-config", "created_at": "2024-01-01T00:00:00Z", "anonymous": false}]}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	if _, err := d.findComputeConfigByName(ctx, "test-config", "cld_target"); err != nil {
+		t.Fatalf("findComputeConfigByName() error = %v", err)
 	}
-	if model.AutoSelectWorkerConfig.ValueBool() != false {
-		t.Errorf("AutoSelectWorkerConfig = %v, want false (default)", model.AutoSelectWorkerConfig.ValueBool())
+	if !sawCloudIDFilter {
+		t.Error("findComputeConfigByName() did not forward cloud_id into the search payload")
 	}
 }
 
-// TestComputeConfigNullableFields tests handling of optional/nullable fields
-func TestComputeConfigNullableFields(t *testing.T) {
-	model := ComputeConfigDataSourceModel{
-		ID:                   types.StringValue("ccfg_123"),
-		MaximumUptimeMinutes: types.Int64Null(),  // Might not be set
-		ProjectID:            types.StringNull(), // Might not be associated with a project
+// TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions exercises the
+// real fetchComputeConfigVersions: the search API returns one row per
+// version (not deduplicated), and the documented behavior is a unique,
+// ascending-sorted version list.
+func TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results": [
+			{"id": "ccfg_v3", "name": "test-config", "version": 3},
+			{"id": "ccfg_v1", "name": "test-config", "version": 1},
+			{"id": "ccfg_v2", "name": "test-config", "version": 2},
+			{"id": "ccfg_v2b", "name": "test-config", "version": 2}
+		]}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.fetchComputeConfigVersions(ctx, "test-config")
+	if err != nil {
+		t.Fatalf("fetchComputeConfigVersions() error = %v", err)
 	}
 
-	if !model.MaximumUptimeMinutes.IsNull() {
-		t.Error("MaximumUptimeMinutes should be null")
+	want := []int64{1, 2, 3}
+	if len(got) != len(want) {
+		t.Fatalf("fetchComputeConfigVersions() = %v, want %v", got, want)
 	}
-	if !model.ProjectID.IsNull() {
-		t.Error("ProjectID should be null")
-	}
-}
-
-// TestComputeConfigNameResolutionWithMultiple tests finding config by name with multiple matches
-func TestComputeConfigNameResolutionWithMultiple(t *testing.T) {
-	// Simulate API response with multiple configs having the same name
-	configs := []struct {
-		ID        string
-		Name      string
-		CreatedAt string
-	}{
-		{
-			ID:        "ccfg_123",
-			Name:      "test-config",
-			CreatedAt: "2024-01-01T00:00:00Z",
-		},
-		{
-			ID:        "ccfg_456",
-			Name:      "test-config",
-			CreatedAt: "2024-01-02T00:00:00Z", // More recent
-		},
-	}
-
-	// Simulate resolution logic (most recent)
-	var matchedConfigID string
-	var latestCreatedAt string
-
-	for _, cfg := range configs {
-		if matchedConfigID == "" || cfg.CreatedAt > latestCreatedAt {
-			matchedConfigID = cfg.ID
-			latestCreatedAt = cfg.CreatedAt
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fetchComputeConfigVersions()[%d] = %d, want %d (must be unique and ascending)", i, got[i], want[i])
 		}
 	}
+}
 
-	// Should pick the most recent one
-	if matchedConfigID != "ccfg_456" {
-		t.Errorf("resolved config_id = %v, want 'ccfg_456' (most recent)", matchedConfigID)
+// TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest is the
+// DS-CC-1 mutation-proof regression guard. The test above proves the
+// sort/dedup logic is correct, but its mock unconditionally returns every row
+// regardless of what request was actually sent - it could not have caught
+// DS-CC-1 because a real backend would never spontaneously return more than
+// the latest version unless the request explicitly asks for all of them.
+//
+// Per the traced backend model (ClusterComputesQuery.version,
+// backend/server/api/base/models/cluster_computes.py:244-271, confirmed
+// independently twice): omitting the version field (or
+// sending -1) resolves to latest-version-only; version -2 is the documented
+// "do not filter by version" sentinel needed to enumerate history. This mock
+// simulates that real behavior - it only returns all 3 versions when the
+// request body's version field is exactly -2, and returns just the latest
+// otherwise - so this currently FAILS (only 1 version comes back, since
+// today's search payload has no version field at all) which is the
+// mutation-proof evidence. Must pass once fetchComputeConfigVersions sends
+// version: -2.
+func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to parse request body: %v", err)
+		}
+
+		w.WriteHeader(http.StatusOK)
+
+		version, hasVersion := payload["version"]
+		if hasVersion && version == float64(-2) {
+			_, _ = w.Write([]byte(`{"results": [
+				{"id": "ccfg_v1", "name": "test-config", "version": 1},
+				{"id": "ccfg_v2", "name": "test-config", "version": 2},
+				{"id": "ccfg_v3", "name": "test-config", "version": 3}
+			]}`))
+			return
+		}
+
+		// Real backend behavior: no version field (or -1) means latest-only.
+		_, _ = w.Write([]byte(`{"results": [
+			{"id": "ccfg_v3", "name": "test-config", "version": 3}
+		]}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.fetchComputeConfigVersions(ctx, "test-config")
+	if err != nil {
+		t.Fatalf("fetchComputeConfigVersions() error = %v", err)
+	}
+
+	want := []int64{1, 2, 3}
+	if len(got) != len(want) {
+		t.Fatalf("fetchComputeConfigVersions() = %v, want %v (all 3 historical versions, not just the latest)", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fetchComputeConfigVersions()[%d] = %d, want %d", i, got[i], want[i])
+		}
 	}
 }
 
-// TestComputeConfigIdleTerminationValues tests various idle termination values
-func TestComputeConfigIdleTerminationValues(t *testing.T) {
-	tests := []struct {
-		name   string
-		value  int64
-		expect string
-	}{
-		{"disabled", 0, "disabled (0)"},
-		{"2 hours", 120, "120 minutes"},
-		{"8 hours", 480, "480 minutes"},
-		{"1 day", 1440, "1440 minutes"},
+// TestFetchComputeConfigVersions_FollowsPagingToken is DS-CC-1's other
+// mutation-proof half, flagged while implementing: the test above
+// proves the version=-2 sentinel is sent, but its mock returns every version
+// in a single response with no next_paging_token at all, so it cannot tell
+// apart "fetches everything in one call" from "correctly follows pagination
+// across multiple calls" - a real config with more results than one page's
+// count would still silently truncate even with the sentinel fix alone. This
+// mock instead splits the 3 versions across two pages and requires the
+// second request to carry the first response's exact next_paging_token.
+//
+// CC5b: retargeted from asserting a body-nested paging.paging_token (the old
+// ext/v0 shape) to the URL query string, since that's where api/v2's
+// required_pagination_large actually reads it from. Left unretargeted, this
+// would have kept "passing" vacuously - nothing populates that body field
+// anymore, so the old assertion would never fail no matter how broken the new
+// pagination is. See TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody
+// for the dedicated negative-space proof that the body does NOT carry paging.
+func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
+	ctx := context.Background()
+	const wantToken = "versions-page-2-token"
+
+	requestCount := 0
+	var sawTokenOnSecondRequest string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{
+				"results": [
+					{"id": "ccfg_v1", "name": "test-config", "version": 1},
+					{"id": "ccfg_v2", "name": "test-config", "version": 2}
+				],
+				"metadata": {"next_paging_token": "` + wantToken + `"}
+			}`))
+			return
+		}
+
+		sawTokenOnSecondRequest = r.URL.Query().Get("paging_token")
+		_, _ = w.Write([]byte(`{
+			"results": [
+				{"id": "ccfg_v3", "name": "test-config", "version": 3}
+			],
+			"metadata": {"next_paging_token": null}
+		}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.fetchComputeConfigVersions(ctx, "test-config")
+	if err != nil {
+		t.Fatalf("fetchComputeConfigVersions() error = %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			model := ComputeConfigDataSourceModel{
-				IdleTerminationMinutes: types.Int64Value(tt.value),
-			}
+	if requestCount != 2 {
+		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
+	}
+	if sawTokenOnSecondRequest != wantToken {
+		t.Errorf("second request's paging_token query param = %q, want %q (the exact token the first response returned)", sawTokenOnSecondRequest, wantToken)
+	}
 
-			if model.IdleTerminationMinutes.ValueInt64() != tt.value {
-				t.Errorf("IdleTerminationMinutes = %v, want %v", model.IdleTerminationMinutes.ValueInt64(), tt.value)
-			}
-		})
+	want := []int64{1, 2, 3}
+	if len(got) != len(want) {
+		t.Fatalf("fetchComputeConfigVersions() = %v, want %v (all 3 versions across both pages)", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fetchComputeConfigVersions()[%d] = %d, want %d", i, got[i], want[i])
+		}
+	}
+}
+
+// TestFindComputeConfigByName_ExactMatchOnPageTwo is CC5b's pagination-proof
+// for findComputeConfigByName (fetchComputeConfigVersions already has one
+// above) - page 1 returns a decoy, page 2 returns the real match, and the
+// second request must carry the first response's exact paging_token as a URL
+// query parameter.
+func TestFindComputeConfigByName_ExactMatchOnPageTwo(t *testing.T) {
+	ctx := context.Background()
+	const wantToken = "byname-page-2-token"
+	requestCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{
+				"results": [{"id": "ccfg_decoy", "name": "test-config", "created_at": "2024-01-01T00:00:00Z", "anonymous": false}],
+				"metadata": {"next_paging_token": "` + wantToken + `"}
+			}`))
+			return
+		}
+
+		if r.URL.Query().Get("paging_token") != wantToken {
+			t.Errorf("second request's paging_token query param = %q, want %q", r.URL.Query().Get("paging_token"), wantToken)
+		}
+		_, _ = w.Write([]byte(`{
+			"results": [{"id": "ccfg_exact", "name": "test-config", "created_at": "2024-06-01T00:00:00Z", "anonymous": false}],
+			"metadata": {"next_paging_token": null}
+		}`))
+	}))
+	defer server.Close()
+
+	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
+
+	got, err := d.findComputeConfigByName(ctx, "test-config", "")
+	if err != nil {
+		t.Fatalf("findComputeConfigByName() error = %v", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
+	}
+	// Both results share the name (real backend already exact-matches server-side), so the
+	// tiebreak (most recently created) picks ccfg_exact - proving both pages' results were
+	// actually collected, not just that page 2 was reached.
+	if got != "ccfg_exact" {
+		t.Errorf("findComputeConfigByName() = %q, want %q (both pages' matches must be collected before the tiebreak)", got, "ccfg_exact")
+	}
+}
+
+// TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody is the
+// direct proof for the hazard CC5b exists to prevent: a naive migration could
+// keep nesting paging/paging_token/count inside the JSON body (the ext/v0
+// shape) - it would compile, hit /api/v2/compute_templates/search, get HTTP
+// 200 back, and silently paginate wrong (always page 1's worth of data, no
+// error). A pagination-proof test alone (does the function eventually return
+// the right answer) would not catch this if the mock is lenient about where
+// it reads pagination params from - both tests above use exactly that kind of
+// lenient mock. This test's mock is deliberately strict: it asserts the
+// request body decodes to only the expected filter keys with no "paging" key
+// at all, and separately asserts count/paging_token arrive as URL query
+// params.
+func TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/compute_templates/search" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to parse request body: %v", err)
+		}
+		if _, hasPaging := payload["paging"]; hasPaging {
+			t.Error(`request body contains a "paging" key - pagination must be sent as URL query params on api/v2, not nested in the body`)
+		}
+		if _, hasName := payload["name"]; !hasName {
+			t.Error(`request body missing expected filter key "name"`)
+		}
+
+		if got := r.URL.Query().Get("count"); got != "100" {
+			t.Errorf(`count query param = %q, want "100"`, got)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results": [{"id": "ccfg_1", "name": "test-config"}], "metadata": {"next_paging_token": null}}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithToken(server.URL, "test-token")
+	basePayload := map[string]interface{}{
+		"name": map[string]string{"equals": "test-config"},
+	}
+
+	_, err := searchComputeTemplatesPaged(ctx, client, basePayload)
+	if err != nil {
+		t.Fatalf("searchComputeTemplatesPaged() error = %v", err)
 	}
 }

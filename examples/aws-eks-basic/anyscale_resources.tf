@@ -1,4 +1,6 @@
 
+data "aws_caller_identity" "current" {}
+
 locals {
   public_subnets  = ["172.24.101.0/24", "172.24.102.0/24"]
   private_subnets = ["172.24.20.0/24", "172.24.21.0/24"]
@@ -7,6 +9,7 @@ locals {
 module "anyscale_vpc" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # tflint-ignore: terraform_module_pinned_source
   source = "github.com/anyscale/terraform-aws-anyscale-cloudfoundation-modules//modules/aws-anyscale-vpc"
 
   anyscale_vpc_name = "anyscale-${var.eks_cluster_name}"
@@ -27,11 +30,21 @@ module "anyscale_vpc" {
 module "anyscale_s3" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # tflint-ignore: terraform_module_pinned_source
   source = "github.com/anyscale/terraform-aws-anyscale-cloudfoundation-modules//modules/aws-anyscale-s3"
 
   module_enabled = true
 
-  anyscale_bucket_name = "${var.eks_cluster_name}-${var.aws_region}"
+  # global, not the module's own account-regional default: this example names
+  # the bucket explicitly (cluster name + region) rather than letting AWS
+  # generate an account-regional-namespaced name from a prefix, and the AWS
+  # provider rejects an explicit name that doesn't already carry the
+  # required -{account_id}-{region}-an suffix under account-regional.
+  # The account id is baked into the name itself instead, so the bucket is
+  # globally unique by design rather than only when a test harness suffix
+  # happens to be layered on top of eks_cluster_name.
+  bucket_namespace     = "global"
+  anyscale_bucket_name = "${var.eks_cluster_name}-${var.aws_region}-${data.aws_caller_identity.current.account_id}"
   force_destroy        = var.anyscale_s3_force_destroy
 
   tags = var.tags
@@ -67,6 +80,7 @@ resource "aws_security_group" "allow_all_vpc" {
 module "anyscale_efs" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # tflint-ignore: terraform_module_pinned_source
   source = "github.com/anyscale/terraform-aws-anyscale-cloudfoundation-modules//modules/aws-anyscale-efs"
 
   module_enabled = var.enable_efs
@@ -84,6 +98,7 @@ module "anyscale_efs" {
 module "anyscale_iam_roles" {
   #checkov:skip=CKV_TF_1: Example code should use the latest version of the module
   #checkov:skip=CKV_TF_2: Example code should use the latest version of the module
+  # tflint-ignore: terraform_module_pinned_source
   source = "github.com/anyscale/terraform-aws-anyscale-cloudfoundation-modules//modules/aws-anyscale-iam"
 
   module_enabled = true

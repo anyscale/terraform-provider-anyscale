@@ -1,12 +1,3 @@
-terraform {
-  required_providers {
-    anyscale = {
-      source  = "anyscale/anyscale"
-      version = "~> 0.1"
-    }
-  }
-}
-
 provider "anyscale" {
   # Optional: API URL (defaults to https://console.anyscale.com)
   # api_url = "https://console.anyscale.com"

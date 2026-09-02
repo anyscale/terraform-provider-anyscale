@@ -1,14 +1,6 @@
 # GCP VM Test Scenario
 # Consolidated example with optional Filestore and Memorystore
-# Uses split pattern: empty cloud + cloud_resource
-
-# Data source to get Filestore IP address (only when Filestore is enabled)
-data "google_filestore_instance" "anyscale" {
-  count    = var.enable_filestore ? 1 : 0
-  name     = module.google_anyscale_v2.filestore_name
-  location = var.gcp_zone
-  project  = module.google_anyscale_v2.project_id
-}
+# Uses multi-resource cloud pattern: empty cloud + cloud_resource
 
 # Step 1: Create empty cloud shell
 resource "anyscale_cloud" "primary" {
@@ -18,8 +10,8 @@ resource "anyscale_cloud" "primary" {
   auto_add_user    = var.auto_add_user
 
   # Cloud-level settings (optional)
-  enable_lineage_tracking = true
-  enable_log_ingestion    = true
+  lineage_tracking_enabled = true
+  aggregated_logs_enabled  = true
 
   # No gcp_config, object_storage, or file_storage blocks
   # This creates an "empty" cloud - resources attached via anyscale_cloud_resource
@@ -28,6 +20,8 @@ resource "anyscale_cloud" "primary" {
 
 # Step 2: Attach cloud resource with configuration
 resource "anyscale_cloud_resource" "primary" {
+  name = var.cloud_name
+
   cloud_id      = anyscale_cloud.primary.id
   region        = var.gcp_region
   compute_stack = var.compute_stack
@@ -38,7 +32,9 @@ resource "anyscale_cloud_resource" "primary" {
     project_id    = module.google_anyscale_v2.project_id
     provider_name = module.google_anyscale_v2.iam_workload_identity_provider_name
     vpc_name      = module.google_anyscale_v2.vpc_name
-    subnet_names  = [module.google_anyscale_v2.public_subnet_name]
+    # subnet_names is VM-only - rejected at plan time on K8S, so this drops
+    # automatically if compute_stack is switched to K8S above.
+    subnet_names = var.compute_stack == "VM" ? [module.google_anyscale_v2.public_subnet_name] : null
 
     controlplane_service_account_email = module.google_anyscale_v2.iam_anyscale_access_service_acct_email
     dataplane_service_account_email    = module.google_anyscale_v2.iam_anyscale_cluster_node_service_acct_email
@@ -62,10 +58,10 @@ resource "anyscale_cloud_resource" "primary" {
     content {
       file_storage_id = module.google_anyscale_v2.filestore_name
       mount_path      = "/mnt/shared"
-      mount_targets {
+      mount_targets = [{
         address = module.google_anyscale_v2.filestore_ip_address
         zone    = var.gcp_zone
-      }
+      }]
     }
   }
 

@@ -3,12 +3,12 @@
 page_title: "anyscale_cloud Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource).
+  Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same name already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).
 ---
 
 # anyscale_cloud (Resource)
 
-Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource).
+Manages an Anyscale Cloud. Supports both all-in-one pattern (embedded configs) and empty cloud pattern (resources added separately via anyscale_cloud_resource). If a cloud with the same `name` already exists at apply time (for example, recovering from an interrupted create), this resource adopts it into Terraform state instead of creating a duplicate. If more than one cloud shares that name, create fails instead of guessing which one to adopt - the error identifies the candidates and explains how to resolve the ambiguity (rename or delete the duplicates, or import the specific cloud you intend to manage).
 
 ## Example Usage
 
@@ -21,10 +21,10 @@ resource "anyscale_cloud" "aws_example" {
   compute_stack  = "VM"
 
   # Cloud-level settings
-  auto_add_user           = false
-  enable_lineage_tracking = false
-  enable_log_ingestion    = false
-  is_private_cloud        = false
+  auto_add_user            = false
+  lineage_tracking_enabled = false
+  aggregated_logs_enabled  = false
+  is_private_cloud         = false
 
   # AWS-specific configuration
   aws_config {
@@ -35,8 +35,8 @@ resource "anyscale_cloud" "aws_example" {
       "subnet-06a825a292bd4d476" = "us-east-2c"
     }
     security_group_ids        = ["sg-064dac0ed5cffc779"]
-    controlplane_iam_role_arn = "arn:aws:iam::367974485317:role/anyscale-crossacct-role"
-    dataplane_iam_role_arn    = "arn:aws:iam::367974485317:role/anyscale-cluster-node-role"
+    controlplane_iam_role_arn = "arn:aws:iam::xxx:role/anyscale-crossacct-role"
+    dataplane_iam_role_arn    = "arn:aws:iam::xxx:role/anyscale-cluster-node-role"
     external_id               = "org_abc123-external-id"
   }
 
@@ -55,16 +55,18 @@ resource "anyscale_cloud" "gcp_example" {
   compute_stack  = "VM"
 
   gcp_config {
-    project_id                     = "my-project-123"
-    provider_name                  = "projects/123/locations/global/workloadIdentityPools/anyscale/providers/anyscale"
-    vpc_name                       = "anyscale-vpc"
-    subnet_names                   = ["anyscale-subnet-us-central1"]
-    anyscale_service_account_email = "anyscale@my-project.iam.gserviceaccount.com"
-    cluster_service_account_email  = "cluster@my-project.iam.gserviceaccount.com"
+    project_id                         = "my-project-123"
+    provider_name                      = "projects/123/locations/global/workloadIdentityPools/anyscale/providers/anyscale"
+    vpc_name                           = "anyscale-vpc"
+    subnet_names                       = ["anyscale-subnet-us-central1"]
+    controlplane_service_account_email = "anyscale@my-project.iam.gserviceaccount.com"
+    dataplane_service_account_email    = "cluster@my-project.iam.gserviceaccount.com"
   }
 
   object_storage {
-    bucket_name = "my-gcs-bucket" # gs:// prefix added automatically
+    # Include the gs:// prefix explicitly for GCP (unlike AWS, where a bare
+    # bucket name is fine either way) - see the "Cloud Resources" guide for why.
+    bucket_name = "gs://my-gcs-bucket"
   }
 }
 
@@ -76,17 +78,104 @@ resource "anyscale_cloud" "eks_example" {
   compute_stack  = "K8S"
 
   kubernetes_config {
-    anyscale_operator_iam_identity = "arn:aws:iam::367974485317:role/anyscale-eks-operator-role"
+    anyscale_operator_iam_identity = "arn:aws:iam::xxx:role/anyscale-eks-operator-role"
     zones                          = ["us-west-2a", "us-west-2b"]
+    # Optional: a Redis endpoint reachable from the data plane, used for Ray
+    # GCS fault tolerance. Available on any K8S cloud, not AWS-specific.
+    redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
   }
 
   object_storage {
     bucket_name = "my-eks-bucket"
     region      = "us-west-2"
   }
+
+  # Optional: shared file storage for the Ray cluster. mount_targets (EFS)
+  # below is one option; persistent_volume_claim and csi_ephemeral_volume_driver
+  # are alternatives to it, not additions - set only one (see the GKE example
+  # below for the persistent_volume_claim form).
+  file_storage {
+    file_storage_id = "fs-0abc123def456789"
+
+    mount_targets = [{
+      address = "fs-0abc123def456789.efs.us-west-2.amazonaws.com"
+      zone    = "us-west-2a"
+    }]
+
+    # persistent_volume_claim     = "my-shared-storage-pvc"
+    # csi_ephemeral_volume_driver = "csi.example.com"
+  }
 }
 
-# Empty Cloud (Split Deployment Pattern)
+# GCP GKE (Kubernetes)
+resource "anyscale_cloud" "gke_example" {
+  name           = "my-gke-cloud"
+  cloud_provider = "GCP"
+  region         = "us-central1"
+  compute_stack  = "K8S"
+
+  kubernetes_config {
+    anyscale_operator_iam_identity = "gke-nodes@my-project.iam.gserviceaccount.com"
+    zones                          = ["us-central1-a", "us-central1-b"]
+    redis_endpoint                 = "redis.ray-system.svc.cluster.local:6379"
+  }
+
+  object_storage {
+    # Include the gs:// prefix explicitly for GCP, same as the GCP VM example
+    # above.
+    bucket_name = "gs://my-gke-bucket"
+  }
+
+  # Optional: a pre-existing PersistentVolumeClaim for shared storage, as an
+  # alternative to EFS/Filestore-style mount_targets (see the EKS example
+  # above) - set only one of persistent_volume_claim, csi_ephemeral_volume_driver,
+  # or mount_targets.
+  file_storage {
+    persistent_volume_claim = "my-shared-storage-pvc"
+  }
+}
+
+# Azure AKS (Kubernetes)
+#
+# Azure is Kubernetes-only: Anyscale does not support Azure VM clouds, so
+# compute_stack must be "K8S" - anything else (including the default when
+# omitted) is a plan-time error. Unlike aws_config/gcp_config, azure_config
+# takes only tenant_id: AKS setup creates no VNet/subnet resources of its own,
+# and authentication is operator workload-identity federation, not network or
+# IAM-role wiring.
+#
+# This example is schema- and mock-validated, not validated against a real AKS
+# cluster the way the EKS and GKE examples above are - validate it against
+# your own Azure subscription before relying on it.
+resource "anyscale_cloud" "aks_example" {
+  name           = "my-aks-cloud"
+  cloud_provider = "AZURE"
+  region         = "eastus2"
+  compute_stack  = "K8S"
+
+  azure_config {
+    tenant_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  }
+
+  kubernetes_config {
+    # The managed identity's PRINCIPAL ID, not its client ID - the reference
+    # AKS setup flow uses principal ID here and client ID only in the
+    # operator's own values.yaml.
+    anyscale_operator_iam_identity = "11111111-2222-3333-4444-555555555555"
+    # Azure availability zones are plain digits, unlike AWS/GCP's region-suffixed names.
+    zones          = ["1", "2"]
+    redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
+  }
+
+  object_storage {
+    # Azure uses its own abfss:// URI, never s3:// or gs:// - passed through
+    # verbatim with no prefix rewriting. Must include the full
+    # container@account.dfs.core.windows.net form, not just a bucket name.
+    bucket_name = "abfss://ray-storage@anyscalestorageacct.dfs.core.windows.net"
+  }
+}
+
+# Empty Cloud (Multi-Resource Cloud Pattern)
 resource "anyscale_cloud" "empty" {
   name           = "my-empty-cloud"
   cloud_provider = "AWS"
@@ -102,6 +191,11 @@ output "cloud_id" {
   description = "The unique identifier for the cloud"
 }
 
+output "cloud_name" {
+  value       = anyscale_cloud.aws_example.name
+  description = "The name of the cloud"
+}
+
 output "is_empty_cloud" {
   value       = anyscale_cloud.empty.is_empty_cloud
   description = "Whether the cloud is empty (no embedded configuration)"
@@ -113,28 +207,29 @@ output "is_empty_cloud" {
 
 ### Required
 
-- `name` (String) The name of the cloud.
+- `name` (String) The name of the cloud. Immutable after creation: the API has no endpoint to rename a cloud, so changing this produces a plan-time error rather than an update or a replacement.
 
 ### Optional
 
-- `auto_add_user` (Boolean) Whether to automatically add users to this cloud.
-- `aws_config` (Block, Optional) AWS-specific configuration. Required when cloud_provider is AWS and using all-in-one pattern. (see [below for nested schema](#nestedblock--aws_config))
-- `azure_config` (Block, Optional) Azure-specific configuration. Required when cloud_provider is Azure. (see [below for nested schema](#nestedblock--azure_config))
-- `cloud_provider` (String) Cloud provider: AWS, GCP, Azure, or Generic. Auto-detected from aws_config/gcp_config, or defaults to AWS for empty clouds.
-- `compute_stack` (String) Compute stack type: VM or K8S. Required when using embedded config (aws_config/gcp_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).
-- `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using split pattern (empty cloud + cloud_resource).
-- `enable_lineage_tracking` (Boolean) Whether to enable lineage tracking for this cloud.
-- `enable_log_ingestion` (Boolean) Whether to enable aggregated log ingestion for this cloud.
-- `file_storage` (Block, Optional) File storage configuration (EFS, Filestore, etc.). (see [below for nested schema](#nestedblock--file_storage))
-- `gcp_config` (Block, Optional) GCP-specific configuration. Required when cloud_provider is GCP and using all-in-one pattern. (see [below for nested schema](#nestedblock--gcp_config))
-- `is_private_cloud` (Boolean) Whether this is a private cloud (private networking).
-- `kubernetes_config` (Block, Optional) Kubernetes-specific configuration. Required when compute_stack is K8S. (see [below for nested schema](#nestedblock--kubernetes_config))
-- `object_storage` (Block, Optional) Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). (see [below for nested schema](#nestedblock--object_storage))
-- `region` (String) The region where the cloud is deployed. Auto-detected from config or defaults to us-east-1 for empty clouds.
+- `aggregated_logs_enabled` (Boolean) Whether to enable aggregated log ingestion for this cloud. Uniform `<noun>_enabled` naming with its sibling `lineage_tracking_enabled` - a previous provider version called this `enable_log_ingestion` on the resource and singular `anyscale_cloud` data source, then briefly `is_aggregated_logs_enabled` (matching the backend's own field name and the plural `anyscale_clouds` data source at the time) before settling here; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
+- `auto_add_user` (Boolean) Whether to automatically add users to this cloud. Note: while enabled, the backend refuses to leave any user without cloud access, so revoking a specific user's access to this cloud will fail until this is disabled.
+- `aws_config` (Block, Optional) AWS-specific configuration. Required when cloud_provider is AWS and using all-in-one pattern. See the [Anyscale AWS cloud configuration documentation](https://docs.anyscale.com/clouds/aws/configure) for the full set of resources Anyscale expects (VPC, subnets, IAM roles, security groups) and how they map to the fields below. (see [below for nested schema](#nestedblock--aws_config))
+- `azure_config` (Block, Optional) Azure-specific configuration. Required when cloud_provider is AZURE. Azure clouds are Kubernetes-only (AKS) - Anyscale does not support Azure VM clouds, so compute_stack must be "K8S"; setting azure_config with any other compute_stack is a plan-time error. Unlike aws_config/gcp_config, this has a single field: AKS setup creates no VNet/subnet resources of its own, and real authentication is operator workload-identity federation (see kubernetes_config.anyscale_operator_iam_identity), not network or IAM-role wiring. (see [below for nested schema](#nestedblock--azure_config))
+- `cloud_provider` (String) Cloud provider: AWS, GCP, or AZURE. Auto-detected from aws_config/gcp_config/azure_config, or defaults to AWS for empty clouds. AWS and GCP support both VM and K8S compute stacks; AZURE supports K8S only (AKS) - Anyscale does not support Azure VM clouds, and setting azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported by this provider.
+- `compute_stack` (String) Compute stack type: VM or K8S. Required when using embedded config (aws_config, gcp_config, or kubernetes_config). When omitted, this reflects the compute stack of the cloud's primary resource as reported by the API (typically VM).
+- `credentials` (String, Sensitive) Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using the multi-resource cloud pattern (empty cloud + cloud_resource).
+- `file_storage` (Block, Optional) File storage configuration (EFS, Filestore, etc.). If omitted, Anyscale falls back to using the object storage bucket for shared storage. On GCP, Filestore is optional and not created by default, and must be in the same region as the cloud's VPC when used. Recovered automatically when importing an existing cloud/resource, whenever the live resource actually has one configured. See the [Anyscale shared storage documentation](https://docs.anyscale.com/storage/shared) for how this is used across a cluster. (see [below for nested schema](#nestedblock--file_storage))
+- `gcp_config` (Block, Optional) GCP-specific configuration. Required when cloud_provider is GCP and using all-in-one pattern. See the [Anyscale GCP cloud configuration documentation](https://docs.anyscale.com/clouds/gcp/configure) for the full set of resources Anyscale expects (VPC, subnets, service accounts, firewall policies) and how they map to the fields below. (see [below for nested schema](#nestedblock--gcp_config))
+- `is_private_cloud` (Boolean) Whether to register this cloud as private - the Terraform equivalent of the Anyscale CLI's `anyscale cloud register --private-network` flag, which places Ray clusters in private subnets. This is a self-asserted flag, not a verified connectivity check: the value you set here is sent to the API as-is, and neither the provider nor the Anyscale backend validates, configures, or provisions any VPN or PrivateLink connectivity because of it. Setting `true` without real private connectivity already in place will not fail at plan or apply time - it only means private clusters may end up unreachable, which is your own responsibility to arrange separately, not something this attribute gates. Changing this value after creation requires replacement: the backend itself has no route to update an existing cloud's `is_private_cloud`, so there's no in-place alternative to fall back on.
+- `kubernetes_config` (Block, Optional) Kubernetes-specific configuration. Required when compute_stack is K8S. See the [Anyscale Kubernetes documentation](https://docs.anyscale.com/clouds/kubernetes) for cluster requirements and how these fields map to the Anyscale Operator installation. (see [below for nested schema](#nestedblock--kubernetes_config))
+- `lineage_tracking_enabled` (Boolean) Whether to enable lineage tracking for this cloud. Named to match the backend's own field name (and the plural `anyscale_clouds` data source, which always used this name) - a previous provider version called this `enable_lineage_tracking` on both the resource and the singular `anyscale_cloud` data source; see CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
+- `object_storage` (Block, Optional) Object storage configuration (S3, GCS, Azure Blob, or S3-compatible). Recovered automatically when importing an existing cloud/resource, whenever the live resource actually has one configured. See the Anyscale documentation for bucket setup: [S3](https://docs.anyscale.com/storage/s3) for AWS, [GCS](https://docs.anyscale.com/storage/gcs) for GCP, [Azure Blob/ADLS](https://docs.anyscale.com/clouds/azure/storage) for Azure. (see [below for nested schema](#nestedblock--object_storage))
+- `region` (String) The region where the cloud is deployed. Auto-detected from config or defaults to us-east-1 for empty clouds. For AWS, Anyscale does not support the China or GovCloud partitions.
+- `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
 ### Read-Only
 
-- `cloud_deployment_id` (String) The cloud deployment ID. For K8S clouds, pass this to the Anyscale operator during installation.
+- `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale when this cloud's default resource was registered. This is what you pass to the Anyscale operator during installation for a K8S cloud (as `global.cloudDeploymentId` in the operator's Helm values, despite the key's name - the value is this resource id). Populated on both this all-in-one pattern and the multi-resource `anyscale_cloud_resource` pattern. Stable for the life of the cloud - it does not move out of band, so the provider pins it to the prior state between applies.
 - `id` (String) The unique identifier of the cloud.
 - `is_empty_cloud` (Boolean) Whether this cloud was created without embedded resource configuration. Use anyscale_cloud_resource to attach resources separately.
 
@@ -143,15 +238,16 @@ output "is_empty_cloud" {
 
 Optional:
 
-- `controlplane_iam_role_arn` (String) IAM role ARN for Anyscale control plane (cross-account access).
-- `dataplane_iam_role_arn` (String) IAM role ARN for Anyscale data plane (cluster nodes).
-- `external_id` (String) External ID for IAM role assumption (recommended for security).
-- `memorydb_cluster_arn` (String) MemoryDB cluster ARN.
-- `memorydb_cluster_endpoint` (String) MemoryDB cluster endpoint address.
-- `memorydb_cluster_name` (String) MemoryDB cluster name for Ray GCS fault tolerance.
-- `security_group_ids` (List of String) List of security group IDs for Anyscale resources.
-- `subnet_ids` (List of String) List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az.
-- `subnet_ids_to_az` (Map of String) Map of subnet ID to availability zone (e.g., {"subnet-123": "us-east-2a"}). Preferred over subnet_ids.
+- `cluster_instance_profile_id` (String) IAM instance profile ARN attached to Ray cluster nodes. Defaults to the instance profile with the same name as `dataplane_iam_role_arn` when unset - set this explicitly only if your IAM tooling generates a profile name that differs from the role name.
+- `controlplane_iam_role_arn` (String) IAM role ARN for Anyscale control plane (cross-account access). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.
+- `dataplane_iam_role_arn` (String) IAM role ARN for Anyscale data plane (cluster nodes). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the trust policy and permissions this role needs.
+- `external_id` (String) External ID for IAM role assumption (recommended for security). Anyscale's external IDs follow a fixed format: the organization ID, a hyphen, then a random string (e.g. `org_1234567890abcdef-1234567890abcdef`). See the [Anyscale AWS IAM documentation](https://docs.anyscale.com/iam/aws) for the full trust policy.
+- `memorydb_cluster_arn` (String) MemoryDB cluster ARN. Derived automatically from `memorydb_cluster_name` when left unset - the Anyscale API returns the cluster's real ARN once it exists, and the provider records it in state at create time and recovers it at import; set it explicitly only if you have a specific reason to pin a value yourself. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.
+- `memorydb_cluster_endpoint` (String) MemoryDB cluster endpoint address, formatted as `<name>.<random>.clustercfg.memorydb.<region>.amazonaws.com:6379`. Requires TLS - use a `rediss://` prefix when connecting. Derived automatically from `memorydb_cluster_name` when left unset, the same way as `memorydb_cluster_arn` above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.
+- `memorydb_cluster_name` (String) MemoryDB cluster name for Ray GCS fault tolerance. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for cluster requirements.
+- `security_group_ids` (List of String) List of security group IDs for Anyscale resources. Missing the required rules causes the cluster to fail silently rather than erroring at plan or apply time - Anyscale needs at minimum an inbound rule for port 443 and a self-referencing rule allowing all traffic.
+- `subnet_ids` (List of String) List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.
+- `subnet_ids_to_az` (Map of String) Map of subnet ID to availability zone (e.g., {"subnet-123": "us-east-2a"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).
 - `vpc_id` (String) The VPC ID where Anyscale resources will be deployed.
 
 
@@ -160,11 +256,7 @@ Optional:
 
 Optional:
 
-- `managed_identity_id` (String) The managed identity ID for Anyscale resources.
-- `resource_group_name` (String) The Azure resource group name.
-- `subnet_name` (String) The Azure subnet name.
-- `subscription_id` (String) The Azure subscription ID.
-- `vnet_name` (String) The Azure VNet name.
+- `tenant_id` (String) The Azure tenant ID (maps to the Anyscale API's AzureConfig.tenant_id, and the CLI's `--azure-tenant-id`).
 
 
 <a id="nestedblock--file_storage"></a>
@@ -172,11 +264,13 @@ Optional:
 
 Optional:
 
+- `csi_ephemeral_volume_driver` (String) CSI driver name for an ephemeral inline volume to use for shared storage (Kubernetes cloud resources only). Mutually exclusive with `persistent_volume_claim` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.
 - `file_storage_id` (String) The file storage ID (EFS ID, Filestore name, etc.).
-- `mount_path` (String) The mount path for the file storage. Changing this requires replacement; the provider has no in-place update path for it.
-- `mount_targets` (Block List) List of mount targets with address and optional zone. Changing this list requires replacement; the provider has no in-place update path for it. (see [below for nested schema](#nestedblock--file_storage--mount_targets))
+- `mount_path` (String) The mount path for the file storage. Only meaningful on GCP Filestore and Azure/Generic NFS-backed clouds; AWS rejects it at plan time, and it is ignored for `persistent_volume_claim`/`csi_ephemeral_volume_driver` configs. Null when the backend has no value - never fabricated - and recovered from the live value at import. On GCP, if `mount_targets` is unset Anyscale auto-discovers the Filestore share and overwrites this value. `file_storage` is not refreshed on read, so state keeps the import-time value; `terraform plan` warns when it drifts, except for a legacy `/mnt/shared` value that the backend has no counterpart for. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver`.
+- `mount_targets` (Attributes List) Mount targets, each an address with an optional zone. The NFS-style mechanism; mutually exclusive with the Kubernetes-native `persistent_volume_claim`/`csi_ephemeral_volume_driver`. Derived from `file_storage_id` when unset - the backend discovers the address once the EFS/Filestore resource exists. Set it only to pin a value, e.g. a sibling EFS/Filestore module output (see the aws-vm/gcp-vm examples). `file_storage` is not refreshed on read, so this is a create/import-time snapshot; `terraform plan` warns if the address later changes. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value. (see [below for nested schema](#nestedatt--file_storage--mount_targets))
+- `persistent_volume_claim` (String) Name of a Kubernetes PersistentVolumeClaim to mount for shared storage (Kubernetes cloud resources only). Mutually exclusive with `csi_ephemeral_volume_driver` - the backend rejects both being set. Also mutually exclusive with `mount_path`, which has no effect once this is set.
 
-<a id="nestedblock--file_storage--mount_targets"></a>
+<a id="nestedatt--file_storage--mount_targets"></a>
 ### Nested Schema for `file_storage.mount_targets`
 
 Optional:
@@ -191,15 +285,15 @@ Optional:
 
 Optional:
 
-- `controlplane_service_account_email` (String) Service account email for Anyscale control plane (cross-project access).
-- `dataplane_service_account_email` (String) Service account email for Ray cluster nodes (data plane).
+- `controlplane_service_account_email` (String) Service account email for Anyscale control plane (cross-project access). See the [Anyscale Google Cloud IAM documentation](https://docs.anyscale.com/iam/google-cloud) for the roles this service account needs.
+- `dataplane_service_account_email` (String) Service account email for Ray cluster nodes (data plane). See the [Anyscale Google Cloud IAM documentation](https://docs.anyscale.com/iam/google-cloud) for the roles this service account needs.
 - `firewall_policy_names` (List of String) List of firewall policy names.
 - `host_project_id` (String) The host project ID for shared VPCs (optional).
-- `memorystore_endpoint` (String) Memorystore endpoint address.
+- `memorystore_endpoint` (String) Memorystore endpoint address. Unlike AWS MemoryDB, Memorystore does not support TLS for this connection. Derived automatically from `memorystore_instance_name` when left unset, the same way as MemoryDB's arn/endpoint fields above; set it explicitly only if you have a specific reason to pin a value yourself. Conflicts with `kubernetes_config.redis_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud. See the [Anyscale head node fault tolerance documentation](https://docs.anyscale.com/administration/resource-management/head-node-fault-tolerance) for full cluster requirements.
 - `memorystore_instance_name` (String) Memorystore instance name for Ray GCS fault tolerance.
 - `project_id` (String) The GCP project ID.
 - `provider_name` (String) Workload Identity Federation provider name (e.g., projects/123456789/locations/global/workloadIdentityPools/anyscale-pool/providers/anyscale-provider).
-- `subnet_names` (List of String) List of subnet names within the VPC for Anyscale resources.
+- `subnet_names` (List of String) List of subnet names within the VPC for Anyscale resources. VM compute only - GKE networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this field unconditionally after the Kubernetes zone list is written, discarding it). Genuinely supports more than one subnet on VM compute - Anyscale spreads instances across whichever are configured, this is not a modeling mismatch.
 - `vpc_name` (String) The VPC network name.
 
 
@@ -208,13 +302,8 @@ Optional:
 
 Optional:
 
-- `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: IAM role ARN. For GCP GKE: service account email. For Azure AKS: managed identity client ID.
-- `cluster_name` (String) The Kubernetes cluster name (EKS, GKE, AKS cluster name). Changing this requires replacement; the provider has no in-place update path for it.
-- `context` (String) Kubeconfig context to use (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
-- `ingress_host` (String) The ingress host for the Anyscale operator (e.g., anyscale.example.com). Changing this requires replacement; the provider has no in-place update path for it.
-- `kubeconfig_path` (String) Path to kubeconfig file (for Generic K8S deployments). Changing this requires replacement; the provider has no in-place update path for it.
-- `namespace` (String) The Kubernetes namespace for Anyscale workloads. Changing this requires replacement; the provider has no in-place update path for it.
-- `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance.
+- `anyscale_operator_iam_identity` (String) The IAM identity for the Anyscale operator. For AWS EKS: the ARN of an IAM role whose trust policy allows `pods.eks.amazonaws.com`, wired to the operator via an `aws_eks_pod_identity_association` (see the [Anyscale EKS IAM documentation](https://docs.anyscale.com/iam/eks)) - a node group's IAM role will NOT work here, since node roles trust `ec2.amazonaws.com` instead; the provider cannot see a role's trust policy, so getting this wrong fails the operator's own authentication at runtime, not at `terraform plan`. For GCP GKE: service account email (see the [Anyscale GKE IAM documentation](https://docs.anyscale.com/iam/gke)). For Azure AKS: the managed identity's principal ID (not its client ID - the reference AKS setup flow distinguishes the two: principal ID here, client ID only in the operator's own values.yaml).
+- `redis_endpoint` (String) Endpoint of a Redis service reachable from the data plane (e.g. `redis.ray-system.svc.cluster.local:6379`). Used for Ray GCS fault tolerance. Conflicts with `aws_config.memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint` - the backend rejects more than one GCS fault-tolerance backing store on the same cloud.
 - `zones` (List of String) List of availability zones for the Kubernetes cluster.
 
 
@@ -223,9 +312,17 @@ Optional:
 
 Optional:
 
-- `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS).
+- `bucket_name` (String) The bucket name (e.g., my-bucket for S3, gs://my-bucket for GCS). A bare name and its scheme-prefixed form (s3://, gs://) are treated as the same bucket for plan purposes, so importing a cloud whose bucket was written without the prefix does not force replacement.
 - `endpoint` (String) Custom S3-compatible endpoint (for MinIO, etc.).
-- `region` (String) The bucket region (if different from cloud region).
+- `region` (String) The bucket region (if different from cloud region). A configuration that sets this to the same value as the cloud's own region is treated as equivalent to a null recovered value for plan purposes, so it will not force replacement - the Anyscale API cannot tell "never set" apart from "explicitly set to the cloud's own region" once stored, so there is no matching value to compare against otherwise. A cloud that already has a null value in state from an older provider version reconciles this with a one-time in-place update on its next plan, never a replace. A genuinely different bucket region round-trips normally via the real API value, and a real change to it still requires replacement.
+
+
+<a id="nestedblock--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) Maximum time to wait for a newly created cloud to become ready (e.g. `20m`, `1h`). Defaults to `30m`. Purely local to this provider - never sent to or read from the Anyscale API.
 
 ## Import
 

@@ -53,6 +53,12 @@ func (d *GlobalResourceSchedulersDataSource) Metadata(ctx context.Context, req d
 
 // Schema defines the schema for the data source.
 func (d *GlobalResourceSchedulersDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	itemAttributes := globalResourceSchedulerSharedAttributes()
+	itemAttributes["name"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The name of the global resource scheduler.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Lists and filters Anyscale Global Resource Schedulers. This data source returns a list of global resource schedulers without detailed spec for performance.",
 
@@ -65,29 +71,7 @@ func (d *GlobalResourceSchedulersDataSource) Schema(ctx context.Context, req dat
 				Computed:            true,
 				MarkdownDescription: "List of global resource schedulers matching the filters.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The unique identifier of the global resource scheduler.",
-						},
-						"name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name of the global resource scheduler.",
-						},
-						"organization_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The organization ID that owns the global resource scheduler.",
-						},
-						"enable_rootless_dataplane_config": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether rootless dataplane configuration is enabled.",
-						},
-						"cloud_ids": schema.ListAttribute{
-							Computed:            true,
-							ElementType:         types.StringType,
-							MarkdownDescription: "List of cloud IDs attached to this global resource scheduler.",
-						},
-					},
+					Attributes: itemAttributes,
 				},
 			},
 		},

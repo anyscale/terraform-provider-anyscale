@@ -4,22 +4,37 @@ page_title: "anyscale_organization_invitation Resource - terraform-provider-anys
 subcategory: ""
 description: |-
   Manages an Anyscale Organization Invitation. This resource sends an email invitation to join an organization.
-  Note: Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the anyscale_organization_collaborator resource to manage their permissions.
+  Note: Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the anyscale_organization_user resource to manage their permissions, and anyscale_organization_user_role to manage their organization role - see the RBAC guide ../guides/rbac.md for how access control is split across scopes. There is no need to remove this resource once accepted - an accepted invitation is a harmless historical record, its status simply reads as accepted from then on, and leaving it in your configuration has no side effects.
+  ~> Warning: What terraform destroy actually does here depends on whether the invitation was accepted. Destroying a pending invitation genuinely revokes it - it is invalidated immediately, and the recipient can no longer accept it. Destroying an already-accepted invitation has no effect on the resulting member: acceptance created a separate, independent anyscale_organization_user identity, and invalidating the (already-consumed) invitation record does not touch it. To remove an existing member's access, destroy their anyscale_organization_user resource instead - destroying this resource never does that.
+  Duplicate invitations: Inviting an email address that is already an organization member fails with a clear error directing you to the anyscale_organization_user resource instead. Inviting an email address that already has a pending invitation does not fail - it silently invalidates the previous invitation (expiring it immediately) and creates a new one with a new id; a different letter-casing of the same address counts as the same recipient for this purpose. If that previous invitation is tracked elsewhere (a separate resource block, a different Terraform configuration, or state left over from a prior apply), its status will simply read as expired on the next refresh rather than surfacing an error.
+  Directory-synced organizations: Creating an invitation through this resource fails in an organization that has both enabled SCIM directory sync and opted into the Policy API (at least one role binding for the org, a cloud, or a project) - SCIM alone does not trigger this, so a SCIM-enabled organization with no Policy API bindings can still invite normally through this resource. Use anyscale policy set for an organization that meets both conditions instead. See the Anyscale policy CLI documentation https://docs.anyscale.com/reference/cli/policy#policy-cli for that command.
+  Organizations with single sign-on required: If your organization's SSO mode is required, Create refuses outright instead of sending an invitation that could never be accepted - the emailed link is rejected on use, and sending it anyway would still consume one of the organization's 20 invitations per 24 hours for nothing. Bring the person in through your identity provider instead, then track them with the anyscale_organization_user resource once they have logged in. When this organization's SSO mode cannot be determined at apply time, Create fails open and sends the invitation anyway, attaching a warning that names what could not run - a failed lookup is not evidence that SSO is required, and refusing on it would turn a transient error into a failed apply.
 ---
 
 # anyscale_organization_invitation (Resource)
 
 Manages an Anyscale Organization Invitation. This resource sends an email invitation to join an organization.
 
-**Note:** Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the `anyscale_organization_collaborator` resource to manage their permissions.
+**Note:** Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the `anyscale_organization_user` resource to manage their permissions, and `anyscale_organization_user_role` to manage their organization role - see the [RBAC guide](../guides/rbac.md) for how access control is split across scopes. There is no need to remove this resource once accepted - an accepted invitation is a harmless historical record, its `status` simply reads as `accepted` from then on, and leaving it in your configuration has no side effects.
+
+~> **Warning:** What `terraform destroy` actually does here depends on whether the invitation was accepted. Destroying a **pending** invitation genuinely revokes it - it is invalidated immediately, and the recipient can no longer accept it. Destroying an **already-accepted** invitation has no effect on the resulting member: acceptance created a separate, independent `anyscale_organization_user` identity, and invalidating the (already-consumed) invitation record does not touch it. To remove an existing member's access, destroy their `anyscale_organization_user` resource instead - destroying this resource never does that.
+
+**Duplicate invitations:** Inviting an email address that is already an organization member fails with a clear error directing you to the `anyscale_organization_user` resource instead. Inviting an email address that already has a *pending* invitation does not fail - it silently invalidates the previous invitation (expiring it immediately) and creates a new one with a new `id`; a different letter-casing of the same address counts as the same recipient for this purpose. If that previous invitation is tracked elsewhere (a separate resource block, a different Terraform configuration, or state left over from a prior apply), its `status` will simply read as `expired` on the next refresh rather than surfacing an error.
+
+**Directory-synced organizations:** Creating an invitation through this resource fails in an organization that has *both* enabled SCIM directory sync *and* opted into the Policy API (at least one role binding for the org, a cloud, or a project) - SCIM alone does not trigger this, so a SCIM-enabled organization with no Policy API bindings can still invite normally through this resource. Use `anyscale policy set` for an organization that meets both conditions instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.
+
+**Organizations with single sign-on required:** If your organization's SSO mode is `required`, Create refuses outright instead of sending an invitation that could never be accepted - the emailed link is rejected on use, and sending it anyway would still consume one of the organization's 20 invitations per 24 hours for nothing. Bring the person in through your identity provider instead, then track them with the `anyscale_organization_user` resource once they have logged in. When this organization's SSO mode cannot be determined at apply time, Create fails open and sends the invitation anyway, attaching a warning that names what could not run - a failed lookup is not evidence that SSO is required, and refusing on it would turn a transient error into a failed apply.
 
 ## Example Usage
 
 ```terraform
-# Send an invitation to a new user with collaborator permissions
+# Send an invitation to a new user. Every invitation grants default collaborator access once
+# accepted -- there's no role argument here, because the invitations API has no way to set one
+# at invite time. To grant a different role (e.g. owner), invite the user, wait for them to
+# accept, then set anyscale_organization_user_role.base_role for them (see its own example, or
+# organization_user_workflow for the full lifecycle).
 resource "anyscale_organization_invitation" "new_user" {
-  email            = "newuser@example.com"
-  permission_level = "collaborator"
+  email = "newuser@example.com"
 }
 
 # Output the invitation status
@@ -34,16 +49,16 @@ output "invitation_id" {
   description = "The unique invitation ID"
 }
 
-# Send invitation to an owner
-resource "anyscale_organization_invitation" "new_owner" {
-  email            = "admin@example.com"
-  permission_level = "owner"
+# Send a second invitation to a different address -- invitations behave identically regardless
+# of who they're for, so this just demonstrates inviting more than one person.
+resource "anyscale_organization_invitation" "second_user" {
+  email = "admin@example.com"
 }
 
-# Check if invitation was accepted
-output "new_owner_accepted" {
-  value       = anyscale_organization_invitation.new_owner.accepted_at != null
-  description = "Whether the owner invitation has been accepted"
+# Check if the second invitation was accepted
+output "second_user_accepted" {
+  value       = anyscale_organization_invitation.second_user.accepted_at != null
+  description = "Whether the second invitation has been accepted"
 }
 ```
 
@@ -52,7 +67,7 @@ output "new_owner_accepted" {
 
 ### Required
 
-- `email` (String) The email address to send the invitation to.
+- `email` (String) The email address to send the invitation to. State reflects whichever casing this resource was created or imported with, not necessarily your most-recently-applied config: the Anyscale API treats two addresses differing only in letter case as the same invitation, so a later apply that changes only casing produces no plan diff and leaves the original casing in state. Changing to a genuinely different email address does replace the invitation.
 
 ### Read-Only
 
@@ -61,7 +76,7 @@ output "new_owner_accepted" {
 - `expires_at` (String) Timestamp when the invitation expires.
 - `id` (String) The unique identifier of the invitation (invitation_id).
 - `organization_id` (String) The organization ID this invitation belongs to.
-- `status` (String) The current status of the invitation. Can be `pending`, `accepted`, or `expired`.
+- `status` (String) The current status of the invitation. Can be `pending`, `accepted`, or `expired`. Computed from `accepted_at` and `expires_at` - note that sending a new invitation to the same email address invalidates this one immediately, which surfaces here as `expired` on the next refresh rather than as an error.
 
 ## Import
 

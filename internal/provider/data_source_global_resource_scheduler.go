@@ -91,121 +91,99 @@ func (d *GlobalResourceSchedulerDataSource) Metadata(ctx context.Context, req da
 
 // Schema defines the schema for the data source.
 func (d *GlobalResourceSchedulerDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		MarkdownDescription: "Fetches details about an Anyscale Global Resource Scheduler by name.",
-
-		Attributes: map[string]schema.Attribute{
-			"name": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The name of the global resource scheduler.",
-			},
-			"id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the global resource scheduler.",
-			},
-			"organization_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The organization ID that owns the global resource scheduler.",
-			},
-			"enable_rootless_dataplane_config": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether rootless dataplane configuration is enabled.",
-			},
-			"cloud_ids": schema.ListAttribute{
-				Computed:            true,
-				ElementType:         types.StringType,
-				MarkdownDescription: "List of cloud IDs attached to this global resource scheduler.",
-			},
-			"spec": schema.ListNestedAttribute{
-				Computed:            true,
-				MarkdownDescription: "The global resource scheduler specification.",
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"kind": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The type of global resource scheduler. Always `ANYSCALE_MANAGED`.",
-						},
-						"machine_types": schema.ListNestedAttribute{
-							Computed:            true,
-							MarkdownDescription: "Machine type configurations.",
-							NestedObject: schema.NestedAttributeObject{
-								Attributes: map[string]schema.Attribute{
-									"name": schema.StringAttribute{
-										Computed:            true,
-										MarkdownDescription: "Resource identifier (e.g., `RES-8CPU-32GB`).",
-									},
-									"launch_templates": schema.ListNestedAttribute{
-										Computed:            true,
-										MarkdownDescription: "Cloud-specific instance configurations.",
-										NestedObject: schema.NestedAttributeObject{
-											Attributes: map[string]schema.Attribute{
-												"instance_type": schema.StringAttribute{
-													Computed:            true,
-													MarkdownDescription: "Cloud provider instance type.",
-												},
-												"market_type": schema.StringAttribute{
-													Computed:            true,
-													MarkdownDescription: "Provisioning model: `ON_DEMAND` or `SPOT`.",
-												},
-												"zones": schema.ListAttribute{
-													Computed:            true,
-													ElementType:         types.StringType,
-													MarkdownDescription: "Availability zones.",
-												},
-											},
+	attributes := globalResourceSchedulerSharedAttributes()
+	attributes["name"] = schema.StringAttribute{
+		Required:            true,
+		MarkdownDescription: "The name of the global resource scheduler.",
+	}
+	attributes["spec"] = schema.ListNestedAttribute{
+		Computed:            true,
+		MarkdownDescription: "The global resource scheduler specification.",
+		NestedObject: schema.NestedAttributeObject{
+			Attributes: map[string]schema.Attribute{
+				"kind": schema.StringAttribute{
+					Computed:            true,
+					MarkdownDescription: "The type of global resource scheduler. Always `ANYSCALE_MANAGED`.",
+				},
+				"machine_types": schema.ListNestedAttribute{
+					Computed:            true,
+					MarkdownDescription: "Machine type configurations.",
+					NestedObject: schema.NestedAttributeObject{
+						Attributes: map[string]schema.Attribute{
+							"name": schema.StringAttribute{
+								Computed:            true,
+								MarkdownDescription: "Resource identifier (e.g., `RES-8CPU-32GB`).",
+							},
+							"launch_templates": schema.ListNestedAttribute{
+								Computed:            true,
+								MarkdownDescription: "Cloud-specific instance configurations.",
+								NestedObject: schema.NestedAttributeObject{
+									Attributes: map[string]schema.Attribute{
+										"instance_type": schema.StringAttribute{
+											Computed:            true,
+											MarkdownDescription: "Cloud provider instance type.",
+										},
+										"market_type": schema.StringAttribute{
+											Computed:            true,
+											MarkdownDescription: "Provisioning model: `ON_DEMAND` or `SPOT`.",
+										},
+										"zones": schema.ListAttribute{
+											Computed:            true,
+											ElementType:         types.StringType,
+											MarkdownDescription: "Availability zones.",
 										},
 									},
-									"recycle_policy": schema.ListNestedAttribute{
-										Computed:            true,
-										MarkdownDescription: "Instance rotation policy.",
-										NestedObject: schema.NestedAttributeObject{
-											Attributes: map[string]schema.Attribute{
-												"max_workloads": schema.Int64Attribute{
-													Computed:            true,
-													MarkdownDescription: "Maximum workloads before rotation.",
-												},
-												"rotation_interval": schema.StringAttribute{
-													Computed:            true,
-													MarkdownDescription: "Time interval for rotation.",
-												},
-												"max_idle_duration": schema.StringAttribute{
-													Computed:            true,
-													MarkdownDescription: "Maximum idle time before termination.",
-												},
-											},
+								},
+							},
+							"recycle_policy": schema.ListNestedAttribute{
+								Computed:            true,
+								MarkdownDescription: "Instance rotation policy.",
+								NestedObject: schema.NestedAttributeObject{
+									Attributes: map[string]schema.Attribute{
+										"max_workloads": schema.Int64Attribute{
+											Computed:            true,
+											MarkdownDescription: "Maximum workloads before rotation.",
+										},
+										"rotation_interval": schema.StringAttribute{
+											Computed:            true,
+											MarkdownDescription: "Time interval for rotation.",
+										},
+										"max_idle_duration": schema.StringAttribute{
+											Computed:            true,
+											MarkdownDescription: "Maximum idle time before termination.",
 										},
 									},
-									"partitions": schema.ListNestedAttribute{
-										Computed:            true,
-										MarkdownDescription: "Resource allocation groups.",
-										NestedObject: schema.NestedAttributeObject{
-											Attributes: map[string]schema.Attribute{
-												"name": schema.StringAttribute{
-													Computed:            true,
-													MarkdownDescription: "Partition name.",
-												},
-												"size": schema.Int64Attribute{
-													Computed:            true,
-													MarkdownDescription: "Total machines in partition.",
-												},
-												"rules": schema.ListNestedAttribute{
-													Computed:            true,
-													MarkdownDescription: "Scheduling rules.",
-													NestedObject: schema.NestedAttributeObject{
-														Attributes: map[string]schema.Attribute{
-															"selector": schema.StringAttribute{
-																Computed:            true,
-																MarkdownDescription: "Kubernetes-style label selector.",
-															},
-															"priority": schema.Int64Attribute{
-																Computed:            true,
-																MarkdownDescription: "Scheduling priority.",
-															},
-															"quota": schema.Int64Attribute{
-																Computed:            true,
-																MarkdownDescription: "Maximum machines for matching workloads.",
-															},
-														},
+								},
+							},
+							"partitions": schema.ListNestedAttribute{
+								Computed:            true,
+								MarkdownDescription: "Resource allocation groups.",
+								NestedObject: schema.NestedAttributeObject{
+									Attributes: map[string]schema.Attribute{
+										"name": schema.StringAttribute{
+											Computed:            true,
+											MarkdownDescription: "Partition name.",
+										},
+										"size": schema.Int64Attribute{
+											Computed:            true,
+											MarkdownDescription: "Total machines in partition.",
+										},
+										"rules": schema.ListNestedAttribute{
+											Computed:            true,
+											MarkdownDescription: "Scheduling rules.",
+											NestedObject: schema.NestedAttributeObject{
+												Attributes: map[string]schema.Attribute{
+													"selector": schema.StringAttribute{
+														Computed:            true,
+														MarkdownDescription: "Kubernetes-style label selector.",
+													},
+													"priority": schema.Int64Attribute{
+														Computed:            true,
+														MarkdownDescription: "Scheduling priority.",
+													},
+													"quota": schema.Int64Attribute{
+														Computed:            true,
+														MarkdownDescription: "Maximum machines for matching workloads.",
 													},
 												},
 											},
@@ -218,6 +196,11 @@ func (d *GlobalResourceSchedulerDataSource) Schema(ctx context.Context, req data
 				},
 			},
 		},
+	}
+
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "Fetches details about an Anyscale Global Resource Scheduler by name.",
+		Attributes:          attributes,
 	}
 }
 

@@ -14,19 +14,60 @@ func TestCreateCloudRequestJSON(t *testing.T) {
 		expected string
 	}{
 		{
+			// is_private_service_cloud unset (nil) -> omitted, matching a
+			// non-GCP create where the resource never touches the field.
 			name: "full request",
 			input: CreateCloudRequest{
 				Name:     "my-cloud",
 				Provider: "AWS",
 			},
-			expected: `{"name":"my-cloud","provider":"AWS"}`,
+			expected: `{"name":"my-cloud","provider":"AWS","is_private_cloud":false}`,
 		},
 		{
 			name: "name only",
 			input: CreateCloudRequest{
 				Name: "my-cloud",
 			},
-			expected: `{"name":"my-cloud"}`,
+			expected: `{"name":"my-cloud","is_private_cloud":false}`,
+		},
+		{
+			// The whole is_private_cloud fix hinges on this field never being
+			// omitted - unlike Provider/Region/Credentials above, it must
+			// always appear on the wire, true or false, since the backend has
+			// no other route to receive it. is_private_service_cloud stays
+			// nil/omitted here since this represents a non-GCP provider.
+			name: "private cloud, non-GCP - service cloud omitted",
+			input: CreateCloudRequest{
+				Name:           "my-cloud",
+				Provider:       "AWS",
+				IsPrivateCloud: true,
+			},
+			expected: `{"name":"my-cloud","provider":"AWS","is_private_cloud":true}`,
+		},
+		{
+			// GCP mirrors is_private_cloud into is_private_service_cloud.
+			name: "private cloud, GCP - service cloud mirrored true",
+			input: CreateCloudRequest{
+				Name:                  "my-cloud",
+				Provider:              "GCP",
+				IsPrivateCloud:        true,
+				IsPrivateServiceCloud: boolPtr(true),
+			},
+			expected: `{"name":"my-cloud","provider":"GCP","is_private_cloud":true,"is_private_service_cloud":true}`,
+		},
+		{
+			// A pointer is required, not a plain bool: the CLI's GCP path
+			// explicitly sends is_private_service_cloud=false for a public
+			// GCP cloud too (never omits it), and omitempty on a plain bool
+			// would incorrectly drop that explicit false.
+			name: "public cloud, GCP - service cloud explicitly false, not omitted",
+			input: CreateCloudRequest{
+				Name:                  "my-cloud",
+				Provider:              "GCP",
+				IsPrivateCloud:        false,
+				IsPrivateServiceCloud: boolPtr(false),
+			},
+			expected: `{"name":"my-cloud","provider":"GCP","is_private_cloud":false,"is_private_service_cloud":false}`,
 		},
 	}
 
@@ -251,14 +292,11 @@ func TestGCPConfigJSON(t *testing.T) {
 	}
 }
 
-// TestAzureConfigJSON tests Azure config JSON marshaling
+// TestAzureConfigJSON tests Azure config JSON marshaling. tenant_id is the
+// only field the Anyscale API accepts here - see AzureConfig's doc comment.
 func TestAzureConfigJSON(t *testing.T) {
 	config := AzureConfig{
-		SubscriptionID:    "sub-123",
-		ResourceGroupName: "my-rg",
-		VNetName:          "my-vnet",
-		SubnetName:        "my-subnet",
-		ManagedIdentityID: "mi-123",
+		TenantID: "11111111-1111-1111-1111-111111111111",
 	}
 
 	data, err := json.Marshal(config)
@@ -266,16 +304,17 @@ func TestAzureConfigJSON(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
+	if !strings.Contains(string(data), `"tenant_id":"11111111-1111-1111-1111-111111111111"`) {
+		t.Errorf("marshaled JSON = %s, want it to contain tenant_id", data)
+	}
+
 	var decoded AzureConfig
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	if decoded.SubscriptionID != config.SubscriptionID {
-		t.Errorf("SubscriptionID = %q, want %q", decoded.SubscriptionID, config.SubscriptionID)
-	}
-	if decoded.ResourceGroupName != config.ResourceGroupName {
-		t.Errorf("ResourceGroupName = %q, want %q", decoded.ResourceGroupName, config.ResourceGroupName)
+	if decoded.TenantID != config.TenantID {
+		t.Errorf("TenantID = %q, want %q", decoded.TenantID, config.TenantID)
 	}
 }
 
@@ -394,7 +433,6 @@ func TestCloudDeploymentsResponseJSON(t *testing.T) {
 		"results": [
 			{
 				"cloud_resource_id": "cr-1",
-				"cloud_deployment_id": "cd-1",
 				"name": "deployment-1",
 				"provider": "AWS",
 				"compute_stack": "VM",
@@ -426,4 +464,66 @@ func TestCloudDeploymentsResponseJSON(t *testing.T) {
 	if resp.Metadata.NextPagingToken == nil || *resp.Metadata.NextPagingToken != "token123" {
 		t.Errorf("NextPagingToken = %v, want %q", resp.Metadata.NextPagingToken, "token123")
 	}
+}
+
+// TestBuildResultResolvedRayVersion tests F4's resolution order: a BYOD build's
+// byod_ray_version (parsed from the docker image tag, may differ from what the user
+// requested) takes precedence over the plain ray_version field when both are present,
+// since only byod_ray_version reflects what the image actually resolved to.
+func TestBuildResultResolvedRayVersion(t *testing.T) {
+	tests := []struct {
+		name           string
+		byodRayVersion *string
+		rayVersion     *string
+		want           *string
+	}{
+		{
+			name:           "byod_ray_version present takes precedence over ray_version",
+			byodRayVersion: strPtr("2.9.3"),
+			rayVersion:     strPtr("2.9.0"),
+			want:           strPtr("2.9.3"),
+		},
+		{
+			name:           "only ray_version present (non-BYOD build)",
+			byodRayVersion: nil,
+			rayVersion:     strPtr("2.44.0"),
+			want:           strPtr("2.44.0"),
+		},
+		{
+			name:           "only byod_ray_version present",
+			byodRayVersion: strPtr("2.9.3"),
+			rayVersion:     nil,
+			want:           strPtr("2.9.3"),
+		},
+		{
+			name:           "neither present",
+			byodRayVersion: nil,
+			rayVersion:     nil,
+			want:           nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildResult{
+				ByodRayVersion: tt.byodRayVersion,
+				RayVersion:     tt.rayVersion,
+			}
+
+			got := result.ResolvedRayVersion()
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("ResolvedRayVersion() = %v, want nil", *got)
+				}
+				return
+			}
+			if got == nil || *got != *tt.want {
+				t.Errorf("ResolvedRayVersion() = %v, want %v", got, *tt.want)
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }

@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -45,7 +47,16 @@ type ContainerImageDataSourceModel struct {
 	CreatedAt   types.String `tfsdk:"created_at"`
 	CreatorID   types.String `tfsdk:"creator_id"`
 	Revision    types.Int64  `tfsdk:"revision"`
+	Digest      types.String `tfsdk:"digest"`
 	NameVersion types.String `tfsdk:"name_version"` // Formatted as "name:revision" for use with Anyscale APIs
+
+	// DS-IMG-4 (Phase B). BuildErrorMessage is singular-only: it comes from the
+	// full per-build GET, which only this data source makes.
+	BuildErrorMessage types.String `tfsdk:"build_error_message"`
+	CloudID           types.String `tfsdk:"cloud_id"`
+	IsDefault         types.Bool   `tfsdk:"is_default"`
+	IsExperimental    types.Bool   `tfsdk:"is_experimental"`
+	LastModifiedAt    types.String `tfsdk:"last_modified_at"`
 }
 
 // Metadata returns the data source type name.
@@ -55,65 +66,55 @@ func (d *ContainerImageDataSource) Metadata(ctx context.Context, req datasource.
 
 // Schema defines the schema for the data source.
 func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	attributes := containerImageSharedAttributes()
+	attributes["id"] = schema.StringAttribute{
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the container image. Either `id` or `name` must be specified. If both are set, `id` takes precedence.",
+		Validators: []validator.String{
+			stringvalidator.AtLeastOneOf(
+				path.MatchRoot("id"),
+				path.MatchRoot("name"),
+			),
+		},
+	}
+	attributes["name"] = schema.StringAttribute{
+		Optional:            true,
+		MarkdownDescription: "The name of the container image. Either `id` or `name` must be specified. If multiple container images have the same name, the most recently modified one will be returned.",
+	}
+	attributes["build_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the latest build for this container image. Null if no build has been triggered yet.",
+	}
+	attributes["ray_version"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The Ray version used in the build. For BYOD images, this resolves from the build's `byod_ray_version` field when the standard field is absent. Null if the image has no build yet, if the build's details couldn't be retrieved, or if the latest build hasn't reported a Ray version yet.",
+	}
+	attributes["build_status"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `pending_cancellation`, `canceled`). Null if no build has been triggered yet, or if the build's details couldn't be retrieved.",
+	}
+	attributes["is_byod"] = schema.BoolAttribute{
+		Computed:            true,
+		MarkdownDescription: "Whether this is a BYOD (Bring Your Own Docker) image. Null if no build has been triggered yet, or if the build's details couldn't be retrieved.",
+	}
+	attributes["digest"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`). Null if the image has no build yet, if the build's details couldn't be retrieved, or if the latest build hasn't produced a digest yet.",
+	}
+	// DS-IMG-4 (Phase B): is_default/is_experimental/last_modified_at/cloud_id are
+	// template-level fields, present on both the get-by-id and list responses -
+	// shared with the plural via containerImageSharedAttributes below except
+	// build_error_message, which only this data source's second per-build GET
+	// can populate.
+	attributes["build_error_message"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The error message from the latest build, if it failed. Null if the build succeeded, is still in progress, or hasn't started yet. Only available on this singular lookup - the plural `anyscale_container_images` data source's lighter per-item response doesn't include build error details without an extra network call per image.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Retrieves information about an existing Anyscale container image (cluster environment). Use this data source to look up container images by ID or name.",
-
-		Attributes: map[string]schema.Attribute{
-			// Input attributes
-			"id": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the cluster environment. Either `id` or `name` must be specified.",
-				Validators: []validator.String{
-					stringvalidator.AtLeastOneOf(
-						path.MatchRoot("id"),
-						path.MatchRoot("name"),
-					),
-				},
-			},
-			"name": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The name of the cluster environment. Either `id` or `name` must be specified.",
-			},
-
-			// Output attributes
-			"build_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The unique identifier of the latest build for this cluster environment.",
-			},
-			"image_uri": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The URI of the container image.",
-			},
-			"ray_version": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The Ray version used in the build.",
-			},
-			"build_status": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The status of the latest build (`pending`, `in_progress`, `succeeded`, `failed`, `cancelled`).",
-			},
-			"is_byod": schema.BoolAttribute{
-				Computed:            true,
-				MarkdownDescription: "Whether this is a BYOD (Bring Your Own Docker) image.",
-			},
-			"created_at": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Timestamp when the cluster environment was created.",
-			},
-			"creator_id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ID of the user who created this cluster environment.",
-			},
-			"revision": schema.Int64Attribute{
-				Computed:            true,
-				MarkdownDescription: "The revision number of the latest build.",
-			},
-			"name_version": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The name and revision formatted as `name:revision` for use with Anyscale APIs.",
-			},
-		},
+		Attributes:          attributes,
 	}
 }
 
@@ -143,14 +144,14 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	var clusterEnv *ClusterEnvironmentResult
+	var template *ApplicationTemplateResult
 	var err error
 
 	// Look up by ID or name
 	if !config.ID.IsNull() && config.ID.ValueString() != "" {
-		clusterEnv, err = d.getClusterEnvironmentByID(ctx, config.ID.ValueString())
+		template, err = d.getApplicationTemplateByID(ctx, config.ID.ValueString())
 	} else if !config.Name.IsNull() && config.Name.ValueString() != "" {
-		clusterEnv, err = d.getClusterEnvironmentByName(ctx, config.Name.ValueString())
+		template, err = d.getApplicationTemplateByName(ctx, config.Name.ValueString())
 	} else {
 		AddConfigError(&resp.Diagnostics, "Missing Required Attribute",
 			"Either 'id' or 'name' must be specified.")
@@ -162,51 +163,54 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	// Map cluster environment to model
-	config.ID = types.StringValue(clusterEnv.ID)
-	config.Name = types.StringValue(clusterEnv.Name)
-	config.CreatedAt = types.StringValue(clusterEnv.CreatedAt)
-	config.CreatorID = types.StringValue(clusterEnv.CreatorID)
+	// Map application template to model
+	config.ID = types.StringValue(template.ID)
+	config.Name = types.StringValue(template.Name)
+	config.CreatedAt = types.StringValue(template.CreatedAt)
+	config.CreatorID = stringOrNull(template.CreatorID)
 
-	// Fetch the latest build for this cluster environment
-	buildID, err := d.getLatestBuildID(ctx, clusterEnv.ID)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to get latest build ID", map[string]any{
-			"cluster_environment_id": clusterEnv.ID,
-			"error":                  err.Error(),
-		})
-	}
+	// DS-IMG-4 (Phase B): template-level fields, always available regardless
+	// of whether a build exists.
+	config.CloudID = types.StringPointerValue(template.CloudID)
+	config.IsDefault = types.BoolValue(template.IsDefault)
+	config.IsExperimental = types.BoolValue(template.IsExperimental)
+	config.LastModifiedAt = stringOrNull(template.LastModifiedAt)
 
-	// Get build details if available
-	if buildID != "" {
-		config.BuildID = types.StringValue(buildID)
+	// Resolve the latest build contract-based, via the template's own latest_build
+	// reference. DS-IMG-2: image_uri now reads straight off the embedded
+	// latest_build.docker_image_name - it no longer depends on the second
+	// per-build GET succeeding, unlike build_status/is_byod/revision/digest/
+	// name_version/build_error_message below, which still need that full
+	// build record.
+	if template.LatestBuild != nil {
+		config.BuildID = types.StringValue(template.LatestBuild.ID)
+		config.ImageURI = types.StringPointerValue(template.LatestBuild.DockerImageName)
 
 		// Get full build details
-		build, err := d.getBuild(ctx, buildID)
+		build, err := d.getBuild(ctx, template.LatestBuild.ID)
 		if err != nil {
 			tflog.Warn(ctx, "Failed to get build details", map[string]any{
-				"build_id": buildID,
+				"build_id": template.LatestBuild.ID,
 				"error":    err.Error(),
 			})
+			config.BuildStatus = types.StringNull()
+			config.RayVersion = types.StringNull()
+			config.IsBYOD = types.BoolNull()
 			config.Revision = types.Int64Null()
+			config.Digest = types.StringNull()
 			config.NameVersion = types.StringNull()
+			config.BuildErrorMessage = types.StringNull()
 		} else {
 			config.BuildStatus = types.StringValue(build.Status)
 			config.IsBYOD = types.BoolValue(build.IsBYOD)
 			config.Revision = types.Int64Value(int64(build.Revision))
-			config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", clusterEnv.Name, build.Revision))
-
-			if build.DockerImageName != nil {
-				config.ImageURI = types.StringValue(*build.DockerImageName)
-			} else {
-				config.ImageURI = types.StringNull()
-			}
-
-			if build.RayVersion != nil {
-				config.RayVersion = types.StringValue(*build.RayVersion)
-			} else {
-				config.RayVersion = types.StringNull()
-			}
+			config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", template.Name, build.Revision))
+			// DS-IMG-1: resolves to byod_ray_version when the plain ray_version
+			// field is absent (the common case for BYOD images), instead of
+			// reporting null for a version the backend actually knows.
+			config.RayVersion = types.StringPointerValue(build.ResolvedRayVersion())
+			config.Digest = types.StringPointerValue(build.Digest)
+			config.BuildErrorMessage = types.StringPointerValue(build.ErrorMessage)
 		}
 	} else {
 		config.BuildID = types.StringNull()
@@ -215,7 +219,9 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 		config.RayVersion = types.StringNull()
 		config.IsBYOD = types.BoolNull()
 		config.Revision = types.Int64Null()
+		config.Digest = types.StringNull()
 		config.NameVersion = types.StringNull()
+		config.BuildErrorMessage = types.StringNull()
 	}
 
 	// Save data into Terraform state
@@ -224,15 +230,15 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 
 // Helper functions
 
-// getClusterEnvironmentByID fetches a cluster environment by ID.
-func (d *ContainerImageDataSource) getClusterEnvironmentByID(ctx context.Context, id string) (*ClusterEnvironmentResult, error) {
-	tflog.Debug(ctx, "Fetching cluster environment by ID", map[string]any{"id": id})
+// getApplicationTemplateByID fetches the decorated application template by ID.
+func (d *ContainerImageDataSource) getApplicationTemplateByID(ctx context.Context, id string) (*ApplicationTemplateResult, error) {
+	tflog.Debug(ctx, "Fetching application template by ID", map[string]any{"id": id})
 
-	clusterEnvResp, err := DoRequestAndParse[ClusterEnvironmentResponse](
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environments/%s", id),
+		fmt.Sprintf("/api/v2/application_templates/%s", id),
 		nil,
 		http.StatusOK,
 	)
@@ -240,70 +246,82 @@ func (d *ContainerImageDataSource) getClusterEnvironmentByID(ctx context.Context
 		return nil, fmt.Errorf("failed to get cluster environment %s: %w", id, err)
 	}
 
-	return &clusterEnvResp.Result, nil
+	return &templateResp.Result, nil
 }
 
-// getClusterEnvironmentByName fetches a cluster environment by name.
-func (d *ContainerImageDataSource) getClusterEnvironmentByName(ctx context.Context, name string) (*ClusterEnvironmentResult, error) {
-	tflog.Debug(ctx, "Fetching cluster environment by name", map[string]any{"name": name})
+// getApplicationTemplateByName fetches an application template by exact name match.
+// GET /api/v2/application_templates/ only supports a name_contains substring filter, so this
+// pages through the full result set (via PaginatedRequest, following next_paging_token) and
+// filters client-side for an exact, non-archived match across ALL pages - not just the first.
+func (d *ContainerImageDataSource) getApplicationTemplateByName(ctx context.Context, name string) (*ApplicationTemplateResult, error) {
+	tflog.Debug(ctx, "Fetching application template by name", map[string]any{"name": name})
 
-	// Search for cluster environment by name using POST /ext/v0/cluster_environments/search
-	searchQuery := ClusterEnvironmentsSearchQuery{
-		Name: &TextQuery{
-			Contains: name,
+	params := url.Values{}
+	params.Set("name_contains", name)
+	params.Set("include_archived", "false")
+
+	results, err := PaginatedRequest(ctx, d.client, "/api/v2/application_templates/", params,
+		func(body []byte) ([]ApplicationTemplateResult, *string, error) {
+			var listResp ApplicationTemplatesListResponse
+			if err := json.Unmarshal(body, &listResp); err != nil {
+				return nil, nil, err
+			}
+			return listResp.Results, listResp.Metadata.NextPagingToken, nil
 		},
-		Paging: PageQuery{
-			Count: 100,
-		},
-		IncludeArchived:  false,
-		IncludeAnonymous: false,
-	}
-
-	reqBody, err := MarshalRequestBody(searchQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal search query: %w", err)
-	}
-
-	clusterEnvsResp, err := DoRequestAndParse[ClusterEnvironmentsListResponse](
-		ctx,
-		d.client,
-		"POST",
-		"/ext/v0/cluster_environments/search",
-		reqBody,
-		http.StatusOK,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search cluster environments: %w", err)
 	}
 
-	// Find exact match
-	var matches []ClusterEnvironmentResult
-	for _, env := range clusterEnvsResp.Results {
-		if env.Name == name && !env.IsArchived() {
-			matches = append(matches, env)
-		}
-	}
+	// Find exact match across every page - name_contains is a substring filter, so an exact
+	// match may sit on any page, not just the first.
+	matches := filterExactApplicationTemplateMatches(results, name)
 
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("no cluster environment found with name '%s'", name)
 	}
 
-	if len(matches) > 1 {
-		WarnIfMultipleMatches(ctx, "cluster environment", name, len(matches), matches[0].ID)
-	}
+	// matches is already exact-name + non-archived, so the predicate here is a passthrough.
+	// Tiebreak on LastModifiedAt rather than CreatedAt (unlike the other PickMostRecentMatch
+	// call sites): this endpoint's backend default order is last_modified_at DESC
+	// (cluster_environments_dao.go's DEFAULT_ORDER_BY_CLAUSES), so "first match" already
+	// meant "most recently modified" before this helper existed. Keying on CreatedAt here
+	// instead would silently pick a different duplicate whenever a template is modified
+	// after creation (X-2).
+	matchedID := PickMostRecentMatch(ctx, "cluster environment", name, matches,
+		func(t ApplicationTemplateResult) bool { return true },
+		func(t ApplicationTemplateResult) string { return t.ID },
+		func(t ApplicationTemplateResult) string { return t.LastModifiedAt },
+	)
 
-	// Return the first match (or most recent if multiple)
-	return &matches[0], nil
+	for i := range matches {
+		if matches[i].ID == matchedID {
+			return &matches[i], nil
+		}
+	}
+	return nil, fmt.Errorf("internal error: matched cluster environment id %q not found", matchedID)
 }
 
-// getBuild fetches build details by ID.
-func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string) (*ClusterEnvironmentBuildResult, error) {
+// filterExactApplicationTemplateMatches narrows a name_contains substring search down to
+// non-archived results whose name is an exact match.
+func filterExactApplicationTemplateMatches(results []ApplicationTemplateResult, name string) []ApplicationTemplateResult {
+	var matches []ApplicationTemplateResult
+	for _, tmpl := range results {
+		if tmpl.Name == name && !tmpl.IsArchived() {
+			matches = append(matches, tmpl)
+		}
+	}
+	return matches
+}
+
+// getBuild fetches the current build details.
+func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
 	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[ClusterEnvironmentBuildResponse](
+	buildResp, err := DoRequestAndParse[BuildResponse](
 		ctx,
 		d.client,
 		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/%s", buildID),
+		fmt.Sprintf("/api/v2/builds/%s", buildID),
 		nil,
 		http.StatusOK,
 		http.StatusCreated,
@@ -313,29 +331,4 @@ func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string)
 	}
 
 	return &buildResp.Result, nil
-}
-
-// getLatestBuildID fetches the latest build ID for a cluster environment.
-func (d *ContainerImageDataSource) getLatestBuildID(ctx context.Context, clusterEnvID string) (string, error) {
-	tflog.Debug(ctx, "Fetching latest build for cluster environment", map[string]any{"cluster_environment_id": clusterEnvID})
-
-	// Note: The Anyscale API may return 201 for GET build endpoints
-	buildsResp, err := DoRequestAndParse[ClusterEnvironmentBuildsListResponse](
-		ctx,
-		d.client,
-		"GET",
-		fmt.Sprintf("/ext/v0/cluster_environment_builds/?cluster_environment_id=%s&count=1&desc=true", clusterEnvID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to list builds for cluster environment %s: %w", clusterEnvID, err)
-	}
-
-	if len(buildsResp.Results) == 0 {
-		return "", nil // No builds yet - not an error
-	}
-
-	return buildsResp.Results[0].ID, nil
 }

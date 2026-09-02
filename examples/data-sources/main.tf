@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     anyscale = {
-      source = "registry.terraform.io/anyscale/anyscale"
+      source = "anyscale/anyscale"
     }
   }
 }
@@ -34,6 +34,11 @@ output "production_cloud_region" {
 # Example 2: Look up an existing cloud by ID
 data "anyscale_cloud" "by_id" {
   id = "cld_abc123xyz"
+}
+
+output "cloud_by_id_provider" {
+  value       = data.anyscale_cloud.by_id.cloud_provider
+  description = "The cloud provider of the cloud looked up by ID"
 }
 
 # Example 3: Use data source to create compute config
@@ -162,7 +167,54 @@ output "default_cloud" {
   description = "Default cloud name"
 }
 
-# Example 12: Get current user information
+# Example 12: Look up an existing project by name, scoped to a cloud
+data "anyscale_project" "team_project" {
+  name       = "my-team-project"
+  cloud_name = "production-cloud"
+}
+
+output "project_directory_name" {
+  value       = data.anyscale_project.team_project.directory_name
+  description = "The storage directory name used by this project"
+}
+
+output "project_collaborators" {
+  value       = data.anyscale_project.team_project.collaborators
+  description = "Current collaborators on the project (email + permission_level each)"
+}
+
+# Example 13: Look up an existing project by ID
+data "anyscale_project" "by_id" {
+  id = "prj_abc123xyz"
+}
+
+output "project_by_id_description" {
+  value       = data.anyscale_project.by_id.description
+  description = "The project's description when looking up by ID"
+}
+
+# Example 14: List every non-default project in a cloud
+data "anyscale_projects" "cloud_projects" {
+  cloud_name       = "production-cloud"
+  include_defaults = false
+}
+
+output "cloud_project_ids" {
+  value       = [for p in data.anyscale_projects.cloud_projects.projects : p.id]
+  description = "IDs of every non-default project in the cloud"
+}
+
+# Example 15: Filter projects by a partial name match across all clouds
+data "anyscale_projects" "research" {
+  name_contains = "research"
+}
+
+output "research_project_names" {
+  value       = [for p in data.anyscale_projects.research.projects : p.name]
+  description = "Names of projects whose name contains \"research\""
+}
+
+# Example 16: Get current user information
 data "anyscale_user" "current" {
 }
 
@@ -202,7 +254,28 @@ output "current_user_cloud_count" {
   description = "Number of clouds the current user has access to"
 }
 
-# Example 13: List all users in the organization (BETA - SCIM)
+# Example 17: Get the connected organization's identity - takes no arguments,
+# since an API token is always scoped to exactly one organization. Distinct
+# from anyscale_user.organizations above: that list exists because the
+# underlying API models organization membership as a list, but in practice it
+# always holds exactly one entry (the token's own org). anyscale_organization
+# is the direct, self-documenting way to reach that one organization without
+# indexing into someone else's list.
+data "anyscale_organization" "current" {
+}
+
+output "organization_name" {
+  value       = data.anyscale_organization.current.name
+  description = "The name of the connected organization"
+}
+
+output "organization_default_cloud_id" {
+  value       = data.anyscale_organization.current.default_cloud_id
+  description = "Default cloud ID for the organization; null if none is configured"
+}
+
+# Example 18: List all users in the organization. Not related to SCIM (this provider has no SCIM
+# integration) - this simply lists organization membership via the API.
 data "anyscale_organization_users" "all" {
 }
 
@@ -215,12 +288,14 @@ output "organization_users_list" {
   value = [for u in data.anyscale_organization_users.all.users : {
     name  = u.name
     email = u.email
-    role  = u.permission_level
+    # base_role is the current source of role information; permission_level is
+    # still available but the backend is moving away from it.
+    base_role = u.base_role
   }]
   description = "List of all organization users"
 }
 
-# Example 14: Look up a specific user by email (BETA - SCIM)
+# Example 19: Look up a specific user by email
 data "anyscale_organization_user" "specific" {
   email = "admin@example.com"
 }
@@ -230,22 +305,37 @@ output "specific_user_id" {
   description = "The identity ID of the specific user"
 }
 
-# Example 15: Look up a specific user by ID (BETA - SCIM)
+# Example 20: Look up a specific user by ID
 data "anyscale_organization_user" "by_id" {
   id = "usr_abc123xyz"
 }
 
-# Example 16: Look up a specific user by user_id (BETA - SCIM)
+output "user_by_id_email" {
+  value       = data.anyscale_organization_user.by_id.email
+  description = "The email of the user looked up by identity ID"
+}
+
+# Example 21: Look up a specific user by user_id
 data "anyscale_organization_user" "by_user_id" {
   user_id = "usr_xyz789abc"
 }
 
-# Example 17: Filter organization users by email (BETA - SCIM)
+output "user_by_user_id_email" {
+  value       = data.anyscale_organization_user.by_user_id.email
+  description = "The email of the user looked up by user_id"
+}
+
+# Example 22: Filter organization users by email
 data "anyscale_organization_users" "filtered" {
   email = "admin@example.com"
 }
 
-# Example 18: Get service accounts only (BETA - SCIM)
+output "filtered_users_count" {
+  value       = length(data.anyscale_organization_users.filtered.users)
+  description = "Number of users matching the email filter"
+}
+
+# Example 23: Get service accounts only
 data "anyscale_organization_users" "service_accounts" {
   is_service_account = true
 }
@@ -255,121 +345,39 @@ output "service_accounts_count" {
   description = "Number of service accounts in the organization"
 }
 
-# Example 19: List all user groups (BETA - SCIM)
-data "anyscale_user_groups" "all" {
+# Example 24: Look up an existing container image by name
+data "anyscale_container_image" "training" {
+  name = "training-image"
 }
 
-output "user_groups_count" {
-  value       = length(data.anyscale_user_groups.all.groups)
-  description = "Total number of user groups synced from IdP"
+output "training_image_name_version" {
+  value       = data.anyscale_container_image.training.name_version
+  description = "The name:revision handle for the training image, for use in job/service submission"
 }
 
-output "user_groups_list" {
-  value = [for g in data.anyscale_user_groups.all.groups : {
-    id   = g.id
-    name = g.name
-  }]
-  description = "List of all user groups"
+output "training_image_build_status" {
+  value       = data.anyscale_container_image.training.build_status
+  description = "The current build status of the image (pending, in_progress, succeeded, failed, pending_cancellation, canceled)"
 }
 
-# Example 20: Look up a specific user group by name (BETA - SCIM)
-data "anyscale_user_group" "admins" {
-  name = "Admins"
+output "training_image_digest" {
+  value       = data.anyscale_container_image.training.digest
+  description = "The content digest of the latest build (e.g. sha256:...); null until a build succeeds"
 }
 
-output "admins_group_id" {
-  value       = data.anyscale_user_group.admins.id
-  description = "The ID of the Admins user group"
+# Example 25: List and filter container images
+data "anyscale_container_images" "recent" {
+  name_contains    = "training"
+  include_archived = false
 }
 
-# Example 21: Look up a specific user group by ID (BETA - SCIM)
-data "anyscale_user_group" "by_id" {
-  id = "ug_abc123xyz"
-}
-
-# Example 22: List all policy bindings for clouds (BETA - SCIM)
-data "anyscale_policy_bindings" "all_clouds" {
-  resource_type = "clouds"
-}
-
-output "clouds_with_policies_count" {
-  value       = length(data.anyscale_policy_bindings.all_clouds.policies)
-  description = "Number of clouds with SCIM policy bindings"
-}
-
-output "clouds_policy_summary" {
-  value = [for p in data.anyscale_policy_bindings.all_clouds.policies : {
-    resource_id = p.resource_id
-    sync_status = p.sync_status
-    num_roles   = length(p.bindings)
-  }]
-  description = "Summary of cloud policy bindings"
-}
-
-# Example 23: List all policy bindings for projects (BETA - SCIM)
-data "anyscale_policy_bindings" "all_projects" {
-  resource_type = "projects"
-}
-
-# Example 24: Get policy binding for a specific cloud (BETA - SCIM)
-data "anyscale_policy_binding" "production_cloud" {
-  resource_type = "cloud"
-  resource_id   = data.anyscale_cloud.production.id
-}
-
-output "production_cloud_policy" {
-  value = {
-    resource_id = data.anyscale_policy_binding.production_cloud.resource_id
-    bindings = [for b in data.anyscale_policy_binding.production_cloud.bindings : {
-      role       = b.role_name
-      num_groups = length(b.principals)
-    }]
-  }
-  description = "Policy bindings for the production cloud"
-}
-
-# Example 25: Get policy binding for a specific project (BETA - SCIM)
-data "anyscale_project" "main" {
-  name = "main-project"
-}
-
-data "anyscale_policy_binding" "main_project" {
-  resource_type = "project"
-  resource_id   = data.anyscale_project.main.id
-}
-
-# Example 26: Get organization-level policy binding (BETA - SCIM)
-data "anyscale_policy_binding" "organization" {
-  resource_type = "organization"
-  resource_id   = data.anyscale_user.current.organizations[0].id
-}
-
-output "organization_roles" {
-  value = [for b in data.anyscale_policy_binding.organization.bindings : {
-    role   = b.role_name
-    groups = b.principals
-  }]
-  description = "Organization-level role assignments"
-}
-
-# Example 27: Find which user groups have access to a cloud (BETA - SCIM)
-data "anyscale_cloud" "shared" {
-  name = "shared-cloud"
-}
-
-data "anyscale_policy_binding" "shared_cloud" {
-  resource_type = "cloud"
-  resource_id   = data.anyscale_cloud.shared.id
-}
-
-locals {
-  # Extract all user group IDs that have any role on the shared cloud
-  shared_cloud_group_ids = flatten([
-    for binding in data.anyscale_policy_binding.shared_cloud.bindings : binding.principals
-  ])
-}
-
-output "shared_cloud_access_groups" {
-  value       = local.shared_cloud_group_ids
-  description = "User groups with access to shared cloud"
+output "recent_container_images" {
+  value = [
+    for img in data.anyscale_container_images.recent.container_images : {
+      name                = img.name
+      name_version        = img.name_version
+      latest_build_status = img.latest_build_status
+    }
+  ]
+  description = "Non-archived container images with 'training' in the name"
 }

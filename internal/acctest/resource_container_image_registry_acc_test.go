@@ -47,7 +47,6 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "image_uri", imageURI),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "build_id"),
-					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "cluster_environment_id"),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "build_status", "succeeded"),
 					// Note: Anyscale-provided images are NOT considered BYOD
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "is_byod"),
@@ -67,7 +66,6 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"registry_login_secret", // sensitive: API never returns auth secrets after create
-					"name",                  // Optional-only schema field; auto-generated when omitted and not rehydrated to avoid drift on null configs
 					"ray_version",           // Optional-only schema field; rehydrated only when the user set it, so import on null configs is ignored
 				},
 			},
@@ -95,16 +93,33 @@ func TestAccContainerImageRegistryResource_BYOD(t *testing.T) {
 		// resource_container_image_build_acc_test.go — the /ext/v0 read model
 		// never serializes archived_at, so its deleted_at can never reflect an
 		// archive regardless of how long you poll).
-		CheckDestroy: NewAPIArchivedDestroyCheckByAttr("anyscale_container_image_registry", "cluster_environment_id", "/api/v2/application_templates/%s", "result.archived_at"),
+		//
+		// Plain (non-ByAttr) variant, keyed on rs.Primary.ID directly — not
+		// ByAttr("cluster_environment_id"). V1(c) removed that attribute
+		// outright, so a lookup by that name would hit a missing map key
+		// (Go returns "" for that, not an error), tripping
+		// newAPIDestroyCheckImpl's id == "" guard and silently skipping the
+		// API call entirely — CheckDestroy would report success having
+		// never checked whether the resource was actually archived. Same
+		// false-green shape TestRegistryCheckDestroy_KeyingOnBuildIDWouldSilentlySkipBuildlessOrphan
+		// (helpers_checkdestroy_test.go) already proves for build_id.
+		//
+		// Using the plain variant rather than ByAttr("id") mirrors
+		// container_image_build's own CheckDestroy just above this resource
+		// in the same family (same endpoint pattern, same archivedJSONPath)
+		// and reads rs.Primary.ID directly instead of going through
+		// rs.Primary.Attributes["id"] — one fewer assumption about how the
+		// legacy flatmap shim represents state.
+		CheckDestroy: NewAPIArchivedDestroyCheck("anyscale_container_image_registry", "/api/v2/application_templates/%s", "result.archived_at"),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccContainerImageRegistryResourceBYODConfig(imageName, fakeECRImageURI),
 				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "id"),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "name", imageName),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "image_uri", fakeECRImageURI),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "is_byod", "true"),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "build_id"),
-					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "cluster_environment_id"),
 					testAccCheckContainerImageRegistryExistsInAPI("anyscale_container_image_registry.test"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{

@@ -1,3 +1,14 @@
+//go:build grs_enabled
+
+// GRS (Global Resource Scheduler) support is temporarily disabled pending
+// backend API rework - provider.go has NewGlobalResourceSchedulerResource and
+// its data sources commented out, so nothing in the default build can create a
+// machine pool through this provider and this sweeper has no legitimate
+// target. Gated behind the same build tag as the resource/data-source
+// acceptance tests (see resource_global_resource_scheduler_acc_test.go) so it
+// re-arms automatically when GRS is re-enabled, rather than issuing real
+// deletes against a resource type nothing here creates.
+
 package acctest
 
 import (
@@ -6,7 +17,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -20,10 +30,6 @@ func init() {
 		F:    sweepSchedulers,
 	})
 }
-
-var sweepSchedulerPrefixes = []string{"tfacc-", "tf-test-", "tfprovider-"}
-
-const sweepSchedulerDefaultMinAge = 2 * time.Hour
 
 // sweepSchedulerResult mirrors only the fields the sweeper needs. The list API
 // response model doesn't expose a created_at; we read it opportunistically in
@@ -47,13 +53,9 @@ func sweepSchedulers(_ string) error {
 		return nil
 	}
 
-	minAge := sweepSchedulerDefaultMinAge
-	if raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE"); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil {
-			return fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, parseErr)
-		}
-		minAge = parsed
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
+	if err != nil {
+		return err
 	}
 	cutoff := time.Now().Add(-minAge)
 
@@ -68,7 +70,7 @@ func sweepSchedulers(_ string) error {
 	var failures []string
 	swept := 0
 	for _, s := range schedulers {
-		if !hasAnyPrefix(s.MachinePoolName, sweepSchedulerPrefixes) {
+		if !hasAnyPrefix(s.MachinePoolName, sweepableResourcePrefixes) {
 			continue
 		}
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -37,6 +38,18 @@ var (
 	// Cache for any cloud ID (fallback for data source tests)
 	cachedAnyCloudID string
 	anyCloudIDMutex  sync.Mutex
+
+	// Cache for GetAllConfiguredClouds - avoids repeating its list-clouds-then
+	// per-cloud-resources-check API calls on every call site across a test run.
+	cachedAllConfiguredClouds []CloudInfo
+	allConfiguredCloudsCached bool
+	allConfiguredCloudsMutex  sync.Mutex
+
+	// Cache for ValidateAuthOrSkip's live probe - see its doc comment for why
+	// only a definitive answer (not a request error) is cached.
+	authProbeDone    bool
+	authProbeInvalid bool
+	authProbeMutex   sync.Mutex
 
 	// Track ephemeral clouds created by tests for cleanup. Keyed by cloud ID
 	// so concurrent createEphemeralTestCloud calls do not clobber each other.
@@ -215,70 +228,111 @@ func validateCloudExists(cloudID string) bool {
 	return resp.StatusCode == 200
 }
 
-// resolveCloudNameToID resolves a cloud name to its ID by querying the API
+// resolveCloudNameToID resolves a cloud name to its ID by querying the API.
+//
+// Paginates across every page of GET /api/v2/clouds, not just the first -
+// this used to read only page 1, so once an org's cloud list exceeded one
+// page, a valid name resolved to "no cloud found" (the same bug class fixed
+// in the provider's own ResolveCloudNameToID, cloud_helpers.go). This
+// function resolves ANYSCALE_TEST_CLOUD_NAME and the default pinned fixture
+// name (tfp-test-aws-useast1-STATIC) at runtime, so the failure mode here is
+// "the entire acceptance suite can no longer find its own fixture" the day
+// the test org's cloud list crosses a page boundary - worth the extra
+// diligence over a typical test-helper bug. Deliberately keeps the exact
+// local most-recent tiebreak and duplicate-warning log below unchanged
+// (rather than delegating to the provider package's PickMostRecentMatch) -
+// only the pagination gap is being closed here.
 func resolveCloudNameToID(t *testing.T, cloudName string) (string, error) {
+	id, matchCount, err := resolveCloudNameToIDCore(cloudName)
+	if err != nil {
+		return "", err
+	}
+	if matchCount > 1 {
+		t.Logf("Warning: Multiple clouds (%d) found with name '%s', using most recent: %s", matchCount, cloudName, id)
+	}
+	t.Logf("Resolved cloud name '%s' to ID: %s", cloudName, id)
+	return id, nil
+}
+
+// resolveCloudNameToIDCore is resolveCloudNameToID without a *testing.T, so
+// callers outside a test function can reuse the same fully-paginated lookup
+// instead of duplicating it. The sweep-target org guard in TestMain needs
+// exactly this: TestMain has no *testing.T, and a second copy of the paging
+// loop is precisely the divergence this repo has been bitten by before (a
+// body-vs-query paging mismatch silently truncating a sweep's candidate list).
+// Returns the resolved ID and how many clouds carried that name; the caller
+// decides whether a duplicate is worth logging.
+func resolveCloudNameToIDCore(cloudName string) (string, int, error) {
 	client, err := GetTestClient()
 	if err != nil {
-		return "", fmt.Errorf("failed to get test client: %w", err)
+		return "", 0, fmt.Errorf("failed to get test client: %w", err)
 	}
 
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to list clouds: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		return "", fmt.Errorf("failed to parse clouds response: %w", err)
-	}
-
-	// Find matching cloud(s) - if multiple exist, use the most recent
+	// Find matching cloud(s) across every page - if multiple exist, use the most recent
 	var matchedCloudID string
 	var latestCreatedAt string
+	matchCount := 0
 
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-				matchedCloudID = cloud.ID
-				latestCreatedAt = cloud.CreatedAt
+	pagingToken := ""
+	for {
+		path := "/api/v2/clouds"
+		if pagingToken != "" {
+			path = fmt.Sprintf("%s?paging_token=%s", path, url.QueryEscape(pagingToken))
+		}
+
+		resp, err := client.DoRequest(context.Background(), "GET", path, nil)
+		if err != nil {
+			return "", 0, fmt.Errorf("failed to list clouds: %w", err)
+		}
+
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return "", 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return "", 0, fmt.Errorf("failed to read response: %w", err)
+		}
+
+		var cloudsResp struct {
+			Results []struct {
+				ID        string `json:"id"`
+				Name      string `json:"name"`
+				CreatedAt string `json:"created_at"`
+			} `json:"results"`
+			Metadata struct {
+				NextPagingToken *string `json:"next_paging_token"`
+			} `json:"metadata"`
+		}
+
+		if err := json.Unmarshal(body, &cloudsResp); err != nil {
+			return "", 0, fmt.Errorf("failed to parse clouds response: %w", err)
+		}
+
+		for _, cloud := range cloudsResp.Results {
+			if cloud.Name == cloudName {
+				matchCount++
+				if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
+					matchedCloudID = cloud.ID
+					latestCreatedAt = cloud.CreatedAt
+				}
 			}
 		}
+
+		if cloudsResp.Metadata.NextPagingToken == nil || *cloudsResp.Metadata.NextPagingToken == "" {
+			break
+		}
+		pagingToken = *cloudsResp.Metadata.NextPagingToken
 	}
 
 	if matchedCloudID == "" {
-		return "", fmt.Errorf("no cloud found with name '%s'", cloudName)
+		return "", 0, fmt.Errorf("no cloud found with name '%s'", cloudName)
 	}
 
-	matchCount := 0
-	for _, cloud := range cloudsResp.Results {
-		if cloud.Name == cloudName {
-			matchCount++
-		}
-	}
-	if matchCount > 1 {
-		t.Logf("Warning: Multiple clouds (%d) found with name '%s', using most recent: %s", matchCount, cloudName, matchedCloudID)
-	}
-
-	t.Logf("Resolved cloud name '%s' to ID: %s", cloudName, matchedCloudID)
-	return matchedCloudID, nil
+	return matchedCloudID, matchCount, nil
 }
 
 // createEphemeralTestCloud creates a minimal empty cloud for testing.
@@ -496,6 +550,40 @@ func autoDiscoverTestCloud(t *testing.T) (cloudID string, cloudName string, err 
 		return "", "", fmt.Errorf("no clouds found in the account (set ANYSCALE_TEST_CREATE_CLOUD=1 to auto-create)")
 	}
 
+	// MAY CREATE, MAY NOT ADOPT.
+	//
+	// Reaching this point means two things at once: the pinned fixture cloud did
+	// NOT resolve (both callers check it immediately before calling us), AND this
+	// organization already contains clouds. The pinned fixture exists only in the
+	// acctest org, so its absence is a reliable signal that we are somewhere else
+	// - and the clouds sitting here belong to whoever owns that organization.
+	//
+	// Adopting one is how four tfacc- clouds were created in a user's working org
+	// on 2026-08-02: the resolver logged "did not resolve in this org", fell
+	// through, scored a cloud, and every later test built on it. Worse, the leak
+	// self-conceals - a wrong-org run leaves tfacc- clouds behind, and tfacc-
+	// scores priority 9 below, so the NEXT run adopts the previous run's leftovers
+	// and passes, with a plausible-looking test cloud waiting for it.
+	//
+	// Creating in an EMPTY org stays allowed - that is the branch above, and it is
+	// the path CI's ANYSCALE_TEST_CREATE_CLOUD=1 exists for. Only adoption of a
+	// pre-existing cloud is refused.
+	if os.Getenv("ANYSCALE_TEST_ALLOW_CLOUD_ADOPTION") != "1" {
+		names := make([]string, 0, len(testClouds))
+		for _, c := range testClouds {
+			names = append(names, c.Name)
+		}
+		return "", "", fmt.Errorf(
+			"refusing to adopt an existing cloud: the pinned fixture %q does not exist in this "+
+				"organization, so these credentials are probably not pointed at the acctest org. "+
+				"Found %d cloud(s) here that this suite did not create: %s.\n\n"+
+				"Point ANYSCALE_CLI_TOKEN at the acctest org, or set ANYSCALE_TEST_CLOUD_ID / "+
+				"ANYSCALE_TEST_CLOUD_NAME to choose a cloud explicitly. If you genuinely mean to run "+
+				"against a cloud this suite did not create, set ANYSCALE_TEST_ALLOW_CLOUD_ADOPTION=1",
+			defaultKnownGoodCloudName, len(testClouds), strings.Join(names, ", "),
+		)
+	}
+
 	// Sort by priority (highest first), then by created_at (most recent first)
 	bestCloud := testClouds[0]
 	for _, cloud := range testClouds {
@@ -660,11 +748,6 @@ func (i InstanceTypeSet) IsValid() bool {
 	return i.Small != "" && i.Medium != ""
 }
 
-// IsK8s returns true if this instance type set is for a K8S cloud
-func (i InstanceTypeSet) IsK8s() bool {
-	return i.ComputeStack == "K8S"
-}
-
 // normalizeComputeStack returns a normalized compute stack value.
 // Empty string defaults to "VM" for backwards compatibility.
 func normalizeComputeStack(computeStack string) string {
@@ -806,18 +889,23 @@ func GetConfiguredCloud(t *testing.T) CloudInfo {
 	return CloudInfo{}
 }
 
-// GetConfiguredCloudID returns a cloud ID that has cloud resources configured.
-// This is required for tests that attach machine pools or need a fully configured cloud.
-// Falls back to any cloud if no fully configured clouds exist.
-func GetConfiguredCloudID(t *testing.T) string {
-	cloud := GetConfiguredCloud(t)
-	return cloud.ID
-}
-
 // GetAllConfiguredClouds returns all clouds that have cloud resources configured.
 // This is useful for running tests across multiple cloud types (AWS VM, GCP VM, AWS K8S, etc.).
 // Returns an empty slice if no clouds are available.
+//
+// The result is cached for the duration of the test binary run (same
+// assumption GetTestCloudID/GetAnyCloudID already make: acceptance tests
+// don't mutate the shared cloud fleet mid-run outside their own tracked
+// ephemeral clouds), since this does a full list-clouds call plus one
+// per-cloud resources check for every candidate.
 func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
+	allConfiguredCloudsMutex.Lock()
+	defer allConfiguredCloudsMutex.Unlock()
+
+	if allConfiguredCloudsCached {
+		return cachedAllConfiguredClouds
+	}
+
 	client, err := GetTestClient()
 	if err != nil {
 		t.Logf("Failed to get test client: %v", err)
@@ -844,13 +932,10 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 
 	var cloudsResp struct {
 		Results []struct {
-			ID             string `json:"id"`
-			Name           string `json:"name"`
-			Provider       string `json:"provider"`
-			ComputeStack   string `json:"compute_stack"`
-			CloudResources []struct {
-				ID string `json:"id"`
-			} `json:"cloud_resources"`
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			Provider     string `json:"provider"`
+			ComputeStack string `json:"compute_stack"`
 		} `json:"results"`
 	}
 
@@ -860,18 +945,42 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	}
 
 	var clouds []CloudInfo
+	allDefinitive := true
 
-	// Collect all clouds with cloud resources configured
+	// Collect all clouds with a healthy resource. GET /api/v2/clouds never
+	// embeds cloud_resources inline (confirmed against the real API: the key
+	// is simply absent from each result, not an empty array) - a prior
+	// version of this function checked that inline field directly, which
+	// meant the len(...) > 0 condition could never be true for ANY cloud in
+	// ANY org, so TestAccComputeConfigResource_Basic/_Disappears silently
+	// skipped everywhere, including CI, regardless of how many healthy
+	// clouds actually existed. Resource-health now comes from the real
+	// per-cloud endpoint instead.
 	for _, cloud := range cloudsResp.Results {
 		computeStack := normalizeComputeStack(cloud.ComputeStack)
-		if len(cloud.CloudResources) > 0 && isKnownProvider(cloud.Provider, computeStack) {
-			clouds = append(clouds, CloudInfo{
-				ID:           cloud.ID,
-				Name:         cloud.Name,
-				Provider:     cloud.Provider,
-				ComputeStack: computeStack,
-			})
+		if !isKnownProvider(cloud.Provider, computeStack) {
+			continue
 		}
+		hasResources, definitive := cloudHasResources(client, cloud.ID)
+		if !definitive {
+			// Transient failure, not a confirmed absence of resources - do
+			// not let this round's result get cached (see below), so a
+			// later call gets a real chance to see this cloud once the
+			// blip clears, instead of it being silently excluded forever.
+			allDefinitive = false
+			t.Logf("  skipping %s (ID: %s): could not determine resource status (transient error), not caching this result", cloud.Name, cloud.ID)
+			continue
+		}
+		if !hasResources {
+			t.Logf("  skipping %s (ID: %s): no cloud resources configured", cloud.Name, cloud.ID)
+			continue
+		}
+		clouds = append(clouds, CloudInfo{
+			ID:           cloud.ID,
+			Name:         cloud.Name,
+			Provider:     cloud.Provider,
+			ComputeStack: computeStack,
+		})
 	}
 
 	// Intentionally no fallback to clouds without cloud_resources: creating a
@@ -881,22 +990,66 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	//
 	// We also intentionally do NOT substitute the static fixture here, so
 	// TestAccComputeConfigResource_Basic/_Disappears (which iterate
-	// GetAllVMClouds) skip rather than run. _Disappears exposes a separate
-	// unresolved issue: it archives the config out-of-band and expects a
-	// non-empty plan, but the compute-config Read returns an archived config as
-	// still-present, so the disappearance is not detected ("expected non-empty
-	// plan, got empty"). That needs the provider Read to treat archived_at as
-	// gone (tracked, forge lane). Compute-config RESOURCE creation is already
-	// covered by _WithCloudName/_Update/_WithWorkers via GetComputeConfigCloudID,
-	// so skipping these two loses no unique coverage; re-add a fixture fallback
-	// once the archived-Read issue is resolved.
+	// GetAllVMClouds) skip rather than run against a cloud with no healthy
+	// resource. _Disappears exposes a separate unresolved issue: it archives
+	// the config out-of-band and expects a non-empty plan, but the
+	// compute-config Read returns an archived config as still-present, so the
+	// disappearance is not detected ("expected non-empty plan, got empty").
+	// That needs the provider Read to treat archived_at as gone (tracked
+	// separately).
 
 	t.Logf("Found %d configured clouds for testing", len(clouds))
 	for _, c := range clouds {
 		t.Logf("  - %s (ID: %s, provider: %s, compute_stack: %s)", c.Name, c.ID, c.Provider, c.ComputeStack)
 	}
 
+	// Only a genuine, fully-definitive resolution is cached - the early
+	// returns above (client/list/read/parse failure) and any per-cloud
+	// transient resources-check failure (allDefinitive) must not be baked
+	// in, so a later call gets a real chance to succeed instead of a
+	// transient blip silently and permanently excluding a healthy cloud.
+	if allDefinitive {
+		cachedAllConfiguredClouds = clouds
+		allConfiguredCloudsCached = true
+	}
 	return clouds
+}
+
+// cloudHasResources reports whether cloudID has at least one cloud resource
+// configured, via GET /api/v2/clouds/{id}/resources, and whether that answer
+// is definitive. The list-clouds endpoint (GET /api/v2/clouds) never embeds
+// cloud_resources inline, so this dedicated per-cloud lookup is the only
+// reliable way to detect a usable cloud.
+//
+// definitive is false on any request/read/parse error or non-200 - the
+// caller must treat that as "unknown", not as a confirmed absence of
+// resources: GetAllConfiguredClouds caches its overall result, and baking an
+// inconclusive per-cloud answer into that cache would silently and
+// permanently exclude a genuinely healthy cloud after one transient blip,
+// for the rest of the whole test binary run (100+ call sites), rather than
+// just costing that one call the way it did before caching existed.
+func cloudHasResources(client *provider.Client, cloudID string) (hasResources bool, definitive bool) {
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+	if err != nil {
+		return false, false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		return false, false
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, false
+	}
+	var resourcesResp struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &resourcesResp); err != nil {
+		return false, false
+	}
+	return len(resourcesResp.Results) > 0, true
 }
 
 // GetComputeConfigCloudID returns the ID of a cloud suitable for creating
@@ -947,6 +1100,179 @@ func GetComputeConfigCloudName(t *testing.T) string {
 	return ""
 }
 
+// EphemeralComputeConfig identifies a compute config created directly against
+// the API by CreateEphemeralComputeConfig, bypassing the Terraform resource
+// entirely - "out-of-band" from Terraform's point of view.
+type EphemeralComputeConfig struct {
+	ConfigID string // version-specific cpt_ id
+	Name     string
+	Version  int64
+}
+
+// CreateEphemeralComputeConfig creates a compute config directly via the API
+// (POST /api/v2/compute_templates/), never touching the anyscale_compute_config
+// Terraform resource. This is what a "genuinely pre-existing" or "created by
+// someone else" fixture looks like for import tests (AG-2), and it is also
+// how a second, older version can be minted without the same test's own
+// Terraform lifecycle managing it (AG-1).
+//
+// The API assigns the version number server-side and rejects a caller-supplied
+// version tag on create (compute_config_sdk.py's create_compute_config) - so
+// this reads the actual version back from the create response rather than
+// assuming 1, matching the same discipline CreateEphemeralTestCloud/
+// CreateEphemeralTestProjectForCloud already apply to their own identifiers.
+func CreateEphemeralComputeConfig(t *testing.T, cloudID string, instanceType string) (EphemeralComputeConfig, error) {
+	t.Helper()
+	client, err := GetTestClient()
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to get test client: %w", err)
+	}
+	if instanceType == "" {
+		instanceType = "m5.large"
+	}
+
+	name := UniqueName(t, "computeconfig")
+	t.Logf("Creating ephemeral out-of-band compute config: %s (cloud: %s)", name, cloudID)
+
+	createBody := map[string]any{
+		"name":        name,
+		"anonymous":   false,
+		"new_version": true,
+		"config": map[string]any{
+			"cloud_id": cloudID,
+			"head_node_type": map[string]any{
+				"name":          "head",
+				"instance_type": instanceType,
+			},
+		},
+	}
+	bodyBytes, err := json.Marshal(createBody)
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to marshal create request: %w", err)
+	}
+
+	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/compute_templates/", strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to create compute config: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to create compute config (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var createResp struct {
+		Result struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Version int64  `json:"version"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &createResp); err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to parse create response: %w", err)
+	}
+
+	fixture := EphemeralComputeConfig{
+		ConfigID: createResp.Result.ID,
+		Name:     createResp.Result.Name,
+		Version:  createResp.Result.Version,
+	}
+	t.Logf("Created ephemeral compute config: %s (config_id: %s, version: %d)", fixture.Name, fixture.ConfigID, fixture.Version)
+
+	if os.Getenv("ANYSCALE_TEST_KEEP") == "1" {
+		t.Logf("ANYSCALE_TEST_KEEP=1: compute config %s will be preserved after tests", fixture.ConfigID)
+	} else {
+		t.Cleanup(func() {
+			// Archive is family-wide (the whole name/cloud lineage, every
+			// version), matching the resource's own Delete - no per-version
+			// cleanup call exists or is needed.
+			delResp, delErr := client.DoRequest(context.Background(), "POST",
+				fmt.Sprintf("/api/v2/compute_templates/%s/archive", fixture.ConfigID), nil)
+			if delErr != nil {
+				t.Logf("Warning: failed to archive ephemeral compute config %s: %v", fixture.ConfigID, delErr)
+				return
+			}
+			defer func() { _ = delResp.Body.Close() }()
+			if delResp.StatusCode != 200 && delResp.StatusCode != 202 && delResp.StatusCode != 204 && delResp.StatusCode != 404 {
+				t.Logf("Warning: failed to archive ephemeral compute config %s: status %d", fixture.ConfigID, delResp.StatusCode)
+			}
+		})
+	}
+
+	return fixture, nil
+}
+
+// UpdateEphemeralComputeConfig mints a NEW version of an out-of-band compute
+// config created by CreateEphemeralComputeConfig, directly via the API - used
+// to set up a "newer version exists" scenario (AG-1) without any Terraform
+// resource involved. Returns the new version's own EphemeralComputeConfig;
+// the ORIGINAL config_id/version from the prior create remain valid and
+// importable (config_id is immutable per version).
+func UpdateEphemeralComputeConfig(t *testing.T, cloudID string, name string, instanceType string) (EphemeralComputeConfig, error) {
+	t.Helper()
+	client, err := GetTestClient()
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to get test client: %w", err)
+	}
+
+	createBody := map[string]any{
+		"name":        name,
+		"anonymous":   false,
+		"new_version": true,
+		"config": map[string]any{
+			"cloud_id": cloudID,
+			"head_node_type": map[string]any{
+				"name":          "head",
+				"instance_type": instanceType,
+			},
+		},
+	}
+	bodyBytes, err := json.Marshal(createBody)
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to marshal update request: %w", err)
+	}
+
+	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/compute_templates/", strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to mint new compute config version: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to mint new compute config version (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var createResp struct {
+		Result struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Version int64  `json:"version"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &createResp); err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to parse update response: %w", err)
+	}
+
+	fixture := EphemeralComputeConfig{
+		ConfigID: createResp.Result.ID,
+		Name:     createResp.Result.Name,
+		Version:  createResp.Result.Version,
+	}
+	t.Logf("Minted new out-of-band compute config version: %s (config_id: %s, version: %d)", fixture.Name, fixture.ConfigID, fixture.Version)
+	// No separate cleanup registration: archive is family-wide, already
+	// covered by the ORIGINAL CreateEphemeralComputeConfig's t.Cleanup for
+	// the same name/cloud lineage.
+	return fixture, nil
+}
+
 // GetAllVMClouds returns one VM cloud per provider (AWS, GCP).
 // This deduplicates clouds so tests run once per provider type, not once per cloud.
 // This is useful for tests that require VM-specific instance types.
@@ -977,185 +1303,112 @@ func GetAllVMClouds(t *testing.T) []CloudInfo {
 	return vmClouds
 }
 
-var (
-	// Cache for a read-only test project ID. Only for tests that merely read
-	// a project (e.g. data source lookups) — never for tests that create,
-	// update, or replace project-scoped state, since this may resolve to a
-	// shared, real project. Those should call createEphemeralTestProject instead.
-	cachedTestProjectID string
-	testProjectIDMutex  sync.Mutex
+// GetAllK8sClouds returns every configured cloud whose compute stack is K8S.
+// Unlike GetAllVMClouds this does not deduplicate by provider: K8S clouds are
+// identified by their registered instance types (see ResolveK8sInstanceType),
+// not by provider-wide SKU catalogs, so two K8S clouds on the same provider
+// can still have different usable instance types.
+func GetAllK8sClouds(t *testing.T) []CloudInfo {
+	allClouds := GetAllConfiguredClouds(t)
 
-	// Cache for a test user group ID, used e.g. as a policy binding principal.
-	cachedTestUserGroupID string
-	testUserGroupIDMutex  sync.Mutex
-)
-
-// GetTestProjectID returns a project ID for READ-ONLY acceptance tests, with
-// priority:
-//  1. ANYSCALE_TEST_PROJECT_ID environment variable (explicit override)
-//  2. Auto-discover: list projects, prefer the org's default project (always
-//     present, stable across runs), else the first result.
-//
-// Do not use this for tests that mutate or replace state scoped to the
-// project itself (e.g. policy bindings, which replace all bindings on the
-// target resource) — call createEphemeralTestProject instead so the test
-// never touches a shared/real project.
-func GetTestProjectID(t *testing.T) string {
-	testProjectIDMutex.Lock()
-	defer testProjectIDMutex.Unlock()
-
-	if cachedTestProjectID != "" {
-		return cachedTestProjectID
+	var k8sClouds []CloudInfo
+	for _, cloud := range allClouds {
+		if cloud.IsK8s() {
+			k8sClouds = append(k8sClouds, cloud)
+			t.Logf("Selected K8S cloud for testing: %s (ID: %s)", cloud.Name, cloud.ID)
+		}
 	}
 
-	if envProjectID := os.Getenv("ANYSCALE_TEST_PROJECT_ID"); envProjectID != "" {
-		t.Logf("Using test project ID from ANYSCALE_TEST_PROJECT_ID: %s", envProjectID)
-		cachedTestProjectID = envProjectID
-		return cachedTestProjectID
+	if len(k8sClouds) == 0 {
+		t.Logf("No K8S clouds available for testing")
 	}
+	return k8sClouds
+}
 
+// ResolveK8sInstanceType returns the name of the smallest CPU-only (non-GPU)
+// instance type registered for cloudID, via
+// GET /api/v2/clouds/{cloud_id}/additional_instance_types. This mirrors the
+// backend's own default-compute-config selection for K8S clouds (see
+// clouds_resource.py's get_smallest_cpu_instance_type in the Platform repo) -
+// K8S compute configs use instance_type values drawn from a cloud's own
+// registered/discovered set, not a fixed provider-wide SKU list like
+// "m5.large", which is why InstanceTypeSet.InstanceTypes() returns empty
+// placeholders for K8S clouds (see that function's TODO comment). Returns ""
+// if the cloud has no registered instance types (caller should skip).
+func ResolveK8sInstanceType(t *testing.T, cloudID string) string {
+	t.Helper()
 	client, err := GetTestClient()
 	if err != nil {
-		t.Skip("No project available - failed to get test client.")
+		t.Logf("ResolveK8sInstanceType: failed to get test client: %v", err)
 		return ""
 	}
 
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/projects", nil)
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/additional_instance_types", cloudID), nil)
 	if err != nil {
-		t.Skip("No project available - failed to list projects.")
+		t.Logf("ResolveK8sInstanceType: request failed: %v", err)
 		return ""
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		t.Skip("No project available - API error listing projects.")
+		t.Logf("ResolveK8sInstanceType: API returned status %d", resp.StatusCode)
 		return ""
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Skip("No project available - failed to read response.")
+		t.Logf("ResolveK8sInstanceType: failed to read response: %v", err)
 		return ""
 	}
 
-	var projectsResp struct {
+	var instanceTypesResp struct {
 		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			IsDefault bool   `json:"is_default"`
+			Name     string `json:"name"`
+			CPUCount int    `json:"cpu_count"`
+			GPUCount *int   `json:"gpu_count"`
 		} `json:"results"`
 	}
-	if err := json.Unmarshal(body, &projectsResp); err != nil {
-		t.Skip("No project available - failed to parse response.")
+	if err := json.Unmarshal(body, &instanceTypesResp); err != nil {
+		t.Logf("ResolveK8sInstanceType: failed to parse response: %v", err)
 		return ""
 	}
 
-	if len(projectsResp.Results) == 0 {
-		t.Skip("No project available - no projects found in the account.")
-		return ""
-	}
-
-	// Prefer the default project: always present, stable across runs, so
-	// repeated test invocations resolve to the same read target.
-	for _, p := range projectsResp.Results {
-		if p.IsDefault {
-			t.Logf("Using default project for test: %s (ID: %s)", p.Name, p.ID)
-			cachedTestProjectID = p.ID
-			return cachedTestProjectID
+	var smallestName string
+	smallestCPU := -1
+	for _, it := range instanceTypesResp.Results {
+		if it.GPUCount != nil && *it.GPUCount > 0 {
+			continue // CPU-only, matching the backend's own default-config selection
+		}
+		if smallestCPU == -1 || it.CPUCount < smallestCPU {
+			smallestCPU = it.CPUCount
+			smallestName = it.Name
 		}
 	}
 
-	t.Logf("Using first available project for test: %s (ID: %s)", projectsResp.Results[0].Name, projectsResp.Results[0].ID)
-	cachedTestProjectID = projectsResp.Results[0].ID
-	return cachedTestProjectID
+	if smallestName == "" {
+		t.Logf("ResolveK8sInstanceType: cloud %s has no registered CPU-only instance types", cloudID)
+	} else {
+		t.Logf("ResolveK8sInstanceType: selected %s (cpu_count=%d) for cloud %s", smallestName, smallestCPU, cloudID)
+	}
+	return smallestName
 }
 
-// GetTestUserGroupID returns a user group ID for acceptance tests that need
-// to reference an existing group (e.g. as a policy binding principal), with
-// priority:
-//  1. ANYSCALE_TEST_USER_GROUP_ID environment variable (explicit override)
-//  2. Auto-discover: list user groups, use the first non-deleted result.
-//
-// User groups are normally synced from an IdP via SCIM rather than created by
-// tests, so unlike clouds/projects there is no ephemeral-creation fallback:
-// if the org has no groups, the test skips.
-func GetTestUserGroupID(t *testing.T) string {
-	testUserGroupIDMutex.Lock()
-	defer testUserGroupIDMutex.Unlock()
-
-	if cachedTestUserGroupID != "" {
-		return cachedTestUserGroupID
-	}
-
-	if envGroupID := os.Getenv("ANYSCALE_TEST_USER_GROUP_ID"); envGroupID != "" {
-		t.Logf("Using test user group ID from ANYSCALE_TEST_USER_GROUP_ID: %s", envGroupID)
-		cachedTestUserGroupID = envGroupID
-		return cachedTestUserGroupID
-	}
-
-	client, err := GetTestClient()
-	if err != nil {
-		t.Skip("No user group available - failed to get test client.")
-		return ""
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/user_groups", nil)
-	if err != nil {
-		t.Skip("No user group available - failed to list user groups.")
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		t.Skip("No user group available - API error listing user groups.")
-		return ""
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Skip("No user group available - failed to read response.")
-		return ""
-	}
-
-	var groupsResp struct {
-		Results []struct {
-			ID        string  `json:"id"`
-			Name      string  `json:"name"`
-			DeletedAt *string `json:"deleted_at"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &groupsResp); err != nil {
-		t.Skip("No user group available - failed to parse response.")
-		return ""
-	}
-
-	for _, g := range groupsResp.Results {
-		if g.DeletedAt == nil {
-			t.Logf("Using user group for test: %s (ID: %s)", g.Name, g.ID)
-			cachedTestUserGroupID = g.ID
-			return cachedTestUserGroupID
-		}
-	}
-
-	t.Skip("No user group available - org has no active user groups. Set ANYSCALE_TEST_USER_GROUP_ID, or ensure SCIM group sync has run.")
-	return ""
-}
-
-// createEphemeralTestProject creates a minimal disposable project under a
-// resolved test cloud, named with the "tfacc-" prefix so the existing project
-// sweeper cleans it up if test cleanup is interrupted. Tests that mutate
-// project-scoped state (e.g. policy bindings, which replace all bindings on
-// the target resource) should use this instead of GetTestProjectID, so they
-// never touch a shared/real project.
-func createEphemeralTestProject(t *testing.T) (projectID string, projectName string, err error) {
+// CreateEphemeralTestProjectForCloud creates a minimal disposable project under parentCloudID,
+// named with the "tfacc-" prefix so the existing project sweeper cleans it up if test cleanup is
+// interrupted. Always pass the specific cloud.ID your test already resolved (e.g. via
+// GetTestCloudID/GetAllVMClouds) rather than independently re-resolving one - the backend enforces
+// that a project's parent_cloud_id must match whatever cloud a cluster is provisioned on
+// (confirmed via a real 403, 2026-07-20 - see check_cloud_id_of_project_and_cluster_match in the
+// backend reference), and a mismatch surfaces as an opaque UNHEALTHY, not a clear plan-time error.
+// Passing a cloud ID resolved separately from the one your compute_config/service actually targets
+// reproduces that exact failure.
+func CreateEphemeralTestProjectForCloud(t *testing.T, parentCloudID string) (projectID string, projectName string, err error) {
 	client, err := GetTestClient()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get test client: %w", err)
 	}
 
-	parentCloudID := GetTestCloudID(t)
-
-	projectName = UniqueName(t, "policy-binding")
+	projectName = UniqueName(t, "project")
 	t.Logf("Creating ephemeral test project: %s (parent cloud: %s)", projectName, parentCloudID)
 
 	createReq := struct {
@@ -1221,80 +1474,203 @@ func createEphemeralTestProject(t *testing.T) (projectID string, projectName str
 }
 
 var (
-	// Cache for the caller's own org ID.
-	cachedTestOrgID string
-	testOrgIDMutex  sync.Mutex
+	// Cache for a read-only test service ID. Unlike GetTestCloudID and the
+	// project helpers above, there is no CreateEphemeralTestService - this
+	// always resolves to an externally-created, real service.
+	cachedTestServiceID string
+	testServiceIDMutex  sync.Mutex
 )
 
-// GetTestOrgID returns the org ID of the credential running the tests, with
-// priority:
-//  1. ANYSCALE_TEST_ORG_ID environment variable (explicit override)
-//  2. Resolve via GET /api/v2/userinfo, which returns the current user's own
-//     record including an organizations array — there is no dedicated
-//     list-organizations endpoint (confirmed 404 on guessed paths).
+// GetTestServiceID returns a service ID for read-only acceptance tests
+// (anyscale_service / anyscale_services), with priority:
+//  1. ANYSCALE_TEST_SERVICE_ID environment variable (explicit override).
+//  2. Auto-discover: list services, prefer one whose current_state is
+//     RUNNING (stable to assert against), else the first result.
 //
-// Same shape already used in HCL via the anyscale_user data source with no
-// email filter (see testAccPolicyBindingDataSourceOrganizationConfig's
-// data.anyscale_user.current.organizations[0].id); this is that lookup one
-// layer lower, for tests that need the raw ID in Go rather than in config.
-func GetTestOrgID(t *testing.T) string {
-	testOrgIDMutex.Lock()
-	defer testOrgIDMutex.Unlock()
+// Unlike GetTestProjectID/GetTestCloudID, a fresh or minimal test org can
+// plausibly have zero services — there is no equivalent to a project's
+// always-present default project to fall back on. Skips with an actionable
+// message (rather than silently passing with no coverage) when neither the
+// env var nor auto-discovery resolves anything, so a CI org with no service
+// fixture is a visible gap, not a silent one.
+func GetTestServiceID(t *testing.T) string {
+	testServiceIDMutex.Lock()
+	defer testServiceIDMutex.Unlock()
 
-	if cachedTestOrgID != "" {
-		return cachedTestOrgID
+	if cachedTestServiceID != "" {
+		return cachedTestServiceID
 	}
 
-	if envOrgID := os.Getenv("ANYSCALE_TEST_ORG_ID"); envOrgID != "" {
-		t.Logf("Using test org ID from ANYSCALE_TEST_ORG_ID: %s", envOrgID)
-		cachedTestOrgID = envOrgID
-		return cachedTestOrgID
+	if envServiceID := os.Getenv("ANYSCALE_TEST_SERVICE_ID"); envServiceID != "" {
+		t.Logf("Using test service ID from ANYSCALE_TEST_SERVICE_ID: %s", envServiceID)
+		cachedTestServiceID = envServiceID
+		return cachedTestServiceID
 	}
 
 	client, err := GetTestClient()
 	if err != nil {
-		t.Skip("No org ID available - failed to get test client.")
+		t.Skip("No service available - failed to get test client.")
 		return ""
 	}
 
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/userinfo", nil)
+	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/services-v2", nil)
 	if err != nil {
-		t.Skip("No org ID available - failed to fetch userinfo.")
+		t.Skip("No service available - failed to list services.")
 		return ""
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		t.Skip("No org ID available - API error fetching userinfo.")
+		t.Skip("No service available - API error listing services.")
 		return ""
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Skip("No org ID available - failed to read userinfo response.")
+		t.Skip("No service available - failed to read response.")
 		return ""
 	}
 
-	var userInfoResp struct {
-		Result struct {
-			Organizations []struct {
-				ID string `json:"id"`
-			} `json:"organizations"`
-		} `json:"result"`
+	var servicesResp struct {
+		Results []struct {
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			CurrentState string `json:"current_state"`
+		} `json:"results"`
 	}
-	if err := json.Unmarshal(body, &userInfoResp); err != nil {
-		t.Skip("No org ID available - failed to parse userinfo response.")
+	if err := json.Unmarshal(body, &servicesResp); err != nil {
+		t.Skip("No service available - failed to parse response.")
 		return ""
 	}
 
-	if len(userInfoResp.Result.Organizations) == 0 {
-		t.Skip("No org ID available - userinfo returned no organizations.")
+	if len(servicesResp.Results) == 0 {
+		t.Skip("No service available - set ANYSCALE_TEST_SERVICE_ID to a persistent service's ID, or ensure at least one service exists in the test org.")
 		return ""
 	}
 
-	t.Logf("Using org ID from userinfo: %s", userInfoResp.Result.Organizations[0].ID)
-	cachedTestOrgID = userInfoResp.Result.Organizations[0].ID
-	return cachedTestOrgID
+	for _, s := range servicesResp.Results {
+		if s.CurrentState == "RUNNING" {
+			t.Logf("Using running service for test: %s (ID: %s)", s.Name, s.ID)
+			cachedTestServiceID = s.ID
+			return cachedTestServiceID
+		}
+	}
+
+	t.Logf("Using first available service for test: %s (ID: %s)", servicesResp.Results[0].Name, servicesResp.Results[0].ID)
+	cachedTestServiceID = servicesResp.Results[0].ID
+	return cachedTestServiceID
+}
+
+// CaptureServiceDiagnosticsOnFailure wraps a TestCheckFunc for an anyscale_service resource so a
+// check failure triggers one last live GET on the service, logged for post-mortem inspection,
+// while the service still exists.
+//
+// This is NOT the same mechanism as the cloud/project ANYSCALE_TEST_KEEP helpers above. Those
+// fixtures are created by a plain API call outside Terraform entirely, so their own t.Cleanup can
+// simply skip a delete call under our control. A service under a real-infra resource.Test lifecycle
+// is different: it is a genuine Terraform-managed resource, and the testing framework
+// (helper/resource/testing_new.go, confirmed against the vendored terraform-plugin-testing v1.16.0
+// source) registers its own post-test destroy unconditionally via a plain defer set up before any
+// step runs - there is no environment variable or TestCase field that can skip it. So
+// ANYSCALE_TEST_KEEP cannot preserve the service itself the way it preserves an ephemeral cloud or
+// project. What it can do is capture full diagnostic state while the service still exists, which is
+// the actual gap this closes (a prior failure needed a one-off manual API call to inspect).
+//
+// The wrapped check's error is always returned unchanged - this never masks or alters a real
+// failure. When ANYSCALE_TEST_KEEP is unset, this is a no-op passthrough identical to calling check
+// directly.
+func CaptureServiceDiagnosticsOnFailure(t *testing.T, resourceName string, check resource.TestCheckFunc) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		err := check(s)
+		if err == nil || os.Getenv("ANYSCALE_TEST_KEEP") != "1" {
+			return err
+		}
+
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok || rs.Primary == nil || rs.Primary.ID == "" {
+			t.Logf("ANYSCALE_TEST_KEEP=1: check failed but no %s id is available in state to fetch diagnostics for", resourceName)
+			return err
+		}
+
+		logServiceDiagnostics(t, rs.Primary.ID)
+		return err
+	}
+}
+
+// logServiceDiagnostics fetches a service by id and logs a whitelisted set of diagnostic fields
+// for post-mortem inspection. Best-effort only: a fetch or parse failure just logs and returns,
+// since this runs inside an already-failing test and must never itself panic or mask the real
+// failure. Line construction is delegated to serviceDiagnosticLines, kept as a pure function
+// (no testing.T, no I/O) specifically so the whitelist-safety property is directly unit-testable:
+// see TestServiceDiagnosticLines_NeverIncludesRayServeConfigOrSecrets.
+func logServiceDiagnostics(t *testing.T, serviceID string) {
+	client, err := GetTestClient()
+	if err != nil {
+		t.Logf("ANYSCALE_TEST_KEEP=1: could not get test client to fetch service %s diagnostics: %v", serviceID, err)
+		return
+	}
+
+	apiResp, err := provider.DoRequestAndParse[provider.ServiceResponse](
+		context.Background(), client, "GET", fmt.Sprintf("/api/v2/services-v2/%s", serviceID), nil, 200,
+	)
+	if err != nil {
+		t.Logf("ANYSCALE_TEST_KEEP=1: failed to fetch service %s diagnostics (service may already be gone): %v", serviceID, err)
+		return
+	}
+
+	for _, line := range serviceDiagnosticLines(&apiResp.Result) {
+		t.Logf("ANYSCALE_TEST_KEEP=1:   %s", line)
+	}
+	t.Logf("ANYSCALE_TEST_KEEP=1: the service above will still be destroyed automatically when this test ends - ANYSCALE_TEST_KEEP cannot prevent that for a Terraform-managed resource, this is diagnostic capture only")
+}
+
+// serviceDiagnosticLines formats a whitelisted set of diagnostic fields from a service API
+// response: id/name/project/cloud, hostname/base_url, current_state/goal_state, error_message,
+// the per-version identifiers/states/weights, and the status checklist. Deliberately excludes
+// ray_serve_config (an open, per-version blob that can carry user-supplied env_vars), build_id,
+// and compute_config_id - never format anything beyond this named set, even under
+// ANYSCALE_TEST_KEEP=1. A pure function on purpose: no testing.T, no I/O, so the whitelist itself
+// is directly unit-testable rather than only observable as printed test output.
+func serviceDiagnosticLines(r *provider.ServiceResult) []string {
+	lines := []string{
+		fmt.Sprintf("service diagnostics for post-mortem - id=%s name=%s project_id=%s cloud_id=%s", r.ID, r.Name, r.ProjectID, r.CloudID),
+		fmt.Sprintf("hostname=%s base_url=%s", r.Hostname, r.BaseURL),
+		fmt.Sprintf("current_state=%s goal_state=%s", r.CurrentState, r.GoalState),
+	}
+	if r.ErrorMessage != nil {
+		lines = append(lines, fmt.Sprintf("error_message=%s", *r.ErrorMessage))
+	}
+	lines = append(lines, serviceVersionDiagnosticLines("primary_version", r.PrimaryVersion)...)
+	lines = append(lines, serviceVersionDiagnosticLines("canary_version", r.CanaryVersion)...)
+	if r.ServiceStatusChecklist != nil {
+		for _, item := range r.ServiceStatusChecklist.Shared {
+			lines = append(lines, fmt.Sprintf("status_checklist(shared): kind=%s label=%s state=%s message=%s", item.Kind, item.Label, item.State, item.Message))
+		}
+		for _, group := range r.ServiceStatusChecklist.PerVersion {
+			for _, item := range group.Items {
+				lines = append(lines, fmt.Sprintf("status_checklist(version_id=%s): kind=%s label=%s state=%s message=%s", group.VersionID, item.Kind, item.Label, item.State, item.Message))
+			}
+		}
+	}
+	return lines
+}
+
+// serviceVersionDiagnosticLines formats the whitelisted subset of a service version's fields -
+// never ray_serve_config, build_id, or compute_config_id, since those are unbounded/config-shaped
+// rather than pure diagnostic state.
+func serviceVersionDiagnosticLines(label string, v *provider.ServiceVersionResult) []string {
+	if v == nil {
+		return []string{fmt.Sprintf("%s: absent", label)}
+	}
+	return []string{fmt.Sprintf("%s: id=%s version=%s current_state=%s weight=%d current_weight=%s target_weight=%s",
+		label, v.ID, v.Version, v.CurrentState, v.Weight, int64PtrString(v.CurrentWeight), int64PtrString(v.TargetWeight))}
+}
+
+func int64PtrString(p *int64) string {
+	if p == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%d", *p)
 }
 
 // GetTestClient returns an authenticated client for testing
@@ -1345,7 +1721,26 @@ func PreCheck(t *testing.T) {
 // ValidateAuthOrSkip probes the Anyscale API with the configured token and
 // SKIPS the test if the API returns 401. Other errors (network, etc.) are
 // logged and ignored — they will surface naturally if they affect the test.
+//
+// The live probe result (valid vs. 401-invalid) is cached for the run once
+// definitively known, since this is called from PreCheck on every single
+// acceptance test (100+ call sites) and the token's validity doesn't change
+// mid-run. A request error is deliberately NOT cached - unlike an actual
+// 401, that's the same "inconclusive, try again" case the uncached version
+// already tolerated per-test, and caching it would let one transient network
+// blip silently suppress the real 401 check for every later test in the run.
 func ValidateAuthOrSkip(t *testing.T) {
+	authProbeMutex.Lock()
+	if authProbeDone {
+		invalid := authProbeInvalid
+		authProbeMutex.Unlock()
+		if invalid {
+			t.Skip("ANYSCALE_CLI_TOKEN is invalid or expired (401 from /api/v2/clouds); skipping acceptance test")
+		}
+		return
+	}
+	authProbeMutex.Unlock()
+
 	client, err := GetTestClient()
 	if err != nil {
 		t.Skipf("No usable Anyscale credentials: %v", err)
@@ -1356,6 +1751,12 @@ func ValidateAuthOrSkip(t *testing.T) {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	authProbeMutex.Lock()
+	authProbeDone = true
+	authProbeInvalid = resp.StatusCode == 401
+	authProbeMutex.Unlock()
+
 	if resp.StatusCode == 401 {
 		t.Skip("ANYSCALE_CLI_TOKEN is invalid or expired (401 from /api/v2/clouds); skipping acceptance test")
 	}
@@ -1447,14 +1848,6 @@ func NewAPIDestroyCheck(resourceType, getPathFmt string) resource.TestCheckFunc 
 	return newAPIDestroyCheckImpl(resourceType, "", getPathFmt, "")
 }
 
-// NewAPIDestroyCheckByAttr is like NewAPIDestroyCheck but pulls the resource
-// ID from rs.Primary.Attributes[attrName] instead of rs.Primary.ID. Used when
-// the API-side identifier is exposed as a non-ID attribute (e.g. compute
-// config's version-specific config_id).
-func NewAPIDestroyCheckByAttr(resourceType, attrName, getPathFmt string) resource.TestCheckFunc {
-	return newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, "")
-}
-
 // NewAPIArchivedDestroyCheck is the variant for resources that the API cannot
 // permanently delete — container images, cluster environments. It verifies
 // that the resource still exists but its archived field is truthy.
@@ -1469,6 +1862,72 @@ func NewAPIArchivedDestroyCheck(resourceType, getPathFmt, archivedJSONPath strin
 // NewAPIArchivedDestroyCheck.
 func NewAPIArchivedDestroyCheckByAttr(resourceType, attrName, getPathFmt, archivedJSONPath string) resource.TestCheckFunc {
 	return newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath)
+}
+
+// NewAPIArchivedDestroyCheckForID is the ID-pinned variant of
+// NewAPIArchivedDestroyCheck: rather than discovering which resources to
+// check by scanning Terraform state for resourceType, it polls the single id
+// the caller supplies via a *string. Use this when the fact under test
+// concerns an id a prior step has already dropped from state — e.g. a
+// RequiresReplace swapped in a new id, and the point of the check is that the
+// OLD id was actually archived server-side, not merely that the new resource
+// looks right. Populate id with a TestCheckFunc earlier in the same Check
+// chain, since its value isn't known until that step runs.
+//
+// Unlike the CheckDestroy-oriented family above, an unexpected status here is
+// a hard error rather than a logged warning: this runs inside a Check as a
+// positive assertion about one known id, not a best-effort leak scan across
+// however many resources remain in state.
+//
+// failureHint is an optional trailing string appended to the timeout error,
+// for a caller that wants the failure message to name the specific
+// regression it proves rather than just the generic timeout.
+func NewAPIArchivedDestroyCheckForID(resourceType string, id *string, getPathFmt, archivedJSONPath string, failureHint ...string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		if id == nil || *id == "" {
+			return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): no id captured to check", resourceType)
+		}
+
+		client, err := GetTestClient()
+		if err != nil {
+			return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): failed to get test client: %w", resourceType, err)
+		}
+
+		path := fmt.Sprintf(getPathFmt, *id)
+		deadline := time.Now().Add(destroyCheckPollTimeout)
+		for {
+			resp, err := client.DoRequest(context.Background(), "GET", path, nil)
+			if err != nil {
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): failed to check archived status of %s: %w", resourceType, *id, err)
+			}
+
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): failed to read response for %s: %w", resourceType, *id, readErr)
+			}
+			if resp.StatusCode != 200 {
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): unexpected status %d checking %s: %s",
+					resourceType, resp.StatusCode, *id, truncateBody(string(body), 256))
+			}
+
+			archived, perr := extractArchivedValue(body, archivedJSONPath)
+			if perr != nil {
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): failed to parse %s for %s: %w", resourceType, archivedJSONPath, *id, perr)
+			}
+			if archived {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				hint := ""
+				if len(failureHint) > 0 && failureHint[0] != "" {
+					hint = " - " + failureHint[0]
+				}
+				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): %s was never archived (checked %s) within the poll window%s", resourceType, *id, archivedJSONPath, hint)
+			}
+			time.Sleep(destroyCheckPollInterval)
+		}
+	}
 }
 
 // Anyscale archives/deletes are asynchronous: the API accepts the request but
@@ -1610,6 +2069,30 @@ func extractArchivedValue(body []byte, jsonPath string) (bool, error) {
 	default:
 		return false, nil
 	}
+}
+
+// truncateBody caps s at max characters, appending a marker if it was cut, so
+// a raw HTTP error body embedded in a log line or wrapped error doesn't dump
+// megabytes of unrelated payload. Shared by every sweeper and CheckDestroy
+// helper that surfaces a raw response body.
+func truncateBody(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
+}
+
+// testAccProviderBlock returns a provider "anyscale" block pointed at an
+// httptest mock server instead of the real Anyscale API, for acceptance
+// tests that prove framework-level behavior (plan-emptiness, import,
+// lifecycle) against a controlled response shape rather than real infra.
+func testAccProviderBlock(serverURL string) string {
+	return fmt.Sprintf(`
+provider "anyscale" {
+  api_url = %[1]q
+  token   = "mock-token"
+}
+`, serverURL)
 }
 
 // UniqueName returns a deterministic-prefixed but per-invocation-unique

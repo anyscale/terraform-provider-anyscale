@@ -26,45 +26,88 @@ locals {
     } : {}
   )
 
+  # Bottlerocket splits node storage into a small OS volume (xvda) and a
+  # separate data volume (xvdb) where container images and ephemeral
+  # storage live. xvdb is the one that needs to be sized for real
+  # workloads -- disk_size only sizes the OS volume and is ignored under
+  # a custom launch template, so it cannot grow the data volume.
+  bottlerocket_block_device_mappings = {
+    xvda = {
+      device_name = "/dev/xvda"
+      ebs = {
+        volume_size           = 4
+        volume_type           = "gp3"
+        delete_on_termination = true
+      }
+    }
+    xvdb = {
+      device_name = "/dev/xvdb"
+      ebs = {
+        volume_size           = var.node_group_disk_size
+        volume_type           = "gp3"
+        encrypted             = true
+        delete_on_termination = true
+      }
+    }
+  }
+
   # Base configuration for GPU node groups
   gpu_node_group_base = {
-    ami_type                     = "AL2023_x86_64_NVIDIA"
+    ami_type                     = "BOTTLEROCKET_x86_64_NVIDIA"
     min_size                     = 0
     max_size                     = 10
     desired_size                 = 0
-    disk_size                    = var.node_group_disk_size
-    use_custom_launch_template   = false
+    block_device_mappings        = local.bottlerocket_block_device_mappings
     iam_role_additional_policies = local.anyscale_iam
   }
 
-  gpu_node_taints_base = [
-    {
-      key    = "nvidia.com/gpu",
-      value  = "present",
-      effect = "NO_SCHEDULE",
-    },
-    {
-      key    = "node.anyscale.com/accelerator-type",
-      value  = "GPU",
-      effect = "NO_SCHEDULE",
+  # Anyscale taints: these node groups are fenced off with taints so only
+  # workloads that explicitly request this capacity land here, keeping
+  # general-purpose pods off the pricier GPU / reserved-capacity nodes.
+  # Anyscale automatically adds matching tolerations to a Ray pod based on
+  # its compute config, so e.g. a workload that requests SPOT capacity
+  # tolerates the SPOT taint below, and one that requests a GPU tolerates
+  # the accelerator-type + nvidia.com/gpu taints -- no manual toleration
+  # wiring needed on the Anyscale side.
+  #   node.anyscale.com/capacity-type = ON_DEMAND|SPOT -> pins the node to
+  #     the capacity type it was provisioned as.
+  #   node.anyscale.com/accelerator-type = GPU -> Anyscale's generic GPU
+  #     selector (the specific model, e.g. T4/A100, is tracked separately
+  #     via node labels, not this taint).
+  #   nvidia.com/gpu = present -> conventional NVIDIA device-plugin taint
+  #     key; the value is not matched on -- the standard device-plugin
+  #     toleration uses `operator: Exists`, so any value works here.
+  gpu_node_taints_base = {
+    gpu_present = {
+      key    = "nvidia.com/gpu"
+      value  = "present"
+      effect = "NO_SCHEDULE"
     }
-  ]
+    accelerator_type = {
+      key    = "node.anyscale.com/accelerator-type"
+      value  = "GPU"
+      effect = "NO_SCHEDULE"
+    }
+  }
 
-  gpu_node_taints_ondemand = concat(local.gpu_node_taints_base, [
-    {
-      key    = "node.anyscale.com/capacity-type",
-      value  = "ON_DEMAND",
-      effect = "NO_SCHEDULE",
+  # Adds a capacity_type taint on top of the base GPU taints so on-demand and
+  # spot GPU nodes are also distinguished from each other. Consumed below by
+  # gpu_node_groups[*].ondemand/.spot (taints = local.gpu_node_taints_ondemand/_spot).
+  gpu_node_taints_ondemand = merge(local.gpu_node_taints_base, {
+    capacity_type = {
+      key    = "node.anyscale.com/capacity-type"
+      value  = "ON_DEMAND"
+      effect = "NO_SCHEDULE"
     }
-  ])
+  })
 
-  gpu_node_taints_spot = concat(local.gpu_node_taints_base, [
-    {
-      key    = "node.anyscale.com/capacity-type",
-      value  = "SPOT",
-      effect = "NO_SCHEDULE",
+  gpu_node_taints_spot = merge(local.gpu_node_taints_base, {
+    capacity_type = {
+      key    = "node.anyscale.com/capacity-type"
+      value  = "SPOT"
+      effect = "NO_SCHEDULE"
     }
-  ])
+  })
 
   # Create a map of GPU node groups based on gpu_instance_types
   gpu_node_groups = {
@@ -104,20 +147,24 @@ locals {
 module "eks" {
   #checkov:skip=CKV_TF_1: Use the given version of the module
   source  = "terraform-aws-modules/eks/aws"
-  version = "20.33.1"
+  version = "21.24.0"
 
   # Cluster basic configuration
-  cluster_name    = var.eks_cluster_name
-  cluster_version = var.eks_cluster_version
+  name               = var.eks_cluster_name
+  kubernetes_version = var.eks_cluster_version
 
-  cluster_addons = {
-    coredns                = {}
-    eks-pod-identity-agent = {}
-    kube-proxy             = {}
+  addons = {
+    coredns    = {}
+    kube-proxy = {}
+    # before_compute: install ahead of node join. v21 hardcodes
+    # bootstrap_self_managed_addons=false, so without these the
+    # cluster gets no CNI and every node stays NotReady.
+    eks-pod-identity-agent = { before_compute = true }
+    vpc-cni                = { before_compute = true }
   }
 
   # API endpoint access configuration
-  cluster_endpoint_public_access = true
+  endpoint_public_access = true
 
   # The authentication mode for the cluster. Valid values are `CONFIG_MAP`, `API` or `API_AND_CONFIG_MAP`
   authentication_mode = "API_AND_CONFIG_MAP"
@@ -149,13 +196,19 @@ module "eks" {
       # This node group is for management components such as CoreDNS, Cluster Autoscaler, AWS-LB controller, ingress-nginx, Anyscale Operator, etc.
       # Note that small instance types of Anyscale workloads can still be scheduled onto this node group.
       default = {
-        ami_type       = "AL2023_x86_64_STANDARD"
+        ami_type       = "BOTTLEROCKET_x86_64"
         instance_types = ["t3.medium"]
 
         min_size     = 1
         max_size     = 10
         desired_size = 2
 
+        # NOTE: v21's node-group IMDS hop limit default is 1 (was 2 in v20),
+        # so pods can no longer reach these policies via IMDS node-role
+        # inheritance. If you deploy cluster-autoscaler or the AWS Load
+        # Balancer Controller on this node group, wire them up via EKS Pod
+        # Identity associations instead -- the Anyscale operator already
+        # uses the pod identity agent addon, so it is unaffected.
         iam_role_additional_policies = merge(local.anyscale_iam, {
           cluster_autoscaler_policy = aws_iam_policy.autoscaler_policy.arn
           elb_policy                = aws_iam_policy.elb_policy.arn
@@ -163,7 +216,7 @@ module "eks" {
       }
 
       ondemand_cpu = {
-        ami_type = "AL2023_x86_64_STANDARD"
+        ami_type = "BOTTLEROCKET_x86_64"
         instance_types = [
           "m7i.8xlarge",
           "m7a.8xlarge",
@@ -175,26 +228,28 @@ module "eks" {
           "m5.4xlarge",
         ]
 
-        capacity_type              = "ON_DEMAND"
-        min_size                   = 0
-        max_size                   = 10
-        desired_size               = 0
-        disk_size                  = var.node_group_disk_size
-        use_custom_launch_template = false
+        capacity_type         = "ON_DEMAND"
+        min_size              = 0
+        max_size              = 10
+        desired_size          = 0
+        block_device_mappings = local.bottlerocket_block_device_mappings
 
-        taints = [
-          {
-            key    = "node.anyscale.com/capacity-type",
-            value  = "ON_DEMAND",
-            effect = "NO_SCHEDULE",
+        # Same capacity-type safelist pattern as the GPU node groups (see
+        # gpu_node_taints_base above): workloads must explicitly tolerate
+        # on-demand vs. spot rather than landing on whichever is available.
+        taints = {
+          capacity_type = {
+            key    = "node.anyscale.com/capacity-type"
+            value  = "ON_DEMAND"
+            effect = "NO_SCHEDULE"
           }
-        ]
+        }
 
         iam_role_additional_policies = local.anyscale_iam
       }
 
       spot_cpu = {
-        ami_type = "AL2023_x86_64_STANDARD"
+        ami_type = "BOTTLEROCKET_x86_64"
         instance_types = [
           "m7i.8xlarge",
           "m7a.8xlarge",
@@ -204,20 +259,22 @@ module "eks" {
           "m5.4xlarge",
         ]
 
-        capacity_type              = "SPOT"
-        min_size                   = 0
-        max_size                   = 10
-        desired_size               = 0
-        disk_size                  = var.node_group_disk_size
-        use_custom_launch_template = false
+        capacity_type         = "SPOT"
+        min_size              = 0
+        max_size              = 10
+        desired_size          = 0
+        block_device_mappings = local.bottlerocket_block_device_mappings
 
-        taints = [
-          {
-            key    = "node.anyscale.com/capacity-type",
-            value  = "SPOT",
-            effect = "NO_SCHEDULE",
+        # Same capacity-type safelist pattern as the GPU node groups (see
+        # gpu_node_taints_base above): workloads must explicitly tolerate
+        # on-demand vs. spot rather than landing on whichever is available.
+        taints = {
+          capacity_type = {
+            key    = "node.anyscale.com/capacity-type"
+            value  = "SPOT"
+            effect = "NO_SCHEDULE"
           }
-        ]
+        }
 
         iam_role_additional_policies = local.anyscale_iam
       }

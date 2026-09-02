@@ -40,16 +40,41 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 					// Verify versions list contains at least version 1
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.#", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.0", "1"),
+					// CC6: data source node topology parity with the resource.
+					// Confirmed live against the real API that "resources"
+					// itself comes back null from BOTH api/v2 and ext/v0 for an
+					// instance_type-only head node (no client-side auto-fill
+					// happens server-side despite the schema description's
+					// wording) -- identical between the two endpoints, which is
+					// exactly the CC5a claim this exercises, so instance_type is
+					// the meaningful, verified-true assertion here.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "head_node.instance_type", "m5.large"),
+
+					// CC5a acceptance: the by-id lookup path must
+					// stay green after switching Read to the shared typed
+					// structs, not just the by-name path exercised above.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "name", configName),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "version", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "head_node.instance_type", "m5.large"),
 				),
 			},
 		},
 	})
 }
 
-// TestAccComputeConfigDataSource_WithVersions tests that version-related attributes
-// are populated correctly after updates to a compute config.
-// Note: The Anyscale API search may not return all historical versions, so we verify
-// that the current version is correctly reflected in both version and name_version.
+// TestAccComputeConfigDataSource_WithVersions is DS-CC-1's mutation-proof
+// acceptance guard, proving version enumeration against a real, genuine
+// two-version history rather than a mock. The old version only asserted
+// versions.# was "set" (non-zero) at each step, which passes identically
+// whether versions correctly enumerates history or - per DS-CC-1 - only ever
+// returns the single latest version: after step 2's update, a broken
+// versions attribute would still show exactly 1 entry (the new latest), and
+// "1" still counts as "set". The old comment ("the API may not return all
+// historical versions") was quietly documenting this exact bug as a
+// permanent constraint instead of a fix target. Now that DS-CC-1 sends the
+// real "don't filter by version" sentinel and pages through results, this
+// asserts the real, falsifiable claim: after two versions exist, versions.#
+// is exactly 2 and contains both 1 and 2 (sorted ascending).
 func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -70,8 +95,9 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "version", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "name_version", configName+":1"),
-					// Versions list should contain at least the current version
-					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.lookup", "versions.#"),
+					// Exactly 1 version exists so far.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.#", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.0", "1"),
 				),
 			},
 			// Step 2: Update to create version 2
@@ -81,8 +107,60 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "version", "2"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "version", "2"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "name_version", configName+":2"),
-					// Versions list should contain at least the current version
-					resource.TestCheckResourceAttrSet("data.anyscale_compute_config.lookup", "versions.#"),
+					// Both historical versions must be enumerated now, not just the latest.
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.#", "2"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.0", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.lookup", "versions.1", "2"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccComputeConfigDataSource_EnableCrossZoneScaling is the regression
+// test for a real, pre-existing bug found while reviewing CC5a's
+// diff: the data source used to look for a top-level enable_cross_zone_scaling
+// JSON key on the config that has never existed - the real value has only
+// ever lived inside flags["allow-cross-zone-autoscaling"], exactly where the
+// resource correctly reads it from. That miss always failed silently (the
+// map-index `ok` check was always false), so the data source's
+// enable_cross_zone_scaling output read as false for every user regardless
+// of what was actually configured, since before this quest started. CC5a's
+// switch to the shared typed parsing (resolveEffectiveComputeConfig, the
+// same helper Read uses) fixes this as a side effect. This proves it against
+// a real, explicitly-true-configured value, not just by re-reading the code.
+func TestAccComputeConfigDataSource_EnableCrossZoneScaling(t *testing.T) {
+	t.Parallel()
+	SkipIfNotAcceptanceTest(t)
+
+	cloudID := GetComputeConfigCloudID(t)
+	configName := UniqueName(t, "ds-compute-xzone")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "anyscale_compute_config" "test" {
+  name                      = %[1]q
+  cloud_id                  = %[2]q
+  enable_cross_zone_scaling = true
+
+  head_node = {
+    instance_type = "m5.large"
+  }
+}
+
+data "anyscale_compute_config" "by_name" {
+  name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+`, configName, cloudID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("anyscale_compute_config.test", "enable_cross_zone_scaling", "true"),
+					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "enable_cross_zone_scaling", "true"),
 				),
 			},
 		},
@@ -102,6 +180,15 @@ resource "anyscale_compute_config" "test" {
 
 data "anyscale_compute_config" "by_name" {
   name = anyscale_compute_config.test.name
+
+  depends_on = [anyscale_compute_config.test]
+}
+
+data "anyscale_compute_config" "by_id" {
+  # The data source's id input is the version-specific API id (what the
+  # resource calls config_id), not the resource's own id (which is the
+  # stable name) -- confusingly overlapping names for two different things.
+  id = anyscale_compute_config.test.config_id
 
   depends_on = [anyscale_compute_config.test]
 }

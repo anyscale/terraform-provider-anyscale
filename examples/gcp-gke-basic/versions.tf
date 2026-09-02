@@ -1,9 +1,8 @@
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.10"
   required_providers {
     anyscale = {
-      source  = "terraform-providers/anyscale"
-      version = "0.0.1" # version is ignored by dev_overrides
+      source = "anyscale/anyscale"
     }
 
     google = {
@@ -15,5 +14,5 @@ terraform {
 
 provider "google" {
   project = var.google_project_id
-  region  = var.google_region
+  region  = var.gcp_region
 }

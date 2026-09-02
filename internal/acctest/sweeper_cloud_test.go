@@ -7,21 +7,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
-
-var sweepableCloudPrefixes = []string{
-	"tfacc-",
-	"tf-test-",
-	"tfprovider-",
-	"tfacc-ephemeral-",
-}
-
-const defaultSweepMinAge = 2 * time.Hour
 
 func init() {
 	resource.AddTestSweepers("anyscale_cloud", &resource.Sweeper{
@@ -31,9 +22,43 @@ func init() {
 	})
 }
 
+// sweepableCloudResult mirrors only the fields the sweeper needs from
+// GET /api/v2/clouds.
+type sweepableCloudResult struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+}
+
+type sweepableCloudsListResponse struct {
+	Results  []sweepableCloudResult `json:"results"`
+	Metadata struct {
+		NextPagingToken *string `json:"next_paging_token"`
+	} `json:"metadata"`
+}
+
+// listAllCloudsForSweep pages through every cloud in the org. GET /api/v2/clouds
+// paginates the same way every other collection endpoint this provider calls
+// does (paging_token in, next_paging_token out) - a single unpaginated GET
+// here silently truncated the sweep to page 1, so anything matching a
+// sweepable prefix beyond it was invisible to `make sweep` even though it was
+// never protected from anything else finding and deleting it.
+func listAllCloudsForSweep(ctx context.Context, client *provider.Client) ([]sweepableCloudResult, error) {
+	return provider.PaginatedRequest(ctx, client, "/api/v2/clouds", nil,
+		func(body []byte) ([]sweepableCloudResult, *string, error) {
+			var page sweepableCloudsListResponse
+			if err := json.Unmarshal(body, &page); err != nil {
+				return nil, nil, fmt.Errorf("parse clouds response: %w", err)
+			}
+			return page.Results, page.Metadata.NextPagingToken, nil
+		},
+	)
+}
+
 // sweepClouds deletes test clouds whose names start with one of the sweepable
-// prefixes ("tfacc-", "tf-test-", "tfprovider-", "tfacc-ephemeral-") and whose
-// age exceeds the minimum threshold (default 2h, override via
+// prefixes (sweepableResourcePrefixes: "tfacc-", "tf-test-", "tfprovider-" -
+// this also covers ephemeral clouds, named "tfacc-ephemeral-<nanos>") and
+// whose age exceeds the minimum threshold (default 2h, override via
 // ANYSCALE_SWEEP_MIN_AGE using time.ParseDuration syntax). The age threshold
 // avoids racing live tests; the prefix filter ensures we never touch
 // production clouds.
@@ -44,46 +69,21 @@ func sweepClouds(region string) error {
 		return nil
 	}
 
-	minAge := defaultSweepMinAge
-	if raw := os.Getenv("ANYSCALE_SWEEP_MIN_AGE"); raw != "" {
-		parsed, parseErr := time.ParseDuration(raw)
-		if parseErr != nil {
-			return fmt.Errorf("invalid ANYSCALE_SWEEP_MIN_AGE %q: %w", raw, parseErr)
-		}
-		minAge = parsed
+	minAge, err := resolveSweepMinAge(defaultSweepMinAge)
+	if err != nil {
+		return err
 	}
 
 	ctx := context.Background()
-	resp, err := client.DoRequest(ctx, "GET", "/api/v2/clouds", nil)
+	clouds, err := listAllCloudsForSweep(ctx, client)
 	if err != nil {
 		return fmt.Errorf("list clouds: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read clouds response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("list clouds returned status %d: %s", resp.StatusCode, truncateBody(string(body), 512))
-	}
-
-	var listResp struct {
-		Results []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CreatedAt string `json:"created_at"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &listResp); err != nil {
-		return fmt.Errorf("parse clouds response: %w", err)
 	}
 
 	now := time.Now().UTC()
 	var failures []string
 
-	for _, cloud := range listResp.Results {
+	for _, cloud := range clouds {
 		// Never sweep the designated static fixture cloud (single source of
 		// truth: defaultKnownGoodCloudName). Its current name is outside the
 		// sweepable prefixes, but this explicit guard protects it even if it is
@@ -92,7 +92,7 @@ func sweepClouds(region string) error {
 			log.Printf("[sweepClouds] KEEP %s (%s): protected static test fixture", cloud.Name, cloud.ID)
 			continue
 		}
-		if !hasSweepablePrefix(cloud.Name) {
+		if !hasAnyPrefix(cloud.Name, sweepableResourcePrefixes) {
 			continue
 		}
 
@@ -136,20 +136,4 @@ func sweepClouds(region string) error {
 		return fmt.Errorf("sweepClouds: %d failure(s): %s", len(failures), strings.Join(failures, "; "))
 	}
 	return nil
-}
-
-func hasSweepablePrefix(name string) bool {
-	for _, prefix := range sweepableCloudPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func truncateBody(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "...(truncated)"
 }

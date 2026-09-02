@@ -14,8 +14,8 @@
 #   make tag VERSION=0.1.0                 # verifies CHANGELOG.md is finalized on main, tags, pushes
 #
 # See the `changelog-release` and `tag` targets in the Makefile, and
-# .crystl/quest/changelog-release-contract.md for why the changelog step
-# goes through a PR instead of a direct push to main.
+# RELEASING.md for why the changelog step goes through a PR instead of a
+# direct push to main.
 
 name: Release
 
@@ -28,12 +28,19 @@ on:
 permissions:
   contents: write
 
+# Never run two publishes for the same tag at once (e.g. a re-pushed or
+# duplicate tag). cancel-in-progress is false on purpose: an in-flight publish
+# must never be cancelled mid-way -- we only prevent a concurrent second run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Fetch full history for changelog generation
           fetch-depth: 0
@@ -42,14 +49,14 @@ jobs:
         run: git fetch --force --tags
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
           cache: true
 
       - name: Import GPG key
         id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -59,21 +66,65 @@ jobs:
       # target), so it's present on this checkout. Re-extract it rather than
       # trusting a local dist/release-notes.md, which never gets committed
       # (dist/ is gitignored) and so never survives to reach this runner.
+      #
+      # Written OUTSIDE dist/ deliberately: `goreleaser release --clean`
+      # removes its own dist/ output directory before building, which would
+      # delete a same-named file dropped there by this step moments earlier -
+      # confirmed live on v0.1.2, where it silently produced an empty GitHub
+      # Release body despite this step extracting the right content.
       - name: Extract release notes from CHANGELOG.md
         run: |
           version="${GITHUB_REF_NAME#v}"
-          go run ./tools/changelog-build -extract "$version" -notes-out dist/release-notes.md
+          go run ./tools/changelog-build -extract "$version" -notes-out release-notes.md
           echo "==> release notes for $version:"
-          cat dist/release-notes.md
+          cat release-notes.md
+
+      # Fail the release BEFORE GoReleaser runs if there is no real changelog
+      # entry for this tag. The extract step above already errors when there is
+      # no "## [<version>]" section at all (changelog-build's Extract returns an
+      # error on a missing heading), which stops a tag pushed without a
+      # finalized changelog. This step adds the other half: a section that
+      # exists but is empty would otherwise sail through and publish a blank
+      # GitHub Release. Together they make "this tag has a finalized, non-empty
+      # changelog entry" a server-side guarantee that holds no matter how the
+      # tag was pushed (make tag, the GitHub UI, or a raw `git tag`) -- not just
+      # a client-side check in the `make tag` target.
+      - name: Verify release notes are non-empty
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::Release notes for ${GITHUB_REF_NAME} are empty -- CHANGELOG.md has no finalized, non-empty '## [${version}]' section. Run 'make changelog-release VERSION=${version}', merge that PR, then 'make tag VERSION=${version}'."
+            exit 1
+          fi
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --release-notes=dist/release-notes.md
+          args: release --clean --release-notes=release-notes.md
         env:
           # GitHub token for creating releases
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # GPG fingerprint for signing checksums
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+
+      # The two guards above only ever look at release-notes.md BEFORE
+      # GoReleaser runs -- they can't see whether GoReleaser actually put
+      # that content into the published release. That's exactly the gap
+      # that let v0.3.0 publish with an empty body despite both of them
+      # passing (root cause: a `changelog: disable: true` in .goreleaser.yml
+      # that also discards --release-notes; see the comment there). This
+      # step closes the gap by checking the real, published body after the
+      # fact. It can't undo a bad publish -- the release already exists by
+      # this point -- but it fails the workflow loudly instead of leaving an
+      # empty release body to be found by manual inspection later.
+      - name: Verify published release notes are non-empty
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body="$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body)"
+          if ! printf '%s' "$body" | grep -q '[^[:space:]]'; then
+            echo "::error::Published GitHub Release ${GITHUB_REF_NAME} has an empty body even though release-notes.md was verified non-empty before GoReleaser ran. Fix (description-only, does not touch assets/signatures): go run ./tools/changelog-build -extract ${GITHUB_REF_NAME#v} -notes-out /tmp/notes.md && gh release edit ${GITHUB_REF_NAME} --notes-file /tmp/notes.md"
+            exit 1
+          fi

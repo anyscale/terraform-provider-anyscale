@@ -7,7 +7,10 @@ resource "anyscale_container_image_build" "inline" {
     RUN pip install --no-cache-dir pandas scikit-learn
   EOT
 
-  build_timeout = "30m"
+  timeouts {
+    create = "30m"
+    update = "30m"
+  }
 }
 
 # Build from a Containerfile checked into the repo, scoped to a project.
@@ -26,5 +29,10 @@ output "build_image_uri" {
 
 output "build_status" {
   value       = anyscale_container_image_build.inline.build_status
-  description = "The current status of the build (pending, in_progress, succeeded, failed, cancelled)"
+  description = "The current status of the build (pending, in_progress, succeeded, failed, pending_cancellation, canceled)"
+}
+
+output "build_image_digest" {
+  value       = anyscale_container_image_build.inline.digest
+  description = "The content digest of the built image (e.g. sha256:...); changes when a new build revision is created"
 }

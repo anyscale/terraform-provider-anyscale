@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -173,6 +174,52 @@ func TestDoRequestRaw(t *testing.T) {
 		_, err := DoRequestRaw(ctx, client, "GET", "/test", nil)
 		if err == nil {
 			t.Fatal("expected error for 500 status, got nil")
+		}
+	})
+
+	t.Run("404 not listed as expected satisfies errors.Is(ErrNotFound) and preserves the legacy verbatim phrase", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error": {"detail": "not found"}}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithToken(server.URL, "test-token")
+
+		_, err := DoRequestRaw(ctx, client, "GET", "/test", nil)
+		if err == nil {
+			t.Fatal("expected error for 404 status, got nil")
+		}
+
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("expected errors.Is(err, ErrNotFound) to be true, got err: %v", err)
+		}
+
+		if !strings.Contains(err.Error(), "unexpected status 404") {
+			t.Errorf("expected error text to contain the verbatim legacy phrase \"unexpected status 404\", not just the digits. No production code matches this text any more (all not-found sites use errors.Is), but this assertion and the ExpectError regexp in acctest/ephemeral_service_credentials_acc_test.go both anchor on the literal phrase - rewording it in api_helpers.go breaks both. Got: %v", err)
+		}
+	})
+
+	t.Run("404 listed as an expected status is a nil-error success, not ErrNotFound", func(t *testing.T) {
+		// Guards an invariant two delete paths rely on: resource_service.go's final
+		// Delete call and container_image_helpers.go's archive call both deliberately list
+		// http.StatusNotFound as expected (an already-gone resource is a successful,
+		// idempotent delete). Their old "404"/"not found" substring guards were
+		// removed as dead code on exactly this basis - if this ever regressed (404 stopped
+		// being treated as accepted here), those call sites would start receiving a real
+		// ErrNotFound-wrapped error with nothing left to catch it, surfacing as a hard
+		// destroy/archive failure instead of a silent success.
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error": {"detail": "not found"}}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithToken(server.URL, "test-token")
+
+		_, err := DoRequestRaw(ctx, client, "DELETE", "/test", nil, http.StatusNoContent, http.StatusNotFound)
+		if err != nil {
+			t.Fatalf("expected nil error when 404 is a listed expected status, got: %v", err)
 		}
 	})
 }

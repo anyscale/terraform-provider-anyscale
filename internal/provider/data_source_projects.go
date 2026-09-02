@@ -61,13 +61,27 @@ func (d *ProjectsDataSource) Metadata(ctx context.Context, req datasource.Metada
 
 // Schema defines the schema for the data source.
 func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	itemAttributes := projectSharedAttributes()
+	itemAttributes["id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The unique identifier of the project.",
+	}
+	itemAttributes["name"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The name of the project.",
+	}
+	itemAttributes["cloud_id"] = schema.StringAttribute{
+		Computed:            true,
+		MarkdownDescription: "The cloud ID this project belongs to. Null if the project has no associated cloud reported by the API.",
+	}
+
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Lists and filters Anyscale Projects. This data source returns a list of projects without collaborator details for performance.",
 
 		Attributes: map[string]schema.Attribute{
 			"name_contains": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Filter projects by partial name match.",
+				MarkdownDescription: "Filter projects by partial, case-insensitive name match.",
 			},
 			"creator_id": schema.StringAttribute{
 				Optional:            true,
@@ -89,44 +103,7 @@ func (d *ProjectsDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				Computed:            true,
 				MarkdownDescription: "List of projects matching the filters. Does not include collaborator details for performance.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The unique identifier of the project.",
-						},
-						"name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The name of the project.",
-						},
-						"description": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Description of the project.",
-						},
-						"cloud_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The cloud ID this project belongs to.",
-						},
-						"creator_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the user who created the project.",
-						},
-						"created_at": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "Timestamp when the project was created.",
-						},
-						"last_used_cloud_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The ID of the cloud last used by this project.",
-						},
-						"is_default": schema.BoolAttribute{
-							Computed:            true,
-							MarkdownDescription: "Whether this is the default project for the organization.",
-						},
-						"directory_name": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The directory name used for this project's storage.",
-						},
-					},
+					Attributes: itemAttributes,
 				},
 			},
 		},
@@ -162,17 +139,9 @@ func (d *ProjectsDataSource) Read(ctx context.Context, req datasource.ReadReques
 	}
 
 	// Resolve cloud_name to cloud_id if provided
-	cloudID := config.CloudID.ValueString()
-	if !config.CloudName.IsNull() {
-		cloudName := config.CloudName.ValueString()
-		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
-
-		resolvedID, err := ResolveCloudNameToID(ctx, d.client, cloudName)
-		if err != nil {
-			AddAPIError(&resp.Diagnostics, "resolve cloud name", err)
-			return
-		}
-		cloudID = resolvedID
+	cloudID, ok := resolveCloudIDFilter(ctx, d.client, config.CloudID, config.CloudName, &resp.Diagnostics)
+	if !ok {
+		return
 	}
 
 	// Build query parameters
@@ -239,34 +208,22 @@ func (d *ProjectsDataSource) fetchProjects(ctx context.Context, params url.Value
 		return nil, err
 	}
 
-	// Convert to model
+	// Convert to model. X-1: CreatorID/Description/LastUsedCloudID are already
+	// *string - StringPointerValue directly instead of a verbose if-nil-else
+	// block. DS-PROJ-1: CloudID (from ParentCloudID) is genuinely nullable
+	// server-side, same treatment.
 	allProjects := make([]ProjectSummaryModel, 0, len(results))
 	for _, project := range results {
 		projectModel := ProjectSummaryModel{
-			ID:            types.StringValue(project.ID),
-			Name:          types.StringValue(project.Name),
-			CloudID:       types.StringValue(project.ParentCloudID),
-			CreatedAt:     types.StringValue(project.CreatedAt),
-			IsDefault:     types.BoolValue(project.IsDefault),
-			DirectoryName: types.StringValue(project.DirectoryName),
-		}
-
-		if project.CreatorID != nil {
-			projectModel.CreatorID = types.StringValue(*project.CreatorID)
-		} else {
-			projectModel.CreatorID = types.StringNull()
-		}
-
-		if project.Description != nil {
-			projectModel.Description = types.StringValue(*project.Description)
-		} else {
-			projectModel.Description = types.StringNull()
-		}
-
-		if project.LastUsedCloudID != nil {
-			projectModel.LastUsedCloudID = types.StringValue(*project.LastUsedCloudID)
-		} else {
-			projectModel.LastUsedCloudID = types.StringNull()
+			ID:              types.StringValue(project.ID),
+			Name:            types.StringValue(project.Name),
+			CloudID:         types.StringPointerValue(project.ParentCloudID),
+			CreatedAt:       types.StringValue(project.CreatedAt),
+			IsDefault:       types.BoolValue(project.IsDefault),
+			DirectoryName:   types.StringValue(project.DirectoryName),
+			CreatorID:       types.StringPointerValue(project.CreatorID),
+			Description:     types.StringPointerValue(project.Description),
+			LastUsedCloudID: types.StringPointerValue(project.LastUsedCloudID),
 		}
 
 		allProjects = append(allProjects, projectModel)

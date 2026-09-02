@@ -2,13 +2,13 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -41,17 +41,13 @@ type ProjectResourceModel struct {
 	// Identity
 	ID types.String `tfsdk:"id"`
 
-	// Cloud reference - mutually exclusive
-	CloudID   types.String `tfsdk:"cloud_id"`
-	CloudName types.String `tfsdk:"cloud_name"`
+	// Cloud reference
+	CloudID types.String `tfsdk:"cloud_id"`
 
 	// Core attributes
 	Name                   types.String `tfsdk:"name"`
 	Description            types.String `tfsdk:"description"`
 	InitialClusterConfigID types.String `tfsdk:"initial_cluster_config_id"`
-
-	// Nested collaborators
-	Collaborators []ProjectCollaboratorModel `tfsdk:"collaborator"`
 
 	// Computed fields
 	CreatorID       types.String `tfsdk:"creator_id"`
@@ -59,14 +55,6 @@ type ProjectResourceModel struct {
 	LastUsedCloudID types.String `tfsdk:"last_used_cloud_id"`
 	IsDefault       types.Bool   `tfsdk:"is_default"`
 	DirectoryName   types.String `tfsdk:"directory_name"`
-}
-
-// ProjectCollaboratorModel represents a project collaborator.
-type ProjectCollaboratorModel struct {
-	Email           types.String `tfsdk:"email"`
-	PermissionLevel types.String `tfsdk:"permission_level"`
-	IdentityID      types.String `tfsdk:"identity_id"` // Computed
-	UserID          types.String `tfsdk:"user_id"`     // Computed
 }
 
 // Metadata returns the resource type name.
@@ -77,6 +65,12 @@ func (r *ProjectResource) Metadata(ctx context.Context, req resource.MetadataReq
 // Schema defines the schema for the resource.
 func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// Version 1: the collaborator block was removed (v0.25.0). Prior state
+		// still carries a `collaborator` attribute and cannot be marshalled
+		// against this schema without the v0 -> v1 upgrader in
+		// resource_project_upgrade.go - see that file for why every existing
+		// anyscale_project state is affected, not just ones that used the block.
+		Version:             1,
 		MarkdownDescription: "Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.",
 
 		Attributes: map[string]schema.Attribute{
@@ -88,17 +82,10 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 				},
 			},
 
-			// Cloud reference (mutually exclusive)
+			// Cloud reference
 			"cloud_id": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The cloud ID for this project. Either `cloud_id` or `cloud_name` must be specified.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"cloud_name": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The cloud name for this project. Either `cloud_id` or `cloud_name` must be specified. Will be resolved to cloud_id.",
+				Required:            true,
+				MarkdownDescription: "The cloud ID for this project. If a later refresh finds the backend reports no associated cloud (an inconsistent state), this reads as null rather than an empty string. To reference a cloud by name instead of by id, look it up with the [`anyscale_cloud` data source](../data-sources/cloud.md) (`cloud_id = data.anyscale_cloud.example.id`).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -107,9 +94,12 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			// Core attributes
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name of the project.",
+				MarkdownDescription: "The name of the project. The API reserves the names `-` and `default` (case-insensitive); using either fails the request.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.NoneOfCaseInsensitive("-", "default"),
 				},
 			},
 			"description": schema.StringAttribute{
@@ -124,7 +114,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			},
 			"initial_cluster_config_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The initial cluster configuration ID to use for workspaces in this project.",
+				MarkdownDescription: "The initial cluster configuration ID to use for workspaces in this project. This is a create-time-only input (API field `cluster_config`): the provider does not read its current value back from the API after creation, so it is not refreshed on `terraform plan`/`refresh` and will always be null immediately after `terraform import`. Changing it forces replacement of the project.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -154,7 +144,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 			},
 			"is_default": schema.BoolAttribute{
 				Computed:            true,
-				MarkdownDescription: "Whether this is the default project for the organization.",
+				MarkdownDescription: "Whether this is the default project for its cloud. Anyscale creates one default project per cloud, not one per organization.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
@@ -164,35 +154,6 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 				MarkdownDescription: "The directory name used for this project's storage.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-		},
-
-		Blocks: map[string]schema.Block{
-			"collaborator": schema.ListNestedBlock{
-				MarkdownDescription: "Collaborators with access to this project. Can be added, removed, or modified in-place.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"email": schema.StringAttribute{
-							Required:            true,
-							MarkdownDescription: "Email address of the collaborator.",
-						},
-						"permission_level": schema.StringAttribute{
-							Required:            true,
-							MarkdownDescription: "Permission level: 'owner', 'writer', or 'readonly'.",
-							Validators: []validator.String{
-								stringvalidator.OneOf("owner", "writer", "readonly"),
-							},
-						},
-						"identity_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The identity ID of the collaborator (computed).",
-						},
-						"user_id": schema.StringAttribute{
-							Computed:            true,
-							MarkdownDescription: "The user ID of the collaborator (computed).",
-						},
-					},
 				},
 			},
 		},
@@ -225,34 +186,9 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	// Validate cloud reference
-	if plan.CloudID.IsNull() && plan.CloudName.IsNull() {
-		AddConfigError(&resp.Diagnostics, "Cloud Reference Required",
-			"Either 'cloud_id' or 'cloud_name' must be specified to create a project.")
-		return
-	}
-
-	if !plan.CloudID.IsNull() && !plan.CloudName.IsNull() {
-		AddConfigError(&resp.Diagnostics, "Conflicting Cloud Reference",
-			"Cannot specify both 'cloud_id' and 'cloud_name'. Please provide only one.")
-		return
-	}
-
-	// Resolve cloud_name to cloud_id if needed (for API call only, don't modify plan)
+	// cloud_id is Required now (cloud_name removed) - Terraform Core already
+	// guarantees a concrete value here.
 	cloudID := plan.CloudID.ValueString()
-	if plan.CloudID.IsNull() && !plan.CloudName.IsNull() {
-		cloudName := plan.CloudName.ValueString()
-		tflog.Info(ctx, "Resolving cloud_name to cloud_id", map[string]any{"cloud_name": cloudName})
-
-		resolvedID, err := ResolveCloudNameToID(ctx, r.client, cloudName)
-		if err != nil {
-			AddConfigError(&resp.Diagnostics, "Cloud Name Resolution Failed",
-				fmt.Sprintf("Failed to resolve cloud name '%s' to ID: %s", cloudName, err.Error()))
-			return
-		}
-		cloudID = resolvedID
-		// Don't set plan.CloudID here - keep cloud_name in state
-	}
 
 	// Build create request
 	desc := plan.Description.ValueString()
@@ -299,14 +235,6 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 
 	tflog.Info(ctx, "Project created successfully", map[string]any{"project_id": projectID})
 
-	// Create collaborators if specified
-	if len(plan.Collaborators) > 0 {
-		if err := r.createCollaborators(ctx, projectID, plan.Collaborators); err != nil {
-			AddAPIError(&resp.Diagnostics, "add collaborators (project created)", err)
-			// Continue to read state even if collaborators failed
-		}
-	}
-
 	// Read back full state
 	if err := r.readProject(ctx, projectID, &plan); err != nil {
 		AddAPIError(&resp.Diagnostics, "read project after create", err)
@@ -331,7 +259,7 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	// Read project
 	if err := r.readProject(ctx, projectID, &state); err != nil {
-		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrNotFound) {
 			tflog.Warn(ctx, "Project not found, removing from state", map[string]any{"project_id": projectID})
 			resp.State.RemoveResource(ctx)
 			return
@@ -346,6 +274,14 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 }
 
 // Update updates the resource and sets the updated Terraform state on success.
+//
+// No attribute on this resource is updatable in place any more: every writable
+// attribute is RequiresReplace (or RequiresReplaceIfConfigured), and the rest
+// are Computed. Terraform Core therefore never plans an Update for this
+// resource in practice - the method exists only to satisfy resource.Resource,
+// and refreshes state from the API rather than issuing any write, so that if
+// Core ever does route an update here the resulting state still reflects
+// reality instead of a silently stale plan.
 func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state ProjectResourceModel
 
@@ -358,13 +294,7 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	projectID := state.ID.ValueString()
 
-	tflog.Info(ctx, "Updating project collaborators", map[string]any{"project_id": projectID})
-
-	// Only collaborators can be updated; other fields require replacement
-	if err := r.syncCollaborators(ctx, projectID, plan.Collaborators, state.Collaborators); err != nil {
-		AddAPIError(&resp.Diagnostics, "update collaborators", err)
-		return
-	}
+	tflog.Info(ctx, "Updating project", map[string]any{"project_id": projectID})
 
 	// Read back full state
 	if err := r.readProject(ctx, projectID, &plan); err != nil {
@@ -390,18 +320,22 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	tflog.Info(ctx, "Deleting project", map[string]any{"project_id": projectID})
 
-	// Delete project
-	_, err := DoRequestRaw(
-		ctx,
-		r.client,
-		"DELETE",
-		fmt.Sprintf("/api/v2/projects/%s", projectID),
-		nil,
-		http.StatusOK,
-		http.StatusNoContent,
-		http.StatusNotFound,
-	)
+	err := r.deleteProjectWithRetry(ctx, projectID, state.CreatedAt.ValueString())
 	if err != nil {
+		if strings.Contains(err.Error(), "status 409") {
+			resp.Diagnostics.AddError(
+				"Project Has Active Resources",
+				fmt.Sprintf("Cannot delete project %s: it still has running clusters or workspaces. Terminate all clusters and workspaces in this project, then retry. (%s)", projectID, err.Error()),
+			)
+			return
+		}
+		if isKnownNonTransient403(err) {
+			resp.Diagnostics.AddError(
+				"Project Has Active Resources",
+				fmt.Sprintf("Cannot delete project %s: it still has running jobs or services. Terminate all jobs and services in this project, then retry. (%s)", projectID, err.Error()),
+			)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "delete project", err)
 		return
 	}
@@ -409,15 +343,205 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 	tflog.Info(ctx, "Project deleted successfully", map[string]any{"project_id": projectID})
 }
 
+// recentlyCreatedRetryWindow bounds how new a project must be (per its own
+// created_at) to qualify for the delete-time 403 retry below.
+const recentlyCreatedRetryWindow = 5 * time.Minute
+
+// deleteProjectRetryInitialInterval, deleteProjectRetryMaxInterval, and deleteProjectRetryMaxWait
+// are vars, not consts, so tests can override them to near-zero for the duration of a test
+// (save, shrink, defer-restore) and keep the exhaust-path/retry-then-succeed unit tests instant
+// instead of really sleeping for the production ~90s. Real acctests hitting the live API are
+// unaffected either way.
+//
+// Capped exponential backoff: 1s, 2s, 4s, 8s, then HELD at the 8s cap for the rest of the 90s
+// ceiling (~14-15 attempts total). Two properties this shape is chosen for, together: (1) short
+// lags are still detected fast via the initial ramp (same fast-catch property a fixed fine
+// interval gives), and (2) overshoot past the actual convergence moment stays bounded to
+// roughly the cap size (~8s) rather than growing with the ceiling, unlike UNCAPPED exponential
+// (1,2,4,8,16,32...) whose late steps get large enough to badly overshoot a step-function
+// convergence event (observed once in practice at ~15.2s) - e.g. a convergence at ~17s under an
+// uncapped schedule isn't rechecked until the 32s step. Capping keeps the per-step overshoot
+// small at any ceiling while still reaching a much longer ceiling in far fewer calls than a
+// fixed-fine-interval schedule, which would need roughly 3x as many calls to reach the same ceiling.
+var (
+	deleteProjectRetryInitialInterval = 1 * time.Second
+	deleteProjectRetryMaxInterval     = 8 * time.Second
+	deleteProjectRetryMaxWait         = 90 * time.Second
+)
+
+// deleteProjectNonTransient403Messages holds substrings of 403 error bodies known to indicate a
+// genuine, non-transient rejection rather than the delete-time permission-check consistency
+// race, even on a recently-created project. This is a NEGATIVE exclusion, not a positive "this
+// text proves it's the race" inference - the race and a permanent denial share the identical
+// bare "Permission denied" text, so text can never prove transience, and this list does not try
+// to. It only ever NARROWS an already-eligible retry: an unrecognized 403 message still retries
+// by default, so the primary race-fix stays unweakened. Best-effort and deliberately brittle: if
+// the backend rewords one of these messages, matching silently lapses and that case just falls
+// back to the full 90s wait - the same behavior as before this exclusion existed, not worse.
+var deleteProjectNonTransient403Messages = []string{
+	"You cannot delete a project unless it has no jobs or services",
+}
+
+// isKnownNonTransient403 reports whether err's body matches one of
+// deleteProjectNonTransient403Messages.
+func isKnownNonTransient403(err error) bool {
+	for _, msg := range deleteProjectNonTransient403Messages {
+		if strings.Contains(err.Error(), msg) {
+			return true
+		}
+	}
+	return false
+}
+
+// deleteProjectWithRetry is a thin wrapper so the resource's own Delete goes through the exact
+// same exported schedule as the acctest package's out-of-band deletion helper - see
+// DeleteProjectWithRetry's doc comment.
+func (r *ProjectResource) deleteProjectWithRetry(ctx context.Context, projectID, createdAt string) error {
+	return DeleteProjectWithRetry(ctx, r.client, projectID, createdAt)
+}
+
+// DeleteProjectWithRetry issues DELETE /api/v2/projects/{projectID}, retrying a 403 on a
+// bounded capped-exponential schedule ONLY when createdAt shows the project was created very
+// recently (within recentlyCreatedRetryWindow).
+//
+// This targets a known backend race: the delete-time permission check is
+// SpiceDB-backed and its CheckPermission call does not request a
+// fully-consistent read, so it can read a stale replica shortly after the
+// create-time permission grant (no zookie is threaded from the create write
+// to the delete-time check) — see the project-delete-403 investigation notes.
+// A genuine, long-standing permission denial is indistinguishable from this
+// race by status code or message alone (both are a bare 403 "Permission
+// denied"), so this does NOT retry every 403 — only ones on a project new
+// enough that the race is a plausible explanation. A project that has existed
+// longer than the window is not retried at all and surfaces its error
+// immediately, exactly as before this change.
+//
+// A recent project can still 403 for a reason that is neither the race nor an identity-level
+// denial: it has active jobs or services, which the backend also reports as a bare 403 (not the
+// 409 used for the narrower active-session case below), and is exactly as textually
+// indistinguishable from the race as a genuine permission denial is. Unlike a permission denial
+// though, this message is specific and known, so deleteProjectNonTransient403Messages excludes
+// it from eligibility - see that var's doc comment for why this is a safe, retry-narrowing-only
+// exclusion rather than a rule that positively decides some other 403 is "fine."
+//
+// The bounded ~90s ceiling is deliberate and must stay bounded, not grow unbounded: a project
+// whose owner-grant tuple was genuinely never written (a separate, backend-config-caused
+// failure mode, not this lag) is textually identical to a slow-but-real lag and will also
+// exhaust this retry before surfacing its 403 - correct, since no client-side wait can produce a
+// tuple that doesn't exist. That case needs a backend tuple backfill, not a longer wait here.
+//
+// Exported (and package-external callers pass createdAt = time.Now() rather than a bare
+// "always eligible" flag) so the acctest package's TestAccProjectResource_Disappears helper -
+// which provokes the identical race from outside the provider by deleting a project the same
+// test just created - shares this exact schedule and eligibility check instead of a second copy
+// that could silently drift out of sync with this one.
+func DeleteProjectWithRetry(ctx context.Context, client *Client, projectID, createdAt string) error {
+	eligible := isRecentlyCreated(createdAt, recentlyCreatedRetryWindow)
+	_, err := retryOn403(ctx, eligible, isKnownNonTransient403,
+		func() ([]byte, error) {
+			return DoRequestRaw(
+				ctx, client, "DELETE", fmt.Sprintf("/api/v2/projects/%s", projectID), nil,
+				http.StatusOK, http.StatusNoContent, http.StatusNotFound,
+			)
+		},
+		func(attempt int, next time.Duration) {
+			tflog.Warn(ctx, "Delete project got a 403 shortly after creation; retrying (known delete-time permission-check consistency race)", map[string]any{
+				"project_id": projectID,
+				"attempt":    attempt,
+				"created_at": createdAt,
+				"next_wait":  next,
+			})
+		},
+	)
+	return err
+}
+
+// retryOn403 issues doRequest repeatedly on the bounded capped-exponential schedule above
+// (deleteProjectRetryInitialInterval et al.) while it keeps failing with a 403, stopping as soon
+// as doRequest succeeds, fails with a non-403 error, is excluded by isNonTransient, or the
+// schedule is exhausted. onRetry is called just before each sleep so a caller can log its own
+// site-specific context (project ID, attempt, etc). isNonTransient may be nil (no exclusions -
+// every eligible 403 retries).
+//
+// Shared core so every call site targeting this family of bug (a permission check reading a
+// just-written grant before it has propagated) uses one schedule instead of a hand-copied loop
+// per site. DeleteProjectWithRetry is the only caller today; the parameters stay generic
+// (accepted statuses and exclusion list are the caller's, not this helper's) so a future site
+// hitting the same race reuses this schedule rather than copying it.
+func retryOn403(
+	ctx context.Context,
+	eligible bool,
+	isNonTransient func(error) bool,
+	doRequest func() ([]byte, error),
+	onRetry func(attempt int, next time.Duration),
+) ([]byte, error) {
+	var lastErr error
+	interval := deleteProjectRetryInitialInterval
+	var elapsed time.Duration
+
+	for attempt := 1; ; attempt++ {
+		body, err := doRequest()
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+
+		if !eligible || !strings.Contains(err.Error(), "status 403") || (isNonTransient != nil && isNonTransient(err)) || elapsed >= deleteProjectRetryMaxWait {
+			return nil, lastErr
+		}
+
+		if onRetry != nil {
+			onRetry(attempt, interval)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, lastErr
+		default:
+		}
+		time.Sleep(interval)
+		elapsed += interval
+
+		interval *= 2
+		if interval > deleteProjectRetryMaxInterval {
+			interval = deleteProjectRetryMaxInterval
+		}
+	}
+}
+
+// isRecentlyCreated reports whether createdAt (RFC3339) is within window of
+// now. An unparseable or empty createdAt is treated as NOT recent (fails
+// closed to no-retry), since the retry should only activate when the timing
+// signal is actually known-good, not when it's missing or malformed.
+func isRecentlyCreated(createdAt string, window time.Duration) bool {
+	t, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return false
+	}
+	return time.Since(t) < window
+}
+
 // ImportState imports the resource into Terraform state.
 func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by project ID
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	projectID := req.ID
+
+	var model ProjectResourceModel
+	if err := r.readProject(ctx, projectID, &model); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			AddConfigError(&resp.Diagnostics, "Project Not Found",
+				fmt.Sprintf("No project exists with ID %q.", projectID))
+			return
+		}
+		AddAPIError(&resp.Diagnostics, "read project for import", err)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
 }
 
 // Helper functions
 
-// readProject reads a project's details and collaborators into the model.
+// readProject reads a project's details into the model.
 func (r *ProjectResource) readProject(ctx context.Context, projectID string, model *ProjectResourceModel) error {
 	tflog.Debug(ctx, "Reading project", map[string]any{"project_id": projectID})
 
@@ -431,9 +555,8 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 		http.StatusOK,
 	)
 	if err != nil {
-		// Check for 404
-		if strings.Contains(err.Error(), "404") {
-			return fmt.Errorf("project not found (404)")
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: project not found", ErrNotFound)
 		}
 		return fmt.Errorf("failed to get project: %w", err)
 	}
@@ -443,278 +566,24 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 	model.ID = types.StringValue(result.ID)
 	model.Name = types.StringValue(result.Name)
 
-	// Handle cloud reference based on what user provided:
-	// - If cloud_name was provided: keep it, don't set cloud_id
-	// - If cloud_id was provided OR this is import (both null): set cloud_id from API
-	if model.CloudName.IsNull() {
-		model.CloudID = types.StringValue(result.ParentCloudID)
-	}
+	// DS-PROJ-1: parent_cloud_id is genuinely nullable server-side in
+	// principle, but cloud_id is Required on this resource (cloud_name
+	// removed, R1), so every config has a concrete value on create and this
+	// is a stable non-null refresh in practice. types.StringPointerValue
+	// rather than types.StringValue defensively handles the case the
+	// backend ever does report a null parent_cloud_id on an existing
+	// project (reads as null rather than an empty string, per the schema
+	// description) - this cannot currently be constructed through
+	// Terraform, since parent_cloud_id is required on create.
+	model.CloudID = types.StringPointerValue(result.ParentCloudID)
 
-	if result.Description != nil {
-		model.Description = types.StringValue(*result.Description)
-	} else {
-		model.Description = types.StringNull()
-	}
-
-	if result.CreatorID != nil {
-		model.CreatorID = types.StringValue(*result.CreatorID)
-	} else {
-		model.CreatorID = types.StringNull()
-	}
-
+	model.Description = types.StringPointerValue(result.Description)
+	model.CreatorID = types.StringPointerValue(result.CreatorID)
 	model.CreatedAt = types.StringValue(result.CreatedAt)
-
-	if result.LastUsedCloudID != nil {
-		model.LastUsedCloudID = types.StringValue(*result.LastUsedCloudID)
-	} else {
-		model.LastUsedCloudID = types.StringNull()
-	}
+	model.LastUsedCloudID = types.StringPointerValue(result.LastUsedCloudID)
 
 	model.IsDefault = types.BoolValue(result.IsDefault)
 	model.DirectoryName = types.StringValue(result.DirectoryName)
-
-	// Only fetch collaborators if they were specified in the configuration
-	// This avoids inconsistency with auto-added creator collaborator
-	tflog.Debug(ctx, "Checking whether to fetch collaborators", map[string]any{
-		"project_id":              projectID,
-		"model_collaborators_len": len(model.Collaborators),
-	})
-
-	if len(model.Collaborators) > 0 {
-		tflog.Debug(ctx, "Fetching collaborators for project", map[string]any{
-			"project_id": projectID,
-		})
-		collaborators, err := r.getCollaborators(ctx, projectID)
-		if err != nil {
-			tflog.Warn(ctx, "Failed to get collaborators", map[string]any{
-				"project_id": projectID,
-				"error":      err.Error(),
-			})
-			// Continue without collaborators rather than failing
-			model.Collaborators = []ProjectCollaboratorModel{}
-		} else {
-			tflog.Debug(ctx, "Successfully fetched collaborators", map[string]any{
-				"project_id": projectID,
-				"count":      len(collaborators),
-			})
-			model.Collaborators = collaborators
-		}
-	} else {
-		tflog.Debug(ctx, "Skipping collaborator fetch (none specified in config)", map[string]any{
-			"project_id": projectID,
-		})
-	}
-
-	return nil
-}
-
-// getCollaborators fetches the list of collaborators for a project.
-func (r *ProjectResource) getCollaborators(ctx context.Context, projectID string) ([]ProjectCollaboratorModel, error) {
-	tflog.Debug(ctx, "Fetching collaborators", map[string]any{
-		"project_id": projectID,
-	})
-
-	// Pages through every page rather than just the first, so a project with
-	// more collaborators than fit on one page doesn't silently drop the rest
-	// on every read/sync.
-	results, err := PaginatedRequest(
-		ctx, r.client, fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil,
-		func(body []byte) ([]ProjectCollaboratorResult, *string, error) {
-			var listResp ProjectCollaboratorListResponse
-			if err := json.Unmarshal(body, &listResp); err != nil {
-				return nil, nil, fmt.Errorf("failed to unmarshal collaborators response: %w", err)
-			}
-			return listResp.Results, listResp.Metadata.NextPagingToken, nil
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get collaborators: %w", err)
-	}
-
-	tflog.Debug(ctx, "Parsed collaborators response", map[string]any{
-		"project_id": projectID,
-		"count":      len(results),
-	})
-
-	// Map to model
-	collaborators := make([]ProjectCollaboratorModel, 0, len(results))
-	for i, collab := range results {
-		tflog.Debug(ctx, "Mapping collaborator", map[string]any{
-			"index":            i,
-			"email":            collab.Value.Email,
-			"permission_level": collab.PermissionLevel,
-			"identity_id":      collab.ID,
-			"user_id":          collab.Value.ID,
-		})
-		collaborators = append(collaborators, ProjectCollaboratorModel{
-			Email:           types.StringValue(collab.Value.Email),
-			PermissionLevel: types.StringValue(collab.PermissionLevel),
-			IdentityID:      types.StringValue(collab.ID),
-			UserID:          types.StringValue(collab.Value.ID),
-		})
-	}
-
-	tflog.Debug(ctx, "Returning collaborators", map[string]any{
-		"project_id": projectID,
-		"count":      len(collaborators),
-	})
-
-	return collaborators, nil
-}
-
-// createCollaborators batch creates collaborators for a project.
-func (r *ProjectResource) createCollaborators(ctx context.Context, projectID string, collaborators []ProjectCollaboratorModel) error {
-	if len(collaborators) == 0 {
-		return nil
-	}
-
-	tflog.Debug(ctx, "Creating collaborators", map[string]any{
-		"project_id": projectID,
-		"count":      len(collaborators),
-	})
-
-	// Build request
-	entries := make(ProjectCollaboratorBatchRequest, 0, len(collaborators))
-	for _, collab := range collaborators {
-		entries = append(entries, ProjectCollaboratorEntry{
-			Value: struct {
-				Email string `json:"email"`
-			}{
-				Email: collab.Email.ValueString(),
-			},
-			PermissionLevel: collab.PermissionLevel.ValueString(),
-		})
-	}
-
-	reqBody, err := MarshalRequestBody(entries)
-	if err != nil {
-		return fmt.Errorf("failed to serialize collaborators request: %w", err)
-	}
-
-	_, err = DoRequestRaw(
-		ctx,
-		r.client,
-		"POST",
-		fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID),
-		reqBody,
-		http.StatusOK,
-		http.StatusNoContent,
-		http.StatusCreated,
-		http.StatusConflict, // Accept 409 Conflict as success
-	)
-	if err != nil {
-		// Check if it's a 409 Conflict (already exists)
-		if strings.Contains(err.Error(), "409") {
-			tflog.Info(ctx, "Collaborator already exists (409), treating as success", map[string]any{
-				"project_id": projectID,
-			})
-			return nil
-		}
-		return fmt.Errorf("failed to create collaborators: %w", err)
-	}
-
-	tflog.Info(ctx, "Collaborators created successfully", map[string]any{
-		"project_id": projectID,
-		"count":      len(entries),
-	})
-
-	return nil
-}
-
-// syncCollaborators reconciles collaborator changes between plan and state.
-func (r *ProjectResource) syncCollaborators(ctx context.Context, projectID string, planned, current []ProjectCollaboratorModel) error {
-	// Build maps for comparison
-	planMap := make(map[string]ProjectCollaboratorModel)
-	for _, collab := range planned {
-		planMap[collab.Email.ValueString()] = collab
-	}
-
-	currentMap := make(map[string]ProjectCollaboratorModel)
-	for _, collab := range current {
-		currentMap[collab.Email.ValueString()] = collab
-	}
-
-	// Determine adds, updates, removes
-	var toAdd []ProjectCollaboratorModel
-	var toUpdate []ProjectCollaboratorModel
-	var toRemove []ProjectCollaboratorModel
-
-	// Find adds and updates
-	for email, planCollab := range planMap {
-		if currentCollab, exists := currentMap[email]; exists {
-			// Check if permission changed
-			if currentCollab.PermissionLevel.ValueString() != planCollab.PermissionLevel.ValueString() {
-				planCollab.IdentityID = currentCollab.IdentityID // Preserve identity_id for update
-				toUpdate = append(toUpdate, planCollab)
-			}
-		} else {
-			toAdd = append(toAdd, planCollab)
-		}
-	}
-
-	// Find removes
-	for email, currentCollab := range currentMap {
-		if _, exists := planMap[email]; !exists {
-			toRemove = append(toRemove, currentCollab)
-		}
-	}
-
-	// Execute changes
-	if len(toAdd) > 0 {
-		tflog.Info(ctx, "Adding collaborators", map[string]any{"count": len(toAdd)})
-		if err := r.createCollaborators(ctx, projectID, toAdd); err != nil {
-			return fmt.Errorf("failed to add collaborators: %w", err)
-		}
-	}
-
-	for _, collab := range toUpdate {
-		tflog.Info(ctx, "Updating collaborator permission", map[string]any{
-			"email":      collab.Email.ValueString(),
-			"permission": collab.PermissionLevel.ValueString(),
-		})
-
-		updateReq := ProjectCollaboratorUpdateRequest{
-			PermissionLevel: collab.PermissionLevel.ValueString(),
-		}
-
-		reqBody, err := MarshalRequestBody(updateReq)
-		if err != nil {
-			return fmt.Errorf("failed to serialize update request: %w", err)
-		}
-
-		identityID := collab.IdentityID.ValueString()
-		_, err = DoRequestRaw(
-			ctx,
-			r.client,
-			"PUT",
-			fmt.Sprintf("/api/v2/projects/%s/collaborators/%s", projectID, identityID),
-			reqBody,
-			http.StatusOK,
-			http.StatusNoContent,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to update collaborator %s: %w", collab.Email.ValueString(), err)
-		}
-	}
-
-	for _, collab := range toRemove {
-		tflog.Info(ctx, "Removing collaborator", map[string]any{"email": collab.Email.ValueString()})
-
-		identityID := collab.IdentityID.ValueString()
-		_, err := DoRequestRaw(
-			ctx,
-			r.client,
-			"DELETE",
-			fmt.Sprintf("/api/v2/projects/%s/collaborators/%s", projectID, identityID),
-			nil,
-			http.StatusOK,
-			http.StatusNoContent,
-			http.StatusNotFound,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to remove collaborator %s: %w", collab.Email.ValueString(), err)
-		}
-	}
 
 	return nil
 }

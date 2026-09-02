@@ -22,19 +22,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # actions/checkout defaults to a shallow (depth 1) clone, which
+          # brings zero tags with it. The "Changelog headings and tags
+          # match" step below needs every real release tag visible to
+          # `git rev-parse --verify refs/tags/v<version>` and `git tag -l`,
+          # or it can't tell a genuinely untagged heading (or unheaded tag)
+          # apart from one this runner just never fetched.
+          fetch-depth: 0
+
+      - name: Fetch all tags
+        # fetch-depth: 0 alone is not reliably sufficient on its own (see the
+        # same two-step pattern in release.yml): git only auto-follows tags
+        # that point at commits the fetch refspec already covers, which is
+        # not a documented guarantee of "every tag in the repo" on top of a
+        # plain fetch-depth:0 checkout. Fetch tags explicitly so the tag
+        # check below never silently runs against an empty tag list.
+        run: git fetch --force --tags
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.25"
 
       - name: Changelog fragment presence check
+        # PR_NUM/HEAD_REF come in via env rather than being interpolated
+        # straight into the script body: head.ref is attacker-controlled (a PR
+        # author picks their branch name), so splicing it into an inline shell
+        # script is a script-injection vector. Passing it through the runner
+        # environment keeps it as inert data. (See actionlint's [expression]
+        # check and GitHub's script-injection hardening guidance.)
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          PR_NUM="${{ github.event.pull_request.number }}"
           FRAGMENT=".changelog/${PR_NUM}.txt"
           HAS_SKIP_LABEL=$(jq -r '[.pull_request.labels[].name] | any(. == "skip-changelog")' "$GITHUB_EVENT_PATH")
-          if [ -s "$FRAGMENT" ]; then
+          if [[ "$HEAD_REF" =~ ^changelog/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Branch $HEAD_REF is a 'make changelog-release' finalize PR -- it consumes fragments"
+            echo "rather than adding one, by design. Exempt from the fragment-presence check."
+          elif [ -s "$FRAGMENT" ]; then
             echo "Found changelog fragment: $FRAGMENT"
           elif [ "$HAS_SKIP_LABEL" = "true" ]; then
             echo "No changelog fragment, but 'skip-changelog' label present -- OK."
@@ -54,3 +82,16 @@ jobs:
           else
             echo "No fragment for this PR (presence check already passed via skip-changelog label) -- nothing to validate."
           fi
+
+      - name: Changelog headings and tags match
+        # Runs unconditionally, including on a `make changelog-release`
+        # finalize PR (the `changelog/v*` branch exemption above is for the
+        # fragment-presence check only, a different concern). This check
+        # doesn't need that same exemption: CheckHeadingsTagged always skips
+        # the single topmost version heading, which is exactly the one a
+        # finalize PR just created and that has no tag yet. CheckTagsHeaded
+        # (the converse - every tag needs a heading) has no symmetric
+        # exemption to worry about here: a tag is only ever created after
+        # its heading-bearing commit merges, never before, so it needs no
+        # "still in flight" carve-out (see tagcheck.go).
+        run: go run ./tools/changelog-build -check-tags

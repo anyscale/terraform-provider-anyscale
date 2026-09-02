@@ -241,16 +241,57 @@ func TestAccCloudResourceResource_WithFileStorage(t *testing.T) {
 	})
 }
 
-// TestAccCloudResourceResource_Azure_NotSupported is a regression test for task
-// 02118d55: the provider switch in addProviderConfig had no case at all for AZURE
-// (or GENERIC), so it silently fell through with none of the user's intent applied
-// and no error. It must now fail clearly, the same way anyscale_cloud's AZURE case
-// already does (task a7b8a48d). No real infra needed: this fails before the add_resource
-// API call is ever made.
-func TestAccCloudResourceResource_Azure_NotSupported(t *testing.T) {
+// TestAccCloudResourceResource_GCP_K8S tests GCP K8S (GKE) cloud resource creation
+func TestAccCloudResourceResource_GCP_K8S(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	SkipIfNoRealInfra(t)
+
+	cloudName := UniqueName(t, "cloud-res-gcp-k8s")
+	resourceName := "default"
+	// Generate random suffix for service accounts to allow parallel test runs
+	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { PreCheck(t) },
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudResourceDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccCloudResourceResourceGCPK8SConfig(cloudName, resourceName, randSuffix),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("anyscale_cloud_resource.test", "cloud_id"),
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "name", resourceName),
+					resource.TestCheckResourceAttr("anyscale_cloud_resource.test", "compute_stack", "K8S"),
+					// API validation
+					testAccCheckCloudResourceExistsInAPI("anyscale_cloud_resource.test", resourceName),
+					testAccCheckCloudResourceAttributes("anyscale_cloud_resource.test", resourceName, "K8S"),
+				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
+}
+
+// TestAccCloudResourceResource_AzureVM_NotSupported is the AKS-era successor to
+// the original task-02118d55 regression test (formerly
+// TestAccCloudResourceResource_Azure_NotSupported) - see the doc comment on its
+// anyscale_cloud sibling, TestAccCloudResource_AzureVM_NotSupported, for the
+// full context on why "Azure not supported" narrowed to "Azure VM not
+// supported" and moved to a plan-time error. The one thing worth calling out
+// here specifically: this config attaches the rejected Azure/VM
+// anyscale_cloud_resource to an otherwise-valid AWS anyscale_cloud parent, and
+// Terraform's config validation runs across the whole configuration before
+// any apply begins - so the plan-time ValidateConfig failure on the child
+// blocks the parent from being created too, same as before. No real infra
+// touched either way.
+func TestAccCloudResourceResource_AzureVM_NotSupported(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	cloudName := UniqueName(t, "cloud-res-azure-notsup")
+	cloudName := UniqueName(t, "cloud-res-azurevm-notsup")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -259,7 +300,7 @@ func TestAccCloudResourceResource_Azure_NotSupported(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccCloudResourceResourceAzureConfig(cloudName),
-				ExpectError: regexp.MustCompile("azure clouds are not yet supported"),
+				ExpectError: regexp.MustCompile(`(?s)Azure Requires Kubernetes Compute Stack.*only support compute_stack = "K8S"`),
 			},
 		},
 	})
@@ -437,13 +478,9 @@ func testAccCheckCloudResourceAttributes(resourceName, expectedName, expectedCom
 			return fmt.Errorf("compute_stack mismatch: expected %s, got %s", expectedComputeStack, foundDeployment.ComputeStack)
 		}
 
-		// Verify resource ID fields are set
+		// Verify resource ID field is set
 		if foundDeployment.CloudResourceID == "" {
 			return fmt.Errorf("cloud_resource_id is empty in API response")
-		}
-
-		if foundDeployment.CloudDeploymentID == "" {
-			return fmt.Errorf("cloud_deployment_id is empty in API response")
 		}
 
 		return nil
@@ -470,33 +507,30 @@ func testAccCloudResourceImportStateIdFunc(resourceName string) resource.ImportS
 }
 
 // testAccCheckCloudResourceDestroy verifies that clouds and cloud resources created by tests
-// are properly destroyed. This checks both anyscale_cloud and anyscale_cloud_resource.
+// are properly destroyed. This checks both anyscale_cloud (delegating to the shared
+// testAccCheckCloudDestroy, so it gets the same poll-for-async-delete behavior every other
+// resource's CheckDestroy gets) and anyscale_cloud_resource.
 func testAccCheckCloudResourceDestroy(s *terraform.State) error {
+	if err := testAccCheckCloudDestroy(s); err != nil {
+		return err
+	}
+
 	client, err := GetTestClient()
 	if err != nil {
 		return fmt.Errorf("failed to get test client: %w", err)
 	}
 
 	for _, rs := range s.RootModule().Resources {
-		switch rs.Type {
-		case "anyscale_cloud":
-			cloudID := rs.Primary.ID
-			if cloudID == "" {
-				continue
-			}
-			if err := verifyCloudDestroyed(client, cloudID); err != nil {
-				return err
-			}
-
-		case "anyscale_cloud_resource":
-			cloudID := rs.Primary.Attributes["cloud_id"]
-			resourceName := rs.Primary.Attributes["name"]
-			if cloudID == "" || resourceName == "" {
-				continue
-			}
-			if err := verifyCloudResourceDestroyed(client, cloudID, resourceName); err != nil {
-				return err
-			}
+		if rs.Type != "anyscale_cloud_resource" {
+			continue
+		}
+		cloudID := rs.Primary.Attributes["cloud_id"]
+		resourceName := rs.Primary.Attributes["name"]
+		if cloudID == "" || resourceName == "" {
+			continue
+		}
+		if err := verifyCloudResourceDestroyed(client, cloudID, resourceName); err != nil {
+			return err
 		}
 	}
 
@@ -585,8 +619,7 @@ resource "anyscale_cloud_resource" "test" {
   compute_stack  = "K8S"
 
   kubernetes_config {
-    context         = "my-context"
-    kubeconfig_path = "/tmp/kubeconfig"
+    anyscale_operator_iam_identity = "arn:aws:iam::123456789012:role/fake"
   }
 }
 `, cloudName)
@@ -609,26 +642,13 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-east-2"
   compute_stack  = "VM"
 
-  aws_config {
-    vpc_id             = "vpc-test123"
-    subnet_ids         = ["subnet-test1", "subnet-test2"]
-    security_group_ids = ["sg-test1"]
-
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/tfacc-cloudres-aws-crossaccount-%s"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/tfacc-cloudres-aws-cluster-node-%s"
-    external_id               = "anyscale-external-id-test"
-
-    subnet_ids_to_az = {
-      "subnet-test1" = "us-east-2a"
-      "subnet-test2" = "us-east-2b"
-    }
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-cres-aws-bucket-%s"
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix, randSuffix)
+`, cloudName, resourceName, awsConfigBlock("tfacc-cloudres-aws", randSuffix), randSuffix)
 }
 
 func testAccCloudResourceResourceGCPConfig(cloudName, resourceName, randSuffix string) string {
@@ -646,21 +666,17 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-central1"
   compute_stack  = "VM"
 
-  gcp_config {
-    project_id                        = "my-gcp-project"
-    vpc_name                          = "anyscale-vpc"
-    subnet_names                      = ["anyscale-subnet-1", "anyscale-subnet-2"]
-    firewall_policy_names             = ["anyscale-fw-ssh"]
-    provider_name                     = "projects/123456789012/locations/global/workloadIdentityPools/tf-cres-gcp-pool-%s/providers/tf-cres-gcp-prov-%s"
-    controlplane_service_account_email = "tf-cres-gcp-cp-%s@my-gcp-project.iam.gserviceaccount.com"
-    dataplane_service_account_email    = "tf-cres-gcp-dp-%s@my-gcp-project.iam.gserviceaccount.com"
-  }
+%s
 
   object_storage {
+    // Deliberately BARE - see the detailed comment on
+    // testAccCloudResourceGCPK8SConfig in resource_cloud_acc_test.go (BUG A);
+    // this must keep working once the semantic-equality fix lands, not
+    // be dodged by switching to gs://.
     bucket_name = "tfacc-cres-gcp-bucket-%s"
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix, randSuffix, randSuffix, randSuffix)
+`, cloudName, resourceName, gcpConfigBlock("tf-cres-gcp", randSuffix), randSuffix)
 }
 
 func testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix, namespace string) string {
@@ -668,8 +684,11 @@ func testAccCloudResourceResourceK8SConfig(cloudName, resourceName, randSuffix, 
 resource "anyscale_cloud" "test_cloud" {
   name           = "%s"
   cloud_provider = "AWS"
-  compute_stack  = "K8S"
   region         = "us-east-2"
+  # compute_stack deliberately omitted (stays Computed): the parent starts
+  # empty and derives its compute_stack from the attached cloud_resource -
+  # setting K8S explicitly here can never be honored by the empty-cloud
+  # create path (C14, see quest chat).
 }
 
 resource "anyscale_cloud_resource" "test" {
@@ -679,17 +698,45 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-east-2"
   compute_stack  = "K8S"
 
-  kubernetes_config {
-    namespace                       = "%s"
-    anyscale_operator_iam_identity  = "arn:aws:iam::123456789012:role/tfacc-cloudres-k8s-operator-%s"
-    zones                           = ["us-east-2a", "us-east-2b"]
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-cres-k8s-bucket-%s"
   }
 }
-`, cloudName, resourceName, namespace, randSuffix, randSuffix)
+`, cloudName, resourceName, k8sConfigBlock(namespace, fmt.Sprintf("arn:aws:iam::123456789012:role/tfacc-cloudres-k8s-operator-%s", randSuffix), []string{"us-east-2a", "us-east-2b"}, ""), randSuffix)
+}
+
+func testAccCloudResourceResourceGCPK8SConfig(cloudName, resourceName, randSuffix string) string {
+	return fmt.Sprintf(`
+resource "anyscale_cloud" "test_cloud" {
+  name           = "%s"
+  cloud_provider = "GCP"
+  region         = "us-central1"
+  # compute_stack deliberately omitted (stays Computed): the parent starts
+  # empty and derives its compute_stack from the attached cloud_resource -
+  # setting K8S explicitly here can never be honored by the empty-cloud
+  # create path (C14, see quest chat).
+}
+
+resource "anyscale_cloud_resource" "test" {
+  cloud_id       = anyscale_cloud.test_cloud.id
+  name           = "%s"
+  cloud_provider = "GCP"
+  region         = "us-central1"
+  compute_stack  = "K8S"
+
+%s
+
+  object_storage {
+    // Deliberately BARE - see the detailed comment on
+    // testAccCloudResourceGCPK8SConfig in resource_cloud_acc_test.go (BUG A);
+    // this must keep working once the semantic-equality fix lands, not
+    // be dodged by switching to gs://.
+    bucket_name = "tfacc-cres-gcp-k8s-bucket-%s"
+  }
+}
+`, cloudName, resourceName, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-cloudres-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}, ""), randSuffix)
 }
 
 func testAccCloudResourceResourceWithFileStorageConfig(cloudName, resourceName, randSuffix, mountPath, mountTargetZone string) string {
@@ -707,20 +754,7 @@ resource "anyscale_cloud_resource" "test" {
   region         = "us-east-2"
   compute_stack  = "VM"
 
-  aws_config {
-    vpc_id             = "vpc-test123"
-    subnet_ids         = ["subnet-test1", "subnet-test2"]
-    security_group_ids = ["sg-test1"]
-
-    controlplane_iam_role_arn = "arn:aws:iam::123456789012:role/tfacc-cloudres-fs-crossaccount-%s"
-    dataplane_iam_role_arn    = "arn:aws:iam::123456789012:role/tfacc-cloudres-fs-cluster-node-%s"
-    external_id               = "anyscale-external-id-test"
-
-    subnet_ids_to_az = {
-      "subnet-test1" = "us-east-2a"
-      "subnet-test2" = "us-east-2b"
-    }
-  }
+%s
 
   object_storage {
     bucket_name = "tfacc-cres-fs-bucket-%s"
@@ -729,11 +763,11 @@ resource "anyscale_cloud_resource" "test" {
   file_storage {
     file_storage_id = "fs-test123"
     mount_path      = "%s"
-    mount_targets {
+    mount_targets = [{
       address = "fs-test123.efs.us-east-2.amazonaws.com"
       zone    = "%s"
-    }
+    }]
   }
 }
-`, cloudName, resourceName, randSuffix, randSuffix, randSuffix, mountPath, mountTargetZone)
+`, cloudName, resourceName, awsConfigBlock("tfacc-cloudres-fs", randSuffix), randSuffix, mountPath, mountTargetZone)
 }

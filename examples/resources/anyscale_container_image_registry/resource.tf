@@ -15,7 +15,12 @@ resource "anyscale_container_image_registry" "private_ecr" {
 }
 
 # Outputs
-output "registry_cluster_environment_id" {
-  value       = anyscale_container_image_registry.public.cluster_environment_id
-  description = "The cluster environment (app config) ID created to hold this image"
+output "registry_id" {
+  value       = anyscale_container_image_registry.public.id
+  description = "The durable ID of the cluster environment (app config) created to hold this image"
+}
+
+output "registry_image_digest" {
+  value       = anyscale_container_image_registry.public.digest
+  description = "The content digest of this image's current latest successful build (e.g. sha256:...); like build_id, revision, and name_version, it can change on a later refresh if a new build supersedes this one"
 }

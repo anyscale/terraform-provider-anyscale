@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -43,9 +42,6 @@ type UserDataSourceModel struct {
 
 	// Cloud access
 	CloudIDs types.List `tfsdk:"cloud_ids"`
-
-	// User groups (placeholder for future implementation)
-	UserGroupIDs types.List `tfsdk:"user_group_ids"`
 }
 
 // OrganizationModel describes an organization in the user data.
@@ -85,16 +81,16 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			},
 			"organization_permission_level": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The permission level of the user within their organization (e.g., owner, admin, member).",
+				MarkdownDescription: "The current user's permission level within their organization (`owner` or `collaborator`). This mirrors the same deprecated `permission_level` concept exposed on `anyscale_organization_user`/`anyscale_organization_users`; `/api/v2/userinfo` has no equivalent to those data sources' `base_role`/`additional_roles`. For the full role picture (including any additional roles) of an arbitrary user, look them up with `anyscale_organization_user` instead.",
 			},
 			"organization_ids": schema.ListAttribute{
 				ElementType:         types.StringType,
 				Computed:            true,
-				MarkdownDescription: "List of organization IDs the user belongs to.",
+				MarkdownDescription: "List of organization IDs the user belongs to. In practice always exactly one element. Mirrors a field the backend has deprecated; prefer `organizations[].id` for new configurations.",
 			},
 			"organizations": schema.ListNestedAttribute{
 				Computed:            true,
-				MarkdownDescription: "List of organizations the user belongs to with detailed information.",
+				MarkdownDescription: "List of organizations the user belongs to, with detailed information. In practice this always contains exactly one entry - an Anyscale API token is scoped to a single organization. See `anyscale_organization` for the direct way to reach it without indexing into this list.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
@@ -111,7 +107,7 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 						},
 						"default_cloud_id": schema.StringAttribute{
 							Computed:            true,
-							MarkdownDescription: "The default cloud ID for the organization.",
+							MarkdownDescription: "The default cloud ID for the organization. Null if the organization has no default cloud configured.",
 						},
 					},
 				},
@@ -120,11 +116,6 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 				ElementType:         types.StringType,
 				Computed:            true,
 				MarkdownDescription: "List of cloud IDs the user has access to.",
-			},
-			"user_group_ids": schema.ListAttribute{
-				ElementType:         types.StringType,
-				Computed:            true,
-				MarkdownDescription: "List of user group IDs the user belongs to. Note: This feature is not fully implemented in the API yet and may return an empty list.",
 			},
 		},
 	}
@@ -138,7 +129,7 @@ func (d *UserDataSource) Configure(ctx context.Context, req datasource.Configure
 
 	client, ok := req.ProviderData.(*Client)
 	if !ok {
-		resp.Diagnostics.AddError(
+		AddConfigError(&resp.Diagnostics,
 			"Unexpected Data Source Configure Type",
 			fmt.Sprintf("Expected *Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
@@ -148,56 +139,48 @@ func (d *UserDataSource) Configure(ctx context.Context, req datasource.Configure
 	d.client = client
 }
 
+// userInfoResponse is the subset of GET /api/v2/userinfo this data source
+// needs. DS-USER-1/DS-USER-2: organization_permission_level and each
+// organization's default_cloud_id are genuinely nullable server-side (see
+// backend/server/api/product/models/users.go's UserInfo.organization_permission_level
+// docstring: "absent if the user does not have a permission level assigned",
+// and organizations.go's Organization.default_cloud_id) - both *string here,
+// mapped via StringPointerValue, matching how anyscale_organization already
+// handles the identical default_cloud_id field.
+type userInfoResponse struct {
+	Result struct {
+		ID                          string   `json:"id"`
+		Email                       string   `json:"email"`
+		Name                        string   `json:"name"`
+		Username                    string   `json:"username"`
+		OrganizationPermissionLevel *string  `json:"organization_permission_level"`
+		OrganizationIDs             []string `json:"organization_ids"`
+		Organizations               []struct {
+			ID               string  `json:"id"`
+			Name             string  `json:"name"`
+			PublicIdentifier string  `json:"public_identifier"`
+			DefaultCloudID   *string `json:"default_cloud_id"`
+		} `json:"organizations"`
+	} `json:"result"`
+}
+
 // Read refreshes the Terraform state with the latest data.
 func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var state UserDataSourceModel
 
-	// Fetch user info from /api/v2/userinfo
-	userInfoResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/userinfo", nil)
+	// DS-USER-4: adopt DoRequestAndParse, matching anyscale_organization's
+	// fetchCurrentOrganization, instead of hand-rolling the request/read/parse
+	// sequence. Same empty-organizations guard as that data source too.
+	userResp, err := DoRequestAndParse[userInfoResponse](ctx, d.client, "GET", "/api/v2/userinfo", nil, http.StatusOK)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch user info", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", fmt.Sprintf("Failed to fetch user info: %s", err.Error()))
-		return
-	}
-	defer func() {
-		if closeErr := userInfoResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	body, err := io.ReadAll(userInfoResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", fmt.Sprintf("Failed to read user info response: %s", err.Error()))
+		AddAPIError(&resp.Diagnostics, "fetch user info", err)
 		return
 	}
 
-	if userInfoResp.StatusCode != http.StatusOK {
-		resp.Diagnostics.AddError(
-			"API Error",
-			fmt.Sprintf("Failed to read user info: %s - %s", userInfoResp.Status, string(body)),
-		)
-		return
-	}
-
-	var userResp struct {
-		Result struct {
-			ID                          string   `json:"id"`
-			Email                       string   `json:"email"`
-			Name                        string   `json:"name"`
-			Username                    string   `json:"username"`
-			OrganizationPermissionLevel string   `json:"organization_permission_level"`
-			OrganizationIDs             []string `json:"organization_ids"`
-			Organizations               []struct {
-				ID               string `json:"id"`
-				Name             string `json:"name"`
-				PublicIdentifier string `json:"public_identifier"`
-				DefaultCloudID   string `json:"default_cloud_id"`
-			} `json:"organizations"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &userResp); err != nil {
-		resp.Diagnostics.AddError("JSON Unmarshal Error", fmt.Sprintf("Failed to unmarshal user info: %s", err.Error()))
+	if len(userResp.Result.Organizations) == 0 {
+		AddAPIError(&resp.Diagnostics, "fetch user info",
+			fmt.Errorf("userinfo returned no organization for the authenticated token"))
 		return
 	}
 
@@ -206,14 +189,10 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	state.Email = types.StringValue(userResp.Result.Email)
 	state.Name = types.StringValue(userResp.Result.Name)
 	state.Username = types.StringValue(userResp.Result.Username)
-	state.OrganizationPermissionLevel = types.StringValue(userResp.Result.OrganizationPermissionLevel)
+	state.OrganizationPermissionLevel = types.StringPointerValue(userResp.Result.OrganizationPermissionLevel)
 
 	// Convert organization IDs to list
-	orgIDs := make([]types.String, len(userResp.Result.OrganizationIDs))
-	for i, orgID := range userResp.Result.OrganizationIDs {
-		orgIDs[i] = types.StringValue(orgID)
-	}
-	orgIDsList, diags := types.ListValueFrom(ctx, types.StringType, orgIDs)
+	orgIDsList, diags := types.ListValueFrom(ctx, types.StringType, userResp.Result.OrganizationIDs)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -227,7 +206,7 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 			ID:               types.StringValue(org.ID),
 			Name:             types.StringValue(org.Name),
 			PublicIdentifier: types.StringValue(org.PublicIdentifier),
-			DefaultCloudID:   types.StringValue(org.DefaultCloudID),
+			DefaultCloudID:   types.StringPointerValue(org.DefaultCloudID),
 		}
 	}
 	orgsList, diags := types.ListValueFrom(ctx, types.ObjectType{
@@ -259,14 +238,14 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	)
 	if err != nil {
 		tflog.Error(ctx, "Failed to fetch clouds", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", fmt.Sprintf("Failed to fetch clouds: %s", err.Error()))
+		AddAPIError(&resp.Diagnostics, "fetch clouds", err)
 		return
 	}
 
 	// Convert cloud IDs to list
-	cloudIDs := make([]types.String, len(clouds))
+	cloudIDs := make([]string, len(clouds))
 	for i, cloud := range clouds {
-		cloudIDs[i] = types.StringValue(cloud.ID)
+		cloudIDs[i] = cloud.ID
 	}
 	cloudIDsList, diags := types.ListValueFrom(ctx, types.StringType, cloudIDs)
 	resp.Diagnostics.Append(diags...)
@@ -275,64 +254,11 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	}
 	state.CloudIDs = cloudIDsList
 
-	// Fetch user groups from /api/v2/user_groups (placeholder for future implementation).
-	// Confirmed non-paginated (no next_paging_token in its response; the dedicated
-	// anyscale_user_groups data source hits the same endpoint the same way) - not an a41c8e2d gap.
-	userGroupsResp, err := d.client.DoRequest(ctx, "GET", "/api/v2/user_groups", nil)
-	if err != nil {
-		tflog.Error(ctx, "Failed to fetch user groups", map[string]any{"error": err.Error()})
-		resp.Diagnostics.AddError("API Request Failed", fmt.Sprintf("Failed to fetch user groups: %s", err.Error()))
-		return
-	}
-	defer func() {
-		if closeErr := userGroupsResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
-
-	userGroupsBody, err := io.ReadAll(userGroupsResp.Body)
-	if err != nil {
-		resp.Diagnostics.AddError("Response Read Error", fmt.Sprintf("Failed to read user groups response: %s", err.Error()))
-		return
-	}
-
-	if userGroupsResp.StatusCode != http.StatusOK {
-		// Log warning but don't fail since this feature is not fully implemented
-		tflog.Warn(ctx, "Failed to fetch user groups, returning empty list", map[string]any{
-			"status": userGroupsResp.Status,
-			"body":   string(userGroupsBody),
-		})
-		state.UserGroupIDs, _ = types.ListValueFrom(ctx, types.StringType, []types.String{})
-	} else {
-		var userGroupsAPIResp struct {
-			Results []struct {
-				ID string `json:"id"`
-			} `json:"results"`
-		}
-
-		if err := json.Unmarshal(userGroupsBody, &userGroupsAPIResp); err != nil {
-			tflog.Warn(ctx, "Failed to unmarshal user groups, returning empty list", map[string]any{"error": err.Error()})
-			state.UserGroupIDs, _ = types.ListValueFrom(ctx, types.StringType, []types.String{})
-		} else {
-			// Convert user group IDs to list
-			userGroupIDs := make([]types.String, len(userGroupsAPIResp.Results))
-			for i, group := range userGroupsAPIResp.Results {
-				userGroupIDs[i] = types.StringValue(group.ID)
-			}
-			userGroupIDsList, diags := types.ListValueFrom(ctx, types.StringType, userGroupIDs)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			state.UserGroupIDs = userGroupIDsList
-		}
-	}
-
 	tflog.Info(ctx, "Successfully retrieved user info", map[string]any{
 		"user_id":    userResp.Result.ID,
 		"email":      userResp.Result.Email,
 		"num_clouds": len(cloudIDs),
-		"num_orgs":   len(orgIDs),
+		"num_orgs":   len(userResp.Result.OrganizationIDs),
 	})
 
 	// Set state

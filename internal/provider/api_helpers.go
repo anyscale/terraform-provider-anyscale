@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,45 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
+
+// ErrNotFound is a sentinel DoRequestRaw/DoRequestAndParse wrap into their
+// returned error whenever the real HTTP response status is 404 AND
+// http.StatusNotFound is NOT in the caller's expectedStatuses (a 404 the
+// caller does list as expected/accepted is returned as a normal, non-error
+// response instead). Callers that need to tell "genuinely gone" apart from
+// any other failure (a transient 500, a network error, a permission loss)
+// should check errors.Is(err, ErrNotFound) rather than either (a) listing
+// StatusNotFound as an expected/accepted status - that makes a 404 look like
+// success, not an error, and (b) inspecting the returned *T for nil/zero-valued
+// fields - DoRequestAndParse returns a non-nil *T pointing at a zero-valued
+// struct whenever a JSON body simply doesn't match T's shape, which a 404
+// error body never does, so that's indistinguishable from "found but empty."
+var ErrNotFound = errors.New("resource not found")
+
+// UnexpectedStatusError carries the real numeric HTTP status code
+// DoRequestRaw/DoRequestAndParse received when it did not match the caller's
+// expectedStatuses, so a caller that needs to classify by status - a retry
+// policy, a feature-gate detection - can check StatusCode directly via
+// errors.As instead of matching the error text for a status-shaped substring
+// like "unexpected status 503". Text matching is unsafe there in a way it
+// is not for a fixed detail substring: the status code sits inside a format
+// string that ALSO embeds the raw response BODY, so a response whose body
+// happens to echo another status - a gateway or proxy relaying upstream
+// status text, for instance - would false-positive a text match on the
+// wrong code entirely.
+//
+// Error() deliberately reproduces the exact preexisting "unexpected status
+// %d: %s" text so every current text-matching caller keeps working
+// unchanged - this type is additive, layered under the existing string
+// format via %w, never a replacement for it.
+type UnexpectedStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *UnexpectedStatusError) Error() string {
+	return fmt.Sprintf("unexpected status %d: %s", e.StatusCode, e.Body)
+}
 
 // DoRequestAndParse performs an HTTP request, reads and closes the response body,
 // checks the status code, and unmarshals the JSON response into the provided type.
@@ -78,7 +118,26 @@ func DoRequestRaw(
 
 	// Check status code
 	if !isStatusExpected(httpResp.StatusCode, expectedStatuses) {
-		return nil, fmt.Errorf("unexpected status %d: %s", httpResp.StatusCode, string(bodyBytes))
+		statusErr := &UnexpectedStatusError{StatusCode: httpResp.StatusCode, Body: string(bodyBytes)}
+		if httpResp.StatusCode == http.StatusNotFound {
+			// Reuse the exact pre-sentinel phrasing ("unexpected status 404: ...")
+			// verbatim, not just a bare "404" digit. No production code depends on
+			// this text any more - every not-found call site now tests
+			// errors.Is(err, ErrNotFound) instead. It survives solely as a
+			// test-compatibility anchor for two tests that match the literal
+			// phrase: the TestDoRequestRaw subtest in api_helpers_test.go that
+			// asserts it, and the ExpectError regexp in
+			// acctest/ephemeral_service_credentials_acc_test.go. Reword this and
+			// both fail. errors.Is works via %w regardless of the trailing text.
+			//
+			// Two %w verbs (Go 1.20+): the resulting Error() text is byte-identical
+			// to the old single-format-string version, since ErrNotFound formats as
+			// "resource not found" and statusErr formats as "unexpected status 404:
+			// ...", concatenated by the same ": " - but now BOTH errors.Is(err,
+			// ErrNotFound) and errors.As(err, &statusErr) work against one value.
+			return nil, fmt.Errorf("%w: %w", ErrNotFound, statusErr)
+		}
+		return nil, statusErr
 	}
 
 	return bodyBytes, nil
@@ -184,6 +243,54 @@ func PaginatedRequest[T any](
 	})
 
 	return allItems, nil
+}
+
+// PickMostRecentMatch scans candidates for every one satisfying matches, and returns the ID of
+// the most-recently-created match (string comparison of getCreatedAt works because the API's
+// created_at is an ISO-8601 timestamp: lexicographic order is chronological order). Warns via
+// WarnIfMultipleMatches when more than one candidate satisfies matches. Returns "" if none do.
+//
+// This is the shared tiebreak for every by-name lookup in the provider (cloud, project, compute
+// config, container image, and the cloud_name-filter resolver): each previously hand-rolled an
+// identical "exact match, pick newest on duplicates, warn" loop, sometimes with the count subtly
+// wrong (warning based on total candidates scanned rather than actual match count). Each call site
+// still owns its own fetch (paginated GET via PaginatedRequest, or a paginated POST search) and its
+// own match predicate, since those legitimately differ per endpoint.
+//
+// Example usage:
+//
+//	id := PickMostRecentMatch(ctx, "cloud", name, results,
+//	    func(c CloudResult) bool { return c.Name == name },
+//	    func(c CloudResult) string { return c.ID },
+//	    func(c CloudResult) string { return c.CreatedAt },
+//	)
+func PickMostRecentMatch[T any](
+	ctx context.Context,
+	resourceType string,
+	name string,
+	candidates []T,
+	matches func(T) bool,
+	getID func(T) string,
+	getCreatedAt func(T) string,
+) string {
+	var matchedID, latestCreatedAt string
+	matchCount := 0
+
+	for _, c := range candidates {
+		if !matches(c) {
+			continue
+		}
+		matchCount++
+		id, createdAt := getID(c), getCreatedAt(c)
+		if matchedID == "" || createdAt > latestCreatedAt {
+			matchedID = id
+			latestCreatedAt = createdAt
+		}
+	}
+
+	WarnIfMultipleMatches(ctx, resourceType, name, matchCount, matchedID)
+
+	return matchedID
 }
 
 // MarshalRequestBody marshals a request struct to JSON and returns it as an io.Reader.

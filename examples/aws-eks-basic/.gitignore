@@ -25,3 +25,7 @@ terraform.rc
 
 # Lock file
 .terraform.lock.hcl
+
+# Locally-pulled Helm chart (required manual pre-step, see gateway_operator.tf
+# and README.md - working around a real terraform-provider-helm OCI-pull bug)
+.charts/
