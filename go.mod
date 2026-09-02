@@ -1,6 +1,6 @@
 module github.com/anyscale/terraform-provider-anyscale
 
-go 1.25.8
+go 1.26.0
 
 require (
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
@@ -13,13 +13,13 @@ require github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
 
 require (
 	github.com/hashicorp/terraform-plugin-framework-timeouts v0.7.0
-	k8s.io/apimachinery v0.35.7
+	k8s.io/apimachinery v0.37.0
 )
 
 require (
 	github.com/go-logr/logr v1.4.3 // indirect
-	k8s.io/klog/v2 v2.130.1 // indirect
-	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
+	k8s.io/klog/v2 v2.140.0 // indirect
+	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
 )
 
 require (
@@ -64,7 +64,7 @@ require (
 	github.com/zclconf/go-cty v1.18.1 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
