@@ -549,6 +549,11 @@ func flattenAdvancedInstanceConfig(apiValue map[string]any) (jsontypes.Normalize
 // null, and [] or {} is a different value that diffs forever against it. The
 // list fields append into nil slices and recycle_policy is only allocated when
 // the wire carries it; do not pre-allocate either to "simplify" this loop.
+//
+// The server collapsing an empty array to an absent key is why an absent key is
+// reachable here at all, and so why this function has to handle the case. It is
+// not the reason null is the right mapping - that is the Terraform fact above,
+// and it would still hold if the server echoed [] back verbatim.
 func flattenSchedulerConfig(cfg SchedulerConfig) (*SchedulerConfigResourceModel, error) {
 	model := &SchedulerConfigResourceModel{}
 
