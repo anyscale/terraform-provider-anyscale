@@ -336,9 +336,9 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 	})
 }
 
-// TestAccOrganizationUserResourceImportRoundTripPreservesCasing is criterion 1
-// for this resource: import must produce a NO-OP PLAN for a realistic config,
-// never a diff and never a replacement.
+// TestAccOrganizationUserResourceImportRoundTripPreservesCasing pins this
+// resource's import-round-trip guarantee: import must produce a NO-OP PLAN
+// for a realistic config, never a diff and never a replacement.
 //
 // The specific thing it pins is the casing rule. The Anyscale backend stores
 // emails lower-cased (users_dao.py lower-cases at INSERT; a live read of the
@@ -375,7 +375,7 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 // without ImportStatePersist, so it executes in a throwaway working directory
 // discarded at the end of that step; step 3's plan is computed against
 // whatever CREATE (step 1) left, never against what import recovered. It is
-// kept because criterion 1 requires the no-op plan assertion, and because it
+// kept because the import-round-trip guarantee requires the no-op plan assertion, and because it
 // is real (if lesser) insurance that Create's own state stays stable under a
 // same-config re-apply - not because it would start covering import if email
 // ever became Optional+Computed. Steps 1 and 2 above are this test's only

@@ -17,8 +17,8 @@ import (
 // ever shows them. resource.Test's ProtoV6ProviderFactories path (used
 // everywhere else in this package) runs terraform via a reattach mechanism
 // that does not surface warning-level diagnostics at all, even on a passing
-// step (confirmed empirically 2026-07-07) - so it cannot verify either
-// criterion regardless of the underlying implementation. This drives a real
+// step (confirmed empirically 2026-07-07) - so it cannot verify either one
+// reached the user regardless of the underlying implementation. This drives a real
 // `terraform validate`/`plan -json` against a freshly-built provider binary
 // instead, which is the only way to observe actually-served warning text.
 //
@@ -283,8 +283,8 @@ provider "anyscale" {
 	return lines
 }
 
-// TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires is the corrected C9
-// acceptance criterion: an all-in-one cloud whose aws_config is present but
+// TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires proves the
+// corrected C9 behavior: an all-in-one cloud whose aws_config is present but
 // has no way to derive a credential must produce a real, served warning
 // during apply - not just a struct-level "wasPlaceholder" assertion.
 func TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires(t *testing.T) {

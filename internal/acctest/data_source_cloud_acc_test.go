@@ -89,8 +89,8 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 // false and cloud_resource_id to null regardless of the real cloud. Unit tests
 // can prove the mapping function is correct in isolation, but only a real
 // resource+data source pair proves the data source's Read genuinely converges
-// with the resource's own state over the real API - which is the actual
-// acceptance criterion ("data source == resource state, by id AND by name").
+// with the resource's own state over the real API, matched both by id and by
+// name.
 //
 // Uses the empty-cloud pattern (no aws_config) so it creates a real cloud via
 // the API without requiring real AWS/GCP infra. auto_add_user and
@@ -158,9 +158,8 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 	})
 }
 
-// TestAccCloudDataSource_C2ParityMatchesPluralDataSource is an
-// acceptance-level proof for change C2's third acceptance criterion:
-// "values match the same cloud in the plural data source." A mocked
+// TestAccCloudDataSource_C2ParityMatchesPluralDataSource proves that, for
+// change C2, values match the same cloud in the plural data source. A mocked
 // unit test proves the singular data source's mapping is internally correct
 // in isolation; this proves the singular and plural data sources actually
 // converge on the same real cloud, which a mapping-only test can't show.

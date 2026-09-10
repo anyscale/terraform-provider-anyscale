@@ -24,7 +24,7 @@ import (
 // produced inconsistent result after apply" for a collection with no
 // Computed elements? Answered: no.
 //
-// AC-21b (the criterion, not the design question) is NOT met by this file:
+// AC-21b (the actual requirement, not the design question above) is NOT met by this file:
 // it needs the real nested `member` schema, since Core checks consistency
 // per attribute PATH and this gate's flat `map[string]string` has no path on
 // which `deny_roles`' null-vs-empty-list divergence could occur. Do not read

@@ -303,7 +303,7 @@ resource "anyscale_organization_user_role" "mock" {
 // value-only check and still contradict R9's "never asserted authority"
 // contract).
 //
-// Was a red acceptance criterion, not a passing test, when first written:
+// Was failing, not passing, when first written:
 // denyRolesDeclared(state.DenyRoles) in Delete checked STATE, but Read always
 // repopulates state.DenyRoles from the observed backend value regardless of
 // what config declared, and a destroy refreshes (Reads) first - so by the
@@ -375,7 +375,7 @@ resource "anyscale_organization_user_role" "mock" {
 // ungated legacy one - the exact failure Optional+Computed was chosen to
 // avoid, reintroduced by the UseStateForUnknown fix for plan stability.
 //
-// Was a red acceptance criterion for the same reason as the Delete test
+// Was failing for the same reason as the Delete test
 // above, when first written: the fix is to select the path from Config in
 // both Create and Update, not Plan. Distinguishing the two paths by mock call
 // count (not just the end value) is deliberate - a value-preserving SET
@@ -498,10 +498,10 @@ resource "anyscale_organization_user_role" "mock" {
 
 // mockOrgUserRoleFlakyServer wraps mockOrgUserRoleServer with an
 // injectable failure on a SPECIFIC numbered call to the list endpoint, to
-// prove criterion 31: a transient (non-404) error in Read must surface as
-// a real error and leave the resource IN STATE, never silently removed the
-// way a genuine 404 does. A 404-only test would pass against the exact bug
-// (Read treating ANY error as "gone").
+// prove that a transient (non-404) error in Read must surface as a real
+// error and leave the resource IN STATE, never silently removed the way a
+// genuine 404 does. A 404-only test would pass against the exact bug (Read
+// treating ANY error as "gone").
 //
 // Counting calls rather than arming a one-shot flag between steps is
 // deliberate: resource.Test runs its own automatic post-apply refresh
@@ -547,9 +547,9 @@ func (s *mockOrgUserRoleFlakyServer) handleFlaky(w http.ResponseWriter, r *http.
 }
 
 // TestAccOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState
-// is criterion 31: a 500 (or any non-404) from Read's underlying list call
-// must produce a real Terraform error, and the resource must remain
-// recoverable in state afterward - not be silently dropped the way a
+// proves that a 500 (or any non-404) from Read's underlying list call must
+// produce a real Terraform error, and the resource must remain recoverable
+// in state afterward - not be silently dropped the way a
 // genuine 404 correctly is. The injected failure lands on the SECOND list
 // call (Create's own internal read-back is the first and must succeed, so
 // the resource genuinely gets created; resource.Test's own automatic
