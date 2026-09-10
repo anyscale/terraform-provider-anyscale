@@ -15,9 +15,9 @@ import (
 )
 
 // Live write-path verification for anyscale_cloud_access - the five
-// (live)-marked acceptance criteria (AC-1, AC-6, AC-15, AC-17, AC-26) that
-// cannot be proven by a mock, since each asks what the real backend does
-// with an authoritative write, not what the provider sends.
+// (live)-marked items (AC-1, AC-6, AC-15, AC-17, AC-26) that cannot be
+// proven by a mock, since each asks what the real backend does with an
+// authoritative write, not what the provider sends.
 //
 // The write path is unconditional; these run against the real resource on any
 // build.
@@ -310,7 +310,7 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 			{
 				// AC-2: a config declaring exactly the recovered members
 				// plans EMPTY. This is the "Test B" shape CLAUDE.md
-				// prescribes for import-recovery criteria - two sequential
+				// prescribes for import-recovery coverage - two sequential
 				// Config-only steps, no import involved, so state actually
 				// carries forward between them (unlike the discarded
 				// throwaway ImportState step above). Step 2 just applied

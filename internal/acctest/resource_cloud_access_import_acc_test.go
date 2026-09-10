@@ -16,12 +16,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccCloudAccessResourceImportRoundTrip is the Criterion 1 import proof
-// for anyscale_cloud_access. Originally written AHEAD of the resource on a
-// premise that turned out to be BACKWARDS once the real implementation
-// existed to check it against, and this comment is the corrected version -
-// see the git history for what it used to claim, rather than trusting a
-// paraphrase here.
+// TestAccCloudAccessResourceImportRoundTrip proves import recovers the full,
+// unfiltered remote member population for anyscale_cloud_access. Originally
+// written AHEAD of the resource on a premise that turned out to be BACKWARDS
+// once the real implementation existed to check it against, and this comment
+// is the corrected version - see the git history for what it used to claim,
+// rather than trusting a paraphrase here.
 //
 // THE RULING (recorded here so nobody "fixes" it back): import
 // recovers the FULL visible remote population, unfiltered - including

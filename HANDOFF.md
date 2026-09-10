@@ -23,8 +23,8 @@ phrase-anchored `UnknownServiceIDErrors` test assertion are all satisfied at onc
 edits to any of the 6 call sites. Landed with a permanent guard test
 (`TestDoRequestRaw`'s new 404 subtest, asserting both properties, mutation-proven against the
 wrong `"(HTTP 404)"`-only wording that was tried and rejected first). No changelog fragment
-needed - the regression never reached a released version. Full incident detail in
-`.crystl/quest/DRAFT-changelog-fragments.txt`'s Resolution-history section.
+needed - the regression never reached a released version. Full incident detail was tracked in
+local scratch state outside this repo; the summary above is the durable record.
 
 ## Current Status
 
@@ -73,9 +73,9 @@ of. That cleanup is the one thing between here and the push.
 
 **No SchemaVersion bump anywhere in this agenda, including the reverted A3.** Recommended a
 single MINOR version release (new capabilities + fixes, zero Breaking Changes fragments in this
-PR). Changelog draft is at `.crystl/quest/DRAFT-changelog-fragments.txt` (shared quest state,
-outside this repo); the real `.changelog/<PR#>.txt` gets written in a follow-up commit once the
-PR number is known, per this repo's own convention.
+PR). The changelog draft was tracked in local scratch state outside this repo; the real
+`.changelog/<PR#>.txt` gets written in a follow-up commit once the PR number is known, per this
+repo's own convention.
 
 **Backlog (fast-follow, not in this PR):** the user explicitly authorized breaking the
 `cloud_id`/`cloud_name` switching guarantee for this resource specifically ("nobody is using this
