@@ -5,6 +5,10 @@ build/
 .crystl/
 .crystl-agent-history/
 
+# Local working log — a scratch narrative of how changes were made, never a
+# project document. It was tracked by mistake; ignored so it cannot come back.
+QUEST-LOG.md
+
 # GoReleaser artifacts
 dist/
 

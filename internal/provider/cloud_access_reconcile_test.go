@@ -1520,7 +1520,7 @@ func TestCloudAccessGrantFailure_NextRefreshSurfacesTheShortfall(t *testing.T) {
 
 	// STEP 1: apply a config declaring both alice and bob. alice's grant
 	// succeeds against the backend; bob's fails and is rolled back (the same
-	// AC-35 shape forge's reconcile-level tests already cover) - confirmed
+	// AC-35 shape the reconcile-level tests already cover) - confirmed
 	// against the backend below, not assumed.
 	plan := &CloudAccessResourceModel{
 		ID:                  types.StringValue(cloudID),

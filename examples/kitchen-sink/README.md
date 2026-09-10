@@ -93,9 +93,9 @@ deliberately doesn't declare a live `anyscale_service` resource to satisfy that 
 example), so a fresh apply sets it to zero instances unless you set `var.existing_service_name` to
 a real, pre-existing service in your org.
 
-Global Resource Scheduler (machine pools) resources/data sources are not included — they're
-currently disabled in the provider (`internal/provider/provider.go`), pending a backend API
-rework, so there's nothing to wire up yet.
+Scheduler resources/data sources are not included. The earlier machine-pool-backed surface was
+never registered in a released provider and has been removed; the replacement built on the
+Anyscale Scheduler API is not implemented yet.
 
 ## Before you apply
 

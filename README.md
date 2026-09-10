@@ -58,6 +58,8 @@ provider "anyscale" {
   - Organization invitations
   - Organization users (invites new people or adopts existing members; membership only)
   - Organization user roles (grants an organization-level role, with optional container-image deny roles)
+  - Anyscale Scheduler configuration (resource flavors, resource queues, scheduling rules, and the
+    policy for retiring and replacing managed machines)
 - Currently supported data sources:
   - Clouds (single lookup and list/filter)
   - Projects (single lookup and list/filter)
