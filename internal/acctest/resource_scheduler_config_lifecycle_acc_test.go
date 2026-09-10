@@ -214,10 +214,15 @@ resource "anyscale_scheduler_config" "test" {
 // that shipped the mount_targets import bug this repo has seen before.
 //
 // This test covers only the flatten half of the twin null/omit contract -
-// criterion 17's raw-body assertion is the only detector for the expand half,
-// per the sharpened contract: a broken expand that emits `[]` instead of
-// omitting the key can round-trip invisibly if the server collapses an empty
-// array back to an absent key on its own.
+// criterion 17's raw-body assertion is the only detector for the expand half.
+// For recycle_policy that detector is real: an unconditionally-allocated
+// empty struct reaches the wire regardless of the tag. For the three list
+// fields it is not - `omitempty` on a `[]T` drops any zero-length slice
+// before the request is even built, so a broken expand that materializes an
+// empty slice there never reaches the wire to be inspected by anything, this
+// test's own byte assertion included. Not "the server collapses it back";
+// the value never leaves the client. See criterion 17 below for what
+// mutation actually proves something on each field kind.
 //
 // Mutation-proof (reverted, byte-clean): materializing
 // model.ResourceQueues = []schedulerResourceQueueModel{} when the section is
@@ -244,14 +249,11 @@ resource "anyscale_scheduler_config" "test" {
 // resource has no delete verb), and the next refresh writes the empty list
 // again. Keep this test for that reason, not merely as a regression guard.
 // Criterion 17: a section the practitioner never declares must never appear
-// on the wire at all - not as `[]`/`{}` - because a broken expand that emits
-// an empty collection instead of omitting the key can round-trip invisibly.
-// If the mock (or a real backend) collapses an empty array back to an absent
-// key on read, criterion 18's plan/apply test sees a clean null and stays
-// green even though the outgoing POST was wrong. This test is the only thing
-// in the suite that inspects the request body itself rather than the
-// read-back, so it is the sole detector for this half of the contract - see
-// the discussion on criterion 18 above.
+// on the wire at all - not as `[]`/`{}`. This test is the only thing in the
+// suite that inspects the request body itself rather than the read-back, so
+// it is the sole detector for whichever half of this contract is genuinely
+// expand's to get wrong - see the mutation-proof below for which field that
+// actually is, and why it isn't the one the name of this test suggests.
 //
 // LastApplyBody() returns bytes captured via io.ReadAll on the mock's POST
 // handler (not a single Read() call, which is not guaranteed to fill the
