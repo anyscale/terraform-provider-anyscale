@@ -37,7 +37,17 @@ import (
 // jsontypes.NormalizedType{} makes step 2 fail with a whitespace/key-order diff
 // on both flavors.
 func TestAccSchedulerConfigResourceAdvancedInstanceConfigSemanticEquality(t *testing.T) {
-	server := newMockSchedulerConfigServer(t)
+	// Serve the two flavor blobs mangled the way the real API mangles them:
+	// keys in a different order than they were written, and integers widened
+	// to floats.
+	//
+	// This is hand-written rather than round-tripped through encoding/json on
+	// purpose. Go's marshaller sorts map keys and renders float64(1) as "1",
+	// which reproduces Terraform's own jsonencode output byte for byte - a mock
+	// built that way passes against a plain string attribute and proves
+	// nothing. Verified: the first draft of this test did exactly that and the
+	// mutation check came back green.
+	server := newMockSchedulerConfigServer(t, `{"resource_flavors":[{"name":"canonicalized","advanced_instance_config":{"c":3.0,"b":"two","a":1.0}},{"name":"reordered","advanced_instance_config":{"middle":5.0,"alpha":"a","zebra":"z"}}]}`)
 	defer server.Close()
 
 	// What the practitioner writes: a literal JSON string, keys in the order
@@ -89,19 +99,78 @@ resource "anyscale_scheduler_config" "test" {
 	})
 }
 
-// mockSchedulerConfigServer serves the scheduler endpoints the resource
-// touches, returning advanced_instance_config in the reordered, float-widened
-// shape the real API returns.
-type mockSchedulerConfigServer struct {
-	mu      sync.Mutex
-	version int64
-	config  map[string]any
-	reads   int
+// Criterion 15b: the documented limitation, pinned by a test.
+//
+// jsontypes compares numbers as literal text, and flattenAdvancedInstanceConfig
+// re-marshals through Go, which renders float64(1) as "1". So a hand-written
+// 1.0 can never match what lands in state, and the diff is permanent - every
+// plan shows it, and every apply mints another immutable org-level config
+// version, because the API has no content dedupe and no DELETE verb.
+//
+// This asserts the NON-empty plan deliberately. Two things it buys:
+//
+//   - The hazard is found here rather than by a practitioner watching their
+//     version counter climb on a config they never changed.
+//   - It guards the reverse regression. A future change that made numeric form
+//     absorbed - preserving the wire's 1.0 in state, or hand-rolling a
+//     numeric-aware plan modifier - would repair this rare case by breaking the
+//     common one, or reimplement semantic equality and lose its contract. If
+//     someone does it anyway, this test turns red and makes them argue for it.
+//
+// The fix is a documentation one, and the schema description carries it: write
+// 1, or use jsonencode(), and the question does not arise.
+func TestAccSchedulerConfigResourceAdvancedInstanceConfigNumericFormDiffers(t *testing.T) {
+	server := newMockSchedulerConfigServer(t, `{"resource_flavors":[{"name":"numeric","advanced_instance_config":{"cpu":1.0}}]}`)
+	defer server.Close()
+
+	// 1.0 written by hand. flatten renders the API's float64(1) as "1", so
+	// state says {"cpu":1} and jsonEqual - decoding with UseNumber - compares
+	// the literals "1.0" and "1" and calls them different.
+	const config = `
+resource "anyscale_scheduler_config" "test" {
+  resource_flavors = [
+    {
+      name                     = "numeric"
+      advanced_instance_config = "{\"cpu\": 1.0}"
+    },
+  ]
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderBlock(server.URL) + config,
+				// The perpetual diff is the assertion, not a tolerated
+				// side-effect: without this the step would fail on the
+				// non-empty follow-up plan resource.Test runs by default.
+				ExpectNonEmptyPlan: true,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectNonEmptyPlan(),
+					},
+				},
+			},
+		},
+	})
 }
 
-func newMockSchedulerConfigServer(t *testing.T) *httptest.Server {
+// mockSchedulerConfigServer serves the scheduler endpoints the resource
+// touches. readConfig is the literal JSON document the GET returns under
+// "config", hand-written by each test so it can carry a shape Go's marshaller
+// would canonicalize away.
+type mockSchedulerConfigServer struct {
+	mu         sync.Mutex
+	version    int64
+	config     map[string]any
+	reads      int
+	readConfig string
+}
+
+func newMockSchedulerConfigServer(t *testing.T, readConfig string) *httptest.Server {
 	t.Helper()
-	s := &mockSchedulerConfigServer{}
+	s := &mockSchedulerConfigServer{readConfig: readConfig}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/v2/scheduler/config/validate", func(w http.ResponseWriter, r *http.Request) {
@@ -133,18 +202,7 @@ func newMockSchedulerConfigServer(t *testing.T) *httptest.Server {
 				return
 			}
 			s.reads++
-			// Serve the two flavor blobs mangled the way the real API mangles
-			// them: keys in a different order than they were written, and
-			// integers widened to floats.
-			//
-			// This is hand-written rather than round-tripped through
-			// encoding/json on purpose. Go's marshaller sorts map keys and
-			// renders float64(1) as "1", which reproduces Terraform's own
-			// jsonencode output byte for byte - a mock built that way passes
-			// against a plain string attribute and proves nothing. Verified:
-			// the first draft of this test did exactly that and the mutation
-			// check came back green.
-			fmt.Fprintf(w, `{"result":{"version":%d,"is_active":true,"created_at":"2026-09-09T00:00:00Z","creator_id":"usr_mock","config":{"resource_flavors":[{"name":"canonicalized","advanced_instance_config":{"c":3.0,"b":"two","a":1.0}},{"name":"reordered","advanced_instance_config":{"middle":5.0,"alpha":"a","zebra":"z"}}]}}}`, s.version)
+			fmt.Fprintf(w, `{"result":{"version":%d,"is_active":true,"created_at":"2026-09-09T00:00:00Z","creator_id":"usr_mock","config":%s}}`, s.version, s.readConfig)
 
 		default:
 			t.Errorf("unexpected method %s on /api/v2/scheduler/config", r.Method)

@@ -190,7 +190,8 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 							CustomType: jsontypes.NormalizedType{},
 							MarkdownDescription: "Cloud-provider-specific instance configuration applied to machines in this flavor, as a JSON string. Use `jsonencode()` for HCL objects. " +
 								"This can't be a native/dynamic value: it lives inside a list, and Terraform doesn't support a dynamic type nested inside a list - the same constraint that shapes `advanced_instance_config` on `anyscale_compute_config`. " +
-								"Compared semantically rather than by text, so key order and whitespace never produce a diff - `{\"a\":1,\"b\":2}` and `{ \"b\":2, \"a\":1 }` are the same value. Numbers are compared as written, so `1` and `1.0` are *not* the same value; `jsonencode()` avoids the question entirely.",
+								"Compared semantically rather than by text, so key order and whitespace never produce a diff - `{\"a\":1,\"b\":2}` and `{ \"b\":2, \"a\":1 }` are the same value. Numbers are compared as written, so `1` and `1.0` are *not* the same value; `jsonencode()` avoids the question entirely. " +
+								"A mismatch here never resolves itself - the same plan reappears on every apply, and because there is no delete route and no content dedupe, each apply mints another permanent config version.",
 						},
 					},
 				},
