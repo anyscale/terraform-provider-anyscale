@@ -187,6 +187,11 @@ func TestAccSchedulerConfigDataSourceOmittedSectionsReadAsNull(t *testing.T) {
 // it is recorded here rather than cited because nothing in this test exercises
 // it. What is verified below is the provider half only - that an absent key
 // maps to null. Do not read a green run as confirmation of the server half.
+//
+// Mutation-proofed: against a build that allocated an empty recycle_policy, the
+// step failed with `expected nil value for Null check, got: map[string]interface
+// {}` - a map rather than a slice, which is what confirms the `.%` path is the
+// one under test here.
 func TestAccSchedulerConfigDataSourceEmptyConfigReadsAllSectionsNull(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig:     `{}`,
@@ -223,6 +228,9 @@ func TestAccSchedulerConfigDataSourceEmptyConfigReadsAllSectionsNull(t *testing.
 // back a zero-valued response - an organization with no scheduler config would
 // then read as a config with every section unset, and every downstream
 // reference would silently see nothing rather than fail.
+//
+// Mutation-proofed: against a build that accepted 404, the step failed reporting
+// an expected error that never arrived.
 func TestAccSchedulerConfigDataSourceErrorsWhenNoActiveConfig(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		GetStatus: 404,
@@ -250,6 +258,9 @@ func TestAccSchedulerConfigDataSourceErrorsWhenNoActiveConfig(t *testing.T) {
 // deliberate: that fail-open is licensed by prior state the provider can leave
 // untouched, not by the status code. A data source has no prior state, so
 // falling open would publish an empty config to everything downstream.
+//
+// Mutation-proofed: against a build whose Read set empty state instead of
+// erroring, the step failed with `expected an error but got none`.
 func TestAccSchedulerConfigDataSourceErrorsWhenSchedulerDisabled(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		GetStatus: 403,

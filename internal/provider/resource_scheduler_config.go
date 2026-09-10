@@ -369,7 +369,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			},
 			"recycle_policy": schema.SingleNestedAttribute{
 				Optional:            true,
-				MarkdownDescription: "When the scheduler retires and replaces the machines it manages.",
+				MarkdownDescription: "When the scheduler retires and replaces the machines it manages. Omit the attribute entirely, not `{}`, to leave the section unset: unlike the list sections, where `[]` is dropped from the request, an empty object here is sent to the API as an empty policy.",
 				Attributes: map[string]schema.Attribute{
 					"rotation_interval": schema.StringAttribute{
 						Optional:            true,
@@ -878,9 +878,12 @@ func (r *SchedulerConfigResource) Update(ctx context.Context, req resource.Updat
 // Delete removes the resource from Terraform state without calling the API.
 // The Anyscale API exposes no delete operation for scheduler configs, so there
 // is nothing to call. Applying an empty document instead was considered and
-// rejected: an empty config is not a neutral state - once any scheduling rule
-// exists, workloads matching none of them are rejected - so a destroy that
-// wrote to the organization could stop workloads from being admitted.
+// rejected: a destroy must not write organization-wide state. Removing one
+// resource from one Terraform configuration would mint a new active config
+// version affecting every workload in the organization, and that write is
+// permanent - there is no operation to undo it. Whether an empty document is
+// a safe thing to apply is a separate question from whether a destroy may
+// apply one on the practitioner's behalf; only the second is decided here.
 func (r *SchedulerConfigResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state SchedulerConfigResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -894,8 +897,10 @@ func (r *SchedulerConfigResource) Delete(ctx context.Context, req resource.Delet
 			"The anyscale_scheduler_config resource was removed from Terraform state, but the organization's "+
 				"scheduler config was NOT cleared and remains in effect (version %d, as last observed by Terraform). "+
 				"The Anyscale API exposes no delete operation for scheduler configs.\n\n"+
-				"To clear it, declare an anyscale_scheduler_config with every section omitted (an empty "+
-				"document) and apply, or manage it through the Anyscale CLI or console.",
+				"To return scheduling to the unrestricted admission an organization has with no config at all, "+
+				"declare an anyscale_scheduler_config with every section omitted (an empty document) and apply, "+
+				"or manage it through the Anyscale CLI or console. Applying an empty document supersedes the "+
+				"current config rather than removing it, so the API still reports an active version afterwards.",
 			state.Version.ValueInt64(),
 		),
 	)
