@@ -158,9 +158,9 @@ resource "anyscale_scheduler_config" "this" {
 ### Optional
 
 - `recycle_policy` (Attributes) When the scheduler retires and replaces the machines it manages. (see [below for nested schema](#nestedatt--recycle_policy))
-- `resource_flavors` (Attributes List) Named hardware profiles that queues allocate quota against. Order is significant: when a workload can run on more than one flavor, flavors are tried in the order written here. (see [below for nested schema](#nestedatt--resource_flavors))
-- `resource_queues` (Attributes List) Queues that workloads are admitted into, each carrying its own quota and preemption policy. (see [below for nested schema](#nestedatt--resource_queues))
-- `scheduling_rules` (Attributes List) Rules mapping workloads to queues. **First match wins, top to bottom**, so order is significant. Once any rule exists, a workload matching no rule is rejected rather than run unscheduled - keep a catch-all rule last unless that is what you intend. (see [below for nested schema](#nestedatt--scheduling_rules))
+- `resource_flavors` (Attributes List) Named hardware profiles that queues allocate quota against. Order is significant: when a workload can run on more than one flavor, flavors are tried in the order written here. If declared, it must contain at least one element - omit the attribute entirely, not `[]`, to leave the section unset. (see [below for nested schema](#nestedatt--resource_flavors))
+- `resource_queues` (Attributes List) Queues that workloads are admitted into, each carrying its own quota and preemption policy. If declared, it must contain at least one element - omit the attribute entirely, not `[]`, to leave the section unset. (see [below for nested schema](#nestedatt--resource_queues))
+- `scheduling_rules` (Attributes List) Rules mapping workloads to queues. **First match wins, top to bottom**, so order is significant. Once any rule exists, a workload matching no rule is rejected rather than run unscheduled - keep a catch-all rule last unless that is what you intend. If declared, it must contain at least one element - omit the attribute entirely, not `[]`, to leave the section unset. (see [below for nested schema](#nestedatt--scheduling_rules))
 
 ### Read-Only
 

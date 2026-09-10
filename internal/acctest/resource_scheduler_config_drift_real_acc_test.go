@@ -15,6 +15,12 @@ package acctest
 // out-of-band write, and Terraform's corrective apply - plus one on cleanup to
 // put the organization's previous document back. That budget is the reason
 // this is one test and not a suite; it must not run on every CI pass.
+//
+// One case the cleanup cannot cover: if the organization had never applied a
+// config, there is no previous document to restore and the test's own declared
+// flavor stays active. That is inert - nothing references it - and unavoidable
+// without a delete verb. It is not a leak to be swept; there is no sweeper for
+// this surface and there cannot be one.
 
 import (
 	"bytes"
@@ -30,6 +36,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
 const schedulerConfigAPIPath = "/api/v2/scheduler/config"
@@ -52,9 +60,17 @@ func newSchedulerRealAPI(t *testing.T) *schedulerRealAPI {
 	if url == "" {
 		url = "https://console.anyscale.com"
 	}
+	// Match the provider's own resolution order, not just the env var. On a
+	// machine authenticated with `anyscale login`, a token-only check would
+	// skip this one test while every other scheduler test ran - a criterion
+	// that reads covered and never executes in the most common local setup.
 	token := os.Getenv("ANYSCALE_CLI_TOKEN")
 	if token == "" {
-		t.Skip("SKIP(no-credentials): ANYSCALE_CLI_TOKEN is required for the real-API drift test")
+		resolved, err := provider.GetAuthToken()
+		if err != nil || resolved == "" {
+			t.Skip("SKIP(no-credentials): set ANYSCALE_CLI_TOKEN or run `anyscale login` for the real-API drift test")
+		}
+		token = resolved
 	}
 	return &schedulerRealAPI{t: t, url: url, token: token}
 }

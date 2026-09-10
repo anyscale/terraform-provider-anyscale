@@ -15,7 +15,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
-	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // Criterion 13: a value outside an enumerated attribute's allowed set fails at
@@ -106,9 +105,13 @@ resource "anyscale_scheduler_config" "test" {
 // diagnostic says to omit the section rather than merely stating a size
 // constraint.
 //
-// An empty section and an absent one are different documents on the wire, and
-// only the absent form is meaningful - so the guidance is part of the
-// behavior under test, not decoration. The regexp deliberately requires the
+// The guidance is part of the behavior under test, not decoration, and the
+// reason is the inverse of the obvious one: the section fields are Go slices
+// tagged omitempty, so an empty list and an absent one serialize identically.
+// Accepting `[]` would silently mean "unset". That also rules out testing this
+// at the wire level - the two documents are byte-identical, so a body
+// assertion would pass against any build. Plan-time diagnostic is the only
+// place the behavior exists. The regexp deliberately requires the
 // "Omit the ... entirely" sentence: the stock
 // listvalidator.SizeAtLeast(1) message ("list must contain at least 1
 // elements") passes a size assertion but not this one, which is exactly the
@@ -163,7 +166,8 @@ func TestAccSchedulerConfigResourcePreservesDeclaredOrder(t *testing.T) {
 	const reorderedReadConfig = `{"resource_flavors":[{"name":"gpu-h100"},{"name":"cpu-standard"},{"name":"gpu-a10"}]}`
 
 	server, mock := newSchedulerConfigServer(t, schedulerConfigServerOpts{
-		ReadConfig: orderedReadConfig,
+		ReadConfig:        orderedReadConfig,
+		EchoAppliedConfig: true,
 	})
 	defer server.Close()
 
@@ -214,10 +218,13 @@ resource "anyscale_scheduler_config" "test" {
 				// assertion that carries the criterion - "non-empty" alone
 				// would also be satisfied by a spurious replace.
 				//
-				// Check restores the ordered read-back afterwards, modeling
-				// the server now returning what the apply just posted.
-				// Without it the step's own post-apply idempotency plan would
-				// diverge for the very reason being asserted.
+				// Nothing restores the ordered read-back by hand: the mock
+				// echoes the posted bytes, so the corrective apply settles on
+				// its own. An earlier version of this test restored it in
+				// Check, which passes only because the harness happens to run
+				// Check before its own post-apply refresh plan - undocumented
+				// internal ordering, and load-bearing enough that removing the
+				// restore without the echo turns the step red.
 				PreConfig: func() { mock.SetReadConfig(reorderedReadConfig) },
 				Config:    testAccProviderBlock(server.URL) + config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -225,10 +232,22 @@ resource "anyscale_scheduler_config" "test" {
 						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionUpdate),
 					},
 				},
-				Check: func(*terraform.State) error {
-					mock.SetReadConfig(orderedReadConfig)
-					return nil
+			},
+			{
+				// The update must have converged: same config, and the
+				// server - now returning what the previous apply posted -
+				// produces no diff. This is the half a reorder test usually
+				// omits; detecting the drift proves nothing if the correction
+				// does not settle.
+				Config: testAccProviderBlock(server.URL) + config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "resource_flavors.0.name", "cpu-standard"),
+					resource.TestCheckResourceAttr(resourceName, "resource_flavors.1.name", "gpu-a10"),
+					resource.TestCheckResourceAttr(resourceName, "resource_flavors.2.name", "gpu-h100"),
+				),
 			},
 		},
 	})

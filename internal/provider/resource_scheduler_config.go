@@ -150,13 +150,26 @@ func schedulerMatchExpressionAttributes(what string) map[string]schema.Attribute
 // nonEmptyListValidator rejects a section that is declared but empty, and
 // names the fix a practitioner actually wants: omit the section entirely.
 //
+// The reason to reject the empty list is that it is INDISTINGUISHABLE from
+// omission, not that it differs. All three sections are Go slices tagged
+// omitempty (see SchedulerConfig in scheduler_api.go), and encoding/json drops
+// a zero-length slice, so `section = []` and no section at all serialize to the
+// same bytes. Accepting the empty form would therefore mean silently treating
+// "I declared this section" as "leave this section unset" - a config that does
+// something other than what it says. Rejecting it at plan makes the practitioner
+// write the version whose meaning is unambiguous.
+//
+// Two consequences worth stating, because both are inviting wrong next moves:
+// this guard is not made redundant by the empty array being harmless on the
+// wire (there is no empty array), and there is no wire-level assertion that
+// could test it (the two documents are byte-identical, so such a test would
+// pass against any build). The behavior is only observable as a plan-time
+// diagnostic, which is where it is tested.
+//
 // The stock listvalidator.SizeAtLeast(1) message ("list must contain at least
-// 1 elements") states the constraint without saying what to do about it, and
-// the distinction is not cosmetic here. An empty section and an absent one are
-// different documents on the wire - the request builder omits an absent
-// section, while an empty list would travel as `[]` - and only the absent form
-// is meaningful to the scheduler. A practitioner reading the stock message is
-// as likely to invent a filler element as to delete the block.
+// 1 elements") states the constraint without saying what to do about it, and a
+// practitioner reading it is as likely to invent a filler element as to delete
+// the block - which is the opposite of the fix.
 type nonEmptyListValidator struct {
 	attrName string
 }
@@ -181,7 +194,8 @@ func (v nonEmptyListValidator) ValidateList(_ context.Context, req validator.Lis
 		fmt.Sprintf("Empty %s Section", v.attrName),
 		fmt.Sprintf(
 			"`%s` was declared as an empty list. Omit the `%s` attribute entirely to leave the section unset - "+
-				"an empty list is not the same document as an absent section, and the scheduler has no use for one.",
+				"an empty list is sent to the Anyscale API as no section at all, so declaring one would quietly "+
+				"mean the opposite of what it looks like.",
 			v.attrName, v.attrName,
 		),
 	)
@@ -212,7 +226,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			"resource_flavors": schema.ListNestedAttribute{
 				Optional:            true,
 				Validators:          []validator.List{nonEmptyListValidator{attrName: "resource_flavors"}},
-				MarkdownDescription: "Named hardware profiles that queues allocate quota against. Order is significant: when a workload can run on more than one flavor, flavors are tried in the order written here.",
+				MarkdownDescription: "Named hardware profiles that queues allocate quota against. Order is significant: when a workload can run on more than one flavor, flavors are tried in the order written here. If declared, it must contain at least one element - omit the attribute entirely, not `[]`, to leave the section unset.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{
@@ -238,7 +252,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			"resource_queues": schema.ListNestedAttribute{
 				Optional:            true,
 				Validators:          []validator.List{nonEmptyListValidator{attrName: "resource_queues"}},
-				MarkdownDescription: "Queues that workloads are admitted into, each carrying its own quota and preemption policy.",
+				MarkdownDescription: "Queues that workloads are admitted into, each carrying its own quota and preemption policy. If declared, it must contain at least one element - omit the attribute entirely, not `[]`, to leave the section unset.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{
@@ -325,7 +339,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			"scheduling_rules": schema.ListNestedAttribute{
 				Optional:            true,
 				Validators:          []validator.List{nonEmptyListValidator{attrName: "scheduling_rules"}},
-				MarkdownDescription: "Rules mapping workloads to queues. **First match wins, top to bottom**, so order is significant. Once any rule exists, a workload matching no rule is rejected rather than run unscheduled - keep a catch-all rule last unless that is what you intend.",
+				MarkdownDescription: "Rules mapping workloads to queues. **First match wins, top to bottom**, so order is significant. Once any rule exists, a workload matching no rule is rejected rather than run unscheduled - keep a catch-all rule last unless that is what you intend. If declared, it must contain at least one element - omit the attribute entirely, not `[]`, to leave the section unset.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"resource_queue": schema.StringAttribute{

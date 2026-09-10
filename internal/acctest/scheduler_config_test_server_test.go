@@ -35,6 +35,11 @@ type schedulerConfigServer struct {
 	// SetReadConfig, which locks the field to exactly what was given.
 	readConfigAuto bool
 
+	// echoApplied, when true, sets readConfig to the raw posted `config` bytes
+	// after every successful apply - order intact, since the bytes are never
+	// decoded and re-encoded. See EchoAppliedConfig.
+	echoApplied bool
+
 	// Criterion 11: destroy must make no write call. Every handler on this
 	// mock increments requests so a test can assert zero after Destroy.
 	requests int
@@ -75,6 +80,15 @@ type schedulerConfigServerOpts struct {
 	ValidateBody   string
 	GetStatus      int
 	GetBody        string
+	// EchoAppliedConfig makes a successful apply set the GET read-back to the
+	// raw `config` bytes that were just posted, the way the real backend does.
+	// This is the order-preserving counterpart to readConfigAuto, which
+	// re-derives the document by marshaling a Go map and so cannot represent
+	// element or key order at all. Criterion 14 needs it: a reorder test must
+	// be able to seed a divergent read-back for one plan and then have the
+	// corrective apply settle on its own, without a test hook restoring the
+	// document between apply and the harness's post-apply refresh plan.
+	EchoAppliedConfig bool
 	// InitialVersion seeds the server as if a config were already applied,
 	// for tests (10, 21) that need Read/refresh behavior without an
 	// intervening real Create in this test run.
@@ -98,6 +112,7 @@ func newSchedulerConfigServer(t *testing.T, opts schedulerConfigServerOpts) (*ht
 		getStatus:      opts.GetStatus,
 		getBody:        opts.GetBody,
 		version:        opts.InitialVersion,
+		echoApplied:    opts.EchoAppliedConfig,
 	}
 
 	mux := http.NewServeMux()
@@ -151,7 +166,17 @@ func newSchedulerConfigServer(t *testing.T, opts schedulerConfigServerOpts) (*ht
 			}
 			s.version++
 			s.config = body.Config
-			if s.readConfigAuto {
+			if s.echoApplied {
+				// Echo the posted bytes verbatim. Decoding them into the map
+				// above and re-marshaling would canonicalize order, which is
+				// exactly what the criterion-14 test is asserting about.
+				var envelope struct {
+					Config json.RawMessage `json:"config"`
+				}
+				if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Config) > 0 {
+					s.readConfig = string(envelope.Config)
+				}
+			} else if s.readConfigAuto {
 				// Re-derive what GET returns from what was actually posted, the
 				// way a real backend would: an update-in-place test must see its
 				// own second apply reflected on the next refresh without hand-
