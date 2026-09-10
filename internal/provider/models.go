@@ -422,40 +422,10 @@ type OrganizationCollaboratorsListResponse struct {
 }
 
 // Machine Pool API Models
-
-// CreateMachinePoolRequest is the request body for creating a machine pool
-type CreateMachinePoolRequest struct {
-	MachinePoolName               string `json:"machine_pool_name"`
-	EnableRootlessDataplaneConfig bool   `json:"enable_rootless_dataplane_config,omitempty"`
-}
-
-// CreateMachinePoolResponse represents the response from creating a machine pool
-type CreateMachinePoolResponse struct {
-	Result struct {
-		MachinePool MachinePoolResult `json:"machine_pool"`
-	} `json:"result"`
-}
-
-// UpdateMachinePoolRequest is the request body for updating a machine pool
-type UpdateMachinePoolRequest struct {
-	MachinePoolName string         `json:"machine_pool_name"`
-	Spec            map[string]any `json:"spec,omitempty"`
-}
-
-// UpdateMachinePoolResponse represents the response from updating a machine pool
-type UpdateMachinePoolResponse struct {
-	Result struct{} `json:"result"`
-}
-
-// DeleteMachinePoolRequest is the request body for deleting a machine pool
-type DeleteMachinePoolRequest struct {
-	MachinePoolName string `json:"machine_pool_name"`
-}
-
-// DeleteMachinePoolResponse represents the response from deleting a machine pool
-type DeleteMachinePoolResponse struct {
-	Result struct{} `json:"result"`
-}
+//
+// Only the read + detach shapes remain: anyscale_cloud's Delete detaches any
+// attached machine pools before tearing the cloud down. There is no provider
+// resource for machine pools themselves.
 
 // MachinePoolResult represents a machine pool from the API
 type MachinePoolResult struct {
@@ -475,28 +445,11 @@ type ListMachinePoolsResponse struct {
 	} `json:"result"`
 }
 
-// AttachMachinePoolToCloudRequest is the request body for attaching a machine pool to a cloud
-type AttachMachinePoolToCloudRequest struct {
-	MachinePoolName string  `json:"machine_pool_name"`
-	CloudID         string  `json:"cloud_id"`
-	CloudResourceID *string `json:"cloud_resource_id,omitempty"`
-}
-
-// AttachMachinePoolToCloudResponse represents the response from attaching a machine pool to a cloud
-type AttachMachinePoolToCloudResponse struct {
-	Result struct{} `json:"result"`
-}
-
 // DetachMachinePoolFromCloudRequest is the request body for detaching a machine pool from a cloud
 type DetachMachinePoolFromCloudRequest struct {
 	MachinePoolName string  `json:"machine_pool_name"`
 	CloudID         string  `json:"cloud_id"`
 	CloudResourceID *string `json:"cloud_resource_id,omitempty"`
-}
-
-// DetachMachinePoolFromCloudResponse represents the response from detaching a machine pool from a cloud
-type DetachMachinePoolFromCloudResponse struct {
-	Result struct{} `json:"result"`
 }
 
 // Container Image / Application Template API Models (/api/v2)

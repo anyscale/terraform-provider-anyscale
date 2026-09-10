@@ -140,40 +140,6 @@ func containerImageSharedAttributes() map[string]schema.Attribute {
 	}
 }
 
-// globalResourceSchedulerSharedAttributes returns the anyscale_global_resource_scheduler /
-// anyscale_global_resource_schedulers attributes that are identical in name, type, and
-// MarkdownDescription on both sides. Called directly by the singular data source and wrapped
-// inside the plural's per-item NestedObject.
-//
-// Deliberately excluded: name (singular's is Required - the sole lookup key - while the
-// plural's per-item name is Computed-only output; matching text, divergent optionality, same
-// structural-divergence class as the cloud/container_image id/name exclusions). spec (the
-// whole nested machine-type/partition tree) is singular-only - the plural's own description
-// says "without detailed spec for performance". Schema-only: this file must never gain
-// machine-pool/GRS request or read logic - the GRSv2 deferral applies to provider behavior,
-// not to deduplicating already-identical schema text.
-func globalResourceSchedulerSharedAttributes() map[string]schema.Attribute {
-	return map[string]schema.Attribute{
-		"id": schema.StringAttribute{
-			Computed:            true,
-			MarkdownDescription: "The unique identifier of the global resource scheduler.",
-		},
-		"organization_id": schema.StringAttribute{
-			Computed:            true,
-			MarkdownDescription: "The organization ID that owns the global resource scheduler.",
-		},
-		"enable_rootless_dataplane_config": schema.BoolAttribute{
-			Computed:            true,
-			MarkdownDescription: "Whether rootless dataplane configuration is enabled.",
-		},
-		"cloud_ids": schema.ListAttribute{
-			Computed:            true,
-			ElementType:         types.StringType,
-			MarkdownDescription: "List of cloud IDs attached to this global resource scheduler.",
-		},
-	}
-}
-
 // organizationUserSharedAttributes returns the anyscale_organization_user /
 // anyscale_organization_users attributes that are identical in name, type, and
 // MarkdownDescription on both sides. Called directly by the singular data source and wrapped

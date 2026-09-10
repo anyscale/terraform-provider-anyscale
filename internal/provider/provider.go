@@ -151,8 +151,6 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewOrganizationUserResource,
 		NewOrganizationUserRoleResource,
 		NewOrganizationDefaultCloudResource,
-		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
-		// NewGlobalResourceSchedulerResource,
 		NewContainerImageBuildResource,
 		NewContainerImageRegistryResource,
 		NewServiceResource,
@@ -187,8 +185,5 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewServicesDataSource,
 		NewSystemClusterDataSource,
 		NewUserDataSource,
-		// TODO(GRS): temporarily disabled pending backend API rework — re-enable when stable.
-		// NewGlobalResourceSchedulerDataSource,
-		// NewGlobalResourceSchedulersDataSource,
 	}
 }
