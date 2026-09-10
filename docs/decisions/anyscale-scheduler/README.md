@@ -211,10 +211,12 @@ call is for. List the current values in `MarkdownDescription` as *known at time 
 
 **Empty lists are not representable — reject them at plan time.** The server collapses an empty array
 to an absent key: `{"resource_flavors": [], "resource_queues": []}` reads back as `config: {}` with
-both keys gone (logged in §6). So `resource_flavors = []` in HCL would be a permanent diff. Put
-`listvalidator.SizeAtLeast(1)` on `resource_flavors`, `resource_queues`, and `scheduling_rules`, with a
-description line telling the user to omit the section rather than declare it empty. Make the illegal
-state unrepresentable rather than silently normalizing it. `recycle_policy` is the exception — an empty
+both keys gone (logged in §6). So `resource_flavors = []` in HCL would be a permanent diff. Reject a
+declared-but-empty section on `resource_flavors`, `resource_queues`, and `scheduling_rules` at plan,
+with a diagnostic that tells the user to **omit the section entirely** — not the stock
+`listvalidator.SizeAtLeast(1)` message, which states the constraint without naming the fix and leaves
+a practitioner as likely to invent a filler element as to delete the block. Say the same in the
+attribute description. Make the illegal state unrepresentable rather than silently normalizing it. `recycle_policy` is the exception — an empty
 *object* is preserved as `{}`, so it needs no such validator.
 
 Two implementation constraints follow directly, and getting either half wrong is a perpetual diff: a
@@ -609,8 +611,9 @@ are not.
 
 **3. CHANGED — an empty list is not representable.** Sent `{"resource_flavors": [], "resource_queues":
 []}`; read back `config: {}` with both keys gone. The server collapses an empty array to an absent
-key. *Consequence:* `listvalidator.SizeAtLeast(1)` on the three list sections, and the
-omit-null-vs-send-`[]` / absent-maps-to-null implementation constraint in §3. An empty **object** is
+key. *Consequence:* a size validator on the three list sections — settled since this run as a
+custom one carrying omit-the-section guidance, §3 — and the omit-null-vs-send-`[]` /
+absent-maps-to-null implementation constraint there. An empty **object** is
 *not* collapsed — `recycle_policy: {}` is preserved — so that section takes no such validator.
 
 **4. CHANGED — drop `is_active`.** `GET /config` only ever returns the active version, so the
@@ -671,14 +674,26 @@ typed field, so no such modifier exists to verify.
 
 Exercisable without reference to implementation internals.
 
-**Every criterion below is checkable.** None states a contract the provider cannot verify. That is
-worth recording because the opposite finding would be a *permanent design fact* rather than a
-status: a criterion that can never be executed is a contract we hold ourselves to and cannot check,
-and it would belong here beside that criterion for as long as the criterion exists. Provenance is an
-assessment of all 21 against confirmed API and framework behavior, not 21 logged runs — see §10 on
-why those two read identically once summarized. The one thing in this section that genuinely cannot
-be done is not a criterion at all: the sweeper, immediately below, is unsatisfiable rather than
-unmet.
+**One clause of three criteria cannot be asserted, and it is recorded rather than left reading as
+met.** Criteria 19, 20 and 21 each require a *warning* alongside the behavior that `plan` completes.
+The behavior half is covered. The warning half is not, and cannot be: `terraform-plugin-testing`
+v1.16.0 exposes no warning-assertion facility at all — there is no `ExpectWarning` — and both
+diagnostics are produced inside `ValidateConfig` and `Read`, where a test has no seam to reach them.
+That is a *permanent design fact*, not a status: it will still be true when every criterion is
+green, so it belongs beside the criteria for as long as they exist.
+
+**What is still guarded is the more important half — the branch, not the message.** Both selections
+are pinned by unit test in `internal/provider/scheduler_api_test.go`:
+`TestValidateSchedulerConfigDistinguishesRejectionFromUnavailability` and
+`TestTranslateSchedulerAPIErrorAdmissionFlag`. A build that took the wrong path — reporting an
+unreachable validator as a rejection, or a flag-off 403 as a generic permission error — fails there.
+What no test in this repository can see is whether the path it chose says anything to the
+practitioner at all.
+
+Provenance for the rest is an assessment of all 21 against confirmed API and framework behavior, not
+21 logged runs — see §10 on why those two read identically once summarized. And the one thing in
+this section that cannot be *done* at all is not a criterion: the sweeper, immediately below, is
+unsatisfiable rather than unmet.
 
 ### Test-strategy ruling: this resource can never have a sweeper, so default to the mock
 
@@ -763,8 +778,16 @@ byte-clean.
     schema description must state the rule (write integers without a decimal point), since the cost of
     tripping it is an extra immutable config version on every apply, forever.
 16. **Empty-list rejection.** `resource_flavors = []` fails at **plan** with the omit-the-section
-    guidance, never reaching apply. Mutate by removing the validator and confirm the test catches the
-    resulting empty-array literal reaching the wire.
+    guidance, never reaching apply. Mutate by removing the validator; the test must go red because
+    the diagnostic is gone.
+
+    **Not because an empty array then reaches the wire — it does not.** An earlier version of this
+    clause said so, and it repeated the same non-distinction corrected at criterion 17: the sections
+    are `[]T` with `omitempty`, so a declared `[]` is dropped and is byte-identical to omission. That
+    is precisely why the rejection has to exist and why it has to live at plan time — accepting `[]`
+    would silently mean *unset*, quietly applying something other than what was written, and no
+    assertion on the request body could ever tell the two apart. The diagnostic is not decoration
+    around a wire contract; on these fields it is the whole of the behavior.
 17. **Null section omitted from the request body.** Against a body-capturing mock: a config with no
     `scheduling_rules` sends a body with **no `scheduling_rules` key at all** — not `null`, not `[]`.
     Assert on the captured bytes. (Note the repo's recorded trap: capture a *snapshot*, not a live
@@ -790,10 +813,12 @@ byte-clean.
       against a config that declares nothing, which is the twin constraint failing in full. Mutate
       here.
 
-    Consequence for the schema: none. `listvalidator.SizeAtLeast(1)` on the three lists and no
-    validator on `recycle_policy` both still follow from the Gate 1 wire facts. What moves is the
-    *threat model* — the list half is held by a struct tag one edit away from removal, and the object
-    half is the one a bug can actually reach.
+    Consequence for the schema: a size validator on the three lists and no validator on
+    `recycle_policy` both still follow from the Gate 1 wire facts. What moves is the *threat model* —
+    the list half is held by a struct tag one edit away from removal, and the object half is the one
+    a bug can actually reach. (The stock `listvalidator.SizeAtLeast(1)` named in an earlier draft was
+    replaced by a validator carrying the omit-the-section guidance; criterion 16 turns on that
+    message, so the stock one no longer satisfies it.)
 18. **Absent key reads back as null, not as an empty list.** Mock returns `config: {}`; state holds
     null for all three list sections; an immediately following plan is empty. 17 and 18 are two halves
     of the same contract and either half alone leaves a permanent diff.
@@ -843,7 +868,9 @@ nothing under the sweeper ruling above.
 
     Mutation for both: restore the hard `AddError` and the step must fail. A test that only asserts
     the warning's presence would still pass if the error were reinstated alongside it — assert that
-    the plan **completes**.
+    the plan **completes**. Which is also all that can be asserted: the warning clause of both
+    criteria is unassertable, and what is pinned instead is the branch — see the head of this
+    section.
 
 21. **A 403 on refresh does not block `plan`, and does not drop the resource.** With the resource
     already in state, the mock returns **403** on `GET /config`: the plan **completes**, a warning
@@ -854,7 +881,9 @@ nothing under the sweeper ruling above.
     **Two mutations, and one alone proves nothing.** Restore the hard error: the step must fail.
     *Separately*, swap retention for `RemoveResource`: the step must fail by producing a create in
     the plan. A warning-presence assertion catches neither, and a completes-successfully assertion
-    catches only the first — a build that drops the resource and warns still "completes."
+    catches only the first — a build that drops the resource and warns still "completes." The
+    warning clause here is unassertable for the same reason as 19 and 20; the two mutations cover
+    everything that can be covered.
 
 Every test must be shown to genuinely run, not skip — the CI shards match
 `^TestAcc[A-Za-z]+Resource` and `^TestAcc[A-Za-z]+DataSource`, and a non-matching name neither runs
@@ -993,15 +1022,26 @@ hash-cited record stops resolving the day it lands, while a function name stays 
 criterion's status is binary — **executed or not.** A criterion that was reasoned about is not met,
 and one that cannot be run at all should say so rather than be counted.
 
-Two criteria are structurally weaker than they read, and are flagged where they are written:
+Some criteria are structurally weaker than they read. Each is flagged where it is written; collected
+here so a reviewer sees the shape of the weakness rather than three isolated caveats:
 
 - **Criterion 21 needs two mutations, not one.** An assertion that `plan` completes cleanly also
   passes a build that drops the resource and merely warns, so the retention half is unguarded unless
   it is mutated on its own.
 - **Any mutation-proof aimed at a nil-versus-empty JSON contract on an `omitempty` slice field is a
   placebo.** `encoding/json` drops any len-0 slice, so the value never reaches the wire and an
-  allocated-empty slice is byte-identical to nil. The guard target on those fields is the struct
-  tag (criteria 16/17).
+  allocated-empty slice is byte-identical to nil. On criterion 17 the guard target is therefore the
+  struct **tag**. On criterion 16 there is no wire contract to guard at all: because the two
+  documents are indistinguishable, the plan-time diagnostic *is* the behavior, and the mutation is
+  removing the validator. This non-distinction is the most-repeated error in this work: it recurred
+  in artifact after artifact even after being named and corrected — in two of the criteria above, in
+  a test comment, in the user-facing diagnostic's own wording, and in the shipped validator's
+  rationale. Expect to find it again; check the field kind and the tag together before believing any
+  statement about `[]` versus absent.
+
+- **Three criteria are only partly assertable.** The warning clause of 19, 20 and 21 cannot be
+  tested; the branch selection behind it is pinned by unit test instead. Stated at the head of §7
+  and beside each criterion, because it will still be true when all of them are green.
 
 ### Sequencing note: the changelog fragment cannot precede the pull request
 
