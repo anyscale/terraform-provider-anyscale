@@ -426,6 +426,13 @@ use case is the `lint[]` array, which is the closest thing to a plan-time warnin
 **Import ID is the organization ID**, validated against the token's own org (from `userinfo`) and
 erroring on mismatch.
 
+**Import hard-errors on a 403, and that is correct — do not propagate the Read carve-out here.**
+Import has no prior state, so there is nothing to fail open *with*; erroring is the only honest
+outcome. Its 404 must error too ("apply one before importing it"), where Read's 404 removes from
+state. The carve-out above exists *because* Read holds prior state worth keeping. Recorded
+explicitly because side by side the two paths read as an inconsistency, which makes this a prime
+candidate for a future cleanup that would reintroduce the workspace-blocking failure.
+
 A singleton has no natural identity, so the alternatives were a fixed sentinel (`current`) or an
 ignored/empty ID. Organization ID is chosen because it makes the import state *which* org is being
 adopted and fails loudly on a mismatch. This repo has a documented history of wrong-org operations
