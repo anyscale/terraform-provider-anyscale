@@ -89,8 +89,8 @@ test files, `globalResourceSchedulerSharedAttributes()` in `schema_shared_attrib
 both data sources were never registered in *any* released tag — `provider.go` carries the
 commented-out entries at v0.1.0 through v0.27.1. No released binary ever exposed these types, so no
 user state can contain them and no configuration can reference them without already failing to plan.
-Confirmed independently by two shards, each with a positive control showing the check could find a
-live registration.
+Confirmed twice independently, each pass with a positive control showing the check could find a live
+registration.
 
 Consequences that follow from that classification, not from convenience:
 
@@ -101,8 +101,8 @@ Consequences that follow from that classification, not from convenience:
   the usual "no production users": the types were never reachable.
 
 **Implemented and independently verified** — ~3,350 lines net deletion; build, vet, lint, unit tests
-and `test-compile` all clean, including under the now-vacuous `grs_enabled` build tag, and confirmed
-by a second pass in a separate worktree. Both mechanical traps below were handled; they are recorded
+and `test-compile` all clean, including under the now-vacuous `grs_enabled` build tag, and re-run
+independently on a clean checkout. Both mechanical traps below were handled; they are recorded
 because they are the parts a future reader would get wrong.
 
 Two mechanical traps for whoever implements this:
@@ -925,3 +925,72 @@ Closed since first draft:
   buildable and testable; the 403 diagnostic ships regardless. Rollout breadth is
   [flagged](#the-admission-flag-is-still-a-gate-and-it-still-defaults-off-in-code) as a
   code-vs-configuration observation, not a design dependency.
+
+---
+
+## 10. Reviewer summary
+
+Everything here is stated elsewhere in this document; it is collected because a reviewer should not
+have to reconstruct it from nine sections. One rule for reading it: **the three ways a claim got in
+here look identical once summarized, so they are labeled.**
+
+- **Run** — a logged request/response, or real `resource.Test` output. Both verification gates (§6)
+  are this, and each records the command and the result at the point it was made.
+- **Asserted** — documented, undisputed framework or standard-library behavior, taken without a run
+  and marked as such where it is used. Two carry weight: the framework's null-versus-prior-state
+  diff semantics, and `encoding/json`'s treatment of a len-0 slice under `omitempty`.
+- **Reported** — a run this document's author did not observe. Not a defect, but not the same
+  evidence as the first category; collapsing the two is how a summary ends up stronger than the work
+  behind it.
+
+### What changed
+
+- **Deleted:** the never-registered GRS surface — one resource, two data sources, their unit and
+  build-tagged acceptance tests, a shared-attributes helper, the sweeper and its text-reading guard
+  test, and eight unreferenced machine-pool model structs (§2a). Compatibility class: **not a
+  user-visible change at all**; no released binary ever exposed these types, so no state can hold
+  them and no configuration can reference them without already failing to plan.
+- **Added:** `anyscale_scheduler_config` — one org-scoped singleton resource, typed schema rather
+  than an encoded document (§3, §4). Compatibility class: **additive**.
+- **Untouched on purpose:** `anyscale_compute_config.machine_pool` and the `anyscale_cloud`
+  delete-time detach path. Machine pools are a separate, live, undeprecated product; the name
+  overlap is not a shared lifecycle (§2b/2c).
+- **No state upgrader and no migration guide.** Nothing released can hold the deleted types, and the
+  new resource has no prior shape to migrate from. The migration-guide call is the user's under repo
+  policy, and was made explicitly (§9).
+
+### What was deliberately left out
+
+- **Queues, events, and the rest of the read surface** — no data source in v1 (§5).
+- **`is_active`** — dropped once the write probe showed what it actually reflects.
+- **A sweeper, permanently.** The resource is an org-level singleton with no DELETE verb, so there
+  is nothing for a sweeper to delete and no name for it to match. That is why the test strategy
+  defaults to the mock — a structural fact, not a speed preference (§7).
+- **The admission flag's rollout breadth** — recorded as a code-versus-configuration observation
+  (§8), not a design dependency. The 403 diagnostic ships regardless of who holds the flag.
+
+### How to cite the criteria in §7
+
+**Name the test function and its file, never a commit hash.** This repository squash-merges with
+`squash_merge_commit_message = COMMIT_MESSAGES`, so per-commit hashes do not survive onto `main`: a
+hash-cited record stops resolving the day it lands, while a function name stays greppable. And a
+criterion's status is binary — **executed or not.** A criterion that was reasoned about is not met,
+and one that cannot be run at all should say so rather than be counted.
+
+Two criteria are structurally weaker than they read, and are flagged where they are written:
+
+- **Criterion 21 needs two mutations, not one.** An assertion that `plan` completes cleanly also
+  passes a build that drops the resource and merely warns, so the retention half is unguarded unless
+  it is mutated on its own.
+- **Any mutation-proof aimed at a nil-versus-empty JSON contract on an `omitempty` slice field is a
+  placebo.** `encoding/json` drops any len-0 slice, so the value never reaches the wire and an
+  allocated-empty slice is byte-identical to nil. The guard target on those fields is the struct
+  tag (criteria 16/17).
+
+### Sequencing note: the changelog fragment cannot precede the pull request
+
+A new resource is provider-facing, so `changelog-gate` requires a `.changelog/<PR#>.txt` fragment
+rather than the `skip-changelog` label. The fragment's *filename is the pull request number*, so its
+body can be settled in advance but the file cannot be named until the PR exists. That ordering is
+inherent to the gate, not a gap in the work: expect the fragment to land after the branch is
+otherwise complete, and do not read its absence on an unopened branch as an unmet requirement.
