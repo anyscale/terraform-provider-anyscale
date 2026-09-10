@@ -570,6 +570,35 @@ typed field, so no such modifier exists to verify.
 
 Exercisable without reference to implementation internals.
 
+### Test-strategy ruling: this resource can never have a sweeper, so default to the mock
+
+**There is no `DELETE` verb anywhere on the scheduler API, and there is no content dedupe** — a
+byte-identical re-`POST` minted version 2 rather than recognising the document (both verified live;
+see §6 Gate 1). So **every apply in every acceptance test permanently appends an immutable version to
+the target org's config history, and nothing can remove it** — not a sweeper, not manual cleanup, not
+the console.
+
+This makes the repo rule "a new resource type that creates real backend state gets a sweeper"
+**unsatisfiable here rather than merely unmet.** Record it as a documented exception; a missing
+scheduler sweeper is not a coverage gap and must not be filed as one. (The retirement deletes the old
+`sweeper_scheduler_test.go` — see §2 — and no replacement is possible.)
+
+Consequences for how the criteria below are written:
+
+- **Default to the mock server** for every criterion that can be satisfied there — the whole
+  lifecycle, plan-time, and diff-stability set. Criteria 15/15b already demonstrate a mock is
+  sufficient for lifecycle work, and the mock is the only place a multi-apply test is free. Drift and
+  update criteria are inherently multi-apply, which is exactly where real-API cost compounds.
+- **Reserve the real API for what cannot be faked:** out-of-band drift, plus one minimal real
+  create + read-back. Two real applies, not twenty.
+- **Carry the confirmed wire shape into every mock** (already policy, restated because it is load
+  bearing here): ints arrive widened to floats, an empty list reads back as an *absent key*, typed
+  fields round-trip byte-stable with nothing sorted. A fixture sending something the real API would
+  never send in that scenario can pass against a broken fix and prove nothing.
+
+The constraint is not permissions — applying configs to the test org is authorized. It is that the
+cost is permanent and one-way: free-looking while the tests are being written, unfixable afterward.
+
 **Retirement**
 
 1. `make build` and `make test` green with the GRS files deleted; no dangling references.
