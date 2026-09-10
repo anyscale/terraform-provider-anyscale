@@ -287,10 +287,14 @@ func isSchedulerNotEnabled(err error) bool {
 //
 // Three cases the generic wrapper handles badly:
 //
-//   - 403 from the admission gate. The backend says "GRS is not enabled for
-//     this organization", using the surface's former internal name, which
-//     appears nowhere in this provider or in Anyscale's public docs. Replaced
-//     with wording that names the product and says what to do.
+//   - 403 from the admission gate. The backend's text currently leads with the
+//     surface's former abbreviation - as of writing, "GRS is not enabled for
+//     this organization" - which appears nowhere in this provider or in
+//     Anyscale's public docs. Replaced with wording that names the product and
+//     says what to do. That quoted sentence is an illustration of today's
+//     wording, not the match target: schedulerNotEnabledDetail deliberately
+//     does NOT key on the abbreviation, and re-narrowing it to match this
+//     example would reintroduce the defect its comment describes.
 //   - 422 field validation. FastAPI returns a structured detail array whose
 //     `loc` path pinpoints the offending field; flattened into one
 //     "field: message" line per error so the practitioner does not have to
