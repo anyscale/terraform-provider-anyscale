@@ -3,6 +3,6 @@ release-note:new-resource
 resource/anyscale_scheduler_config: Manage an organization's Anyscale Scheduler configuration (resource flavors, resource queues, scheduling rules, recycle policy) as an org-scoped singleton; `terraform destroy` removes it from Terraform state only — the API has no delete route, so the organization's active configuration remains in effect. Removal emits a warning naming the version left in effect.
 ```
 ```
-release-note:breaking-change
-resource/anyscale_global_resource_scheduler: Removed, along with its `anyscale_global_resource_scheduler` and `anyscale_global_resource_schedulers` data sources; there is no replacement or migration path, since this surface had no production users — remove any remaining `anyscale_global_resource_scheduler*` blocks from your configuration and run `terraform state rm` for any resources still tracked in state before upgrading.
+release-note:removed
+resource/anyscale_global_resource_scheduler: The dead source for this resource and its `anyscale_global_resource_scheduler`/`anyscale_global_resource_schedulers` data sources is deleted. All three have been commented out of the provider's compiled schema since PR #34 (v0.7.0) and returned "Invalid resource/data source type" on any `terraform plan` regardless of credentials; deleting the unreachable code has no effect on a working configuration.
 ```
