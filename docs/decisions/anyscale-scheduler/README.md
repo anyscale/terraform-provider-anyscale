@@ -671,6 +671,15 @@ typed field, so no such modifier exists to verify.
 
 Exercisable without reference to implementation internals.
 
+**Every criterion below is checkable.** None states a contract the provider cannot verify. That is
+worth recording because the opposite finding would be a *permanent design fact* rather than a
+status: a criterion that can never be executed is a contract we hold ourselves to and cannot check,
+and it would belong here beside that criterion for as long as the criterion exists. Provenance is an
+assessment of all 21 against confirmed API and framework behavior, not 21 logged runs — see §10 on
+why those two read identically once summarized. The one thing in this section that genuinely cannot
+be done is not a criterion at all: the sweeper, immediately below, is unsatisfiable rather than
+unmet.
+
 ### Test-strategy ruling: this resource can never have a sweeper, so default to the mock
 
 **There is no `DELETE` verb anywhere on the scheduler API, and there is no content dedupe** — a
