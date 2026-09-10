@@ -261,19 +261,35 @@ resource "anyscale_scheduler_config" "test" {
 // value would reconstruct whatever shape json.Marshal produces regardless of
 // whether the wire form actually omitted the key.
 //
-// Mutation-proof (reverted, byte-clean): the realistic failure this test
-// guards against is narrower than "any nil-vs-empty slice bug," and that
-// narrowing was only found by trying it. Materializing
-// cfg.ResourceQueues = []SchedulerResourceQueue{} unconditionally in
-// expandSchedulerConfig does NOT fail this test - Go's encoding/json
-// `omitempty` omits a slice field whose length is zero regardless of
-// nil-vs-non-nil, so a wrongly-initialized empty slice is indistinguishable
-// on the wire from a correctly-nil one. The observable form of this bug is
-// on a *struct pointer* field instead: materializing
-// cfg.RecyclePolicy = &SchedulerRecyclePolicy{} does fail this test, because
-// `omitempty` on a pointer checks only nilness, not the pointee's contents,
-// so an unconditionally-allocated empty struct serializes as
-// `"recycle_policy":{}` and is caught. Confirmed failing, then reverted.
+// Which layer holds the omit-on-absence constraint differs by field kind,
+// and that only surfaced by trying to break each one:
+//
+//   - ResourceFlavors/ResourceQueues/SchedulingRules are plain slices with
+//     `omitempty`, which drops the key whenever len==0 regardless of
+//     nil-vs-non-nil. Materializing
+//     cfg.ResourceQueues = []SchedulerResourceQueue{} unconditionally in
+//     expandSchedulerConfig does NOT fail this test - it can't, by
+//     construction, since a wrongly-initialized empty slice and a correctly
+//     nil one serialize identically. That is a placebo mutation, not a
+//     weaker one: it passes against broken code exactly as it does against
+//     correct code, so it certifies nothing about this field. The struct tag
+//     is what actually holds the line here, and IS provable: temporarily
+//     removing `,omitempty` from ResourceQueues' json tag in scheduler_api.go
+//     made a nil slice serialize as `"resource_queues":null`, which this
+//     test's byte assertion caught immediately. Confirmed failing, then
+//     reverted (byte-clean) - see quest history for the run. The request
+//     builder cannot violate this constraint on these three fields; there is
+//     no expand-side bug this test could be defending against here.
+//   - RecyclePolicy is a struct pointer, where `omitempty` checks only
+//     nilness, not the pointee's contents. This is genuinely expand's to get
+//     right: materializing cfg.RecyclePolicy = &SchedulerRecyclePolicy{}
+//     unconditionally DOES fail this test, since an unconditionally-allocated
+//     empty struct serializes as `"recycle_policy":{}` regardless of the tag.
+//     Confirmed failing, then reverted. This field is the sharper risk, not
+//     merely an "also affected" one: a list-shaped section that somehow got
+//     an empty array onto the wire would still collapse back to absent on a
+//     real backend's read (per Gate 1 finding 3), but recycle_policy has no
+//     such net - an empty object round-trips into state as-is.
 func TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections(t *testing.T) {
 	server, srv := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig: `{"resource_flavors":[{"name":"cpu-standard"}]}`,
