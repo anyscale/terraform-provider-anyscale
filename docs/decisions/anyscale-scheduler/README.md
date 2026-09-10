@@ -221,6 +221,15 @@ Two implementation constraints follow directly, and getting either half wrong is
 null section MUST be **omitted from the request body**, never sent as `[]`; and on read an **absent key
 MUST map to null**, never to an empty list.
 
+Which layer holds each half differs by field kind, and it decides where the guard belongs — see
+criterion 17. For the three list sections the omit half is held by **`omitempty` on a slice field**,
+not by request-building logic: any len-0 slice is dropped, so expand cannot violate it without the tag
+being removed. For `recycle_policy` the omit half is held by **provider logic** — `omitempty` on a
+struct pointer tests only nilness, so an unconditionally allocated empty struct does emit
+`recycle_policy: {}`, and the server preserves an empty object rather than collapsing it. Same
+exception as the validator above, in the opposite direction: the field that needs no validator is the
+one whose omit constraint is genuinely the implementation's to keep.
+
 **`advanced_instance_config` is a JSON string, not `Dynamic`, and it needs semantic equality.**
 Upstream types it as an untyped `object` with no properties. The repo already made the string call for
 the per-node `advanced_instance_config` on `anyscale_compute_config`, and the recorded reason transfers
