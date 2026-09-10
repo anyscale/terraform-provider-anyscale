@@ -297,6 +297,44 @@ this repo's settled convention is that connection-level identity belongs in the 
   remove the resource from state. **Do not route this through `DoRequestAndParse`'s accepted-status
   list** — that helper swallows 404s, which would turn "config deleted out of band" into a silent
   success with stale state.
+- **Read on a 403 — keep prior state and warn; do not error, and do not remove.** This is a
+  *narrower* fail-open than the plan-time one below, and the narrowness is deliberate. A 403 means
+  "not allowed to look," which is not evidence of "gone," so the three candidate behaviors separate
+  cleanly: hard-erroring blocks the entire workspace, `RemoveResource` is affirmatively wrong (it
+  would plan a create of a config that already exists, and under an append-only API with no content
+  dedupe that mints a duplicate version), and retaining state with a warning that names refresh as
+  skipped is the only one that reports what actually happened. Every other Read failure — transport,
+  5xx — stays a hard error.
+
+  **Why this does not contradict the plan-time ruling below, spending the exception differently.**
+  The two calls have different jobs. `config/validate` is a *convenience*: skipping it costs early
+  feedback and nothing else, so failing open on anything that is not a semantic rejection is nearly
+  free. `Read` is *load-bearing*: its result becomes state, so failing open there is a genuine
+  correctness tradeoff and has to be spent narrowly. It is spent on the 403 because the admission
+  flag defaults off in code (§8), making it the modal failure rather than an edge case. A transient
+  5xx earns no carve-out — a failed plan on a blip is ordinary Terraform behavior and self-resolves.
+
+  **This is the half the plan-time ruling cannot reach.** Refresh runs *before* plan modification, so
+  for any resource already in state a 403 fails `plan` before `ModifyPlan` is ever consulted. Fixing
+  validation alone would leave the blast radius intact for every existing user and only repair the
+  first-apply case.
+
+- **Recognize the admission 403 without depending on the word "GRS".** Both fail-open paths hinge on
+  correctly classifying one 403, and the classifier must not rest on the volatile half of the
+  server's sentence. Upstream raises it from a single site — `detail="GRS is not enabled for this
+  organization."` — where `GRS` is precisely the token this rename is retiring (identifiers already
+  moved; this string has not followed yet), while `not enabled for this organization` is a
+  house phrasing shared by at least eight unrelated capability gates and is therefore the stable
+  half. **Match on 403 plus the name-agnostic clause; keep the status requirement, drop the
+  abbreviation.**
+
+  The risk is asymmetric, which is what settles it. If the short clause ever matched some *other*
+  capability 403 on a scheduler route, the cost is a retained-state warning instead of an error — and
+  the warning quotes the server's own reason, so the user still sees the true cause. If the
+  abbreviation stops matching after a cosmetic upstream reword, the cost is that **every `plan`
+  hard-fails workspace-wide** — reintroducing, silently and at a distance, the exact blast radius
+  these two rulings exist to remove. Guarding against the benign misclassification by accepting
+  exposure to the severe one is the wrong trade.
 - **Delete:** **state-only removal, plus a warning.** There is no `DELETE` route on
   `/api/v2/scheduler/config` — confirmed against the OpenAPI path list (§6). Terraform forgets the
   resource; the org's scheduler config stays active. The warning must say exactly that, because a
@@ -699,6 +737,17 @@ nothing under the sweeper ruling above.
     Mutation for both: restore the hard `AddError` and the step must fail. A test that only asserts
     the warning's presence would still pass if the error were reinstated alongside it — assert that
     the plan **completes**.
+
+21. **A 403 on refresh does not block `plan`, and does not drop the resource.** With the resource
+    already in state, the mock returns **403** on `GET /config`: the plan **completes**, a warning
+    names refresh as *skipped*, and the state is **retained**. This is the case criteria 19 and 20
+    structurally cannot reach — refresh runs before plan modification, so plan-time validation is
+    never consulted.
+
+    **Two mutations, and one alone proves nothing.** Restore the hard error: the step must fail.
+    *Separately*, swap retention for `RemoveResource`: the step must fail by producing a create in
+    the plan. A warning-presence assertion catches neither, and a completes-successfully assertion
+    catches only the first — a build that drops the resource and warns still "completes."
 
 Every test must be shown to genuinely run, not skip — the CI shards match
 `^TestAcc[A-Za-z]+Resource` and `^TestAcc[A-Za-z]+DataSource`, and a non-matching name neither runs
