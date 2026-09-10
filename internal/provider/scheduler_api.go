@@ -27,10 +27,20 @@ import (
 // model; do not add convenience fields.
 //
 // Every optional scalar is a pointer and every optional list is a nil-able
-// slice, both with `omitempty`. That distinction is load-bearing rather than
-// cosmetic: the backend treats an unset quota as "unlimited" and an explicit
-// 0 as "block this resource entirely", so serializing an absent value as 0
-// would invert the meaning of the field.
+// slice, both with `omitempty`.
+//
+// For scalars the pointer is load-bearing rather than cosmetic: the backend
+// treats an unset quota as "unlimited" and an explicit 0 as "block this
+// resource entirely", so serializing an absent value as 0 would invert the
+// meaning of the field. The same holds for every optional nested struct, where
+// `omitempty` tests only nilness - an unconditionally allocated empty struct
+// serializes as `{}` and asserts the section, which is not the same as omitting
+// it.
+//
+// For slices it is NOT the nilness that carries the meaning: `omitempty` omits
+// any len-0 slice, so nil and an allocated empty slice are indistinguishable on
+// the wire. Writing them nil-able is a readability convention, not a guard.
+// Do not rely on it as one, and do not "harden" a slice field by allocating it.
 
 // --- Enum values -------------------------------------------------------------
 //
