@@ -147,12 +147,10 @@ resource "anyscale_scheduler_config" "test" {
 //
 // The mock is deliberately left in auto-derive mode (no ReadConfig override)
 // so GET reflects whatever was actually last posted, the way a real backend
-// would. An earlier version of this test pre-set the second version's
-// read-back via a PreConfig hook before step 2's plan was computed - that
-// mutation lands before Terraform's own pre-plan refresh, so refresh already
-// matched the new config and the step spuriously planned no-op instead of
-// update. Reproduced by actually running the test, not assumed from reading
-// the code.
+// would. Pre-setting the second version's read-back via a PreConfig hook
+// instead would land before Terraform's own pre-plan refresh, making refresh
+// already match the new config and the step spuriously plan no-op instead of
+// update.
 func TestAccSchedulerConfigResourceLifecycleUpdateInPlace(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{})
 	defer server.Close()
@@ -201,7 +199,7 @@ resource "anyscale_scheduler_config" "test" {
 // list or empty object, genuinely absent from the JSON - must read back as
 // Terraform null, not as an empty collection.
 //
-// This is the plan/apply half of the twin null/omit constraint forge's unit
+// This is the plan/apply half of the twin null/omit constraint the unit
 // tests exercise at the Go level only (expand omits a null section on write,
 // flatten appends into nil slices on read). What a Go-level unit test cannot
 // see is Core rejecting or rewriting an inconsistent shape at plan time -
@@ -231,13 +229,13 @@ resource "anyscale_scheduler_config" "test" {
 // terraform-plugin-testing's own post-apply refresh-consistency check ("the
 // refresh plan was not empty").
 //
-// The cause, traced to source: applyAndRefresh keeps the
-// document exactly as planned after Create/Update and takes only
-// version/created_at/creator_id off the read-back - flatten never runs on
-// the apply path at all, so Core's own post-apply consistency check is blind
-// to this bug by construction, not lenient. flatten is reached only by Read
-// and ImportState, so the test framework's own subsequent refresh (which
-// calls Read) is the earliest point a broken flatten can be observed at all.
+// The cause: applyAndRefresh keeps the document exactly as planned after
+// Create/Update and takes only version/created_at/creator_id off the
+// read-back - flatten never runs on the apply path at all, so Core's own
+// post-apply consistency check is blind to this bug by construction, not
+// lenient. flatten is reached only by Read and ImportState, so the test
+// framework's own subsequent refresh (which calls Read) is the earliest
+// point a broken flatten can be observed at all.
 //
 // That makes this the ONLY thing that can catch this failure before a real
 // practitioner does: outside a test harness there is no apply-time error
@@ -261,8 +259,7 @@ resource "anyscale_scheduler_config" "test" {
 // value would reconstruct whatever shape json.Marshal produces regardless of
 // whether the wire form actually omitted the key.
 //
-// Which layer holds the omit-on-absence constraint differs by field kind,
-// and that only surfaced by trying to break each one:
+// Which layer holds the omit-on-absence constraint differs by field kind:
 //
 //   - ResourceFlavors/ResourceQueues/SchedulingRules are plain slices with
 //     `omitempty`, which drops the key whenever len==0 regardless of
@@ -277,9 +274,9 @@ resource "anyscale_scheduler_config" "test" {
 //     removing `,omitempty` from ResourceQueues' json tag in scheduler_api.go
 //     made a nil slice serialize as `"resource_queues":null`, which this
 //     test's byte assertion caught immediately. Confirmed failing, then
-//     reverted (byte-clean) - see quest history for the run. The request
-//     builder cannot violate this constraint on these three fields; there is
-//     no expand-side bug this test could be defending against here.
+//     reverted (byte-clean). The request builder cannot violate this
+//     constraint on these three fields; there is no expand-side bug this
+//     test could be defending against here.
 //   - RecyclePolicy is a struct pointer, where `omitempty` checks only
 //     nilness, not the pointee's contents. This is genuinely expand's to get
 //     right: materializing cfg.RecyclePolicy = &SchedulerRecyclePolicy{}
@@ -288,8 +285,8 @@ resource "anyscale_scheduler_config" "test" {
 //     Confirmed failing, then reverted. This field is the sharper risk, not
 //     merely an "also affected" one: a list-shaped section that somehow got
 //     an empty array onto the wire would still collapse back to absent on a
-//     real backend's read (per Gate 1 finding 3), but recycle_policy has no
-//     such net - an empty object round-trips into state as-is.
+//     real backend's read, but recycle_policy has no such net - an empty
+//     object round-trips into state as-is.
 func TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections(t *testing.T) {
 	server, srv := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig: `{"resource_flavors":[{"name":"cpu-standard"}]}`,
