@@ -664,6 +664,27 @@ func (r *SchedulerConfigResource) ModifyPlan(ctx context.Context, req resource.M
 	}
 
 	if err := validateSchedulerConfig(ctx, r.client, config); err != nil {
+		if errors.Is(err, ErrSchedulerValidationUnavailable) {
+			// The check could not run. Failing the plan here would make
+			// `terraform plan` impossible for a reason unrelated to the
+			// config - an expired token, a 5xx, a network blip, or the
+			// organization's scheduler admission flag - and would report the
+			// config as rejected when nothing ever read it. Warn, name why,
+			// and let the plan proceed; a genuinely invalid document still
+			// fails at apply with the server's own message.
+			resp.Diagnostics.AddWarning(
+				"Anyscale Scheduler Configuration Not Validated",
+				fmt.Sprintf(
+					"Terraform could not reach the Anyscale scheduler validation endpoint, so this config was "+
+						"NOT checked before planning. This is not a statement about whether the config is valid.\n\n"+
+						"Reason: %s\n\n"+
+						"The plan continues. If the config turns out to be invalid, the apply will fail with the "+
+						"API's own error message.",
+					err,
+				),
+			)
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Invalid Anyscale Scheduler Configuration",
 			fmt.Sprintf("The Anyscale API rejected this scheduler config: %s", err),
@@ -744,6 +765,31 @@ func (r *SchedulerConfigResource) Read(ctx context.Context, req resource.ReadReq
 			// state - rather than erroring - lets the next apply recreate it.
 			tflog.Warn(ctx, "no active Anyscale scheduler config; removing resource from state")
 			resp.State.RemoveResource(ctx)
+			return
+		}
+		if errors.Is(err, ErrSchedulerNotEnabled) {
+			// The capability gate is closed, so this token cannot look at the
+			// config. "Cannot look" is not evidence of "gone": erroring would
+			// fail the whole plan on a flag flip, and removing from state
+			// would plan a create for a config that still exists - which,
+			// under an append-only API with no content dedupe, would mint a
+			// duplicate version. Keep the prior state untouched and say so.
+			//
+			// Deliberately narrow: this is the only Read failure that fails
+			// open. A transport error or a 5xx stays a hard error, because a
+			// failed plan on a transient blip is ordinary behavior and
+			// self-resolves, while silently trusting stale state is not.
+			resp.Diagnostics.AddWarning(
+				"Anyscale Scheduler Config Not Refreshed",
+				fmt.Sprintf(
+					"Terraform could not read the organization's scheduler config, so the values in state "+
+						"were kept as-is and may be out of date.\n\n"+
+						"Reason: %s\n\n"+
+						"State was NOT removed: the config still exists, and removing it would plan a "+
+						"redundant apply. Re-run once the Anyscale Scheduler is enabled to refresh it.",
+					err,
+				),
+			)
 			return
 		}
 		resp.Diagnostics.AddError("Unable to Read Anyscale Scheduler Config", err.Error())

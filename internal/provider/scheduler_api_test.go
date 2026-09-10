@@ -211,6 +211,52 @@ func TestTranslateSchedulerAPIError400CrossReference(t *testing.T) {
 	}
 }
 
+// The classifier that lets ModifyPlan tell "the server read this and rejected
+// it" apart from "the check never ran". Both halves are asserted here: a 400
+// and a 422 must NOT be marked unavailable (they are real rejections and must
+// keep failing the plan), and a 503 must be, so the plan warns and proceeds
+// instead of blocking on an outage.
+//
+// Mutation check: making schedulerServerEvaluatedDocument return false
+// unconditionally flips the 400/422 subtests red; returning true
+// unconditionally flips the 503 subtest red.
+func TestValidateSchedulerConfigDistinguishesRejectionFromUnavailability(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		body        string
+		unavailable bool
+	}{
+		{"422 field error", http.StatusUnprocessableEntity, `{"detail":[{"loc":["body","config"],"msg":"bad","type":"value_error"}]}`, false},
+		{"400 cross reference", http.StatusBadRequest, `{"error":{"detail":"Scheduling rule #1 references unknown resource queue 'q'."}}`, false},
+		{"503 outage", http.StatusServiceUnavailable, `{"error":{"detail":"Service Unavailable"}}`, true},
+		{"401 expired token", http.StatusUnauthorized, `{"error":{"detail":"Invalid token."}}`, true},
+		{"403 capability gate", http.StatusForbidden, `{"error":{"detail":"GRS is not enabled for this organization."}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := schedulerTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+
+			err := validateSchedulerConfig(context.Background(), client, SchedulerConfig{})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if got := errors.Is(err, ErrSchedulerValidationUnavailable); got != tc.unavailable {
+				t.Fatalf("unavailable = %v, want %v (err: %v)", got, tc.unavailable, err)
+			}
+			// The wrapper must not prefix the message it carries - the
+			// diagnostic renders it verbatim, and the 403's translated text in
+			// particular is asserted elsewhere to omit the backend's internal
+			// name.
+			if strings.Contains(err.Error(), "could not be performed") {
+				t.Errorf("wrapper leaked its sentinel text into the message: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateSchedulerConfigAccepts204(t *testing.T) {
 	client := schedulerTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != schedulerConfigValidatePath {

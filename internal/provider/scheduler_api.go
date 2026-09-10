@@ -401,9 +401,48 @@ func validateSchedulerConfig(ctx context.Context, client *Client, config Schedul
 		ctx, client, http.MethodPost, schedulerConfigValidatePath, bytes.NewReader(payload),
 		http.StatusOK, http.StatusNoContent,
 	); err != nil {
-		return translateSchedulerAPIError(err)
+		translated := translateSchedulerAPIError(err)
+		if schedulerServerEvaluatedDocument(err) {
+			return translated
+		}
+		// The server never got as far as reading the document - transport
+		// failure, timeout, 401, 403, 5xx. Callers must be able to tell this
+		// apart from a real rejection, because reporting "the API rejected
+		// your config" for an expired token or a 503 is a false diagnostic,
+		// and hard-failing on it makes `terraform plan` impossible for reasons
+		// that have nothing to do with the config.
+		return &schedulerValidationUnavailableError{detail: translated.Error()}
 	}
 	return nil
+}
+
+// ErrSchedulerValidationUnavailable marks a validate call that could not be
+// performed, as opposed to one that ran and rejected the document.
+var ErrSchedulerValidationUnavailable = errors.New("scheduler config validation could not be performed")
+
+// schedulerValidationUnavailableError carries the underlying diagnostic
+// verbatim - Error() is the translated detail, unprefixed - while remaining
+// matchable with errors.Is. Wrapping with fmt.Errorf("%w: ...") would prepend
+// a sentinel string to every message a caller renders.
+type schedulerValidationUnavailableError struct{ detail string }
+
+func (e *schedulerValidationUnavailableError) Error() string { return e.detail }
+func (e *schedulerValidationUnavailableError) Unwrap() error {
+	return ErrSchedulerValidationUnavailable
+}
+
+// schedulerServerEvaluatedDocument reports whether the backend actually read
+// the submitted document and formed an opinion about it. 422 is FastAPI's
+// structured field validation; 400 is the cross-reference check. Everything
+// else - including a non-status transport error - means the answer is unknown,
+// not "invalid".
+func schedulerServerEvaluatedDocument(err error) bool {
+	var statusErr *UnexpectedStatusError
+	if !errors.As(err, &statusErr) {
+		return false
+	}
+	return statusErr.StatusCode == http.StatusBadRequest ||
+		statusErr.StatusCode == http.StatusUnprocessableEntity
 }
 
 // ValidateSchedulerConfigRequest is the body of the validate endpoint. It is
