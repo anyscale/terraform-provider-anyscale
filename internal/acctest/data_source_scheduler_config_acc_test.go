@@ -160,6 +160,49 @@ func TestAccSchedulerConfigDataSourceOmittedSectionsReadAsNull(t *testing.T) {
 	})
 }
 
+// An active config that sets nothing reads back with all four sections null.
+//
+// The companion to the test above, which cannot cover resource_flavors: that
+// section is its positive control there, so it is necessarily non-null. Here
+// the served document is empty and every section is asserted null, with the
+// metadata fields standing in as the positive control - they prove a read
+// happened at all, so an entirely blank state cannot pass.
+//
+// recycle_policy is the section worth the extra step. It is a single nested
+// object, so its count key is `.%` rather than `.#`, and TestCheckNoResourceAttr
+// treats both suffixes identically - the placebo described above applies
+// unchanged in a different spelling. And the distinction is observable on the
+// wire, not just state hygiene: the server preserves an empty object here where
+// it collapses an empty list, so a read that turned an unset policy into `{}`
+// would misreport live server state rather than merely look untidy.
+func TestAccSchedulerConfigDataSourceEmptyConfigReadsAllSectionsNull(t *testing.T) {
+	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
+		ReadConfig:     `{}`,
+		InitialVersion: 5,
+	})
+	defer server.Close()
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderBlock(server.URL) + schedulerConfigDataSourceConfig,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Positive control: the read really happened.
+					resource.TestCheckResourceAttr(schedulerConfigDataSourceName, "version", "5"),
+					resource.TestCheckResourceAttr(schedulerConfigDataSourceName, "created_at", "2026-09-09T00:00:00Z"),
+				),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(schedulerConfigDataSourceName, tfjsonpath.New("resource_flavors"), knownvalue.Null()),
+					statecheck.ExpectKnownValue(schedulerConfigDataSourceName, tfjsonpath.New("resource_queues"), knownvalue.Null()),
+					statecheck.ExpectKnownValue(schedulerConfigDataSourceName, tfjsonpath.New("scheduling_rules"), knownvalue.Null()),
+					statecheck.ExpectKnownValue(schedulerConfigDataSourceName, tfjsonpath.New("recycle_policy"), knownvalue.Null()),
+				},
+			},
+		},
+	})
+}
+
 // No active config is an error, not an empty document.
 //
 // The mock answers the real 404 body the API sends. That matters for more than
