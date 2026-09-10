@@ -726,17 +726,45 @@ byte-clean.
 17. **Null section omitted from the request body.** Against a body-capturing mock: a config with no
     `scheduling_rules` sends a body with **no `scheduling_rules` key at all** — not `null`, not `[]`.
     Assert on the captured bytes. (Note the repo's recorded trap: capture a *snapshot*, not a live
-    reference to a map the handler goes on to mutate.)
+    reference to a map the handler goes on to mutate. And read the body to EOF — a single `Read` can
+    return short, and a truncated body satisfies a byte assertion that was meant to constrain the
+    whole document.)
+
+    **Narrowed by its own mutation-proof: the "not `[]`" clause is unsatisfiable for the three list
+    sections, and that changes what the criterion guards.** Verified at source — all four sections
+    carry `omitempty`, the three list sections are `[]T` and `recycle_policy` is `*struct`:
+
+    - **`[]T` + `omitempty` omits *any* len-0 slice**, so a nil slice and an allocated empty slice are
+      byte-identical on the wire. The obvious expand bug — allocate instead of leaving `nil` — has no
+      wire representation at all on these fields. Not caught late: **not expressible.**
+    - What criterion 17 therefore guards on the list sections is **the struct tag, not the expand
+      logic.** Remove `omitempty` and a nil slice serializes as `null`, which the byte assertion does
+      catch. So the proving mutation for this half is *dropping the tag*, and a mutation-proof that
+      materializes an empty slice will pass against a correct build and prove nothing.
+    - **The reachable and higher-consequence bug is on `recycle_policy`**, where `omitempty` tests
+      only nilness: an unconditionally allocated `&SchedulerRecyclePolicy{}` serializes as
+      `recycle_policy: {}`. Per Gate 1 the server **preserves an empty object** where it collapses an
+      empty array, so this half has **no server-side safety net** — `{}` round-trips into state
+      against a config that declares nothing, which is the twin constraint failing in full. Mutate
+      here.
+
+    Consequence for the schema: none. `listvalidator.SizeAtLeast(1)` on the three lists and no
+    validator on `recycle_policy` both still follow from the Gate 1 wire facts. What moves is the
+    *threat model* — the list half is held by a struct tag one edit away from removal, and the object
+    half is the one a bug can actually reach.
 18. **Absent key reads back as null, not as an empty list.** Mock returns `config: {}`; state holds
     null for all three list sections; an immediately following plan is empty. 17 and 18 are two halves
     of the same contract and either half alone leaves a permanent diff.
 
     **The two halves fail through different mechanisms, which is why neither test substitutes for the
-    other.** Mutating the *expand* half — emit `[]` instead of omitting the key — may not fail visibly
-    at all in a mock round-trip, because the server collapses an empty array to an absent key (Gate 1
-    finding 5) and the read path then yields null anyway; only criterion 17's assertion on the
-    captured bytes catches it. Mutating the *flatten* half — materialize an empty slice where it
-    should leave `nil` — is caught by the harness's automatic post-apply plan-emptiness check.
+    other.** On the *expand* half, only criterion 17's assertion on the captured bytes can fail at
+    all — and only for the mutations that criterion now names, since the list sections' `omitempty`
+    makes the obvious one unexpressible. On the *flatten* half, the harness's automatic post-apply
+    plan-emptiness check is the detector, and materializing an empty slice where `nil` belongs does
+    fail it. (An earlier draft here said the expand half might survive because *the server* collapses
+    an empty array; for the list sections the value never reaches the server — `encoding/json` drops
+    it first. Same conclusion, wrong layer, and the right layer is the one that decides which mutation
+    proves the test.)
 
     **Corrected against a real run (mutation-proven, criterion 18's own test).** The prediction
     recorded here first — that a flatten regression would fail the apply with *"provider produced
