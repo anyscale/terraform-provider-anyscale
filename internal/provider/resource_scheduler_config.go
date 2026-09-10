@@ -155,21 +155,11 @@ func schedulerMatchExpressionAttributes(what string) map[string]schema.Attribute
 // omitempty (see SchedulerConfig in scheduler_api.go), and encoding/json drops
 // a zero-length slice, so `section = []` and no section at all serialize to the
 // same bytes. Accepting the empty form would therefore mean silently treating
-// "I declared this section" as "leave this section unset" - a config that does
-// something other than what it says. Rejecting it at plan makes the practitioner
-// write the version whose meaning is unambiguous.
-//
-// Two consequences worth stating, because both are inviting wrong next moves:
-// this guard is not made redundant by the empty array being harmless on the
-// wire (there is no empty array), and there is no wire-level assertion that
-// could test it (the two documents are byte-identical, so such a test would
-// pass against any build). The behavior is only observable as a plan-time
-// diagnostic, which is where it is tested.
-//
-// The stock listvalidator.SizeAtLeast(1) message ("list must contain at least
-// 1 elements") states the constraint without saying what to do about it, and a
-// practitioner reading it is as likely to invent a filler element as to delete
-// the block - which is the opposite of the fix.
+// "I declared this section" as "leave this section unset". Two consequences,
+// both inviting wrong next moves: the guard is not redundant (there is no empty
+// array on the wire to be harmless), and no wire-level assertion can test it
+// (byte-identical documents, so such a test passes against any build). The
+// behavior exists only as a plan-time diagnostic, which is where it is tested.
 type nonEmptyListValidator struct {
 	attrName string
 }

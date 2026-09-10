@@ -105,17 +105,15 @@ resource "anyscale_scheduler_config" "test" {
 // diagnostic says to omit the section rather than merely stating a size
 // constraint.
 //
-// The guidance is part of the behavior under test, not decoration, and the
-// reason is the inverse of the obvious one: the section fields are Go slices
-// tagged omitempty, so an empty list and an absent one serialize identically.
-// Accepting `[]` would silently mean "unset". That also rules out testing this
-// at the wire level - the two documents are byte-identical, so a body
-// assertion would pass against any build. Plan-time diagnostic is the only
-// place the behavior exists. The regexp deliberately requires the
-// "Omit the ... entirely" sentence: the stock
+// Why the empty form is rejected at all, and why no wire-level assertion could
+// test it, is on nonEmptyListValidator's doc comment; it is not restated here.
+//
+// Test-specific: the regexp requires the "Omit the ... entirely" sentence
+// rather than asserting a size constraint. The stock
 // listvalidator.SizeAtLeast(1) message ("list must contain at least 1
-// elements") passes a size assertion but not this one, which is exactly the
-// mutation this test defends against.
+// elements") satisfies a size assertion but not this one, and swapping to it is
+// exactly the mutation this test defends against - the guidance is the behavior
+// under test, not decoration.
 func TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan(t *testing.T) {
 	for _, attr := range []string{"resource_flavors", "resource_queues", "scheduling_rules"} {
 		t.Run(attr, func(t *testing.T) {

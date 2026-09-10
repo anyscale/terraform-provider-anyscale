@@ -177,13 +177,8 @@ func newSchedulerConfigServer(t *testing.T, opts schedulerConfigServerOpts) (*ht
 					s.readConfig = string(envelope.Config)
 				}
 			} else if s.readConfigAuto {
-				// Re-derive what GET returns from what was actually posted, the
-				// way a real backend would: an update-in-place test must see its
-				// own second apply reflected on the next refresh without hand-
-				// authoring every intermediate wire shape. A test that needs a
-				// specific shape (reordered keys, widened numeric types, a
-				// deliberately omitted section) opts out by passing ReadConfig or
-				// calling SetReadConfig, which locks this field.
+				// Re-derive what GET returns from what was posted; see the
+				// readConfigAuto field doc for why and how a test opts out.
 				if derived, err := json.Marshal(s.config); err == nil {
 					s.readConfig = string(derived)
 				}

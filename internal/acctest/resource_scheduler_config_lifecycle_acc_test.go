@@ -227,13 +227,11 @@ resource "anyscale_scheduler_config" "test" {
 // Mutation-proof (reverted, byte-clean): materializing
 // model.ResourceQueues = []schedulerResourceQueueModel{} when the section is
 // absent, instead of leaving it nil, fails this test - not with Core's
-// "provider produced inconsistent result after apply" as first predicted, but
-// with terraform-plugin-testing's own post-apply refresh-consistency check
-// ("the refresh plan was not empty").
+// "provider produced inconsistent result after apply", but with
+// terraform-plugin-testing's own post-apply refresh-consistency check ("the
+// refresh plan was not empty").
 //
-// The real cause, traced to source after the first prediction (and a second,
-// still-wrong "Optional-not-Computed" explanation) both turned out false:
-// applyAndRefresh (resource_scheduler_config.go) deliberately keeps the
+// The cause, traced to source: applyAndRefresh keeps the
 // document exactly as planned after Create/Update and takes only
 // version/created_at/creator_id off the read-back - flatten never runs on
 // the apply path at all, so Core's own post-apply consistency check is blind
