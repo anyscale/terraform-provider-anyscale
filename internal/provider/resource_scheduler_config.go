@@ -872,6 +872,13 @@ func (r *SchedulerConfigResource) ImportState(ctx context.Context, req resource.
 		return
 	}
 
+	// Every failure below is terminal, and deliberately so. Import runs with no
+	// prior state: there is no previously-observed config to keep, so there is
+	// nothing to fall back to and no way to proceed on a partial answer. A
+	// closed capability gate means this token cannot read the config, and a 404
+	// means there is no config to adopt - in both cases the only honest outcome
+	// is to stop, because the alternative is writing state that was never read
+	// from the API.
 	current, err := getActiveSchedulerConfig(ctx, r.client)
 	if err != nil {
 		if errors.Is(err, ErrSchedulerConfigNotFound) {
