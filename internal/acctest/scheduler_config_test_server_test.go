@@ -266,6 +266,13 @@ func (s *schedulerConfigServer) SetGetResponse(status int, body string) {
 // bodies. Used by tests that need a specific wire shape GET must return
 // regardless of what was last posted (reordering, numeric-form divergence, a
 // deliberately omitted section).
+//
+// It locks readConfigAuto but deliberately leaves echoApplied alone, despite
+// looking like it disables read-back derivation wholesale. A test that seeds a
+// divergent document here and then asserts the corrective apply settles needs
+// the echo to survive this call: with it cleared, the seeded document would
+// stay in place and the convergence assertion would be measuring the seed
+// rather than the write path.
 func (s *schedulerConfigServer) SetReadConfig(readConfig string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
