@@ -1,10 +1,13 @@
 package acctest
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // Criteria 6 and 7: create sets every declared section and version, and an
@@ -221,10 +224,97 @@ resource "anyscale_scheduler_config" "test" {
 // absent, instead of leaving it nil, fails this test - not with Core's
 // "provider produced inconsistent result after apply" as first predicted, but
 // with terraform-plugin-testing's own post-apply refresh-consistency check
-// ("the refresh plan was not empty"), because resource_queues is Optional and
-// not Computed so Core accepts the returned `[]` as the new value and only
-// the following idempotency replan surfaces the drift against the
-// null-implying config. Either way the mutation cannot pass silently.
+// ("the refresh plan was not empty").
+//
+// The real cause, traced to source after the first prediction (and a second,
+// still-wrong "Optional-not-Computed" explanation) both turned out false:
+// applyAndRefresh (resource_scheduler_config.go) deliberately keeps the
+// document exactly as planned after Create/Update and takes only
+// version/created_at/creator_id off the read-back - flatten never runs on
+// the apply path at all, so Core's own post-apply consistency check is blind
+// to this bug by construction, not lenient. flatten is reached only by Read
+// and ImportState, so the test framework's own subsequent refresh (which
+// calls Read) is the earliest point a broken flatten can be observed at all.
+//
+// That makes this the ONLY thing that can catch this failure before a real
+// practitioner does: outside a test harness there is no apply-time error
+// either. The field symptom is a permanent non-convergent diff, not silent
+// drift - refresh writes the empty list, config says null, every plan
+// proposes removing it, every apply mints another immutable version (this
+// resource has no delete verb), and the next refresh writes the empty list
+// again. Keep this test for that reason, not merely as a regression guard.
+// Criterion 17: a section the practitioner never declares must never appear
+// on the wire at all - not as `[]`/`{}` - because a broken expand that emits
+// an empty collection instead of omitting the key can round-trip invisibly.
+// If the mock (or a real backend) collapses an empty array back to an absent
+// key on read, criterion 18's plan/apply test sees a clean null and stays
+// green even though the outgoing POST was wrong. This test is the only thing
+// in the suite that inspects the request body itself rather than the
+// read-back, so it is the sole detector for this half of the contract - see
+// the discussion on criterion 18 above.
+//
+// LastApplyBody() returns bytes captured via io.ReadAll on the mock's POST
+// handler (not a single Read() call, which is not guaranteed to fill the
+// buffer and could silently hand back a truncated body a substring check
+// would pass against for the wrong reason). Asserting on undecoded raw bytes
+// is deliberate: decoding through encoding/json and re-inspecting the Go
+// value would reconstruct whatever shape json.Marshal produces regardless of
+// whether the wire form actually omitted the key.
+//
+// Mutation-proof (reverted, byte-clean): the realistic failure this test
+// guards against is narrower than "any nil-vs-empty slice bug," and that
+// narrowing was only found by trying it. Materializing
+// cfg.ResourceQueues = []SchedulerResourceQueue{} unconditionally in
+// expandSchedulerConfig does NOT fail this test - Go's encoding/json
+// `omitempty` omits a slice field whose length is zero regardless of
+// nil-vs-non-nil, so a wrongly-initialized empty slice is indistinguishable
+// on the wire from a correctly-nil one. The observable form of this bug is
+// on a *struct pointer* field instead: materializing
+// cfg.RecyclePolicy = &SchedulerRecyclePolicy{} does fail this test, because
+// `omitempty` on a pointer checks only nilness, not the pointee's contents,
+// so an unconditionally-allocated empty struct serializes as
+// `"recycle_policy":{}` and is caught. Confirmed failing, then reverted.
+func TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections(t *testing.T) {
+	server, srv := newSchedulerConfigServer(t, schedulerConfigServerOpts{
+		ReadConfig: `{"resource_flavors":[{"name":"cpu-standard"}]}`,
+	})
+	defer server.Close()
+
+	const config = `
+resource "anyscale_scheduler_config" "test" {
+  resource_flavors = [
+    { name = "cpu-standard" },
+  ]
+}
+`
+
+	resourceName := "anyscale_scheduler_config.test"
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderBlock(server.URL) + config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "resource_flavors.#", "1"),
+					func(*terraform.State) error {
+						body := string(srv.LastApplyBody())
+						if body == "" {
+							return fmt.Errorf("apply body was never captured")
+						}
+						for _, key := range []string{`"resource_queues"`, `"scheduling_rules"`, `"recycle_policy"`} {
+							if strings.Contains(body, key) {
+								return fmt.Errorf("apply body contains %s but the config never declared it - expand must omit, not send empty; body: %s", key, body)
+							}
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
 func TestAccSchedulerConfigResourceLifecycleOmittedSectionsReadAsNull(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig: `{"resource_flavors":[{"name":"cpu-standard"}]}`,
