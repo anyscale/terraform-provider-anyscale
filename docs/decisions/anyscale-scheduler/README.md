@@ -344,6 +344,36 @@ fall back to rendering `detail` for the 400 case. Do **not** blindly `detail`-st
 yields a Go dump of a slice of maps. Do **not** include the echoed request body in a diagnostic; it is
 the user's own config coming back and can be large.
 
+**Skip validation when the plan is a destroy or is not fully known.** A null plan has nothing to
+validate; a partial document would report errors about unknowns rather than about the practitioner's
+config. Both are correct early returns, not gaps.
+
+#### The check must fail open — a failed check is not a rejected config
+
+**Split the outcomes by whether the server actually evaluated the document.** Only 422 and 400 mean it
+did.
+
+| Outcome | Diagnostic | Plan |
+|---|---|---|
+| **422 / 400** — server read the document and rejected it | `AddError` with the server's own `message` (above) | fails |
+| **Transport error, 401, 403, 5xx, timeout** — the check could not run | `AddWarning` naming validation as **skipped** and why | **proceeds** |
+
+Collapsing these into one hard error is wrong twice over, and the second reason is the severe one:
+
+- **It is a false diagnostic.** The API rejected nothing; the check could not run. A message saying
+  the config was rejected sends the user to debug HCL that is fine.
+- **It makes `plan` impossible, not merely noisier.** And this is not hypothetical: §8 records that
+  the admission flag defaults off in code and that rollout breadth is unverifiable from the source
+  tree, so **403 is the single most likely failure this resource has.** One org-level flag flip would
+  hard-fail every `plan` in any workspace containing this resource, blocking work on every unrelated
+  resource beside it.
+
+Failing open ships nothing unsafe. A genuinely invalid document still fails loudly at Create/Update;
+the only thing lost is early feedback, which was already lost the moment the check could not run. This
+is the standing **preflight guards fail open loudly** pattern. The 403 path already has a translated
+diagnostic that scrubs the upstream abbreviation and names the product (§0), so that text is reusable
+verbatim in the warning.
+
 `POST /api/v2/scheduler/config/preview` is deliberately **not** adopted in v1. It is now known to
 return real content — `{corpus: {window_days: 90, total_events, distinct_combos, truncated,
 snapshot_at}, verdicts[], lint[], unevaluable_rules[], preview_unavailable}` — i.e. an advisory
@@ -655,6 +685,20 @@ byte-clean.
 18. **Absent key reads back as null, not as an empty list.** Mock returns `config: {}`; state holds
     null for all three list sections; an immediately following plan is empty. 17 and 18 are two halves
     of the same contract and either half alone leaves a permanent diff.
+
+**Plan-time validation fails open** (see §3 *Plan-time behavior*). Both are mock-only, so they cost
+nothing under the sweeper ruling above.
+
+19. **Unreachable validate endpoint does not block `plan`.** Mock returns **503** on
+    `config/validate`: the plan **succeeds**, emits a warning naming validation as *skipped*, and the
+    warning does **not** claim the config was rejected.
+20. **Admission-flag 403 does not block `plan`.** Mock returns **403** with the admission-flag body:
+    same outcome — plan succeeds with a warning. This is the likely-in-practice case, not the
+    synthetic one.
+
+    Mutation for both: restore the hard `AddError` and the step must fail. A test that only asserts
+    the warning's presence would still pass if the error were reinstated alongside it — assert that
+    the plan **completes**.
 
 Every test must be shown to genuinely run, not skip — the CI shards match
 `^TestAcc[A-Za-z]+Resource` and `^TestAcc[A-Za-z]+DataSource`, and a non-matching name neither runs
