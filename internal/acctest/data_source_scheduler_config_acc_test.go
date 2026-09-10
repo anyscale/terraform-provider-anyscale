@@ -168,13 +168,25 @@ func TestAccSchedulerConfigDataSourceOmittedSectionsReadAsNull(t *testing.T) {
 // metadata fields standing in as the positive control - they prove a read
 // happened at all, so an entirely blank state cannot pass.
 //
-// recycle_policy is the section worth the extra step. It is a single nested
-// object, so its count key is `.%` rather than `.#`, and TestCheckNoResourceAttr
-// treats both suffixes identically - the placebo described above applies
-// unchanged in a different spelling. And the distinction is observable on the
-// wire, not just state hygiene: the server preserves an empty object here where
-// it collapses an empty list, so a read that turned an unset policy into `{}`
-// would misreport live server state rather than merely look untidy.
+// recycle_policy is the section worth the extra step, for two reasons.
+//
+// Mechanically, it is a single nested object, so its count key is `.%` rather
+// than `.#` - and TestCheckNoResourceAttr treats both suffixes identically, so
+// the placebo described above applies unchanged in a different spelling. That
+// is the half this test proves: materialize an empty policy and it goes red.
+//
+// Substantively, the distinction is observable on the wire rather than mere
+// state hygiene. The three list sections are dropped by `omitempty` on a slice,
+// which treats a len-0 slice as absent; `omitempty` on a struct pointer tests
+// only nilness, so an unconditionally allocated empty struct really does emit
+// `recycle_policy: {}`, and the server preserves that empty object rather than
+// collapsing it. A read that turned an unset policy into `{}` would therefore
+// misreport live server state.
+//
+// The wire behavior above was established during design against the real API;
+// it is recorded here rather than cited because nothing in this test exercises
+// it. What is verified below is the provider half only - that an absent key
+// maps to null. Do not read a green run as confirmation of the server half.
 func TestAccSchedulerConfigDataSourceEmptyConfigReadsAllSectionsNull(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig:     `{}`,
