@@ -1,7 +1,13 @@
 # Anyscale Scheduler — Terraform surface contract
 
-Status: **design confirmed for reads; write path pending one verification gate** (see
-[Verification gates](#verification-gates)).
+Status: **design confirmed — reads and writes both verified live against the API** (see
+[Verification gates](#verification-gates)). No design decisions remain open. One framework-contract
+proof (Gate 2, nested semantic equality) belongs to implementation and has a decided failure branch,
+so nothing here forks on its outcome.
+
+The write probe changed three schema decisions from an earlier draft — `advanced_instance_config` now
+needs semantic equality, empty lists are rejected at plan time, and `is_active` is dropped. Anything
+citing this contract from before that probe is reading a superseded shape.
 
 Product docs: <https://docs.anyscale.com/scheduler> — labeled **Beta: "The scheduler is in beta.
 Names and fields may change."** That label is load-bearing for several decisions below.
@@ -173,13 +179,51 @@ Match expression: `key` (Required), `operator` (Required, enum `in` / `not_in` /
 
 `priority_policy`: `default`, `min`, `max`, `on_violation` (`reject` / `force_update`).
 
-Every enum above gets a framework `Validator` so a typo fails at plan rather than as a 422 at apply.
+**Enum validators: yes for the closed semantic enums, no for the resource-name namespace.** `operator`,
+the three `preemption` policies, and `on_violation` get a framework `Validator` so a typo fails at plan
+rather than as a 422 at apply. `covered_resources` and `resources[].name` do **not**, even though the
+server enforces a closed set — see below.
 
-**`advanced_instance_config` is a JSON string, not `Dynamic`.** Upstream types it as an untyped
-`object` with no properties. The repo already made exactly this call for the per-node
-`advanced_instance_config` on `anyscale_compute_config`, and the recorded reason transfers precisely:
-the field lives inside a list, and `Dynamic` inside a list is the known-broken case. Reuse the
-convention rather than re-litigate it.
+**`covered_resources` / `resources[].name` are a closed, case-sensitive, lowercase set upstream:
+`cpu`, `gpu`, `memory_gb`, `tpu`.** `CPU` is rejected (logged in §6), and this set appears nowhere on
+the docs page. Do not hardcode it in the schema: `tpu` was plainly added after `cpu`/`gpu`, accelerator
+names keep arriving, and a frozen `OneOf` would reject a value the API had started accepting — a
+provider release becoming the thing that blocks a new accelerator. The plan-time `/config/validate`
+call returns the authoritative allowed list inside its own error message, which is precisely what that
+call is for. List the current values in `MarkdownDescription` as *known at time of writing*.
+
+**Empty lists are not representable — reject them at plan time.** The server collapses an empty array
+to an absent key: `{"resource_flavors": [], "resource_queues": []}` reads back as `config: {}` with
+both keys gone (logged in §6). So `resource_flavors = []` in HCL would be a permanent diff. Put
+`listvalidator.SizeAtLeast(1)` on `resource_flavors`, `resource_queues`, and `scheduling_rules`, with a
+description line telling the user to omit the section rather than declare it empty. Make the illegal
+state unrepresentable rather than silently normalizing it. `recycle_policy` is the exception — an empty
+*object* is preserved as `{}`, so it needs no such validator.
+
+Two implementation constraints follow directly, and getting either half wrong is a perpetual diff: a
+null section MUST be **omitted from the request body**, never sent as `[]`; and on read an **absent key
+MUST map to null**, never to an empty list.
+
+**`advanced_instance_config` is a JSON string, not `Dynamic`, and it needs semantic equality.**
+Upstream types it as an untyped `object` with no properties. The repo already made the string call for
+the per-node `advanced_instance_config` on `anyscale_compute_config`, and the recorded reason transfers
+precisely: the field lives inside a list, and `Dynamic` inside a list is the known-broken case.
+
+What does *not* transfer is byte comparison. The blob round-trips through an unordered dict and coerces
+integers to floats — a sent `{"nested":{"a":1,"b":…}}` reads back as `{"nested":{"b":…,"a":1.0}}`, and
+top-level key order differed between two reads of the *same* version (logged in §6). A plain
+`types.String` is therefore guaranteed to diff forever for any blob with two or more keys at any level.
+Use `jsontypes.NormalizedType`, whose semantic equality compares unmarshalled values, so reordered keys
+and `1` vs `1.0` both compare equal. `go.mod` already carries the dependency line, commented out.
+
+That choice carries a **Gate 2 obligation** (§6): prove semantic equality is actually consulted for a
+value nested inside a `ListNestedAttribute` element, with a real `resource.Test` where state holds
+`1.0` and config holds `1`, asserting an empty plan. Framework source describes the mechanism without
+revealing what Core enforces for nested values. If it does not hold nested, fall back to the
+`compute_config` precedent — never refresh the blob, carry prior state forward, recover only at
+import — but match the prior entry **by flavor `name`, not by list index** the way `compute_config`
+does, because flavor lists get reordered and an index correspondence would silently graft one flavor's
+blob onto another.
 
 **All ordering is significant and must be preserved, never sorted.** The product docs are explicit
 that flavors within a resource group are tried in written order and that scheduling rules are
@@ -193,7 +237,12 @@ first-match-wins top to bottom. Terraform lists are order-sensitive, which match
 | `version` | Integer. Every apply mints a new version. **No `UseStateForUnknown`** — it is volatile by construction, and that modifier on a volatile Computed attribute is a known crash source in this provider. |
 | `created_at` | RFC3339 string, from the API. |
 | `creator_id` | The identity that applied this version. |
-| `is_active` | Boolean. Always true for the version this resource manages; surfaced because the API returns it and it disambiguates a config read by version. |
+
+**`is_active` is deliberately NOT modeled**, reversing an earlier draft of this contract. `GET /config`
+returns only the active version — there is no way to reach a superseded one through the endpoint this
+resource reads — so the attribute could only ever hold `true`. A Computed attribute with one possible
+value is noise in every plan and state file that carries it. The flag becomes meaningful only for a
+version fetched via `/config/versions/{n}`, which §5 declines to model.
 
 `organization_id` is **not** an attribute. It is invariant across everything a given token sees, and
 this repo's settled convention is that connection-level identity belongs in the zero-argument
@@ -220,22 +269,55 @@ this repo's settled convention is that connection-level identity belongs in the 
   user reasonably reads `terraform destroy` as "the scheduler stops governing my workloads," and it
   will not.
 
-  *Rejected alternative — apply an empty config on destroy.* An empty config is not a neutral state.
-  The product docs warn that once any scheduling rule exists, unmatched workloads *fail instead of
-  running*, and that a `nominal_quota` of `0` blocks a resource outright. A destroy that writes to the
-  org could therefore take down workload admission. Writing on destroy also invents a mutation the
-  user did not ask for. Same conclusion, and same reasoning, as `anyscale_org_user_role`, whose Destroy
-  is state-only for the identical "no DELETE verb" reason.
+  *Rejected alternative — apply an empty config on destroy.* An empty document **is** accepted by the
+  server: `{"config": {}}` validates 204 and applies cleanly (logged in §6), so this alternative is
+  mechanically available and was rejected on behavior, not feasibility. An empty config is not a
+  neutral state. The product docs warn that once any scheduling rule exists, unmatched workloads *fail
+  instead of running*, and that a `nominal_quota` of `0` blocks a resource outright — so clearing the
+  document changes admission for every workload in the org. A destroy that writes to the org
+  therefore invents a mutation the user did not ask for, at the moment they are least expecting one.
+  Same conclusion, and same reasoning, as `anyscale_org_user_role`, whose Destroy is state-only for the
+  identical "no DELETE verb" reason.
+
+  What *does* change now that the empty document is confirmed accepted: the warning should name it as
+  the **user's own remedy** rather than leaving them with a dead end. "To clear the config, declare
+  this resource with every section omitted and apply, or use the Anyscale CLI/console." The version
+  cited in the warning must be the value from **state** (`version`, as last observed by Terraform) —
+  `DeleteRequest` carries State, not Config, so the live version may already be newer, and the wording
+  must not claim otherwise.
 
 ### Plan-time behavior
 
-`POST /api/v2/scheduler/config/validate` returns **204** on a valid document. Call it during
-`ValidateConfig`/plan so an invalid config fails at plan with the server's own diagnostic, instead of
-surfacing as a 422 mid-apply.
+`POST /api/v2/scheduler/config/validate` returns **204** on a valid document and is non-mutating
+(confirmed in §6 — the version counter did not advance across repeated validate calls). Call it during
+plan so an invalid config fails at plan with the server's own diagnostic, instead of surfacing as an
+error mid-apply.
 
-`POST /api/v2/scheduler/config/preview` is deliberately **not** adopted in v1. It returns a
-projection whose meaning we would have to explain before it helps anyone, and plan-time disclosure is
-worth adding only once we know what the projection actually says. Revisit with a named use case.
+It carries more weight here than a typical plan-time nicety, because it is where the values this
+schema deliberately does **not** enumerate get checked: an unknown `covered_resources` entry comes
+back from `/validate` with the authoritative allowed list in the message. That is the whole reason the
+resource-name namespace can stay un-hardcoded (§3).
+
+Two distinct error shapes, both confirmed live, and the implementation must handle both:
+
+| Status | When | `detail` shape |
+|---|---|---|
+| **422** | Document shape is wrong (bad enum value, wrong type, unknown key) | **Array** of `{loc, msg, type}` objects, plus a flat `message` string and an echo of the entire submitted request body |
+| **400** | Shape is fine but cross-references don't resolve (queue naming an unknown flavor, rule naming an unknown queue) | **Plain string** |
+
+Prefer the flat `message` field when present — it is already a readable, ready-to-print sentence — and
+fall back to rendering `detail` for the 400 case. Do **not** blindly `detail`-stringify: on 422 that
+yields a Go dump of a slice of maps. Do **not** include the echoed request body in a diagnostic; it is
+the user's own config coming back and can be large.
+
+`POST /api/v2/scheduler/config/preview` is deliberately **not** adopted in v1. It is now known to
+return real content — `{corpus: {window_days: 90, total_events, distinct_combos, truncated,
+snapshot_at}, verdicts[], lint[], unevaluable_rules[], preview_unavailable}` — i.e. an advisory
+analysis of how the proposed document *would have* classified the last 90 days of workload events.
+That confirms rather than weakens the deferral: it is a judgment call about historical traffic, not a
+statement about the resource being planned, and surfacing it as a plan-time diagnostic would put
+probabilistic prose in front of a user reviewing a diff. The one piece worth revisiting with a named
+use case is the `lint[]` array, which is the closest thing to a plan-time warning the API offers.
 
 ### Import
 
@@ -259,8 +341,9 @@ New resource, no prior state, `Version: 0`, no upgrader. **Additive.**
 ### Diagnostics
 
 - 404 on Read → resource removed from state (no error).
-- 422 from apply/validate → surface the server's `detail` verbatim; do not paraphrase a validation
-  message we did not author.
+- 422 / 400 from apply or validate → surface the server's own words; do not paraphrase a validation
+  message we did not author. Per the table above, prefer the flat `message` field, render `detail` as
+  a string only for the 400 case, and never echo back the submitted body.
 - **Admission-flag rejection → a named, actionable error**, not a bare 403. Every scheduler route is
   behind an org-scoped feature-flag dependency upstream, which returns **403 with detail `"GRS is not
   enabled for this organization."`** An org without the flag must be told the scheduler is not enabled
@@ -359,29 +442,83 @@ Note the product doc page documents **three** config sections; the API has **fou
 and not on that page, and `lending_limit` / `borrowing_limit` likewise. The schema above follows the
 API.
 
-**Writes: NOT CONFIRMED. This is the one thing blocking full design confirmation.** Unverified:
+**Writes: CONFIRMED.** Run under explicit user authorization. Seven real config versions were applied
+to the test org and each was read back and diffed field by field against what was sent. The org was
+left on **version 7 = the empty document**, governing nothing — no flavors, no queues, no rules, so no
+workload admission is affected.
 
-1. **Round-trip normalization** — whether `POST /config` followed by `GET /config` returns the
-   document unchanged. If the server reorders, defaults, or rewrites anything, the result is a
-   perpetual diff, and the fix (semantic-equality plan modifiers, or `Optional+Computed` on the
-   normalized fields) is a *schema* decision that cannot be retrofitted quietly.
-2. Whether `version` increments predictably and `is_active` behaves as assumed.
-3. Whether `validate` returns diagnostics specific enough to be worth surfacing at plan time.
+Three of the six findings changed the schema, and each is written into §3 rather than only recorded
+here.
 
-**Why this is not just done:** there is no `DELETE`, so applying a first config to this org is not
-cleanly reversible to "no config" — and the product docs warn that once any scheduling rule exists,
-unmatched workloads *fail instead of running*. A careless first apply could break workload admission
-on this org. Authorization requested under [open decisions](#open-decisions).
+**1. Typed fields round-trip byte-stable. No normalization anywhere.** Zero server defaulting, zero
+reordering, zero sorting. Every list came back in written order: flavors, queues, flavors within a
+resource group, resources within a flavor, and `covered_resources` returned as the unsorted
+`["gpu","cpu"]` exactly as sent. Duration strings are verbatim (`"30m"`, `"1h30m"` — not
+canonicalized to a common unit). Integers arrive as floats on the wire (`8` → `8.0`), which is
+invisible through a `Float64` attribute.
+
+*Consequence:* **no semantic-equality plan modifiers and no `Optional+Computed` on any typed field.**
+Plain `Optional` throughout. The normalization contingency this gate existed to detect does not exist.
+
+**2. CHANGED — the untyped blob is not byte-stable, so `advanced_instance_config` cannot be a plain
+string.** `advanced_instance_config` round-trips through an unordered dict *and* coerces numbers: a
+sent `{"nested":{"a":1,"b":…}}` read back as `{"nested":{"b":…,"a":1.0}}`, and the top-level key order
+differed between two reads of the *same* version. The `1.0` was confirmed to come from the server, not
+from the local JSON printer, by grepping the raw response bytes. A `types.String` comparison is
+therefore *guaranteed* to produce a perpetual diff for any blob with two or more keys.
+*Consequence:* `jsontypes.NormalizedType` (§3), plus the Gate 2 item below.
+
+**3. CHANGED — an empty list is not representable.** Sent `{"resource_flavors": [], "resource_queues":
+[]}`; read back `config: {}` with both keys gone. The server collapses an empty array to an absent
+key. *Consequence:* `listvalidator.SizeAtLeast(1)` on the three list sections, and the
+omit-null-vs-send-`[]` / absent-maps-to-null implementation constraint in §3. An empty **object** is
+*not* collapsed — `recycle_policy: {}` is preserved — so that section takes no such validator.
+
+**4. CHANGED — drop `is_active`.** `GET /config` only ever returns the active version, so the
+attribute can only hold `true`. Recorded in §3.
+
+**5. `covered_resources` / `resources[].name` is a closed, case-sensitive, lowercase set:** `cpu`,
+`gpu`, `memory_gb`, `tpu`. `CPU` is rejected. The allowed list is returned in the server's own error
+message, and appears nowhere on the product docs page. §3 explains why this is deliberately *not*
+hardcoded as a validator.
+
+**6. No content dedupe.** A byte-identical re-POST of an unchanged document minted version 2 rather
+than returning version 1. This is what raises findings 2 and 3 from polish to schema changes: a
+perpetual diff here would not merely be noisy, it would append a junk version to an immutable audit
+log on **every single apply**, forever, with no delete verb to clean up after it.
+
+Two error shapes were confirmed, and both negative controls were run *before* trusting any 204 — a
+deliberately malformed document returned **422** (array `detail`, flat `message`, echoed request body)
+and a semantically invalid one returned **400** (string `detail`). That is the positive control
+proving `/config/validate` discriminates; without it, its 204s would have meant nothing. The shapes
+are tabulated in §3.
+
+Also confirmed incidentally: `GET /config/versions` returns `{results, metadata.total,
+next_paging_token}`; `GET /config/versions/99` → **404** `"Scheduler config version 99 not found."`;
+and `/config/preview` returns the corpus/verdicts/lint structure described in §3.
+
+**Referential integrity is enforced server-side in both directions** — a queue naming an unknown
+flavor and a rule naming an unknown queue each return 400. This retroactively justifies
+one-resource-per-document: had the sections been split across separate Terraform resources, no apply
+ordering could keep the references valid, because it is one immutable document minted in a single
+call.
 
 ### Gate 2 — Framework/Core contract
 
-Required before the write path is confirmed, and only reachable after Gate 1(1):
+- **Required, and now the only open gate: nested semantic equality.** Prove that
+  `jsontypes.NormalizedType`'s semantic equality is actually consulted for a value nested inside a
+  `ListNestedAttribute` element — a real `resource.Test` with state holding `1.0` and config declaring
+  `1` (plus a reordered-keys variant), asserting an empty plan. Framework source describes the
+  mechanism without revealing what Core enforces for nested values, and a unit test built on that
+  source shares its blind spot. **If it does not hold nested,** fall back to the `compute_config`
+  precedent — never refresh the blob, carry prior state, recover only at import — matching prior
+  entries **by flavor `name`, not by list index** (§3).
+- That a singleton resource's 404-Read → remove-from-state path does not trip "provider produced
+  inconsistent result after apply."
 
-- If normalization exists, whether a semantic-equality plan modifier may rewrite `resp.PlanValue` for
-  a nested list attribute at plan time. Framework source describes the mechanism without revealing
-  every constraint Core enforces, so this needs a real `resource.Test` plan/apply, not a unit test.
-- That a singleton resource's 404-Read → remove-from-state path does not trip
-  "provider produced inconsistent result after apply."
+The originally-planned Gate 2 item — whether a semantic-equality modifier may rewrite `resp.PlanValue`
+for a *typed* nested attribute — is **moot**: Gate 1 finding 1 proved there is no normalization on any
+typed field, so no such modifier exists to verify.
 
 ---
 
@@ -400,9 +537,10 @@ Exercisable without reference to implementation internals.
 5. `anyscale_cloud` Delete still detaches machine pools — existing cloud lifecycle tests unchanged and
    passing.
 
-**New resource** — each blocked on the corresponding Gate 1 item.
+**New resource.** Gate 1 is closed, so none of these are blocked any longer; 15–18 exist because of
+what it found.
 
-6. Create → `version` set, `is_active` true, document readable back.
+6. Create → `version` set, document readable back field for field.
 7. Re-apply the identical config → **empty plan**. This is the perpetual-diff guard and the single
    most important test here.
 8. Update one field → in-place update, no replacement, `version` advances.
@@ -416,6 +554,25 @@ Exercisable without reference to implementation internals.
 14. Order of `scheduling_rules` and `flavors` round-trips exactly; a reordered config produces a
     non-empty plan.
 
+The next four all follow from Gate 1 findings, and every one of them guards a failure mode that would
+otherwise mint a junk config version on every apply forever (finding 6 — there is no dedupe and no
+delete). Each must be **mutation-proof**: introduce the regression, confirm the test goes red, revert
+byte-clean.
+
+15. **Blob semantic equality, nested.** State holding `{"a":1.0}` inside a flavor and config declaring
+    `{"a":1}` → empty plan; likewise a reordered-keys variant. This is simultaneously the Gate 2
+    proof. Mutate by swapping the attribute type back to `types.String` and confirm red.
+16. **Empty-list rejection.** `resource_flavors = []` fails at **plan** with the omit-the-section
+    guidance, never reaching apply. Mutate by removing the validator and confirm the test catches the
+    resulting empty-array literal reaching the wire.
+17. **Null section omitted from the request body.** Against a body-capturing mock: a config with no
+    `scheduling_rules` sends a body with **no `scheduling_rules` key at all** — not `null`, not `[]`.
+    Assert on the captured bytes. (Note the repo's recorded trap: capture a *snapshot*, not a live
+    reference to a map the handler goes on to mutate.)
+18. **Absent key reads back as null, not as an empty list.** Mock returns `config: {}`; state holds
+    null for all three list sections; an immediately following plan is empty. 17 and 18 are two halves
+    of the same contract and either half alone leaves a permanent diff.
+
 Every test must be shown to genuinely run, not skip — the CI shards match
 `^TestAcc[A-Za-z]+Resource` and `^TestAcc[A-Za-z]+DataSource`, and a non-matching name neither runs
 nor fails. Each regression test must be mutation-proven: introduce the regression, confirm the test
@@ -426,8 +583,14 @@ fails, revert byte-clean.
 ## 8. Risks
 
 - **Beta schema churn** (§4) — accepted, with eyes open.
-- **Perpetual diff from server normalization** — unquantified until Gate 1(1). Highest-impact unknown
-  in this design.
+- **Perpetual diff from server normalization** — **retired as a risk for typed fields** (Gate 1
+  finding 1: no normalization exists) and **narrowed to one leaf** for the untyped blob, where it is
+  now a confirmed certainty rather than a risk and is handled by `jsontypes.NormalizedType`. The
+  residual is Gate 2: whether semantic equality holds for a value nested in a list. Sharper, and much
+  smaller, than when this design was drafted.
+- **Every apply is permanent** — no dedupe, no delete verb (Gate 1 finding 6). Any diff bug does not
+  just annoy; it appends to an immutable org-level audit log on every apply. This is why the §7
+  diff-stability criteria are non-negotiable rather than nice-to-have.
 - **Silent singleton contention** — inherent; mitigated by documentation only.
 - **Destroy surprises users** — mitigated by the warning; no better option exists without a DELETE
   verb.
@@ -467,17 +630,18 @@ thing to remove upstream — flagged, not worked around.
 
 ## 9. Open decisions
 
-Escalated rather than assumed.
-
-1. **Authorization to satisfy Gate 1 for the write path** — apply a scheduler config to this org.
-   Not cleanly reversible (no DELETE), and a config containing scheduling rules can affect workload
-   admission. A flavors-only config with no `scheduling_rules` and no zero quotas looks materially
-   safer and would still answer the normalization question; confirmation needed either way.
-2. **Migration guide for the retirement** — repo policy makes this the user's call every time. The
-   recommendation is no, on the stronger-than-usual ground that the types were never registered in any
-   released build.
+**None outstanding for design.** One verification item remains, and it belongs to implementation, not
+to this contract: Gate 2's nested-semantic-equality proof (§6), which is also acceptance criterion 15.
+Its failure branch is already decided, so the design does not fork on the answer.
 
 Closed since first draft:
+
+- **Authorization to satisfy Gate 1 for the write path** — **granted**, and exercised. Seven versions
+  applied; the org was left on an empty document governing nothing. Results in §6; three schema
+  changes followed.
+- **Migration guide for the retirement** — **not required.** User's call, per repo policy, and made
+  explicitly. The recommendation had been no on the ground that the types were never registered in any
+  released build; that is now the decision.
 
 - **Typed vs encoded document** — decided typed (§4). The beta-tracking commitment is accepted as
   part of owning the resource; it is a maintenance cost, not a design fork.
