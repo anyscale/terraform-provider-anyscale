@@ -154,6 +154,7 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewContainerImageBuildResource,
 		NewContainerImageRegistryResource,
 		NewServiceResource,
+		NewSchedulerConfigResource,
 		NewSystemClusterResource,
 	}
 }
