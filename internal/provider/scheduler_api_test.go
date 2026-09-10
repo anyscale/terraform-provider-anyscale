@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -131,24 +132,41 @@ func TestApplySchedulerConfigOmitsUnsetFields(t *testing.T) {
 // backend's own wording uses the surface's former internal name, which appears
 // nowhere in this provider or in Anyscale's public documentation, so passing it
 // through unchanged tells a practitioner nothing they can act on.
+//
+// Both bodies below must classify: the one upstream sends today, and the one
+// it will plausibly send once the rename reaches its own error string. The
+// second case is the load-bearing one - classification drives both fail-open
+// paths, so a miss turns every plan into a hard workspace-wide failure, and
+// the change that caused it would be a cosmetic reword upstream that nothing
+// here would otherwise flag.
 func TestTranslateSchedulerAPIErrorAdmissionFlag(t *testing.T) {
-	client := schedulerTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"error":{"detail":"GRS is not enabled for this organization."}}`))
-	}))
+	for _, tc := range []struct {
+		name   string
+		detail string
+	}{
+		{"current wording", "GRS is not enabled for this organization."},
+		{"post-rename wording", "Anyscale Scheduler is not enabled for this organization."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := schedulerTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = fmt.Fprintf(w, `{"error":{"detail":%q}}`, tc.detail)
+			}))
 
-	_, err := getActiveSchedulerConfig(context.Background(), client)
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if !errors.Is(err, ErrSchedulerNotEnabled) {
-		t.Fatalf("403 from the admission gate was not classified: %v", err)
-	}
-	if !strings.Contains(err.Error(), "Anyscale Scheduler is not enabled") {
-		t.Errorf("diagnostic does not name the product: %v", err)
-	}
-	if strings.Contains(err.Error(), "GRS") {
-		t.Errorf("diagnostic leaks the backend's internal name: %v", err)
+			_, err := getActiveSchedulerConfig(context.Background(), client)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !errors.Is(err, ErrSchedulerNotEnabled) {
+				t.Fatalf("403 from the admission gate was not classified: %v", err)
+			}
+			if !strings.Contains(err.Error(), "Anyscale Scheduler is not enabled") {
+				t.Errorf("diagnostic does not name the product: %v", err)
+			}
+			if strings.Contains(err.Error(), "GRS") {
+				t.Errorf("diagnostic leaks the backend's internal name: %v", err)
+			}
+		})
 	}
 }
 

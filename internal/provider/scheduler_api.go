@@ -256,11 +256,21 @@ var ErrSchedulerConfigNotFound = errors.New("no active scheduler config")
 // surfacing the backend's internal wording.
 var ErrSchedulerNotEnabled = errors.New("anyscale scheduler is not enabled for this organization")
 
-// schedulerNotEnabledDetail is the backend's own 403 text
-// (RequireGRSAdmissionFlag). Matched as a substring, and only ever in
-// combination with a real 403 status, so an unrelated 403 whose body happens
-// to echo similar words cannot be misclassified on text alone.
-const schedulerNotEnabledDetail = "GRS is not enabled for this organization"
+// schedulerNotEnabledDetail is the name-agnostic half of the backend's 403
+// text from the scheduler admission gate. The gate's message currently leads
+// with the surface's former internal abbreviation, which this rename is
+// retiring - so matching on that abbreviation would break the moment upstream
+// rewords its own sentence, which is a cosmetic change nothing would flag.
+// This clause is house phrasing shared by unrelated capability gates upstream,
+// making it the stable half.
+//
+// Deliberately biased toward over-matching. A false positive costs a warning
+// that still quotes the server's own reason, so the practitioner sees the true
+// cause regardless. A false negative sends both fail-open paths back to hard
+// errors and blocks plan workspace-wide - the exact failure the fail-open
+// behavior exists to prevent, reintroduced silently. The 403 status
+// requirement below is what keeps an unrelated body from matching at all.
+const schedulerNotEnabledDetail = "not enabled for this organization"
 
 // isSchedulerNotEnabled reports whether err is a 403 raised by the scheduler
 // admission gate.
