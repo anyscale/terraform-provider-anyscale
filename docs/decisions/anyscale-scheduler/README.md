@@ -1,9 +1,7 @@
 # Anyscale Scheduler — Terraform surface contract
 
-Status: **design confirmed — reads and writes both verified live against the API** (see
-[Verification gates](#verification-gates)). No design decisions remain open. One framework-contract
-proof (Gate 2, nested semantic equality) belongs to implementation and has a decided failure branch,
-so nothing here forks on its outcome.
+Status: **design confirmed — reads and writes both verified live against the API, and both verification
+gates are closed** (see [Verification gates](#verification-gates)). No design decisions remain open.
 
 The write probe changed three schema decisions from an earlier draft — `advanced_instance_config` now
 needs semantic equality, empty lists are rejected at plan time, and `is_active` is dropped. Anything
@@ -37,14 +35,23 @@ command path — three of the four user-facing surfaces. Only the CLI help strin
 Scheduler," and "GRS" is an internal-facing abbreviation this provider should not adopt.
 
 **But the resource's `MarkdownDescription` must still name the alias once**, because "should not adopt"
-is not the same as "users will never see it." The admission-flag diagnostic (§3) surfaces the server's
-own words, and that string is literally `"GRS is not enabled for this organization."` The abbreviation
-therefore reaches users *through our own error text* regardless of what we call the type. One sentence:
-the Anyscale Scheduler is also referred to upstream as the Global Resource Scheduler (GRS), the CLI
-help text and some API error messages still use that name, and they are the same product. Not
-"formerly known as" — the upstream rename was identifiers only and the prose name was never retired,
-so "formerly" would be false. And none of the internal identifiers from the table above belong on a
-published page.
+is not the same as "users will never encounter it." A practitioner who runs the CLI's `--help` meets
+"Global Resource Scheduler" with nothing connecting it to the type they just wrote, and the raw API
+still returns the abbreviation in its own error text. One sentence: the Anyscale Scheduler is also
+referred to upstream as the Global Resource Scheduler (GRS), the CLI help text and some API error
+messages still use that name, and they are the same product. Not "formerly known as" — the upstream
+rename was identifiers only and the prose name was never retired, so "formerly" would be false. And
+none of the internal identifiers from the table above belong on a published page.
+
+**The alias must NOT be justified by our own diagnostics, and this doc previously got that wrong.** An
+earlier revision of this section claimed the decisive reason was that the admission-flag diagnostic
+surfaces the server's `"GRS is not enabled for this organization."` verbatim. It does not: the
+transport layer deliberately scrubs the abbreviation and substitutes the product name, and a unit test
+asserts the diagnostic does *not* contain it. That scrub is correct and stays — it is the named,
+actionable error §3 asks for, and the "surface the server's own words" rule in §3 governs the 422/400
+*validation* messages, where the server knows constraints we do not, not the 403 capability gate, where
+the actionable name is ours. Prose pointing a user at a string we guarantee they never see would be a
+worse defect than the omission it was fixing.
 
 ---
 
@@ -219,21 +226,38 @@ Upstream types it as an untyped `object` with no properties. The repo already ma
 the per-node `advanced_instance_config` on `anyscale_compute_config`, and the recorded reason transfers
 precisely: the field lives inside a list, and `Dynamic` inside a list is the known-broken case.
 
-What does *not* transfer is byte comparison. The blob round-trips through an unordered dict and coerces
-integers to floats — a sent `{"nested":{"a":1,"b":…}}` reads back as `{"nested":{"b":…,"a":1.0}}`, and
-top-level key order differed between two reads of the *same* version (logged in §6). A plain
-`types.String` is therefore guaranteed to diff forever for any blob with two or more keys at any level.
-Use `jsontypes.NormalizedType`, whose semantic equality compares unmarshalled values, so reordered keys
-and `1` vs `1.0` both compare equal. `go.mod` already carries the dependency line, commented out.
+What does *not* transfer is byte comparison — but **not for the reason an earlier revision of this doc
+gave, and the difference changes how the test must be written.** The wire is unstable (unordered dict,
+integers widened to floats — §6 finding 2), and the original rationale stopped there. It should not
+have: `flatten` re-marshals the parsed object through Go, and `encoding/json` sorts map keys and
+renders `float64(3)` as `3`. **The API's reordering and widening therefore never reach state — state is
+always Go-canonical.** Measuring the wire and asserting about state skipped a layer that canonicalizes.
 
-That choice carries a **Gate 2 obligation** (§6): prove semantic equality is actually consulted for a
-value nested inside a `ListNestedAttribute` element, with a real `resource.Test` where state holds
-`1.0` and config holds `1`, asserting an empty plan. Framework source describes the mechanism without
-revealing what Core enforces for nested values. If it does not hold nested, fall back to the
-`compute_config` precedent — never refresh the blob, carry prior state forward, recover only at
-import — but match the prior entry **by flavor `name`, not by list index** the way `compute_config`
-does, because flavor lists get reordered and an index correspondence would silently graft one flavor's
-blob onto another.
+The divergence that *does* survive is between Go-canonical state and whatever the practitioner wrote.
+A hand-written or `file()`-loaded blob with its own key order and whitespace will differ from state
+byte-for-byte on every plan, so a plain `types.String` still diffs forever — the conclusion holds, the
+mechanism is the user's formatting rather than the server's. Use `jsontypes.NormalizedType`, whose
+semantic equality absorbs key order and whitespace.
+
+Two consequences follow, both load-bearing:
+
+- **A `jsonencode()`-based test is a placebo.** `jsonencode()` emits sorted, whitespace-free JSON —
+  byte-identical to what `flatten` produces — so such a test passes against a plain `StringAttribute`
+  and proves nothing. It must use a hand-written or `file()`-loaded blob. (This is not hypothetical:
+  the first implementation draft did exactly that and passed without the custom type.)
+- **Numeric literal form is NOT absorbed, so it is a documented limitation, not a fixed one.**
+  `jsontypes` decodes with `dec.UseNumber()` specifically to avoid normalizing numeric representation,
+  so numbers compare as literal text and `1.0` does **not** equal `1`. A blob hand-written with `1.0`
+  therefore diffs against the `1` that `flatten` produces — permanently, and because the API has no
+  content dedupe and no delete verb, every such plan mints another immutable version. The schema
+  description must say so plainly. Not worth "fixing": preserving the wire's numeric form in state
+  would repair the rare hand-written `1.0` by breaking the common `1`, and a bespoke numeric-aware
+  modifier would reimplement semantic equality and lose its contract.
+
+Rejected fallback, recorded because it was the decided branch had Gate 2 failed: the `compute_config`
+precedent — never refresh the blob, carry prior state forward, recover only at import — matched **by
+flavor `name`, not by list index** the way `compute_config` does, since an index correspondence would
+silently graft one flavor's blob onto another. Gate 2 passed, so this is not the shipped design.
 
 **All ordering is significant and must be preserved, never sorted.** The product docs are explicit
 that flavors within a resource group are tried in written order and that scheduling rules are
@@ -474,9 +498,13 @@ Plain `Optional` throughout. The normalization contingency this gate existed to 
 string.** `advanced_instance_config` round-trips through an unordered dict *and* coerces numbers: a
 sent `{"nested":{"a":1,"b":…}}` read back as `{"nested":{"b":…,"a":1.0}}`, and the top-level key order
 differed between two reads of the *same* version. The `1.0` was confirmed to come from the server, not
-from the local JSON printer, by grepping the raw response bytes. A `types.String` comparison is
-therefore *guaranteed* to produce a perpetual diff for any blob with two or more keys.
-*Consequence:* `jsontypes.NormalizedType` (§3), plus the Gate 2 item below.
+from the local JSON printer, by grepping the raw response bytes.
+
+*Consequence:* `jsontypes.NormalizedType` (§3) — but note the correction recorded in §3: this wire
+instability is **not** what reaches state, because `flatten` re-marshals through Go and canonicalizes
+key order and numeric form. The instability that survives into a plan is between Go-canonical state and
+the practitioner's own formatting. The schema decision is unchanged; the reasoning and the test shape
+are not.
 
 **3. CHANGED — an empty list is not representable.** Sent `{"resource_flavors": [], "resource_queues":
 []}`; read back `config: {}` with both keys gone. The server collapses an empty array to an absent
@@ -515,14 +543,20 @@ call.
 
 ### Gate 2 — Framework/Core contract
 
-- **Required, and now the only open gate: nested semantic equality.** Prove that
-  `jsontypes.NormalizedType`'s semantic equality is actually consulted for a value nested inside a
-  `ListNestedAttribute` element — a real `resource.Test` with state holding `1.0` and config declaring
-  `1` (plus a reordered-keys variant), asserting an empty plan. Framework source describes the
-  mechanism without revealing what Core enforces for nested values, and a unit test built on that
-  source shares its blind spot. **If it does not hold nested,** fall back to the `compute_config`
-  precedent — never refresh the blob, carry prior state, recover only at import — matching prior
-  entries **by flavor `name`, not by list index** (§3).
+- **CLOSED — nested semantic equality holds.** `jsontypes.NormalizedType`'s semantic equality *is*
+  consulted for a value nested inside a `ListNestedAttribute` element: empty plan confirmed with a real
+  `resource.Test`, mutation-proven by dropping `CustomType` and observing red
+  (`internal/acctest/resource_scheduler_config_advanced_config_acc_test.go`). The `compute_config`
+  fallback in §3 is therefore not the shipped design.
+
+  **Two facts about how it holds, both of which corrected this document rather than confirming it.**
+  Whitespace and key order are absorbed; **numeric literal form is not** — `jsontypes` decodes with
+  `dec.UseNumber()` (verified at `normalized_value.go:104`), so `1.0` does not equal `1`. And the case
+  the gate exists to cover is a *hand-written* blob, not a `jsonencode()`d one: `flatten` re-marshals
+  through Go (`json.Marshal(map[string]any)`), which sorts keys and renders `float64(3)` as `3`, so a
+  `jsonencode()` config is byte-identical to state and passes against a plain `StringAttribute`. Both
+  were found by running the test, not by reading framework source — which is precisely the failure mode
+  Gate 2 exists to catch, and this time it caught the design doc.
 - That a singleton resource's 404-Read → remove-from-state path does not trip "provider produced
   inconsistent result after apply."
 
@@ -569,9 +603,19 @@ otherwise mint a junk config version on every apply forever (finding 6 — there
 delete). Each must be **mutation-proof**: introduce the regression, confirm the test goes red, revert
 byte-clean.
 
-15. **Blob semantic equality, nested.** State holding `{"a":1.0}` inside a flavor and config declaring
-    `{"a":1}` → empty plan; likewise a reordered-keys variant. This is simultaneously the Gate 2
-    proof. Mutate by swapping the attribute type back to `types.String` and confirm red.
+15. **Blob semantic equality, nested.** *(met — this is the Gate 2 proof.)* Config declaring a
+    **hand-written** blob whose key order and whitespace differ from Go-canonical form → empty plan on
+    re-plan. Mutate by dropping `CustomType` and confirm red.
+
+    **Do not write this with `jsonencode()`.** `jsonencode()` output is byte-identical to what
+    `flatten` produces, so the test passes against a plain `StringAttribute` and asserts nothing — the
+    first implementation draft failed exactly this way. Use a literal heredoc or `file()`.
+15b. **Numeric literal form diffs, and that is the documented contract.** A blob hand-written with
+    `{"a": 1.0}` produces a **non-empty** plan, because `jsontypes` compares numbers as text. Assert
+    the diff rather than an empty plan: this pins a known limitation so it is discovered by a test
+    instead of by a user, and guards against a future "improvement" that silently swallows it. The
+    schema description must state the rule (write integers without a decimal point), since the cost of
+    tripping it is an extra immutable config version on every apply, forever.
 16. **Empty-list rejection.** `resource_flavors = []` fails at **plan** with the omit-the-section
     guidance, never reaching apply. Mutate by removing the validator and confirm the test catches the
     resulting empty-array literal reaching the wire.
@@ -640,11 +684,17 @@ thing to remove upstream — flagged, not worked around.
 
 ## 9. Open decisions
 
-**None outstanding for design.** One verification item remains, and it belongs to implementation, not
-to this contract: Gate 2's nested-semantic-equality proof (§6), which is also acceptance criterion 15.
-Its failure branch is already decided, so the design does not fork on the answer.
+**None outstanding, and both verification gates are now closed.**
 
 Closed since first draft:
+
+- **Gate 2 — nested semantic equality** — **passed**, mutation-proven (§6). It corrected two pieces of
+  this document's own reasoning on the way through: state is Go-canonical rather than wire-shaped, and
+  numeric literal form is not absorbed. Recorded at §3 and criteria 15/15b.
+- **Whether to name the GRS alias, and on what grounds** — **yes, once, in the resource's top-level
+  description**, on the strength of the CLI help text and raw API errors only. The earlier rationale
+  citing our own admission-flag diagnostic was false and is retracted in §0; the transport's scrub of
+  the abbreviation stands unchanged.
 
 - **Authorization to satisfy Gate 1 for the write path** — **granted**, and exercised. Seven versions
   applied; the org was left on an empty document governing nothing. Results in §6; three schema
