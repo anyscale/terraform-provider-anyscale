@@ -731,6 +731,18 @@ byte-clean.
     null for all three list sections; an immediately following plan is empty. 17 and 18 are two halves
     of the same contract and either half alone leaves a permanent diff.
 
+    **The two halves fail through different mechanisms, which is why neither test substitutes for the
+    other.** These sections are `Optional` and *not* `Computed`, so an omitted section is planned as
+    null and Core enforces that against what apply returns. Mutating the *flatten* half — materialize
+    an empty slice where it should leave `nil` — should therefore surface as a **failed apply**
+    (*"provider produced inconsistent result after apply"*, the repo's C12 shape), not as a non-empty
+    plan. Mutating the *expand* half — emit `[]` instead of omitting the key — may not fail visibly
+    at all in a mock round-trip, because the server collapses an empty array to an absent key (Gate 1
+    finding 5) and the read path then yields null anyway; only criterion 17's assertion on the
+    captured bytes catches it. A run in which the flatten mutation produces a clean-but-non-empty
+    plan instead of an apply failure means something is absorbing the divergence, and that is itself
+    a finding worth chasing rather than working around.
+
 **Plan-time validation fails open** (see §3 *Plan-time behavior*). Both are mock-only, so they cost
 nothing under the sweeper ruling above.
 
