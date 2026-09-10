@@ -262,17 +262,18 @@ func (s *schedulerConfigServer) SetGetResponse(status int, body string) {
 
 // SetReadConfig changes the literal "config" document GET returns on the
 // success path, without touching the version counter or forcing an error
-// status, and locks readConfig against further auto-derivation from applied
-// bodies. Used by tests that need a specific wire shape GET must return
+// status, and locks readConfig against the map-marshaling auto-derivation from
+// applied bodies. Used by tests that need a specific wire shape GET must return
 // regardless of what was last posted (reordering, numeric-form divergence, a
 // deliberately omitted section).
 //
-// It locks readConfigAuto but deliberately leaves echoApplied alone, despite
-// looking like it disables read-back derivation wholesale. A test that seeds a
-// divergent document here and then asserts the corrective apply settles needs
-// the echo to survive this call: with it cleared, the seeded document would
-// stay in place and the convergence assertion would be measuring the seed
-// rather than the write path.
+// It locks readConfig by clearing readConfigAuto, but deliberately leaves the
+// other derivation flag, echoApplied, set - despite reading as though it
+// disables read-back derivation wholesale. A test that seeds a divergent
+// document here and then asserts the corrective apply settles needs the echo to
+// survive this call: with it cleared, the seeded document would stay in place
+// and the convergence assertion would be measuring the seed rather than the
+// write path.
 func (s *schedulerConfigServer) SetReadConfig(readConfig string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
