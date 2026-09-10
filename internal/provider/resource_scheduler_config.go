@@ -156,7 +156,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			"~> **Singleton, authoritative-write.** An organization has at most one active scheduler config, and this resource owns the whole document - there is no per-cloud variant and no user-chosen key. Two Terraform configurations that both declare `anyscale_scheduler_config` for the same organization will silently fight, each apply reverting the other. Declare it in exactly one place. Changes made outside Terraform (CLI or console) appear as drift and are reverted by the next apply.\n\n" +
 			"~> **`terraform destroy` does not clear the configuration.** The Anyscale API has no delete operation for scheduler configs, so destroying this resource removes it from Terraform state while the organization's config stays active. See the warning emitted at destroy time.\n\n" +
 			"Requires the Anyscale Scheduler to be enabled for your organization. If it is not, the provider reports that explicitly rather than surfacing a bare permission error.\n\n" +
-			"-> **A note on naming.** The Anyscale CLI's help text calls this surface the \"Global Resource Scheduler,\" abbreviated `GRS` in some API error messages. The product, its documentation, and this provider all call it the Anyscale Scheduler; they are the same thing.",
+			"-> **A note on naming.** You may also see this called the **Global Resource Scheduler (GRS)** - the Anyscale CLI help text and some API error messages still use that name. They are the same product.",
 		Attributes: map[string]schema.Attribute{
 			"version": schema.Int64Attribute{
 				Computed:            true,
