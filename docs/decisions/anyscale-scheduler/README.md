@@ -230,6 +230,23 @@ struct pointer tests only nilness, so an unconditionally allocated empty struct 
 exception as the validator above, in the opposite direction: the field that needs no validator is the
 one whose omit constraint is genuinely the implementation's to keep.
 
+The **read** half's mechanism is the schema choice, and it has to be quarantined from an identical
+phrase that is false one path over. A config that omits a section holds the provider to null;
+refreshed state holding `[]` is a different value, so every plan proposes the change and every apply
+mints another immutable version. Were these sections `Optional + Computed`, a null config would adopt
+prior state and `[]` would never diff — so `Optional`-not-`Computed` is genuinely what makes flatten's
+mapping load-bearing. That is documented, undisputed framework behavior; asserted here, not re-run.
+**The same words were falsified for apply.** Criterion 18 originally predicted a flatten regression
+would fail the *apply* with an inconsistent-result error for this reason, and a real run disproved it:
+apply never renders the document through `flatten` at all, so Core's post-apply check is blind, not
+lenient. One schema fact, load-bearing for the diff and irrelevant to the apply error. Side by side
+the two read as a contradiction, which makes either one a prime candidate for a future "cleanup" that
+reintroduces the bug — so neither may be edited to match the other without re-reading this paragraph.
+
+The server-collapse fact keeps a narrower role on the read half: it is why an absent key is *reachable
+at all*, and therefore why flatten must handle the case — not why `null` is the correct mapping.
+Neither delete it nor promote it.
+
 **`advanced_instance_config` is a JSON string, not `Dynamic`, and it needs semantic equality.**
 Upstream types it as an untyped `object` with no properties. The repo already made the string call for
 the per-node `advanced_instance_config` on `anyscale_compute_config`, and the recorded reason transfers
