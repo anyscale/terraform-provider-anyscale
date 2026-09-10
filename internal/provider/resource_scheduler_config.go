@@ -542,9 +542,13 @@ func flattenAdvancedInstanceConfig(apiValue map[string]any) (jsontypes.Normalize
 
 // flattenSchedulerConfig maps the wire document onto the Terraform model.
 //
-// An absent section maps to a nil slice, i.e. Terraform null - never to an
-// empty list. The server collapses an empty array to an absent key, so
-// flattening absent to [] would diff forever against a config that omitted it.
+// An absent section maps to nil, i.e. Terraform null - never to an empty list
+// or an allocated empty struct. Unlike the omit half on the request side, this
+// really is the implementation's to keep for every section: the sections are
+// Optional and not Computed, so a config that omits one holds the provider to
+// null, and [] or {} is a different value that diffs forever against it. The
+// list fields append into nil slices and recycle_policy is only allocated when
+// the wire carries it; do not pre-allocate either to "simplify" this loop.
 func flattenSchedulerConfig(cfg SchedulerConfig) (*SchedulerConfigResourceModel, error) {
 	model := &SchedulerConfigResourceModel{}
 
