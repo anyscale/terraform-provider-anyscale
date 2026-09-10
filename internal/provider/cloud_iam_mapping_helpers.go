@@ -235,11 +235,13 @@ type CloudIAMMappingRuleModel struct {
 
 // dataplaneIAMMappingRulesFromState converts the schema's rules
 // types.List into the wire slice, preserving order - never sort, never
-// dedupe. Returns nil (not an empty slice) for a null or empty list so the
-// caller's DataplaneIAMMappingWireSpec.Rules stays omitempty-empty on the
-// wire, matching "rules omitted" rather than "rules explicitly empty" (the
-// backend treats both the same way today, but nil is the more honest
-// representation of "no rules configured").
+// dedupe. Returns nil rather than an empty slice for a null or empty list.
+// That choice is readability only, not a wire guard: Rules carries omitempty,
+// which drops any len-0 slice, so nil and an allocated empty slice serialize
+// identically and neither can express "rules explicitly empty". Nil is simply
+// the more honest in-memory representation of "no rules configured". Do not
+// build a behavioral distinction on it - to send an explicit empty list the
+// field would have to lose omitempty or become a pointer.
 func dataplaneIAMMappingRulesFromState(ctx context.Context, rules types.List) ([]DataplaneIAMMappingRule, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if rules.IsNull() || rules.IsUnknown() || len(rules.Elements()) == 0 {

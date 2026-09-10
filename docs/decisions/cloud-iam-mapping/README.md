@@ -229,8 +229,8 @@ practitioner the write may have partially applied and that a refresh will show t
 
 Machine-pool propagation is a **no-op for non-PCP clouds**, independently confirmed by two lanes.
 Ordinary AWS/GCP/K8s clouds require no machine pool, so this design does **not** build on the
-Global Resource Scheduler surface that remains deliberately disabled at
-`internal/provider/provider.go:154`, `:189-190`.
+machine-pool-backed scheduler surface, which was never registered in a released provider and has
+since been removed.
 
 ## Data source
 

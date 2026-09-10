@@ -39,7 +39,7 @@ func isSweepDryRun() bool {
 
 // sweepableResourcePrefixes are the only name prefixes any sweeper will ever
 // delete - a safety invariant shared across every resource type (cloud,
-// compute_config, container_image, project, global_resource_scheduler, ...).
+// compute_config, container_image, project, ...).
 // Ephemeral clouds are named "tfacc-ephemeral-<nanos>" (see
 // createEphemeralTestCloud), which already starts with "tfacc-", so no
 // resource type needs a separate prefix list of its own.

@@ -12,6 +12,7 @@ require (
 require github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
 
 require (
+	github.com/hashicorp/terraform-plugin-framework-jsontypes v0.2.0
 	github.com/hashicorp/terraform-plugin-framework-timeouts v0.7.0
 	k8s.io/apimachinery v0.35.7
 )
