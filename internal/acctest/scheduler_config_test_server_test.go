@@ -39,6 +39,13 @@ type schedulerConfigServer struct {
 	// mock increments requests so a test can assert zero after Destroy.
 	requests int
 
+	// Criterion 11: writes (POST /api/v2/scheduler/config, the only mutating
+	// call the API exposes) are also counted separately from requests, since
+	// a legitimate Read refresh (GET) still happens as part of Terraform's own
+	// pre-destroy plan and would otherwise be indistinguishable from an
+	// errant write in a simple before/after requests comparison.
+	writes int
+
 	// Criteria 19/20/21: force the validate or GET-config endpoint to answer
 	// with a specific status/body instead of the default success path, so a
 	// test can simulate "the server could not evaluate this" (5xx/timeout
@@ -132,6 +139,7 @@ func newSchedulerConfigServer(t *testing.T, opts schedulerConfigServerOpts) (*ht
 				return
 			}
 			s.lastApplyBodyRaw = raw
+			s.writes++
 
 			var body struct {
 				Config map[string]any `json:"config"`
@@ -189,6 +197,16 @@ func (s *schedulerConfigServer) RequestCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.requests
+}
+
+// WriteCount returns the number of POST /api/v2/scheduler/config calls the
+// mock has received - the only mutating call the real API exposes for this
+// resource. Unlike RequestCount, it is unaffected by the GET refresh
+// Terraform issues before planning a destroy.
+func (s *schedulerConfigServer) WriteCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writes
 }
 
 func (s *schedulerConfigServer) LastApplyBody() []byte {
