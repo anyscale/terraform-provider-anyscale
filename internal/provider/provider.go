@@ -182,6 +182,7 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewOrganizationUsersDataSource,
 		NewProjectDataSource,
 		NewProjectsDataSource,
+		NewSchedulerConfigDataSource,
 		NewServiceDataSource,
 		NewServicesDataSource,
 		NewSystemClusterDataSource,
