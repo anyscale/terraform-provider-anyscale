@@ -743,6 +743,14 @@ byte-clean.
     plan instead of an apply failure means something is absorbing the divergence, and that is itself
     a finding worth chasing rather than working around.
 
+    **Which mutation produces which symptom is reasoned from Core's post-apply consistency check, and
+    has NOT been observed.** Two people reviewing the design agreed on it independently; that is
+    concurrence, not evidence, and the design-verification policy for a Core-contract claim asks for a
+    real plan/apply. This criterion's own run is what closes it. Until a logged result is recorded
+    here, treat the *requirement* (the contract's two halves both hold) as settled and the *predicted
+    symptom* as a hypothesis — and if the run disagrees, correct this paragraph rather than
+    reinterpreting the run to fit it.
+
 **Plan-time validation fails open** (see §3 *Plan-time behavior*). Both are mock-only, so they cost
 nothing under the sweeper ruling above.
 
