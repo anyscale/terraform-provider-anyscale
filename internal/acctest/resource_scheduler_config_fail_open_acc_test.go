@@ -37,7 +37,8 @@ resource "anyscale_scheduler_config" "test" {
 
 const schedulerFailOpenReadConfig = `{"resource_flavors":[{"name":"cpu-standard"}]}`
 
-// Criterion 19: an unreachable validation endpoint does not block plan.
+// TestAccSchedulerConfigResourceValidationUnreachableDoesNotBlockPlan: an
+// unreachable validation endpoint does not block plan.
 //
 // The mock answers 503 on /config/validate - the server never got as far as
 // reading the document - while the apply path itself stays healthy. A build
@@ -69,13 +70,13 @@ func TestAccSchedulerConfigResourceValidationUnreachableDoesNotBlockPlan(t *test
 	}
 }
 
-// Criterion 20: the organization-level admission-flag 403 does not block plan
-// either.
+// TestAccSchedulerConfigResourceAdmissionFlag403DoesNotBlockPlan: the
+// organization-level admission-flag 403 does not block plan either.
 //
-// This is the same fail-open path as criterion 19 but the case a practitioner
-// is far more likely to hit: an org without the scheduler enabled. Blocking
-// plan here would make the whole workspace unplannable, not just this
-// resource.
+// This is the same fail-open path as the unreachable-validation case above,
+// but the one a practitioner is far more likely to hit: an org without the
+// scheduler enabled. Blocking plan here would make the whole workspace
+// unplannable, not just this resource.
 func TestAccSchedulerConfigResourceAdmissionFlag403DoesNotBlockPlan(t *testing.T) {
 	server, mock := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig:     schedulerFailOpenReadConfig,
@@ -101,8 +102,9 @@ func TestAccSchedulerConfigResourceAdmissionFlag403DoesNotBlockPlan(t *testing.T
 	}
 }
 
-// Criterion 21: a 403 on refresh, with the resource already in state,
-// completes the plan AND retains the state.
+// TestAccSchedulerConfigResourceRefreshForbiddenRetainsState: a 403 on
+// refresh, with the resource already in state, completes the plan AND
+// retains the state.
 //
 // Two independent things can go wrong here and one assertion cannot catch
 // both:
@@ -116,7 +118,7 @@ func TestAccSchedulerConfigResourceAdmissionFlag403DoesNotBlockPlan(t *testing.T
 //     check: a dropped resource plans a Create, not a no-op.
 //
 // So the empty-plan check is not a stylistic tightening of the completion
-// assertion. It is the second half of the criterion.
+// assertion. It is the second half of what this test proves.
 func TestAccSchedulerConfigResourceRefreshForbiddenRetainsState(t *testing.T) {
 	server, mock := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig: schedulerFailOpenReadConfig,

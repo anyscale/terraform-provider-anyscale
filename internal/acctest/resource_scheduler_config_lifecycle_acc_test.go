@@ -10,8 +10,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// Criteria 6 and 7: create sets every declared section and version, and an
-// identical re-apply of that same config plans empty.
+// Create sets every declared section and version, and an identical re-apply
+// of that same config plans empty.
 //
 // Empty-plan is asserted explicitly via plancheck.ExpectEmptyPlan() rather
 // than trusting step success alone: on an append-only API with no content
@@ -102,8 +102,8 @@ resource "anyscale_scheduler_config" "test" {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Criterion 6: every declared field is readable back, and
-				// version is set by the first apply.
+				// Every declared field is readable back, and version is set by
+				// the first apply.
 				Config: testAccProviderBlock(server.URL) + config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "version", "1"),
@@ -127,8 +127,8 @@ resource "anyscale_scheduler_config" "test" {
 				),
 			},
 			{
-				// Criterion 7: replanning identical config against the state
-				// the first apply produced must be a true no-op.
+				// Replanning identical config against the state the first
+				// apply produced must be a true no-op.
 				Config: testAccProviderBlock(server.URL) + config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -140,8 +140,8 @@ resource "anyscale_scheduler_config" "test" {
 	})
 }
 
-// Criterion 8: changing one field updates in place - no replacement - and
-// mints a new version. resource_flavors carries no RequiresReplace plan
+// Changing one field updates in place - no replacement - and mints a new
+// version. resource_flavors carries no RequiresReplace plan
 // modifier anywhere in the schema (the whole document is one authoritative,
 // in-place-writable API object), so an update here must never destroy first.
 //
@@ -195,9 +195,10 @@ resource "anyscale_scheduler_config" "test" {
 	})
 }
 
-// Criterion 18: a section omitted entirely by the API - not sent as an empty
-// list or empty object, genuinely absent from the JSON - must read back as
-// Terraform null, not as an empty collection.
+// TestAccSchedulerConfigResourceLifecycleOmittedSectionsReadAsNull: a section
+// omitted entirely by the API - not sent as an empty list or empty object,
+// genuinely absent from the JSON - must read back as Terraform null, not as
+// an empty collection.
 //
 // This is the plan/apply half of the twin null/omit constraint the unit
 // tests exercise at the Go level only (expand omits a null section on write,
@@ -212,15 +213,17 @@ resource "anyscale_scheduler_config" "test" {
 // that shipped the mount_targets import bug this repo has seen before.
 //
 // This test covers only the flatten half of the twin null/omit contract -
-// criterion 17's raw-body assertion is the only detector for the expand half.
+// TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections' raw-body
+// assertion is the only detector for the expand half.
 // For recycle_policy that detector is real: an unconditionally-allocated
 // empty struct reaches the wire regardless of the tag. For the three list
 // fields it is not - `omitempty` on a `[]T` drops any zero-length slice
 // before the request is even built, so a broken expand that materializes an
 // empty slice there never reaches the wire to be inspected by anything, this
 // test's own byte assertion included. Not "the server collapses it back";
-// the value never leaves the client. See criterion 17 below for what
-// mutation actually proves something on each field kind.
+// the value never leaves the client. See
+// TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections below for
+// what mutation actually proves something on each field kind.
 //
 // Mutation-proof (reverted, byte-clean): materializing
 // model.ResourceQueues = []schedulerResourceQueueModel{} when the section is
@@ -244,12 +247,13 @@ resource "anyscale_scheduler_config" "test" {
 // proposes removing it, every apply mints another immutable version (this
 // resource has no delete verb), and the next refresh writes the empty list
 // again. Keep this test for that reason, not merely as a regression guard.
-// Criterion 17: a section the practitioner never declares must never appear
-// on the wire at all - not as `[]`/`{}`. This test is the only thing in the
-// suite that inspects the request body itself rather than the read-back, so
-// it is the sole detector for whichever half of this contract is genuinely
-// expand's to get wrong - see the mutation-proof below for which field that
-// actually is, and why it isn't the one the name of this test suggests.
+// TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections: a
+// section the practitioner never declares must never appear on the wire at
+// all - not as `[]`/`{}`. This test is the only thing in the suite that
+// inspects the request body itself rather than the read-back, so it is the
+// sole detector for whichever half of this contract is genuinely expand's to
+// get wrong - see the mutation-proof below for which field that actually is,
+// and why it isn't the one the name of this test suggests.
 //
 // LastApplyBody() returns bytes captured via io.ReadAll on the mock's POST
 // handler (not a single Read() call, which is not guaranteed to fill the

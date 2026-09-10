@@ -16,10 +16,10 @@ import (
 // This is a separate helper from mockSchedulerConfigServer (defined in
 // resource_scheduler_config_advanced_config_acc_test.go, owned by the
 // advanced_instance_config tests) rather than a shared rework of it: that
-// helper is stable, already covers two committed criteria, and touching it
+// helper is stable, already covers two committed cases, and touching it
 // would put two lanes' tests through the same file. Every knob here that the
 // simpler helper does not need is a deliberate response to one of the
-// remaining acceptance criteria - see each field's comment.
+// remaining acceptance checks - see each field's comment.
 type schedulerConfigServer struct {
 	mu sync.Mutex
 
@@ -40,19 +40,19 @@ type schedulerConfigServer struct {
 	// decoded and re-encoded. See EchoAppliedConfig.
 	echoApplied bool
 
-	// Criterion 11: destroy must make no write call. Every handler on this
-	// mock increments requests so a test can assert zero after Destroy.
+	// Destroy must make no write call. Every handler on this mock increments
+	// requests so a test can assert zero after Destroy.
 	requests int
 
-	// Criterion 11: writes (POST /api/v2/scheduler/config, the only mutating
-	// call the API exposes) are also counted separately from requests, since
+	// writes (POST /api/v2/scheduler/config, the only mutating call the API
+	// exposes) are also counted separately from requests, since
 	// a legitimate Read refresh (GET) still happens as part of Terraform's own
 	// pre-destroy plan and would otherwise be indistinguishable from an
 	// errant write in a simple before/after requests comparison.
 	writes int
 
-	// Criteria 19/20/21: force the validate or GET-config endpoint to answer
-	// with a specific status/body instead of the default success path, so a
+	// Force the validate or GET-config endpoint to answer with a specific
+	// status/body instead of the default success path, so a
 	// test can simulate "the server could not evaluate this" (5xx/timeout
 	// stand-in) vs. "the server evaluated and rejected it" (400/422) vs. the
 	// capability-gate 403.
@@ -61,13 +61,13 @@ type schedulerConfigServer struct {
 	getStatus      int
 	getBody        string
 
-	// Criterion 17: the raw bytes of the last apply POST body, captured
-	// before any decoding, so a test can assert an omitted section never
+	// The raw bytes of the last apply POST body, captured before any
+	// decoding, so a test can assert an omitted section never
 	// appears as a substring - decoding and re-encoding it back to a string
 	// would silently repair the very omission being tested.
 	lastApplyBodyRaw []byte
 
-	// Criterion 12: the organization ID served on /api/v2/userinfo.
+	// The organization ID served on /api/v2/userinfo.
 	orgID string
 }
 
@@ -84,14 +84,14 @@ type schedulerConfigServerOpts struct {
 	// raw `config` bytes that were just posted, the way the real backend does.
 	// This is the order-preserving counterpart to readConfigAuto, which
 	// re-derives the document by marshaling a Go map and so cannot represent
-	// element or key order at all. Criterion 14 needs it: a reorder test must
-	// be able to seed a divergent read-back for one plan and then have the
+	// element or key order at all. A reorder test needs it: it must be able
+	// to seed a divergent read-back for one plan and then have the
 	// corrective apply settle on its own, without a test hook restoring the
 	// document between apply and the harness's post-apply refresh plan.
 	EchoAppliedConfig bool
 	// InitialVersion seeds the server as if a config were already applied,
-	// for tests (10, 21) that need Read/refresh behavior without an
-	// intervening real Create in this test run.
+	// for tests that need Read/refresh behavior without an intervening real
+	// Create in this test run.
 	InitialVersion int64
 }
 
@@ -169,7 +169,7 @@ func newSchedulerConfigServer(t *testing.T, opts schedulerConfigServerOpts) (*ht
 			if s.echoApplied {
 				// Echo the posted bytes verbatim. Decoding them into the map
 				// above and re-marshaling would canonicalize order, which is
-				// exactly what the criterion-14 test is asserting about.
+				// exactly what a reorder test is asserting about.
 				var envelope struct {
 					Config json.RawMessage `json:"config"`
 				}
@@ -236,8 +236,8 @@ func (s *schedulerConfigServer) LastApplyBody() []byte {
 }
 
 // SetValidateResponse changes what /config/validate answers for subsequent
-// requests. Used mid-test (criteria 19/20) to flip the mock from "server
-// cannot evaluate" back to "server rejects" without tearing down state.
+// requests. Used mid-test to flip the mock from "server cannot evaluate"
+// back to "server rejects" without tearing down state.
 func (s *schedulerConfigServer) SetValidateResponse(status int, body string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -246,8 +246,8 @@ func (s *schedulerConfigServer) SetValidateResponse(status int, body string) {
 }
 
 // SetGetResponse changes what GET /config answers for subsequent requests.
-// Used mid-test (criterion 21) to flip the mock between "refresh fails open"
-// and "refresh hard-errors" against the same already-applied state.
+// Used mid-test to flip the mock between "refresh fails open" and "refresh
+// hard-errors" against the same already-applied state.
 func (s *schedulerConfigServer) SetGetResponse(status int, body string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

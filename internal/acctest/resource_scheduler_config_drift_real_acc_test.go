@@ -2,7 +2,7 @@ package acctest
 
 // Out-of-band drift against the real Anyscale API.
 //
-// This is the one criterion a mock cannot answer honestly. Every other
+// This is the one check a mock cannot answer honestly. Every other
 // scheduler test asserts how the provider behaves given a response shape; this
 // one asserts what the real backend does with a document written by something
 // other than Terraform, and then whether the next plan sees it. A mock that
@@ -62,8 +62,8 @@ func newSchedulerRealAPI(t *testing.T) *schedulerRealAPI {
 	}
 	// Match the provider's own resolution order, not just the env var. On a
 	// machine authenticated with `anyscale login`, a token-only check would
-	// skip this one test while every other scheduler test ran - a criterion
-	// that reads covered and never executes in the most common local setup.
+	// skip this one test while every other scheduler test ran - a check that
+	// reads covered and never executes in the most common local setup.
 	token := os.Getenv("ANYSCALE_CLI_TOKEN")
 	if token == "" {
 		resolved, err := provider.GetAuthToken()
@@ -155,8 +155,9 @@ func (c *schedulerRealAPI) Apply(document string) int64 {
 	return body.Result.Version
 }
 
-// Criterion 9: a config changed outside Terraform shows as drift on the next
-// plan, and applying restores the declared document.
+// TestAccSchedulerConfigResourceOutOfBandDriftRealAPI: a config changed
+// outside Terraform shows as drift on the next plan, and applying restores
+// the declared document.
 //
 // Both halves are load bearing and they fail independently. A provider whose
 // Read did not actually re-read would show an empty plan and silently accept

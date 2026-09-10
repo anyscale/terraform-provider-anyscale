@@ -99,7 +99,7 @@ resource "anyscale_scheduler_config" "test" {
 	})
 }
 
-// Criterion 15b: the documented limitation, pinned by a test.
+// The documented limitation, pinned by a test.
 //
 // jsontypes compares numbers as literal text, and flattenAdvancedInstanceConfig
 // re-marshals through Go, which renders float64(1) as "1". So a hand-written

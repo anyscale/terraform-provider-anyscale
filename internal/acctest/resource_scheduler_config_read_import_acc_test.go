@@ -1,11 +1,11 @@
 package acctest
 
-// Criteria 10 and 12: Read must remove a genuinely-gone config from state
-// (10), and ImportState must adopt an existing config by organization ID,
-// rejecting a mismatched ID, a missing config, and a capability-gated
-// organization with clear diagnostics rather than an empty phantom resource
-// (12). ImportState has no fail-open carve-out - unlike Read's 403 handling
-// (criterion 21), an import that cannot see the config must hard-fail.
+// Read must remove a genuinely-gone config from state, and ImportState must
+// adopt an existing config by organization ID, rejecting a mismatched ID, a
+// missing config, and a capability-gated organization with clear diagnostics
+// rather than an empty phantom resource. ImportState has no fail-open
+// carve-out - unlike Read's 403 handling, an import that cannot see the
+// config must hard-fail.
 
 import (
 	"net/http"
@@ -28,11 +28,11 @@ resource "anyscale_scheduler_config" "test" {
 `
 }
 
-// TestAccSchedulerConfigResource_ReadRemovesOnGenuine404_MockServer is
-// criterion 10: once the organization's config genuinely disappears (mock GET
-// returns 404, matching the real "no active scheduler config" body), the next
-// refresh must remove the resource from state rather than report it healthy -
-// the next plan then shows a create, not a no-op.
+// TestAccSchedulerConfigResource_ReadRemovesOnGenuine404_MockServer: once the
+// organization's config genuinely disappears (mock GET returns 404, matching
+// the real "no active scheduler config" body), the next refresh must remove
+// the resource from state rather than report it healthy - the next plan then
+// shows a create, not a no-op.
 func TestAccSchedulerConfigResource_ReadRemovesOnGenuine404_MockServer(t *testing.T) {
 	server, mock := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig: schedulerReadImportTestConfig,
@@ -65,10 +65,10 @@ func TestAccSchedulerConfigResource_ReadRemovesOnGenuine404_MockServer(t *testin
 	})
 }
 
-// TestAccSchedulerConfigResource_ImportAdoptsActiveConfig_MockServer is
-// criterion 12's happy path: importing by the token's own organization ID
-// adopts the already-active config, recovering its document and computed
-// metadata with no preceding local Create.
+// TestAccSchedulerConfigResource_ImportAdoptsActiveConfig_MockServer: the
+// happy path - importing by the token's own organization ID adopts the
+// already-active config, recovering its document and computed metadata with
+// no preceding local Create.
 func TestAccSchedulerConfigResource_ImportAdoptsActiveConfig_MockServer(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig:     schedulerReadImportTestConfig,
@@ -113,9 +113,9 @@ func TestAccSchedulerConfigResource_ImportAdoptsActiveConfig_MockServer(t *testi
 	})
 }
 
-// TestAccSchedulerConfigResource_ImportOrgIDMismatch_MockServer is criterion
-// 12's mismatch case: an import ID that is not the token's own organization
-// must fail clearly rather than silently importing the wrong org's config.
+// TestAccSchedulerConfigResource_ImportOrgIDMismatch_MockServer: the mismatch
+// case - an import ID that is not the token's own organization must fail
+// clearly rather than silently importing the wrong org's config.
 func TestAccSchedulerConfigResource_ImportOrgIDMismatch_MockServer(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig:     schedulerReadImportTestConfig,
@@ -138,9 +138,9 @@ func TestAccSchedulerConfigResource_ImportOrgIDMismatch_MockServer(t *testing.T)
 	})
 }
 
-// TestAccSchedulerConfigResource_ImportNoActiveConfig_MockServer is criterion
-// 12's not-found case: importing an organization with no active scheduler
-// config (mock never seeded a version) must fail clearly, not import an empty
+// TestAccSchedulerConfigResource_ImportNoActiveConfig_MockServer: the
+// not-found case - importing an organization with no active scheduler config
+// (mock never seeded a version) must fail clearly, not import an empty
 // phantom resource.
 func TestAccSchedulerConfigResource_ImportNoActiveConfig_MockServer(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{})
@@ -161,10 +161,10 @@ func TestAccSchedulerConfigResource_ImportNoActiveConfig_MockServer(t *testing.T
 	})
 }
 
-// TestAccSchedulerConfigResource_ImportSchedulerNotEnabled_MockServer is
-// criterion 12's capability-gate case: ImportState has no fail-open carve-out
-// - a 403 admission-gate response must hard-fail the import, unlike Read's
-// warn-and-retain behavior for the same condition (criterion 21).
+// TestAccSchedulerConfigResource_ImportSchedulerNotEnabled_MockServer: the
+// capability-gate case - ImportState has no fail-open carve-out, so a 403
+// admission-gate response must hard-fail the import, unlike Read's
+// warn-and-retain behavior for the same condition.
 func TestAccSchedulerConfigResource_ImportSchedulerNotEnabled_MockServer(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		GetStatus: http.StatusForbidden,

@@ -3,7 +3,7 @@ package acctest
 // Plan-time validation of the scheduler config document: enum values,
 // declaration order, and declared-but-empty sections.
 //
-// All three criteria here concern what happens at PLAN, not at apply. That
+// All three checks here concern what happens at PLAN, not at apply. That
 // distinction is the whole point - a config the schema can reject must never
 // reach the API - so every test that claims it asserts it, either with a
 // PlanOnly step (which fails the test if the error only arrives during apply)
@@ -17,8 +17,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// Criterion 13: a value outside an enumerated attribute's allowed set fails at
-// plan, with the schema's own OneOf diagnostic, and never reaches apply.
+// A value outside an enumerated attribute's allowed set fails at plan, with
+// the schema's own OneOf diagnostic, and never reaches apply.
 //
 // PlanOnly is what makes this a claim about plan rather than about the config
 // being rejected somewhere. Without it a step that errored only during apply
@@ -101,9 +101,8 @@ resource "anyscale_scheduler_config" "test" {
 	}
 }
 
-// Criterion 16: a section declared as an empty list fails at plan, and the
-// diagnostic says to omit the section rather than merely stating a size
-// constraint.
+// A section declared as an empty list fails at plan, and the diagnostic says
+// to omit the section rather than merely stating a size constraint.
 //
 // Why the empty form is rejected at all, and why no wire-level assertion could
 // test it, is on nonEmptyListValidator's doc comment; it is not restated here.
@@ -144,8 +143,8 @@ resource "anyscale_scheduler_config" "test" {
 	}
 }
 
-// Criterion 14: the declared order of list sections round-trips exactly, and a
-// read-back whose order differs from the config produces a non-empty plan.
+// The declared order of list sections round-trips exactly, and a read-back
+// whose order differs from the config produces a non-empty plan.
 //
 // Order is significant to the scheduler (flavors are tried in the order
 // written), so a build that reordered on the way out or normalized on the way
@@ -213,8 +212,8 @@ resource "anyscale_scheduler_config" "test" {
 				// This step applies rather than planning only: PlanOnly and
 				// ConfigPlanChecks.PreApply are mutually exclusive in
 				// terraform-plugin-testing, and the plan-action check is the
-				// assertion that carries the criterion - "non-empty" alone
-				// would also be satisfied by a spurious replace.
+				// assertion that carries the claim - "non-empty" alone would
+				// also be satisfied by a spurious replace.
 				//
 				// Nothing restores the ordered read-back by hand: the mock
 				// echoes the posted bytes, so the corrective apply settles on

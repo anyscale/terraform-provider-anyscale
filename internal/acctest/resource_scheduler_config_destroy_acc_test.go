@@ -1,11 +1,11 @@
 package acctest
 
-// Criterion 11: the Anyscale API has no delete operation for scheduler
-// configs, so Destroy must be state-only - it removes the resource from
-// Terraform state but never calls the API. The write-call count proves that
-// part: an errant call here would look identical to a "successful" destroy
-// from Terraform's own diagnostics, since the resource is state-only either
-// way - only counting real requests against the mock catches it.
+// The Anyscale API has no delete operation for scheduler configs, so
+// Destroy must be state-only - it removes the resource from Terraform state
+// but never calls the API. The write-call count proves that: an errant call
+// here would look identical to a "successful" destroy from Terraform's own
+// diagnostics, since the resource is state-only either way - only counting
+// real requests against the mock catches it.
 
 import (
 	"testing"
