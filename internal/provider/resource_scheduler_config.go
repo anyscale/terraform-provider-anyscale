@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
-	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -148,6 +147,46 @@ func schedulerMatchExpressionAttributes(what string) map[string]schema.Attribute
 	}
 }
 
+// nonEmptyListValidator rejects a section that is declared but empty, and
+// names the fix a practitioner actually wants: omit the section entirely.
+//
+// The stock listvalidator.SizeAtLeast(1) message ("list must contain at least
+// 1 elements") states the constraint without saying what to do about it, and
+// the distinction is not cosmetic here. An empty section and an absent one are
+// different documents on the wire - the request builder omits an absent
+// section, while an empty list would travel as `[]` - and only the absent form
+// is meaningful to the scheduler. A practitioner reading the stock message is
+// as likely to invent a filler element as to delete the block.
+type nonEmptyListValidator struct {
+	attrName string
+}
+
+func (v nonEmptyListValidator) Description(ctx context.Context) string {
+	return v.MarkdownDescription(ctx)
+}
+
+func (v nonEmptyListValidator) MarkdownDescription(_ context.Context) string {
+	return fmt.Sprintf("if `%s` is declared it must contain at least one element; omit it entirely to leave it unset", v.attrName)
+}
+
+func (v nonEmptyListValidator) ValidateList(_ context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if len(req.ConfigValue.Elements()) > 0 {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(
+		req.Path,
+		fmt.Sprintf("Empty %s Section", v.attrName),
+		fmt.Sprintf(
+			"`%s` was declared as an empty list. Omit the `%s` attribute entirely to leave the section unset - "+
+				"an empty list is not the same document as an absent section, and the scheduler has no use for one.",
+			v.attrName, v.attrName,
+		),
+	)
+}
+
 func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Version: 0,
@@ -172,7 +211,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			},
 			"resource_flavors": schema.ListNestedAttribute{
 				Optional:            true,
-				Validators:          []validator.List{listvalidator.SizeAtLeast(1)},
+				Validators:          []validator.List{nonEmptyListValidator{attrName: "resource_flavors"}},
 				MarkdownDescription: "Named hardware profiles that queues allocate quota against. Order is significant: when a workload can run on more than one flavor, flavors are tried in the order written here.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -198,7 +237,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			},
 			"resource_queues": schema.ListNestedAttribute{
 				Optional:            true,
-				Validators:          []validator.List{listvalidator.SizeAtLeast(1)},
+				Validators:          []validator.List{nonEmptyListValidator{attrName: "resource_queues"}},
 				MarkdownDescription: "Queues that workloads are admitted into, each carrying its own quota and preemption policy.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -285,7 +324,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			},
 			"scheduling_rules": schema.ListNestedAttribute{
 				Optional:            true,
-				Validators:          []validator.List{listvalidator.SizeAtLeast(1)},
+				Validators:          []validator.List{nonEmptyListValidator{attrName: "scheduling_rules"}},
 				MarkdownDescription: "Rules mapping workloads to queues. **First match wins, top to bottom**, so order is significant. Once any rule exists, a workload matching no rule is rejected rather than run unscheduled - keep a catch-all rule last unless that is what you intend.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
