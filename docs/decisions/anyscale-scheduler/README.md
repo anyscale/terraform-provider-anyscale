@@ -36,6 +36,16 @@ and marked beta on 2026-09-09 — a visibility change, with byte-identical help 
 command path — three of the four user-facing surfaces. Only the CLI help string says "Global Resource
 Scheduler," and "GRS" is an internal-facing abbreviation this provider should not adopt.
 
+**But the resource's `MarkdownDescription` must still name the alias once**, because "should not adopt"
+is not the same as "users will never see it." The admission-flag diagnostic (§3) surfaces the server's
+own words, and that string is literally `"GRS is not enabled for this organization."` The abbreviation
+therefore reaches users *through our own error text* regardless of what we call the type. One sentence:
+the Anyscale Scheduler is also referred to upstream as the Global Resource Scheduler (GRS), the CLI
+help text and some API error messages still use that name, and they are the same product. Not
+"formerly known as" — the upstream rename was identifiers only and the prose name was never retired,
+so "formerly" would be false. And none of the internal identifiers from the table above belong on a
+published page.
+
 ---
 
 ## 1. This is not a rename
