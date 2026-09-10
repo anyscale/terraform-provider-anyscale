@@ -732,24 +732,34 @@ byte-clean.
     of the same contract and either half alone leaves a permanent diff.
 
     **The two halves fail through different mechanisms, which is why neither test substitutes for the
-    other.** These sections are `Optional` and *not* `Computed`, so an omitted section is planned as
-    null and Core enforces that against what apply returns. Mutating the *flatten* half — materialize
-    an empty slice where it should leave `nil` — should therefore surface as a **failed apply**
-    (*"provider produced inconsistent result after apply"*, the repo's C12 shape), not as a non-empty
-    plan. Mutating the *expand* half — emit `[]` instead of omitting the key — may not fail visibly
+    other.** Mutating the *expand* half — emit `[]` instead of omitting the key — may not fail visibly
     at all in a mock round-trip, because the server collapses an empty array to an absent key (Gate 1
     finding 5) and the read path then yields null anyway; only criterion 17's assertion on the
-    captured bytes catches it. A run in which the flatten mutation produces a clean-but-non-empty
-    plan instead of an apply failure means something is absorbing the divergence, and that is itself
-    a finding worth chasing rather than working around.
+    captured bytes catches it. Mutating the *flatten* half — materialize an empty slice where it
+    should leave `nil` — is caught by the harness's automatic post-apply plan-emptiness check.
 
-    **Which mutation produces which symptom is reasoned from Core's post-apply consistency check, and
-    has NOT been observed.** Two people reviewing the design agreed on it independently; that is
-    concurrence, not evidence, and the design-verification policy for a Core-contract claim asks for a
-    real plan/apply. This criterion's own run is what closes it. Until a logged result is recorded
-    here, treat the *requirement* (the contract's two halves both hold) as settled and the *predicted
-    symptom* as a hypothesis — and if the run disagrees, correct this paragraph rather than
-    reinterpreting the run to fit it.
+    **Corrected against a real run (mutation-proven, criterion 18's own test).** The prediction
+    recorded here first — that a flatten regression would fail the apply with *"provider produced
+    inconsistent result after apply"* — is **false**, and so is the reason given for it. Two reviewers
+    concurred on it from Core semantics alone; the run disagreed, and per the standing instruction the
+    paragraph is corrected rather than the run reinterpreted.
+
+    The mechanism is structural, and it is not about `Optional`-vs-`Computed`: **`POST /config`
+    returns only `{version}`, so the apply path never renders the document through `flatten` at all.**
+    Create/Update keep the document exactly as planned and take only `version`, `created_at` and
+    `creator_id` from the read-back. Core's post-apply consistency check therefore compares a value
+    that flatten never produced — it is not lenient here, it is blind here by construction. `flatten`
+    is reached only by **Read** and **ImportState**, so a regression in it can surface no earlier than
+    the first refresh.
+
+    **What this means in the field, which is the part worth keeping.** No apply error exists for this
+    bug outside the test harness. In production the symptom is a **permanent non-convergent diff**:
+    refresh writes `[]`, config says null, every plan proposes the change, every apply mints another
+    immutable version, and the next refresh writes `[]` again. Not silent — a practitioner does see a
+    diff — but unfixable from their side, and on *this* resource each round of the loop appends
+    permanently to an org-level audit log with no delete verb. So criterion 18 is the **only detector
+    that can fire before a user's own infrastructure pays for the bug**, which is a stronger reason to
+    keep it than the regression-guard framing it was written under.
 
 **Plan-time validation fails open** (see §3 *Plan-time behavior*). Both are mock-only, so they cost
 nothing under the sweeper ruling above.
