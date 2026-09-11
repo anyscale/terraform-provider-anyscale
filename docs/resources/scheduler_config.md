@@ -145,6 +145,7 @@ resource "anyscale_scheduler_config" "this" {
     },
   ]
 
+  # Stored and returned by the API, but not consumed by the scheduler yet.
   recycle_policy = {
     rotation_interval = "24h"
     max_idle_duration = "10m"
