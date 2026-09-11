@@ -11,6 +11,7 @@ package acctest
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -312,4 +313,75 @@ resource "anyscale_scheduler_config" "test" {
 			},
 		},
 	})
+}
+
+// Gap 1 (PR #280 review), route 1 of two: when the validate endpoint cannot
+// evaluate the document at all - here, a 503 - the plan/apply proceeds
+// end-to-end rather than silently doing nothing or hard-failing. This is the
+// resource.Test-shaped half of the coverage; it proves the observable
+// behavior through a real plan/apply cycle. It deliberately cannot assert
+// the WARNING'S CONTENT: terraform-plugin-testing v1.16.0 has no
+// ExpectWarning mechanism (confirmed by a zero-hit grep across the module,
+// with ExpectError as a 13-file positive control), so the exact diagnostic
+// summary ("Anyscale Scheduler Configuration Not Validated") is asserted
+// only by the companion ModifyPlan-level unit test
+// (TestSchedulerConfigModifyPlan_WarnsAndProceedsWhenValidateIsUnreachable,
+// internal/provider). Together the two routes cover what each alone cannot:
+// this one proves the end-to-end outcome a practitioner actually sees;
+// that one proves the specific diagnostic fires rather than being silently
+// dropped by some other branch.
+//
+// Mutation-proof: disabling the errors.Is(err, ErrSchedulerValidationUnavailable)
+// branch in ModifyPlan (so an unclassifiable validate response falls through
+// to the AddError path instead) turns this test red - the apply step itself
+// fails with "Invalid Anyscale Scheduler Configuration," not the assertions
+// below. Restoring the branch turns it back green.
+//
+// The 503 here (as opposed to the 400 used by
+// TestAccSchedulerConfigResourceCrossReferenceValidationRunsOnCreate) is the
+// status this provider's own classifier
+// (schedulerServerEvaluatedDocument, scheduler_api.go) does not recognize as
+// "the server evaluated the document" - neither 400 nor 422 - so it lands in
+// the unavailable/warn branch rather than the rejected/error branch. Without
+// omitting ExpectError, resource.Test itself fails the step on any
+// diagnostic with error severity, so the absence of ExpectError here is
+// already the "no error, plan/apply proceeded" assertion; ValidateHits and
+// WriteCount confirm the call actually happened and apply actually went
+// through, rather than the step passing for an unrelated reason.
+func TestAccSchedulerConfigResourceProceedsWhenValidateUnavailableAtCreate(t *testing.T) {
+	server, mock := newSchedulerConfigServer(t, schedulerConfigServerOpts{
+		ValidateStatus: http.StatusServiceUnavailable,
+	})
+	defer server.Close()
+
+	const config = `
+resource "anyscale_scheduler_config" "test" {
+  resource_flavors = [
+    { name = "cpu-standard" },
+  ]
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderBlock(server.URL) + config,
+			},
+		},
+	})
+
+	// Not an exact count: resource.Test's single Config step runs ModifyPlan
+	// more than once on its own (the Create plan, then at least one
+	// post-apply convergence plan) - that is testing-framework mechanics,
+	// not part of the behavior under test. The claim here is "the
+	// cross-reference validate call happened at all," which >= 1 states
+	// without also asserting a step-count the framework, not this resource,
+	// controls.
+	if hits := mock.ValidateHits(); hits < 1 {
+		t.Fatalf("expected at least 1 call to the validate endpoint, got %d", hits)
+	}
+	if writes := mock.WriteCount(); writes != 1 {
+		t.Fatalf("expected the apply to proceed (1 write) despite validate being unavailable, got %d write(s)", writes)
+	}
 }
