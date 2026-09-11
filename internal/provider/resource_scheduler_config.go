@@ -692,16 +692,25 @@ func (r *SchedulerConfigResource) ModifyPlan(ctx context.Context, req resource.M
 	if r.client == nil {
 		return
 	}
-	if !req.Plan.Raw.IsFullyKnown() {
-		// Values that resolve during apply cannot be serialized yet. Skipping
-		// is the honest outcome: validating a partial document would report
-		// errors about unknowns rather than about the practitioner's config.
-		tflog.Debug(ctx, "skipping scheduler config plan-time validation: plan contains unknown values")
+	// Gate on the config, not the plan. The plan always carries unknowns for
+	// this resource - version, created_at, and creator_id are Computed and
+	// change on every apply - so a plan-based check would skip every create
+	// and every update, which is to say always. The config only holds
+	// unknowns when the practitioner interpolates a value that resolves
+	// during apply, which is the case actually worth skipping: validating a
+	// partial document would report errors about unknowns rather than about
+	// the practitioner's config.
+	if !req.Config.Raw.IsFullyKnown() {
+		tflog.Debug(ctx, "skipping scheduler config plan-time validation: config contains unknown values")
 		return
 	}
 
+	// Read from the config for the same reason: the document sent to the
+	// validate endpoint is built entirely from the four input sections, none
+	// of which is Computed, so the config carries the same values without the
+	// unknowns.
 	var plan SchedulerConfigResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
