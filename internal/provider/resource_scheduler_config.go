@@ -369,7 +369,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			},
 			"recycle_policy": schema.SingleNestedAttribute{
 				Optional:            true,
-				MarkdownDescription: "When the scheduler retires and replaces the machines it manages. Omit the attribute entirely, not `{}`, to leave the section unset: unlike the list sections, where `[]` is dropped from the request, an empty object here is sent to the API as an empty policy.",
+				MarkdownDescription: "When the scheduler retires and replaces the machines it manages. Stored and returned by the API, but no Anyscale component acts on it yet, so setting it changes no scheduling behavior today. Omit the attribute entirely, not `{}`, to leave the section unset: unlike the list sections, where `[]` is dropped from the request, an empty object here is sent to the API as an empty policy.",
 				Attributes: map[string]schema.Attribute{
 					"rotation_interval": schema.StringAttribute{
 						Optional:            true,
