@@ -709,6 +709,17 @@ func (r *SchedulerConfigResource) ModifyPlan(ctx context.Context, req resource.M
 	// validate endpoint is built entirely from the four input sections, none
 	// of which is Computed, so the config carries the same values without the
 	// unknowns.
+	//
+	// That last clause is a load-bearing precondition, not an observation.
+	// Adding a Computed (or Optional+Computed) attribute anywhere inside
+	// resource_flavors, resource_queues, scheduling_rules, or recycle_policy
+	// breaks this silently: the config would read null and fully known while
+	// the plan carries the resolved or unknown value, so the gate would pass
+	// and the document validated here would not be the document apply sends.
+	// A Default is fine - it makes the value known in both. Computed is the
+	// hazard. If one is ever added, the fix is to expand from the plan and
+	// keep the gate on the config, checking the plan for unknowns in the
+	// serialized sections specifically.
 	var plan SchedulerConfigResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
