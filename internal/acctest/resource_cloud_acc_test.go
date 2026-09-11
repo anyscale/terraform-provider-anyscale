@@ -672,9 +672,9 @@ func newFileStorageUpdateMockServer(
 	}
 }
 
-// TestAccCloudResource_FileStorageAddIsUpdatable covers acceptance
-// criterion 1 of D2 (docs/decisions/cloud-file-storage-lifecycle/README.md):
-// on an already-live anyscale_cloud with no file_storage block, adding one
+// TestAccCloudResource_FileStorageAddIsUpdatable proves that, for D2
+// (docs/decisions/cloud-file-storage-lifecycle/README.md), on an
+// already-live anyscale_cloud with no file_storage block, adding one
 // that sets only persistent_volume_claim now plans and applies an in-place
 // Update, not a replace. This is the direct inversion of the pre-D2 pinning
 // test of the same shape (every file_storage attribute carried an
@@ -772,9 +772,9 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageUpdateDoesNotWipeSiblings covers acceptance
-// criterion 2 of D2: updating file_storage on a live K8S cloud must not
-// collaterally wipe kubernetes_config.redis_endpoint or object_storage -
+// TestAccCloudResource_FileStorageUpdateDoesNotWipeSiblings proves that, for
+// D2, updating file_storage on a live K8S cloud must not collaterally wipe
+// kubernetes_config.redis_endpoint or object_storage -
 // D2's round-trip PUT is a full-spec replace, so any sibling field the
 // provider fails to echo back is cleared by the API, not merely left stale in
 // state. The check reads the mock's stored deployment directly over raw HTTP,
@@ -877,15 +877,16 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageClearingWorks covers acceptance criterion 5
-// of D2: removing a previously-declared file_storage block from config plans
-// and applies an in-place Update that clears it - D2's round-trip PUT omits
-// the key entirely when planFileStorage is nil, and per the design doc's own
-// Gate-1 evidence (G1.2), omission clears file_storage on the live deployment
-// rather than leaving the last value in place (the opposite of how the
-// sibling blocks behave on omission). Sibling fields are asserted intact for
-// the same reason as criterion 2: clearing file_storage must not collaterally
-// wipe kubernetes_config or object_storage.
+// TestAccCloudResource_FileStorageClearingWorks proves that, for D2, removing
+// a previously-declared file_storage block from config plans and applies an
+// in-place Update that clears it - D2's round-trip PUT omits the key entirely
+// when planFileStorage is nil, and per the design doc's own Gate-1 evidence
+// (G1.2), omission clears file_storage on the live deployment rather than
+// leaving the last value in place (the opposite of how the sibling blocks
+// behave on omission). Sibling fields are asserted intact for the same
+// reason as TestAccCloudResource_FileStorageUpdateDoesNotWipeSiblings above:
+// clearing file_storage must not collaterally wipe kubernetes_config or
+// object_storage.
 func TestAccCloudResource_FileStorageClearingWorks(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -983,9 +984,9 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageImportRecoversValue covers acceptance
-// criterion 6a of D2: importing a cloud that already has file_storage set
-// recovers it, via requiredImportConfigBlocks' flattenFileStorage call. This
+// TestAccCloudResource_FileStorageImportRecoversValue proves that, for D2,
+// importing a cloud that already has file_storage set recovers it, via
+// requiredImportConfigBlocks' flattenFileStorage call. This
 // is a COLD import (no preceding Create in this test) - per CLAUDE.md's own
 // documented ImportStatePersist gotcha, an ImportState step's recovered state
 // is discarded at the end of the step verifying it, so the only place that
@@ -1050,15 +1051,15 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageImportedShapeIsPlanStable covers acceptance
-// criterion 6b of D2: a config that reconstructs the shape import would
-// produce (file_storage declared, matching the live deployment) plans EMPTY -
-// import recovering file_storage must not itself introduce a phantom diff.
-// This is the "Test B" shape CLAUDE.md prescribes for import-recovery
-// criteria: two sequential Config-only steps, no ImportState involved, so
-// state actually carries forward between them (unlike the throwaway
-// ImportState step in criterion 6a above, whose recovered state cannot reach
-// a later step in the same test).
+// TestAccCloudResource_FileStorageImportedShapeIsPlanStable proves that, for
+// D2, a config that reconstructs the shape import would produce (file_storage
+// declared, matching the live deployment) plans EMPTY - import recovering
+// file_storage must not itself introduce a phantom diff. This is the "Test B"
+// shape CLAUDE.md prescribes for import-recovery coverage: two sequential
+// Config-only steps, no ImportState involved, so state actually carries
+// forward between them (unlike the throwaway ImportState step in
+// TestAccCloudResource_FileStorageImportRecoversValue above, whose recovered
+// state cannot reach a later step in the same test).
 func TestAccCloudResource_FileStorageImportedShapeIsPlanStable(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -1109,8 +1110,8 @@ resource "anyscale_cloud" "test" {
 				Check:  resource.TestCheckResourceAttr("anyscale_cloud.test", "file_storage.persistent_volume_claim", "ray-shared-pvc-stable"),
 			},
 			{
-				// criterion 6b: re-planning the identical config - the shape
-				// import would produce - must show no changes.
+				// Re-planning the identical config - the shape import would
+				// produce - must show no changes.
 				Config:             config,
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
@@ -1119,9 +1120,9 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageUpdateRunningClustersError covers
-// acceptance criterion 7 of D2: when the backend refuses a file_storage
-// update because clusters are running, the practitioner sees a designed
+// TestAccCloudResource_FileStorageUpdateRunningClustersError proves that,
+// for D2, when the backend refuses a file_storage update because clusters
+// are running, the practitioner sees a designed
 // diagnostic naming that cause, not an opaque 400 body. The "active
 // clusters" substring match in addFileStorageUpdateError is sourced from
 // backend source rather than a captured response - G1.3 was never run (see
@@ -1227,14 +1228,15 @@ resource "anyscale_cloud" "test" {
 	})
 }
 
-// TestAccCloudResource_FileStorageManagedCloudRefusal covers acceptance
-// criterion 8 of D2: a file_storage change on a cloud created with `anyscale
-// cloud setup` (rather than registered) is refused, both at plan time
+// TestAccCloudResource_FileStorageManagedCloudRefusal proves that, for D2, a
+// file_storage change on a cloud created with `anyscale cloud setup` (rather
+// than registered) is refused, both at plan time
 // (refuseFileStorageChangeOnManagedCloud/isAnyscaleManaged, so the
 // practitioner sees it before an apply starts writing) and, as a backstop, at
 // apply time if the plan-time check didn't catch it
 // (addFileStorageUpdateError's "anyscale-managed" substring branch, mirroring
-// criterion 7's shape). isAnyscaleManaged treats any of three provenance
+// TestAccCloudResource_FileStorageUpdateRunningClustersError's shape).
+// isAnyscaleManaged treats any of three provenance
 // fields as sufficient: AWS's cloudformation_id, or either of GCP's
 // deployment_manager_id/infrastructure_manager_id - all three are exercised,
 // plus a negative control (none set) proving the guard is selective rather
@@ -1351,7 +1353,7 @@ resource "anyscale_cloud" "test" {
 	t.Run("apply_time_anyscale_managed_substring_backstop", func(t *testing.T) {
 		// live GET carries no managed field, so the plan-time guard does not fire -
 		// this isolates the apply-time addFileStorageUpdateError translation as its
-		// own backstop, mirroring criterion 7's shape.
+		// own backstop, mirroring TestAccCloudResource_FileStorageUpdateRunningClustersError's shape.
 		server, _ := newFileStorageUpdateMockServer(t, cloudID, cloudJSON,
 			resourcesJSONWithManagedField(""), "null",
 			func(sent map[string]interface{}) (bool, int, string) {
@@ -1542,9 +1544,8 @@ func TestAccCloudResource_SubnetNamesK8SRejected(t *testing.T) {
 
 // TestAccCloudResource_SubnetNamesVMMultipleAllowed is the negative
 // counterpart: GCP VM compute with MORE THAN ONE subnet_name must still plan
-// clean - this is the multi-subnet case that
-// subnet-names-gcp-supports-multiple-no-cardinality-validator confirmed is a
-// real, intentional, tested backend feature, not something to reject. Runs
+// clean - GCP VM clouds genuinely support multiple subnets, a real,
+// intentional, tested backend feature, not something to reject. Runs
 // against a mock server (no real infra) since proving no misfire needs a
 // real Create through the framework's own validator dispatch, the same
 // reasoning as TestAccCloudResource_MountPathPVCDefaultNoMisfire.

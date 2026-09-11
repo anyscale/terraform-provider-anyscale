@@ -448,8 +448,8 @@ func TestFinalize_ReleaseNotesExcludeFooterLinks(t *testing.T) {
 }
 
 func TestFinalize_ReleaseNotesMatchChangelogSection(t *testing.T) {
-	// Acceptance criterion 5: GitHub Release body must byte-match the
-	// CHANGELOG.md section for that version once rendered back with the heading.
+	// Proves the GitHub Release body byte-matches the CHANGELOG.md section
+	// for that version once rendered back with the heading.
 	changelog := "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- a bug\n"
 	newChangelog, notes, err := Finalize(changelog, "1.2.3", "2026-01-01")
 	if err != nil {

@@ -335,10 +335,10 @@ func awsConfigBlockLifecycle(letter string) string {
   }`, letter, letter, letter, letter, letter, letter)
 }
 
-// TestAccCloudResourceMulti_DistinctExplicitNames is acceptance criterion 1
-// (CLOUD-RESOURCE-DESIGN.md): two anyscale_cloud_resource blocks with
-// distinct explicit names on one cloud must produce 2 distinct backend
-// resources and a clean, empty re-plan. depends_on forces block "b" to apply
+// TestAccCloudResourceMulti_DistinctExplicitNames proves that two
+// anyscale_cloud_resource blocks with distinct explicit names on one cloud
+// must produce 2 distinct backend resources and a clean, empty re-plan.
+// depends_on forces block "b" to apply
 // strictly after block "a" commits - without it Terraform's default
 // parallelism could race the two Creates, which wouldn't test this scenario
 // deterministically either pre- or post-fix.
@@ -518,10 +518,10 @@ resource "anyscale_cloud_resource" "a" {
 	}
 }
 
-// TestAccCloudResourceMulti_DuplicateExplicitName_ReturnsConflict is
-// acceptance criterion 4's reframed assertion (b): a duplicate EXPLICIT name
-// on the same cloud must fail loudly at apply time (mirroring the backend's
-// real 409), never silently collapse. Unlike the two tests above, this one
+// TestAccCloudResourceMulti_DuplicateExplicitName_ReturnsConflict proves
+// that a duplicate EXPLICIT name on the same cloud must fail loudly at
+// apply time (mirroring the backend's real 409), never silently collapse.
+// Unlike the two tests above, this one
 // is fork-independent and passes both before and after CR1's fix: pre-fix,
 // the adopt path overwrites block "b"'s name to match block "a"'s -- which
 // happens to already equal "b"'s own explicit name here, so the add_resource

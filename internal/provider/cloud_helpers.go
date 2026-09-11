@@ -148,9 +148,9 @@ func rejectFieldOnK8S(computeStack string, isFieldSet bool, attrPath path.Path, 
 // extra zones or that subnet - a genuine corruption of the cloud's
 // registered networking, not a benign no-op. GKE networking comes entirely
 // from kubernetes_config.zones; subnet_names has no role there. GCP VM
-// clouds are unaffected and genuinely support multiple subnets - see
-// subnet-names-gcp-supports-multiple-no-cardinality-validator for why a
-// cardinality check on VM would be wrong.
+// clouds are unaffected and genuinely support multiple subnets - this is a
+// real, intentional, tested backend feature, so a cardinality check that
+// rejected more than one subnet_name on VM would be wrong.
 func validateSubnetNamesSupported(computeStack string, gcpConfig *GCPConfigModel) diag.Diagnostics {
 	if gcpConfig == nil {
 		return nil
