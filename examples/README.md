@@ -268,6 +268,17 @@ acceptance happens outside Terraform entirely.
 **Use this when**: You want to see how the invitation and collaborator resources fit together
 across the full member-onboarding lifecycle, not just in isolation.
 
+#### [resources/scheduler_config_composition](./resources/scheduler_config_composition/)
+
+Splits a single `anyscale_scheduler_config` resource across files (`flavors.tf`, `queues.tf`,
+`rules.tf`) instead of one large embedded block, for organizations with many flavors, queues, or
+rules. See the [Scheduler Configuration guide](../templates/guides/scheduler-config.md) for the
+composition rules this example follows.
+
+**Use this when**: A single `anyscale_scheduler_config.resource_flavors` /
+`.resource_queues` / `.scheduling_rules` block is getting hard to read and you want to compose it
+from smaller, purpose-named locals instead.
+
 ### Provider Configuration
 
 #### [provider](./provider/)

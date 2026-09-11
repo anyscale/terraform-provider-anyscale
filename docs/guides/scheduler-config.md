@@ -147,3 +147,51 @@ touch. If you instead want hard capacity isolation per person or team, give each
 `resource_queue` (or its own cohort) with its own `resource_groups`, the way the two-queue
 `batch`/`interactive` example on the resource page does it - that trades this pattern's flexible
 sharing for a guarantee that one person's workloads can never crowd out another's.
+
+## Composing large configs across files
+
+`resource_flavors`, `resource_queues`, and `scheduling_rules` are typed HCL list attributes, not
+JSON blobs, so Terraform validates and tab-completes them regardless of size - but a platform team
+with a dozen queues and rules per team will still outgrow a single resource block. The fix is
+authoring, not schema: pull each section into its own file as locals, and shrink the resource block
+to reference them. This is still one resource, one plan, one state address - splitting the
+authoring across files does not give any section its own lifecycle or its own apply. (Splitting
+`anyscale_scheduler_config` itself into per-section resources was evaluated and rejected: the API
+takes one write for the whole document, so positional ordering has no way to be expressed across
+separate resources.)
+
+The three sections don't compose the same way, because they don't all order the same way:
+
+- **`resource_flavors`** is ordered - the scheduler tries flavors within a `resource_group` in the
+  list's order - and it declares the names other sections reference. Keep the list as the source of
+  truth and compose it with `concat()` across files; derive a lookup map only when you need one,
+  with `{ for f in local.flavors : f.name => f }`. Never author this section as a map keyed by
+  name - iterating a map is lexicographic, not insertion order, so a map-first flavors section
+  still plans and applies cleanly while silently reordering which flavor the scheduler tries first.
+  This particular `for` expression does buy one thing for free: a duplicate flavor name is a hard
+  `Duplicate object key` error at `terraform plan` - a property of this expression, not a guarantee
+  every map-shaped local in this guide shares.
+- **`resource_queues`** makes no ordering claim, so a map keyed by queue name can be the source of
+  truth here. Build the document's list from it (`[for k, q in local.queues : q]` or
+  `values(local.queues)` - equivalent, pick whichever reads better) rather than writing the list
+  by hand alongside the map.
+- **`scheduling_rules`**, and the `flavors` nested inside a `resource_group`, are ordered but
+  reference names rather than declaring them. Keep these as plain lists composed with `concat()`,
+  and point each name field through the map it refers to -
+  `resource_queue = local.queues["batch"].name` - rather than the bare string `"batch"`. A typo in
+  the map key fails before any request is made - at the expression's source location, not as a
+  400 from the API mid-apply.
+
+If the same map is fed to `for_each` to generate separate resource instances, rather than into a
+`for` or `concat()` expression inside one resource body, ordering is gone entirely - resource
+instances have no sequence. The same data behaves differently depending on which idiom consumes it.
+
+See [`examples/resources/scheduler_config_composition`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/scheduler_config_composition)
+for a complete, runnable version of this pattern.
+
+## Out-of-band changes show up as a plan diff, not a silent drop
+
+`anyscale_scheduler_config` writes the whole document on every apply - there is no per-section
+update. Because of that, anything set outside Terraform (console, API, another tool) shows up in
+the next plan as a removal, for any of the four sections, not just `scheduling_rules`: read the
+plan before applying whenever the console or API might also be writing this config.
