@@ -175,9 +175,12 @@ resource "anyscale_scheduler_config" "test" {
 //
 // Mutation-proof: reverting ModifyPlan's gate and expand calls from
 // req.Config back to req.Plan (the shape this resource shipped with) turns
-// this test red - Create succeeds and the write-count assertion fails,
-// because the plan's Computed unknowns skip the call regardless of what the
-// mock's validate endpoint would have said.
+// this test red - the plan step itself succeeds with no error, so the
+// ExpectError assertion is what fails, and the test ends there. The
+// write-count assertion never runs against a reverted build; it only earns
+// its place in the passing (fixed) build, where it rules out a different
+// false positive - a build that fails Create for some unrelated reason
+// could also satisfy ExpectError without ever having called validate.
 func TestAccSchedulerConfigResourceCrossReferenceValidationRunsOnCreate(t *testing.T) {
 	const rejectDetail = "Scheduling rule #1 references unknown resource queue 'ghost-queue'."
 
