@@ -147,3 +147,10 @@ touch. If you instead want hard capacity isolation per person or team, give each
 `resource_queue` (or its own cohort) with its own `resource_groups`, the way the two-queue
 `batch`/`interactive` example on the resource page does it - that trades this pattern's flexible
 sharing for a guarantee that one person's workloads can never crowd out another's.
+
+## Out-of-band changes show up as a plan diff, not a silent drop
+
+`anyscale_scheduler_config` writes the whole document on every apply - there is no per-section
+update. Because of that, anything set outside Terraform (console, API, another tool) shows up in
+the next plan as a removal, for any of the four sections, not just `scheduling_rules`: read the
+plan before applying whenever the console or API might also be writing this config.
