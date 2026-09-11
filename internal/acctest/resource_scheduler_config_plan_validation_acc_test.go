@@ -174,7 +174,7 @@ resource "anyscale_scheduler_config" "test" {
 // receives the 400, and fails the plan before any write happens.
 //
 // Mutation-proof: reverting ModifyPlan's gate and expand calls from
-// req.Config back to req.Plan (the shape this resource shipped with) turns
+// req.Config back to req.Plan (the shape this resource was merged with) turns
 // this test red - the plan step itself succeeds with no error, so the
 // ExpectError assertion is what fails, and the test ends there. The
 // write-count assertion never runs against a reverted build; it only earns
