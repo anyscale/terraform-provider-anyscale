@@ -711,15 +711,31 @@ func (r *SchedulerConfigResource) ModifyPlan(ctx context.Context, req resource.M
 	// unknowns.
 	//
 	// That last clause is a load-bearing precondition, not an observation.
-	// Adding a Computed (or Optional+Computed) attribute anywhere inside
-	// resource_flavors, resource_queues, scheduling_rules, or recycle_policy
-	// breaks this silently: the config would read null and fully known while
-	// the plan carries the resolved or unknown value, so the gate would pass
-	// and the document validated here would not be the document apply sends.
-	// A Default is fine - it makes the value known in both. Computed is the
-	// hazard. If one is ever added, the fix is to expand from the plan and
-	// keep the gate on the config, checking the plan for unknowns in the
-	// serialized sections specifically.
+	// Validating the config is only equivalent to validating what apply sends
+	// while nothing can make the two differ across those four sections. Three
+	// things would, and all three are absent today:
+	//
+	//   1. a Computed (or Optional+Computed) attribute inside a section
+	//   2. a schema Default on a section attribute
+	//   3. a plan modifier rewriting a section value
+	//
+	// Any of them makes the config read null (or stale) and fully known, so
+	// the gate passes and the document validated here is not the document
+	// apply sends. Nothing errors when that happens: validate answers
+	// correctly about the wrong document, so it can pass while the apply
+	// fails and fail while the real document is fine.
+	//
+	// Checking (2) by grepping "Default" in this file returns hits that are
+	// not schema defaults - priority_policy has an attribute literally named
+	// "default", so the matches are Go struct field assignments. Read each
+	// hit; do not conclude from the count.
+	//
+	// If any of the three is ever added, do not patch around it here. Gate on
+	// the plan's serialized subtree being fully known and expand from the
+	// plan: metadata unknowns stop suppressing the call, section unknowns
+	// still skip it, and what is validated is what is sent. That form carries
+	// no standing precondition at all. It is not worth the swap today, since
+	// config/config is correct and verified as long as the three hold.
 	var plan SchedulerConfigResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
