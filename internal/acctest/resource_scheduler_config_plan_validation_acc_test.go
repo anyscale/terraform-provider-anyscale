@@ -10,7 +10,9 @@ package acctest
 // or with an explicit plan-action check.
 
 import (
+	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -140,6 +142,86 @@ resource "anyscale_scheduler_config" "test" {
 				t.Fatalf("expected an empty %s to be rejected at plan with zero API writes, got %d write(s)", attr, writes)
 			}
 		})
+	}
+}
+
+// The cross-reference validate call actually runs on Create, not merely
+// "would run if reached."
+//
+// ModifyPlan's precondition for calling /config/validate has to gate on
+// something, because values that resolve during apply cannot be serialized
+// into the request yet. The bug this test targets is which raw value that
+// gate reads. This resource has three top-level Computed attributes -
+// version, created_at, creator_id - with no UseStateForUnknown, so on Create
+// the plan's raw value is never fully known: there is no prior state to
+// carry them forward from, so they are Unknown in the plan by construction.
+// A gate keyed on the PLAN's fully-known-ness is therefore false on every
+// single Create, unconditionally, and the validate call it guards never
+// fires - not "fires except in edge cases," never. A gate keyed on the
+// CONFIG's fully-known-ness does not have this problem: config carries no
+// Computed values at all, so it is fully known on an ordinary Create and the
+// call proceeds.
+//
+// This is an assert-absence claim ("validate ran"), so it needs a positive
+// control on the same path or a vacuous pass is indistinguishable from a
+// real one - the same reasoning as the empty-plan checks above. The control
+// here is the mock's validate endpoint answering 400, the status this
+// provider treats as "the server evaluated the document and rejected it"
+// (schedulerServerEvaluatedDocument). A build where the gate never fires
+// cannot surface that rejection: nothing ever POSTs to /validate, so the
+// 400 is never seen, and Create proceeds to write the (mock-)invalid
+// document and succeeds. A build where the gate fires calls validate,
+// receives the 400, and fails the plan before any write happens.
+//
+// Mutation-proof: reverting ModifyPlan's gate and expand calls from
+// req.Config back to req.Plan (the shape this resource shipped with) turns
+// this test red - Create succeeds and the write-count assertion fails,
+// because the plan's Computed unknowns skip the call regardless of what the
+// mock's validate endpoint would have said.
+func TestAccSchedulerConfigResourceCrossReferenceValidationRunsOnCreate(t *testing.T) {
+	const rejectDetail = "Scheduling rule #1 references unknown resource queue 'ghost-queue'."
+
+	server, mock := newSchedulerConfigServer(t, schedulerConfigServerOpts{
+		ValidateStatus: 400,
+		ValidateBody:   fmt.Sprintf(`{"error":{"detail":%q}}`, rejectDetail),
+	})
+	defer server.Close()
+
+	const config = `
+resource "anyscale_scheduler_config" "test" {
+  resource_flavors = [
+    { name = "cpu-standard" },
+  ]
+  scheduling_rules = [
+    { resource_queue = "ghost-queue" },
+  ]
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:   testAccProviderBlock(server.URL) + config,
+				PlanOnly: true,
+				// The CLI's own diagnostic renderer word-wraps long lines, so a
+				// literal match on the server's detail sentence would break on
+				// whichever space happens to fall at the wrap column. Every
+				// run-of-spaces in the expected text becomes \s+ instead of a
+				// literal match, tolerating the wrap without weakening the
+				// assertion to "some error happened."
+				ExpectError: regexp.MustCompile(`(?s)Invalid Anyscale Scheduler Configuration.*` +
+					strings.Join(strings.Fields(regexp.QuoteMeta(rejectDetail)), `\s+`)),
+			},
+		},
+	})
+
+	// The write-count assertion is what makes this a claim about PLAN, not
+	// about the resource eventually failing somewhere. A build that skips
+	// the plan-time call but still fails Create some other way could pass
+	// the ExpectError above; it cannot pass this.
+	if writes := mock.WriteCount(); writes != 0 {
+		t.Fatalf("expected the cross-reference rejection to be caught at plan with zero API writes, got %d write(s)", writes)
 	}
 }
 
