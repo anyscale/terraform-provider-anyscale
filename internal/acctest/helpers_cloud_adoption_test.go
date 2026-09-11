@@ -22,9 +22,9 @@ func newCloudResolverServer(t *testing.T, cloudNames ...string) (*httptest.Serve
 	// "/api/v2/clouds" with NO trailing slash; registering only the subtree makes
 	// ServeMux 301-redirect it, and a redirected POST is downgraded to GET by the
 	// client - so the create branch silently never runs and the mock answers with
-	// an empty list instead. Whether that downgrade happens varies by Go version
-	// (it did not on 1.26 locally, it did on CI's 1.25), which is exactly the kind
-	// of environment-dependent difference a mock must not rely on.
+	// an empty list instead. Whether that downgrade happens has varied by Go
+	// version, which is exactly the kind of environment-dependent difference a
+	// mock must not rely on - so register both and stay version-independent.
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost {
