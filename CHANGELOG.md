@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-09-11
+
+### New Resources
+
+- resource/anyscale_scheduler_config: Manage an organization's Anyscale Scheduler configuration (resource flavors, resource queues, scheduling rules, recycle policy) as an org-scoped singleton; `terraform destroy` removes it from Terraform state only — the API has no delete route, so the organization's active configuration remains in effect. Removal emits a warning naming the version left in effect.
+
+### New Data Sources
+
+- data-source/anyscale_scheduler_config: Read the organization's active Anyscale Scheduler configuration. Zero arguments, no plural variant — the API serves at most one active config per token-scoped org. Errors if no config exists or the scheduler is disabled for the org, rather than returning a document with every section unset.
+
+### Changed
+
+- Built with Go 1.26.8 (previously 1.25.8). This adopts Go 1.26 runtime defaults; notably net/url now rejects hostnames with unbracketed IPv6 colons, so an `api_url` like `http://::1:8080` must be written `http://[::1]:8080`.
+
+### Removed
+
+- resource/anyscale_global_resource_scheduler: The dead source for this resource and its `anyscale_global_resource_scheduler`/`anyscale_global_resource_schedulers` data sources is deleted. All three have been commented out of the provider's compiled schema since v0.1.0 and have never been registered in any released version; every `terraform plan` referencing them has always returned "Invalid resource/data source type" regardless of credentials, so deleting the unreachable code has no effect on a working configuration.
+
 ## [0.27.1] - 2026-08-31
 
 ### Fixed
@@ -1036,7 +1054,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.27.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.0
 [0.27.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.27.1
 [0.27.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.27.0
 [0.26.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.26.0
