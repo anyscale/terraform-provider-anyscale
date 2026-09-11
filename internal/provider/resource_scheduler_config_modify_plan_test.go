@@ -11,6 +11,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -175,4 +176,159 @@ func TestSchedulerConfigModifyPlan_WarnsAndProceedsWhenValidateIsUnreachable(t *
 		t.Fatalf("expected a warning diagnostic summarized %q, got: %v",
 			"Anyscale Scheduler Configuration Not Validated", diags)
 	}
+}
+
+// schedulerConfigGap2KnownRaw builds a fully-known raw value for this
+// resource's schema with resource_flavors[0].name set to flavorName and every
+// other attribute null (Computed version/created_at/creator_id; the other
+// three top-level sections unset). SchedulerConfigResourceModel has no way to
+// express "unknown" - every field is a concrete types.T value or absent - so
+// gap 2's fixtures start from this fully-known value and then flip exactly
+// one leaf to unknown with tftypes.Transform, rather than hand-authoring the
+// whole schema tree by hand.
+func schedulerConfigGap2KnownRaw(t *testing.T, flavorName string) (schema.Schema, tftypes.Value) {
+	t.Helper()
+	ctx := context.Background()
+
+	r := &SchedulerConfigResource{}
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+	}
+	rawType := schemaResp.Schema.Type().TerraformType(ctx)
+
+	planned := &SchedulerConfigResourceModel{
+		ResourceFlavors: []schedulerResourceFlavorModel{
+			{Name: types.StringValue(flavorName)},
+		},
+	}
+	holder := tfsdk.Plan{Schema: schemaResp.Schema, Raw: tftypes.NewValue(rawType, nil)}
+	if diags := holder.Set(ctx, planned); diags.HasError() {
+		t.Fatalf("failed to build the plan fixture: %v", diags)
+	}
+	return schemaResp.Schema, holder.Raw
+}
+
+// schedulerConfigGap2FlavorNamePath is the path to the one leaf gap 2 flips
+// between known and unknown: resource_flavors[0].name. It is inside a
+// serialized section (resource_flavors), not a top-level attribute -
+// deliberately, per the architect's requirement 2. The shipped gate
+// (req.Config.Raw.IsFullyKnown(), resource_scheduler_config.go:703) is
+// whole-config today, so an unknown at top level and one inside a section are
+// indistinguishable to it - but this test is written against the documented
+// contract (validation only ever concerns the four input sections), not
+// against the current gate's shape, so it keeps testing the right thing if
+// the gate is ever narrowed to the serialized subtree.
+func schedulerConfigGap2FlavorNamePath() *tftypes.AttributePath {
+	return tftypes.NewAttributePath().
+		WithAttributeName("resource_flavors").
+		WithElementKeyInt(0).
+		WithAttributeName("name")
+}
+
+// runSchedulerConfigModifyPlanRaw drives ModifyPlan directly from a
+// caller-built raw value, the same harness shape as
+// runSchedulerConfigModifyPlan but for gap 2's fixtures, which are built by
+// mutating a raw tftypes.Value rather than through a Go model - see
+// schedulerConfigGap2KnownRaw.
+func runSchedulerConfigModifyPlanRaw(t *testing.T, client *Client, s schema.Schema, raw tftypes.Value) diag.Diagnostics {
+	t.Helper()
+	ctx := context.Background()
+
+	r := &SchedulerConfigResource{client: client}
+	resp := &resource.ModifyPlanResponse{}
+	r.ModifyPlan(ctx, resource.ModifyPlanRequest{
+		State:  tfsdk.State{Schema: s, Raw: tftypes.NewValue(raw.Type(), nil)},
+		Plan:   tfsdk.Plan{Schema: s, Raw: raw},
+		Config: tfsdk.Config{Schema: s, Raw: raw},
+	}, resp)
+	return resp.Diagnostics
+}
+
+// TestSchedulerConfigModifyPlan_SkipsValidateSilentlyWhenSectionHasUnknownValue
+// is gap 2 from the PR #280 review, per the architect's spec: nothing today
+// proves that an unknown value inside one of the four config sections (as
+// opposed to the whole config being null, which the destroy short-circuit
+// already covers) makes ModifyPlan skip the cross-reference validate call
+// silently - zero diagnostics, not a warning - rather than either calling
+// validate against a partial document or erroring on the unknown itself.
+//
+// Built on the same unit harness as route 2 (an unclassifiable validate
+// response was never involved here) rather than as an acceptance test:
+// terraform_data would only add a harder setup and an ordering dependency
+// with no coverage benefit, since this harness can place an unknown at an
+// exact path directly.
+//
+// The unknown leaf is placed inside resource_flavors (a serialized section),
+// not on a top-level attribute like version - see
+// schedulerConfigGap2FlavorNamePath's comment for why that placement is the
+// one that matters against the documented contract, independent of whether
+// the shipped gate happens to be whole-config today.
+//
+// The positive control subtest is required, not incidental: on its own,
+// Hits() == 0 in the skip subtest is equally consistent with "the gate
+// correctly skipped" and with "the mock was never wired up" or "the harness
+// never reached the client at all." The control fixture differs from the
+// skip fixture by exactly that one leaf (unknown vs. the same known string),
+// so nothing else can explain a hit-count difference between the two.
+//
+// Mutation-proof: gated with `if false && !req.Config.Raw.IsFullyKnown()`
+// (resource_scheduler_config.go:703) to disable the skip while leaving the
+// line otherwise intact, the skip subtest failed with:
+//
+//	expected zero calls to the validate endpoint when resource_flavors[0].name
+//	is unknown, got 1
+//
+// req.Config.Get did not panic on the unknown leaf - it decoded cleanly into
+// SchedulerConfigResourceModel and ModifyPlan proceeded to call validate, so
+// the gate's absence surfaced as exactly the hit-count assertion failure this
+// test is designed to catch, not a panic or an unrelated encode error.
+// Restoring the gate (reverted byte-identical, confirmed via `git diff
+// --stat`) turned it back green: 0 hits, 0 diagnostics, positive control
+// passing throughout.
+func TestSchedulerConfigModifyPlan_SkipsValidateSilentlyWhenSectionHasUnknownValue(t *testing.T) {
+	const flavorName = "tfacc-gap2-sentinel-flavor"
+	unknownPath := schedulerConfigGap2FlavorNamePath()
+
+	t.Run("unknown leaf inside a serialized section skips validate silently", func(t *testing.T) {
+		s, knownRaw := schedulerConfigGap2KnownRaw(t, flavorName)
+
+		unknownRaw, err := tftypes.Transform(knownRaw, func(p *tftypes.AttributePath, v tftypes.Value) (tftypes.Value, error) {
+			if p.Equal(unknownPath) {
+				return tftypes.NewValue(v.Type(), tftypes.UnknownValue), nil
+			}
+			return v, nil
+		})
+		if err != nil {
+			t.Fatalf("failed to inject an unknown value at %s: %v", unknownPath, err)
+		}
+
+		server, mock := newSchedulerConfigValidateUnavailableServer(t)
+		defer server.Close()
+		client := &Client{BaseURL: server.URL, Token: "test-token", HTTPClient: server.Client()}
+
+		diags := runSchedulerConfigModifyPlanRaw(t, client, s, unknownRaw)
+
+		if got := mock.Hits(); got != 0 {
+			t.Fatalf("expected zero calls to the validate endpoint when resource_flavors[0].name is unknown, got %d", got)
+		}
+		if len(diags) != 0 {
+			t.Fatalf("expected zero diagnostics (skipping must be silent, not a warning), got: %v", diags)
+		}
+	})
+
+	t.Run("positive control: the identical fixture with that leaf known reaches validate", func(t *testing.T) {
+		s, knownRaw := schedulerConfigGap2KnownRaw(t, flavorName)
+
+		server, mock := newSchedulerConfigValidateUnavailableServer(t)
+		defer server.Close()
+		client := &Client{BaseURL: server.URL, Token: "test-token", HTTPClient: server.Client()}
+
+		_ = runSchedulerConfigModifyPlanRaw(t, client, s, knownRaw)
+
+		if got := mock.Hits(); got != 1 {
+			t.Fatalf("expected exactly 1 call to the validate endpoint when resource_flavors[0].name is known (control differs from the skip case only in that leaf), got %d", got)
+		}
+	})
 }
