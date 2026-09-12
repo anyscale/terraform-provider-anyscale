@@ -369,7 +369,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 			},
 			"recycle_policy": schema.SingleNestedAttribute{
 				Optional:            true,
-				MarkdownDescription: "When the scheduler retires and replaces the machines it manages. Omit the attribute entirely, not `{}`, to leave the section unset: unlike the list sections, where `[]` is dropped from the request, an empty object here is sent to the API as an empty policy.",
+				MarkdownDescription: "When the scheduler retires and replaces the machines it manages. Stored and returned by the API, but the scheduler does not act on it yet, so setting it changes no scheduling behavior today. Omit the attribute entirely, not `{}`, to leave the section unset: unlike the list sections, where `[]` is dropped from the request, an empty object here is sent to the API as an empty policy.",
 				Attributes: map[string]schema.Attribute{
 					"rotation_interval": schema.StringAttribute{
 						Optional:            true,
@@ -692,16 +692,52 @@ func (r *SchedulerConfigResource) ModifyPlan(ctx context.Context, req resource.M
 	if r.client == nil {
 		return
 	}
-	if !req.Plan.Raw.IsFullyKnown() {
-		// Values that resolve during apply cannot be serialized yet. Skipping
-		// is the honest outcome: validating a partial document would report
-		// errors about unknowns rather than about the practitioner's config.
-		tflog.Debug(ctx, "skipping scheduler config plan-time validation: plan contains unknown values")
+	// Gate on the config, not the plan. The plan always carries unknowns for
+	// this resource - version, created_at, and creator_id are Computed and
+	// change on every apply - so a plan-based check would skip every create
+	// and every update, which is to say always. The config only holds
+	// unknowns when the practitioner interpolates a value that resolves
+	// during apply, which is the case actually worth skipping: validating a
+	// partial document would report errors about unknowns rather than about
+	// the practitioner's config.
+	if !req.Config.Raw.IsFullyKnown() {
+		tflog.Debug(ctx, "skipping scheduler config plan-time validation: config contains unknown values")
 		return
 	}
 
+	// Read from the config for the same reason: the document sent to the
+	// validate endpoint is built entirely from the four input sections, none
+	// of which is Computed, so the config carries the same values without the
+	// unknowns.
+	//
+	// That last clause is a load-bearing precondition, not an observation.
+	// Validating the config is only equivalent to validating what apply sends
+	// while nothing can make the two differ across those four sections. Three
+	// things would, and all three are absent today:
+	//
+	//   1. a Computed (or Optional+Computed) attribute inside a section
+	//   2. a schema Default on a section attribute
+	//   3. a plan modifier rewriting a section value
+	//
+	// Any of them makes the config read null (or stale) and fully known, so
+	// the gate passes and the document validated here is not the document
+	// apply sends. Nothing errors when that happens: validate answers
+	// correctly about the wrong document, so it can pass while the apply
+	// fails and fail while the real document is fine.
+	//
+	// Checking (2) by grepping "Default" in this file returns hits that are
+	// not schema defaults - priority_policy has an attribute literally named
+	// "default", so the matches are Go struct field assignments. Read each
+	// hit; do not conclude from the count.
+	//
+	// If any of the three is ever added, do not patch around it here. Gate on
+	// the plan's serialized subtree being fully known and expand from the
+	// plan: metadata unknowns stop suppressing the call, section unknowns
+	// still skip it, and what is validated is what is sent. That form carries
+	// no standing precondition at all. It is not worth the swap today, since
+	// config/config is correct and verified as long as the three hold.
 	var plan SchedulerConfigResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}

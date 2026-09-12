@@ -221,7 +221,7 @@ func (d *SchedulerConfigDataSource) Schema(ctx context.Context, req datasource.S
 			},
 			"recycle_policy": schema.SingleNestedAttribute{
 				Computed:            true,
-				MarkdownDescription: "When the scheduler retires and replaces the machines it manages. `null` if the config sets no recycle policy.",
+				MarkdownDescription: "When the scheduler retires and replaces the machines it manages. Reflects what the config stores; the scheduler does not act on it yet, so a policy here does not describe scheduling behavior in effect. `null` if the config sets no recycle policy.",
 				Attributes: map[string]schema.Attribute{
 					"rotation_interval": schema.StringAttribute{
 						Computed:            true,

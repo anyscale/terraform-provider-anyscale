@@ -61,6 +61,12 @@ type schedulerConfigServer struct {
 	getStatus      int
 	getBody        string
 
+	// validateHits counts calls to /config/validate specifically, distinct
+	// from requests (every endpoint) and writes (POST /config only) - so a
+	// test can assert the cross-reference/validate call itself happened,
+	// not merely that some request landed somewhere.
+	validateHits int
+
 	// The raw bytes of the last apply POST body, captured before any
 	// decoding, so a test can assert an omitted section never
 	// appears as a substring - decoding and re-encoding it back to a string
@@ -129,6 +135,7 @@ func newSchedulerConfigServer(t *testing.T, opts schedulerConfigServerOpts) (*ht
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.requests++
+		s.validateHits++
 
 		if s.validateStatus != 0 {
 			w.WriteHeader(s.validateStatus)
@@ -227,6 +234,14 @@ func (s *schedulerConfigServer) WriteCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.writes
+}
+
+// ValidateHits returns the number of calls to /config/validate, independent
+// of RequestCount (every endpoint) and WriteCount (POST /config only).
+func (s *schedulerConfigServer) ValidateHits() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.validateHits
 }
 
 func (s *schedulerConfigServer) LastApplyBody() []byte {
