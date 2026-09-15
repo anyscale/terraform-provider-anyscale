@@ -1,6 +1,6 @@
 ---
 page_title: "Cloud Resources: Provider Support, Naming, and Known Limitations"
-subcategory: "Behavior & Limitations"
+subcategory: "Concepts & Reference"
 description: |-
   Cloud provider support, naming differences between the Cloud resources and data sources, and known limitations.
 ---

@@ -1,6 +1,6 @@
 ---
 page_title: "Compute Config: Versioning, Identity, and Write-Only Fields"
-subcategory: "Behavior & Limitations"
+subcategory: "Concepts & Reference"
 description: |-
   Versioning model, identity attributes, and write-only fields for the Compute Config resource and data source that aren't obvious from the schema table alone.
 ---

@@ -1,6 +1,6 @@
 ---
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
-subcategory: "Behavior & Limitations"
+subcategory: "Concepts & Reference"
 description: |-
   How access control is split across anyscale_organization_user and anyscale_organization_user_role - the vocabulary differences between scopes, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
 ---
