@@ -1,6 +1,6 @@
 ---
 page_title: "Kitchen Sink: A Tour of the Full Provider Surface"
-subcategory: "Getting Started"
+subcategory: "Concepts & Reference"
 description: |-
   A curated tour of the kitchen-sink example - every resource and data source this provider registers (with one deliberate exception), wired together, with the non-obvious Terraform patterns it exists to demonstrate.
 ---

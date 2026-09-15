@@ -1,0 +1,9 @@
+```
+release-note:changed
+provider: The provider's landing page now leads with Authentication before Quick Start, the Quick Start section opens by asking whether you already have an Anyscale cloud registered, and the Getting Started guide list names which cloud provider and shape (VM vs. Kubernetes) each guide is for.
+```
+
+```
+release-note:changed
+provider: The Kitchen Sink tour guide moved out of the Getting Started guide list into a renamed "Concepts & Reference" section (formerly "Behavior & Limitations"), alongside RBAC, Cloud Resources, Compute Config, Container Images, and Anyscale Scheduler - it's a tour for after the basics, not a first stop.
+```

@@ -47,7 +47,21 @@ provider "anyscale" {
 }
 ```
 
+## Authentication
+
+The provider resolves an API token in the following order:
+
+1. The `token` argument in the `provider` block above.
+2. The `ANYSCALE_CLI_TOKEN` environment variable.
+3. `~/.anyscale/credentials.json` (the same file the Anyscale CLI writes on `anyscale login`).
+
+The first one found wins; later methods are only checked if earlier ones are unset. See the
+[Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate a token.
+
 ## Quick Start
+
+**Does your Anyscale organization already have a cloud registered?** If not, register one first -
+see the Getting Started guides below. The rest of this section assumes a cloud already exists.
 
 Create a minimal [Compute Config](resources/compute_config.md) with a single head node in an
 existing Anyscale cloud.
@@ -77,28 +91,17 @@ Replace `my-anyscale-cloud` with the name of a cloud already registered in your 
 organization. To scale out, add a `worker_nodes` block - see the
 [Compute Config resource page](resources/compute_config.md) for examples.
 
-## Authentication
-
-The provider resolves an API token in the following order:
-
-1. The `token` argument in the `provider` block above.
-2. The `ANYSCALE_CLI_TOKEN` environment variable.
-3. `~/.anyscale/credentials.json` (the same file the Anyscale CLI writes on `anyscale login`).
-
-The first one found wins; later methods are only checked if earlier ones are unset. See the
-[Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate a token.
-
 ## Guides
 
 Getting Started:
 
-- [Create a VM Cloud (AWS)](guides/create-a-vm-cloud.md) - register an AWS VM cloud with Anyscale from scratch.
-- [Create a VM Cloud (GCP)](guides/create-a-vm-cloud-gcp.md) - register a GCP VM cloud with Anyscale from scratch.
-- [Create a Kubernetes Cloud (AWS EKS)](guides/create-a-kubernetes-cloud.md) - register an AWS EKS cloud, including the Anyscale Operator and Gateway install.
-- [Kitchen Sink: A Tour of the Full Provider Surface](guides/kitchen-sink-tour.md) - every resource and data source this provider registers, wired together.
+- [Create a VM Cloud (AWS)](guides/create-a-vm-cloud.md) - for a first cloud on AWS, the simplest on-ramp: one `anyscale_cloud` resource, no Kubernetes cluster to run.
+- [Create a VM Cloud (GCP)](guides/create-a-vm-cloud-gcp.md) - the same on-ramp on GCP.
+- [Create a Kubernetes Cloud (AWS EKS)](guides/create-a-kubernetes-cloud.md) - for a cloud running on an existing or new EKS cluster, including the Anyscale Operator and Gateway install; a bigger lift than the VM path.
 
-Behavior & Limitations:
+Concepts & Reference:
 
+- [Kitchen Sink: A Tour of the Full Provider Surface](guides/kitchen-sink-tour.md) - once the basics feel comfortable, every resource and data source this provider registers, wired together.
 - [RBAC: Roles Across Organizations, Clouds, and Projects](guides/rbac.md) - how access control is split across the organization, cloud, and project scopes.
 - [Cloud Resources: Provider Support, Naming, and Known Limitations](guides/cloud-resources.md) - cloud provider support and naming differences between the Cloud resources and data sources.
 - [Compute Config: Versioning, Identity, and Write-Only Fields](guides/compute-config.md) - the versioning model and identity attributes behind the schema table.
