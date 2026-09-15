@@ -3,12 +3,15 @@
 page_title: "anyscale_project Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an Anyscale Project. Projects organize workspaces and resources within a cloud. terraform destroy shortly after the matching apply can retry for up to 90 seconds against a known backend permission-check timing race before succeeding - invisible unless TF_LOG is WARN or higher; a genuine permission problem still surfaces unchanged.
+  Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.
+  terraform destroy shortly after apply may pause before succeeding. Deleting a project created in the last five minutes can hit a transient backend permission-check race, which the provider retries for up to 90 seconds - invisible unless TF_LOG is WARN or higher. An older project, or one that still has active jobs or services, fails immediately instead: a real permission problem is never masked.
 ---
 
 # anyscale_project (Resource)
 
-Manages an Anyscale Project. Projects organize workspaces and resources within a cloud. `terraform destroy` shortly after the matching `apply` can retry for up to 90 seconds against a known backend permission-check timing race before succeeding - invisible unless `TF_LOG` is `WARN` or higher; a genuine permission problem still surfaces unchanged.
+Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.
+
+**`terraform destroy` shortly after `apply` may pause before succeeding.** Deleting a project created in the last five minutes can hit a transient backend permission-check race, which the provider retries for up to 90 seconds - invisible unless `TF_LOG` is `WARN` or higher. An older project, or one that still has active jobs or services, fails immediately instead: a real permission problem is never masked.
 
 ## Example Usage
 
