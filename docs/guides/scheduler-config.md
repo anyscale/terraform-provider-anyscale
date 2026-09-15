@@ -1,6 +1,6 @@
 ---
 page_title: "Anyscale Scheduler: Per-Identity Rules and Deny-by-Default"
-subcategory: "Behavior & Limitations"
+subcategory: "Concepts & Reference"
 description: |-
   A worked example of per-identity priority tiers on one shared queue, and the deny-by-default consequence of omitting a catch-all scheduling rule from anyscale_scheduler_config.
 ---
