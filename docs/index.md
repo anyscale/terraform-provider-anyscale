@@ -88,9 +88,8 @@ resource "anyscale_compute_config" "example" {
 }
 ```
 
-Replace `my-anyscale-cloud` with the name of a cloud already registered in your Anyscale
-organization. To scale out, add a `worker_nodes` block - see the
-[Compute Config resource page](resources/compute_config.md) for examples.
+Replace `my-anyscale-cloud` with the name of that cloud. To scale out, add a `worker_nodes`
+block - see the [Compute Config resource page](resources/compute_config.md) for examples.
 
 ## Guides
 
