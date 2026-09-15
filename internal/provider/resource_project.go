@@ -70,8 +70,9 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 		// against this schema without the v0 -> v1 upgrader in
 		// resource_project_upgrade.go - see that file for why every existing
 		// anyscale_project state is affected, not just ones that used the block.
-		Version:             1,
-		MarkdownDescription: "Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.",
+		Version: 1,
+		MarkdownDescription: "Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.\n\n" +
+			"**`terraform destroy` shortly after `apply` may pause before succeeding.** Deleting a project created in the last five minutes can hit a transient backend permission-check race, which the provider retries for up to 90 seconds - invisible unless `TF_LOG` is `WARN` or higher. An older project, or one that still has active jobs or services, fails immediately instead: a real permission problem is never masked.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

@@ -1,11 +1,11 @@
 ---
-page_title: "Create a Kubernetes Cloud"
+page_title: "Create a Kubernetes Cloud (AWS EKS)"
 subcategory: "Getting Started"
 description: |-
   A first-time walkthrough of registering an AWS EKS cloud with Anyscale, including the Anyscale Operator and Gateway install, building up to the runnable aws-eks-basic example.
 ---
 
-# Create a Kubernetes cloud
+# Create a Kubernetes cloud (AWS EKS)
 
 This walks through registering a new AWS **Kubernetes (EKS) cloud** with Anyscale: provisioning an
 EKS cluster, registering it as an `anyscale_cloud`, then installing the Anyscale Operator so the
@@ -263,8 +263,8 @@ terraform destroy
   section for each landmine mentioned above.
 - [Cloud Resources guide](./cloud-resources.md) - provider support matrix and known limitations
   across every cloud shape this provider supports, not just this one.
-- [Create a VM cloud](./create-a-vm-cloud.md) - the simpler sibling to this guide, if you landed
-  here first.
+- [Create a VM cloud (AWS)](./create-a-vm-cloud.md) - the simpler sibling to this guide, if you
+  landed here first.
 - [Kitchen Sink tour](./kitchen-sink-tour.md) - a tour of every resource and data source this
   provider registers, including a second cloud resource sharing this same EKS cluster's VPC.
 - [Anyscale's own Gateway (Envoy) setup documentation](https://docs.anyscale.com/clouds/kubernetes/gateway-envoy) -

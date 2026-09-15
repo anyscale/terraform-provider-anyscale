@@ -1,11 +1,11 @@
 ---
-page_title: "Create a VM Cloud"
+page_title: "Create a VM Cloud (AWS)"
 subcategory: "Getting Started"
 description: |-
   A first-time walkthrough of registering an AWS VM cloud with Anyscale from scratch, building up to the runnable aws-vm-basic example.
 ---
 
-# Create a VM cloud
+# Create a VM cloud (AWS)
 
 This walks through registering a new AWS **VM cloud** with Anyscale, end to end: providing the AWS
 infrastructure Anyscale needs, then creating the [`anyscale_cloud`](../resources/cloud.md) resource
@@ -199,8 +199,8 @@ resource "anyscale_project" "default" {
 }
 ```
 
-This resource does not manage who can access the project - see the [Project
-guide](./project.md) for why, and for a known timing limitation on `destroy` shortly after `apply`.
+This resource does not manage who can access the project - see the [`anyscale_project` resource
+page](../resources/project.md) for a known timing limitation on `destroy` shortly after `apply`.
 
 ## Cleaning up
 
@@ -219,10 +219,11 @@ intend to keep, so an accidental `destroy` can't silently drop stored data.
 - [`examples/aws-vm-basic`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/aws-vm-basic) -
   the complete, runnable version of this walkthrough, including additional compute config and
   project variations
-- [Create a Kubernetes cloud](./create-a-kubernetes-cloud.md) - the Kubernetes/EKS equivalent of
-  this same walkthrough, a bigger lift since it also installs the Anyscale Operator
-- [Create a GCP VM cloud](./create-a-vm-cloud-gcp.md) - the GCP equivalent of this same walkthrough,
-  same all-in-one pattern applied to a brand-new GCP project instead of an existing AWS account
+- [Create a Kubernetes cloud (AWS EKS)](./create-a-kubernetes-cloud.md) - the Kubernetes/EKS
+  equivalent of this same walkthrough, a bigger lift since it also installs the Anyscale Operator
+- [Create a VM cloud (GCP)](./create-a-vm-cloud-gcp.md) - the GCP equivalent of this same
+  walkthrough, same all-in-one pattern applied to a brand-new GCP project instead of an existing AWS
+  account
 - [Kitchen Sink tour](./kitchen-sink-tour.md) - once the basics feel comfortable, a tour of every
   resource and data source this provider registers, composed together
 - [Cloud Resources guide](./cloud-resources.md) - provider support matrix, naming differences
