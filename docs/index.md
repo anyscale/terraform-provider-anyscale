@@ -27,6 +27,7 @@ v1.0 release.
 
 ```terraform
 terraform {
+  required_version = ">= 1.10"
   required_providers {
     anyscale = {
       source = "anyscale/anyscale"
@@ -61,10 +62,10 @@ The first one found wins; later methods are only checked if earlier ones are uns
 ## Quick Start
 
 **Does your Anyscale organization already have a cloud registered?** If not, register one first -
-see the Getting Started guides below. The rest of this section assumes a cloud already exists.
+see the Getting Started guides below.
 
-Create a minimal [Compute Config](resources/compute_config.md) with a single head node in an
-existing Anyscale cloud.
+Create a minimal [Compute Config](resources/compute_config.md) with a single head node in that
+cloud.
 
 ```terraform
 # A minimal compute config with a single head node, in an existing Anyscale
