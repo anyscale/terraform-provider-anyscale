@@ -10,5 +10,5 @@ provider: The Kitchen Sink tour guide moved out of the Getting Started guide lis
 
 ```
 release-note:changed
-provider: The terraform block on the provider landing page now declares required_version = ">= 1.10", the floor set by the anyscale_service_credentials ephemeral resource. Copying the published example onto an older Terraform CLI now fails with an explicit version constraint error rather than an unexplained failure on the first primitive that needs it.
+provider: The `terraform` block on the provider landing page now declares `required_version = ">= 1.10"`, the floor set by the `anyscale_service_credentials` ephemeral resource. Copying the published example onto an older Terraform CLI now fails with an explicit version constraint error rather than an unexplained failure on the first primitive that needs it.
 ```
