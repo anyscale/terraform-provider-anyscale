@@ -3,12 +3,12 @@
 page_title: "anyscale_project Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.
+  Manages an Anyscale Project. Projects organize workspaces and resources within a cloud. terraform destroy shortly after the matching apply can retry for up to 90 seconds against a known backend permission-check timing race before succeeding - invisible unless TF_LOG is WARN or higher; a genuine permission problem still surfaces unchanged.
 ---
 
 # anyscale_project (Resource)
 
-Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.
+Manages an Anyscale Project. Projects organize workspaces and resources within a cloud. `terraform destroy` shortly after the matching `apply` can retry for up to 90 seconds against a known backend permission-check timing race before succeeding - invisible unless `TF_LOG` is `WARN` or higher; a genuine permission problem still surfaces unchanged.
 
 ## Example Usage
 

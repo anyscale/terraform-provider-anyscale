@@ -1,11 +1,11 @@
 ---
-page_title: "Create a GCP VM Cloud"
+page_title: "Create a VM Cloud (GCP)"
 subcategory: "Getting Started"
 description: |-
   A first-time walkthrough of registering a GCP VM cloud with Anyscale from scratch, including provisioning a brand-new GCP project, building up to the runnable gcp-vm-basic example.
 ---
 
-# Create a GCP VM cloud
+# Create a VM cloud (GCP)
 
 This walks through registering a new GCP **VM cloud** with Anyscale, end to end: providing the GCP
 infrastructure Anyscale needs - including a brand-new GCP project - then creating the
@@ -15,7 +15,7 @@ configuration is for rather than just having copy-pasted it.
 
 This is the **all-in-one pattern**: one `anyscale_cloud` resource with an embedded `gcp_config`
 block, the simplest of the cloud shapes this provider supports - the same shape the [Create a VM
-Cloud](./create-a-vm-cloud.md) guide walks through for AWS. If you've already read that one, the
+Cloud (AWS)](./create-a-vm-cloud.md) guide walks through for AWS. If you've already read that one, the
 overall structure here will feel familiar; what's different is GCP-specific: a brand-new project
 created from scratch, and workload identity federation in place of cross-account IAM role
 assumption. It's also VM, not Kubernetes - Anyscale schedules Ray clusters directly onto Compute
@@ -228,8 +228,8 @@ resource "anyscale_project" "default" {
 }
 ```
 
-This resource does not manage who can access the project - see the [Project
-guide](./project.md) for why, and for a known timing limitation on `destroy` shortly after `apply`.
+This resource does not manage who can access the project - see the [`anyscale_project` resource
+page](../resources/project.md) for a known timing limitation on `destroy` shortly after `apply`.
 
 ## Cleaning up
 
@@ -255,12 +255,11 @@ resource; empty the bucket yourself first rather than expecting a force-destroy 
 
 ## See also
 
-- [Create a VM cloud](./create-a-vm-cloud.md) - the AWS equivalent of this same walkthrough, the
-  same all-in-one pattern applied to a different cloud provider
+- [Create a VM cloud (AWS)](./create-a-vm-cloud.md) - the AWS equivalent of this same walkthrough,
+  the same all-in-one pattern applied to a different cloud provider
 - [`examples/gcp-vm-basic`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/gcp-vm-basic) -
   the complete, runnable version of this walkthrough, including an additional compute config
   variation
 - [Cloud Resources guide](./cloud-resources.md) - provider support matrix, naming differences
   between resources and data sources, and known limitations
 - [Compute Config guide](./compute-config.md) - versioning model and write-only fields
-- [Project guide](./project.md) - collaborator block removal and known limitations

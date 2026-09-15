@@ -71,7 +71,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 		// resource_project_upgrade.go - see that file for why every existing
 		// anyscale_project state is affected, not just ones that used the block.
 		Version:             1,
-		MarkdownDescription: "Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.",
+		MarkdownDescription: "Manages an Anyscale Project. Projects organize workspaces and resources within a cloud. `terraform destroy` shortly after the matching `apply` can retry for up to 90 seconds against a known backend permission-check timing race before succeeding - invisible unless `TF_LOG` is `WARN` or higher; a genuine permission problem still surfaces unchanged.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

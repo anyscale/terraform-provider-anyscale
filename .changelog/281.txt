@@ -1,0 +1,8 @@
+```
+release-note:removed
+provider: Remove the standalone project collaborator-removal guide; its still-relevant note on a `terraform destroy` timing retry moved into the `anyscale_project` resource page instead of disappearing with the page.
+```
+```
+release-note:changed
+provider: Getting Started guide and index titles for the VM and Kubernetes cloud walkthroughs now name their cloud provider (`(AWS)`, `(GCP)`, `(AWS EKS)`) so the sidebar and page titles are unambiguous at a glance.
+```
