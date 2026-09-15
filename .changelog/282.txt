@@ -7,3 +7,8 @@ provider: The provider's landing page now leads with Authentication before Quick
 release-note:changed
 provider: The Kitchen Sink tour guide moved out of the Getting Started guide list into a renamed "Concepts & Reference" section (formerly "Behavior & Limitations"), alongside RBAC, Cloud Resources, Compute Config, Container Images, and Anyscale Scheduler - it's a tour for after the basics, not a first stop.
 ```
+
+```
+release-note:changed
+provider: The terraform block on the provider landing page now declares required_version = ">= 1.10", the floor set by the anyscale_service_credentials ephemeral resource. Copying the published example onto an older Terraform CLI now fails with an explicit version constraint error rather than an unexplained failure on the first primitive that needs it.
+```
