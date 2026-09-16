@@ -1,9 +1,0 @@
-```
-release-note:changed
-provider: Getting Started guide and index titles for the VM and Kubernetes cloud walkthroughs now name their cloud provider (`(AWS)`, `(GCP)`, `(AWS EKS)`) so the sidebar and page titles are unambiguous at a glance.
-```
-
-```
-release-note:changed
-resource/anyscale_project: The delete-time permission-check retry (up to 90 seconds on a project created in the last five minutes) is now documented on the resource page itself, rather than in a standalone Project guide. No behavior change.
-```

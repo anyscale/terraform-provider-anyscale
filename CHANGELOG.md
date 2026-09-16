@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.1] - 2026-09-16
+
+### Changed
+
+- provider: Getting Started guide and index titles for the VM and Kubernetes cloud walkthroughs now name their cloud provider (`(AWS)`, `(GCP)`, `(AWS EKS)`) so the sidebar and page titles are unambiguous at a glance.
+- resource/anyscale_project: The delete-time permission-check retry (up to 90 seconds on a project created in the last five minutes) is now documented on the resource page itself, rather than in a standalone Project guide. No behavior change.
+- provider: The provider's landing page now leads with Authentication before Quick Start, the Quick Start section opens by asking whether you already have an Anyscale cloud registered, and each Getting Started guide's description now says which one to start with and how big a lift it is.
+- provider: The Kitchen Sink tour guide moved out of the Getting Started guide list into a renamed "Concepts & Reference" section (formerly "Behavior & Limitations"), alongside RBAC, Cloud Resources, Compute Config, Container Images, and Anyscale Scheduler - it's a tour for after the basics, not a first stop.
+- provider: The `terraform` block on the provider landing page now declares `required_version = ">= 1.10"`, the floor set by the `anyscale_service_credentials` ephemeral resource. Copying the published example onto an older Terraform CLI now fails with an explicit version constraint error rather than an unexplained failure on the first primitive that needs it.
+
 ## [0.28.0] - 2026-09-11
 
 ### New Resources
@@ -1054,7 +1064,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.28.1...HEAD
+[0.28.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.1
 [0.28.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.0
 [0.27.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.27.1
 [0.27.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.27.0
