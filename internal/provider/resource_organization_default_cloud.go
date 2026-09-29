@@ -180,21 +180,22 @@ func (r *OrganizationDefaultCloudResource) Read(ctx context.Context, req resourc
 
 	cloudID := state.CloudID.ValueString()
 
-	httpResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	// Only a 404 means the cloud is gone. Any other non-200 (5xx, 401, 403)
+	// is an error that leaves state untouched: decoding its error body would
+	// yield is_default=false and silently drop the resource from state.
+	bodyBytes, err := DoRequestRaw(ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			tflog.Warn(ctx, "Managed cloud no longer exists, removing from state", map[string]any{"cloud_id": cloudID})
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "read cloud", err)
-		return
-	}
-	defer CloseBody(ctx, httpResp.Body)
-
-	if httpResp.StatusCode == http.StatusNotFound {
-		tflog.Warn(ctx, "Managed cloud no longer exists, removing from state", map[string]any{"cloud_id": cloudID})
-		resp.State.RemoveResource(ctx)
 		return
 	}
 
 	var cloudResp CloudResponse
-	if err := json.NewDecoder(httpResp.Body).Decode(&cloudResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &cloudResp); err != nil {
 		AddJSONError(&resp.Diagnostics, "unmarshal", "cloud response", err)
 		return
 	}
@@ -261,21 +262,21 @@ func (r *OrganizationDefaultCloudResource) Delete(ctx context.Context, req resou
 func (r *OrganizationDefaultCloudResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	cloudID := req.ID
 
-	httpResp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	// As in Read, only a 404 means "not found"; any other non-200 is an API
+	// error, never misreported as "Not The Organization Default".
+	bodyBytes, err := DoRequestRaw(ctx, r.client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, http.StatusOK)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			AddConfigError(&resp.Diagnostics, "Cloud Not Found",
+				fmt.Sprintf("Cloud %q was not found.", cloudID))
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "read cloud", err)
-		return
-	}
-	defer CloseBody(ctx, httpResp.Body)
-
-	if httpResp.StatusCode == http.StatusNotFound {
-		AddConfigError(&resp.Diagnostics, "Cloud Not Found",
-			fmt.Sprintf("Cloud %q was not found.", cloudID))
 		return
 	}
 
 	var cloudResp CloudResponse
-	if err := json.NewDecoder(httpResp.Body).Decode(&cloudResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &cloudResp); err != nil {
 		AddJSONError(&resp.Diagnostics, "unmarshal", "cloud response", err)
 		return
 	}
