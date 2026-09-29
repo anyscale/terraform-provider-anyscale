@@ -1,6 +1,7 @@
 package acctest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -383,7 +384,7 @@ func createEphemeralTestCloud(t *testing.T) (cloudID string, cloudName string, e
 		return "", "", fmt.Errorf("failed to marshal create request: %w", err)
 	}
 
-	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/clouds", strings.NewReader(string(reqBody)))
+	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/clouds", bytes.NewReader(reqBody))
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create cloud: %w", err)
 	}
@@ -781,126 +782,6 @@ func isKnownProvider(provider, computeStack string) bool {
 	return false
 }
 
-// GetConfiguredCloud returns a cloud that has cloud resources configured.
-// This is required for tests that attach machine pools or need a fully configured cloud.
-// Returns CloudInfo so tests can adapt instance types based on provider.
-// Falls back to any cloud with a known provider if no fully configured clouds exist.
-func GetConfiguredCloud(t *testing.T) CloudInfo {
-	client, err := GetTestClient()
-	if err != nil {
-		t.Skip("No configured cloud available - failed to get test client.")
-		return CloudInfo{}
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
-	if err != nil {
-		t.Skip("No configured cloud available - failed to list clouds.")
-		return CloudInfo{}
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		t.Skip("No configured cloud available - API error.")
-		return CloudInfo{}
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Skip("No configured cloud available - failed to read response.")
-		return CloudInfo{}
-	}
-
-	var cloudsResp struct {
-		Results []struct {
-			ID             string `json:"id"`
-			Name           string `json:"name"`
-			Provider       string `json:"provider"`
-			ComputeStack   string `json:"compute_stack"`
-			CloudResources []struct {
-				ID string `json:"id"`
-			} `json:"cloud_resources"`
-		} `json:"results"`
-	}
-
-	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		t.Skip("No configured cloud available - failed to parse response.")
-		return CloudInfo{}
-	}
-
-	// Priority 1: Look for VM clouds with cloud resources configured (best for compute config tests)
-	for _, cloud := range cloudsResp.Results {
-		if len(cloud.CloudResources) > 0 && (cloud.ComputeStack == "VM" || cloud.ComputeStack == "") {
-			t.Logf("Found configured VM cloud: %s (ID: %s, provider: %s, compute_stack: %s)", cloud.Name, cloud.ID, cloud.Provider, cloud.ComputeStack)
-			return CloudInfo{
-				ID:           cloud.ID,
-				Name:         cloud.Name,
-				Provider:     cloud.Provider,
-				ComputeStack: normalizeComputeStack(cloud.ComputeStack),
-			}
-		}
-	}
-
-	// Priority 2: Look for any cloud with cloud resources configured (including K8S)
-	for _, cloud := range cloudsResp.Results {
-		if len(cloud.CloudResources) > 0 {
-			t.Logf("Found configured cloud: %s (ID: %s, provider: %s, compute_stack: %s)", cloud.Name, cloud.ID, cloud.Provider, cloud.ComputeStack)
-			return CloudInfo{
-				ID:           cloud.ID,
-				Name:         cloud.Name,
-				Provider:     cloud.Provider,
-				ComputeStack: normalizeComputeStack(cloud.ComputeStack),
-			}
-		}
-	}
-
-	// Priority 3: Fall back to any VM cloud with a known provider (AWS, GCP)
-	for _, cloud := range cloudsResp.Results {
-		computeStack := normalizeComputeStack(cloud.ComputeStack)
-		if isKnownProvider(cloud.Provider, computeStack) && computeStack == "VM" {
-			t.Logf("Found VM cloud without cloud_resources (may not work for all tests): %s (ID: %s, provider: %s)", cloud.Name, cloud.ID, cloud.Provider)
-			return CloudInfo{
-				ID:           cloud.ID,
-				Name:         cloud.Name,
-				Provider:     cloud.Provider,
-				ComputeStack: computeStack,
-			}
-		}
-	}
-
-	// Priority 4: Fall back to any cloud with a known provider (including K8S and Generic)
-	for _, cloud := range cloudsResp.Results {
-		computeStack := normalizeComputeStack(cloud.ComputeStack)
-		if isKnownProvider(cloud.Provider, computeStack) {
-			t.Logf("Found cloud without cloud_resources (may not work for all tests): %s (ID: %s, provider: %s, compute_stack: %s)", cloud.Name, cloud.ID, cloud.Provider, computeStack)
-			return CloudInfo{
-				ID:           cloud.ID,
-				Name:         cloud.Name,
-				Provider:     cloud.Provider,
-				ComputeStack: computeStack,
-			}
-		}
-	}
-
-	// Priority 5: Fall back to any cloud, defaulting to AWS instance types
-	if len(cloudsResp.Results) > 0 {
-		cloud := cloudsResp.Results[0]
-		provider := cloud.Provider
-		if provider == "" {
-			provider = "AWS" // Default to AWS instance types
-		}
-		t.Logf("Found cloud without known provider (using %s defaults): %s (ID: %s, compute_stack: %s)", provider, cloud.Name, cloud.ID, cloud.ComputeStack)
-		return CloudInfo{
-			ID:           cloud.ID,
-			Name:         cloud.Name,
-			Provider:     provider,
-			ComputeStack: normalizeComputeStack(cloud.ComputeStack),
-		}
-	}
-
-	t.Skip("No configured cloud available - no clouds found in the account.")
-	return CloudInfo{}
-}
-
 // GetAllConfiguredClouds returns all clouds that have cloud resources configured.
 // This is useful for running tests across multiple cloud types (AWS VM, GCP VM, AWS K8S, etc.).
 // Returns an empty slice if no clouds are available.
@@ -1092,28 +973,6 @@ func GetComputeConfigCloudID(t *testing.T) string {
 	return ""
 }
 
-// GetComputeConfigCloudName is like GetComputeConfigCloudID but returns the
-// cloud name, for tests that reference a cloud by name. Honors
-// ANYSCALE_TEST_CLOUD_NAME first.
-func GetComputeConfigCloudName(t *testing.T) string {
-	if name := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); name != "" {
-		return name
-	}
-	// Known-good static fixture (resolved by name) before auto-discovery.
-	if resolveDefaultKnownGoodCloudID(t) != "" {
-		return defaultKnownGoodCloudName
-	}
-	for _, c := range GetAllConfiguredClouds(t) {
-		if c.IsVM() {
-			return c.Name
-		}
-	}
-	t.Skip("No VM cloud with a healthy primary cloud resource available; " +
-		"compute config creation returns a backend 500 on degraded clouds. " +
-		"Set ANYSCALE_TEST_CLOUD_NAME to a healthy cloud to run this test.")
-	return ""
-}
-
 // EphemeralComputeConfig identifies a compute config created directly against
 // the API by CreateEphemeralComputeConfig, bypassing the Terraform resource
 // entirely - "out-of-band" from Terraform's point of view.
@@ -1148,52 +1007,9 @@ func CreateEphemeralComputeConfig(t *testing.T, cloudID string, instanceType str
 	name := UniqueName(t, "computeconfig")
 	t.Logf("Creating ephemeral out-of-band compute config: %s (cloud: %s)", name, cloudID)
 
-	createBody := map[string]any{
-		"name":        name,
-		"anonymous":   false,
-		"new_version": true,
-		"config": map[string]any{
-			"cloud_id": cloudID,
-			"head_node_type": map[string]any{
-				"name":          "head",
-				"instance_type": instanceType,
-			},
-		},
-	}
-	bodyBytes, err := json.Marshal(createBody)
+	fixture, err := postComputeConfigVersion(client, cloudID, name, instanceType, "create", "create compute config")
 	if err != nil {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to marshal create request: %w", err)
-	}
-
-	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/compute_templates/", strings.NewReader(string(bodyBytes)))
-	if err != nil {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to create compute config: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to read response: %w", err)
-	}
-	if resp.StatusCode != 200 && resp.StatusCode != 201 {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to create compute config (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var createResp struct {
-		Result struct {
-			ID      string `json:"id"`
-			Name    string `json:"name"`
-			Version int64  `json:"version"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(body, &createResp); err != nil {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to parse create response: %w", err)
-	}
-
-	fixture := EphemeralComputeConfig{
-		ConfigID: createResp.Result.ID,
-		Name:     createResp.Result.Name,
-		Version:  createResp.Result.Version,
+		return EphemeralComputeConfig{}, err
 	}
 	t.Logf("Created ephemeral compute config: %s (config_id: %s, version: %d)", fixture.Name, fixture.ConfigID, fixture.Version)
 
@@ -1233,7 +1049,61 @@ func UpdateEphemeralComputeConfig(t *testing.T, cloudID string, name string, ins
 		return EphemeralComputeConfig{}, fmt.Errorf("failed to get test client: %w", err)
 	}
 
-	createBody := map[string]any{
+	fixture, err := postComputeConfigVersion(client, cloudID, name, instanceType, "update", "mint new compute config version")
+	if err != nil {
+		return EphemeralComputeConfig{}, err
+	}
+	t.Logf("Minted new out-of-band compute config version: %s (config_id: %s, version: %d)", fixture.Name, fixture.ConfigID, fixture.Version)
+	// No separate cleanup registration: archive is family-wide, already
+	// covered by the ORIGINAL CreateEphemeralComputeConfig's t.Cleanup for
+	// the same name/cloud lineage.
+	return fixture, nil
+}
+
+// postComputeConfigVersion POSTs a minimal compute config (head node only) to
+// /api/v2/compute_templates/ with new_version=true and returns the version the
+// API assigned. verb and action only shape error messages.
+func postComputeConfigVersion(client *provider.Client, cloudID, name, instanceType, verb, action string) (EphemeralComputeConfig, error) {
+	bodyBytes, err := json.Marshal(computeConfigVersionBody(cloudID, name, instanceType))
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to marshal %s request: %w", verb, err)
+	}
+
+	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/compute_templates/", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to %s: %w", action, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to %s (status %d): %s", action, resp.StatusCode, string(body))
+	}
+
+	var createResp struct {
+		Result struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Version int64  `json:"version"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &createResp); err != nil {
+		return EphemeralComputeConfig{}, fmt.Errorf("failed to parse %s response: %w", verb, err)
+	}
+	return EphemeralComputeConfig{
+		ConfigID: createResp.Result.ID,
+		Name:     createResp.Result.Name,
+		Version:  createResp.Result.Version,
+	}, nil
+}
+
+// computeConfigVersionBody is the request body for a minimal head-node-only
+// compute config version.
+func computeConfigVersionBody(cloudID, name, instanceType string) map[string]any {
+	return map[string]any{
 		"name":        name,
 		"anonymous":   false,
 		"new_version": true,
@@ -1245,46 +1115,6 @@ func UpdateEphemeralComputeConfig(t *testing.T, cloudID string, name string, ins
 			},
 		},
 	}
-	bodyBytes, err := json.Marshal(createBody)
-	if err != nil {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to marshal update request: %w", err)
-	}
-
-	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/compute_templates/", strings.NewReader(string(bodyBytes)))
-	if err != nil {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to mint new compute config version: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to read response: %w", err)
-	}
-	if resp.StatusCode != 200 && resp.StatusCode != 201 {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to mint new compute config version (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var createResp struct {
-		Result struct {
-			ID      string `json:"id"`
-			Name    string `json:"name"`
-			Version int64  `json:"version"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(body, &createResp); err != nil {
-		return EphemeralComputeConfig{}, fmt.Errorf("failed to parse update response: %w", err)
-	}
-
-	fixture := EphemeralComputeConfig{
-		ConfigID: createResp.Result.ID,
-		Name:     createResp.Result.Name,
-		Version:  createResp.Result.Version,
-	}
-	t.Logf("Minted new out-of-band compute config version: %s (config_id: %s, version: %d)", fixture.Name, fixture.ConfigID, fixture.Version)
-	// No separate cleanup registration: archive is family-wide, already
-	// covered by the ORIGINAL CreateEphemeralComputeConfig's t.Cleanup for
-	// the same name/cloud lineage.
-	return fixture, nil
 }
 
 // GetAllVMClouds returns one VM cloud per provider (AWS, GCP).
@@ -1440,7 +1270,7 @@ func CreateEphemeralTestProjectForCloud(t *testing.T, parentCloudID string) (pro
 		return "", "", fmt.Errorf("failed to marshal create request: %w", err)
 	}
 
-	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/projects", strings.NewReader(string(reqBody)))
+	resp, err := client.DoRequest(context.Background(), "POST", "/api/v2/projects", bytes.NewReader(reqBody))
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create project: %w", err)
 	}
@@ -1471,15 +1301,13 @@ func CreateEphemeralTestProjectForCloud(t *testing.T, parentCloudID string) (pro
 	if os.Getenv("ANYSCALE_TEST_KEEP") == "1" {
 		t.Logf("ANYSCALE_TEST_KEEP=1: Project will be preserved after tests")
 	} else {
+		createdAt := time.Now().Format(time.RFC3339)
 		t.Cleanup(func() {
-			delResp, delErr := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/projects/%s", createdID), nil)
-			if delErr != nil {
+			// Same retry as the resource's own Delete: a delete issued shortly
+			// after create can 403 until the owner grant propagates. A final
+			// failure only warns - the sweeper is the backstop.
+			if delErr := provider.DeleteProjectWithRetry(context.Background(), client, createdID, createdAt); delErr != nil {
 				t.Logf("Warning: Failed to delete ephemeral project %s: %v", createdID, delErr)
-				return
-			}
-			defer func() { _ = delResp.Body.Close() }()
-			if delResp.StatusCode != 200 && delResp.StatusCode != 202 && delResp.StatusCode != 204 && delResp.StatusCode != 404 {
-				t.Logf("Warning: Failed to delete ephemeral project %s: status %d", createdID, delResp.StatusCode)
 			}
 		})
 	}
@@ -1896,7 +1724,7 @@ func NewAPIArchivedDestroyCheckByAttr(resourceType, attrName, getPathFmt, archiv
 // failureHint is an optional trailing string appended to the timeout error,
 // for a caller that wants the failure message to name the specific
 // regression it proves rather than just the generic timeout.
-func NewAPIArchivedDestroyCheckForID(resourceType string, id *string, getPathFmt, archivedJSONPath string, failureHint ...string) resource.TestCheckFunc {
+func NewAPIArchivedDestroyCheckForID(resourceType string, id *string, getPathFmt, archivedJSONPath, failureHint string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		if id == nil || *id == "" {
 			return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): no id captured to check", resourceType)
@@ -1934,8 +1762,8 @@ func NewAPIArchivedDestroyCheckForID(resourceType string, id *string, getPathFmt
 			}
 			if time.Now().After(deadline) {
 				hint := ""
-				if len(failureHint) > 0 && failureHint[0] != "" {
-					hint = " - " + failureHint[0]
+				if failureHint != "" {
+					hint = " - " + failureHint
 				}
 				return fmt.Errorf("NewAPIArchivedDestroyCheckForID(%s): %s was never archived (checked %s) within the poll window%s", resourceType, *id, archivedJSONPath, hint)
 			}
@@ -2078,8 +1906,6 @@ func extractArchivedValue(body []byte, jsonPath string) (bool, error) {
 		return v, nil
 	case string:
 		return v != "", nil
-	case nil:
-		return false, nil
 	default:
 		return false, nil
 	}

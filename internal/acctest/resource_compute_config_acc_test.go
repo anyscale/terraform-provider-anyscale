@@ -1,12 +1,12 @@
 package acctest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -607,7 +607,7 @@ func TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI(t *testi
 		"new_version": true,
 	}
 	body, _ := json.Marshal(createPayload)
-	resp, err := client.DoRequest(ctx, "POST", "/api/v2/compute_templates/", strings.NewReader(string(body)))
+	resp, err := client.DoRequest(ctx, "POST", "/api/v2/compute_templates/", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

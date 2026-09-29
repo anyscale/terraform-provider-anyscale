@@ -61,7 +61,7 @@ resource "anyscale_compute_config" "test" {
 		if d.Severity != "warning" {
 			continue
 		}
-		if containsAll(d.Detail, "instance_type", "m5.xlarge") {
+		if strings.Contains(d.Detail, "instance_type") && strings.Contains(d.Detail, "m5.xlarge") {
 			found = true
 			break
 		}
@@ -69,15 +69,6 @@ resource "anyscale_compute_config" "test" {
 	if !found {
 		t.Errorf("expected a warning about the duplicate-instance_type unnamed worker groups, got: %+v", result.Diagnostics)
 	}
-}
-
-func containsAll(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if !strings.Contains(s, sub) {
-			return false
-		}
-	}
-	return true
 }
 
 func TestAccComputeConfigResource_DuplicateDerivedWorkerNamesGetUniqueSuffix_MockServer(t *testing.T) {

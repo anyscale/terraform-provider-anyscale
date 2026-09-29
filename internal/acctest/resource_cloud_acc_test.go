@@ -845,7 +845,7 @@ resource "anyscale_cloud" "test" {
 			"tfacc-filestorage-nowipe-bucket",
 			"ray-shared-pvc-v2",
 		} {
-			if !regexp.MustCompile(regexp.QuoteMeta(want)).MatchString(body) {
+			if !strings.Contains(body, want) {
 				return fmt.Errorf("expected %q to survive the file_storage update, stored deployment: %s", want, body)
 			}
 		}

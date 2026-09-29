@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -226,21 +227,11 @@ func lowercaseResourceKeys(node map[string]any) {
 		lc := k
 		switch k {
 		case "CPU", "GPU", "Memory", "Object_Store_Memory":
-			lc = toLowerASCII(k)
+			lc = strings.ToLower(k)
 		}
 		lowered[lc] = v
 	}
 	node["resources"] = lowered
-}
-
-func toLowerASCII(s string) string {
-	b := []byte(s)
-	for i, c := range b {
-		if c >= 'A' && c <= 'Z' {
-			b[i] = c + ('a' - 'A')
-		}
-	}
-	return string(b)
 }
 
 // TestAccComputeConfigResource_Lifecycle_MockServer proves the framework-level create

@@ -1,13 +1,14 @@
 package acctest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"testing"
 
+	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -47,31 +48,36 @@ func requireRealIAMMappingTestCloud(t *testing.T) (cloudID, cloudResourceID stri
 	if err != nil {
 		t.Fatalf("failed to get test client: %v", err)
 	}
-	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil)
+	cloudResourceID, found, err := findDefaultCloudResourceID(context.Background(), client, cloudID)
 	if err != nil {
 		t.Fatalf("failed to list cloud resources for %s: %v", cloudID, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read cloud resources response: %v", err)
+	if !found {
+		t.Skipf("test cloud %s has no default cloud_resource attached - config endpoint would 404", cloudID)
 	}
-	var listResp struct {
+	return cloudID, cloudResourceID
+}
+
+// findDefaultCloudResourceID returns the cloud's default cloud_resource_id.
+// found is false only when the list answered 200 with no default resource -
+// the "not applicable" case. Any other status is an error, so a backend
+// failure fails the test instead of reading as an empty list and skipping.
+func findDefaultCloudResourceID(ctx context.Context, client *provider.Client, cloudID string) (cloudResourceID string, found bool, err error) {
+	listResp, err := provider.DoRequestAndParse[struct {
 		Results []struct {
 			CloudResourceID string `json:"cloud_resource_id"`
 			IsDefault       bool   `json:"is_default"`
 		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &listResp); err != nil {
-		t.Fatalf("failed to parse cloud resources response: %v", err)
+	}](ctx, client, "GET", fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), nil, 200)
+	if err != nil {
+		return "", false, err
 	}
 	for _, r := range listResp.Results {
 		if r.IsDefault {
-			return cloudID, r.CloudResourceID
+			return r.CloudResourceID, true, nil
 		}
 	}
-	t.Skipf("test cloud %s has no default cloud_resource attached - config endpoint would 404", cloudID)
-	return "", ""
+	return "", false, nil
 }
 
 // putRealCloudDeploymentConfig performs a raw PUT against the real config
@@ -89,7 +95,7 @@ func putRealCloudDeploymentConfig(t *testing.T, cloudID, cloudResourceID string,
 	}
 	resp, err := client.DoRequest(context.Background(), "PUT",
 		fmt.Sprintf("/api/v2/clouds/%s/deployment/%s/config", cloudID, cloudResourceID),
-		strings.NewReader(string(body)))
+		bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("PUT config failed: %v", err)
 	}
