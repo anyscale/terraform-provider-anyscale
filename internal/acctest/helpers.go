@@ -1301,15 +1301,13 @@ func CreateEphemeralTestProjectForCloud(t *testing.T, parentCloudID string) (pro
 	if os.Getenv("ANYSCALE_TEST_KEEP") == "1" {
 		t.Logf("ANYSCALE_TEST_KEEP=1: Project will be preserved after tests")
 	} else {
+		createdAt := time.Now().Format(time.RFC3339)
 		t.Cleanup(func() {
-			delResp, delErr := client.DoRequest(context.Background(), "DELETE", fmt.Sprintf("/api/v2/projects/%s", createdID), nil)
-			if delErr != nil {
+			// Same retry as the resource's own Delete: a delete issued shortly
+			// after create can 403 until the owner grant propagates. A final
+			// failure only warns - the sweeper is the backstop.
+			if delErr := provider.DeleteProjectWithRetry(context.Background(), client, createdID, createdAt); delErr != nil {
 				t.Logf("Warning: Failed to delete ephemeral project %s: %v", createdID, delErr)
-				return
-			}
-			defer func() { _ = delResp.Body.Close() }()
-			if delResp.StatusCode != 200 && delResp.StatusCode != 202 && delResp.StatusCode != 204 && delResp.StatusCode != 404 {
-				t.Logf("Warning: Failed to delete ephemeral project %s: status %d", createdID, delResp.StatusCode)
 			}
 		})
 	}

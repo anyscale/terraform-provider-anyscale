@@ -148,27 +148,10 @@ func cloudAccessLiveSetRole(t *testing.T, client *provider.Client, cloudID, user
 // about, since state can lie but the backend cannot.
 func cloudAccessLiveMemberEmails(t *testing.T, client *provider.Client, cloudID string) map[string]bool {
 	t.Helper()
-	ctx := context.Background()
-
-	resp, err := client.DoRequest(ctx, http.MethodPost,
+	emails, err := fetchCollaboratorEmails(context.Background(), client, http.MethodPost,
 		fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/search", cloudID), strings.NewReader(`{}`))
 	if err != nil {
 		t.Fatalf("member search on cloud %s failed: %v", cloudID, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	var page struct {
-		Results []struct {
-			Value struct {
-				Email string `json:"email"`
-			} `json:"value"`
-		} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-		t.Fatalf("decoding member search response failed: %v", err)
-	}
-	emails := make(map[string]bool, len(page.Results))
-	for _, r := range page.Results {
-		emails[strings.ToLower(r.Value.Email)] = true
 	}
 	return emails
 }
@@ -177,29 +160,34 @@ func cloudAccessLiveMemberEmails(t *testing.T, client *provider.Client, cloudID 
 // collaborator list straight from the backend, for AC-15.
 func cloudAccessLiveProjectMemberEmails(t *testing.T, client *provider.Client, projectID string) map[string]bool {
 	t.Helper()
-	ctx := context.Background()
-
-	resp, err := client.DoRequest(ctx, http.MethodGet,
+	emails, err := fetchCollaboratorEmails(context.Background(), client, http.MethodGet,
 		fmt.Sprintf("/api/v2/projects/%s/collaborators/users", projectID), nil)
 	if err != nil {
 		t.Fatalf("project collaborator list for %s failed: %v", projectID, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	var page struct {
+	return emails
+}
+
+// fetchCollaboratorEmails returns the lowercased emails in one collaborator
+// list response. Any status other than 200 is an error: callers assert that
+// an email is ABSENT, and an error body decoded as an empty list would make
+// that assertion pass without the backend ever answering.
+func fetchCollaboratorEmails(ctx context.Context, client *provider.Client, method, path string, body io.Reader) (map[string]bool, error) {
+	page, err := provider.DoRequestAndParse[struct {
 		Results []struct {
 			Value struct {
 				Email string `json:"email"`
 			} `json:"value"`
 		} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-		t.Fatalf("decoding project collaborator response failed: %v", err)
+	}](ctx, client, method, path, body, http.StatusOK)
+	if err != nil {
+		return nil, err
 	}
 	emails := make(map[string]bool, len(page.Results))
 	for _, r := range page.Results {
 		emails[strings.ToLower(r.Value.Email)] = true
 	}
-	return emails
+	return emails, nil
 }
 
 // cloudAccessLiveConfig is the shared HCL shape for these tests: the real
