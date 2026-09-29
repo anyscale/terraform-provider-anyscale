@@ -1,0 +1,4 @@
+```
+release-note:security
+provider: Update the indirect `google.golang.org/grpc` dependency to v1.83.2, clearing GHSA-vp52-pcj8-j9qc, GHSA-2v4p-qf9q-27wj, and GHSA-qc2q-p7wx-3px3. The first two affect the gRPC server the provider exposes to Terraform Core over its local plugin connection, so exposure is local-only. GHSA-qc2q-p7wx-3px3 is an xDS RBAC bypass in code the provider does not link. No change to provider behavior.
+```
