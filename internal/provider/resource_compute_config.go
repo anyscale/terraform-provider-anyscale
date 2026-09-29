@@ -1355,16 +1355,8 @@ func populateComputedFieldsFromResponse(
 	// not happen given the backend's own idle default, but costs nothing to
 	// handle) would hit the identical "Provider produced inconsistent result
 	// after apply" this function exists to prevent.
-	if configData.IdleTerminationMinutes != nil {
-		plan.IdleTerminationMinutes = types.Int64Value(*configData.IdleTerminationMinutes)
-	} else {
-		plan.IdleTerminationMinutes = types.Int64Null()
-	}
-	if configData.MaximumUptimeMinutes != nil {
-		plan.MaximumUptimeMinutes = types.Int64Value(*configData.MaximumUptimeMinutes)
-	} else {
-		plan.MaximumUptimeMinutes = types.Int64Null()
-	}
+	plan.IdleTerminationMinutes = types.Int64PointerValue(configData.IdleTerminationMinutes)
+	plan.MaximumUptimeMinutes = types.Int64PointerValue(configData.MaximumUptimeMinutes)
 
 	// Same primary/additional split Read uses, but matched against the
 	// PLAN's own cloud_resource/additional_resources as "prior" instead of
@@ -1409,11 +1401,7 @@ func populateComputedFieldsFromResponse(
 	}
 
 	if len(eff.WorkerNodeTypes) > 0 {
-		workerInterfaces := make([]interface{}, 0, len(eff.WorkerNodeTypes))
-		for _, worker := range eff.WorkerNodeTypes {
-			workerInterfaces = append(workerInterfaces, worker)
-		}
-		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, eff.WorkerNodeTypes)
 		diags.Append(workerNodesDiags...)
 		if !diags.HasError() {
 			plan.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, diags)
@@ -1512,16 +1500,8 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	// CC2 (see effectiveComputeConfig): read directly off configData rather
 	// than through resolveEffectiveComputeConfig, unlike flags/head_node/
 	// worker_nodes below.
-	if configData.IdleTerminationMinutes != nil {
-		state.IdleTerminationMinutes = types.Int64Value(*configData.IdleTerminationMinutes)
-	} else {
-		state.IdleTerminationMinutes = types.Int64Null()
-	}
-	if configData.MaximumUptimeMinutes != nil {
-		state.MaximumUptimeMinutes = types.Int64Value(*configData.MaximumUptimeMinutes)
-	} else {
-		state.MaximumUptimeMinutes = types.Int64Null()
-	}
+	state.IdleTerminationMinutes = types.Int64PointerValue(configData.IdleTerminationMinutes)
+	state.MaximumUptimeMinutes = types.Int64PointerValue(configData.MaximumUptimeMinutes)
 
 	// 0 or 1 deployment_configs entries is the common single-resource
 	// case, resolved exactly as before this fix - byte-identical, untouched.
@@ -1556,11 +1536,7 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		if len(eff.AllowedAZs) == 1 && strings.EqualFold(eff.AllowedAZs[0], "any") {
 			state.Zones = types.ListNull(types.StringType)
 		} else {
-			allowedAZInterfaces := make([]interface{}, 0, len(eff.AllowedAZs))
-			for _, az := range eff.AllowedAZs {
-				allowedAZInterfaces = append(allowedAZInterfaces, az)
-			}
-			zonesList, diags := InterfaceListToString(ctx, allowedAZInterfaces)
+			zonesList, diags := stringListOrNull(ctx, eff.AllowedAZs)
 			resp.Diagnostics.Append(diags...)
 			state.Zones = zonesList
 		}
@@ -1622,11 +1598,7 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	if len(eff.WorkerNodeTypes) > 0 {
-		workerInterfaces := make([]interface{}, 0, len(eff.WorkerNodeTypes))
-		for _, worker := range eff.WorkerNodeTypes {
-			workerInterfaces = append(workerInterfaces, worker)
-		}
-		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, eff.WorkerNodeTypes)
 		resp.Diagnostics.Append(workerNodesDiags...)
 		if !resp.Diagnostics.HasError() {
 			state.WorkerNodes = maskWorkerNodesFromPrior(ctx, workerNodesList, priorWorkerNodes, &resp.Diagnostics)
@@ -1646,11 +1618,7 @@ func maskNodeFromPrior(ctx context.Context, apiNode types.Object, priorNode type
 	}
 
 	priorAttrs := priorNode.Attributes()
-	apiAttrs := apiNode.Attributes()
-	masked := make(map[string]attr.Value, len(apiAttrs))
-	for k, v := range apiAttrs {
-		masked[k] = v
-	}
+	masked := apiNode.Attributes()
 
 	for _, name := range []string{"resources", "required_resources", "labels", "required_labels", "advanced_instance_config", "flags", "cloud_deployment"} {
 		if prior, ok := priorAttrs[name]; ok && prior != nil && prior.IsNull() {
@@ -2055,11 +2023,7 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 	}
 
 	if len(eff.WorkerNodeTypes) > 0 {
-		workerInterfaces := make([]interface{}, 0, len(eff.WorkerNodeTypes))
-		for _, worker := range eff.WorkerNodeTypes {
-			workerInterfaces = append(workerInterfaces, worker)
-		}
-		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, eff.WorkerNodeTypes)
 		resp.Diagnostics.Append(workerNodesDiags...)
 		if !resp.Diagnostics.HasError() {
 			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("worker_nodes"), workerNodesList)...)
@@ -2451,7 +2415,7 @@ func apiNodeTypeToTerraform(ctx context.Context, apiNode map[string]interface{})
 }
 
 // apiWorkerNodeTypesToTerraform converts API worker_node_types to a Terraform types.List
-func apiWorkerNodeTypesToTerraform(ctx context.Context, apiWorkers []interface{}) (types.List, diag.Diagnostics) {
+func apiWorkerNodeTypesToTerraform(ctx context.Context, apiWorkers []map[string]interface{}) (types.List, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	workerAttrTypes := workerNodeConfigAttrTypes()
@@ -2462,12 +2426,7 @@ func apiWorkerNodeTypesToTerraform(ctx context.Context, apiWorkers []interface{}
 
 	workerObjs := make([]attr.Value, 0, len(apiWorkers))
 
-	for _, w := range apiWorkers {
-		workerMap, ok := w.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
+	for _, workerMap := range apiWorkers {
 		workerObj, workerDiags := apiWorkerNodeTypeToTerraform(ctx, workerMap)
 		diags.Append(workerDiags...)
 		if !diags.HasError() {

@@ -1020,18 +1020,20 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 	deleteURL := fmt.Sprintf("/api/v2/clouds/%s/remove_resource?cloud_resource_name=%s",
 		cloudID, url.QueryEscape(resourceName))
 
-	bodyBytes, err := DoRequestRaw(ctx, r.client, "DELETE", deleteURL, nil,
-		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
-	if err != nil {
-		bodyStr := string(bodyBytes)
-		tflog.Error(ctx, "Failed to delete cloud resource", map[string]any{"error": err.Error(), "body": bodyStr})
-
-		// Handle the case where the API tells us this is a primary resource
-		if strings.Contains(bodyStr, "primary resource") {
+	if _, err := DoRequestRaw(ctx, r.client, "DELETE", deleteURL, nil,
+		http.StatusOK, http.StatusNoContent, http.StatusNotFound); err != nil {
+		// The backend refuses to remove the primary resource with a 400. That
+		// resource's lifecycle belongs to the cloud, so this is the same no-op
+		// as the IsDefault branch above - reached when is_default in state is
+		// stale (e.g. destroy -refresh=false).
+		var statusErr *UnexpectedStatusError
+		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest &&
+			strings.Contains(statusErr.Body, "is the primary resource and cannot be removed") {
 			tflog.Info(ctx, "Cloud resource is the primary resource - it will be deleted when the cloud is deleted", map[string]any{"name": resourceName})
 			return
 		}
 
+		tflog.Error(ctx, "Failed to delete cloud resource", map[string]any{"error": err.Error()})
 		AddAPIError(&resp.Diagnostics, "delete cloud resource", err)
 		return
 	}
@@ -1236,14 +1238,8 @@ func expandAWSConfig(ctx context.Context, obj types.Object) (*AWSConfig, error) 
 	if !awsModel.ExternalID.IsNull() {
 		awsConfig.ExternalID = awsModel.ExternalID.ValueString()
 	}
-	if !awsModel.ClusterInstanceProfileID.IsNull() {
-		profileID := awsModel.ClusterInstanceProfileID.ValueString()
-		awsConfig.ClusterInstanceProfileID = &profileID
-	}
-	if !awsModel.MemoryDBClusterName.IsNull() {
-		name := awsModel.MemoryDBClusterName.ValueString()
-		awsConfig.MemoryDBClusterName = &name
-	}
+	awsConfig.ClusterInstanceProfileID = awsModel.ClusterInstanceProfileID.ValueStringPointer()
+	awsConfig.MemoryDBClusterName = awsModel.MemoryDBClusterName.ValueStringPointer()
 	// Optional+Computed and unset at Create (no prior state for UseStateForUnknown to carry
 	// forward) plans Unknown, not Null - an IsNull()-only guard would read that as a
 	// user-supplied value and send an explicit empty string instead of omitting the field.
@@ -1379,14 +1375,8 @@ func expandObjectStorage(ctx context.Context, obj types.Object) (*ObjectStorage,
 		BucketName: storageModel.BucketName.ValueString(),
 	}
 
-	if !storageModel.Region.IsNull() {
-		region := storageModel.Region.ValueString()
-		storage.Region = &region
-	}
-	if !storageModel.Endpoint.IsNull() {
-		endpoint := storageModel.Endpoint.ValueString()
-		storage.Endpoint = &endpoint
-	}
+	storage.Region = storageModel.Region.ValueStringPointer()
+	storage.Endpoint = storageModel.Endpoint.ValueStringPointer()
 
 	return storage, nil
 }
@@ -1458,11 +1448,13 @@ func waitForCloudReady(ctx context.Context, client *Client, cloudID string, time
 		pollCount++
 		tflog.Debug(ctx, "Polling cloud status", map[string]any{"poll_count": pollCount, "cloud_id": cloudID})
 
-		bodyBytes, err := DoRequestRaw(ctx, client, "GET", cloudPath, nil,
-			http.StatusOK, http.StatusTooManyRequests)
+		bodyBytes, err := DoRequestRaw(ctx, client, "GET", cloudPath, nil, http.StatusOK)
 		if err != nil {
-			// Handle rate limiting (429) with backoff
-			if strings.Contains(err.Error(), "429") {
+			// Handle rate limiting (429) with backoff. 429 must not be in the
+			// accepted list above: an accepted 429 body would be parsed as a
+			// cloud.
+			var statusErr *UnexpectedStatusError
+			if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusTooManyRequests {
 				tflog.Warn(ctx, "Rate limited, backing off", map[string]any{"poll_count": pollCount, "backoff": currentBackoff.String()})
 				select {
 				case <-ctx.Done():

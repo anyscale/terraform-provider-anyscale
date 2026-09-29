@@ -175,9 +175,9 @@ func waitForServiceStateWithTiming(ctx context.Context, client *Client, serviceI
 	}
 }
 
-// getServiceByID fetches a single service by ID. Shared by the wait loop and the resource's
-// Create/Read/Update/Delete - the data source's own getService is a method on ServiceDataSource
-// so it is not directly callable from resource_service.go.
+// getServiceByID fetches a single service by ID, returning DoRequestAndParse's error unwrapped.
+// Shared by the wait loop, the resource's Create/Read/Update/Delete, and the data source's
+// getService (which adds its own error wrapping).
 func getServiceByID(ctx context.Context, client *Client, serviceID string) (*ServiceResult, error) {
 	serviceResp, err := DoRequestAndParse[ServiceResponse](
 		ctx, client, "GET", fmt.Sprintf("/api/v2/services-v2/%s", serviceID), nil, http.StatusOK,

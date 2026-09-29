@@ -3,9 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -183,7 +181,7 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	}
 
 	// Fetch project details
-	project, err := d.getProject(ctx, projectID)
+	project, err := getProjectByID(ctx, d.client, projectID)
 	if err != nil {
 		AddAPIError(&resp.Diagnostics, "read project", err)
 		return
@@ -255,21 +253,6 @@ func (d *ProjectDataSource) findProjectByName(ctx context.Context, name string, 
 	}
 
 	return matchedProjectID, nil
-}
-
-// getProject fetches a single project by ID.
-func (d *ProjectDataSource) getProject(ctx context.Context, projectID string) (*ProjectResult, error) {
-	projectResp, err := DoRequestAndParse[ProjectResponse](
-		ctx, d.client, "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil, http.StatusOK,
-	)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, fmt.Errorf("%w: project not found", ErrNotFound)
-		}
-		return nil, fmt.Errorf("failed to get project: %w", err)
-	}
-
-	return &projectResp.Result, nil
 }
 
 // getCollaborators fetches the list of collaborators for a project.

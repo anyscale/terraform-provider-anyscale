@@ -491,11 +491,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	config.CreatedAt = stringOrNull(resultData.CreatedAt)
 	config.LastModifiedAt = stringOrNull(resultData.LastModifiedAt)
 
-	if resultData.ProjectID != "" {
-		config.ProjectID = types.StringValue(resultData.ProjectID)
-	} else {
-		config.ProjectID = types.StringNull()
-	}
+	config.ProjectID = stringOrNull(resultData.ProjectID)
 
 	configData := resultData.Config
 	if configData.CloudID != "" {
@@ -519,16 +515,8 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 
 	// CC2 (see effectiveComputeConfig in resource_compute_config.go): read
 	// straight off configData rather than through resolveEffectiveComputeConfig.
-	if configData.IdleTerminationMinutes != nil {
-		config.IdleTerminationMinutes = types.Int64Value(*configData.IdleTerminationMinutes)
-	} else {
-		config.IdleTerminationMinutes = types.Int64Null()
-	}
-	if configData.MaximumUptimeMinutes != nil {
-		config.MaximumUptimeMinutes = types.Int64Value(*configData.MaximumUptimeMinutes)
-	} else {
-		config.MaximumUptimeMinutes = types.Int64Null()
-	}
+	config.IdleTerminationMinutes = types.Int64PointerValue(configData.IdleTerminationMinutes)
+	config.MaximumUptimeMinutes = types.Int64PointerValue(configData.MaximumUptimeMinutes)
 	// DS-CC-3: explicit stringOrNull, same reasoning as created_at/last_modified_at above.
 	config.Region = stringOrNull(configData.Region)
 
@@ -614,11 +602,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	// were never explicitly configured to avoid perpetual plan drift. A data
 	// source has no plan to drift.
 	if len(eff.AllowedAZs) > 0 {
-		allowedAZInterfaces := make([]interface{}, 0, len(eff.AllowedAZs))
-		for _, az := range eff.AllowedAZs {
-			allowedAZInterfaces = append(allowedAZInterfaces, az)
-		}
-		zonesList, diags := InterfaceListToString(ctx, allowedAZInterfaces)
+		zonesList, diags := stringListOrNull(ctx, eff.AllowedAZs)
 		resp.Diagnostics.Append(diags...)
 		config.Zones = zonesList
 	} else {
@@ -636,11 +620,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 
 	config.WorkerNodes = types.ListNull(types.ObjectType{AttrTypes: workerNodeConfigAttrTypes()})
 	if len(eff.WorkerNodeTypes) > 0 {
-		workerInterfaces := make([]interface{}, 0, len(eff.WorkerNodeTypes))
-		for _, worker := range eff.WorkerNodeTypes {
-			workerInterfaces = append(workerInterfaces, worker)
-		}
-		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, eff.WorkerNodeTypes)
 		resp.Diagnostics.Append(workerNodesDiags...)
 		if !resp.Diagnostics.HasError() {
 			config.WorkerNodes = workerNodesList

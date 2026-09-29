@@ -576,11 +576,7 @@ func apiDeploymentConfigToAdditionalResource(ctx context.Context, entry cloudDep
 		if len(entry.AllowedAZs) == 1 && strings.EqualFold(entry.AllowedAZs[0], "any") {
 			attrs["zones"] = types.ListNull(types.StringType)
 		} else {
-			azInterfaces := make([]interface{}, 0, len(entry.AllowedAZs))
-			for _, az := range entry.AllowedAZs {
-				azInterfaces = append(azInterfaces, az)
-			}
-			zonesList, zonesDiags := InterfaceListToString(ctx, azInterfaces)
+			zonesList, zonesDiags := stringListOrNull(ctx, entry.AllowedAZs)
 			diags.Append(zonesDiags...)
 			attrs["zones"] = zonesList
 		}
@@ -649,11 +645,7 @@ func apiDeploymentConfigToAdditionalResource(ctx context.Context, entry cloudDep
 	}
 
 	if len(entry.WorkerNodeTypes) > 0 {
-		workerInterfaces := make([]interface{}, 0, len(entry.WorkerNodeTypes))
-		for _, w := range entry.WorkerNodeTypes {
-			workerInterfaces = append(workerInterfaces, w)
-		}
-		workerNodesList, workerDiags := apiWorkerNodeTypesToTerraform(ctx, workerInterfaces)
+		workerNodesList, workerDiags := apiWorkerNodeTypesToTerraform(ctx, entry.WorkerNodeTypes)
 		diags.Append(workerDiags...)
 		if !workerDiags.HasError() {
 			if forImport {

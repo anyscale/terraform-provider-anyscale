@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -955,11 +956,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("API Request Failed", err.Error())
 		return
 	}
-	defer func() {
-		if closeErr := httpResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
+	defer CloseBody(ctx, httpResp.Body)
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
@@ -1396,43 +1393,42 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 
 	// Find and detach pools attached to this cloud
 	for _, pool := range listResp.Result.MachinePools {
-		for _, attachedCloudID := range pool.CloudIDs {
-			if attachedCloudID == cloudID {
-				tflog.Info(ctx, "Detaching machine pool from cloud", map[string]any{
-					"pool":     pool.MachinePoolName,
-					"cloud_id": cloudID,
-				})
-
-				detachReq := DetachMachinePoolFromCloudRequest{
-					MachinePoolName: pool.MachinePoolName,
-					CloudID:         cloudID,
-				}
-
-				reqBody, err := MarshalRequestBody(detachReq)
-				if err != nil {
-					return fmt.Errorf("failed to marshal detach request: %w", err)
-				}
-
-				_, err = DoRequestRaw(
-					ctx,
-					r.client,
-					"POST",
-					"/api/v2/machine_pools/detach",
-					reqBody,
-					http.StatusOK,
-					http.StatusNotFound,
-				)
-				if err != nil {
-					return fmt.Errorf("failed to detach machine pool %s: %w", pool.MachinePoolName, err)
-				}
-
-				tflog.Info(ctx, "Machine pool detached from cloud", map[string]any{
-					"pool":     pool.MachinePoolName,
-					"cloud_id": cloudID,
-				})
-				break // Move to next pool
-			}
+		if !slices.Contains(pool.CloudIDs, cloudID) {
+			continue
 		}
+
+		tflog.Info(ctx, "Detaching machine pool from cloud", map[string]any{
+			"pool":     pool.MachinePoolName,
+			"cloud_id": cloudID,
+		})
+
+		detachReq := DetachMachinePoolFromCloudRequest{
+			MachinePoolName: pool.MachinePoolName,
+			CloudID:         cloudID,
+		}
+
+		reqBody, err := MarshalRequestBody(detachReq)
+		if err != nil {
+			return fmt.Errorf("failed to marshal detach request: %w", err)
+		}
+
+		_, err = DoRequestRaw(
+			ctx,
+			r.client,
+			"POST",
+			"/api/v2/machine_pools/detach",
+			reqBody,
+			http.StatusOK,
+			http.StatusNotFound,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to detach machine pool %s: %w", pool.MachinePoolName, err)
+		}
+
+		tflog.Info(ctx, "Machine pool detached from cloud", map[string]any{
+			"pool":     pool.MachinePoolName,
+			"cloud_id": cloudID,
+		})
 	}
 
 	return nil
@@ -1676,11 +1672,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		tflog.Error(ctx, "Failed to add cloud resource", map[string]any{"error": err.Error()})
 		return err
 	}
-	defer func() {
-		if closeErr := deployResp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
+	defer CloseBody(ctx, deployResp.Body)
 
 	deployBody, err := io.ReadAll(deployResp.Body)
 	if err != nil {
@@ -1735,11 +1727,7 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			tflog.Warn(ctx, "Failed to close response body", map[string]any{"error": closeErr.Error()})
-		}
-	}()
+	defer CloseBody(ctx, resp.Body)
 
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("%w: cloud not found", ErrNotFound)
