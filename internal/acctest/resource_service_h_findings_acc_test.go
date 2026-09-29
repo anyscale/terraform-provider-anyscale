@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -326,6 +327,11 @@ resource "anyscale_service" "test" {
 			},
 			{
 				Config: timeoutOnlyConfig,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_service.test", plancheck.ResourceActionUpdate),
+					},
+				},
 				// The step succeeding at all (no "provider produced inconsistent result after
 				// apply" / unknown-value error) is itself part of what this proves - that is
 				// exactly the shape contract §H5 broke: a no-deploy Update branch that persists

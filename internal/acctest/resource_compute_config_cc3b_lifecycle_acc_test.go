@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
 // This file proves CC3b against a mock backend, the same httptest-server
@@ -146,6 +147,11 @@ resource "anyscale_compute_config" "test" {
 				// this test's actual claim.
 				Config:      configOnCloudB,
 				ExpectError: regexp.MustCompile(`Compute Config Cloud Is Immutable`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_compute_config.test", plancheck.ResourceActionUpdate),
+					},
+				},
 			},
 			{
 				// Confirms the refused apply left the resource exactly as it

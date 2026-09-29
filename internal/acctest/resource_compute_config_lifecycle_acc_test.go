@@ -326,6 +326,11 @@ resource "anyscale_compute_config" "test" {
 					resource.TestCheckResourceAttr("anyscale_compute_config.test", "head_node.instance_type", "m5.2xlarge"),
 					testAccCheckComputeConfigIDChanged("anyscale_compute_config.test", &firstConfigID),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_compute_config.test", plancheck.ResourceActionUpdate),
+					},
+				},
 				ExpectNonEmptyPlan: false,
 			},
 			{

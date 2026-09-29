@@ -187,6 +187,9 @@ resource "anyscale_service" "test" {
 					resource.TestCheckResourceAttr("anyscale_service.test", "primary_version.version", "v2"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_service.test", plancheck.ResourceActionUpdate),
+					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},
@@ -337,6 +340,9 @@ resource "anyscale_service" "test" {
 					resource.TestCheckResourceAttr("anyscale_service.test", "primary_version.version", "v2"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_service.test", plancheck.ResourceActionUpdate),
+					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},

@@ -10,6 +10,7 @@ import (
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -403,6 +404,11 @@ resource "anyscale_cloud_iam_mapping" "test" {
 					resource.TestCheckResourceAttr("anyscale_cloud_iam_mapping.test", "rules.1.value", "tfacc-iammap-lifecycle-role-b"),
 					resource.TestCheckResourceAttr("anyscale_cloud_iam_mapping.test", "fallback_rule", "FAIL"),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_cloud_iam_mapping.test", plancheck.ResourceActionUpdate),
+					},
+				},
 			},
 			{
 				Config:             updateConfig,
