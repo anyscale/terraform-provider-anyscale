@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.2] - 2026-09-29
+
+### Fixed
+
+- resource/anyscale_organization_default_cloud: An API error (such as a 5xx, 401, or 403) during refresh no longer silently removes the resource from state, and import now reports the API error instead of "Not The Organization Default".
+- resource/anyscale_cloud_resource: Destroying a cloud resource that the backend reports as the cloud's primary resource no longer fails.
+- resource/anyscale_cloud: A rate-limited (429) status poll during create now backs off and retries instead of failing.
+- resource/anyscale_cloud_resource: A rate-limited (429) status poll during create now backs off and retries instead of failing.
+- resource/anyscale_container_image_build: Destroy now fails on an unexpected archive error instead of reporting success, and on an Azure control plane, where archiving is unsupported, completes with a warning that the image was left in place.
+- resource/anyscale_container_image_registry: Destroy now fails on an unexpected archive error instead of reporting success, and on an Azure control plane, where archiving is unsupported, completes with a warning that the image was left in place.
+- resource/anyscale_container_image_build: Interrupting Terraform, or hitting an operation timeout, now stops build and digest polling immediately instead of after the current wait interval.
+- resource/anyscale_container_image_registry: Interrupting Terraform, or hitting an operation timeout, now stops digest polling immediately instead of after the current wait interval.
+- resource/anyscale_project: Interrupting Terraform, or hitting an operation timeout, during destroy now stops the delete retry immediately instead of after the current wait interval.
+
+### Security
+
+- provider: Update the indirect `google.golang.org/grpc` dependency to v1.83.2, clearing GHSA-vp52-pcj8-j9qc, GHSA-2v4p-qf9q-27wj, and GHSA-qc2q-p7wx-3px3. The first two affect the gRPC server the provider exposes to Terraform Core over its local plugin connection, so exposure is local-only. GHSA-qc2q-p7wx-3px3 is an xDS RBAC bypass in code the provider does not link. No change to provider behavior.
+
 ## [0.28.1] - 2026-09-16
 
 ### Changed
@@ -1064,7 +1082,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.28.1...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.28.2...HEAD
+[0.28.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.2
 [0.28.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.1
 [0.28.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.0
 [0.27.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.27.1
