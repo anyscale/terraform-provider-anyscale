@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
@@ -19,12 +20,13 @@ import (
 // mutating a shared fixture concurrently with other tests is exactly what
 // this repo's testing conventions forbid. They require:
 //
-//   - ANYSCALE_TEST_REAL_INFRA=1 (gates all of them via SkipIfNoRealInfra)
+//   - TF_ACC=1 and ANYSCALE_TEST_REAL_INFRA=1 (via SkipIfNoRealInfra)
 //   - ANYSCALE_TEST_CLOUD_ID set to a dedicated, real AWS or GCP VM/K8S cloud
-//     with an attached cloud_resource - NOT the auto-discovered/static
-//     default, because the config endpoint 404s against a cloud with no
-//     resource attached, and the mutating tests here must never land on a
-//     cloud anything else might be concurrently relying on.
+//     with an attached cloud_resource. It is read directly, never through
+//     GetTestCloudID: that resolver falls back to the static fixture and then
+//     to auto-discovery, and the mutating tests here must never land on a
+//     cloud anything else might be concurrently relying on. The static
+//     fixture is refused by name even when set explicitly.
 //
 // A plain "empty cloud" (createEphemeralTestCloud) is not sufficient - the
 // config endpoint requires a resolvable cloud_resource, which an empty cloud
@@ -37,16 +39,29 @@ import (
 // under test, or skips with a clear reason.
 func requireRealIAMMappingTestCloud(t *testing.T) (cloudID, cloudResourceID string) {
 	t.Helper()
+	SkipIfNotAcceptanceTest(t)
 	SkipIfNoRealInfra(t)
 
-	cloudID = GetTestCloudID(t)
+	cloudID = os.Getenv("ANYSCALE_TEST_CLOUD_ID")
 	if cloudID == "" {
-		t.Skip("no test cloud resolved")
+		t.Skip("ANYSCALE_TEST_CLOUD_ID not set: these tests overwrite the cloud's IAM mapping, so they need an " +
+			"explicitly chosen dedicated cloud and never fall back to a resolved or shared one")
 	}
 
 	client, err := GetTestClient()
 	if err != nil {
 		t.Fatalf("failed to get test client: %v", err)
+	}
+	cloud, err := provider.DoRequestAndParse[struct {
+		Result struct {
+			Name string `json:"name"`
+		} `json:"result"`
+	}](context.Background(), client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, 200)
+	if err != nil {
+		t.Fatalf("failed to look up ANYSCALE_TEST_CLOUD_ID %s: %v", cloudID, err)
+	}
+	if err := refuseSharedIAMMappingTestCloud(cloud.Result.Name); err != nil {
+		t.Fatal(err)
 	}
 	cloudResourceID, found, err := findDefaultCloudResourceID(context.Background(), client, cloudID)
 	if err != nil {
@@ -56,6 +71,17 @@ func requireRealIAMMappingTestCloud(t *testing.T) (cloudID, cloudResourceID stri
 		t.Skipf("test cloud %s has no default cloud_resource attached - config endpoint would 404", cloudID)
 	}
 	return cloudID, cloudResourceID
+}
+
+// refuseSharedIAMMappingTestCloud rejects the shared static fixture. An IAM
+// mapping write replaces the cloud's whole mapping, so running these tests
+// against the fixture would break every other test that relies on it.
+func refuseSharedIAMMappingTestCloud(cloudName string) error {
+	if cloudName == defaultKnownGoodCloudName {
+		return fmt.Errorf("ANYSCALE_TEST_CLOUD_ID points at the shared fixture %q; these tests overwrite the "+
+			"cloud's IAM mapping, so point it at a dedicated cloud instead", cloudName)
+	}
+	return nil
 }
 
 // findDefaultCloudResourceID returns the cloud's default cloud_resource_id.

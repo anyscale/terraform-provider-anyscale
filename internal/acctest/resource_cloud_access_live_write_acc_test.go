@@ -645,6 +645,7 @@ func cloudAccessLiveRevokeProjectRole(t *testing.T, client *provider.Client, pro
 // covered by mock tests in cloud_access_projects_test.go - not re-proven
 // here.
 func TestAccCloudAccessResource_LiveProjectRoleRequestShapes(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
 	email := requireRealInfraTestUser(t)
 	PreCheck(t)
 
