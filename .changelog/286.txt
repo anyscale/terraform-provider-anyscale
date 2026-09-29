@@ -30,15 +30,15 @@ resource/anyscale_container_image_registry: Destroy now fails on an unexpected a
 
 ```
 release-note:fixed
-resource/anyscale_container_image_build: Interrupting Terraform, or hitting an operation timeout, now stops container image build and digest polling and the project-delete retry immediately instead of after the current wait interval.
+resource/anyscale_container_image_build: Interrupting Terraform, or hitting an operation timeout, now stops build and digest polling immediately instead of after the current wait interval.
 ```
 
 ```
 release-note:fixed
-resource/anyscale_container_image_registry: Interrupting Terraform, or hitting an operation timeout, now stops container image build and digest polling and the project-delete retry immediately instead of after the current wait interval.
+resource/anyscale_container_image_registry: Interrupting Terraform, or hitting an operation timeout, now stops digest polling immediately instead of after the current wait interval.
 ```
 
 ```
 release-note:fixed
-resource/anyscale_project: Interrupting Terraform, or hitting an operation timeout, now stops container image build and digest polling and the project-delete retry immediately instead of after the current wait interval.
+resource/anyscale_project: Interrupting Terraform, or hitting an operation timeout, during destroy now stops the delete retry immediately instead of after the current wait interval.
 ```
