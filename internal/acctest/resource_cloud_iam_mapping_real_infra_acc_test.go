@@ -1,11 +1,11 @@
 package acctest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -89,7 +89,7 @@ func putRealCloudDeploymentConfig(t *testing.T, cloudID, cloudResourceID string,
 	}
 	resp, err := client.DoRequest(context.Background(), "PUT",
 		fmt.Sprintf("/api/v2/clouds/%s/deployment/%s/config", cloudID, cloudResourceID),
-		strings.NewReader(string(body)))
+		bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("PUT config failed: %v", err)
 	}

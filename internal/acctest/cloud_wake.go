@@ -1,6 +1,7 @@
 package acctest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -57,33 +58,35 @@ func defaultWakeOpts() wakeOpts {
 // row (transport failure). It is not a verdict on the cloud.
 var errWakeInconclusive = errors.New("cloud wake probe inconclusive")
 
-// isHibernationResponse reports whether a 599 body is the hibernation error.
-// Any other 599 body is not treated as asleep.
-func isHibernationResponse(status int, body string) bool {
-	if status != hibernationStatus {
-		return false
-	}
+// parseErrorDetail returns error.detail from a JSON error body, and whether
+// the body parsed.
+func parseErrorDetail(body string) (string, bool) {
 	var parsed struct {
 		Error struct {
 			Detail string `json:"detail"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		return "", false
+	}
+	return parsed.Error.Detail, true
+}
+
+// isHibernationResponse reports whether a 599 body is the hibernation error.
+// Any other 599 body is not treated as asleep.
+func isHibernationResponse(status int, body string) bool {
+	if status != hibernationStatus {
 		return false
 	}
-	return strings.Contains(strings.ToLower(parsed.Error.Detail), "hibernated")
+	detail, ok := parseErrorDetail(body)
+	return ok && strings.Contains(strings.ToLower(detail), "hibernated")
 }
 
 // hibernationDetail returns error.detail from a hibernation body, or the raw
 // body if it does not parse.
 func hibernationDetail(body string) string {
-	var parsed struct {
-		Error struct {
-			Detail string `json:"detail"`
-		} `json:"error"`
-	}
-	if json.Unmarshal([]byte(body), &parsed) == nil && parsed.Error.Detail != "" {
-		return parsed.Error.Detail
+	if detail, ok := parseErrorDetail(body); ok && detail != "" {
+		return detail
 	}
 	return body
 }
@@ -209,22 +212,11 @@ func probeCloudWithComputeConfigCreate(ctx context.Context, t *testing.T, cloudI
 		return 0, "", err
 	}
 	name := UniqueName(t, "wake")
-	payload, err := json.Marshal(map[string]any{
-		"name":        name,
-		"anonymous":   false,
-		"new_version": true,
-		"config": map[string]any{
-			"cloud_id": cloudID,
-			"head_node_type": map[string]any{
-				"name":          "head",
-				"instance_type": "m5.large",
-			},
-		},
-	})
+	payload, err := json.Marshal(computeConfigVersionBody(cloudID, name, "m5.large"))
 	if err != nil {
 		return 0, "", err
 	}
-	resp, err := client.DoRequest(ctx, "POST", "/api/v2/compute_templates/", strings.NewReader(string(payload)))
+	resp, err := client.DoRequest(ctx, "POST", "/api/v2/compute_templates/", bytes.NewReader(payload))
 	if err != nil {
 		return 0, "", err
 	}

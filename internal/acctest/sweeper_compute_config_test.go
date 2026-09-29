@@ -1,6 +1,7 @@
 package acctest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -168,7 +169,7 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 		}
 		path := fmt.Sprintf("/api/v2/compute_templates/search?%s", query.Encode())
 
-		resp, err := client.DoRequest(ctx, "POST", path, strings.NewReader(string(body)))
+		resp, err := client.DoRequest(ctx, "POST", path, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("search compute configs: %w", err)
 		}

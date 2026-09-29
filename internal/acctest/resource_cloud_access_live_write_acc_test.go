@@ -1,6 +1,7 @@
 package acctest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -41,7 +42,7 @@ func cloudAccessLiveOOBMember(t *testing.T, client *provider.Client, cloudID, em
 
 	body, _ := json.Marshal(map[string]string{"email": email, "permission_level": permissionLevel})
 	resp, err := client.DoRequest(ctx, http.MethodPost,
-		fmt.Sprintf("/api/v2/clouds/%s/collaborators/users", cloudID), strings.NewReader(string(body)))
+		fmt.Sprintf("/api/v2/clouds/%s/collaborators/users", cloudID), bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("out-of-band add of %s to cloud %s failed: %v", email, cloudID, err)
 	}
@@ -131,7 +132,7 @@ func cloudAccessLiveSetRole(t *testing.T, client *provider.Client, cloudID, user
 	}
 	body, _ := json.Marshal(map[string]interface{}{"base_role": baseRole, "deny_roles": denyRoles})
 	resp, err := client.DoRequest(ctx, http.MethodPut,
-		fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/%s/roles", cloudID, userID), strings.NewReader(string(body)))
+		fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/%s/roles", cloudID, userID), bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("out-of-band roles PUT for user %s on cloud %s failed: %v", userID, cloudID, err)
 	}
@@ -580,7 +581,7 @@ func cloudAccessLiveGrantProjectRole(t *testing.T, client *provider.Client, proj
 	body, _ := json.Marshal([]entry{e})
 
 	resp, err := client.DoRequest(ctx, http.MethodPost,
-		fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID), strings.NewReader(string(body)))
+		fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID), bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("project role grant for %s on project %s failed: %v", email, projectID, err)
 	}
