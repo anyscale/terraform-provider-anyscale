@@ -81,6 +81,7 @@ func resolveDefaultKnownGoodCloudID(t *testing.T) string {
 	if err != nil {
 		return ""
 	}
+	ensureCloudAwake(t, id, cloudLabelFor(defaultKnownGoodCloudName))
 	return id
 }
 
@@ -94,6 +95,17 @@ func resolveDefaultKnownGoodCloudID(t *testing.T) string {
 // Unlike sync.Once, this will retry on failure.
 // Cached values are validated to ensure the cloud still exists.
 func GetTestCloudID(t *testing.T) string {
+	id := resolveTestCloudID(t)
+	cloudIDMutex.Lock()
+	name := cachedTestCloudName
+	cloudIDMutex.Unlock()
+	ensureCloudAwake(t, id, cloudLabelFor(name))
+	return id
+}
+
+// resolveTestCloudID is the resolution behind GetTestCloudID, before the
+// wake gate.
+func resolveTestCloudID(t *testing.T) string {
 	cloudIDMutex.Lock()
 	defer cloudIDMutex.Unlock()
 
@@ -1060,6 +1072,7 @@ func cloudHasResources(client *provider.Client, cloudID string) (hasResources bo
 // override is honored first (the operator is asserting that cloud is healthy).
 func GetComputeConfigCloudID(t *testing.T) string {
 	if id := os.Getenv("ANYSCALE_TEST_CLOUD_ID"); id != "" {
+		ensureCloudAwake(t, id, cloudLabelFor(os.Getenv("ANYSCALE_TEST_CLOUD_NAME")))
 		return id
 	}
 	// Known-good static fixture (resolved by name) before auto-discovery.
@@ -1069,6 +1082,7 @@ func GetComputeConfigCloudID(t *testing.T) string {
 	}
 	for _, c := range GetAllConfiguredClouds(t) {
 		if c.IsVM() {
+			ensureCloudAwake(t, c.ID, cloudLabelFor(c.Name))
 			return c.ID
 		}
 	}
