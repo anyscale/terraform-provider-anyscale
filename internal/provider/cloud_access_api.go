@@ -233,11 +233,11 @@ func cloudAutoAddUserEnabled(ctx context.Context, client *Client, cloudID string
 	if err != nil {
 		return false, err
 	}
-	// DoRequestAndParse returns a nil result rather than an error for a 404 when
-	// that status is in its accepted list; it is not here, but the nil check is
-	// kept so that a future change to the accepted list cannot turn "cloud gone"
-	// into "auto_add_user is false", which would let a revoke pass proceed on a
-	// guard that never actually answered.
+	// DoRequestAndParse never returns a nil result with a nil error (a 404 is
+	// ErrNotFound unless accepted, and an accepted 404 still decodes into a
+	// zero-valued struct). The nil check is defensive: it keeps "cloud gone"
+	// from ever reading as "auto_add_user is false", which would let a revoke
+	// pass proceed on a guard that never actually answered.
 	if cloudResp == nil {
 		return false, fmt.Errorf("%w: cloud %s", ErrNotFound, cloudID)
 	}

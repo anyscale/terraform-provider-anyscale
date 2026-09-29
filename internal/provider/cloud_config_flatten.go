@@ -217,11 +217,7 @@ func mergeAWSDerivedFields(awsConfig types.Object, derived *AWSConfig) (types.Ob
 		return awsConfig, diags
 	}
 
-	attrs := awsConfig.Attributes()
-	patched := make(map[string]attr.Value, len(attrs))
-	for k, v := range attrs {
-		patched[k] = v
-	}
+	patched := awsConfig.Attributes()
 
 	var arn, endpoint *string
 	if derived != nil {
@@ -281,11 +277,7 @@ func mergeGCPDerivedFields(gcpConfig types.Object, derived *GCPConfig) (types.Ob
 		return gcpConfig, diags
 	}
 
-	attrs := gcpConfig.Attributes()
-	patched := make(map[string]attr.Value, len(attrs))
-	for k, v := range attrs {
-		patched[k] = v
-	}
+	patched := gcpConfig.Attributes()
 
 	endpoint := ""
 	if derived != nil {
@@ -491,11 +483,7 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 		return fileStorage, diags
 	}
 
-	attrs := fileStorage.Attributes()
-	patched := make(map[string]attr.Value, len(attrs))
-	for k, v := range attrs {
-		patched[k] = v
-	}
+	patched := fileStorage.Attributes()
 
 	if v, ok := patched["mount_targets"]; ok && (v.IsNull() || v.IsUnknown()) {
 		var apiMountTargets []MountTarget

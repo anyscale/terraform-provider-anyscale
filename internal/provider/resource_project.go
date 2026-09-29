@@ -199,10 +199,7 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		Description:   &desc,
 	}
 
-	if !plan.InitialClusterConfigID.IsNull() {
-		configID := plan.InitialClusterConfigID.ValueString()
-		createReq.InitialClusterConfigID = &configID
-	}
+	createReq.InitialClusterConfigID = plan.InitialClusterConfigID.ValueStringPointer()
 
 	// Marshal request to JSON
 	reqBody, err := MarshalRequestBody(createReq)
@@ -498,9 +495,8 @@ func retryOn403(
 		select {
 		case <-ctx.Done():
 			return nil, lastErr
-		default:
+		case <-time.After(interval):
 		}
-		time.Sleep(interval)
 		elapsed += interval
 
 		interval *= 2
@@ -542,28 +538,32 @@ func (r *ProjectResource) ImportState(ctx context.Context, req resource.ImportSt
 
 // Helper functions
 
+// getProjectByID fetches a single project by ID. A missing project is
+// reported as an error wrapping ErrNotFound.
+func getProjectByID(ctx context.Context, client *Client, projectID string) (*ProjectResult, error) {
+	projectResp, err := DoRequestAndParse[ProjectResponse](
+		ctx, client, "GET", fmt.Sprintf("/api/v2/projects/%s", projectID), nil, http.StatusOK,
+	)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: project not found", ErrNotFound)
+		}
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+
+	return &projectResp.Result, nil
+}
+
 // readProject reads a project's details into the model.
 func (r *ProjectResource) readProject(ctx context.Context, projectID string, model *ProjectResourceModel) error {
 	tflog.Debug(ctx, "Reading project", map[string]any{"project_id": projectID})
 
-	// Get project details
-	projectResp, err := DoRequestAndParse[ProjectResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/projects/%s", projectID),
-		nil,
-		http.StatusOK,
-	)
+	result, err := getProjectByID(ctx, r.client, projectID)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return fmt.Errorf("%w: project not found", ErrNotFound)
-		}
-		return fmt.Errorf("failed to get project: %w", err)
+		return err
 	}
 
 	// Map to model
-	result := projectResp.Result
 	model.ID = types.StringValue(result.ID)
 	model.Name = types.StringValue(result.Name)
 

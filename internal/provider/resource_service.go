@@ -1112,10 +1112,7 @@ func buildApplyServiceRequest(ctx context.Context, plan *ServiceResourceModel) (
 		ComputeConfigID: plan.ComputeConfigID.ValueString(),
 	}
 
-	if !plan.Description.IsNull() {
-		desc := plan.Description.ValueString()
-		body.Description = &desc
-	}
+	body.Description = plan.Description.ValueStringPointer()
 
 	// Unknown when Optional+Computed and omitted by the user (not yet resolved by the
 	// backend) - send nothing and let the backend pick its default project, same as a

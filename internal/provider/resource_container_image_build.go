@@ -223,10 +223,7 @@ func (r *ContainerImageBuildResource) Create(ctx context.Context, req resource.C
 		Containerfile: containerfileContent,
 	}
 
-	if !plan.ProjectID.IsNull() {
-		projectID := plan.ProjectID.ValueString()
-		createReq.ProjectID = &projectID
-	}
+	createReq.ProjectID = plan.ProjectID.ValueStringPointer()
 
 	// Marshal request to JSON
 	reqBody, err := MarshalRequestBody(createReq)
@@ -377,7 +374,7 @@ func (r *ContainerImageBuildResource) Read(ctx context.Context, req resource.Rea
 
 	// If we have a build ID, get build details
 	if buildID != "" {
-		build, err := r.getBuild(ctx, buildID)
+		build, err := getBuild(ctx, r.client, buildID)
 		if err != nil {
 			tflog.Warn(ctx, "Failed to get build details", map[string]any{
 				"build_id": buildID,
@@ -440,7 +437,7 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	// ever tested that path before), surfaced by the PR2 test that closes exactly that
 	// coverage gap.
 	if !containerfileChanged {
-		build, err := r.getBuild(ctx, state.BuildID.ValueString())
+		build, err := getBuild(ctx, r.client, state.BuildID.ValueString())
 		if err != nil {
 			AddAPIError(&resp.Diagnostics, "read build", err)
 			return
@@ -622,7 +619,7 @@ func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID 
 		default:
 		}
 
-		build, err := r.getBuild(ctx, buildID)
+		build, err := getBuild(ctx, r.client, buildID)
 		if err != nil {
 			return nil, err
 		}
@@ -639,7 +636,11 @@ func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID 
 		if done {
 			return build, nil
 		}
-		time.Sleep(buildPollInterval)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(buildPollInterval):
+		}
 	}
 
 	return nil, fmt.Errorf("build timed out after %v", timeout)
@@ -668,23 +669,4 @@ func evaluateBuildStatus(build *BuildResult) (done bool, err error) {
 	default:
 		return true, fmt.Errorf("unknown build status: %s", build.Status)
 	}
-}
-
-// getBuild fetches the current build details.
-func (r *ContainerImageBuildResource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
-	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[BuildResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/builds/%s", buildID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get build %s: %w", buildID, err)
-	}
-
-	return &buildResp.Result, nil
 }

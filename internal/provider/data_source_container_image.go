@@ -187,7 +187,7 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 		config.ImageURI = types.StringPointerValue(template.LatestBuild.DockerImageName)
 
 		// Get full build details
-		build, err := d.getBuild(ctx, template.LatestBuild.ID)
+		build, err := getBuild(ctx, d.client, template.LatestBuild.ID)
 		if err != nil {
 			tflog.Warn(ctx, "Failed to get build details", map[string]any{
 				"build_id": template.LatestBuild.ID,
@@ -312,23 +312,4 @@ func filterExactApplicationTemplateMatches(results []ApplicationTemplateResult, 
 		}
 	}
 	return matches
-}
-
-// getBuild fetches the current build details.
-func (d *ContainerImageDataSource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
-	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[BuildResponse](
-		ctx,
-		d.client,
-		"GET",
-		fmt.Sprintf("/api/v2/builds/%s", buildID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get build %s: %w", buildID, err)
-	}
-
-	return &buildResp.Result, nil
 }

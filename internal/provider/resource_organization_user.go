@@ -740,17 +740,8 @@ func (r *OrganizationUserResource) reportLapsedInvitation(
 func applyMemberIdentity(model *OrganizationUserResourceModel, collaborator *OrganizationCollaboratorResult) {
 	model.IdentityID = types.StringValue(collaborator.ID)
 
-	if collaborator.UserID != nil && *collaborator.UserID != "" {
-		model.UserID = types.StringValue(*collaborator.UserID)
-	} else {
-		model.UserID = types.StringNull()
-	}
-
-	if collaborator.Name != nil && *collaborator.Name != "" {
-		model.Name = types.StringValue(*collaborator.Name)
-	} else {
-		model.Name = types.StringNull()
-	}
+	model.UserID = stringPtrOrNull(collaborator.UserID)
+	model.Name = stringPtrOrNull(collaborator.Name)
 
 	if (model.CreatedAt.IsNull() || model.CreatedAt.IsUnknown()) && collaborator.CreatedAt != "" {
 		model.CreatedAt = types.StringValue(collaborator.CreatedAt)
@@ -1095,8 +1086,8 @@ func listAllOrganizationCollaborators(ctx context.Context, client *Client, extra
 	)
 }
 
-// Invitation status values, shared with computeInvitationStatus (which returns
-// these literals) so the switches that branch on it cannot drift by a typo.
+// Invitation status values returned by computeInvitationStatus, shared with the
+// switches that branch on it so the two cannot drift by a typo.
 const (
 	invitationStatusPending  = "pending"
 	invitationStatusAccepted = "accepted"
