@@ -541,11 +541,7 @@ func applyCollaboratorToModel(ctx context.Context, model *OrganizationUserRoleRe
 	model.ID = types.StringValue(c.Email)
 	model.Email = types.StringValue(c.Email)
 	model.IdentityID = types.StringValue(c.ID)
-	if c.UserID != nil && *c.UserID != "" {
-		model.UserID = types.StringValue(*c.UserID)
-	} else {
-		model.UserID = types.StringNull()
-	}
+	model.UserID = stringPtrOrNull(c.UserID)
 	model.BaseRole = types.StringValue(c.BaseRole)
 
 	denyRoles, listDiags := additionalRolesToList(ctx, c.AdditionalRoles)

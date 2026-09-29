@@ -158,3 +158,22 @@ func archiveClusterEnvironment(ctx context.Context, client *Client, clusterEnvID
 		"cluster_environment_id": clusterEnvID,
 	})
 }
+
+// getBuild fetches the current build details.
+func getBuild(ctx context.Context, client *Client, buildID string) (*BuildResult, error) {
+	// Note: The Anyscale API returns 201 for GET build endpoints
+	buildResp, err := DoRequestAndParse[BuildResponse](
+		ctx,
+		client,
+		"GET",
+		fmt.Sprintf("/api/v2/builds/%s", buildID),
+		nil,
+		http.StatusOK,
+		http.StatusCreated,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get build %s: %w", buildID, err)
+	}
+
+	return &buildResp.Result, nil
+}

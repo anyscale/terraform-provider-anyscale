@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -307,9 +306,7 @@ func (d *ServiceDataSource) findServiceByName(ctx context.Context, name, project
 
 // getService fetches a single service by ID.
 func (d *ServiceDataSource) getService(ctx context.Context, serviceID string) (*ServiceResult, error) {
-	serviceResp, err := DoRequestAndParse[ServiceResponse](
-		ctx, d.client, "GET", fmt.Sprintf("/api/v2/services-v2/%s", serviceID), nil, http.StatusOK,
-	)
+	service, err := getServiceByID(ctx, d.client, serviceID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("%w: service not found", ErrNotFound)
@@ -317,5 +314,5 @@ func (d *ServiceDataSource) getService(ctx context.Context, serviceID string) (*
 		return nil, fmt.Errorf("failed to get service: %w", err)
 	}
 
-	return &serviceResp.Result, nil
+	return service, nil
 }

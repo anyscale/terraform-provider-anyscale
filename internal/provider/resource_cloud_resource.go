@@ -1236,14 +1236,8 @@ func expandAWSConfig(ctx context.Context, obj types.Object) (*AWSConfig, error) 
 	if !awsModel.ExternalID.IsNull() {
 		awsConfig.ExternalID = awsModel.ExternalID.ValueString()
 	}
-	if !awsModel.ClusterInstanceProfileID.IsNull() {
-		profileID := awsModel.ClusterInstanceProfileID.ValueString()
-		awsConfig.ClusterInstanceProfileID = &profileID
-	}
-	if !awsModel.MemoryDBClusterName.IsNull() {
-		name := awsModel.MemoryDBClusterName.ValueString()
-		awsConfig.MemoryDBClusterName = &name
-	}
+	awsConfig.ClusterInstanceProfileID = awsModel.ClusterInstanceProfileID.ValueStringPointer()
+	awsConfig.MemoryDBClusterName = awsModel.MemoryDBClusterName.ValueStringPointer()
 	// Optional+Computed and unset at Create (no prior state for UseStateForUnknown to carry
 	// forward) plans Unknown, not Null - an IsNull()-only guard would read that as a
 	// user-supplied value and send an explicit empty string instead of omitting the field.
@@ -1379,14 +1373,8 @@ func expandObjectStorage(ctx context.Context, obj types.Object) (*ObjectStorage,
 		BucketName: storageModel.BucketName.ValueString(),
 	}
 
-	if !storageModel.Region.IsNull() {
-		region := storageModel.Region.ValueString()
-		storage.Region = &region
-	}
-	if !storageModel.Endpoint.IsNull() {
-		endpoint := storageModel.Endpoint.ValueString()
-		storage.Endpoint = &endpoint
-	}
+	storage.Region = storageModel.Region.ValueStringPointer()
+	storage.Endpoint = storageModel.Endpoint.ValueStringPointer()
 
 	return storage, nil
 }

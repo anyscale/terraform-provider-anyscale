@@ -396,21 +396,21 @@ func (r *OrganizationInvitationResource) getInvitationByID(ctx context.Context, 
 // computeInvitationStatus determines the status based on accepted_at and expires_at timestamps
 func computeInvitationStatus(acceptedAt *string, expiresAt string) string {
 	if acceptedAt != nil && *acceptedAt != "" {
-		return "accepted"
+		return invitationStatusAccepted
 	}
 
 	// Parse expiration time
 	expires, err := time.Parse(time.RFC3339, expiresAt)
 	if err != nil {
 		// If we can't parse the time, assume pending
-		return "pending"
+		return invitationStatusPending
 	}
 
 	if time.Now().After(expires) {
-		return "expired"
+		return invitationStatusExpired
 	}
 
-	return "pending"
+	return invitationStatusPending
 }
 
 // getEmailDomain extracts the domain from an email address for logging (privacy)

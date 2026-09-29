@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -160,12 +161,7 @@ func CloseBody(ctx context.Context, body io.ReadCloser) {
 
 // isStatusExpected checks if the status code matches any of the expected statuses
 func isStatusExpected(statusCode int, expectedStatuses []int) bool {
-	for _, expected := range expectedStatuses {
-		if statusCode == expected {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(expectedStatuses, statusCode)
 }
 
 // PaginatedRequest handles automatic pagination for list endpoints that use

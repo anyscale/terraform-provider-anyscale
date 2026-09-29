@@ -234,10 +234,7 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		RayVersion:  rayVersion,
 	}
 
-	if !plan.RegistryLoginSecret.IsNull() {
-		secret := plan.RegistryLoginSecret.ValueString()
-		configJSON.RegistryLoginSecret = &secret
-	}
+	configJSON.RegistryLoginSecret = plan.RegistryLoginSecret.ValueStringPointer()
 
 	// Determine name - use provided value or generate a valid one from image URI
 	// Name must match pattern: ^[A-Za-z0-9._-]+$
