@@ -1,11 +1,15 @@
 package acctest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
@@ -21,10 +25,10 @@ import (
 // would compile, hit /api/v2/compute_templates/search, get HTTP 200 back, and
 // silently paginate wrong (always page 1's worth of data, no error). This
 // test's mock is deliberately strict about where it reads pagination from,
-// and also asserts the second landmine found beyond the pagination
-// transport: version and archive_status must be sent explicitly in the body,
-// or api/v2's own defaults (latest-version-only, unarchived-only) would
-// silently narrow which rows the sweeper ever sees.
+// and also asserts the body filters: version must be -2, or api/v2's
+// latest-version-only default would let a recently-churned leak evade the
+// sweeper, and archive_status must be NOT_ARCHIVED so already-archived
+// configs are never re-archived and counted as swept.
 func TestSearchComputeConfigsByContains_MultiPage(t *testing.T) {
 	requestCount := 0
 	var pagingTokensSeen []string
@@ -58,8 +62,8 @@ func TestSearchComputeConfigsByContains_MultiPage(t *testing.T) {
 		if nameFilter, ok := payload["name"].(map[string]any); !ok || nameFilter["contains"] == nil {
 			t.Errorf(`request body missing expected name.contains filter, got name=%v`, payload["name"])
 		}
-		if archiveStatus, ok := payload["archive_status"].(string); !ok || archiveStatus != "ALL" {
-			t.Errorf(`request body archive_status = %v, want "ALL" (omitting it would silently narrow to api/v2's NOT_ARCHIVED default)`, payload["archive_status"])
+		if archiveStatus, ok := payload["archive_status"].(string); !ok || archiveStatus != "NOT_ARCHIVED" {
+			t.Errorf(`request body archive_status = %v, want "NOT_ARCHIVED" (ALL re-archives every already-archived config each run, drowning real archives in no-ops)`, payload["archive_status"])
 		}
 		if version, ok := payload["version"].(float64); !ok || version != -2 {
 			t.Errorf(`request body version = %v, want -2 (omitting it would silently narrow to api/v2's latest-version-only default, letting a recently-churned leak evade the sweeper)`, payload["version"])
@@ -164,5 +168,69 @@ func TestSearchComputeConfigsByContains_SinglePageStopsAfterOnePage(t *testing.T
 	}
 	if len(results) != 1 || results[0].ID != "cpt_only" {
 		t.Errorf("got %+v, want exactly one result with ID cpt_only", results)
+	}
+}
+
+// TestSweepComputeConfigs_CountsOnlyRealArchives drives the whole sweeper
+// against a mock whose search ignores the archive_status filter and returns an
+// already-archived row beside an unarchived one. Only the unarchived row may
+// be archived, and swept must count only it: the nightly sweep once reported
+// swept=11728 while almost every row was a re-archive no-op, which hid
+// whether any real leak had been cleaned up.
+func TestSweepComputeConfigs_CountsOnlyRealArchives(t *testing.T) {
+	var archived []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/compute_templates/search":
+			var payload struct {
+				Name struct {
+					Contains string `json:"contains"`
+				} `json:"name"`
+			}
+			body, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Errorf("failed to parse search body: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if payload.Name.Contains != "tfacc-" {
+				_, _ = w.Write([]byte(`{"results": [], "metadata": {"next_paging_token": null}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{
+				"results": [
+					{"id": "cpt_live", "name": "tfacc-leak", "created_at": "2024-01-01T00:00:00Z", "anonymous": false, "archived_at": null},
+					{"id": "cpt_done", "name": "tfacc-old", "created_at": "2024-01-01T00:00:00Z", "anonymous": false, "archived_at": "2024-01-02T00:00:00Z"}
+				],
+				"metadata": {"next_paging_token": null}
+			}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/archive"):
+			archived = append(archived, strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v2/compute_templates/"), "/archive"))
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("ANYSCALE_API_URL", server.URL)
+	t.Setenv("ANYSCALE_CLI_TOKEN", "fake-token-counts")
+	t.Setenv("ANYSCALE_SWEEP_DRY_RUN", "")
+	t.Setenv("ANYSCALE_SWEEP_MIN_AGE", "")
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	if err := sweepComputeConfigs(""); err != nil {
+		t.Fatalf("sweepComputeConfigs returned error: %v", err)
+	}
+
+	if len(archived) != 1 || archived[0] != "cpt_live" {
+		t.Errorf("archived %v, want only [cpt_live]; an already-archived config must not be re-archived", archived)
+	}
+	if !strings.Contains(logs.String(), "swept=1 already_archived=1 failed=0") {
+		t.Errorf("summary line missing or wrong; want swept=1 already_archived=1 failed=0, got logs:\n%s", logs.String())
 	}
 }

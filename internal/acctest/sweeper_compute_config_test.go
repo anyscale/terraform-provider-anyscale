@@ -26,10 +26,11 @@ func init() {
 }
 
 type sweepComputeConfigResult struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"created_at"`
-	Anonymous bool   `json:"anonymous"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	CreatedAt  string  `json:"created_at"`
+	Anonymous  bool    `json:"anonymous"`
+	ArchivedAt *string `json:"archived_at"`
 }
 
 type sweepComputeConfigListResponse struct {
@@ -76,9 +77,15 @@ func sweepComputeConfigs(_ string) error {
 	log.Printf("[sweep:anyscale_compute_config] candidates=%d min-age=%s", len(candidates), minAge)
 
 	var failures []string
-	swept := 0
+	swept, alreadyArchived := 0, 0
 	for _, c := range candidates {
 		if c.Anonymous {
+			continue
+		}
+		// The search already excludes archived rows; this keeps swept an
+		// honest count of real archives even if that filter ever regresses.
+		if c.ArchivedAt != nil {
+			alreadyArchived++
 			continue
 		}
 		if !hasAnyPrefix(c.Name, sweepableResourcePrefixes) {
@@ -102,7 +109,7 @@ func sweepComputeConfigs(_ string) error {
 		swept++
 	}
 
-	log.Printf("[sweep:anyscale_compute_config] swept=%d failed=%d", swept, len(failures))
+	log.Printf("[sweep:anyscale_compute_config] swept=%d already_archived=%d failed=%d", swept, alreadyArchived, len(failures))
 	if len(failures) > 0 {
 		return fmt.Errorf("compute config sweep had %d failure(s): %s", len(failures), strings.Join(failures, "; "))
 	}
@@ -143,17 +150,19 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 		// fetchComputeConfigVersions already uses) and restores the current,
 		// safer, enumerate-every-version behavior.
 		//
-		// archive_status: "ALL" is also now sent explicitly. api/v2 defaults
-		// this to NOT_ARCHIVED (ext/v0 has no equivalent and never filtered),
-		// so omitting it would silently narrow results to unarchived rows
-		// only. Already-archived rows passing through here are harmless --
-		// sweepArchiveComputeConfig treats re-archiving as success
-		// (200/202/204/404) -- so ALL preserves today's exact behavior
-		// rather than narrowing it.
+		// archive_status: "NOT_ARCHIVED" asks only for rows still needing
+		// cleanup. Archived is the terminal state for a compute config (there
+		// is no delete), so searching ALL returned every config ever archived
+		// and re-archived it each run: the API accepts that as success, so
+		// swept=N counted thousands of no-ops, took ~30 minutes, and could not
+		// show a real leak. The backend applies the filter per row on
+		// archived_at, independently of version (compute_templates_dao.py
+		// _apply_filters_to_list_compute_template_query), so -2 still yields
+		// every unarchived version of a partly-archived name.
 		payload := map[string]interface{}{
 			"name":              map[string]string{"contains": contains},
 			"include_anonymous": false,
-			"archive_status":    "ALL",
+			"archive_status":    "NOT_ARCHIVED",
 			"version":           -2,
 		}
 
