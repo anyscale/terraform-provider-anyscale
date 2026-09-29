@@ -495,9 +495,8 @@ func retryOn403(
 		select {
 		case <-ctx.Done():
 			return nil, lastErr
-		default:
+		case <-time.After(interval):
 		}
-		time.Sleep(interval)
 		elapsed += interval
 
 		interval *= 2

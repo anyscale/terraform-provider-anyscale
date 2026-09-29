@@ -68,7 +68,11 @@ func waitForBuildDigestWithTiming(ctx context.Context, client *Client, build *Bu
 		if time.Now().After(deadline) {
 			return build, false
 		}
-		time.Sleep(interval)
+		select {
+		case <-ctx.Done():
+			return build, false
+		case <-time.After(interval):
+		}
 
 		refreshed, err := DoRequestAndParse[BuildResponse](
 			ctx,

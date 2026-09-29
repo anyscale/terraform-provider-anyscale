@@ -636,7 +636,11 @@ func (r *ContainerImageBuildResource) waitForBuild(ctx context.Context, buildID 
 		if done {
 			return build, nil
 		}
-		time.Sleep(buildPollInterval)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(buildPollInterval):
+		}
 	}
 
 	return nil, fmt.Errorf("build timed out after %v", timeout)
