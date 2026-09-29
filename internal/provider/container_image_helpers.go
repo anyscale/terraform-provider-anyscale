@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -112,10 +113,14 @@ func AddDigestNotSettledWarning(diags *diag.Diagnostics, buildID string) {
 // /ext/v0/cluster_environments/ endpoint has no DELETE) a cluster environment on Destroy.
 // Shared by resource_container_image_build.go and resource_container_image_registry.go, whose
 // Delete methods both back the same cluster-environment resource and so must tolerate the same
-// two already-gone states: a 404/not-found (already archived or deleted) and the
-// cannot-archive-a-default-environment error (Anyscale-provided images, e.g. anyscale/ray:*).
-// Both are treated as success rather than surfaced as errors, since the desired end state -
-// no live cluster environment for Terraform to manage - already holds.
+// already-gone states: a 404 (already archived or deleted) and the backend's
+// cannot-archive-a-default-environment 400 (Anyscale-provided images, e.g. anyscale/ray:*).
+// Both are treated as success, since the desired end state - no live cluster environment for
+// Terraform to manage - already holds.
+//
+// 400 is deliberately not an accepted status: the backend
+// (cluster_environments_resource.archive_cluster_environment) returns it for two distinct
+// cases, matched below on the response body, and any other 400 is a real failure.
 func archiveClusterEnvironment(ctx context.Context, client *Client, clusterEnvID string, diags *diag.Diagnostics) {
 	tflog.Info(ctx, "Archiving cluster environment", map[string]any{
 		"cluster_environment_id": clusterEnvID,
@@ -130,24 +135,28 @@ func archiveClusterEnvironment(ctx context.Context, client *Client, clusterEnvID
 		http.StatusOK,
 		http.StatusNoContent,
 		http.StatusNotFound,
-		http.StatusBadRequest,
 	)
 	if err != nil {
-		// No not-found check here (unlike most Read/Delete not-found sites in this provider):
-		// http.StatusNotFound is already in this call's expectedStatuses above, so a real 404
-		// is an accepted status and DoRequestRaw returns a nil error - execution never reaches
-		// this branch for that case. A string-matched "404"/"not found" guard used to sit here;
-		// it could never fire for a genuine 404 for the reason above, and it carried a narrow
-		// risk of misclassifying an unrelated error whose body text happened to contain that
-		// text as "already archived" instead of surfacing it via AddAPIError below.
-
-		// Check if this is a default cluster environment that cannot be archived
-		// This happens when using Anyscale's official images (e.g., anyscale/ray:*)
-		if strings.Contains(err.Error(), "Cannot archive a default cluster environment") {
-			tflog.Info(ctx, "Cluster environment is a default environment and cannot be archived (this is expected for Anyscale-provided images)", map[string]any{
-				"cluster_environment_id": clusterEnvID,
-			})
-			return
+		var statusErr *UnexpectedStatusError
+		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest {
+			// Anyscale's official images (e.g. anyscale/ray:*) are default environments.
+			if strings.Contains(statusErr.Body, "Cannot archive a default cluster environment") {
+				tflog.Info(ctx, "Cluster environment is a default environment and cannot be archived (this is expected for Anyscale-provided images)", map[string]any{
+					"cluster_environment_id": clusterEnvID,
+				})
+				return
+			}
+			// Azure control planes reject every archive. Failing here would make destroy
+			// impossible there, so the image is left in place with a warning instead.
+			if strings.Contains(statusErr.Body, "not supported on Azure Control Plane") {
+				diags.AddWarning(
+					"Container Image Left In Place",
+					fmt.Sprintf("Cluster environment %s was removed from Terraform state but not archived: "+
+						"archiving container images is not supported on this Azure control plane. "+
+						"The image remains in Anyscale.", clusterEnvID),
+				)
+				return
+			}
 		}
 
 		AddAPIError(diags, "archive cluster environment", err)
