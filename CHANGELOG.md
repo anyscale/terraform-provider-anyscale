@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.3] - 2026-09-30
+
+### Changed
+
+- resource/anyscale_service: Changing only `rollout_strategy` or `max_surge_percent` no longer triggers a deploy; the new values take effect on the next deploy. To force a redeploy, change a deploy field such as `ray_serve_config`.
+
+### Fixed
+
+- resource/anyscale_service: Importing a service and then applying unchanged configuration no longer redeploys it. The first plan after import still shows an in-place update of `rollout_strategy` or `max_surge_percent`; applying it only records the values in state.
+- resource/anyscale_cloud_resource: An in-place change to `file_storage` or `timeouts` no longer fails with "Provider produced inconsistent result after apply". Previously every such apply failed after the `file_storage` update had already reached the backend, so it could not be completed in place. After upgrading, run `terraform apply` again to complete the pending update.
+- resource/anyscale_cloud_access: Project roles declared in a member's `projects` are now granted and kept. In v0.26.0 through v0.28.2 apply reported success without granting them, every later plan showed the same in-place update, and any apply that updated the resource could silently remove a declared project role that had been granted outside Terraform. After upgrading, the next `terraform apply` re-grants the roles still declared; no re-import or state edit is needed. A removed role that is no longer declared is not restored, so if you granted project roles outside Terraform, check project access.
+
 ## [0.28.2] - 2026-09-29
 
 ### Fixed
@@ -1082,7 +1094,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.28.2...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.28.3...HEAD
+[0.28.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.3
 [0.28.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.2
 [0.28.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.1
 [0.28.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.0
