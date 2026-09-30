@@ -10,19 +10,20 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
-// TestSearchComputeConfigsByContains_MultiPage is the CC5b-tail mutation-proof
-// for the sweeper's search call site, mirroring
+// TestSearchComputeConfigsByContains_MultiPage is the mutation-proof for the
+// sweeper's search call site, mirroring
 // TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody and
 // TestFetchComputeConfigVersions_FollowsPagingToken (data_source_compute_config_test.go),
 // the data source's already-proven tests for the identical api/v2 transport
-// this sweeper now shares. A naive migration could keep nesting
-// paging/paging_token/count inside the JSON body (the old ext/v0 shape) - it
-// would compile, hit /api/v2/compute_templates/search, get HTTP 200 back, and
+// this sweeper shares. Nesting paging/paging_token/count inside the JSON body
+// (the ext/v0 shape) would compile, hit /api/v2/compute_templates/search, get HTTP 200 back, and
 // silently paginate wrong (always page 1's worth of data, no error). This
 // test's mock is deliberately strict about where it reads pagination from,
 // and also asserts the body filters: version must be -2, or api/v2's
@@ -30,7 +31,8 @@ import (
 // sweeper, and archive_status must be NOT_ARCHIVED so already-archived
 // configs are never re-archived and counted as swept.
 func TestSearchComputeConfigsByContains_MultiPage(t *testing.T) {
-	requestCount := 0
+	var requestCount atomic.Int32
+	var mu sync.Mutex // guards pagingTokensSeen and countsSeen
 	var pagingTokensSeen []string
 	var countsSeen []string
 
@@ -43,9 +45,11 @@ func TestSearchComputeConfigsByContains_MultiPage(t *testing.T) {
 			return
 		}
 
-		requestCount++
+		call := requestCount.Add(1)
+		mu.Lock()
 		pagingTokensSeen = append(pagingTokensSeen, r.URL.Query().Get("paging_token"))
 		countsSeen = append(countsSeen, r.URL.Query().Get("count"))
+		mu.Unlock()
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -71,7 +75,7 @@ func TestSearchComputeConfigsByContains_MultiPage(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		if requestCount == 1 {
+		if call == 1 {
 			_, _ = w.Write([]byte(`{
 				"results": [
 					{"id": "cpt_page1_a", "name": "tfacc-multipage", "created_at": "2024-01-01T00:00:00Z", "anonymous": false},
@@ -97,9 +101,11 @@ func TestSearchComputeConfigsByContains_MultiPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("searchComputeConfigsByContains returned error: %v", err)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 
-	if requestCount != 2 {
-		t.Fatalf("expected exactly 2 HTTP requests (one per page), got %d", requestCount)
+	if requestCount.Load() != 2 {
+		t.Fatalf("expected exactly 2 HTTP requests (one per page), got %d", requestCount.Load())
 	}
 	if pagingTokensSeen[0] != "" {
 		t.Errorf("first request should not carry a paging_token query param, got %q", pagingTokensSeen[0])
@@ -137,7 +143,7 @@ func TestSearchComputeConfigsByContains_MultiPage(t *testing.T) {
 // that always re-requests (or infinite-loops on a nil/empty token) would only
 // show up as a hang or duplicate-results bug, not a clean failure.
 func TestSearchComputeConfigsByContains_SinglePageStopsAfterOnePage(t *testing.T) {
-	requestCount := 0
+	var requestCount atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v2/compute_templates/search" {
@@ -146,7 +152,7 @@ func TestSearchComputeConfigsByContains_SinglePageStopsAfterOnePage(t *testing.T
 			return
 		}
 
-		requestCount++
+		requestCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"results": [
@@ -163,8 +169,8 @@ func TestSearchComputeConfigsByContains_SinglePageStopsAfterOnePage(t *testing.T
 		t.Fatalf("searchComputeConfigsByContains returned error: %v", err)
 	}
 
-	if requestCount != 1 {
-		t.Errorf("expected exactly 1 HTTP request for a single-page response, got %d", requestCount)
+	if requestCount.Load() != 1 {
+		t.Errorf("expected exactly 1 HTTP request for a single-page response, got %d", requestCount.Load())
 	}
 	if len(results) != 1 || results[0].ID != "cpt_only" {
 		t.Errorf("got %+v, want exactly one result with ID cpt_only", results)
@@ -178,6 +184,7 @@ func TestSearchComputeConfigsByContains_SinglePageStopsAfterOnePage(t *testing.T
 // swept=11728 while almost every row was a re-archive no-op, which hid
 // whether any real leak had been cleaned up.
 func TestSweepComputeConfigs_CountsOnlyRealArchives(t *testing.T) {
+	var mu sync.Mutex // guards archived
 	var archived []string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -205,7 +212,9 @@ func TestSweepComputeConfigs_CountsOnlyRealArchives(t *testing.T) {
 				"metadata": {"next_paging_token": null}
 			}`))
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/archive"):
+			mu.Lock()
 			archived = append(archived, strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v2/compute_templates/"), "/archive"))
+			mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
@@ -226,6 +235,8 @@ func TestSweepComputeConfigs_CountsOnlyRealArchives(t *testing.T) {
 	if err := sweepComputeConfigs(""); err != nil {
 		t.Fatalf("sweepComputeConfigs returned error: %v", err)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 
 	if len(archived) != 1 || archived[0] != "cpt_live" {
 		t.Errorf("archived %v, want only [cpt_live]; an already-archived config must not be re-archived", archived)

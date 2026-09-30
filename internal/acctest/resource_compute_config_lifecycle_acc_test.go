@@ -343,11 +343,10 @@ resource "anyscale_compute_config" "test" {
 					// Import has no prior state to mask Computed sub-attributes
 					// against, same as the real-API equivalent in
 					// resource_compute_config_acc_test.go. enable_cross_zone_scaling,
-					// advanced_instance_config, and flags used to be listed here too
-					// (pre-CC11/CC12/CC14); this config sets none of the three, so
-					// they now correctly resolve/stay at their pre-import values with
-					// nothing to ignore - see TestAccComputeConfigResource_ImportRecoversWriteOnlyFields
-					// for the actual CC12 recovery-with-real-values proof.
+					// advanced_instance_config, and flags need no entry: this config
+					// sets none of the three, so what import resolves/recovers matches
+					// the created state - see TestAccComputeConfigResource_ImportRecoversWriteOnlyFields
+					// for recovery of explicitly set values.
 					"head_node", "worker_nodes",
 					"min_resources", "max_resources", "zones",
 				},
@@ -383,16 +382,16 @@ resource "anyscale_compute_config" "test" {
 	})
 }
 
-// newCC12MockComputeConfigServer serves a single, fixed compute config that
-// already has real top-level flags and advanced_instance_config set - the
-// realistic "pre-existing config imported into a config that omits them"
-// scenario CC12 exists for. The mock never validates these values (unlike
-// the real Anyscale API, which rejects arbitrary flag keys and validates
+// newImportRecoveryMockComputeConfigServer serves a single, fixed compute
+// config that already has real top-level flags and advanced_instance_config
+// set - the realistic "pre-existing config imported into a config that omits
+// them" scenario. The mock never validates these values (unlike the real
+// Anyscale API, which rejects arbitrary flag keys and validates
 // advanced_instance_config against a provider-specific instance-launch
-// shape - see the design discussion), which is exactly why this has to be a
-// mock-server test rather than a real-API one: a synthetic marker payload
-// that proves the mechanism would 400 against the real backend.
-func newCC12MockComputeConfigServer(t *testing.T, configID, configName, cloudID string) *httptest.Server {
+// shape), which is why this has to be a mock-server test rather than a
+// real-API one: a synthetic marker payload that proves the mechanism would
+// 400 against the real backend.
+func newImportRecoveryMockComputeConfigServer(t *testing.T, configID, configName, cloudID string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
@@ -403,7 +402,7 @@ func newCC12MockComputeConfigServer(t *testing.T, configID, configName, cloudID 
 		"config": {
 			"cloud_id": %[3]q,
 			"head_node_type": {"name": "head", "instance_type": "m5.2xlarge"},
-			"flags": {"cc12-marker-flag": true, "cc12-marker-count": 3},
+			"flags": {"import-marker-flag": true, "import-marker-count": 3},
 			"advanced_configurations_json": {"disk_size": 100, "enable_monitoring": true}
 		}
 	}`, configID, configName, cloudID)
@@ -418,14 +417,13 @@ func newCC12MockComputeConfigServer(t *testing.T, configID, configName, cloudID 
 	return server
 }
 
-// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields is CC12's verify-gate,
-// which was designed but not actually written until the gap was caught while
-// reviewing the release PR text that claimed it existed. Read intentionally
+// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields proves ImportState
+// recovers top-level flags/advanced_instance_config. Read intentionally
 // never reads flags/advanced_instance_config back from the API on ordinary
 // refresh (to avoid perpetual drift against what the user configured) -
 // ImportState is the one place recovering them is unambiguous, since there
 // is no prior state yet to confuse "recovered at import" with "genuinely
-// never configured". The three-point gate, all exercised here:
+// never configured". Three properties, all exercised here:
 //  1. A config that already matches the recovered values reaches an empty
 //     plan (the recovered values are not phantom/unknown).
 //  2. A config that omits them shows a TRUTHFUL, non-empty diff - not a
@@ -436,11 +434,11 @@ func newCC12MockComputeConfigServer(t *testing.T, configID, configName, cloudID 
 func TestAccComputeConfigResource_ImportRecoversWriteOnlyFields(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	const configID = "cpt_cc12_mock"
-	const configName = "cc12-import-mock"
-	const cloudID = "cld_cc12_mock"
+	const configID = "cpt_import_mock"
+	const configName = "import-recover-mock"
+	const cloudID = "cld_import_mock"
 
-	server := newCC12MockComputeConfigServer(t, configID, configName, cloudID)
+	server := newImportRecoveryMockComputeConfigServer(t, configID, configName, cloudID)
 	providerBlock := testAccProviderBlock(server.URL)
 
 	// What a user would naturally write without knowing the backend already
@@ -472,8 +470,8 @@ resource "anyscale_compute_config" "test" {
   }
 
   flags = {
-    cc12-marker-flag  = true
-    cc12-marker-count = 3
+    import-marker-flag  = true
+    import-marker-count = 3
   }
 
   advanced_instance_config = {
@@ -510,8 +508,8 @@ resource "anyscale_compute_config" "test" {
 					attrs := states[0].Attributes
 					for attr, want := range map[string]string{
 						"config_id":                                  configID,
-						"flags.cc12-marker-flag":                     "true",
-						"flags.cc12-marker-count":                    "3",
+						"flags.import-marker-flag":                   "true",
+						"flags.import-marker-count":                  "3",
 						"advanced_instance_config.disk_size":         "100",
 						"advanced_instance_config.enable_monitoring": "true",
 					} {
@@ -537,7 +535,7 @@ resource "anyscale_compute_config" "test" {
 				// truthful, non-empty removal diff - proving state actually
 				// tracks these as real values now, not a silent pass-through
 				// that would let an unrelated apply wipe them with no
-				// warning (the exact CC12 was designed to close).
+				// warning.
 				Config:             configOmittingWriteOnlyFields,
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true,
@@ -546,14 +544,14 @@ resource "anyscale_compute_config" "test" {
 	})
 }
 
-// newCC12PerNodeMockComputeConfigServer serves a compute config with TWO
-// worker node groups, each carrying a real, realistic per-node
+// newPerNodeImportRecoveryMockComputeConfigServer serves a compute config
+// with TWO worker node groups, each carrying a realistic per-node
 // advanced_instance_config - an IAM instance profile assignment, the exact
 // shape already shipping in examples/aws-vm-basic/compute_config.tf
 // (worker_nodes[].advanced_instance_config = jsonencode({IamInstanceProfile
-// = {Arn = ...}})), prompted by an earlier finding and the user's explicit
-// ask to cover workers specifically with more than one entry.
-func newCC12PerNodeMockComputeConfigServer(t *testing.T, configID, configName, cloudID string) *httptest.Server {
+// = {Arn = ...}})). Two groups, so recovery is proven per worker entry, not
+// just for the first.
+func newPerNodeImportRecoveryMockComputeConfigServer(t *testing.T, configID, configName, cloudID string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
@@ -591,29 +589,26 @@ func newCC12PerNodeMockComputeConfigServer(t *testing.T, configID, configName, c
 	return server
 }
 
-// TestAccComputeConfigResource_ImportRecoversPerNodeAdvancedInstanceConfig is CC12's
+// TestAccComputeConfigResource_ImportRecoversPerNodeAdvancedInstanceConfig is the
 // per-node companion to TestAccComputeConfigResource_ImportRecoversWriteOnlyFields,
-// requested explicitly by the user after review caught that the top-level
-// test never actually exercised the nested case despite a comment implying
-// it did. Unlike the top-level Dynamic fields (CC15's structural List-vs-
-// Tuple concern), per-node advanced_instance_config/flags are plain JSON
+// which covers only the top-level fields. Unlike the top-level Dynamic fields
+// (where the concern is structural List-vs-Tuple typing), per-node
+// advanced_instance_config/flags are plain JSON
 // STRINGS (schema.StringAttribute) - apiNodeTypeToTerraform/
 // apiWorkerNodeTypeToTerraform build them via a straight json.Marshal of the
-// decoded API response. The open question here is a byte-compare one: does
-// Go's compact, sorted-key json.Marshal output match what Terraform's own
-// jsonencode() produces for the same logical content. If this does not
-// reach an empty plan, that calls for a real per-node JSON
-// canonicalization fix (in the same spirit as CC15), not a
-// shrug-and-document fallback - the user confirmed this is a common real
-// customer pattern, not an edge case.
+// decoded API response. The question is a byte-compare one: does Go's
+// compact, sorted-key json.Marshal output match what Terraform's own
+// jsonencode() produces for the same logical content. Per-node IAM instance
+// profiles are a common customer pattern, so a non-empty plan here calls for
+// a per-node JSON canonicalization fix, not a documented limitation.
 func TestAccComputeConfigResource_ImportRecoversPerNodeAdvancedInstanceConfig(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	const configID = "cpt_cc12_pernode_mock"
-	const configName = "cc12-pernode-mock"
-	const cloudID = "cld_cc12_pernode_mock"
+	const configID = "cpt_pernode_import_mock"
+	const configName = "pernode-import-mock"
+	const cloudID = "cld_pernode_import_mock"
 
-	server := newCC12PerNodeMockComputeConfigServer(t, configID, configName, cloudID)
+	server := newPerNodeImportRecoveryMockComputeConfigServer(t, configID, configName, cloudID)
 	providerBlock := testAccProviderBlock(server.URL)
 
 	configOmittingPerNodeFields := providerBlock + fmt.Sprintf(`

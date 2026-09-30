@@ -12,31 +12,21 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// This file proves CC3b against a mock backend, the same httptest-server
-// pattern resource_cloud_c3_lifecycle_acc_test.go established: no real
-// infra, no ANYSCALE_TEST_REAL_INFRA gate, runs in ordinary CI.
+// This file proves compute-config cloud immutability against a mock backend
+// (httptest server): no real infra, no ANYSCALE_TEST_REAL_INFRA gate, runs in
+// ordinary CI.
 //
-// CC3b's final shape is an error guard in Update, NOT a RequiresReplace plan
-// modifier: a first pass tried RequiresReplace on cloud_id (with
-// UseStateForUnknown), but that cannot correctly detect a genuine cloud
-// change at plan time without a network call. Deliberately: leave
-// cloud_id with no plan modifiers, and instead have Update compare the
-// plan's cloud_id against state's cloud_id, erroring only when they
-// genuinely differ. This catches the orphan at apply time instead of plan
-// time -- an intentional, documented tradeoff.
-//
-// R1 (2026-07-27): cloud_name was removed from this resource entirely
-// (cloud_id is now Required, cloud_name-based name resolution moved to the
-// anyscale_cloud data source). This file previously also proved a
-// cloud_name-based "switching selectors" guarantee
-// (Lifecycle_CloudNameOnly_MockServer) -- deleted along with cloud_name
-// itself, since there is no longer a second selector to switch away from.
-// The immutability guarantee below is unrelated to that and still real.
+// Immutability is an error guard in Update, NOT a RequiresReplace plan
+// modifier: RequiresReplace on cloud_id (with UseStateForUnknown) cannot
+// correctly detect a genuine cloud change at plan time without a network call.
+// cloud_id has no plan modifiers; Update compares the plan's cloud_id against
+// state's and errors only when they genuinely differ. This catches the orphan
+// at apply time instead of plan time -- an intentional, documented tradeoff.
 //
 // TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer proves the actual
 // protection: changing to a genuinely different cloud is refused with a
 // clear error before any request that would create the orphan is ever sent.
-func newCC3bTwoCloudMockServer(t *testing.T, cloudAID, cloudBID, configID, configName string) *httptest.Server {
+func newTwoCloudComputeConfigMockServer(t *testing.T, cloudAID, cloudBID, configID, configName string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
@@ -87,8 +77,8 @@ func newCC3bTwoCloudMockServer(t *testing.T, cloudAID, cloudBID, configID, confi
 	return server
 }
 
-// TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer is CC3b's core
-// proof: attempting to move an existing compute config to a genuinely
+// TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer is the core
+// immutability proof: attempting to move an existing compute config to a genuinely
 // different cloud must be refused with a clear, named error, never silently
 // orphan the config on the old cloud, and never even reach the API call
 // that would create the orphan (the mock only implements POST/archive for
@@ -103,7 +93,7 @@ func TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer(t *testin
 	const configID = "cpt_cc3b_immutable"
 	const configName = "cc3b-immutable-config"
 
-	server := newCC3bTwoCloudMockServer(t, cloudAID, cloudBID, configID, configName)
+	server := newTwoCloudComputeConfigMockServer(t, cloudAID, cloudBID, configID, configName)
 	providerBlock := testAccProviderBlock(server.URL)
 
 	configOnCloudA := providerBlock + fmt.Sprintf(`
@@ -139,7 +129,7 @@ resource "anyscale_compute_config" "test" {
 				ExpectNonEmptyPlan: false,
 			},
 			{
-				// The headline CC3b gate: a real cloud change is refused, not
+				// The headline check: a real cloud change is refused, not
 				// replaced and not silently applied. Match on the diagnostic
 				// summary only -- Terraform word-wraps the detail text, so
 				// asserting on a longer literal phrase from the detail is

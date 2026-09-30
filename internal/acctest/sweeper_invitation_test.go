@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -111,10 +112,10 @@ func listAllInvitationsForSweep(ctx context.Context, client *provider.Client) ([
 // truncating to page one - a truncation bug here would not error, it would
 // just make the sweeper blind to leaked invitations on later pages.
 func TestListAllInvitationsForSweep_MultiPage(t *testing.T) {
-	requestCount := 0
+	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		if requestCount == 1 {
+		call := requestCount.Add(1)
+		if call == 1 {
 			if got := r.URL.Query().Get("paging_token"); got != "" {
 				t.Errorf("first request should not carry a paging_token, got %q", got)
 			}
@@ -135,8 +136,8 @@ func TestListAllInvitationsForSweep_MultiPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if requestCount != 2 {
-		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
+	if requestCount.Load() != 2 {
+		t.Fatalf("expected 2 requests (one per page), got %d", requestCount.Load())
 	}
 	if len(invitations) != 2 {
 		t.Fatalf("expected 2 invitations across both pages, got %d (silent truncation would show up as a short result here)", len(invitations))

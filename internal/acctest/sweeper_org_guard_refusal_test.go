@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -41,11 +42,11 @@ func TestSweepOrgGuardRefusesWhenFixtureAbsent(t *testing.T) {
 		return
 	}
 
-	var cloudsCalls int
+	var cloudsCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/v2/clouds"):
-			cloudsCalls++
+			cloudsCalls.Add(1)
 			// Empty list: the pinned fixture cloud does not exist here.
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"results":[],"metadata":{"next_paging_token":null}}`)
@@ -96,7 +97,7 @@ func TestSweepOrgGuardRefusesWhenFixtureAbsent(t *testing.T) {
 
 	// 3. It must abort BEFORE sweeping. Sweepers hit many endpoints; the guard
 	//    should have consulted the clouds list and then stopped.
-	if cloudsCalls == 0 {
+	if cloudsCalls.Load() == 0 {
 		t.Error("guard never queried the clouds list - it cannot have checked the org")
 	}
 }

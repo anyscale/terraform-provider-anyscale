@@ -121,11 +121,10 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 	var pagingToken string
 
 	for {
-		// CC5b tail: migrated from /ext/v0/cluster_computes/search to
-		// /api/v2/compute_templates/search, mirroring the identical pattern
-		// already proven by the data source's searchComputeTemplatesPaged
-		// (data_source_compute_config.go). Two landmines here, both traced
-		// against the read-only product reference, not assumed:
+		// Uses /api/v2/compute_templates/search (not the older
+		// /ext/v0/cluster_computes/search), mirroring the pattern proven by the
+		// data source's searchComputeTemplatesPaged (data_source_compute_config.go).
+		// Two landmines here, both traced against the backend source:
 		//
 		// 1. Pagination moves from the request BODY to the URL QUERY STRING.
 		// api/v2's search endpoint reads count/paging_token via

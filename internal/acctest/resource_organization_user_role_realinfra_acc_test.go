@@ -22,13 +22,13 @@ import (
 // because both are questions about WHAT THE BACKEND DOES, not about what the
 // provider sends. Asserting against a mock would be asserting our own guess:
 //
-//	R5  does the legacy permission_level PUT silently wipe deny roles that were
-//	    set through the roles path? The whole routing design in this resource -
-//	    already merged to main - assumes it does not. If it does, the design is
-//	    wrong, and no amount of mock coverage would reveal that.
-//	V8  does a CHANGING deny_roles write actually persist, or does the second
-//	    write silently no-op? A mock that echoes back whatever we sent proves
-//	    only that we sent it.
+//   - Does the legacy permission_level PUT silently wipe deny roles that were
+//     set through the roles path? The resource's write-path routing assumes it
+//     does not. If it does, the design is wrong, and no amount of mock coverage
+//     would reveal that.
+//   - Does a CHANGING deny_roles write actually persist, or does the second
+//     write silently no-op? A mock that echoes back whatever we sent proves
+//     only that we sent it.
 //
 // Both therefore READ BACK FROM THE REAL API and assert on what the backend
 // actually stored, not on what we asked it to store.
@@ -42,8 +42,8 @@ import (
 // cannot be used even if you were willing.
 //
 // Unlike the organization_user tests, these do NOT evict anyone: this resource's
-// Destroy writes a role back, it does not remove a member. The final check in
-// each test asserts exactly that - the member is still there afterwards.
+// Destroy writes a role back, it does not remove a member. The changing-deny-role
+// test asserts that in CheckDestroy - the member is still there afterwards.
 
 // requireRealInfraTestUser returns the disposable test identity's email, or
 // skips when ANYSCALE_TEST_USER_EMAIL is unset. Once it is set,
@@ -115,8 +115,8 @@ func requireRealInfraTestUser(t *testing.T) string {
 	// a 403 that means "you cannot modify yourself" and looks exactly like a
 	// failed gate - i.e. it would read as "the legacy write path DOES clobber deny
 	// roles" when the write never happened at all. A false red on this gate is
-	// worse than no result, because R5 exists to decide whether an already-merged
-	// routing design is sound.
+	// worse than no result, because the legacy-write test exists to decide whether
+	// the routing design is sound.
 	//
 	// This is a live hazard, not a theoretical one: the credentials in use during
 	// development authenticate as a `+`-aliased address in the same domain as the
@@ -243,8 +243,8 @@ type liveOrgMember struct {
 // handleSingular returns the real one): the list formatter derives roles fresh
 // from Postgres, the singular read derives them from SpiceDB-managed groups.
 // A LIST-based check would therefore read [] for a member who genuinely holds a
-// deny role - and R5 would report a CLOBBER THAT DID NOT HAPPEN, i.e. would
-// declare an already-merged design broken on the strength of a false empty.
+// deny role - and the legacy-write test would report a CLOBBER THAT DID NOT
+// HAPPEN, declaring the design broken on the strength of a false empty.
 //
 // So the authoritative read is the singular one, which is also what the provider
 // itself uses (resource_organization_user.go:441).
@@ -586,17 +586,17 @@ resource "anyscale_organization_user_role" "realinfra" {
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "deny_roles.0", secondDeny),
-					// THE V8 ASSERTION. The CHANGED value must be what the backend
-					// holds - not the original, and not both.
+					// The CHANGED value must be what the backend holds - not the
+					// original, and not both.
 					func(*terraform.State) error {
 						live := mustReadLiveOrgRole(t, email).AdditionalRoles
 						if !containsFold(live, secondDeny) {
-							return fmt.Errorf("V8 FAILED - the changing deny_roles write did not persist. "+
+							return fmt.Errorf("the changing deny_roles write did not persist. "+
 								"Backend still reports %v after applying %q; the update appears to have silently no-opped",
 								live, secondDeny)
 						}
 						if containsFold(live, firstDeny) {
-							return fmt.Errorf("V8 FAILED - the write ACCUMULATED rather than replaced. "+
+							return fmt.Errorf("the write ACCUMULATED rather than replaced. "+
 								"Backend reports %v, which still contains the superseded %q alongside %q",
 								live, firstDeny, secondDeny)
 						}

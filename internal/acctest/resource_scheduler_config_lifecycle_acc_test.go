@@ -195,58 +195,6 @@ resource "anyscale_scheduler_config" "test" {
 	})
 }
 
-// TestAccSchedulerConfigResourceLifecycleOmittedSectionsReadAsNull: a section
-// omitted entirely by the API - not sent as an empty list or empty object,
-// genuinely absent from the JSON - must read back as Terraform null, not as
-// an empty collection.
-//
-// This is the plan/apply half of the twin null/omit constraint the unit
-// tests exercise at the Go level only (expand omits a null section on write,
-// flatten appends into nil slices on read). What a Go-level unit test cannot
-// see is Core rejecting or rewriting an inconsistent shape at plan time -
-// this resource.Test is the only thing that can.
-//
-// The mock document below deliberately omits resource_queues,
-// scheduling_rules, and recycle_policy - it does not send them as `[]`/`{}`.
-// A fixture that "fills them in" empty would let a broken flatten (nil slice
-// vs. explicit empty list) pass silently, which is exactly the failure shape
-// that shipped the mount_targets import bug this repo has seen before.
-//
-// This test covers only the flatten half of the twin null/omit contract -
-// TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections' raw-body
-// assertion is the only detector for the expand half.
-// For recycle_policy that detector is real: an unconditionally-allocated
-// empty struct reaches the wire regardless of the tag. For the three list
-// fields it is not - `omitempty` on a `[]T` drops any zero-length slice
-// before the request is even built, so a broken expand that materializes an
-// empty slice there never reaches the wire to be inspected by anything, this
-// test's own byte assertion included. Not "the server collapses it back";
-// the value never leaves the client. See
-// TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections below for
-// what mutation actually proves something on each field kind.
-//
-// Mutation-proof (reverted, byte-clean): materializing
-// model.ResourceQueues = []schedulerResourceQueueModel{} when the section is
-// absent, instead of leaving it nil, fails this test - not with Core's
-// "provider produced inconsistent result after apply", but with
-// terraform-plugin-testing's own post-apply refresh-consistency check ("the
-// refresh plan was not empty").
-//
-// The cause: applyAndRefresh keeps the document exactly as planned after
-// Create/Update and takes only version/created_at/creator_id off the
-// read-back - flatten never runs on the apply path at all, so Core's own
-// post-apply consistency check is blind to this bug by construction, not
-// lenient. flatten is reached only by Read and ImportState, so the test
-// framework's own subsequent refresh (which calls Read) is the earliest
-// point a broken flatten can be observed at all.
-//
-// That makes this the ONLY thing that can catch this failure before a real
-// practitioner does: outside a test harness there is no apply-time error
-// either. The field symptom is a permanent non-convergent diff, not silent
-// drift - refresh writes the empty list, config says null, every plan
-// proposes removing it, every apply mints another immutable version (this
-// resource has no delete verb), and the next refresh writes the empty list
-// again. Keep this test for that reason, not merely as a regression guard.
 // TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections: a
 // section the practitioner never declares must never appear on the wire at
 // all - not as `[]`/`{}`. This test is the only thing in the suite that
@@ -332,6 +280,58 @@ resource "anyscale_scheduler_config" "test" {
 	})
 }
 
+// TestAccSchedulerConfigResourceLifecycleOmittedSectionsReadAsNull: a section
+// omitted entirely by the API - not sent as an empty list or empty object,
+// genuinely absent from the JSON - must read back as Terraform null, not as
+// an empty collection.
+//
+// This is the plan/apply half of the twin null/omit constraint the unit
+// tests exercise at the Go level only (expand omits a null section on write,
+// flatten appends into nil slices on read). What a Go-level unit test cannot
+// see is Core rejecting or rewriting an inconsistent shape at plan time -
+// this resource.Test is the only thing that can.
+//
+// The mock document below deliberately omits resource_queues,
+// scheduling_rules, and recycle_policy - it does not send them as `[]`/`{}`.
+// A fixture that "fills them in" empty would let a broken flatten (nil slice
+// vs. explicit empty list) pass silently, which is exactly the failure shape
+// that shipped the mount_targets import bug this repo has seen before.
+//
+// This test covers only the flatten half of the twin null/omit contract -
+// TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections' raw-body
+// assertion is the only detector for the expand half.
+// For recycle_policy that detector is real: an unconditionally-allocated
+// empty struct reaches the wire regardless of the tag. For the three list
+// fields it is not - `omitempty` on a `[]T` drops any zero-length slice
+// before the request is even built, so a broken expand that materializes an
+// empty slice there never reaches the wire to be inspected by anything, this
+// test's own byte assertion included. Not "the server collapses it back";
+// the value never leaves the client. See
+// TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections above for
+// what mutation actually proves something on each field kind.
+//
+// Mutation-proof (reverted, byte-clean): materializing
+// model.ResourceQueues = []schedulerResourceQueueModel{} when the section is
+// absent, instead of leaving it nil, fails this test - not with Core's
+// "provider produced inconsistent result after apply", but with
+// terraform-plugin-testing's own post-apply refresh-consistency check ("the
+// refresh plan was not empty").
+//
+// The cause: applyAndRefresh keeps the document exactly as planned after
+// Create/Update and takes only version/created_at/creator_id off the
+// read-back - flatten never runs on the apply path at all, so Core's own
+// post-apply consistency check is blind to this bug by construction, not
+// lenient. flatten is reached only by Read and ImportState, so the test
+// framework's own subsequent refresh (which calls Read) is the earliest
+// point a broken flatten can be observed at all.
+//
+// That makes this the ONLY thing that can catch this failure before a real
+// practitioner does: outside a test harness there is no apply-time error
+// either. The field symptom is a permanent non-convergent diff, not silent
+// drift - refresh writes the empty list, config says null, every plan
+// proposes removing it, every apply mints another immutable version (this
+// resource has no delete verb), and the next refresh writes the empty list
+// again. Keep this test for that reason, not merely as a regression guard.
 func TestAccSchedulerConfigResourceLifecycleOmittedSectionsReadAsNull(t *testing.T) {
 	server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig: `{"resource_flavors":[{"name":"cpu-standard"}]}`,

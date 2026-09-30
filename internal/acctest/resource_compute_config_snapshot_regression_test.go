@@ -2,12 +2,12 @@ package acctest
 
 // This file guards a byte-identical contract: a plain single-resource
 // anyscale_compute_config config (no additional_resources block) must send
-// the EXACT SAME create/update request shape after the multi-resource
-// generalization as it did before. That claim is proven by a real request
-// snapshot, not a source-read assumption - this is that gate.
+// the same create/update request shape it did before multi-resource
+// (additional_resources) support existed. That is proven by a real request
+// snapshot, not a source-read assumption.
 //
 // The captured shape asserted below was taken from the actual request this
-// mock server received BEFORE any Option C / F1-F7 changes landed. If a
+// mock server received before multi-resource support was added. If a
 // future change to expand/nodeConfigToAPI/resource_compute_config.go's
 // Create legitimately needs to alter this shape, this test must fail loudly
 // first - update it deliberately, with the reason written down, not by
@@ -74,7 +74,7 @@ resource "anyscale_compute_config" "test" {
 	// deployment_configs entry (mirroring the top-level fields), no
 	// additional_resources concept anywhere on the wire, and no top-level
 	// cloud_resource/deployment selector fields beyond cloud_id. This is the
-	// literal shape captured from the real Create call before Option C.
+	// literal shape captured from the real Create call before multi-resource support.
 	want := map[string]any{
 		"cloud_id": "cld_mock_cc",
 		"head_node_type": map[string]any{
@@ -123,7 +123,7 @@ resource "anyscale_compute_config" "test" {
 
 	if string(gotJSON) != string(wantJSON) {
 		t.Errorf("single-resource Create request shape changed from the captured baseline.\n"+
-			"If this change is deliberate (e.g. a real Option C/F1-F7 fix), update this golden "+
+			"If this change is deliberate, update this golden "+
 			"snapshot explicitly with the reason in the commit message - do not just relax the "+
 			"assertion.\n--- got ---\n%s\n--- want ---\n%s", gotJSON, wantJSON)
 	}

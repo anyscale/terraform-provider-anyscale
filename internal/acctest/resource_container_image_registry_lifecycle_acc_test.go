@@ -1,22 +1,18 @@
 package acctest
 
-// GATE-F3 (c)/(d): resource.Test mock-server lifecycle coverage for the id
-// migration. resource_container_image_registry_upgrade_test.go (package
-// provider) proves the StateUpgrader function itself re-keys id to the
-// cluster environment id (formerly its own cluster_environment_id attribute,
-// removed outright by V1(c) - id alone is the durable handle now) in
-// isolation; it cannot prove that the ordinary framework-level Read/plan/
-// import path actually works once a resource is living under that new id
-// scheme - the same "mapping function correct in isolation, framework-level
-// plan still unstable" gap the compute-config C3/C12 precedent hit. This file
-// closes that gap: a resource created fresh under the current (v1) schema
-// already carries id == the cluster environment id end-to-end, so driving it
-// through create -> apply -> plan(empty) -> import -> plan(empty) exercises
-// the exact Read() codepath (state.ID.ValueString() -> GET
-// /api/v2/application_templates/{id}) a migrated resource's next refresh
-// would also take.
+// Mock-server lifecycle coverage for the registry resource's id, which is the
+// application template (cluster environment) id, never the build id.
+// resource_container_image_registry_upgrade_test.go (package provider) proves
+// the StateUpgrader re-keys id in isolation; it cannot prove the ordinary
+// framework-level Read/plan/import path works once a resource lives under that
+// id - a mapping function can be correct in isolation while the framework-level
+// plan is still unstable. A resource created fresh under the current schema
+// already carries id == template id end-to-end, so driving it through
+// create -> apply -> plan(empty) -> import -> plan(empty) exercises the exact
+// Read() codepath (state.ID.ValueString() -> GET
+// /api/v2/application_templates/{id}) a migrated resource's next refresh takes.
 //
-// Mirrors the house *_MockServer idiom from resource_cloud_c3_lifecycle_acc_test.go:
+// Same *_MockServer idiom as resource_cloud_c3_lifecycle_acc_test.go:
 // httptest server + testAccProviderBlock, no real infra, no
 // ANYSCALE_TEST_REAL_INFRA gate.
 
@@ -30,12 +26,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// newRegistryF3MockServer serves a fixed BYOD registry lifecycle: the two
+// newRegistryLifecycleMockServer serves a fixed BYOD registry lifecycle: the two
 // Create() calls, the two Read() calls (decorated template + build), and
 // Delete()'s archive call, all keyed off the same templateID/buildID no
 // matter how many times each is hit (create, post-apply refresh, import
 // refresh, destroy).
-func newRegistryF3MockServer(t *testing.T, templateID, buildID, name, imageURI, rayVersion, digest string) *httptest.Server {
+func newRegistryLifecycleMockServer(t *testing.T, templateID, buildID, name, imageURI, rayVersion, digest string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
@@ -129,14 +125,11 @@ func newRegistryF3MockServer(t *testing.T, templateID, buildID, name, imageURI, 
 	return server
 }
 
-// TestAccContainerImageRegistryResource_Lifecycle_MockServer is the GATE-F3
-// (c)/(d) proof: a v1-schema registry resource's id is the cluster
-// environment id (never the build id) all the way through create -> apply ->
-// plan(empty) -> import-by-id -> plan(empty). Import is passthrough on `id`
-// (resource.ImportStatePassthroughID, path.Root("id")) - since V1(c), id is
-// the resource's ONLY identity attribute, so a clean ImportStateVerify here
-// is exactly GATE-F3(d)'s import coverage, not a separate mechanism needing
-// separate proof.
+// TestAccContainerImageRegistryResource_Lifecycle_MockServer proves a registry
+// resource's id is the application template id (never the build id) all the
+// way through create -> apply -> plan(empty) -> import-by-id -> plan(empty).
+// id is the resource's only identity attribute and import keys on it, so a
+// clean ImportStateVerify here is the import coverage for that identity.
 func TestAccContainerImageRegistryResource_Lifecycle_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -147,7 +140,7 @@ func TestAccContainerImageRegistryResource_Lifecycle_MockServer(t *testing.T) {
 	const rayVersion = "2.44.0"
 	const digest = "sha256:f3lifecyclemock0000000000000000000000000000000000000000000000"
 
-	server := newRegistryF3MockServer(t, templateID, buildID, name, imageURI, rayVersion, digest)
+	server := newRegistryLifecycleMockServer(t, templateID, buildID, name, imageURI, rayVersion, digest)
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_container_image_registry" "test" {
   name        = %[1]q
@@ -163,11 +156,8 @@ resource "anyscale_container_image_registry" "test" {
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// The money assertion: id must be the TEMPLATE id, never
-					// the build id - this is what F3 changed and what a
-					// regression back to the v0 behavior would get wrong.
-					// (V1(c) removed the separate cluster_environment_id
-					// attribute that used to carry this same value alongside
-					// id; id alone is the durable handle now.)
+					// the build id - the schema-v0 behavior this guards
+					// against a regression to.
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "id", templateID),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "build_id", buildID),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "image_uri", imageURI),
@@ -176,21 +166,18 @@ resource "anyscale_container_image_registry" "test" {
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "build_status", "succeeded"),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "name_version", fmt.Sprintf("%s:1", name)),
 				),
-				// Post-migration Read stability: a config populated at
-				// create against the real Read() codepath (GET
-				// application_templates/{id} keyed by the NEW id scheme)
-				// must not diff on the very next plan.
+				// Read stability: state populated at create through the
+				// real Read() codepath (GET application_templates/{id}
+				// keyed by the template id) must not diff on the next plan.
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},
 				},
 			},
-			// GATE-F3(d): import is passthrough on `id`, which post-F3 is
-			// the cluster environment id (formerly duplicated onto its own
-			// cluster_environment_id attribute, removed by V1(c)) - so
-			// importing by the resource's own id (as Terraform always does)
-			// IS importing by the cluster environment id.
+			// Import by the resource's own id, which is the template id.
+			// name is not ignored: the import refresh fills it from the API
+			// (Read sets name when state holds null).
 			{
 				ResourceName:      "anyscale_container_image_registry.test",
 				ImportState:       true,
@@ -201,32 +188,18 @@ resource "anyscale_container_image_registry" "test" {
 			},
 			// ImportStateVerify above only proves imported state matches
 			// created state - both sides see the same API-echoed value - so
-			// it cannot catch a defect where an operator-typed config value
-			// diverges from state on the very next plan. This step
-			// re-applies the SAME config used at create and asserts that
-			// plan is a true no-op.
+			// it cannot catch an operator-typed config value diverging from
+			// state on the next plan. This step re-applies the create config
+			// and asserts a true no-op.
 			//
-			// Caveat confirmed empirically (not just inferred from docs):
-			// this step's plan is computed against the CARRIED-FORWARD
-			// state from the preceding real apply, not the freshly
-			// imported state - terraform-plugin-testing discards an
-			// ImportState step's result unless ImportStatePersist is also
-			// set (see its doc comment), and setting ImportStatePersist:
-			// true here to force it reproducibly fails with "Error:
-			// Resource already managed by Terraform" (terraform import
-			// refuses an address already present in the same working
-			// directory's state, which it is here after the preceding
-			// apply step) - a Terraform CLI-level constraint, not a
-			// provider defect, and not fixable from within this test
-			// shape. So this step, as added, does not independently prove
-			// name (ignored above because Read() never rehydrates it)
-			// survives a real import unscathed - it does still guard
-			// against any OTHER config/state divergence introduced
-			// between create and this point. See
-			// resource_cloud_import_object_storage_region_acc_test.go for
-			// the two-test shape that actually proves import recovery
-			// (ImportStateCheck on the import step itself, plus a separate
-			// Config-only two-step test for plan stability).
+			// This plan runs against the state carried forward from the
+			// apply step, not the imported state: terraform-plugin-testing
+			// discards an ImportState step's result unless
+			// ImportStatePersist is set, and setting it here fails with
+			// "Resource already managed by Terraform". So this step guards
+			// against config/state divergence introduced by create, not
+			// import recovery; import recovery of name is proven by the
+			// two-test shape in resource_container_image_registry_name_acc_test.go.
 			{
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{

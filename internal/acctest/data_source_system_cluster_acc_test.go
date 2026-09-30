@@ -6,8 +6,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// TestAccSystemClusterDataSource_ReturnsObservedState covers AC20's "observed
-// state" half: once a System Cluster is running (via the resource in the
+// TestAccSystemClusterDataSource_ReturnsObservedState: once a System Cluster is running (via the resource in the
 // same config), the data source pointed at the same cloud_id must reflect
 // that real state - not just echo config back.
 func TestAccSystemClusterDataSource_ReturnsObservedState(t *testing.T) {
@@ -38,8 +37,8 @@ data "anyscale_system_cluster" "test" {
 	})
 }
 
-// TestAccSystemClusterDataSource_NotConfiguredReturnsCleanNull covers AC20's
-// other two halves at once: a cloud with no System Cluster yet returns clean
+// TestAccSystemClusterDataSource_NotConfiguredReturnsCleanNull covers two
+// properties at once: a cloud with no System Cluster yet returns clean
 // null computed fields (not an error), and doing so is provably
 // side-effect-free - the mock's describe endpoint must never be hit at all
 // (regardless of start_cluster), only the existence oracle. If the data

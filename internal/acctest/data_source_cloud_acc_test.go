@@ -84,7 +84,7 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 }
 
 // TestAccCloudDataSource_MatchesResourceState is an acceptance-level regression
-// test for change C1: data_source_cloud.go used to hardcode auto_add_user,
+// test: data_source_cloud.go used to hardcode auto_add_user,
 // lineage_tracking_enabled, aggregated_logs_enabled, is_empty_cloud to
 // false and cloud_resource_id to null regardless of the real cloud. Unit tests
 // can prove the mapping function is correct in isolation, but only a real
@@ -96,10 +96,9 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 // the API without requiring real AWS/GCP infra. auto_add_user and
 // aggregated_logs_enabled are set to true via a separate Update step (step
 // 2), not at Create (step 1): Create()'s POST /clouds request does not send
-// these fields at all today (a distinct, separately-reported gap - see quest
-// chat) - only Update() does. Routing through Update keeps this test scoped
-// to C1 (data-source read mapping) instead of also depending on that
-// unrelated create-time gap being fixed.
+// these fields (CreateCloudRequest has no slot for them) - only Update()
+// does. Routing through Update keeps this test scoped to the data source's
+// read mapping.
 //
 // lineage_tracking_enabled is deliberately left at its false default and
 // excluded from the true-value assertions: this test org's Anyscale
@@ -158,8 +157,9 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 	})
 }
 
-// TestAccCloudDataSource_C2ParityMatchesPluralDataSource proves that, for
-// change C2, values match the same cloud in the plural data source. A mocked
+// TestAccCloudDataSource_C2ParityMatchesPluralDataSource proves that the
+// singular data source's values match the same cloud in the plural data
+// source. A mocked
 // unit test proves the singular data source's mapping is internally correct
 // in isolation; this proves the singular and plural data sources actually
 // converge on the same real cloud, which a mapping-only test can't show.
@@ -184,7 +184,6 @@ func TestAccCloudDataSource_C2ParityMatchesPluralDataSource(t *testing.T) {
 			{
 				Config: testAccCloudDataSourceConfig_c2Parity(cloudName),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.#"),
 					testAccCheckCloudC2ParityFieldsMatch("anyscale_cloud.test", "data.anyscale_cloud.test", "data.anyscale_clouds.test"),
 				),
 			},
@@ -194,13 +193,11 @@ func TestAccCloudDataSource_C2ParityMatchesPluralDataSource(t *testing.T) {
 
 // testAccCheckCloudC2ParityFieldsMatch finds the entry in the plural data
 // source's clouds list whose id matches resourceName's id (rather than
-// assuming a specific index - see the comment on the test above), then
-// asserts 4 of the 5 remaining C2 parity fields agree with the singular data
-// source's own values for that same cloud. is_aioa/is_bring_your_own_resource/
-// is_private_service_cloud were part of the original 8-field C2 parity set
-// but were removed from both data sources (read-only, backend-internal
-// classification values users could not act on) - see the
-// data_source_attr_removal spec.
+// assuming a specific index - see the comment on the test above; it errors if
+// the cloud is absent), then asserts each parity field is non-empty on both
+// sides and agrees with the singular data source's value for that same cloud.
+// Requiring non-empty keeps the check from passing when both sides map a
+// field to nothing.
 //
 // is_default is deliberately excluded: confirmed reproducible (twice, hours
 // apart, same test org) that GET /clouds/{id} and GET /clouds disagree on
@@ -251,6 +248,9 @@ func testAccCheckCloudC2ParityFieldsMatch(resourceName, singularDS, pluralDS str
 		for _, field := range fields {
 			pluralVal := plural.Primary.Attributes[fmt.Sprintf("clouds.%d.%s", foundIndex, field)]
 			singularVal := singular.Primary.Attributes[field]
+			if singularVal == "" || pluralVal == "" {
+				return fmt.Errorf("%s is empty: singular=%q plural=%q", field, singularVal, pluralVal)
+			}
 			if pluralVal != singularVal {
 				return fmt.Errorf("%s mismatch: singular=%q plural=%q", field, singularVal, pluralVal)
 			}

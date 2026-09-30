@@ -1,8 +1,6 @@
-// This file is the mock-server regression suite for CONTRACT_anyscale_service_resource.md
-// section H (semantic-pass findings against resource_service.go).
-// Each test is a deliberate mutation-proof pairing with a real, currently-shipping bug or gap:
-// written to FAIL against the code as it stands when this file was authored, expected to PASS
-// once the corresponding fix lands - see each test's doc comment for the specific finding.
+// This file is the mock-server regression suite for anyscale_service's create, delete, update,
+// import, and tag-refresh edge cases. Each test pins one specific behavior of resource_service.go
+// that would fail if it regressed - see each test's doc comment for what it guards.
 package acctest
 
 import (
@@ -40,11 +38,10 @@ func serviceFindingsJSON(id, name, projectID, currentState string) string {
 
 // testAccServiceRayServeConfigHCL is a realistic, non-empty ray_serve_config - a list containing
 // one application object with a nested runtime_env object - deliberately NOT an empty list.
-// applications=[] types as an empty types.List and would never have exercised the real bug found
-// during the real-infra pass (contract §P1): HCL infers a list of OBJECTS as types.Tuple, not
-// types.List, and convertAttrValueToInterface had no types.Tuple case, so a real
-// ray_serve_config.applications always silently became JSON null. The isolated unit tests in
-// framework_helpers_test.go are the load-bearing regression guard for that bug (they exercise the
+// applications=[] types as an empty types.List and would never exercise this path: HCL infers a list of OBJECTS as types.Tuple, not
+// types.List, and without a types.Tuple case in convertAttrValueToInterface a real
+// ray_serve_config.applications silently becomes JSON null. The isolated unit tests in
+// framework_helpers_test.go are the load-bearing regression guard for that (they exercise the
 // conversion function directly, no HCL/mock server needed) - this shared HCL fragment is
 // defense-in-depth so the acctest layer exercises the same Tuple path end-to-end too.
 const testAccServiceRayServeConfigHCL = `
@@ -72,8 +69,8 @@ resource "anyscale_service" "test" {
 `, name, projectID, testAccServiceRayServeConfigHCL)
 }
 
-// emptyTagsBody / oneTagBody are the two GET /api/v2/tags/resource response shapes the H4 test
-// toggles between.
+// emptyTagsBody / oneTagBody are the two GET /api/v2/tags/resource response shapes
+// TestAccServiceResource_TagsFullRemovalDetected toggles between.
 const emptyTagsBody = `{"result": {"tags": []}}`
 
 func oneTagBody(key, value string) string {
@@ -83,8 +80,7 @@ func oneTagBody(key, value string) string {
 // serviceFindingsCurrentState reports "TERMINATED" once terminated is set, else "RUNNING" - used
 // by every test below's GET handler so the resource.Test-automatic end-of-test destroy's
 // wait-for-TERMINATED loop resolves on its first or second poll instead of hanging for the real
-// delete timeout default (30m, PR2 timeouts{} migration - previously 45m) against a mock that
-// never reflects termination.
+// delete timeout default (30m) against a mock that never reflects termination.
 func serviceFindingsCurrentState(terminated *int32) string {
 	if atomic.LoadInt32(terminated) == 1 {
 		return "TERMINATED"
@@ -109,15 +105,13 @@ func serveServiceGetOrDelete(t *testing.T, w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// TestAccServiceResource_PlainCreateSucceeds is the permanent regression guard for contract
-// section P0: a bare, minimal apply of anyscale_service - no H-finding-specific mocking, just
-// the required attributes - must succeed with zero diagnostics. This is deliberately the
-// simplest possible test in this file. Before the P0 fix, EVERY create failed here with a
-// framework-level "Value Conversion Error: Received unknown value, however the target type
-// cannot handle unknown values" while decoding the plan's Computed-only nested-object fields
-// (service_observability_urls / primary_version / canary_version / service_status_checklist) -
-// this test is what would have caught that on day one, so it stays in the committed suite
-// rather than living only as a scratch repro.
+// TestAccServiceResource_PlainCreateSucceeds: a bare, minimal apply of anyscale_service - no
+// scenario-specific mocking, just the required attributes - must succeed with zero diagnostics.
+// This is deliberately the simplest test in this file. It guards against every create failing
+// with a framework-level "Value Conversion Error: Received unknown value, however the target
+// type cannot handle unknown values" while decoding the plan's Computed-only nested-object
+// fields (service_observability_urls / primary_version / canary_version /
+// service_status_checklist).
 func TestAccServiceResource_PlainCreateSucceeds(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -140,8 +134,7 @@ func TestAccServiceResource_PlainCreateSucceeds(t *testing.T) {
 		// Every test's TestCase issues a REAL destroy automatically at the end, which waits for
 		// current_state==TERMINATED before the DELETE call - so GET must reflect termination
 		// once this fires, or that wait polls a state that can never arrive and hangs for the
-		// real delete timeout default (30m, PR2 timeouts{} migration - previously 45m), blowing
-		// well past this test's own timeout.
+		// real delete timeout default (30m), blowing well past this test's own timeout.
 		atomic.StoreInt32(&terminated, 1)
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": {}}`)
@@ -172,16 +165,15 @@ func TestAccServiceResource_PlainCreateSucceeds(t *testing.T) {
 	})
 }
 
-// TestAccServiceResource_DeleteAlreadyGone is the H1 regression: terminate returning 404 (the
+// TestAccServiceResource_DeleteAlreadyGone: terminate returning 404 (the
 // service was already terminated+deleted out-of-band) must make Delete succeed cleanly, not
 // fall through to the termination wait.
 //
-// The original bug had two halves: the terminate call listed http.StatusNotFound as an ACCEPTED
-// status, so a real 404 produced err=nil, which left the already-gone guard right after it
-// unreachable dead code. Control then fell into waitForServiceState, which GETs the now-absent
-// service, 404s for real this time (GET only accepts 200), and fails the destroy. Both halves
-// are fixed - terminate accepts only StatusAccepted, and the guard tests
-// errors.Is(err, ErrNotFound) - so this test exists to stop either one being undone.
+// Two things must hold: the terminate call accepts only StatusAccepted (if it also accepted
+// http.StatusNotFound, a real 404 would produce err=nil and make the already-gone guard right
+// after it unreachable), and that guard tests errors.Is(err, ErrNotFound). If either breaks,
+// control falls into waitForServiceState, which GETs the now-absent service, 404s (GET only
+// accepts 200), and fails the destroy.
 //
 // Proven by tracking whether the service-by-id endpoint is hit AFTER terminate fires: correct
 // behavior returns immediately without another GET; the buggy behavior falls through into
@@ -211,9 +203,9 @@ func TestAccServiceResource_DeleteAlreadyGone(t *testing.T) {
 				// GET's point of view too - consistent with the already-gone scenario, and
 				// critically, this makes a regression (falling through to the wait) fail FAST
 				// (getServiceByID errors on the first poll, since GET only accepts 200) rather
-				// than hang for the real delete timeout default (30m, PR2 timeouts{} migration -
-				// previously 45m) waiting on a state that can never arrive, which would otherwise
-				// blow well past this test's own timeout instead of failing informatively.
+				// than hang for the real delete timeout default (30m) waiting on a state that can
+				// never arrive, which would blow well past this test's own timeout instead of
+				// failing informatively.
 				atomic.AddInt32(&getsAfterTerminate, 1)
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = fmt.Fprint(w, `{"error": {"detail": "Service not found"}}`)
@@ -251,26 +243,24 @@ func TestAccServiceResource_DeleteAlreadyGone(t *testing.T) {
 			},
 			// No explicit destroy step: resource.Test issues the real destroy automatically at
 			// the end of the TestCase, and fails the overall test if that destroy's Delete()
-			// returns a diagnostic error - exactly the signal this finding needs.
+			// returns a diagnostic error - exactly the signal this test needs.
 		},
 	})
 
 	if got := atomic.LoadInt32(&getsAfterTerminate); got != 0 {
 		t.Errorf("GET /services-v2/%s was called %d time(s) AFTER terminate - the fixed Delete "+
 			"must return immediately on a terminate-404 without ever polling again; falling "+
-			"through to the wait (today's bug) is exactly what this proves did NOT happen if this fails",
+			"through to the wait is exactly what this proves did NOT happen if this fails",
 			serviceID, got)
 	}
 }
 
-// TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges is the H2 regression:
-// the timeouts{} block (formerly rollout_timeout, migrated under PR2) is a purely client-local
-// wait knob (never sent to or read from the API - see its schema MarkdownDescription), so
-// changing ONLY it must not trigger a new PUT /apply or rollout wait against an already-healthy,
-// unrelated-in-every-other-way service. serviceDeployFieldsChanged (resource_service.go) never
-// referenced the flat attribute and needs no changes for the migration - this asserts that
-// still holds true for the timeouts{} block by exercising it directly: the apply endpoint is hit
-// exactly once (from Create) even after a second apply with a different timeouts.update value.
+// TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges: the timeouts{} block is a
+// purely client-local wait knob (never sent to or read from the API - see its schema
+// MarkdownDescription), so changing ONLY it must not trigger a new PUT /apply or rollout wait
+// against an already-healthy service. serviceDeployFieldsChanged (resource_service.go) does not
+// consider timeouts{}; this asserts it directly: the apply endpoint is hit exactly once (from
+// Create) even after a second apply with a different timeouts.update value.
 func TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -334,7 +324,7 @@ resource "anyscale_service" "test" {
 				},
 				// The step succeeding at all (no "provider produced inconsistent result after
 				// apply" / unknown-value error) is itself part of what this proves - that is
-				// exactly the shape contract §H5 broke: a no-deploy Update branch that persists
+				// the failure mode of a no-deploy Update branch that persists
 				// state without populating the computed outputs leaves them Unknown post-apply.
 				// The explicit checks below additionally pin down that current_state/hostname
 				// specifically carry real, known values (not just "the step didn't error").
@@ -355,14 +345,12 @@ resource "anyscale_service" "test" {
 	})
 }
 
-// TestAccServiceResource_ImportPopulatesProjectID is the H3 regression: Read never refreshes
-// project_id (only name/description/build_id/compute_config_id), and ImportState seeds only id +
-// ray_serve_config - so after import, the automatic post-import Read leaves project_id null.
-// Because project_id is Optional+Computed+RequiresReplace, a user who then writes the real
-// project_id into config to match what they imported would see null -> value, which
-// RequiresReplace reads as "destroy and recreate" - potentially a production service. Proven by
-// importing a service created with a known project_id and asserting the imported state's
-// project_id is populated with that real value, not empty/null.
+// TestAccServiceResource_ImportPopulatesProjectID: ImportState seeds only id + ray_serve_config,
+// so project_id must come from the post-import Read. If it stayed null, a user who then writes the
+// real project_id into config would see null -> value, which RequiresReplace
+// (project_id is Optional+Computed+RequiresReplace) reads as "destroy and recreate" - potentially
+// a production service. Proven by importing a service created with a known project_id and
+// asserting the imported state's project_id is populated with that real value, not empty/null.
 func TestAccServiceResource_ImportPopulatesProjectID(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -415,7 +403,7 @@ func TestAccServiceResource_ImportPopulatesProjectID(t *testing.T) {
 					}
 					if got := states[0].Attributes["project_id"]; got != wantProjectID {
 						return fmt.Errorf("project_id after import = %q, want %q - Read must refresh "+
-							"project_id (today it does not), or a post-import config write of the real "+
+							"project_id, or a post-import config write of the real "+
 							"project_id would spuriously RequiresReplace this service", got, wantProjectID)
 					}
 					return nil
@@ -425,7 +413,7 @@ func TestAccServiceResource_ImportPopulatesProjectID(t *testing.T) {
 	})
 }
 
-// TestAccServiceResource_TagsFullRemovalDetected is the H4 regression: refreshServiceTagsIntoModel
+// TestAccServiceResource_TagsFullRemovalDetected: refreshServiceTagsIntoModel
 // leaves the tags model untouched whenever the fetch comes back empty, to preserve the
 // null-vs-empty distinction (never-configured vs explicitly-{}) - but that also means a full,
 // out-of-band removal of every tag is never detected on Read, since "was {a:1}, fetch now empty"
@@ -506,8 +494,7 @@ resource "anyscale_service" "test" {
 	})
 }
 
-// TestAccServiceResource_CreateWaitTimeoutPreservesID is the contract §G2 regression: orphan
-// prevention. PUT /apply creates the service (its id is known) BEFORE the rollout wait begins -
+// TestAccServiceResource_CreateWaitTimeoutPreservesID covers orphan prevention. PUT /apply creates the service (its id is known) BEFORE the rollout wait begins -
 // if Create only wrote state on a successful wait, a service that gets created remotely but then
 // times out waiting for RUNNING would be orphaned: it exists in Anyscale, but Terraform has no
 // record of it to destroy or reconcile on the next apply. The fix is to persist id (and the rest

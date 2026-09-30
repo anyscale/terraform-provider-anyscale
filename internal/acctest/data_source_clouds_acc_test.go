@@ -14,6 +14,8 @@ func TestAccCloudsDataSource_NoFilters(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
 
+	cloudID := GetTestCloudID(t)
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -21,8 +23,8 @@ func TestAccCloudsDataSource_NoFilters(t *testing.T) {
 			{
 				Config: testAccCloudsDataSourceNoFiltersConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Should return at least some clouds
-					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.#"),
+					// An unfiltered list must include the known test cloud.
+					testAccCheckCloudsListIncludesID("data.anyscale_clouds.test", cloudID),
 				),
 			},
 		},
@@ -244,9 +246,8 @@ func TestAccCloudsDataSource_CloudFieldsPopulated(t *testing.T) {
 			{
 				Config: testAccCloudsDataSourceNoFiltersConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify at least one cloud is returned
-					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.#"),
-					// Verify the first cloud has expected fields populated
+					// The first cloud has expected fields populated (clouds.0.id
+					// being set also proves the list is non-empty).
 					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.0.id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.0.name"),
 					resource.TestCheckResourceAttrSet("data.anyscale_clouds.test", "clouds.0.cloud_provider"),
@@ -284,7 +285,7 @@ func TestAccCloudsDataSource_FindSpecificCloud(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.anyscale_cloud.verify", "id", cloudID),
 					resource.TestCheckResourceAttr("data.anyscale_cloud.verify", "name", cloudName),
-					// Should find exactly the test cloud via the combined filter.
+					// The combined filter must include the test cloud.
 					testAccCheckCloudsListIncludesID("data.anyscale_clouds.test", cloudID),
 				),
 			},

@@ -11,16 +11,15 @@ import (
 )
 
 // newMemoryDBImportMockCloudServer is a dedicated mock for the
-// memorydb_cluster_arn/memorydb_cluster_endpoint replace-on-import gap
-// (Import Round-Trip Gaps, HIGH). Unlike newC3MockCloudServer (whose
+// memorydb_cluster_arn/memorydb_cluster_endpoint import round-trip. Unlike newC3MockCloudServer (whose
 // add_resource handler returns only cloud_deployment_id/cloud_resource_id),
 // this mock returns a REALISTIC full aws_config - including the two
 // backend-derived fields - from BOTH add_resource and the
 // /clouds/{id}/resources listing, matching how the real backend actually
 // behaves (it has no notion of "which endpoint the provider reads its
-// state from", so both legitimately echo the same underlying resource). A
-// planned Path A fix may source its Create/Update merge from either
-// endpoint, so this mock stays valid regardless of which one lands.
+// state from", so both legitimately echo the same underlying resource). The
+// provider's Create/Update merge of the derived fields may read either
+// endpoint, so this mock stays valid whichever one it uses.
 func newMemoryDBImportMockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, awsConfigJSON, cloudResourceID string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -58,8 +57,8 @@ func newMemoryDBImportMockCloudServer(t *testing.T, cloudID, cloudJSON, resource
 		w.WriteHeader(http.StatusOK)
 		// Deliberately realistic, not the minimal shape newC3MockCloudServer
 		// returns: a real add_resource response carries the full resource,
-		// aws_config included - a Path A merge sourced directly from this
-		// response (rather than the resources-list) must see the same data.
+		// aws_config included - a merge sourced directly from this response
+		// (rather than the resources-list) must see the same data.
 		_, _ = fmt.Fprintf(w, `{"result": {"cloud_deployment_id": "cldrsrc_memorydb_mock_default", "cloud_resource_id": %q, "aws_config": %s}}`, cloudResourceID, awsConfigJSON)
 	})
 
@@ -73,22 +72,21 @@ func newMemoryDBImportMockCloudServer(t *testing.T, cloudID, cloudJSON, resource
 	return server
 }
 
-// TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM is the fail-first
-// regression test for the memorydb_cluster_arn/memorydb_cluster_endpoint
-// replace-on-import bug (Import Round-Trip Gaps, HIGH item). Both fields
-// are backend-derived from memorydb_cluster_name when left unset - like
-// mount_targets, but as plain schema.StringAttribute (not Computed today),
-// so flattenAWSConfig recovers them at import into a slot Create/Read
-// never populate.
+// TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM is the regression
+// test for the memorydb_cluster_arn/memorydb_cluster_endpoint
+// replace-on-import bug. Both fields are backend-derived from
+// memorydb_cluster_name when left unset, and flattenAWSConfig recovers them
+// at import. They were once plain Optional attributes that Create never
+// populated, so import recovered values Create's state lacked and a
+// RequiresReplace slot planned a replacement. They are now
+// Optional+Computed+UseStateForUnknown and Create merges them from the API
+// response, so Create's state and the imported state agree.
 //
-// Today (pre-Path-A): Create leaves both fields null (nothing reads
-// AWSConfig back out of add_resource's response or the resources-list -
-// confirmed by tracing resource_cloud.go directly), while import recovers
-// the real values - so ImportStateVerify (step 2 below) catches the
-// mismatch before the replace-loop (step 3) is even reached. Once Path A
-// lands (Optional+Computed+UseStateForUnknown, plus the Create/Update
-// merge), step 1 produces the real values too, and all 3 steps go green
-// unchanged.
+// Step 2's ImportStateVerify is the import-recovery assertion: it fails if
+// Create leaves the fields null while import recovers the mock's values.
+// Step 3 plans against Create's state (the import step's state is discarded
+// without ImportStatePersist), so it proves refresh/plan stability of the
+// created resource, not the plan against imported state.
 func TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -153,10 +151,8 @@ resource "anyscale_cloud" "test" {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Establish real applied state. Pre-fix: memorydb_cluster_arn/
-				// endpoint are null here (Create never reads them back),
-				// regardless of what the mock's add_resource/resources
-				// responses carry.
+				// Establish applied state. Create merges memorydb_cluster_arn/
+				// endpoint from the API response rather than leaving them null.
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "aws_config.memorydb_cluster_name", "memorydbtest-cluster"),
@@ -165,10 +161,9 @@ resource "anyscale_cloud" "test" {
 			},
 			{
 				// THE regression proof: recovered arn/endpoint must match
-				// step 1's state exactly. Pre-fix, they do not (step 1 is
-				// null, import recovers the mock's real values) - this step
-				// is expected to fail today via ImportStateVerify, not via a
-				// plan-time replace.
+				// step 1's state exactly. With the old bug, step 1 was null
+				// while import recovered the mock's values, and this step
+				// failed via ImportStateVerify.
 				ResourceName:      resourceName,
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -177,8 +172,8 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			{
-				// The literal bug bar: a config matching the live cloud
-				// must plan as a no-op, never a replace.
+				// Refresh/plan stability: re-applying the same config against
+				// Create's state plans a no-op, never a replace.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{

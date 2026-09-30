@@ -14,9 +14,11 @@ package acctest
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // TestAccContainerImagesDataSource_Basic tests unfiltered listing without building images.
@@ -37,9 +39,9 @@ func TestAccContainerImagesDataSource_Basic(t *testing.T) {
 data "anyscale_container_images" "no_filters" {
 }
 `,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("data.anyscale_container_images.no_filters", "container_images.#"),
-				),
+				// The unfiltered count depends on the shared org, so assert the
+				// default filter instead: every returned image is unarchived.
+				Check: testCheckContainerImagesNoneArchived("data.anyscale_container_images.no_filters"),
 			},
 		},
 	})
@@ -61,7 +63,7 @@ func TestAccContainerImagesDataSource_WithBuild(t *testing.T) {
 			{
 				Config: testAccContainerImagesDataSourceWithBuildConfig(imageName),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// DS-IMG-7: pin the exact count, not just non-zero. imageName is a
+					// Pin the exact count, not just non-zero. imageName is a
 					// UniqueName-generated random string, so name_contains matching
 					// exactly one image is the expected outcome if filtering genuinely
 					// narrows; a no-op filter would return every image in the (possibly
@@ -83,8 +85,13 @@ func TestAccContainerImagesDataSource_WithBuild(t *testing.T) {
 					// For a new image, revision is typically 1, so name_version should be "imageName:1"
 					resource.TestCheckResourceAttr("data.anyscale_container_images.by_name", "container_images.0.name_version", fmt.Sprintf("%s:1", imageName)),
 
-					// Verify exclude_archived also works (separate data source in same config)
-					resource.TestCheckResourceAttrSet("data.anyscale_container_images.exclude_archived", "container_images.#"),
+					// The unfiltered include_archived = false listing must contain the
+					// just-built image, unarchived.
+					resource.TestCheckTypeSetElemNestedAttrs("data.anyscale_container_images.exclude_archived", "container_images.*", map[string]string{
+						"name":        imageName,
+						"is_archived": "false",
+					}),
+					testCheckContainerImagesNoneArchived("data.anyscale_container_images.exclude_archived"),
 				),
 			},
 			// Drop the image resource; destroy archives it. Data sources read at plan
@@ -109,6 +116,32 @@ func TestAccContainerImagesDataSource_WithBuild(t *testing.T) {
 			},
 		},
 	})
+}
+
+// testCheckContainerImagesNoneArchived asserts that every element of the data
+// source's container_images list has is_archived = false.
+func testCheckContainerImagesNoneArchived(name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[name]
+		if !ok {
+			return fmt.Errorf("resource not found: %s", name)
+		}
+		raw, ok := rs.Primary.Attributes["container_images.#"]
+		if !ok {
+			return fmt.Errorf("%s: container_images.# not set", name)
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return fmt.Errorf("%s: container_images.# = %q: %w", name, raw, err)
+		}
+		for i := 0; i < n; i++ {
+			key := fmt.Sprintf("container_images.%d.is_archived", i)
+			if got := rs.Primary.Attributes[key]; got != "false" {
+				return fmt.Errorf("%s: %s = %q, want \"false\" (default listing must exclude archived images)", name, key, got)
+			}
+		}
+		return nil
+	}
 }
 
 // Configuration template for tests that need a built image

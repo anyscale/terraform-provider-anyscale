@@ -11,27 +11,25 @@ import (
 
 // The sweep-target org guard.
 //
-// `make sweep` deletes real infrastructure across SIX endpoint families and
-// matches three name prefixes (see sweepableResourcePrefixes). A sweep aimed
-// at the wrong organization is therefore one of the most destructive things
-// this repo can do with valid credentials - and nothing stopped it before
-// this guard.
+// `make sweep` runs seven registered sweepers across six endpoint families
+// (clouds, projects, services, compute configs, container images - builds and
+// registries - and organization invitations) and matches three name prefixes
+// (see sweepableResourcePrefixes). A sweep aimed at the wrong organization is
+// therefore one of the most destructive things this repo can do with valid
+// credentials.
 //
-// It happened. On 2026-08-03 the credentials in ~/.anyscale/credentials.json
-// were scoped to a user's own staging org for an entire session; acceptance
-// tests ran there and leaked four clouds into it. A sweep would have been aimed
-// at the same org. The only thing that would have saved the real resources in
-// it was that none of them happened to carry a test-looking name prefix - luck
-// about that org's naming conventions, not a property of any guard. The sweep
-// was prevented that day by a human telling everyone not to run it, which
-// protects nothing tomorrow.
+// This is not hypothetical: credentials in ~/.anyscale/credentials.json have
+// been scoped to a personal staging org for a whole session, and acceptance
+// tests leaked clouds into it. A sweep from the same shell would have targeted
+// that org, and only the absence of test-looking name prefixes there would
+// have protected its real resources.
 //
 // WHY THE PINNED FIXTURE CLOUD IS THE ORG SIGNAL, and why no org name is
 // committed here: defaultKnownGoodCloudName ("tfp-test-aws-useast1-STATIC")
-// exists only in the acctest org. It was confirmed on 2026-08-03 to resolve in
-// CI (helpers.go:138 success line in run 30830762541, both acctest shards) and
-// to be absent from the wrong org - so its resolution genuinely carries
-// org identity, and a separate expected-org-name constant would be a second
+// exists only in the acctest org. It resolves in CI (the "Using default
+// known-good test cloud" log line from GetTestCloudID in both acctest shards)
+// and is absent from other orgs, so its resolution genuinely carries org
+// identity, and a separate expected-org-name constant would be a second
 // source of truth for a question this already answers.
 //
 // FAIL CLOSED, DELIBERATELY, and note this is the OPPOSITE of the right
@@ -122,8 +120,8 @@ func assertSweepTargetOrg() error {
 			"cannot confirm this is the acceptance-test organization.\n"+
 				"  Looked for the fixture cloud %q and could not resolve it: %v%s\n"+
 				"  Sweepers delete real resources named tfacc-*, tf-test-* and tfprovider-* across\n"+
-				"  clouds, projects, services, compute configs, container images, invitations and\n"+
-				"  MACHINE POOLS. Refusing rather than risk deleting resources in the wrong org.\n"+
+				"  clouds, projects, services, compute configs, container images and invitations.\n"+
+				"  Refusing rather than risk deleting resources in the wrong org.\n"+
 				"  If this IS the right org, the fixture cloud is missing - restore it before sweeping",
 			defaultKnownGoodCloudName, err, where)
 	}

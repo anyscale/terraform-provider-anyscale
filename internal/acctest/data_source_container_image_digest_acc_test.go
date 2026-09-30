@@ -1,23 +1,15 @@
 package acctest
 
-// GATE-F5.4: mock-server proof that the anyscale_container_image data source's
-// `digest` attribute (added alongside the resource-side digest work, see
+// Mock-server proof that the anyscale_container_image data source's `digest`
+// attribute (resource-side counterparts:
 // resource_container_image_registry_digest_acc_test.go and
-// resource_container_image_build_digest_acc_test.go for the resource-side
-// gates) actually gets populated from the live build, through BOTH of the data
+// resource_container_image_build_digest_acc_test.go) actually gets populated from the live build, through BOTH of the data
 // source's lookup paths (by id, by name) -- not just one. data_source_container_image.go's
 // Read() resolves the two paths through genuinely different API calls
 // (getApplicationTemplateByID: a single GET; getApplicationTemplateByName: a
 // paginated list-and-filter), each returning its own ApplicationTemplateResult,
 // so a bug isolated to one path (e.g. the list response's LatestBuild wiring)
 // would not be caught by only exercising the other.
-//
-// Deliberately independent of the V1(c) cluster_environment_id removal: this
-// data source has only ever exposed `id`/`name` as its lookup keys (confirmed
-// by inspection -- there is no cluster_environment_id attribute or reference
-// anywhere in data_source_container_image.go or data_source_container_images.go),
-// so this test needs no changes once that removal lands on the registry
-// resource and does not need to wait for it.
 
 import (
 	"fmt"
@@ -109,8 +101,8 @@ func newContainerImageDigestDataSourceMockServer(t *testing.T, templateID, build
 	return server
 }
 
-// TestAccContainerImageDataSource_DigestPopulatesFromLatestBuild_MockServer is
-// the GATE-F5.4 proof: both the by-id and by-name lookup paths surface the
+// TestAccContainerImageDataSource_DigestPopulatesFromLatestBuild_MockServer
+// proves both the by-id and by-name lookup paths surface the
 // SAME latest build's digest, proving Read() resolves digest correctly
 // through either route rather than one being a coincidental pass-through of
 // the other's result.

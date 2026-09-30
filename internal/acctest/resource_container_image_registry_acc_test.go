@@ -99,7 +99,7 @@ func TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer(
 	const storedPlainRayVersion = "2.44.0"
 	const digest = "sha256:rayversionimportmock00000000000000000000000000000000000000000000"
 
-	server := newRegistryF4MockServer(t, templateID, buildID, name, imageURI, "", resolvedRayVersion, storedPlainRayVersion, digest)
+	server := newRegistryRayVersionMockServer(t, templateID, buildID, name, imageURI, "", resolvedRayVersion, storedPlainRayVersion, digest)
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_container_image_registry" "test" {
   name      = %[1]q
@@ -156,8 +156,8 @@ func TestAccContainerImageRegistryResource_BYOD(t *testing.T) {
 		// archive regardless of how long you poll).
 		//
 		// Plain (non-ByAttr) variant, keyed on rs.Primary.ID directly — not
-		// ByAttr("cluster_environment_id"). V1(c) removed that attribute
-		// outright, so a lookup by that name would hit a missing map key
+		// ByAttr("cluster_environment_id"). The resource has no such
+		// attribute, so a lookup by that name would hit a missing map key
 		// (Go returns "" for that, not an error), tripping
 		// newAPIDestroyCheckImpl's id == "" guard and silently skipping the
 		// API call entirely — CheckDestroy would report success having

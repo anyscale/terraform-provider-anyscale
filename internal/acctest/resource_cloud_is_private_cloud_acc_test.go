@@ -82,12 +82,11 @@ func newIsPrivateCloudMockServer(t *testing.T, cloudID string) (*httptest.Server
 			if v, ok := body["region"].(string); ok {
 				m.region = v
 			}
-			// Mimic today's real backend column exactly: a request that
-			// omits the key persists false (the column's zero value), not
-			// "unchanged" or "unknown" - this is the pre-fix
-			// CreateCloudRequest path. Once the fix lands, is_private_cloud
-			// is Optional+Computed+Default(false), so ValueBool() is never
-			// unknown at create and the key is always present on the wire.
+			// Mimic the real backend column exactly: a request that omits
+			// the key persists false (the column's zero value), not
+			// "unchanged" or "unknown". The provider's is_private_cloud is
+			// Optional+Computed+Default(false) and CreateCloudRequest
+			// sends it as a plain bool, so the key is always on the wire.
 			if v, ok := body["is_private_cloud"].(bool); ok {
 				m.isPrivate = v
 			} else {
@@ -151,15 +150,14 @@ func newIsPrivateCloudMockServer(t *testing.T, cloudID string) (*httptest.Server
 }
 
 // TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer is the mutation-proof
-// regression test for the yunhao-reported bug: is_private_cloud=true used to
+// regression test for a user-reported bug: is_private_cloud=true used to
 // create the cloud then fail with Terraform's "Provider produced inconsistent
 // result after apply" (CreateCloudRequest never sent the field, so the
 // create-only backend column defaulted false and the post-create Read read
-// that false straight back). Run against unfixed code this fails with
-// exactly that error; against the fix (models.go CreateCloudRequest +
-// resource_cloud.go createReq wiring) it passes clean. The false case is a
-// same-shape regression guard in the other direction - it must stay clean on
-// both sides of the fix, proving the fix didn't flip the default.
+// that false straight back). With that wiring (models.go CreateCloudRequest,
+// resource_cloud.go createReq) removed, the true case fails with exactly that
+// error. The false case is a regression guard in the other direction: it
+// stays clean either way, proving the wiring didn't flip the default.
 func TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer(t *testing.T) {
 	cases := []struct {
 		name      string

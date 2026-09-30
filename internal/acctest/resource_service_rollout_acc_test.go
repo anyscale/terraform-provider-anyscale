@@ -40,9 +40,9 @@ func serviceRolloutJSON(id, name, projectID, currentState, versionID, version st
 // TestAccServiceResource_UpdateRedeploysAndConverges is the mock companion to the real-infra
 // rollout test - cheaper and faster, proving the FRAMEWORK-level mechanics of a real redeploy
 // (a second PUT /apply actually fires, and the wait loop drives STARTING/ROLLING_OUT through to
-// RUNNING for an UPDATE, not just a Create) without needing real compute. Contract gap: H2
-// (UpdateSkipsApplyWhenOnlyTimeoutChanges) only proves the OPPOSITE case - when a change must NOT
-// trigger a redeploy. Nothing in the existing suite proved the redeploy path itself converges.
+// RUNNING for an UPDATE, not just a Create) without needing real compute.
+// TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges covers the OPPOSITE case - a
+// change that must NOT trigger a redeploy.
 func TestAccServiceResource_UpdateRedeploysAndConverges(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -77,9 +77,8 @@ func TestAccServiceResource_UpdateRedeploysAndConverges(t *testing.T) {
 			versionID, version = "svcver_v2", "v2"
 			state = "ROLLING_OUT"
 		}
-		// The apply response itself reports the TRANSITIONAL state (202 + in-flight service) -
-		// matches contract §5b: apply returns 202 with the service already mid-rollout, not
-		// RUNNING immediately.
+		// The apply response itself reports the TRANSITIONAL state, as the real API does: 202
+		// with the service already mid-rollout, not RUNNING immediately.
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": `+serviceRolloutJSON(serviceID, "rollout-converge", "prj_rollout", state, versionID, version)+`}`)
 	})
@@ -101,11 +100,8 @@ func TestAccServiceResource_UpdateRedeploysAndConverges(t *testing.T) {
 
 		// Once terminate has fired (the automatic end-of-test destroy), report TERMINATED so
 		// that wait loop resolves - otherwise it polls a state (RUNNING) that can never satisfy
-		// its target (TERMINATED) and hangs for the real rollout timeout default (30m, confirmed
-		// 2026-07-22 per the PR2 timeouts{} migration - previously 45m; this comment was stale
-		// against the old default before that change and is deliberately correct now, not a
-		// coincidence). Checked BEFORE the transitional-window logic since destroy always
-		// happens after both applies.
+		// its target (TERMINATED) and hangs for the real delete timeout default (30m). Checked
+		// BEFORE the transitional-window logic since destroy always happens after both applies.
 		state := "RUNNING"
 		switch {
 		case isTerminated:
@@ -150,8 +146,8 @@ resource "anyscale_service" "test" {
   }
 }
 `
-	// updatedConfig changes import_path - a genuine version-defining field change (contract §6),
-	// so this must trigger a new PUT /apply and a real rollout, not the H2 no-op path.
+	// updatedConfig changes import_path - a genuine version-defining field change, so this must
+	// trigger a new PUT /apply and a real rollout, not the timeouts-only no-op path.
 	updatedConfig := testAccProviderBlock(server.URL) + `
 resource "anyscale_service" "test" {
   name              = "rollout-converge"
@@ -208,11 +204,11 @@ resource "anyscale_service" "test" {
 }
 
 // TestAccServiceResource_InPlaceUpdateConverges is the IN_PLACE-strategy counterpart to
-// TestAccServiceResource_UpdateRedeploysAndConverges - the user asked for BOTH upgrade strategies
-// covered, not just the ROLLOUT default. Structurally identical (a version-defining
+// TestAccServiceResource_UpdateRedeploysAndConverges, so both upgrade strategies are covered, not
+// just the ROLLOUT default. Structurally identical (a version-defining
 // ray_serve_config change must trigger a real second apply and converge to RUNNING with a new
-// primary_version), but transitions through UPDATING (the IN_PLACE-specific continue-state, per
-// contract §5b) rather than ROLLING_OUT, and sets rollout_strategy = "IN_PLACE" explicitly on the
+// primary_version), but transitions through UPDATING (the IN_PLACE-specific continue-state)
+// rather than ROLLING_OUT, and sets rollout_strategy = "IN_PLACE" explicitly on the
 // update step - only ray_serve_config differs between the two configs, honoring the ModifyPlan
 // invariant that IN_PLACE permits changing only that field.
 func TestAccServiceResource_InPlaceUpdateConverges(t *testing.T) {
@@ -304,7 +300,7 @@ resource "anyscale_service" "test" {
 }
 `
 	// updatedConfig sets rollout_strategy = IN_PLACE and changes ONLY ray_serve_config - the one
-	// field IN_PLACE permits changing (contract §4/ModifyPlan); build_id/compute_config_id/
+	// field IN_PLACE permits changing (enforced in ModifyPlan); build_id/compute_config_id/
 	// connection_ids stay untouched on purpose.
 	updatedConfig := testAccProviderBlock(server.URL) + `
 resource "anyscale_service" "test" {
@@ -360,9 +356,9 @@ resource "anyscale_service" "test" {
 	}
 }
 
-// TestAccServiceResource_InPlaceRejectsBuildIDChange is the NEGATIVE case specified
-// alongside the two positive upgrade scenarios: rollout_strategy = "IN_PLACE" permits changing
-// ONLY ray_serve_config (contract §4/§6, ModifyPlan). Changing build_id (or compute_config_id/
+// TestAccServiceResource_InPlaceRejectsBuildIDChange is the NEGATIVE case to the two positive
+// upgrade scenarios: rollout_strategy = "IN_PLACE" permits changing ONLY ray_serve_config
+// (enforced in ModifyPlan). Changing build_id (or compute_config_id/
 // connection_ids - same guard, one representative field here) together with IN_PLACE must be
 // REJECTED AT PLAN TIME by ModifyPlan's invariant check, not left to fail opaquely at apply -
 // this is plan-time-only, no real infra and no second apply needed, since ModifyPlan runs before
@@ -456,15 +452,14 @@ resource "anyscale_service" "test" {
 	}
 }
 
-// TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout CI-proves Option 2 (user-
-// ratified): a config that sets rollout_strategy = "IN_PLACE" from the very first apply must
-// create successfully - the resource transparently sends a standard deploy on the wire (the
-// backend rejects IN_PLACE outright on a genuine create), while STATE keeps the user's real
-// IN_PLACE value unchanged, so the config never needs to be edited between create and a later
-// update. This assertion previously only existed in TestAccServiceResource_RealInfra_InPlaceRollout,
-// which SKIPs in every normal CI run (no real-infra env set there) - so Option 2's create-path
-// change was landing without CI coverage. Captures the actual CREATE apply request body to prove
-// the wire value, not just the end state, which alone wouldn't distinguish "sent IN_PLACE and the
+// TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout: a config that sets
+// rollout_strategy = "IN_PLACE" from the very first apply must create successfully - the resource
+// transparently sends a standard deploy on the wire (the backend rejects IN_PLACE outright on a
+// genuine create), while STATE keeps the user's real IN_PLACE value unchanged, so the config
+// never needs to be edited between create and a later update.
+// TestAccServiceResource_RealInfra_InPlaceRollout asserts the same against real infra but SKIPs
+// in every normal CI run, so this mock test is the CI coverage. Captures the actual CREATE apply
+// request body to prove the wire value, not just the end state, which alone wouldn't distinguish "sent IN_PLACE and the
 // backend silently accepted it" from "transparently forced to ROLLOUT on the wire".
 func TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -490,7 +485,7 @@ func TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout(t *testing.
 		mu.Lock()
 		isTerminated := terminated
 		mu.Unlock()
-		// Same terminated-flag pattern as the H-series tests: without it, the framework's own
+		// Same terminated-flag pattern as resource_service_mock_acc_test.go: without it, the framework's own
 		// automatic end-of-test destroy (terminate -> wait for TERMINATED) polls forever against
 		// a GET that always says RUNNING.
 		state := "RUNNING"
@@ -515,8 +510,8 @@ func TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout(t *testing.
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	// config sets rollout_strategy = IN_PLACE on the very first apply - the exact shape the
-	// backend used to 404 on before Option 2, and the shape a real user would reasonably write
+	// config sets rollout_strategy = IN_PLACE on the very first apply - the shape the backend
+	// rejects if sent through on a create, and the shape a real user would reasonably write
 	// once, expecting it to stay unchanged across every future update.
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_service" "test" {
@@ -536,7 +531,6 @@ resource "anyscale_service" "test" {
 `
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -557,11 +551,11 @@ resource "anyscale_service" "test" {
 							return fmt.Errorf("parse captured apply body: %w", err)
 						}
 						// The WIRE request for a create must never carry the user's IN_PLACE
-						// value through - that is exactly the shape that used to 404. It must
+						// value through - the backend rejects IN_PLACE on a create. It must
 						// be the transparent standard-deploy value instead.
 						if sent.RolloutStrategy == "IN_PLACE" {
 							return fmt.Errorf("apply request sent rollout_strategy=IN_PLACE on a CREATE - "+
-								"Option 2 requires the create apply to transparently force a standard "+
+								"the create apply must transparently force a standard "+
 								"deploy regardless of the configured strategy; captured body: %s", raw)
 						}
 						if sent.RolloutStrategy != "ROLLOUT" {

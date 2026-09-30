@@ -204,8 +204,7 @@ resource "anyscale_organization_default_cloud" "test" {
 	}
 }
 
-// TestAccOrganizationDefaultCloudResource_BogusCloudID_MockServer is the
-// Gate 2 test required as a build/test case: the backend's
+// TestAccOrganizationDefaultCloudResource_BogusCloudID_MockServer: the backend's
 // update_default_cloud performs zero validation on cloud_id (confirmed
 // against the real service), so the ONLY thing standing between a user and
 // silently repointing their org default at a typo'd or wrong-org id is this
@@ -233,14 +232,13 @@ resource "anyscale_organization_default_cloud" "test" {
 		},
 	})
 
-	if m.setCalls != 0 {
-		t.Errorf("update_default_cloud was called %d times for a bogus cloud_id that should have failed client-side validation before ever reaching the API", m.setCalls)
+	if setCalls, _ := m.snapshot(); setCalls != 0 {
+		t.Errorf("update_default_cloud was called %d times for a bogus cloud_id that should have failed client-side validation before ever reaching the API", setCalls)
 	}
 }
 
 // TestAccOrganizationDefaultCloudResource_ImportNotCurrentDefault_MockServer
-// is the Gate 2 "import non-default -> clean error" case the authoritative
-// spec names explicitly: importing a cloud that EXISTS but is not the
+// covers importing a cloud that EXISTS but is not the
 // current organization default must fail with a clear diagnostic, not
 // silently import garbage state.
 func TestAccOrganizationDefaultCloudResource_ImportNotCurrentDefault_MockServer(t *testing.T) {

@@ -30,8 +30,7 @@ func TestAccProjectDataSource_ByID(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.anyscale_project.test", "creator_id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_project.test", "directory_name"),
 					resource.TestCheckResourceAttr("data.anyscale_project.test", "is_default", "false"),
-					// Collaborators should be present (empty list is fine)
-					resource.TestCheckResourceAttrSet("data.anyscale_project.test", "collaborators.#"),
+					resource.TestCheckResourceAttr("data.anyscale_project.test", "description", "Test project for data source lookup by ID"),
 				),
 			},
 		},

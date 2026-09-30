@@ -1,16 +1,11 @@
-// PR2 (timeouts{} migration). Closes a real, pre-existing coverage gap
-// found during the PR2 survey: unlike service's well-tested H2 mechanism
-// (TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges),
-// NOTHING today proves container_image_build's Update short-circuit
-// (containerfileChanged check, resource_container_image_build.go ~426-429)
-// actually skips a real second build when only the timeout changes - this
-// is new coverage, not a repoint.
+// Proves container_image_build's Update short-circuit (the containerfileChanged
+// check in resource_container_image_build.go) skips a real second build when
+// only the timeouts{} block changes - the build-resource counterpart of
+// TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges.
 //
 // Mock endpoint shapes (POST /api/v2/application_templates/, POST
-// /api/v2/builds/, GET /api/v2/builds/{id}, POST .../archive) are copied
-// directly from this file's own newBuildDigestMockServer (same package,
-// resource_container_image_build_digest_acc_test.go) - verified against
-// real, already-working mock code, not invented.
+// /api/v2/builds/, GET /api/v2/builds/{id}, POST .../archive) match
+// newBuildDigestMockServer (resource_container_image_build_digest_acc_test.go).
 
 package acctest
 
@@ -126,9 +121,9 @@ func newBuildTimeoutOnlyMockServer(t *testing.T, buildCallCount *int32, template
 }
 
 // TestAccContainerImageBuildResource_UpdateSkipsBuildWhenOnlyTimeoutChanges
-// closes the coverage gap: containerfileChanged (resource_container_image_build.go
-// ~426-429) must skip the real build-creation call when only timeouts changes,
-// mirroring service's H2 proof for the exact same PR2 migration concern.
+// proves containerfileChanged (resource_container_image_build.go) skips the real
+// build-creation call when only timeouts changes, mirroring the service
+// resource's timeout-only Update test.
 func TestAccContainerImageBuildResource_UpdateSkipsBuildWhenOnlyTimeoutChanges(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 

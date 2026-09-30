@@ -296,14 +296,6 @@ func (s *mockCloudAccessServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleList serves the live-confirmed CloudCollaborator shape (an "id" that
-// is the identity_id for the permission, a nested "value" object carrying the
-// user_id/name/email, and "metadata.total" - not "total_count") rather than
-// this mock's own flat internal member representation. A response shaped
-// like the mock's internal map instead of the real API's would validate a
-// Read implementation that parses the wrong fields and 404s/mis-decodes in
-// production - the same mock-realism gap this file's own header comment
-// warns about.
 // handleUserinfo backs fetchCloudAccessCallerIdentity, which every reconcile
 // calls unconditionally and first - a missing handler here fails every apply
 // at "Could Not Identify The Calling Identity" before any cloud endpoint is
@@ -408,6 +400,14 @@ func (s *mockCloudAccessServer) handleRolesRead(w http.ResponseWriter) {
 	})
 }
 
+// handleList serves the live-confirmed CloudCollaborator shape (an "id" that
+// is the identity_id for the permission, a nested "value" object carrying the
+// user_id/name/email, and "metadata.total" - not "total_count") rather than
+// this mock's own flat internal member representation. A response shaped
+// like the mock's internal map instead of the real API's would validate a
+// Read implementation that parses the wrong fields and 404s/mis-decodes in
+// production - the same mock-realism gap this file's own header comment
+// warns about.
 func (s *mockCloudAccessServer) handleList(w http.ResponseWriter) {
 	emails := make([]string, 0, len(s.members))
 	for email := range s.members {
@@ -714,12 +714,13 @@ resource "anyscale_cloud_access" "test" {
 					if got := attrs["member."+cloudAccessMockImplicitMember+".base_role"]; got != "owner" {
 						return fmt.Errorf("imported member.%s.base_role = %q, want \"owner\"", cloudAccessMockImplicitMember, got)
 					}
-					// DELIBERATE GAP: unmanaged_grants is not asserted here.
-					// Import performs no revoke, so whether a fresh import
-					// reports a pre-existing unrevoked grant is a design
-					// question the reconcile has not answered yet. Asserting
-					// either way now would be guessing at a shape. Fill this
-					// in with the PR-B implementation, not before.
+					// unmanaged_grants records what the last APPLY could not
+					// revoke. Import performs no revoke, so it starts empty -
+					// the undeclared member shows up in `member` above, not
+					// here.
+					if got := attrs["unmanaged_grants.#"]; got != "0" {
+						return fmt.Errorf("imported unmanaged_grants.# = %q, want \"0\" - import performs no revoke, so it has nothing to record", got)
+					}
 					return nil
 				},
 			},
@@ -736,8 +737,8 @@ resource "anyscale_cloud_access" "test" {
 				// which reports cloud-owner back into `member` since their
 				// revoke never succeeds, and config still doesn't declare
 				// them - a real, standing diff proposing to revoke them
-				// again. J.12 in the consolidation record: unmanaged_grants
-				// is diagnostics only and never influences planning, and
+				// again. unmanaged_grants is diagnostics only and never
+				// influences planning, and
 				// every plan re-attempts everything still undone. What this
 				// step actually proves is narrower and still real: the
 				// SHAPE of that diff is an in-place update (attempting the

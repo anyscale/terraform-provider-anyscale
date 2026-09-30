@@ -29,13 +29,11 @@ func serviceCloudMatchProjectJSON(id string, parentCloudID *string) string {
 	return fmt.Sprintf(`{"result": {"id": %[1]q, "name": "proj-cloudmatch", "parent_cloud_id": %[2]s, "created_at": "2026-01-01T00:00:00Z", "is_default": false}}`, id, pc)
 }
 
-// TestAccServiceResource_CloudMatchRejectsMismatch is MT1: project_id and compute_config_id
-// resolve to DIFFERENT clouds - the validator must reject at PLAN TIME, before any apply ever
-// fires. This is the whole point of the guard: today, without it, this exact mismatch reaches the
-// backend and comes back as an opaque UNHEALTHY with a misleading "user removed from
-// organization" 403 (confirmed via a real, empirically-verified diagnosis this session - see
-// resource_service_realinfra_acc_test.go's cloud-scoped project fix for the real-infra side of
-// the same root cause).
+// TestAccServiceResource_CloudMatchRejectsMismatch: project_id and compute_config_id resolve
+// to DIFFERENT clouds, so the validator must reject at PLAN TIME, before any apply fires.
+// Without the guard this mismatch reaches the backend and comes back as an opaque UNHEALTHY with
+// a misleading "user removed from organization" 403 (resource_service_realinfra_acc_test.go's
+// cloud-scoped project is the real-infra side of the same root cause).
 func TestAccServiceResource_CloudMatchRejectsMismatch(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -85,7 +83,6 @@ resource "anyscale_service" "test" {
 `
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -102,7 +99,7 @@ resource "anyscale_service" "test" {
 	}
 }
 
-// TestAccServiceResource_CloudMatchAllowsMatch is MT2, and the MOST important
+// TestAccServiceResource_CloudMatchAllowsMatch is the most important
 // case: project_id and compute_config_id resolve to the SAME cloud, so the validator must NOT
 // block the apply. A validator that rejects valid, matching configs would be a worse regression
 // than having no validator at all - this is the false-positive guard.
@@ -169,7 +166,6 @@ resource "anyscale_service" "test" {
 `
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -180,7 +176,7 @@ resource "anyscale_service" "test" {
 	})
 }
 
-// TestAccServiceResource_CloudMatchSkipsOnOmittedProjectID is MT3: project_id is omitted from
+// TestAccServiceResource_CloudMatchSkipsOnOmittedProjectID: project_id is omitted from
 // config entirely (Optional+Computed, Unknown at plan until Create resolves the backend's
 // default project). The validator must skip cleanly rather than error on an Unknown value it
 // cannot yet compare - proving "no project_id set" doesn't regress into a plan-time crash or a
@@ -257,7 +253,6 @@ resource "anyscale_service" "test" {
 `
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -277,7 +272,7 @@ resource "anyscale_service" "test" {
 	}
 }
 
-// TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID is MT4: compute_config_id is
+// TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID: compute_config_id is
 // Required but references another resource's own computed output (anyscale_compute_config.x.id),
 // making it Unknown at plan time - the more realistic real-world skip case than an omitted
 // project_id, since compute_config_id can never itself be omitted. Proves Required-but-Unknown
@@ -287,7 +282,7 @@ func TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID(t *testing.T
 
 	const serviceID = "svc_cloudmatch_unknown_cc"
 	var terminated atomic.Bool
-	var computeTemplateHit, projectHit atomic.Bool
+	var projectHit atomic.Bool
 	var mu sync.Mutex
 	var createdComputeConfig map[string]any // stored so GET (refresh) echoes exactly what POST (create) returned
 
@@ -334,7 +329,6 @@ func TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID(t *testing.T
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		computeTemplateHit.Store(true)
 		mu.Lock()
 		record := createdComputeConfig
 		mu.Unlock()
@@ -409,7 +403,6 @@ resource "anyscale_service" "test" {
 `
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -419,9 +412,14 @@ resource "anyscale_service" "test" {
 		},
 	})
 
-	// The validator must skip while compute_config_id is Unknown at PLAN time - it is not
-	// asserting the lookups never happen at all (Read/other paths may call these same
-	// endpoints), only that the plan step itself did not depend on them succeeding.
-	_ = computeTemplateHit.Load()
-	_ = projectHit.Load()
+	// The step succeeding is the plan-time proof: at plan, compute_config_id is Unknown and the
+	// validator must skip rather than error. Core then re-plans anyscale_service during apply,
+	// once anyscale_compute_config has a real id, so the validator does run at that point - and
+	// it is the only caller of GET /api/v2/projects/{id}. A project lookup therefore proves the
+	// guard still applies once the id is known, rather than being skipped for good.
+	// (compute_templates is not tracked: anyscale_compute_config's own Read hits it regardless.)
+	if !projectHit.Load() {
+		t.Errorf("validator never looked up the project - once compute_config_id becomes known " +
+			"during apply, the cloud-match check must still run")
+	}
 }

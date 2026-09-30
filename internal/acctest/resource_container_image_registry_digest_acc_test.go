@@ -1,60 +1,30 @@
-// GATE-F5 (registry side): Computed build-mirror attributes must be pinned across an
-// ordinary refresh (UseStateForUnknown) but must still ADVANCE, non-destructively, when the
-// backend's latest build genuinely changes out from under Terraform.
+// Registry-side build-mirror attributes: pinned across an ordinary refresh, yet still
+// advancing non-destructively when the backend's latest build changes out from under Terraform.
 //
-// build_id, revision, name_version, digest, and build_status (resource_container_image_
-// registry.go's containerImageRegistryAttributes()) all carry ONLY
-// stringplanmodifier.UseStateForUnknown() / int64planmodifier.UseStateForUnknown() - none of
-// them carry RequiresReplace. That is a deliberate choice, not an oversight: this resource's
-// identity is the cluster environment (id == cluster_environment_id, see F3), and Read()
-// unconditionally re-fetches "the current latest build for that cluster environment" on every
-// refresh (GET application_templates/{id} for the latest_build stub, then GET builds/{id} for
-// the decorated detail). Someone registering a new build against the same underlying template
-// outside Terraform - e.g. via the Anyscale CLI or console - is expected, and must be absorbed
-// as ordinary, non-destructive drift on these Computed fields: never a Replace/Destroy. This is
-// a different, LOWER-severity class of change than F3: F3 was the resource's own TERRAFORM
-// IDENTITY (id) drifting, which breaks import/state-addressing outright; this is a Computed
-// attribute mirroring upstream state, which RequiresReplace's absence here explicitly declares
-// safe to update in place.
+// build_id, revision, name_version, digest, and build_status (containerImageRegistryAttributes()
+// in resource_container_image_registry.go) carry only UseStateForUnknown - no RequiresReplace.
+// The resource's identity is the application template (id); Read() re-fetches that template's
+// current latest build on every refresh (GET application_templates/{id} for the latest_build
+// stub, then GET builds/{id} for the detail). A build registered against the same template
+// outside Terraform (CLI, console) must therefore be absorbed as ordinary drift on these
+// Computed fields, never a Replace/Destroy.
 //
-// A mechanical note on what "surfaces as Update" actually means here, verified empirically
-// against this exact resource (not assumed): for a purely Computed, non-Optional attribute
-// whose only plan modifier is UseStateForUnknown(), Terraform Core's ordinary implicit-refresh
-// plan (a plain `terraform plan`, no `-refresh=false`) folds the new backend value into prior
-// state BEFORE the plan-vs-config diff step ever runs (Core's node_resource_plan_instance.go
-// reassigns the same refreshed-state variable that the diff step then reads; see
-// objchange.proposedNewAttributes, which sets newV = priorV for non-Optional attributes). Since
-// none of these five attributes are ever mentioned in HCL config, that diff step has nothing to
-// compare against config for them either way, so the resulting single-invocation plan action is
-// NoOp, not Update - there is no code path where the pre-refresh and post-refresh values are
-// held simultaneously for a config-vs-state diff to report as a change. This is not specific to
-// UseStateForUnknown: the same refresh-then-diff ordering means RequiresReplace could not
-// observe this transition either, for the same underlying reason (nothing survives to compare
-// the old value against once refresh has already overwritten it) - so "RequiresReplace would
-// show up as Replace here" is not a safe assumption either, and is deliberately not the contrast
-// drawn below. What Terraform Core DOES still guarantee, and what is actually load-bearing to
-// prove: the refreshed value replacing the old one is absorbed as an ordinary, error-free NoOp
-// (or ordinary Update, if a real per-attribute diff exists to report on that particular plan),
-// with the resource's plan action NEVER Replace/Destroy/CreateBeforeDestroy/DestroyBeforeCreate
-// - which is exactly the safety property RequiresReplace's absence on these fields is meant to
-// guarantee, and exactly what would break if any of the five picked up RequiresReplace later.
+// What the transition's plan action actually is: for a Computed, non-Optional attribute,
+// Terraform Core's implicit refresh folds the new backend value into prior state BEFORE the
+// plan-vs-config diff runs (objchange.proposedNewAttributes sets newV = priorV for non-Optional
+// attributes), and none of these five attributes appear in config. So the plan that performs
+// the transition is NoOp, not Update - no code path holds the pre- and post-refresh values at
+// once. The same ordering means a RequiresReplace on one of these attributes would not observe
+// the transition either, so this test does not claim to catch that; it pins the verified NoOp
+// action, proves state really advanced, and proves the new values are then stable.
 //
-// Two tests, one proving each half:
+// Two tests, one per half:
 //   - DigestStableAcrossRefresh: nothing changes backend-side between two refreshes -> the
-//     second refresh's plan must be truly empty (plancheck.ExpectEmptyPlan()), matching F3's
-//     and F4's existing "no refresh-induced noise" bar for this resource.
+//     second refresh's plan must be truly empty (plancheck.ExpectEmptyPlan()).
 //   - LatestBuildAdvance_UpdatesNoReplace: the mock's "latest build" advances out-of-band
 //     between two refreshes (new build_id/revision/name_version/digest/build_status, same
-//     cluster environment). The money assertion is plancheck.ExpectResourceAction(addr,
-//     plancheck.ResourceActionNoop) on that transition's own plan - per the mechanical note
-//     above, NoOp (not Update) is the correct, expected action for this exact case today, and
-//     is proven here specifically so a future change to how these attributes are populated
-//     cannot silently regress into Replace/Destroy without this test catching it. The test then
-//     separately proves state genuinely advanced to build-B's values (via Check) and that a
-//     further, independent refresh against the now-current build-B stays stable
-//     (ExpectEmptyPlan) - i.e. the "latest build" transition is real, absorbed correctly, and
-//     never destructive, even though it is invisible as a distinct "Update" step in the single
-//     plan that performs it.
+//     template). The transitioning plan must be plancheck.ResourceActionNoop, state must show
+//     build-B's values (Check), and a further refresh against build-B must be empty.
 package acctest
 
 import (
@@ -84,9 +54,9 @@ type registryBuildSnapshot struct {
 
 // digestMockRegistryServer serves a BYOD registry lifecycle whose "latest build" can be
 // swapped out mid-test via advanceLatestBuild, simulating a build registered against the same
-// cluster environment out-of-band (i.e. not through this Terraform resource). This is the one
-// behavior newRegistryF3MockServer/newRegistryF4MockServer do not need and do not have: their
-// GET handlers are closed over fixed values for the lifetime of the httptest.Server. Mutable
+// application template out-of-band (i.e. not through this Terraform resource). This is the one
+// behavior newRegistryLifecycleMockServer/newRegistryRayVersionMockServer do not have: their GET handlers are
+// closed over fixed values for the lifetime of the httptest.Server. Mutable
 // state guarded by a mutex mirrors the established pattern in
 // resource_compute_config_lifecycle_acc_test.go's mockComputeConfigServer, sized down to the
 // single field this test needs to flip.
@@ -104,15 +74,15 @@ func (s *digestMockRegistryServer) snapshot() registryBuildSnapshot {
 
 // advanceLatestBuild swaps in a new "latest build" snapshot. Call this between TestSteps (not
 // concurrently with an in-flight request) to simulate the backend's latest build changing
-// out-of-band between two refreshes of the same cluster environment.
+// out-of-band between two refreshes of the same application template.
 func (s *digestMockRegistryServer) advanceLatestBuild(next registryBuildSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.current = next
 }
 
-// newDigestMockRegistryServer wires up the same endpoint shape as newRegistryF3MockServer /
-// newRegistryF4MockServer (create template, create build, GET template, GET build, archive),
+// newDigestMockRegistryServer wires up the same endpoint shape as newRegistryLifecycleMockServer /
+// newRegistryRayVersionMockServer (create template, create build, GET template, GET build, archive),
 // but the two GET handlers read from the server's mutable snapshot instead of closing over
 // fixed values, so a test can call advanceLatestBuild between steps to change what the NEXT
 // refresh sees without needing a new httptest.Server or a new resource.
@@ -240,8 +210,8 @@ func newDigestMockRegistryServer(t *testing.T, templateID, name, imageURI, rayVe
 // "nothing changed" half: build_id, revision, name_version, digest, and build_status must
 // all be pinned by UseStateForUnknown() across a refresh where the backend's latest build has
 // not moved - producing a truly EMPTY plan, not just an unchanged-but-still-planned attribute
-// set. This is the same bar F3's and F4's lifecycle tests already hold this resource to;
-// this test isolates it specifically for the five build-mirror attributes together.
+// set. The lifecycle and ray_version tests hold this resource to the same bar; this test
+// isolates it for the five build-mirror attributes together.
 func TestAccContainerImageRegistryResource_DigestStableAcrossRefresh_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -317,16 +287,11 @@ resource "anyscale_container_image_registry" "test" {
 // the "backend moved" half: when the cluster environment's latest build advances out-of-band
 // (build-A -> build-B, with every one of build_id/revision/name_version/digest/build_status
 // genuinely different, not coincidentally similar), the transitioning refresh's own plan must
-// come back as plancheck.ResourceActionNoop - per the file header's mechanical note, that is the
-// correct, verified action for this exact case (ordinary implicit-refresh plan, unchanged
-// config, Computed-only attributes), not a weaker stand-in for Update. What actually matters,
-// and what this test is built to catch a regression in, is that the action is NEVER Replace,
-// Destroy, CreateBeforeDestroy, or DestroyBeforeCreate - which would only become reachable if
-// one of these five attributes picked up RequiresReplace (or something else config-influencing)
-// later. The test separately proves state genuinely advanced to build-B's values (Check) and
-// that a further, independent refresh against the now-current build-B stays stable
-// (ExpectEmptyPlan), so the transition is real and non-destructive even though it does not
-// surface as its own distinct "Update" step.
+// come back as plancheck.ResourceActionNoop - per the file header, that is the verified action
+// for an implicit-refresh plan over Computed-only attributes with unchanged config. The test
+// separately proves state genuinely advanced to build-B's values (Check) and that a further,
+// independent refresh against the now-current build-B stays stable (ExpectEmptyPlan), so the
+// transition is real and non-destructive even though it does not surface as its own "Update".
 func TestAccContainerImageRegistryResource_LatestBuildAdvance_UpdatesNoReplace_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -387,7 +352,7 @@ resource "anyscale_container_image_registry" "test" {
 			},
 			{
 				// Unchanged config, but the backend's latest build has advanced to build-B
-				// (registered against the same cluster environment out-of-band, e.g. via the
+				// (registered against the same application template out-of-band, e.g. via the
 				// Anyscale CLI/console rather than through this Terraform resource). This
 				// PreConfig is what simulates that: it flips the mock's snapshot immediately
 				// before Terraform plans this step, so the plan/apply below is exactly what a
@@ -397,12 +362,11 @@ resource "anyscale_container_image_registry" "test" {
 				},
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					// Money assertion: the plan action for THIS resource's own transitioning
-					// plan is NoOp - the mechanically correct, verified action here (see file
-					// header), not Replace/Destroy/CreateBeforeDestroy/DestroyBeforeCreate. A
-					// regression that gave any of these five attributes RequiresReplace (or
-					// otherwise made them config-influencing) would flip this to something in
-					// that destructive set, which is exactly what this assertion guards against.
+					// Money assertion: the transitioning plan is NoOp, the verified action for
+					// this case (see file header). Refresh has already folded build-B into prior
+					// state, so a RequiresReplace on one of the five attributes would not change
+					// this action either; what this pins is that the transition plans cleanly,
+					// with no Update/Replace and no error, before Check confirms the new values.
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(resourceAddress, plancheck.ResourceActionNoop),
 					},
@@ -415,7 +379,7 @@ resource "anyscale_container_image_registry" "test" {
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Post-apply, state must show build-B's values, not build-A's stale ones.
-					resource.TestCheckResourceAttr(resourceAddress, "id", templateID), // identity (F3) unaffected - only the build-mirror attrs move
+					resource.TestCheckResourceAttr(resourceAddress, "id", templateID), // identity unaffected - only the build-mirror attrs move
 					resource.TestCheckResourceAttr(resourceAddress, "build_id", buildB.buildID),
 					resource.TestCheckResourceAttr(resourceAddress, "revision", "7"),
 					resource.TestCheckResourceAttr(resourceAddress, "digest", buildB.digest),

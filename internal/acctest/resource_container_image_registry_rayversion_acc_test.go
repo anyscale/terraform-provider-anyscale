@@ -1,4 +1,4 @@
-// GATE-F4: ray_version plan-stability + BYOD value-population.
+// ray_version plan-stability and BYOD value-population for anyscale_container_image_registry.
 //
 // ray_version is Optional+Computed with UseStateForUnknown()+RequiresReplace(). Its fill
 // logic (Create() and Read() in resource_container_image_registry.go) is guarded on
@@ -13,7 +13,7 @@
 //     DecoratedBuild (builds.py), so the create response can never carry it, no matter what
 //     the request sent. This is why Create()'s fill can only ever land on a concrete value
 //     via a *subsequent* Read(), never at Create() itself, for a BYOD registry - proven by
-//     Test A below.
+//     the RayVersionUnset_PopulatesOnRefresh test below.
 //   - GET /api/v2/builds/{id} (Read) hits builds_resolver.resolve_build(), which sets
 //     byod_ray_version = get_ray_version(base_image) only when
 //     is_byod AND config_json AND base_image are all present, else leaves it None
@@ -35,16 +35,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// newRegistryF4MockServer mirrors newRegistryF3MockServer's shape but gives independent
+// newRegistryRayVersionMockServer mirrors newRegistryLifecycleMockServer's shape but gives independent
 // control over what the bare create response vs. the decorated Read response report for
-// ray_version, since that split is exactly what F4's fill guards are built around. Per the
+// ray_version, since that split is exactly what the ray_version fill guards are built around. Per the
 // real API contract above, createRayVersion is realistically always "" (the create response
 // model has no byod_ray_version field, and the plain ray_version field is not populated for
 // BYOD builds either - see the CreateBYODBuild finding cited in resource_container_image_
 // registry.go's Create() comment); it stays parameterized here rather than hardcoded so a
 // future regression that starts *reading* the create response's ray_version some other way
 // still has a test able to catch it.
-func newRegistryF4MockServer(t *testing.T, templateID, buildID, name, imageURI, createRayVersion, readByodRayVersion, readPlainRayVersion, digest string) *httptest.Server {
+func newRegistryRayVersionMockServer(t *testing.T, templateID, buildID, name, imageURI, createRayVersion, readByodRayVersion, readPlainRayVersion, digest string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
@@ -164,8 +164,7 @@ func newRegistryF4MockServer(t *testing.T, templateID, buildID, name, imageURI, 
 }
 
 // TestAccContainerImageRegistryResource_RayVersionUnset_PopulatesOnRefresh_MockServer covers
-// GATE-F4 cases 1+2 in a single lifecycle, plus the Create-time half of case 5's "no value
-// yet" symmetry:
+// two cases in a single lifecycle, plus the Create-time "no value yet" behavior:
 //   - Create-time: the create response never carries a resolved ray_version (real contract,
 //     see file header), so Create()'s IsUnknown() fill guard must land on explicit null, not
 //     an error and not a still-Unknown value (Core would reject the latter for a Computed
@@ -191,7 +190,7 @@ func TestAccContainerImageRegistryResource_RayVersionUnset_PopulatesOnRefresh_Mo
 	const staleDefaultDecoy = "2.44.0" // what Create() actually sent server-side when config left ray_version unset; must lose to byod_ray_version
 	const digest = "sha256:f4unsetmock000000000000000000000000000000000000000000000000000"
 
-	server := newRegistryF4MockServer(t, templateID, buildID, name, imageURI, "", resolvedRayVersion, staleDefaultDecoy, digest)
+	server := newRegistryRayVersionMockServer(t, templateID, buildID, name, imageURI, "", resolvedRayVersion, staleDefaultDecoy, digest)
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_container_image_registry" "test" {
   name      = %[1]q
@@ -245,7 +244,7 @@ resource "anyscale_container_image_registry" "test" {
 }
 
 // TestAccContainerImageRegistryResource_RayVersionSet_PreservedDespiteBackendMismatch_MockServer
-// covers GATE-F4 case 3: once the user sets ray_version explicitly, it must survive verbatim
+// proves that once the user sets ray_version explicitly, it must survive verbatim
 // even when the backend's own resolved value disagrees. byod_ray_version is parsed purely
 // from the user's own image tag (see file header) and is never derived from the ray_version
 // the user typed - so a real backend response for an explicit ray_version can legitimately
@@ -268,7 +267,7 @@ func TestAccContainerImageRegistryResource_RayVersionSet_PreservedDespiteBackend
 	// IsUnknown() guard on the call-1 request in Create()), but it is inert for this test
 	// either way: state.RayVersion is never null once the user sets it, so Read()'s fill
 	// guard - and therefore ResolvedRayVersion() itself - never even runs in this flow.
-	server := newRegistryF4MockServer(t, templateID, buildID, name, imageURI, "", backendUnrelatedValue, userRayVersion, digest)
+	server := newRegistryRayVersionMockServer(t, templateID, buildID, name, imageURI, "", backendUnrelatedValue, userRayVersion, digest)
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_container_image_registry" "test" {
   name        = %[1]q
@@ -311,7 +310,7 @@ resource "anyscale_container_image_registry" "test" {
 }
 
 // TestAccContainerImageRegistryResource_RayVersionUnset_NonVersionTagResolvesStably_MockServer
-// covers GATE-F4 case 4: an image tagged with something that is not a version number (e.g.
+// proves that an image tagged with something that is not a version number (e.g.
 // `:latest`) still resolves through get_ray_version's plain substring split to a real,
 // stable, non-null value ("latest") - this must be stored as-is, not treated as an error and
 // not coerced to null, and must not keep re-planning once resolved.
@@ -325,7 +324,7 @@ func TestAccContainerImageRegistryResource_RayVersionUnset_NonVersionTagResolves
 	const nonVersionResolved = "latest" // get_ray_version("...:latest") == "latest": split(":")[-1]="latest", split("-")[0]="latest"
 	const staleDefaultDecoy = "2.44.0"  // what Create() actually sent server-side when config left ray_version unset; must lose to byod_ray_version, same as the sibling Unset test
 
-	server := newRegistryF4MockServer(t, templateID, buildID, name, imageURI, "", nonVersionResolved, staleDefaultDecoy, "sha256:f4nonversionmock00000000000000000000000000000000000000000000")
+	server := newRegistryRayVersionMockServer(t, templateID, buildID, name, imageURI, "", nonVersionResolved, staleDefaultDecoy, "sha256:f4nonversionmock00000000000000000000000000000000000000000000")
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_container_image_registry" "test" {
   name      = %[1]q

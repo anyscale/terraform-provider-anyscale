@@ -4,21 +4,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
-// The sweeper half of the GATE-11 Part B orphan-prevention proof.
-// sweepContainerImageResult (see sweeper_container_image_test.go) carries no
-// build-related field at all -- ID, Name, CreatedAt, DeletedAt, Anonymous,
-// IsDefault -- so a template-without-a-build candidate is not a special case
-// the sweeper has to detect, it's the only shape the sweeper ever sees.
-// What had zero test coverage before this file is sweepContainerImages
-// itself: only its search helper (searchContainerImagesByContains, in
-// sweeper_container_image_pagination_test.go) was tested in isolation. These
-// tests drive the real top-level orchestration -- search, cross-prefix dedup,
+// The sweeper half of the registry orphan-prevention proof. The sweeper
+// decodes candidates into provider.ApplicationTemplateResult and never reads
+// its LatestBuild field -- it decides on ID, Name, CreatedAt, DeletedAt,
+// Anonymous, and IsDefault -- so a template-without-a-build candidate is not a
+// special case the sweeper has to detect. The search helper
+// (searchContainerImagesByContains) is tested in isolation in
+// sweeper_container_image_pagination_test.go; these tests cover
+// sweepContainerImages itself, driving the real top-level orchestration -- search, cross-prefix dedup,
 // age filter, prefix filter, already-archived filter, archive call -- against
 // a mock server, using t.Setenv to redirect the package-internal
 // GetTestClient() call the same way helpers_checkdestroy_test.go does.
@@ -42,19 +42,24 @@ func buildlessSweepCandidate(id, name string, createdAt time.Time, deletedAt *st
 // sweepableResourcePrefixes searches (tfacc-, tf-test-, tfprovider-) --
 // returning candidate on the first search only, so cross-prefix dedup logic
 // isn't required to make the candidate appear exactly once -- and records
-// archive calls. Fails the test on any other request.
-func newBuildlessSweepServer(t *testing.T, candidate provider.ApplicationTemplateResult) (*httptest.Server, *int, *[]string) {
+// archive calls. Fails the test on any other request. The returned
+// accessors read the handler's counters under its lock.
+func newBuildlessSweepServer(t *testing.T, candidate provider.ApplicationTemplateResult) (*httptest.Server, func() int, func() []string) {
 	t.Helper()
+	var mu sync.Mutex // guards searchCalls and archivedPaths
 	searchCalls := 0
 	var archivedPaths []string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/application_templates/":
+			mu.Lock()
 			searchCalls++
+			call := searchCalls
+			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			if searchCalls == 1 {
+			if call == 1 {
 				_ = json.NewEncoder(w).Encode(provider.ApplicationTemplatesListResponse{
 					Results: []provider.ApplicationTemplateResult{candidate},
 				})
@@ -62,7 +67,9 @@ func newBuildlessSweepServer(t *testing.T, candidate provider.ApplicationTemplat
 			}
 			_ = json.NewEncoder(w).Encode(provider.ApplicationTemplatesListResponse{})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/"+candidate.ID+"/archive":
+			mu.Lock()
 			archivedPaths = append(archivedPaths, r.URL.Path)
+			mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
@@ -75,10 +82,20 @@ func newBuildlessSweepServer(t *testing.T, candidate provider.ApplicationTemplat
 	t.Setenv("ANYSCALE_SWEEP_DRY_RUN", "")
 	t.Setenv("ANYSCALE_SWEEP_MIN_AGE", "")
 
-	return server, &searchCalls, &archivedPaths
+	getSearchCalls := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return searchCalls
+	}
+	getArchivedPaths := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), archivedPaths...)
+	}
+	return server, getSearchCalls, getArchivedPaths
 }
 
-// TestSweepContainerImages_BuildlessOrphan_ArchivesCleanly is the main GATE
+// TestSweepContainerImages_BuildlessOrphan_ArchivesCleanly is the main
 // proof: a build-less template old enough to sweep, correctly prefixed, not
 // anonymous/default, and not yet archived must be archived exactly once, with
 // no error -- using nothing but the candidate's own id.
@@ -93,15 +110,15 @@ func TestSweepContainerImages_BuildlessOrphan_ArchivesCleanly(t *testing.T) {
 		t.Fatalf("sweepContainerImages returned an error for a build-less orphan: %v", err)
 	}
 
-	if *searchCalls != len(sweepableResourcePrefixes) {
-		t.Fatalf("expected %d search calls (one per configured prefix), got %d -- did GetTestClient resolve the mock server?", len(sweepableResourcePrefixes), *searchCalls)
+	if searchCalls() != len(sweepableResourcePrefixes) {
+		t.Fatalf("expected %d search calls (one per configured prefix), got %d -- did GetTestClient resolve the mock server?", len(sweepableResourcePrefixes), searchCalls())
 	}
-	if len(*archivedPaths) != 1 {
-		t.Fatalf("expected exactly 1 archive call, got %d -- build-less orphan was not swept", len(*archivedPaths))
+	if len(archivedPaths()) != 1 {
+		t.Fatalf("expected exactly 1 archive call, got %d -- build-less orphan was not swept", len(archivedPaths()))
 	}
 	wantPath := "/api/v2/application_templates/" + templateID + "/archive"
-	if (*archivedPaths)[0] != wantPath {
-		t.Errorf("archived path = %q, want %q", (*archivedPaths)[0], wantPath)
+	if archivedPaths()[0] != wantPath {
+		t.Errorf("archived path = %q, want %q", archivedPaths()[0], wantPath)
 	}
 }
 
@@ -119,8 +136,8 @@ func TestSweepContainerImages_BuildlessOrphan_TooYoungIsKept(t *testing.T) {
 	if err := sweepContainerImages(""); err != nil {
 		t.Fatalf("sweepContainerImages returned an error: %v", err)
 	}
-	if len(*archivedPaths) != 0 {
-		t.Fatalf("expected 0 archive calls for a too-young build-less candidate, got %d", len(*archivedPaths))
+	if len(archivedPaths()) != 0 {
+		t.Fatalf("expected 0 archive calls for a too-young build-less candidate, got %d", len(archivedPaths()))
 	}
 }
 
@@ -138,7 +155,7 @@ func TestSweepContainerImages_BuildlessOrphan_AlreadyArchivedIsSkipped(t *testin
 	if err := sweepContainerImages(""); err != nil {
 		t.Fatalf("sweepContainerImages returned an error: %v", err)
 	}
-	if len(*archivedPaths) != 0 {
-		t.Fatalf("expected 0 archive calls for an already-archived build-less candidate, got %d", len(*archivedPaths))
+	if len(archivedPaths()) != 0 {
+		t.Fatalf("expected 0 archive calls for an already-archived build-less candidate, got %d", len(archivedPaths()))
 	}
 }

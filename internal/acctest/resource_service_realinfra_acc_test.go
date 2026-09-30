@@ -9,28 +9,25 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccServiceResource_RealInfra is the load-bearing real-infra gate for contract AC-R5/AC-R6,
-// PLUS the real-rollout gap flagged directly by the user - the original ask was "deploying a new
-// Anyscale Service as well as dealing with rolling out new versions", and neither AC-R5 nor AC-R6
-// as originally scoped actually exercised the rollout half against real infrastructure. No mock
-// can prove any of these three, since all depend on the real backend's actual behavior:
+// TestAccServiceResource_RealInfra is the load-bearing real-infra gate for deploying a new
+// Anyscale Service and rolling out new versions of it. No mock can prove any of these three,
+// since all depend on the real backend's actual behavior:
 //
-//   - AC-R5: after a real apply, a SECOND plan (refresh + diff against unchanged config) must be
+//   - Clean re-plan: after a real apply, a SECOND plan (refresh + diff against unchanged config) must be
 //     completely EMPTY - not just ray_serve_config, but every attribute (connection_ids, tags,
 //     every computed field). A server-side normalization of the applied ray_serve_config, or any
 //     other drift source, would show up here and nowhere else.
-//   - Real rollout (added after user follow-up, not in the original AC-R5/AC-R6 scope): changing
-//     a deploy-affecting field (ray_serve_config) on an already-RUNNING service must roll out a
+//   - Real rollout: changing a deploy-affecting field (ray_serve_config) on an already-RUNNING service must roll out a
 //     real new version, in place (same id, not a replace), and reach RUNNING again. The mock
-//     suite only proves the OPPOSITE case (H2: a non-deploy-affecting change like the timeouts{}
-//     block must NOT redeploy) - this is the first real proof that a redeploy actually works end to end.
-//   - AC-R6: after a real destroy, GET /{id} must actually 404 - proving terminate-then-wait-
+//     suite proves the framework mechanics of a redeploy; only real infra proves the backend
+//     actually completes one.
+//   - Clean destroy: after a real destroy, GET /{id} must actually 404 - proving terminate-then-wait-
 //     then-delete really leaves nothing behind, not just that Destroy returned without error.
 //
 // Reuses an existing default application build (no fresh container image build needed - the org
 // already has default Ray images with succeeded builds) and creates only a fresh, cheap
 // compute_config against the existing pinned/discovered fixture cloud (never a fresh cloud) -
-// per a reuse-first ruling, this keeps the real-infra footprint to exactly one real
+// this keeps the real-infra footprint to exactly one real
 // service (the thing actually under test) plus one lightweight compute_config registration.
 //
 // ray_serve_config points at anyscale/first-service, Anyscale's own minimal public example
@@ -49,11 +46,9 @@ func TestAccServiceResource_RealInfra(t *testing.T) {
 	// CreateEphemeralTestProjectForCloud, NOT an auto-discovered org-wide "default" project: that
 	// default project can legitimately be homed on a DIFFERENT cloud than the one resolved above,
 	// and the backend enforces that a project's parent_cloud_id must match
-	// the compute_config's cloud_id (confirmed via a real 403 during this test's own diagnosis,
-	// 2026-07-20 - see check_cloud_id_of_project_and_cluster_match in the backend reference). A
-	// mismatch surfaces as an opaque UNHEALTHY at apply time, not a clear error - exactly what
-	// made this test's rollout step look like a capacity/health problem before the real cause was
-	// traced. Scoping the project to this test's own cloud.ID prevents that class of failure
+	// the compute_config's cloud_id (check_cloud_id_of_project_and_cluster_match in the backend).
+	// A mismatch surfaces as an opaque UNHEALTHY at apply time, not a clear error, which reads
+	// like a capacity/health problem. Scoping the project to this test's own cloud.ID prevents that class of failure
 	// outright, rather than relying on the org's default project happening to line up.
 	projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloud.ID)
 	if err != nil {
@@ -81,7 +76,7 @@ resource "anyscale_service" "test" {
   // minutes at this exact 60m value. The original 20m was simply too tight for this test, not
   // evidence of a hang, a capacity ceiling, or a provider defect - the wait predicate
   // (evaluateServiceState, gating on service.CurrentState) is correct; it just needed more time.
-  // PR2 timeouts{} migration: only create is exercised in this scenario, so only create is set.
+  // Only create is exercised in this scenario, so only create is set.
   // Block syntax (no "="), since timeouts.Block() returns a schema.SingleNestedBlock, not an
   // attribute - verified against the vendored terraform-plugin-framework-timeouts source.
   timeouts {
@@ -106,8 +101,8 @@ resource "anyscale_service" "test" {
 `, computeConfigName, cloud.ID, instanceTypes.Small, serviceName, projectID)
 
 	// updatedConfig changes ONLY ray_serve_config (adds a real env_var) - a genuine
-	// deploy-affecting field change (contract §6), so it must roll out a new version in place
-	// (same id, not RequiresReplace) rather than be a no-op like H2's timeouts-only case.
+	// deploy-affecting field change, so it must roll out a new version in place (same id, not
+	// RequiresReplace) rather than be a no-op like a timeouts-only change.
 	updatedConfig := fmt.Sprintf(`
 resource "anyscale_compute_config" "test" {
   name     = %[1]q
@@ -127,7 +122,7 @@ resource "anyscale_service" "test" {
   // minutes at this exact 60m value. The original 20m was simply too tight for this test, not
   // evidence of a hang, a capacity ceiling, or a provider defect - the wait predicate
   // (evaluateServiceState, gating on service.CurrentState) is correct; it just needed more time.
-  // PR2 timeouts{} migration: only create is exercised in this scenario, so only create is set.
+  // Only create is exercised in this scenario, so only create is set.
   // Block syntax (no "="), since timeouts.Block() returns a schema.SingleNestedBlock, not an
   // attribute - verified against the vendored terraform-plugin-framework-timeouts source.
   timeouts {
@@ -169,7 +164,7 @@ resource "anyscale_service" "test" {
 					resource.TestCheckResourceAttr("anyscale_service.test", "tags.purpose", "tfacc-real-infra-gate"),
 					CaptureResourceAttr("anyscale_service.test", "id", &serviceIDAfterCreate),
 				)),
-				// AC-R5, the load-bearing gate: an EMPTY plan across every attribute after a real
+				// The load-bearing gate: an EMPTY plan across every attribute after a real
 				// apply, not just a spot-check on ray_serve_config.
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
@@ -179,8 +174,7 @@ resource "anyscale_service" "test" {
 			},
 			// Real rollout step: changing ray_serve_config must actually redeploy the SAME
 			// service (id unchanged, so this proves in-place Update, not a replace) and reach
-			// RUNNING again - the real behavior "rolling out new versions" names explicitly, not
-			// yet proven against real infrastructure anywhere else in this suite.
+			// RUNNING again.
 			{
 				Config: updatedConfig,
 				Check: CaptureServiceDiagnosticsOnFailure(t, "anyscale_service.test", resource.ComposeAggregateTestCheckFunc(
@@ -208,24 +202,22 @@ resource "anyscale_service" "test" {
 				},
 			},
 		},
-		// AC-R6 is proven by CheckDestroy above: it runs after the TestCase's real destroy and
+		// Clean destroy is proven by CheckDestroy above: it runs after the TestCase's real destroy and
 		// asserts GET /api/v2/services-v2/{id} returns 404, not just that Destroy() returned nil.
 	})
 }
 
 // TestAccServiceResource_RealInfra_InPlaceRollout is the IN_PLACE-strategy companion to
 // TestAccServiceResource_RealInfra's rollout step above, which exercises the default ROLLOUT
-// strategy (new cluster, traffic shift). Requested directly by the user: both the in_place and
-// the standard rollout upgrade paths must be covered in acctest AND real E2E, not just one of the
-// two. The mock suite's TestAccServiceResource_InPlaceUpdateConverges already proves the
+// strategy (new cluster, traffic shift), so both upgrade paths are covered against real infra.
+// The mock suite's TestAccServiceResource_InPlaceUpdateConverges already proves the
 // provider's own polling/state handling for IN_PLACE in isolation; only real infra can prove the
 // backend actually honors IN_PLACE end to end - upgrading the SAME running cluster rather than
 // starting a new one - which is the thing a mock, by definition, cannot observe.
 //
 // rollout_strategy = "IN_PLACE" is set from the very first apply and left unchanged across both
-// steps - this is the confirmed, ratified UX (Option 2, user-confirmed): the backend rejects
-// IN_PLACE outright on a genuine create (a first real-infra run of this test with the initial
-// config setting IN_PLACE 404'd: "service does not exist"), so the resource's Create transparently
+// steps. The backend rejects IN_PLACE outright on a genuine create (it 404s with "service does
+// not exist"), so the resource's Create transparently
 // forces a standard deploy on the wire regardless of the configured strategy, while state still
 // stores the user's real IN_PLACE value unchanged (rollout_strategy is never part of the read
 // model, so this causes no drift). This test proves that contract end to end against real infra:
@@ -243,8 +235,7 @@ func TestAccServiceResource_RealInfra_InPlaceRollout(t *testing.T) {
 	}
 
 	// CreateEphemeralTestProjectForCloud, NOT an auto-discovered default project - see the
-	// identical comment on TestAccServiceResource_RealInfra above for why (a real, confirmed
-	// cross-cloud project/cloud mismatch this session, not a hypothetical).
+	// identical comment on TestAccServiceResource_RealInfra above for why.
 	projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloud.ID)
 	if err != nil {
 		t.Fatalf("failed to create ephemeral test project scoped to cloud %s: %v", cloud.ID, err)
@@ -267,8 +258,8 @@ resource "anyscale_service" "test" {
   build_id          = "anyscaleray2561-slim-py312-cu129"
   compute_config_id = anyscale_compute_config.test.config_id
   rollout_strategy  = "IN_PLACE"
-  // PR2 timeouts{} migration: both create and update exercised here (initial apply + IN_PLACE
-  // update to the same cluster) - block syntax (no "="), see the 60m fixture's comment above.
+  // Both create and update are exercised here (initial apply + IN_PLACE update to the same
+  // cluster) - block syntax (no "="), see the 60m fixture's comment above.
   timeouts {
     create = "20m"
     update = "20m"
@@ -310,8 +301,8 @@ resource "anyscale_service" "test" {
   build_id          = "anyscaleray2561-slim-py312-cu129"
   compute_config_id = anyscale_compute_config.test.config_id
   rollout_strategy  = "IN_PLACE"
-  // PR2 timeouts{} migration: both create and update exercised here (initial apply + IN_PLACE
-  // update to the same cluster) - block syntax (no "="), see the 60m fixture's comment above.
+  // Both create and update are exercised here (initial apply + IN_PLACE update to the same
+  // cluster) - block syntax (no "="), see the 60m fixture's comment above.
   timeouts {
     create = "20m"
     update = "20m"

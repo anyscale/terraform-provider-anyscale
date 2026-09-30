@@ -1,22 +1,21 @@
 package acctest
 
-// F5/F6 regression: worker-group name uniqueness and order stability. Two
-// worker groups sharing an instance_type with BOTH names left unset used to
-// both derive the identical default name (the instance_type itself) -
-// tolerated by the compute_templates storage layer, but a real risk once
-// Ray's name-keyed autoscaler dict is built from it. F5 makes the derivation
-// unique (deterministic "-2" suffix, client-side, before the request is ever
-// sent) and warns. F6 makes a worker_nodes list whose backend-returned order
-// differs from the user's own configured order resolve back to the
-// configured order (by name match, with a uniqueness guard), so pure
-// reordering never causes a spurious diff.
+// Worker-group name uniqueness and order stability. Two worker groups sharing
+// an instance_type with BOTH names left unset would both derive the identical
+// default name (the instance_type itself) - tolerated by the compute_templates
+// storage layer, but a real risk once Ray's name-keyed autoscaler dict is
+// built from it. The provider makes the derivation unique (deterministic "-2"
+// suffix, client-side, before the request is ever sent) and warns. A
+// worker_nodes list whose backend-returned order differs from the configured
+// order resolves back to the configured order (by name match, with a
+// uniqueness guard), so pure reordering never causes a spurious diff.
 //
-// These reuse newMockComputeConfigServerWithState (resource_compute_config_
-// lifecycle_acc_test.go), NOT a bespoke mock: that shared mock's
-// applyServerNormalization already replicates the real backend defaulting an
-// EMPTY worker name to its instance_type - an ad-hoc mock that just echoes
-// the request verbatim does not reproduce this, and would fail for the wrong
-// reason (an empty string rather than the real pre-fix collision).
+// The apply-based tests reuse newMockComputeConfigServerWithState
+// (resource_compute_config_lifecycle_acc_test.go), NOT a bespoke mock: that
+// shared mock's applyServerNormalization replicates the real backend
+// defaulting an EMPTY worker name to its instance_type - an ad-hoc mock that
+// just echoes the request verbatim does not reproduce this, and would pass or
+// fail for the wrong reason (an empty string rather than the real collision).
 
 import (
 	"strings"
@@ -25,8 +24,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-// F5: two worker groups, same instance_type, both names unset - must NOT
-// collide (deterministic unique-derive), and must warn at plan time.
+// Two worker groups, same instance_type, both names unset: must warn at plan
+// time. Runs `terraform validate` against a freshly built binary
+// (runTerraformValidate) - no mock server, since the warning is plan-time only
+// and resource.Test's reattach path does not reliably surface warnings. The
+// unique-suffix derivation itself is proven by the apply-based test below.
 func TestAccComputeConfigResource_DuplicateDerivedWorkerNamesDisambiguated_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	binDir := buildProviderBinaryForCLICheck(t)
@@ -114,13 +116,13 @@ resource "anyscale_compute_config" "test" {
 	})
 }
 
-// F5, additional_resources call site: the disambiguation-index-building loop
+// additional_resources call site: the disambiguation-index-building loop
 // in additionalResourceToDeploymentConfig (compute_config_helpers.go) is a
 // separate copy of the primary path's loop above - only the leaf
 // workerNodeConfigToAPI/disambiguateDefaultedWorkerNames functions are
 // shared, not the surrounding "is this index eligible" logic itself. This is
-// the permanent regression proof for that second call site: without it, only
-// the primary path's fix has committed CI-gated coverage.
+// the regression proof for that second call site: without it, only the
+// primary path has CI-gated coverage.
 func TestAccComputeConfigResource_AdditionalResourcesDuplicateDerivedWorkerNamesGetUniqueSuffix_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -173,7 +175,7 @@ resource "anyscale_compute_config" "test" {
 	})
 }
 
-// F6: worker_nodes reordered by the backend must resolve back to the
+// worker_nodes reordered by the backend must resolve back to the
 // user's configured order, so a pure backend-side reorder never diffs.
 func TestAccComputeConfigResource_WorkerOrderMatchesConfiguredOrder_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)

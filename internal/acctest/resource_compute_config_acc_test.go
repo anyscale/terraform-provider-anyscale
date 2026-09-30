@@ -44,9 +44,9 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 				// Compute configs ARCHIVE (not delete) on destroy: the resource's Delete
 				// calls /api/v2/compute_templates/{id}/archive, which sets archived_at
 				// but leaves the row 200-fetchable. So verify the archived marker, not a
-				// 404 — else CheckDestroy false-positives ("still returns 200"). Same
-				// wrong-check-type class as the F4 container-image fix; confirmed live:
-				// an archived config returns archived_at set + deleted_at null here.
+				// 404 — else CheckDestroy false-positives ("still returns 200").
+				// Confirmed live: an archived config returns archived_at set +
+				// deleted_at null here.
 				CheckDestroy: NewAPIArchivedDestroyCheckByAttr("anyscale_compute_config", "config_id", "/api/v2/compute_templates/%s", "result.archived_at"),
 				Steps: []resource.TestStep{
 					// Create and Read testing
@@ -80,15 +80,12 @@ func TestAccComputeConfigResource_Basic(t *testing.T) {
 							"min_resources", // serialized into flags["min_resources"]; null on Basic test config but API returns whatever it normalized
 							"max_resources", // serialized into flags["max_resources"]; null on Basic test config but API returns whatever it normalized
 							"zones",         // API replaces empty with ["any"]; preserved-as-configured by Read
-							// enable_cross_zone_scaling, advanced_instance_config, and flags used
-							// to be listed here too, with a comment that predates CC11/CC12/CC14:
-							// CC14 made enable_cross_zone_scaling resolve to false unconditionally
-							// on import instead of staying null, and CC12 made ImportState recover
-							// flags/advanced_instance_config from the API - for THIS test's config,
-							// which never sets any of the three, both now correctly stay/resolve to
-							// their pre-import values with nothing to ignore. See
-							// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields(_RealAPI) for the
-							// actual CC12 recovery-with-real-values proof.
+							// enable_cross_zone_scaling, advanced_instance_config, and flags need
+							// no entry: import resolves enable_cross_zone_scaling to false and
+							// recovers flags/advanced_instance_config from the API, which for this
+							// config (none of the three set) matches the created state. See
+							// TestAccComputeConfigResource_ImportRecoversWriteOnlyFields(_RealAPI)
+							// for recovery of explicitly set values.
 						},
 					},
 				},
@@ -129,14 +126,13 @@ func TestAccComputeConfigResource_WithWorkers(t *testing.T) {
 	})
 }
 
-// TestAccComputeConfigResource_InconsistentResultRegressions is a regression
-// test for tasks 451e2845 and 1f2d592f: worker_nodes[].name and resource-map
-// keys (per-node resources, and top-level min_resources) used to trip
-// Terraform's "provider produced inconsistent result after apply" check -
+// TestAccComputeConfigResource_InconsistentResultRegressions guards against
+// "provider produced inconsistent result after apply" on worker_nodes[].name and
+// resource-map keys (per-node resources, and top-level min_resources):
 // resourceMapToAPI canonicalizes well-known resource keys to lowercase before
-// sending, so a configured "CPU" used to come back as "cpu", and a
-// server-assigned worker name used to come back non-null when the config left
-// it unset. Step 1 exercises both at Create time. Step 2 adds a second,
+// sending, so a configured "CPU" must still round-trip as "CPU", and a
+// server-assigned worker name must stay null when the config leaves it
+// unset. Step 1 exercises both at Create time. Step 2 adds a second,
 // brand-new nameless worker group via Update - the case populateNodesFromResponse
 // exists for, since UseStateForUnknown has no prior list element to fall back
 // to for a worker group that didn't exist before this update.
@@ -169,10 +165,10 @@ func TestAccComputeConfigResource_InconsistentResultRegressions(t *testing.T) {
 					},
 				},
 			},
-			// regression test for task 1f2d592f: adding a second, brand-new
-			// nameless worker group via Update (not Create) must not trip the
-			// inconsistent-result check either - Update() now resolves Computed
-			// sub-attributes from the response the same way Create() does.
+			// Adding a second, brand-new nameless worker group via Update (not
+			// Create) must not trip the inconsistent-result check either - Update()
+			// resolves Computed sub-attributes from the response the same way
+			// Create() does.
 			{
 				Config: testAccComputeConfigResourceConfig_inconsistentResultUpdateAddWorker(configName, cloudID, "m5.large"),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -466,19 +462,10 @@ resource "anyscale_compute_config" "test" {
 }
 
 // TestAccComputeConfigResource_Disappears verifies that an out-of-band archive
-// of the compute config is detected by the next plan as drift.
-//
-// GetAllConfiguredClouds used to check an inline cloud_resources field that
-// GET /api/v2/clouds never actually populates, so this test silently skipped
-// in every environment, including CI, regardless of how many healthy clouds
-// existed. Fixing that discovery bug (see cloudHasResources) made this test
-// run for the first time and immediately exposed the real, previously-hidden
-// bug it was written to catch: Read() did not treat an archived_at compute
-// config as gone, so an out-of-band archive produced an empty refresh plan
-// instead of drift. That is CC11, now fixed (Read and ImportState both check
-// ArchivedAt and remove the resource from state the same way as the 404
-// path) - this test was stopgap-skipped with a tracked reason in the
-// meantime and is un-skipped now that the fix is confirmed present.
+// of the compute config is detected by the next plan as drift. Archiving leaves
+// the config 200-fetchable, so this depends on Read (and ImportState) treating
+// a set archived_at as gone and removing the resource from state, the same as
+// the 404 path; without that, the refresh plan would be empty.
 func TestAccComputeConfigResource_Disappears(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -552,14 +539,11 @@ func testAccDeleteComputeConfigViaAPI(resourceName string) resource.TestCheckFun
 }
 
 // TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI is the real-API
-// companion to the mock-server version of this test (see
-// resource_compute_config_lifecycle_acc_test.go for the full CC12 background
-// and the three-point verify-gate this proves). The mock version is intended
-// to be the CI-durable floor (it was NOT, until 2026-07-08 - see the
-// TestAcc<Thing>Resource_/DataSource_ naming-gap fix that made it actually
-// selectable by CI for the first time); this one proves the same three gates against the actual
-// Anyscale API and, specifically, against a REAL per-node-shaped payload the
-// backend accepts, closing the design's least-confident spot: whether Go's
+// companion to the mock-server TestAccComputeConfigResource_ImportRecoversWriteOnlyFields
+// (resource_compute_config_lifecycle_acc_test.go, which explains the three
+// properties both prove). The mock version is the CI floor; this one proves the
+// same three against the actual Anyscale API and, specifically, against a REAL
+// per-node-shaped payload the backend accepts, covering what a mock cannot: whether Go's
 // json.Marshal of the recovered advanced_instance_config/flags actually
 // comes back byte-identical to what a user's own jsonencode() would produce,
 // which only a real round trip through the framework can prove.
@@ -580,7 +564,7 @@ func TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI(t *testi
 	}
 	cloudID := GetComputeConfigCloudID(t)
 	ctx := context.Background()
-	configName := UniqueName(t, "cc12-import-real")
+	configName := UniqueName(t, "compute-config-import-real")
 
 	createPayload := map[string]interface{}{
 		"name": configName,
@@ -778,14 +762,12 @@ func TestAccComputeConfigResource_K8S(t *testing.T) {
 	})
 }
 
-// TestAccComputeConfigResource_RenameForcesReplace is the regression test for
-// CC3a. Before this fix, renaming a compute config sent the new name to the
-// same backend "create-or-new-version" endpoint used for Update, which
-// silently created a brand-new config under the new name and left the old
-// one live and un-archived - a real, live-verified orphan bug (see
-// the rename-orphan probe in the design discussion), not
-// hypothetical. name now carries RequiresReplace, so Terraform's own
-// destroy-then-create replace cycle runs the resource's normal Delete/Create
+// TestAccComputeConfigResource_RenameForcesReplace guards against a rename
+// orphaning the old config. The backend's "create-or-new-version" endpoint
+// used for Update keys on name, so sending a new name through it would
+// silently create a brand-new config and leave the old one live and
+// un-archived (verified live). name therefore carries RequiresReplace, so
+// Terraform's own destroy-then-create replace cycle runs the resource's normal Delete/Create
 // path instead: the old config gets archived (proving Delete ran on it, not
 // silently abandoned) and a genuinely new config is provisioned under the new
 // name. This is the actual regression coverage - a plan-only check would only

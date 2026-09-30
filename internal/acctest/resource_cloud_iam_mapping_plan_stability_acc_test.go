@@ -15,21 +15,23 @@ import (
 // writeJSONResult and readJSONBody are small local helpers for this file's
 // mock server - it needs to decode and re-encode arbitrary spec shapes
 // (rather than a fixed struct) so a PUT's body can be stored and echoed back
-// verbatim by the next GET.
+// verbatim by the next GET. They run on the httptest handler goroutine, where
+// t.Fatal must not be called, so they report with t.Errorf instead.
 func writeJSONResult(t *testing.T, w http.ResponseWriter, result map[string]any) {
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(map[string]any{"result": result}); err != nil {
-		t.Fatalf("failed to encode mock response: %v", err)
+		t.Errorf("failed to encode mock response: %v", err)
 	}
 }
 
-func readJSONBody(t *testing.T, r *http.Request) map[string]any {
+func readJSONBody(t *testing.T, r *http.Request) (map[string]any, bool) {
 	t.Helper()
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		t.Fatalf("failed to decode request body: %v", err)
+		t.Errorf("failed to decode request body: %v", err)
+		return nil, false
 	}
-	return body
+	return body, true
 }
 
 // This file proves plan-stability for anyscale_cloud_iam_mapping against a
@@ -71,16 +73,23 @@ func newCloudIAMMappingMockServer(t *testing.T, cloudID, cloudResourceID string)
 			// putCloudDeploymentConfig marshals CloudDeploymentConfigResult{Spec}
 			// directly as the request body - {"spec": {...}}, with no "result"
 			// wrapper. Only GET/PUT RESPONSES are wrapped in "result".
-			body := readJSONBody(t, r)
+			body, ok := readJSONBody(t, r)
+			if !ok {
+				http.Error(w, `{"error":{"detail":"mock: undecodable request body"}}`, http.StatusBadRequest)
+				return
+			}
 			newSpec, ok := body["spec"].(map[string]any)
 			if !ok {
-				t.Fatalf("PUT body missing spec: %v", body)
+				t.Errorf("PUT body missing spec: %v", body)
+				http.Error(w, `{"error":{"detail":"mock: PUT body missing spec"}}`, http.StatusBadRequest)
+				return
 			}
 			spec = newSpec
 			w.WriteHeader(http.StatusOK)
 			writeJSONResult(t, w, map[string]any{"spec": spec})
 		default:
-			t.Fatalf("unexpected method %s on %s", r.Method, path)
+			t.Errorf("unexpected method %s on %s", r.Method, path)
+			http.Error(w, `{"error":{"detail":"mock: unexpected method"}}`, http.StatusMethodNotAllowed)
 		}
 	})
 

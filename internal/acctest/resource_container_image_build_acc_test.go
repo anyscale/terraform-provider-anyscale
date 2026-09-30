@@ -45,10 +45,9 @@ RUN pip install emoji==2.15.0`
 		// archived_at + archiver_id on the ClusterEnvironment row, and never
 		// touches deleted_at. The /ext/v0 read model doesn't even serialize
 		// archived_at, so its deleted_at is structurally always null — no
-		// amount of polling that field will ever observe an archive. Confirmed
-		// against the live API 2026-07-02: an image archived minutes earlier
-		// showed deleted_at=null on /ext/v0 and archived_at=<real timestamp>
-		// on /api/v2 for the same ID.
+		// amount of polling that field will ever observe an archive. Observed
+		// against the live API: an archived image shows deleted_at=null on
+		// /ext/v0 and a real archived_at timestamp on /api/v2 for the same ID.
 		CheckDestroy: NewAPIArchivedDestroyCheck("anyscale_container_image_build", "/api/v2/application_templates/%s", "result.archived_at"),
 		Steps: []resource.TestStep{
 			// Create and Read testing

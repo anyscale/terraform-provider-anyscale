@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,8 +26,8 @@ func init() {
 }
 
 // sweepServiceMaxTerminateWait/sweepServiceTerminatePollTick bound the sweeper's own
-// terminate-then-wait loop: DELETE /{id} 400s unless current_state is already TERMINATED (traced
-// via contract §H1/the resource's own Delete), so a bare terminate-then-immediate-delete would
+// terminate-then-wait loop: DELETE /{id} 400s unless current_state is already TERMINATED (the
+// resource's own Delete handles the same constraint), so a bare terminate-then-immediate-delete would
 // fail here too. Self-contained rather than reusing service_helpers.go's waitForServiceState:
 // that helper is unexported (package provider, this file is package acctest), and a sweeper has
 // no need for the millisecond-injectable timing that helper's unit tests rely on - a real,
@@ -122,10 +123,10 @@ func listAllServicesForSweep(ctx context.Context, client *provider.Client) ([]sw
 // next_paging_token across pages instead of silently truncating to page one - mirrors
 // TestListAllProjectsForSweep_MultiPage's guard for the identical class of bug.
 func TestListAllServicesForSweep_MultiPage(t *testing.T) {
-	requestCount := 0
+	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		if requestCount == 1 {
+		call := requestCount.Add(1)
+		if call == 1 {
 			if got := r.URL.Query().Get("paging_token"); got != "" {
 				t.Errorf("first request should not carry a paging_token, got %q", got)
 			}
@@ -146,8 +147,8 @@ func TestListAllServicesForSweep_MultiPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if requestCount != 2 {
-		t.Fatalf("expected 2 requests (one per page), got %d", requestCount)
+	if requestCount.Load() != 2 {
+		t.Fatalf("expected 2 requests (one per page), got %d", requestCount.Load())
 	}
 	if len(services) != 2 {
 		t.Fatalf("expected 2 services across both pages, got %d (silent truncation would show up as a short result here)", len(services))
@@ -178,7 +179,7 @@ func sweepDeleteService(ctx context.Context, client *provider.Client, s sweepSer
 				return err
 			}
 		case http.StatusNotFound:
-			// Already gone (terminated+deleted out-of-band) - matches the resource's own H1
+			// Already gone (terminated+deleted out-of-band) - matches the resource's own Delete
 			// handling; nothing left to wait for or delete.
 			log.Printf("[sweep:anyscale_service] %s (%s) already gone at terminate", s.ID, s.Name)
 			return nil
