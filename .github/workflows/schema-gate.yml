@@ -54,4 +54,17 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-        run: .github/scripts/schema-gate.sh gate "$BASE_SHA" "$HEAD_SHA"
+        # The gate script runs from the merge-base for the same reason the classifier does: a
+        # PR must not edit the logic that judges it. Only the PR that adds the gate falls back
+        # to its own copy.
+        run: |
+          merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA") ||
+            { echo "::error::schema-gate: no merge-base between the PR base and head"; exit 2; }
+          script="$RUNNER_TEMP/schema-gate.sh"
+          if git cat-file -e "${merge_base}:.github/scripts/schema-gate.sh" 2>/dev/null; then
+            git show "${merge_base}:.github/scripts/schema-gate.sh" > "$script"
+          else
+            echo "::notice::schema-gate: .github/scripts/schema-gate.sh does not exist at the merge-base ${merge_base}; running the PR head's copy. This only happens for the PR that adds the gate."
+            cp .github/scripts/schema-gate.sh "$script"
+          fi
+          bash "$script" gate "$BASE_SHA" "$HEAD_SHA"

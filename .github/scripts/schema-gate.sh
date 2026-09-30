@@ -130,7 +130,36 @@ gate() {
   dump base "$merge_base" "$WORK/base.json"
   dump head "$head_sha" "$WORK/head.json"
 
-  (cd "$REPO_ROOT" && go build -o "$WORK/schema-diff" ./tools/schema-diff) || dump_failure "the schema-diff tool (go build failed)"
+  # The classifier comes from the merge-base, so a PR is judged by the rules already on
+  # main and cannot relax them for itself. The one exception is the PR that first adds
+  # the tool, whose merge-base has none.
+  local tool_src
+  if git -C "$REPO_ROOT" cat-file -e "${merge_base}:tools/schema-diff/main.go" 2>/dev/null; then
+    tool_src="$WORK/tool-src"
+    git -C "$REPO_ROOT" worktree add --detach --quiet "$tool_src" "$merge_base" ||
+      dump_failure "the schema-diff tool (${merge_base}: worktree)"
+    WORKTREES+=("$tool_src")
+    echo "schema-gate: classifier built from the merge-base ${merge_base}"
+  else
+    echo "::notice::schema-gate: tools/schema-diff does not exist at the merge-base ${merge_base}; building the classifier from the PR head. This only happens for the PR that adds the gate."
+    tool_src="$REPO_ROOT"
+  fi
+  (cd "$tool_src" && go build -o "$WORK/schema-diff" ./tools/schema-diff) || dump_failure "the schema-diff tool (go build failed)"
+
+  # A PR that edits the gate is still judged by the merge-base rules above, but say so loudly:
+  # its own rule changes only take effect for the next PR.
+  local gate_files
+  local path
+  gate_files=""
+  for path in .github/workflows/schema-gate.yml .github/scripts/schema-gate.sh tools/schema-diff/; do
+    if [ -n "$(git -C "$REPO_ROOT" diff --name-only "$merge_base" "$head_sha" -- "$path")" ]; then
+      gate_files+="${path} "
+    fi
+  done
+  if [ -n "$gate_files" ]; then
+    echo "::warning::schema-gate: this PR changes the schema gate itself (${gate_files% }). It is judged by the gate rules at the merge-base; its own changes apply from the next PR. Review them."
+    summary "> **Needs review: this PR changes the schema gate itself** (\`${gate_files% }\`). It is judged by the gate rules at the merge-base; its own changes apply from the next PR." ""
+  fi
 
   local rc=0
   "$WORK/schema-diff" -base "$WORK/base.json" -head "$WORK/head.json" \
