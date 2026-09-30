@@ -496,7 +496,11 @@ resource "anyscale_service" "test" {
 				Config:             config,
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true,
-				Check:              resource.TestCheckResourceAttr("anyscale_service.test", "tags.%", "0"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_service.test", plancheck.ResourceActionUpdate),
+					},
+				},
 			},
 		},
 	})
@@ -509,14 +513,14 @@ resource "anyscale_service" "test" {
 // record of it to destroy or reconcile on the next apply. The fix is to persist id (and the rest
 // of the computed fields) via resp.State.Set BEFORE the wait, so a subsequent wait failure still
 // leaves a recoverable record. Proven here with a service that never leaves STARTING and a short
-// timeouts.create: the apply is expected to error (the wait times out), but the resource's id
-// must still be checkable afterward - proving it landed in state despite the error, not just that
-// the error occurred.
+// timeouts.create: the apply is expected to error (the wait times out). A Check on that step
+// never runs, so a follow-up RefreshState step asserts the id is in state, and the terminate
+// count after resource.Test proves the end-of-test destroy found a record to destroy.
 func TestAccServiceResource_CreateWaitTimeoutPreservesID(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	const serviceID = "svc_g2_orphan_prevention"
-	var terminated int32
+	var terminated, terminateCalls int32
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v2/services-v2/apply", func(w http.ResponseWriter, r *http.Request) {
@@ -539,6 +543,7 @@ func TestAccServiceResource_CreateWaitTimeoutPreservesID(t *testing.T) {
 		serveServiceGetOrDelete(t, w, r, serviceFindingsJSON(serviceID, "g2-orphan-prevention", "prj_g2", state))
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&terminateCalls, 1)
 		atomic.StoreInt32(&terminated, 1)
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": {}}`)
@@ -570,8 +575,20 @@ resource "anyscale_service" "test" {
 			{
 				Config:      config,
 				ExpectError: regexp.MustCompile(`(?s)wait for service rollout.*timed out`),
-				Check:       resource.TestCheckResourceAttr("anyscale_service.test", "id", serviceID),
+			},
+			{
+				// The failed create leaves the record tainted, so the
+				// post-refresh plan is a replacement.
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr("anyscale_service.test", "id", serviceID),
 			},
 		},
 	})
+
+	// resource.Test's destroy only reaches what is in state; no terminate
+	// call means the timed-out service was never recorded.
+	if got := atomic.LoadInt32(&terminateCalls); got < 1 {
+		t.Fatalf("terminate called %d times, want >= 1: the service created before the wait timed out was orphaned", got)
+	}
 }

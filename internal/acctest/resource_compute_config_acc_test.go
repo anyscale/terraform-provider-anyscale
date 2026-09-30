@@ -686,12 +686,28 @@ resource "anyscale_compute_config" "test" {
 				ImportStateId:      configID,
 				ImportStatePersist: true,
 				Config:             configOmittingWriteOnlyFields,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "config_id", configID),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "flags.disable_gpu_health_checks", "true"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "flags.idle_termination_seconds", "60"),
-					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "advanced_instance_config.TagSpecifications"),
-				),
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported instance state, got %d", len(states))
+					}
+					attrs := states[0].Attributes
+					// A Dynamic object flattens to leaf keys; there is no
+					// value at the bare "advanced_instance_config.TagSpecifications".
+					for attr, want := range map[string]string{
+						"config_id":                                                 configID,
+						"flags.disable_gpu_health_checks":                           "true",
+						"flags.idle_termination_seconds":                            "60",
+						"advanced_instance_config.TagSpecifications.#":              "1",
+						"advanced_instance_config.TagSpecifications.0.ResourceType": "instance",
+						"advanced_instance_config.TagSpecifications.0.Tags.0.Key":   "team",
+						"advanced_instance_config.TagSpecifications.0.Tags.0.Value": "ml-platform",
+					} {
+						if got, ok := attrs[attr]; !ok || got != want {
+							return fmt.Errorf("imported %s = %q (present=%t), want %q", attr, got, ok, want)
+						}
+					}
+					return nil
+				},
 			},
 			{
 				// Gate 1 + gate 3: real json.Marshal round-trip proof, the
