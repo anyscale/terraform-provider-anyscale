@@ -86,7 +86,10 @@ func TestAccCloudResource_AzureVM_NotSupported(t *testing.T) {
 	})
 }
 
-// TestAccCloudResource_GCP_K8S tests GCP K8S (GKE) cloud creation
+// TestAccCloudResource_GCP_K8S tests GCP K8S (GKE) cloud creation.
+// Real-infra gated; run by hand:
+//
+//	TF_ACC=1 ANYSCALE_TEST_REAL_INFRA=1 go test ./internal/acctest -run '^TestAccCloudResource_GCP_K8S$' -v -count=1
 func TestAccCloudResource_GCP_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	SkipIfNoRealInfra(t)
@@ -130,6 +133,19 @@ func TestAccCloudResource_GCP_K8S(t *testing.T) {
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
 					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
+					// Create keeps the configured bare name; the backend returns GCS buckets
+					// gs://-prefixed and import recovers that form. Asserted below instead.
+					"object_storage.bucket_name",
+				},
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported instance state, got %d", len(states))
+					}
+					want := "gs://tfacc-gcp-k8s-bucket-" + randSuffix
+					if got := states[0].Attributes["object_storage.bucket_name"]; got != want {
+						return fmt.Errorf("imported object_storage.bucket_name = %q, want %q", got, want)
+					}
+					return nil
 				},
 			},
 		},
@@ -1579,7 +1595,7 @@ resource "anyscale_cloud" "test" {
     bucket_name = "tfacc-gcp-k8s-bucket-%s"
   }
 }
-`, name, k8sConfigBlock("anyscale", fmt.Sprintf("tfacc-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}, redisEndpoint), randSuffix)
+`, name, k8sConfigBlock(fmt.Sprintf("tfacc-gcp-k8s-operator-%s@my-gcp-project.iam.gserviceaccount.com", randSuffix), []string{"us-central1-a", "us-central1-b"}, redisEndpoint), randSuffix)
 }
 
 // testAccCloudResourcePVCCSIConflictConfig is deliberately minimal (just

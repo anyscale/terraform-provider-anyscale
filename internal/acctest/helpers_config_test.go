@@ -6,7 +6,7 @@ import (
 )
 
 // k8sConfigBlock renders the kubernetes_config nested block shared by the
-// cloud/cloud_resource HCL test fixtures that use the "namespace + operator
+// cloud/cloud_resource HCL test fixtures that use the "operator
 // identity + zones" shape (distinct from the single-occurrence bare
 // context/kubeconfig_path shape used elsewhere, which is not duplicated
 // anywhere and so is left inline). identity is the caller's own
@@ -15,7 +15,7 @@ import (
 // whichever one it needs and passes the final string through unchanged.
 // redisEndpoint is omitted from the block entirely when empty, so existing
 // callers that pass "" render byte-identical HCL to before this field existed.
-func k8sConfigBlock(namespace, identity string, zones []string, redisEndpoint string) string {
+func k8sConfigBlock(identity string, zones []string, redisEndpoint string) string {
 	quoted := make([]string, len(zones))
 	for i, z := range zones {
 		quoted[i] = fmt.Sprintf("%q", z)
@@ -25,8 +25,7 @@ func k8sConfigBlock(namespace, identity string, zones []string, redisEndpoint st
 		redisLine = fmt.Sprintf("\n    redis_endpoint                  = %q", redisEndpoint)
 	}
 	return fmt.Sprintf(`  kubernetes_config {
-    namespace                       = "%s"
     anyscale_operator_iam_identity  = "%s"
     zones                           = [%s]%s
-  }`, namespace, identity, strings.Join(quoted, ", "), redisLine)
+  }`, identity, strings.Join(quoted, ", "), redisLine)
 }
