@@ -1,0 +1,56 @@
+name: Schema Gate
+
+# Fails a PR whose provider schema has a breaking change relative to its
+# merge-base, unless the PR carries the `breaking-change` label AND a
+# `release-note:breaking-change` entry in .changelog/<PR#>.txt. A failure to
+# build or dump the schema at either ref always fails; the label never
+# bypasses it. Logic lives in .github/scripts/schema-gate.sh so it runs
+# locally too. Re-runs on labeled/unlabeled, like changelog-gate.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: schema-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  schema-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so the merge-base with the base branch is present.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: false
+
+      - name: Setup Terraform
+        # Same pin as ci.yml: dev_overrides without `terraform init` needs >= 1.15.
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.15.7"
+          # The wrapper decorates stdout, which would corrupt the schema JSON.
+          terraform_wrapper: false
+
+      - name: Schema gate
+        # PR-controlled values reach the script only through env, never
+        # interpolated into the script body.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: .github/scripts/schema-gate.sh gate "$BASE_SHA" "$HEAD_SHA"
