@@ -1,0 +1,17 @@
+# Base variables for the gcp-vm example.
+#
+# The variables below have no default and must be supplied - copy this file
+# to terraform.tfvars (already gitignored) and fill in your own values, or
+# pass -var-file=terraform.tfvars.example directly:
+#
+#   terraform apply -var-file=terraform.tfvars.example
+#
+# Everything else in variables.tf has a working default and does not need to
+# be set here.
+
+gcp_region                   = "us-central1"
+gcp_zone                     = "us-central1-a"
+billing_account_id           = "000000-000000-000000"
+root_folder_number           = "000000000000"
+customer_ingress_cidr_ranges = "203.0.113.0/24"                 # replace with your own CIDR
+anyscale_org_id              = "org_00000000000000000000000000" # replace with your org ID
