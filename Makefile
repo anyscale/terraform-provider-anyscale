@@ -7,7 +7,9 @@ INSTALL_DIR := $(HOME)/.terraform.d/plugins/registry.terraform.io/anyscale/anysc
 GO := go
 GOFLAGS := -v
 GOLANGCI_LINT := golangci-lint
-TFPLUGINDOCS := tfplugindocs
+# tfplugindocs is pinned by its own module (tools/docsgen) so its ~25 dependencies
+# never enter the provider's go.mod. -modfile points the go tool at that module.
+TFPLUGINDOCS := go tool -modfile=tools/docsgen/go.mod tfplugindocs
 
 # Per-run suffix used by example apply/destroy targets to isolate state and
 # cloud names across parallel runs. Defaults to a timestamp.
@@ -165,12 +167,12 @@ testacc-cover: ## Run acceptance tests with coverage (token from Keychain, fails
 .PHONY: sweep
 sweep: ## Run sweepers to clean up leaked test resources
 	@echo "==> Running sweepers..."
-	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 60m -sweep=anyscale -sweep-run=
+	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 50m -sweep=anyscale -sweep-run=
 
 .PHONY: sweep-dry-run
 sweep-dry-run: ## List what sweepers would delete without actually deleting
 	@echo "==> Running sweepers in dry-run mode..."
-	TF_ACC=1 ANYSCALE_SWEEP_DRY_RUN=1 $(GO) test ./internal/acctest/ -v -timeout 60m -sweep=anyscale -sweep-run=
+	TF_ACC=1 ANYSCALE_SWEEP_DRY_RUN=1 $(GO) test ./internal/acctest/ -v -timeout 50m -sweep=anyscale -sweep-run=
 
 .PHONY: test-compile
 test-compile: ## Verify tests compile without running
@@ -270,22 +272,12 @@ deps-update: ## Update all dependencies
 .PHONY: docs
 docs: ## Generate provider documentation
 	@echo "==> Generating documentation..."
-	@if command -v $(TFPLUGINDOCS) >/dev/null 2>&1; then \
-		$(TFPLUGINDOCS) generate --provider-name $(BINARY_NAME); \
-	else \
-		echo "tfplugindocs not installed. Install with: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest"; \
-		exit 1; \
-	fi
+	$(TFPLUGINDOCS) generate --provider-name $(BINARY_NAME)
 
 .PHONY: docs-validate
 docs-validate: ## Validate provider documentation
 	@echo "==> Validating documentation..."
-	@if command -v $(TFPLUGINDOCS) >/dev/null 2>&1; then \
-		$(TFPLUGINDOCS) validate --provider-name $(BINARY_NAME); \
-	else \
-		echo "tfplugindocs not installed. Install with: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest"; \
-		exit 1; \
-	fi
+	$(TFPLUGINDOCS) validate --provider-name $(BINARY_NAME)
 
 # ============================================================================
 # CLEAN

@@ -17,6 +17,10 @@ updates:
       - "skip-changelog"
     schedule:
       interval: "weekly"
+    # Wait a week after a new release before proposing it. Security updates are
+    # not subject to cooldown, so vulnerability fixes still arrive immediately.
+    cooldown:
+      default-days: 7
     groups:
       actions-minor-patch:
         update-types:
@@ -33,8 +37,23 @@ updates:
       - "skip-changelog"
     schedule:
       interval: "weekly"
+    # Wait a week after a new release before proposing it. Security updates are
+    # not subject to cooldown, so vulnerability fixes still arrive immediately.
+    cooldown:
+      default-days: 7
     groups:
       gomod-minor-patch:
         update-types:
           - "minor"
           - "patch"
+
+  - package-ecosystem: "gomod"
+    directory: "/tools/docsgen"
+    labels:
+      - "dependencies"
+      - "go"
+      - "skip-changelog"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
