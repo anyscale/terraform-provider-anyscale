@@ -453,15 +453,47 @@ resource "anyscale_organization_user_role" "realinfra" {
 }
 `, email, denyRole)
 
-	// Step 2 OMITS deny_roles, which is what routes the write down the legacy
+	// Steps 2 and 3 OMIT deny_roles, which routes the write down the legacy
 	// permission_level path. The question is whether that path leaves the
 	// previously-set deny role alone.
-	omittedDenyRoles := realInfraProviderBlock() + fmt.Sprintf(`
+	omittedDenyRoles := func(baseRole string) string {
+		return realInfraProviderBlock() + fmt.Sprintf(`
 resource "anyscale_organization_user_role" "realinfra" {
   email     = %[1]q
-  base_role = "collaborator"
+  base_role = %[2]q
 }
-`, email)
+`, email, baseRole)
+	}
+
+	// THE R5 ASSERTION. Read fresh from the API after a legacy permission_level
+	// PUT and require both the new base role and the deny role.
+	legacyWriteKeptDenyRole := func(wantBase string) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			live := mustReadLiveOrgRole(t, email)
+			if !strings.EqualFold(live.BaseRole, wantBase) {
+				return fmt.Errorf("the legacy write did not land: backend base_role is %q, want %q", live.BaseRole, wantBase)
+			}
+			if !containsFold(live.AdditionalRoles, denyRole) {
+				return fmt.Errorf("R5 FAILED - the legacy permission_level write CLOBBERED an existing deny role. "+
+					"Backend now reports deny roles %v; %q was set through the roles path and is gone. "+
+					"The routing design in anyscale_organization_user_role assumes these two write paths are "+
+					"independent, and this proves they are not", live.AdditionalRoles, denyRole)
+			}
+			return nil
+		}
+	}
+
+	legacyUpdateStep := func(baseRole string) resource.TestStep {
+		return resource.TestStep{
+			Config: omittedDenyRoles(baseRole),
+			ConfigPlanChecks: resource.ConfigPlanChecks{
+				PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(addr, plancheck.ResourceActionUpdate),
+				},
+			},
+			Check: legacyWriteKeptDenyRole(baseRole),
+		}
+	}
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -471,6 +503,7 @@ resource "anyscale_organization_user_role" "realinfra" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "deny_roles.#", "1"),
 					resource.TestCheckResourceAttr(addr, "deny_roles.0", denyRole),
+					CaptureResourceAttr(addr, "identity_id", &identityID),
 					// Confirm against the BACKEND, not state, that the write landed.
 					func(*terraform.State) error {
 						live := mustReadLiveOrgRole(t, email).AdditionalRoles
@@ -481,24 +514,8 @@ resource "anyscale_organization_user_role" "realinfra" {
 					},
 				),
 			},
-			{
-				Config: omittedDenyRoles,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// THE R5 ASSERTION. Read fresh from the API after the legacy
-					// permission_level PUT and require the deny role to have
-					// survived it.
-					func(*terraform.State) error {
-						live := mustReadLiveOrgRole(t, email).AdditionalRoles
-						if !containsFold(live, denyRole) {
-							return fmt.Errorf("R5 FAILED - the legacy permission_level write CLOBBERED an existing deny role. "+
-								"Backend now reports deny roles %v; %q was set through the roles path and is gone. "+
-								"The routing design in anyscale_organization_user_role assumes these two write paths are "+
-								"independent, and this proves they are not", live, denyRole)
-						}
-						return nil
-					},
-				),
-			},
+			legacyUpdateStep("owner"),
+			legacyUpdateStep("collaborator"),
 		},
 	})
 }
