@@ -70,8 +70,8 @@ example per type.
 
 **Shipping a breaking change?** Its fragment must use `release-note:breaking-change` and state
 both what breaks and how to migrate, in one sentence — see the breaking-change section of
-`.changelog/README.md` for the exact shape. This is the only mechanism for flagging a break; there
-is no separate breaking-change label.
+`.changelog/README.md` for the exact shape. A deliberate schema break also needs the
+`breaking-change` label; see [Schema breaking-change gate](#schema-breaking-change-gate) below.
 
 **No user-facing effect?** Internal refactors, test-only fixes, CI changes, and examples-only
 edits outside `examples/resources/`, `examples/data-sources/`, and `examples/provider/` don't need
@@ -81,3 +81,21 @@ are the exception: they feed `tfplugindocs` and are pulled into registry-publish
 `docs/resources/cloud.md`), so a change there is provider-facing even though it's "just an
 example." If you're contributing from a fork and can't apply labels yourself, say so in the PR
 description and a maintainer will apply it during review.
+
+## Schema breaking-change gate
+
+The `Schema Gate` check compares the provider schema at the PR's merge-base with the schema at the PR head and fails on changes that would break existing configurations or state. It runs on every PR, including docs-only ones, and writes its report to the job summary (Actions run page → **Summary**), not as a PR comment.
+
+**Reading the summary.** The header counts the findings (`N breaking, N needs review, N non-breaking`), followed by one list per severity. Each line names the affected resource or attribute, what changed, and the rule that fired:
+
+- **Breaking** fails the check. Examples: a resource, data source, or attribute removed; a new Required attribute; Optional changed to Required; a type or nesting change; an attribute that users could set becoming Computed-only; Optional+Computed narrowed to Optional; `Sensitive` removed.
+- **Needs review** passes but asks a reviewer to confirm something. A resource `version` bump needs a state upgrader; a deprecation added, Computed added to an Optional attribute, and `Sensitive` added are listed too (adding `Sensitive` can fail plan for a root module output that references the attribute without `sensitive = true`).
+- **Non-breaking** is collapsed. New resources, new Optional or Computed attributes, and description changes.
+
+**Shipping an intentional break.** Apply the `breaking-change` label **and** add a `release-note:breaking-change` entry to `.changelog/<PR#>.txt` (see [Changelog fragments](#changelog-fragments)). The label alone still fails the check: a deliberate break must reach the changelog. The check re-runs when the label is added or removed. From a fork, ask a maintainer to apply the label.
+
+**If the check fails with "could not produce a provider schema".** The provider failed to build, or `terraform providers schema` failed, at the merge-base or the PR head. This is not a breaking-change finding, and the label does not bypass it. Fix the build or the schema-time error shown in the job log.
+
+**Run it locally.** `.github/scripts/schema-gate.sh gate origin/main HEAD` (needs git, go, jq, and Terraform 1.15 or later). Set `PR_NUMBER` and `PR_LABELS_JSON` to exercise the label and fragment checks. The check uses the gate rules from the merge-base, so a PR that changes the gate is judged by the rules on main and its own changes apply from the next PR; the summary flags any PR that edits the gate.
+
+**Limitations.** The schema JSON does not include plan modifiers, so a newly added `RequiresReplace` is invisible to this check. The check also does not compare `min_items`/`max_items` on nested attributes, or resource identity schemas. Reviewers should still look for all three.

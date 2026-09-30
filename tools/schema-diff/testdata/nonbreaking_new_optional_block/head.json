@@ -1,0 +1,148 @@
+{
+ "format_version": "1.0",
+ "provider_schemas": {
+  "registry.terraform.io/anyscale/anyscale": {
+   "data_source_schemas": {
+    "anyscale_widget": {
+     "block": {
+      "attributes": {
+       "id": {
+        "description_kind": "plain",
+        "required": true,
+        "type": "string"
+       },
+       "name": {
+        "computed": true,
+        "description_kind": "plain",
+        "type": "string"
+       }
+      },
+      "description_kind": "plain"
+     },
+     "version": 0
+    }
+   },
+   "ephemeral_resource_schemas": {
+    "anyscale_widget_token": {
+     "block": {
+      "attributes": {
+       "token": {
+        "computed": true,
+        "description_kind": "plain",
+        "sensitive": true,
+        "type": "string"
+       }
+      },
+      "description_kind": "plain"
+     },
+     "version": 0
+    }
+   },
+   "provider": {
+    "block": {
+     "attributes": {
+      "token": {
+       "description_kind": "plain",
+       "optional": true,
+       "sensitive": true,
+       "type": "string"
+      }
+     },
+     "description_kind": "plain"
+    },
+    "version": 0
+   },
+   "resource_schemas": {
+    "anyscale_widget": {
+     "block": {
+      "attributes": {
+       "id": {
+        "computed": true,
+        "description_kind": "plain",
+        "type": "string"
+       },
+       "name": {
+        "description_kind": "plain",
+        "required": true,
+        "type": "string"
+       },
+       "region": {
+        "computed": true,
+        "description_kind": "plain",
+        "optional": true,
+        "type": "string"
+       },
+       "secret": {
+        "description_kind": "plain",
+        "optional": true,
+        "sensitive": true,
+        "type": "string"
+       },
+       "settings": {
+        "description_kind": "plain",
+        "nested_type": {
+         "attributes": {
+          "mode": {
+           "description_kind": "plain",
+           "optional": true,
+           "type": "string"
+          }
+         },
+         "nesting_mode": "single"
+        },
+        "optional": true
+       },
+       "size": {
+        "description_kind": "plain",
+        "optional": true,
+        "type": "string"
+       },
+       "tags": {
+        "description_kind": "plain",
+        "optional": true,
+        "type": [
+         "list",
+         "string"
+        ]
+       }
+      },
+      "block_types": {
+       "network": {
+        "block": {
+         "attributes": {
+          "subnet_ids": {
+           "description_kind": "plain",
+           "optional": true,
+           "type": [
+            "list",
+            "string"
+           ]
+          }
+         },
+         "description_kind": "plain"
+        },
+        "max_items": 2,
+        "nesting_mode": "list"
+       },
+       "placement": {
+        "block": {
+         "attributes": {
+          "zone": {
+           "description_kind": "plain",
+           "optional": true,
+           "type": "string"
+          }
+         },
+         "description_kind": "plain"
+        },
+        "nesting_mode": "list"
+       }
+      },
+      "description_kind": "plain"
+     },
+     "version": 0
+    }
+   }
+  }
+ }
+}
