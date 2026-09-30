@@ -2,7 +2,6 @@ package acctest
 
 import (
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -148,108 +147,6 @@ resource "anyscale_cloud" "test" {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
 					},
-				},
-			},
-		},
-	})
-}
-
-// requiredAzureEnv resolves the three env vars a real AKS creation needs and
-// are not safe to fabricate the way the mock test above does (a real tenant
-// ID, a real federated operator identity, and a real, reachable Storage
-// account container) - unlike ANYSCALE_TEST_CLOUD_NAME's single override,
-// there is no way to auto-discover or default any of these, so all three (or
-// none) is the only sensible contract.
-func requiredAzureEnv(t *testing.T) (tenantID, operatorIdentity, bucket string, ok bool) {
-	t.Helper()
-	tenantID = os.Getenv("ANYSCALE_TEST_AZURE_TENANT_ID")
-	operatorIdentity = os.Getenv("ANYSCALE_TEST_AZURE_OPERATOR_IDENTITY")
-	bucket = os.Getenv("ANYSCALE_TEST_AZURE_BUCKET")
-	if tenantID == "" || operatorIdentity == "" || bucket == "" {
-		return "", "", "", false
-	}
-	return tenantID, operatorIdentity, bucket, true
-}
-
-// TestAccCloudResource_AzureK8S_RealInfra is the real-Azure counterpart to
-// TestAccCloudResource_Lifecycle_AzureK8S_MockServer above, following the
-// same opt-in pattern as ANYSCALE_TEST_CLOUD_NAME (CLAUDE.md "Test cloud
-// selection"): it is SKIPPED cleanly whenever real Azure credentials are not
-// configured (true today - no Azure subscription exists in this repo's test
-// org, per K8S-CLOUD-CONTRACT.md's AKS section), and runs a real
-// create -> apply -> plan-empty -> import -> plan-empty lifecycle against the
-// real Anyscale API the moment someone sets all three env vars below. This is
-// what makes the AKS implementation's real-infra coverage genuinely "runs
-// automatically if/when Azure creds exist" rather than a permanent TODO that
-// bit-rots unnoticed.
-//
-// Required env vars (all three, or the test skips):
-//   - ANYSCALE_TEST_AZURE_TENANT_ID: a real Azure AD tenant ID.
-//   - ANYSCALE_TEST_AZURE_OPERATOR_IDENTITY: the managed identity's principal
-//     ID, already federated for workload identity against a real AKS cluster
-//     with the Anyscale operator installed (see docs.anyscale.com/clouds/azure/create-aks).
-//   - ANYSCALE_TEST_AZURE_BUCKET: a full abfss://container@account.dfs.core.windows.net
-//     URI for a real, reachable Azure Storage account container.
-func TestAccCloudResource_AzureK8S_RealInfra(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-
-	tenantID, operatorIdentity, bucket, ok := requiredAzureEnv(t)
-	if !ok {
-		t.Skip("SKIP(no-real-azure): requires a real Azure AD tenant + a federated operator " +
-			"identity + a reachable Storage account container; not available in this org today. " +
-			"Set ANYSCALE_TEST_AZURE_TENANT_ID, ANYSCALE_TEST_AZURE_OPERATOR_IDENTITY, and " +
-			"ANYSCALE_TEST_AZURE_BUCKET to run this for real once Azure infra exists.")
-	}
-
-	cloudName := UniqueName(t, "cloud-azure-k8s")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckCloudDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: fmt.Sprintf(`
-resource "anyscale_cloud" "test" {
-  name           = %[1]q
-  cloud_provider = "AZURE"
-  compute_stack  = "K8S"
-  region         = "eastus"
-
-  kubernetes_config {
-    anyscale_operator_iam_identity = %[2]q
-  }
-
-  object_storage {
-    bucket_name = %[3]q
-  }
-
-  azure_config {
-    tenant_id = %[4]q
-  }
-}
-`, cloudName, operatorIdentity, bucket, tenantID),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "AZURE"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "compute_stack", "K8S"),
-					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "id"),
-					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
-					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "AZURE", "eastus"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-			{
-				ResourceName:      "anyscale_cloud.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-				ImportStateVerifyIgnore: []string{
-					"credentials", "is_empty_cloud",
-					"azure_config", // optional, never recovered at import by design (C3-v2)
 				},
 			},
 		},

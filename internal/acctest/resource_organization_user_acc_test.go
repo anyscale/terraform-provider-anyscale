@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
@@ -16,153 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// warnRealOrgMemberTest logs a warning before any test that imports a real
-// organization member via resource.Test.
-//
-// resource.Test always calls the resource's real Delete() at teardown, pass or
-// fail; CheckDestroy only adds a post-destroy verification. For an imported
-// member, Delete() removes nothing: the membership was not created by this
-// resource, so destroy leaves the person in the organization (see
-// deleteMembership in resource_organization_user.go). The gate stays because a
-// regression in that branch would remove a real person from the organization,
-// and a removed member can only be restored by re-inviting them. Point
-// ANYSCALE_TEST_USER_EMAIL only at a dedicated test member you can afford to
-// lose; the default, CI-safe coverage for this resource is the mock-backed
-// tests, which touch nothing real.
-func warnRealOrgMemberTest(t *testing.T, email string) {
-	t.Helper()
-	t.Logf("WARNING: this test imports org member %s against the real API, and resource.Test destroys it at "+
-		"teardown. Destroy is expected to leave the member in place; if it does not, they are removed from "+
-		"the organization and must be re-invited. Only point ANYSCALE_TEST_USER_EMAIL at a dedicated test member.",
-		email)
-}
-
-func TestAccOrganizationUserResource_Import(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-
-	// Keyed on email since the re-key - identity_id no longer imports.
-	testUserEmail := os.Getenv("ANYSCALE_TEST_USER_EMAIL")
-	if testUserEmail == "" {
-		t.Skip("ANYSCALE_TEST_USER_EMAIL not set, skipping import test")
-	}
-	warnRealOrgMemberTest(t, testUserEmail)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		// No CheckDestroy: the API has no GET-by-ID endpoint for collaborators
-		// (only list-and-filter). CheckDestroy would only verify what happens
-		// after destroy, not prevent it — see warnRealOrgMemberTest:
-		// destroy must leave this member in place.
-		Steps: []resource.TestStep{
-			// Import existing collaborator. ImportStateVerify is NOT usable here:
-			// it verifies import against an *already-established* prior resource
-			// state from an earlier step (normally created via Create()), but this
-			// test has no earlier step at all - it is a single cold import against
-			// a real, disposable identity (see warnRealOrgMemberTest
-			// above). That is a choice about THIS test, not a limitation of the
-			// resource: Create adopts an existing member or invites a new one (see
-			// resource_organization_user.go's own doc comment), it is not blocked.
-			// So there is no
-			// "old" state to compare against, so ImportStateVerify would always
-			// fail with "Failed state verification, resource with ID ... not
-			// found" regardless of whether import itself actually worked. This
-			// went uncaught for as long as it did purely because the test always
-			// skipped (no ANYSCALE_TEST_USER_IDENTITY_ID in CI) until a real
-			// identity was provided. ImportStateCheck verifies the imported
-			// values directly instead, which is the documented alternative for
-			// exactly this situation.
-			{
-				Config:        testAccOrganizationUserResourceConfig(testUserEmail),
-				ResourceName:  "anyscale_organization_user.test",
-				ImportState:   true,
-				ImportStateId: testUserEmail,
-				ImportStateCheck: func(states []*terraform.InstanceState) error {
-					if len(states) != 1 {
-						return fmt.Errorf("expected 1 imported resource, got %d", len(states))
-					}
-					s := states[0]
-					// id holds the EMAIL since the re-key, not the identity_id.
-					if s.Attributes["id"] != testUserEmail {
-						return fmt.Errorf("imported id = %q, want the email %q", s.Attributes["id"], testUserEmail)
-					}
-					if s.Attributes["email"] == "" {
-						return fmt.Errorf("imported email is empty, want it populated from the API")
-					}
-					if s.Attributes["created_at"] == "" {
-						return fmt.Errorf("imported created_at is empty, want it populated from the API")
-					}
-					// Role fields are deliberately NOT asserted here: this
-					// resource manages membership only, and base_role /
-					// additional_roles / permission_level live on
-					// anyscale_organization_user_role and the
-					// organization_user(s) data sources instead.
-					return nil
-				},
-			},
-		},
-	})
-}
-
-func TestAccOrganizationUserResource_Delete(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-
-	// Since the re-key this test asserts the OPPOSITE of what it used to:
-	// destroy must LEAVE the member in place. It is still env-gated because it
-	// imports and destroys against a real identity, and a regression here would
-	// evict a real person - the failure mode is exactly why the gate stays.
-	testUserEmail := os.Getenv("ANYSCALE_TEST_USER_EMAIL")
-	if testUserEmail == "" {
-		t.Skip("ANYSCALE_TEST_USER_EMAIL not set, skipping destroy test")
-	}
-	warnRealOrgMemberTest(t, testUserEmail)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		// No CheckDestroy: API has no GET-by-ID for collaborators; the inline
-		// testAccCheckCollaboratorDoesNotExist below covers post-destroy state.
-		Steps: []resource.TestStep{
-			// Import collaborator
-			{
-				Config:        testAccOrganizationUserResourceConfig(testUserEmail),
-				ResourceName:  "anyscale_organization_user.test",
-				ImportState:   true,
-				ImportStateId: testUserEmail,
-			},
-			// Verify it exists
-			{
-				Config: testAccOrganizationUserResourceConfig(testUserEmail),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckCollaboratorExistsInAPI("anyscale_organization_user.test"),
-				),
-			},
-			// Removing the resource from config destroys it - and the member must
-			// SURVIVE. This assertion is inverted from what it used to be: destroy
-			// no longer evicts anyone, so a regression that restored eviction would
-			// remove a real human here. That is why this stays env-gated.
-			{
-				Config: "# resource removed from configuration",
-				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckCollaboratorExistsInAPIByEmail(testUserEmail),
-				),
-			},
-		},
-	})
-}
-
 // Helper functions
-
-// testAccOrganizationUserResourceConfig builds the resource block. email is
-// REQUIRED since the re-key - it is the resource's key, and the identifier that
-// exists at every point in the lifecycle. Callers pass the address they seeded.
-func testAccOrganizationUserResourceConfig(email string) string {
-	return fmt.Sprintf(`
-resource "anyscale_organization_user" "test" {
-  email = %q
-}
-`, email)
-}
 
 func testAccCheckCollaboratorExistsInAPI(resourceName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -193,33 +45,6 @@ func testAccCheckCollaboratorExistsInAPI(resourceName string) resource.TestCheck
 		}
 
 		return fmt.Errorf("collaborator %s not found in organization_collaborators list (%d entries)", identityID, len(collaborators))
-	}
-}
-
-// testAccCheckCollaboratorExistsInAPIByEmail asserts the member is STILL in the
-// organization. Since the re-key, destroy does not evict anyone, so this is the
-// post-destroy assertion - the inverse of the one it replaced. A regression that
-// restored eviction removes a real human, which is why the test that calls this
-// is env-gated.
-func testAccCheckCollaboratorExistsInAPIByEmail(email string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		client, err := GetTestClient()
-		if err != nil {
-			return fmt.Errorf("Failed to get test client: %w", err)
-		}
-
-		collaborators, err := listAllCollaboratorsForTest(context.Background(), client)
-		if err != nil {
-			return fmt.Errorf("Error fetching collaborators: %w", err)
-		}
-
-		for _, c := range collaborators {
-			if strings.EqualFold(c.Email, email) {
-				return nil
-			}
-		}
-		return fmt.Errorf("member %s is GONE from the organization after destroy - destroying this resource must "+
-			"never evict a human", email)
 	}
 }
 

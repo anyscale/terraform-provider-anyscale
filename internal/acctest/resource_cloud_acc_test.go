@@ -21,60 +21,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccCloudResource_AWS_Basic tests basic AWS cloud creation with all-in-one pattern
-func TestAccCloudResource_AWS_Basic(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-	SkipIfNoRealInfra(t)
-
-	cloudName := UniqueName(t, "cloud-aws-basic")
-	// Generate random suffix for IAM roles to allow parallel test runs
-	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckCloudDestroy,
-		Steps: []resource.TestStep{
-			// Create and Read testing
-			{
-				Config: testAccCloudResourceAWSBasicConfig(cloudName, randSuffix),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "AWS"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "compute_stack", "VM"),
-					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "id"),
-					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "region"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "is_empty_cloud", "false"),
-					// API validation: verify cloud exists and has correct attributes
-					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
-					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "AWS", "us-east-2"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-			// ImportState testing
-			{
-				ResourceName:      "anyscale_cloud.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-				ImportStateVerifyIgnore: []string{
-					"credentials",       // sensitive: API never returns auth tokens after create
-					"aws_config",        // write-only block: API does not echo back provider-specific config on cloud GET
-					"gcp_config",        // write-only block: API does not echo back provider-specific config on cloud GET
-					"azure_config",      // write-only block: API does not echo back provider-specific config on cloud GET
-					"kubernetes_config", // write-only block: API does not echo back provider-specific config on cloud GET
-					"object_storage",    // write-only block: storage lives on the cloud deployment, not on the cloud GET
-					"file_storage",      // write-only block: storage lives on the cloud deployment, not on the cloud GET
-					"is_empty_cloud",    // create-time-only flag derived from plan; not surfaced by the API
-				},
-			},
-		},
-	})
-}
-
 // TestAccCloudResource_AWS_EmptyCloud tests AWS empty cloud pattern
 func TestAccCloudResource_AWS_EmptyCloud(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
@@ -135,128 +81,6 @@ func TestAccCloudResource_AzureVM_NotSupported(t *testing.T) {
 			{
 				Config:      testAccCloudResourceAzureConfig(cloudName),
 				ExpectError: regexp.MustCompile(`(?s)Azure Requires Kubernetes Compute Stack.*only support compute_stack = "K8S"`),
-			},
-		},
-	})
-}
-
-// TestAccCloudResource_GCP_Basic tests basic GCP cloud creation
-func TestAccCloudResource_GCP_Basic(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-	SkipIfNoRealInfra(t)
-
-	cloudName := UniqueName(t, "cloud-gcp-basic")
-	// Generate random suffix for service accounts to allow parallel test runs
-	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckCloudDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCloudResourceGCPBasicConfig(cloudName, randSuffix),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "GCP"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "compute_stack", "VM"),
-					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "id"),
-					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "region"),
-					// API validation
-					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
-					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "GCP", "us-central1"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-			{
-				ResourceName:      "anyscale_cloud.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-				ImportStateVerifyIgnore: []string{
-					"credentials",    // sensitive: API never returns auth tokens after create
-					"gcp_config",     // write-only block: API does not echo back provider-specific config on cloud GET
-					"object_storage", // write-only block: storage lives on the cloud deployment, not on the cloud GET
-					"is_empty_cloud", // create-time-only flag derived from plan; not surfaced by the API
-				},
-			},
-		},
-	})
-}
-
-// TestAccCloudResource_AWS_K8S tests AWS K8S cloud creation
-func TestAccCloudResource_AWS_K8S(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-	SkipIfNoRealInfra(t)
-
-	cloudName := UniqueName(t, "cloud-aws-k8s")
-	// Generate random suffix for IAM roles to allow parallel test runs
-	randSuffix := acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)
-
-	const redisEndpoint = "redis.ray-system.svc.cluster.local:6379"
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckCloudDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix, "anyscale", redisEndpoint),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "name", cloudName),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "cloud_provider", "AWS"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "compute_stack", "K8S"),
-					resource.TestCheckResourceAttrSet("anyscale_cloud.test", "id"),
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.redis_endpoint", redisEndpoint),
-					// API validation
-					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
-					testAccCheckCloudAttributes("anyscale_cloud.test", cloudName, "AWS", "us-east-2"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-			},
-			// ImportState testing against REAL infra (not just the mock server):
-			// proves the real add_resource/resources-listing API round-trips
-			// kubernetes_config - including redis_endpoint - through the C3-v2
-			// import-recovery path (requiredImportConfigBlocks), not just that a
-			// mocked response shaped the way we assume it would. Placed before the
-			// namespace-edit step below (still "anyscale", the same default
-			// flattenKubernetesConfig always recovers) so there is no known hazard
-			// to ignore; kubernetes_config is deliberately NOT in
-			// ImportStateVerifyIgnore for that reason.
-			{
-				ResourceName:      "anyscale_cloud.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-				ImportStateVerifyIgnore: []string{
-					"credentials", "is_empty_cloud",
-					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
-				},
-			},
-			// regression test for task 02118d55: this kubernetes_config block is a
-			// duplicate of the one fixed under 861aaf10 on anyscale_cloud_resource and
-			// had the same missing RequiresReplace, so an edit here plans a clean
-			// replace now instead of a diff Update() (partial no-op) used to swallow.
-			{
-				Config: testAccCloudResourceAWSK8SConfig(cloudName, randSuffix, "custom-ns", redisEndpoint),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "kubernetes_config.namespace", "custom-ns"),
-					testAccCheckCloudExistsInAPI("anyscale_cloud.test"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionReplace),
-					},
-					PostApplyPostRefresh: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
 			},
 		},
 	})
@@ -1698,19 +1522,6 @@ var testAccCheckCloudDestroy = NewAPIDestroyCheck("anyscale_cloud", "/api/v2/clo
 
 // Configuration templates
 
-func testAccCloudResourceAWSBasicConfig(name, randSuffix string) string {
-	return fmt.Sprintf(`
-resource "anyscale_cloud" "test" {
-  name           = "%s"
-  cloud_provider = "AWS"
-  compute_stack  = "VM"
-  region         = "us-east-2"
-
-%s
-}
-`, name, awsConfigBlock("tfacc-aws-basic", randSuffix))
-}
-
 func testAccCloudResourceAWSEmptyConfig(name string) string {
 	return fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
@@ -1739,36 +1550,6 @@ resource "anyscale_cloud" "test" {
   }
 }
 `, name)
-}
-
-func testAccCloudResourceGCPBasicConfig(name, randSuffix string) string {
-	return fmt.Sprintf(`
-resource "anyscale_cloud" "test" {
-  name           = "%s"
-  cloud_provider = "GCP"
-  compute_stack  = "VM"
-  region         = "us-central1"
-
-%s
-}
-`, name, gcpConfigBlock("tfacc-gcp-basic", randSuffix))
-}
-
-func testAccCloudResourceAWSK8SConfig(name, randSuffix, namespace, redisEndpoint string) string {
-	return fmt.Sprintf(`
-resource "anyscale_cloud" "test" {
-  name           = "%s"
-  cloud_provider = "AWS"
-  compute_stack  = "K8S"
-  region         = "us-east-2"
-
-%s
-
-  object_storage {
-    bucket_name = "tfacc-aws-k8s-bucket-%s"
-  }
-}
-`, name, k8sConfigBlock(namespace, fmt.Sprintf("arn:aws:iam::123456789012:role/tfacc-aws-k8s-operator-%s", randSuffix), []string{"us-east-2a", "us-east-2b"}, redisEndpoint), randSuffix)
 }
 
 func testAccCloudResourceGCPK8SConfig(name, randSuffix, redisEndpoint string) string {

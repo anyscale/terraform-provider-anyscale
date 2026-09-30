@@ -417,23 +417,27 @@ this by hardcoding the ID.
 Cleanup: ephemeral clouds are destroyed by default; `ANYSCALE_TEST_KEEP=1` keeps one and prints its
 ID/name (never tokens).
 
-### User fixtures for organization_user / invitation tests
+`ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID` is not an override: it names a dedicated cloud for the
+iam_mapping real-infra tests. They skip when it is unset and refuse the STATIC fixture, because they
+rewrite the cloud's IAM mapping. Deliberately separate from `ANYSCALE_TEST_CLOUD_ID`, which pins every
+test's cloud.
 
-These real-infra tests are opt-in by env var and skip cleanly when unset, because they are
-destructive (member delete removes a real org member; a role change alters real access) or
-rate-limited (invitations) — never point them at a shared or borrowed identity.
+### Real-infra test gates and user fixtures
 
-- `ANYSCALE_TEST_USER_EMAIL` — an existing accepted org member dedicated to testing, with no clouds
-  assigned (these surfaces manage org-level role, not cloud access). Used by organization_user
-  import/read/update checks and the org_user/org_users data sources.
-- `ANYSCALE_TEST_INVITE_EMAIL` — a fresh, never-invited address under the same disposable identity,
-  used for the invitation lifecycle test (including a mixed-case variant). Invalidate invitations
-  the tests create.
+No workflow sets these, so the tests they gate never run in CI; run them by hand (each test's header
+comment gives the exact command). They skip cleanly when unset.
+
+- `ANYSCALE_TEST_REAL_INFRA=1` — gates tests that create real cloud infrastructure
+  (`SkipIfNoRealInfra`).
+- `ANYSCALE_TEST_USER_EMAIL` — an existing accepted org member dedicated to testing: not an owner,
+  not the token's own identity, with no clouds assigned. Used by the organization_user_role and
+  cloud_access real-infra tests, which change that member's real org and cloud roles.
+- `ANYSCALE_TEST_ORG_NAME` — mandatory whenever `ANYSCALE_TEST_USER_EMAIL` is set: the org the token
+  must authenticate against, so a role-changing test never runs in an inherited org.
 
 Same reasoning as `ANYSCALE_TEST_CLOUD_NAME`: the literal address is never committed. Use a real
-disposable plus-alias in an inbox you control (`you+tfprovidertest@yourdomain.com`) so invitation
-mail lands somewhere safe. Never a colleague's account or any identity whose role you can't afford
-to have changed.
+disposable plus-alias in an inbox you control (`you+tfprovidertest@yourdomain.com`). Never a
+colleague's account or any identity whose role you can't afford to have changed.
 
 ### Naming and sweepers
 
