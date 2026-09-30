@@ -1,3 +1,0 @@
-```release-note:fixed
-resource/anyscale_cloud_access: Project roles declared in a member's `projects` are now granted and kept. In v0.26.0 through v0.28.2 apply reported success without granting them, every later plan showed the same in-place update, and any apply that updated the resource could silently remove a declared project role that had been granted outside Terraform. After upgrading, the next `terraform apply` re-grants the roles still declared; no re-import or state edit is needed. A removed role that is no longer declared is not restored, so if you granted project roles outside Terraform, check project access.
-```

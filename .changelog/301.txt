@@ -1,3 +1,0 @@
-```release-note:fixed
-resource/anyscale_cloud_resource: An in-place change to `file_storage` or `timeouts` no longer fails with "Provider produced inconsistent result after apply". Previously every such apply failed after the `file_storage` update had already reached the backend, so it could not be completed in place. After upgrading, run `terraform apply` again to complete the pending update.
-```
