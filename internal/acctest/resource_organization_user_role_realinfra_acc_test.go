@@ -346,7 +346,17 @@ func readLiveOrgRole(t *testing.T, email string) (member liveOrgMember, found bo
 			fromList.AdditionalRoles, wrapped.Result.AdditionalRoles)
 	}
 
-	return wrapped.Result, true
+	// base_role is the opposite case: the legacy permission_level PUT writes it
+	// to Postgres only, and the singular read takes it from SpiceDB, so after a
+	// legacy write only the list reports the new value. The provider reads
+	// base_role from the list for the same reason, so the tests do too.
+	member = wrapped.Result
+	if !strings.EqualFold(fromList.BaseRole, member.BaseRole) {
+		t.Logf("NOTE: list and singular disagree on base_role for this member (list=%q, singular=%q). "+
+			"Using the list value, which reflects legacy writes.", fromList.BaseRole, member.BaseRole)
+	}
+	member.BaseRole = fromList.BaseRole
+	return member, true
 }
 
 // mustReadLiveOrgRole is readLiveOrgRole for the callers that treat absence as a
@@ -376,6 +386,37 @@ provider "anyscale" {}
 `
 }
 
+// restoreCollaboratorIfOwner demotes the test member back to collaborator
+// through the legacy endpoint when a failed R5 run left them an owner. The
+// owner precondition in requireRealInfraTestUser would otherwise refuse every
+// later run.
+func restoreCollaboratorIfOwner(t *testing.T, email, identityID string) {
+	t.Helper()
+	member, found := readLiveOrgRole(t, email)
+	if !found || !strings.EqualFold(member.BaseRole, "owner") {
+		return
+	}
+	if identityID == "" {
+		t.Errorf("%s was left an organization OWNER and its identity_id is unknown; demote it to collaborator by hand", email)
+		return
+	}
+	client, err := GetTestClient()
+	if err != nil {
+		t.Errorf("%s was left an organization OWNER and no API client is available to demote it: %s", email, err)
+		return
+	}
+	resp, err := client.DoRequest(context.Background(), "PUT", "/api/v2/organization_collaborators/"+identityID,
+		strings.NewReader(`{"permission_level":"collaborator"}`))
+	if err != nil {
+		t.Errorf("%s was left an organization OWNER and demoting it failed: %s", email, err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		t.Errorf("%s was left an organization OWNER and demoting it returned HTTP %d", email, resp.StatusCode)
+	}
+}
+
 // TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles is the R5
 // gate: it answers whether the legacy permission_level write path clobbers deny
 // roles set through the roles path.
@@ -384,12 +425,24 @@ provider "anyscale" {}
 // that is ALREADY MERGED to main, which is why it blocks the tag rather than the
 // merge. If the deny role does not survive, the design's central assumption -
 // that the two write paths are independent - is false.
+//
+// Omitting deny_roles alone plans a no-op (deny_roles is UseStateForUnknown; see
+// TestAccOrganizationUserRoleResource_DenyRolesOmittedPlanStability), so no write
+// would happen at all. Step 2 therefore also changes base_role to owner, which
+// forces an Update down the legacy path, and step 3 restores collaborator through
+// the same path. Destroy does not revert base_role, so a cleanup also demotes the
+// member back to collaborator if a failure leaves them an owner.
+//
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles$' -v -count=1
 func TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	email := requireRealInfraTestUser(t)
 
 	const addr = "anyscale_organization_user_role.realinfra"
 	const denyRole = "image_reader"
+
+	var identityID string
+	t.Cleanup(func() { restoreCollaboratorIfOwner(t, email, identityID) })
 
 	// Step 1 declares deny_roles, which routes through the roles endpoint.
 	withDenyRole := realInfraProviderBlock() + fmt.Sprintf(`
