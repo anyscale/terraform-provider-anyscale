@@ -986,6 +986,17 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
+	// file_storage and timeouts are the only fields that update in place, and readCloudResource
+	// refreshes neither, so carry the applied values into state. Otherwise state keeps the
+	// pre-update values and Terraform rejects the apply as inconsistent.
+	fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil)
+	resp.Diagnostics.Append(d...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.FileStorage = fileStorage
+	state.Timeouts = plan.Timeouts
+
 	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource", err)
 		return
