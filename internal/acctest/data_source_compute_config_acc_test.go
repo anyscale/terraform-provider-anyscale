@@ -40,19 +40,14 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 					// Verify versions list contains at least version 1
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.#", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "versions.0", "1"),
-					// CC6: data source node topology parity with the resource.
-					// Confirmed live against the real API that "resources"
-					// itself comes back null from BOTH api/v2 and ext/v0 for an
-					// instance_type-only head node (no client-side auto-fill
-					// happens server-side despite the schema description's
-					// wording) -- identical between the two endpoints, which is
-					// exactly the CC5a claim this exercises, so instance_type is
-					// the meaningful, verified-true assertion here.
+					// Data source node topology matches the resource. Confirmed
+					// live that "resources" comes back null for an
+					// instance_type-only head node (the server does not auto-fill
+					// it), so instance_type is the meaningful assertion here.
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_name", "head_node.instance_type", "m5.large"),
 
-					// CC5a acceptance: the by-id lookup path must
-					// stay green after switching Read to the shared typed
-					// structs, not just the by-name path exercised above.
+					// The by-id lookup path must resolve the same config as the
+					// by-name path exercised above.
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "name", configName),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "version", "1"),
 					resource.TestCheckResourceAttr("data.anyscale_compute_config.by_id", "head_node.instance_type", "m5.large"),
@@ -62,19 +57,12 @@ func TestAccComputeConfigDataSource_Basic(t *testing.T) {
 	})
 }
 
-// TestAccComputeConfigDataSource_WithVersions is DS-CC-1's mutation-proof
-// acceptance guard, proving version enumeration against a real, genuine
-// two-version history rather than a mock. The old version only asserted
-// versions.# was "set" (non-zero) at each step, which passes identically
-// whether versions correctly enumerates history or - per DS-CC-1 - only ever
-// returns the single latest version: after step 2's update, a broken
-// versions attribute would still show exactly 1 entry (the new latest), and
-// "1" still counts as "set". The old comment ("the API may not return all
-// historical versions") was quietly documenting this exact bug as a
-// permanent constraint instead of a fix target. Now that DS-CC-1 sends the
-// real "don't filter by version" sentinel and pages through results, this
-// asserts the real, falsifiable claim: after two versions exist, versions.#
-// is exactly 2 and contains both 1 and 2 (sorted ascending).
+// TestAccComputeConfigDataSource_WithVersions proves version enumeration
+// against a real two-version history rather than a mock. The data source sends
+// the "don't filter by version" sentinel and pages through results; a broken
+// lookup that returns only the latest version would still show one entry, so
+// this asserts exact counts: after two versions exist, versions.# is exactly 2
+// and contains both 1 and 2 (sorted ascending).
 func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -117,18 +105,12 @@ func TestAccComputeConfigDataSource_WithVersions(t *testing.T) {
 	})
 }
 
-// TestAccComputeConfigDataSource_EnableCrossZoneScaling is the regression
-// test for a real, pre-existing bug found while reviewing CC5a's
-// diff: the data source used to look for a top-level enable_cross_zone_scaling
-// JSON key on the config that has never existed - the real value has only
-// ever lived inside flags["allow-cross-zone-autoscaling"], exactly where the
-// resource correctly reads it from. That miss always failed silently (the
-// map-index `ok` check was always false), so the data source's
-// enable_cross_zone_scaling output read as false for every user regardless
-// of what was actually configured, since before this quest started. CC5a's
-// switch to the shared typed parsing (resolveEffectiveComputeConfig, the
-// same helper Read uses) fixes this as a side effect. This proves it against
-// a real, explicitly-true-configured value, not just by re-reading the code.
+// TestAccComputeConfigDataSource_EnableCrossZoneScaling proves the data source
+// reads enable_cross_zone_scaling from flags["allow-cross-zone-autoscaling"],
+// where the API actually stores it (there is no top-level JSON key), via the
+// same resolveEffectiveComputeConfig helper the resource's Read uses. Reading
+// a nonexistent top-level key fails silently and reports false for every
+// config, so this asserts against an explicitly-true configured value.
 func TestAccComputeConfigDataSource_EnableCrossZoneScaling(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)

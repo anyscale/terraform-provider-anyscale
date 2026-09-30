@@ -141,8 +141,9 @@ resource "anyscale_container_image_registry" "test" {
 // exact shape import would leave - step 1 omits name (so Create/Read populate it from the
 // backend, matching what a cold import would also recover), step 2 declares it explicitly at
 // that recovered value. Asserts both an empty plan AND the real value - ExpectEmptyPlan alone is
-// a placebo here: Gate 2 proved it stays green even with Read's fill-on-null removed, since a
-// stably-null state trivially plans empty regardless of whether the attribute ever gets filled.
+// a placebo here: a real resource.Test run showed it stays green even with Read's fill-on-null
+// removed, since a stably-null state trivially plans empty regardless of whether the attribute
+// ever gets filled.
 func TestAccContainerImageRegistryResource_NamePlanStableOnceRecovered(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -151,12 +152,12 @@ func TestAccContainerImageRegistryResource_NamePlanStableOnceRecovered(t *testin
 	const imageURI = "123456789012.dkr.ecr.us-west-2.amazonaws.com/tfacc-planstable:v1"
 	// Same non-derivable-from-image_uri requirement as Test A. This mock always echoes this
 	// fixed name regardless of what Create's request actually contains (matching
-	// newRegistryF3MockServer's established shape in this package) - realistic per Gate 1
+	// newRegistryLifecycleMockServer's established shape in this package) - realistic per the logged API check
 	// (the backend echoes verbatim, never renames), and means step 2's config can declare a
 	// value known in advance rather than trying to predict Create's live-timestamped fallback.
 	const realBackendName = "tfacc-planstable-real-backend-only-7d2b9e"
 
-	server := newRegistryF3MockServer(t, templateID, buildID, realBackendName, imageURI, "2.44.0", "sha256:planstablemock000000000000000000000000000000000000000000000000")
+	server := newRegistryLifecycleMockServer(t, templateID, buildID, realBackendName, imageURI, "2.44.0", "sha256:planstablemock000000000000000000000000000000000000000000000000")
 
 	configNameOmitted := testAccProviderBlock(server.URL) + fmt.Sprintf(`
 resource "anyscale_container_image_registry" "test" {

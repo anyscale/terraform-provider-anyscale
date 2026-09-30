@@ -1,23 +1,20 @@
 package acctest
 
-// F2 regression: required_resources.memory is documented as accepting a
-// unit-string like "4Gi", but the real backend only accepts a plain integer
-// byte count and 422s on a unit-suffixed string. The fix parses the unit
-// string client-side before sending, matching what the Python SDK already
-// does. This proves it with a mock server that mirrors the real backend's
-// strictness (rejects anything that isn't a bare integer for memory), so a
-// regression back to sending the raw string fails the same way a live create
-// would.
+// required_resources.memory accepts a unit-string like "4Gi", but the real
+// backend only accepts a plain integer byte count and 422s on a unit-suffixed
+// string, so the provider parses the unit string client-side before sending,
+// matching what the Python SDK does. The mock server mirrors the real backend's
+// strictness (rejects anything that isn't a bare integer for memory), so
+// sending the raw string fails the same way a live create would.
 //
 // State must show the user's own "4Gi", not the API's raw byte-count echo:
 // the API can never return anything but a number, and this field is a plain
-// (non-Computed) string, so a naive implementation crashes apply the same
-// way F4's custom_resources did ("provider produced inconsistent result
-// after apply", config "4Gi" vs. state "4294967296"). The fix
-// (MemoryQuantityType/MemoryQuantityValue, StringSemanticEquals comparing
-// parsed byte counts) keeps the planned "4Gi" in state instead of adopting
-// the differently-formatted-but-equal value the wire returned - the check
-// below asserts that directly, not the byte count.
+// (non-Computed) string, so adopting the echo would fail apply with
+// "provider produced inconsistent result after apply" (config "4Gi" vs.
+// state "4294967296"). MemoryQuantityType/MemoryQuantityValue
+// (StringSemanticEquals comparing parsed byte counts) keeps the planned "4Gi"
+// in state instead of adopting the differently-formatted-but-equal value the
+// wire returned - the check below asserts that directly, not the byte count.
 
 import (
 	"encoding/json"
@@ -25,15 +22,21 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-func newF2MemoryParseMockServer(t *testing.T) *httptest.Server {
+func newMemoryParseMockServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	var lastRecord map[string]any
+	// lastRecord is shared across handler invocations, which net/http may run
+	// on different goroutines; guarded by mu as hardening.
+	var (
+		mu         sync.Mutex
+		lastRecord map[string]any
+	)
 
 	// Registered under both the subtree and bare-path forms (see
 	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
@@ -87,16 +90,21 @@ func newF2MemoryParseMockServer(t *testing.T) *httptest.Server {
 				"archived_at":      nil,
 				"config":           req.Config,
 			}
+			mu.Lock()
 			lastRecord = record
+			mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": record})
 		case r.Method == http.MethodGet:
-			if lastRecord == nil {
+			mu.Lock()
+			record := lastRecord
+			mu.Unlock()
+			if record == nil {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": lastRecord})
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": record})
 		case r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -114,7 +122,7 @@ func newF2MemoryParseMockServer(t *testing.T) *httptest.Server {
 func TestAccComputeConfigResource_MemoryUnitStringParsesToBytes_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	server := newF2MemoryParseMockServer(t)
+	server := newMemoryParseMockServer(t)
 	name := "cc-f2-memory-parse"
 
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`

@@ -25,8 +25,8 @@ func init() {
 }
 
 // sweepServiceMaxTerminateWait/sweepServiceTerminatePollTick bound the sweeper's own
-// terminate-then-wait loop: DELETE /{id} 400s unless current_state is already TERMINATED (traced
-// via contract §H1/the resource's own Delete), so a bare terminate-then-immediate-delete would
+// terminate-then-wait loop: DELETE /{id} 400s unless current_state is already TERMINATED (the
+// resource's own Delete handles the same constraint), so a bare terminate-then-immediate-delete would
 // fail here too. Self-contained rather than reusing service_helpers.go's waitForServiceState:
 // that helper is unexported (package provider, this file is package acctest), and a sweeper has
 // no need for the millisecond-injectable timing that helper's unit tests rely on - a real,
@@ -178,7 +178,7 @@ func sweepDeleteService(ctx context.Context, client *provider.Client, s sweepSer
 				return err
 			}
 		case http.StatusNotFound:
-			// Already gone (terminated+deleted out-of-band) - matches the resource's own H1
+			// Already gone (terminated+deleted out-of-band) - matches the resource's own Delete
 			// handling; nothing left to wait for or delete.
 			log.Printf("[sweep:anyscale_service] %s (%s) already gone at terminate", s.ID, s.Name)
 			return nil

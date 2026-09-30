@@ -13,11 +13,11 @@ import (
 )
 
 // mockSystemClusterServer is a stateful, states-advancing mock proving the real
-// enable-then-start-then-poll Create flow (AC1-AC5), the two-call
-// oracle+status Read (AC6), and the state-only Delete (AC10) through the real
+// enable-then-start-then-poll Create flow, the two-call
+// oracle+status Read, and the state-only Delete through the real
 // provider machinery - not just a client-level unit test. The describe
-// sequence deliberately mirrors the real backend's observed live behavior
-// (from AC26's smoke test): the first describe(start_cluster=true) call
+// sequence deliberately mirrors the real backend's observed live behavior:
+// the first describe(start_cluster=true) call
 // returns Terminated immediately (StartingUp is genuinely async), then two
 // more polls advance StartingUp -> Running, proving the resource actually
 // loops rather than trusting a single call.
@@ -138,7 +138,7 @@ func newMockSystemClusterServer(t *testing.T) (*httptest.Server, *mockSystemClus
 		var status string
 		switch {
 		case startCluster:
-			// Real observed behavior (AC26 live smoke test): the create-time
+			// Real observed backend behavior: the create-time
 			// start call returns Terminated immediately; StartingUp is async.
 			status = "Terminated"
 		case postStartPoll:
@@ -250,11 +250,11 @@ resource "anyscale_system_cluster" "test" {
 }
 `
 
-// TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning covers
-// AC1-AC5: Create must enable-then-start (never skip the enable call - AC4's
-// mutation-proof requirement, see comment below), persist through the
-// Terminated->StartingUp->Running progression, and a repeat apply must be a
-// pure no-op (AC5) with no additional enable/start calls.
+// TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning: Create
+// must enable-then-start (never skip the enable call - see the mutation-proof
+// comment below), persist through the Terminated->StartingUp->Running
+// progression, and a repeat apply must be a pure no-op with no additional
+// enable/start calls.
 func TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -275,7 +275,7 @@ func TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning(t *testin
 				),
 			},
 			{
-				// AC5: repeat apply is a pure no-op.
+				// Repeat apply is a pure no-op.
 				Config: testAccProviderBlock(server.URL) + syscClusterBaseConfig,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PostApplyPostRefresh: []plancheck.PlanCheck{
@@ -288,7 +288,7 @@ func TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning(t *testin
 
 	enableCalls, describeStartCalls, terminateCalled := mockServer.snapshot()
 
-	// AC4, MUTATION-PROOF: removing Create's enableSystemCluster call would
+	// MUTATION-PROOF: removing Create's enableSystemCluster call would
 	// leave enableCalls empty here while describeStartCalls still populated -
 	// this assertion fails loudly in that case, not just "cluster never
 	// reaches Running" (which a broken enable-then-start ordering could still
@@ -326,7 +326,7 @@ func TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning(t *testin
 		t.Errorf("expected describe call #0 = start_cluster=false (the enable-propagation check) followed by describe call #1 = start_cluster=true (the real start); got sequence %v with the true call at index %d - Create must wait for enable to propagate before starting", describeStartCalls, startCallIndex)
 	}
 
-	// AC17-adjacent (resource-level correctness): every OTHER describe call
+	// Every OTHER describe call
 	// (the enable-propagation check, plus the polls) must have passed
 	// start_cluster=false.
 	for i, sc := range describeStartCalls {
@@ -343,11 +343,12 @@ func TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning(t *testin
 	}
 }
 
-// TestAccSystemClusterResource_DeleteIsStateOnly is the AC10 mutation-proof
-// test: Delete must remove the resource from Terraform state without ever
-// calling terminate. Asserting terminateCalled==false after a real
-// resource.Test destroy cycle proves this through the actual Delete() code
-// path, not just by reading the source.
+// TestAccSystemClusterResource_DeleteIsStateOnly is a mutation-proof test:
+// Delete must remove the resource from Terraform state without ever calling
+// terminate. Asserting terminateCalled==false after a real resource.Test
+// destroy cycle proves this through the actual Delete() code path, not just by
+// reading the source. Because Delete is state-only, anyscale_system_cluster has
+// no sweeper - destroying one never touches the backend, so there is nothing to sweep.
 func TestAccSystemClusterResource_DeleteIsStateOnly(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -370,11 +371,11 @@ func TestAccSystemClusterResource_DeleteIsStateOnly(t *testing.T) {
 
 	_, _, terminateCalled := mockServer.snapshot()
 	if terminateCalled {
-		t.Error("Delete called terminate - it must be state-only and never touch the real System Cluster (AC10)")
+		t.Error("Delete called terminate - it must be state-only and never touch the real System Cluster")
 	}
 }
 
-// TestAccSystemClusterResource_ImportByCloudID covers AC11: a create-then-
+// TestAccSystemClusterResource_ImportByCloudID covers a create-then-
 // import (not cold-import-only, so ImportStateVerify at step 2 is a genuine
 // check against Create's own state) using cloud_id as the sole import
 // identifier.
@@ -401,8 +402,8 @@ func TestAccSystemClusterResource_ImportByCloudID(t *testing.T) {
 				Check:  resource.TestCheckResourceAttr(resourceAddr, "state", "Running"),
 			},
 			{
-				// No ImportStateVerifyIgnore needed for the timeouts{} block
-				// (PR2 migration, replacing start_timeout): terraform-plugin-
+				// No ImportStateVerifyIgnore needed for the timeouts{} block:
+				// terraform-plugin-
 				// testing's own ImportStateVerify unconditionally excludes any
 				// state key that is exactly "timeouts" or starts with
 				// "timeouts." from its comparison (helper/resource/

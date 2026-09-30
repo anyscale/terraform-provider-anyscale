@@ -1,14 +1,11 @@
 package acctest
 
-// F1 regression: node-level cloud_deployment used to be written to the
-// WRONG wire location - a top-level sibling key on the node's config map -
-// which the real backend rejects outright with a 422 "extra fields not
-// permitted". The fix nests it inside that node's flags dict instead, matching
-// the SDK/backend/our-own-flatten's actual expectation. This proves the fix
-// with a mock server that MIRRORS the real backend's strictness: it 422s if
-// cloud_deployment ever arrives at the wrong (top-level) location, so this
-// test fails the same way a live create would if the bug ever came back -
-// not just "does read work," but "did we send it to the right place at all."
+// Node-level cloud_deployment must be sent inside that node's flags dict, not
+// as a top-level sibling key on the node's config map, which the real backend
+// rejects with a 422 "extra fields not permitted". The mock server MIRRORS that
+// strictness: it 422s if cloud_deployment arrives at the top level, so this
+// test fails the same way a live create would - not just "does read work,"
+// but "did we send it to the right place at all."
 
 import (
 	"encoding/json"
@@ -16,15 +13,21 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-func newF1CloudDeploymentMockServer(t *testing.T) *httptest.Server {
+func newCloudDeploymentFlagsMockServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	var lastRecord map[string]any
+	// lastRecord is shared across handler invocations, which net/http may run
+	// on different goroutines; guarded by mu as hardening.
+	var (
+		mu         sync.Mutex
+		lastRecord map[string]any
+	)
 
 	// Registered under both the subtree and bare-path forms (see
 	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
@@ -87,16 +90,21 @@ func newF1CloudDeploymentMockServer(t *testing.T) *httptest.Server {
 				"config":           req.Config,
 			}
 			_ = cloudDep
+			mu.Lock()
 			lastRecord = record
+			mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": record})
 		case r.Method == http.MethodGet:
-			if lastRecord == nil {
+			mu.Lock()
+			record := lastRecord
+			mu.Unlock()
+			if record == nil {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": lastRecord})
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": record})
 		case r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -114,7 +122,7 @@ func newF1CloudDeploymentMockServer(t *testing.T) *httptest.Server {
 func TestAccComputeConfigResource_CloudDeploymentNestsInFlags_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	server := newF1CloudDeploymentMockServer(t)
+	server := newCloudDeploymentFlagsMockServer(t)
 	name := "cc-f1-cloud-deployment"
 
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`

@@ -10,12 +10,11 @@ import (
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
-// TestSearchContainerImagesByContains_MultiPage is the GATE-F2 multi-page
-// proof for the sweeper's search call site. A single-page happy-path test
-// would pass even if the pagination loop were silently broken - this is the
-// same body-vs-query paging_token shape that CC5b hit in compute_config
-// (deferred there; not deferred here, since this call site was migrated to
-// api/v2 in 3c43eea). This drives the real searchContainerImagesByContains
+// TestSearchContainerImagesByContains_MultiPage is the multi-page proof for
+// the sweeper's search call site. A single-page happy-path test would pass
+// even if the pagination loop were silently broken - on api/v2 the
+// paging_token travels as a URL query parameter, not in the request body as
+// on ext/v0, and getting that wrong silently truncates. This drives the real searchContainerImagesByContains
 // against a 2-page mock and asserts (a) both pages' results are collected
 // and (b) the second request actually carries the exact token the first
 // response returned, proving the loop follows the token rather than

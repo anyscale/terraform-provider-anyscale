@@ -1,4 +1,4 @@
-// GATE-F5 (build-resource half): digest has NO plan modifiers on
+// digest has NO plan modifiers on
 // anyscale_container_image_build, deliberately, unlike its sibling registry
 // resource's Computed+UseStateForUnknown digest. A rebuild (containerfile change on
 // Update, or a fresh build on Create) genuinely produces a new digest every time, so
@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -69,12 +70,18 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 	const createdAt = "2024-01-01T00:00:00Z"
 	const buildStatus = "succeeded"
 
-	// currentBuildID tracks which build GET /api/v2/application_templates/{id} should
-	// report as latest_build, and which build ID the shared /api/v2/builds/ GET
-	// handler (registered per-ID below) should currently be answering for. Update()
-	// flips this after the second build is created, mirroring the real backend's
-	// "latest_build always reflects the newest build" behavior.
+	// currentBuildID is the build GET /api/v2/application_templates/{id} reports as
+	// latest_build. The build-create handler flips it to buildID2 when Update() creates
+	// the second build, mirroring the real backend's "latest_build always reflects the
+	// newest build" behavior. Handlers run on the server's goroutines, so it is read and
+	// written only under mu (hardening; no race has been observed).
+	var mu sync.Mutex
 	currentBuildID := buildID1
+	getCurrentBuildID := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return currentBuildID
+	}
 
 	// Registered under both the subtree and bare-path forms (see
 	// helpers_cloud_adoption_test.go: a subtree-only mock makes ServeMux
@@ -111,7 +118,7 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 			"id": %[1]q, "name": %[2]q, "creator_id": "user_mock",
 			"created_at": %[3]q, "anonymous": false, "is_default": false,
 			"latest_build": {"id": %[4]q, "revision": 1, "status": %[5]q}
-		}}`, templateID, name, createdAt, currentBuildID, buildStatus)
+		}}`, templateID, name, createdAt, getCurrentBuildID(), buildStatus)
 	})
 
 	// New build creation for Update(): CreateBuildRequest{application_template_id,
@@ -125,7 +132,9 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		mu.Lock()
 		currentBuildID = buildID2
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"result": {
@@ -189,7 +198,7 @@ func newBuildDigestMockServer(t *testing.T, templateID, name, buildID1, digest1,
 }
 
 // TestAccContainerImageBuildResource_DigestUpdatesOnRebuild_MockServer is the money
-// test for GATE-F5's build-resource half: a containerfile change on Update must
+// test for the build resource's digest: a containerfile change on Update must
 // trigger a real rebuild whose digest transitions to a genuinely different value,
 // and the apply must complete with NO Terraform Core error. If digest carried
 // UseStateForUnknown (the registry resource's pattern, wrongly copied here), Core

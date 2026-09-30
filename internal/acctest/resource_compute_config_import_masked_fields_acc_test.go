@@ -1,18 +1,17 @@
 package acctest
 
-// GAP-3 regression (extends AG-2): import must recover resources/
-// required_resources/labels/required_labels/node cloud_deployment from the
-// real API instead of leaving them null. Live-confirmed: each of these 5
-// fields comes back null when never set (nothing to lose by recovering) and
-// round-trips byte-for-byte when genuinely set (nothing invented by
-// recovering). This extends AG-2's shape (a genuinely pre-existing,
-// out-of-band fixture, not self-seeded by a preceding Create in this same
-// test) rather than narrowing the existing ImportStateVerifyIgnore lists in
-// resource_compute_config_acc_test.go / _lifecycle_acc_test.go - those
-// ignores cover a SEPARATE, still-standing reason (API-normalized
-// instance_type-derived defaults with no prior state to mask against) that
-// GAP-3 does not touch, so a dedicated explicit-values case is the correct
-// shape, not a shared one.
+// Import must recover resources/required_resources/labels/required_labels/
+// node cloud_deployment from the real API instead of leaving them null.
+// Live-confirmed: each of these 5 fields comes back null when never set
+// (nothing to lose by recovering) and round-trips byte-for-byte when genuinely
+// set (nothing invented by recovering). Uses the same shape as
+// TestAccComputeConfigResource_ImportPreExistingOutOfBandFixture (a genuinely
+// pre-existing, out-of-band fixture, not self-seeded by a preceding Create in
+// this same test) rather than narrowing the existing ImportStateVerifyIgnore
+// lists in resource_compute_config_acc_test.go / _lifecycle_acc_test.go -
+// those ignores cover a separate reason (API-normalized instance_type-derived
+// defaults with no prior state to mask against), so a dedicated
+// explicit-values case is the correct shape, not a shared one.
 
 import (
 	"bytes"
@@ -37,11 +36,11 @@ func TestAccComputeConfigResource_ImportRecoversMaskedFieldsWhenSet(t *testing.T
 	cloudID := GetComputeConfigCloudID(t)
 	ctx := context.Background()
 
-	name := UniqueName(t, "gap3recover")
+	name := UniqueName(t, "compute-config-import-masked")
 
 	// Built directly (not via CreateEphemeralComputeConfig) since this
-	// scenario needs all 5 GAP-3 fields explicitly set at once, including a
-	// GPU-satisfying required_labels/required_resources pairing so A1's
+	// scenario needs all 5 recovered fields explicitly set at once, including a
+	// GPU-satisfying required_labels/required_resources pairing so the
 	// GPU/TPU cross-validator (a real plan-time HARD error) doesn't trip on
 	// the config used for the later import-match step.
 	createBody := map[string]any{
@@ -131,7 +130,7 @@ resource "anyscale_compute_config" "test" {
 			{
 				// Cold import - this test's own Terraform lifecycle never
 				// created configID, the raw API call above did, entirely
-				// out of band (same AG-2 shape).
+				// out of band.
 				ResourceName:       "anyscale_compute_config.test",
 				ImportState:        true,
 				ImportStateId:      configID,
@@ -152,7 +151,7 @@ resource "anyscale_compute_config" "test" {
 					}
 					for attr, want := range checks {
 						if got := attrs[attr]; got != want {
-							return fmt.Errorf("%s = %q, want %q recovered from the real API on import (GAP-3) - got left null/blank means the old nulling behavior is still present", attr, got, want)
+							return fmt.Errorf("%s = %q, want %q recovered from the real API on import - null/blank means import is not recovering this field", attr, got, want)
 						}
 					}
 					return nil

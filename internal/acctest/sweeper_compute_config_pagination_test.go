@@ -15,14 +15,13 @@ import (
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
-// TestSearchComputeConfigsByContains_MultiPage is the CC5b-tail mutation-proof
-// for the sweeper's search call site, mirroring
+// TestSearchComputeConfigsByContains_MultiPage is the mutation-proof for the
+// sweeper's search call site, mirroring
 // TestSearchComputeTemplatesPaged_SendsPagingAsQueryParamsNotBody and
 // TestFetchComputeConfigVersions_FollowsPagingToken (data_source_compute_config_test.go),
 // the data source's already-proven tests for the identical api/v2 transport
-// this sweeper now shares. A naive migration could keep nesting
-// paging/paging_token/count inside the JSON body (the old ext/v0 shape) - it
-// would compile, hit /api/v2/compute_templates/search, get HTTP 200 back, and
+// this sweeper shares. Nesting paging/paging_token/count inside the JSON body
+// (the ext/v0 shape) would compile, hit /api/v2/compute_templates/search, get HTTP 200 back, and
 // silently paginate wrong (always page 1's worth of data, no error). This
 // test's mock is deliberately strict about where it reads pagination from,
 // and also asserts the body filters: version must be -2, or api/v2's

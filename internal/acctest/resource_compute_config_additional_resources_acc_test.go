@@ -1,7 +1,6 @@
 package acctest
 
-// Option C / F7 regression: the new additional_resources multi-resource
-// support. splitDeploymentConfigsForRead matches N deployment_configs
+// additional_resources multi-resource support. splitDeploymentConfigsForRead matches N deployment_configs
 // entries back to (primary, additional[]) by cloud_resource NAME against
 // prior state, not position or response order - the backend's response
 // order isn't guaranteed, it's merely echoed, not backend-meaningful.
@@ -27,7 +26,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-func newOptionCMockServer(t *testing.T) (*httptest.Server, *sync.Mutex, *[]any) {
+func newAdditionalResourcesMockServer(t *testing.T) (*httptest.Server, *sync.Mutex, *[]any) {
 	t.Helper()
 	var mu sync.Mutex
 	var storedDeploymentConfigs []any
@@ -113,7 +112,7 @@ func newOptionCMockServer(t *testing.T) (*httptest.Server, *sync.Mutex, *[]any) 
 	return server, &mu, &storedDeploymentConfigs
 }
 
-func optionCDeploymentConfigEntry(cloudResource string) map[string]any {
+func additionalResourcesDeploymentConfigEntry(cloudResource string) map[string]any {
 	return map[string]any{
 		"cloud_deployment": cloudResource,
 		"head_node_type": map[string]any{
@@ -126,7 +125,7 @@ func optionCDeploymentConfigEntry(cloudResource string) map[string]any {
 func TestAccComputeConfigResource_AdditionalResourcesPrimaryMatchedByName_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	server, mu, storedDCs := newOptionCMockServer(t)
+	server, mu, storedDCs := newAdditionalResourcesMockServer(t)
 	name := "cc-optionc-multi"
 
 	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
@@ -179,9 +178,9 @@ resource "anyscale_compute_config" "test" {
 					// "resource-a" as primary regardless of response order.
 					mu.Lock()
 					*storedDCs = []any{
-						optionCDeploymentConfigEntry("resource-c"),
-						optionCDeploymentConfigEntry("resource-a"),
-						optionCDeploymentConfigEntry("resource-b"),
+						additionalResourcesDeploymentConfigEntry("resource-c"),
+						additionalResourcesDeploymentConfigEntry("resource-a"),
+						additionalResourcesDeploymentConfigEntry("resource-b"),
 					}
 					mu.Unlock()
 				},
@@ -194,18 +193,16 @@ resource "anyscale_compute_config" "test" {
 	})
 }
 
-// GAP A regression: additional_resources must also surface on the DATA
-// SOURCE, not just the resource - a multi-resource config looked up via the
-// data source previously (silently, no diagnostic) returned only the
-// primary entry, the exact silent-truncation problem F7 was scoped to kill,
-// just on a surface F7's original scope didn't touch. The DS has no
+// additional_resources must also surface on the DATA SOURCE, not just the
+// resource - otherwise a multi-resource config looked up via the data source
+// silently returns only the primary entry. The DS has no
 // prior state to match against (a fresh lookup every time), so this asserts
 // the deterministic cold-lookup fallback (first entry = primary, rest =
 // name-sorted additional) rather than a specific configured order.
 func TestAccComputeConfigDataSource_AdditionalResourcesNotSilentlyTruncated_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	server, mu, storedDCs := newOptionCMockServer(t)
+	server, mu, storedDCs := newAdditionalResourcesMockServer(t)
 	name := "cc-optionc-ds-multi"
 
 	// Seed via the mock's create path so a real config_id/name exists to
@@ -252,9 +249,9 @@ data "anyscale_compute_config" "test" {
 					// resolve all of them, not just entry zero.
 					mu.Lock()
 					*storedDCs = []any{
-						optionCDeploymentConfigEntry("resource-a"),
-						optionCDeploymentConfigEntry("resource-b"),
-						optionCDeploymentConfigEntry("resource-c"),
+						additionalResourcesDeploymentConfigEntry("resource-a"),
+						additionalResourcesDeploymentConfigEntry("resource-b"),
+						additionalResourcesDeploymentConfigEntry("resource-c"),
 					}
 					mu.Unlock()
 				},

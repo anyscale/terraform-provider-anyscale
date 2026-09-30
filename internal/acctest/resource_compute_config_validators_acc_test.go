@@ -1,6 +1,6 @@
 package acctest
 
-// Regression tests for the compute-config validator agenda (V1-V3, F4). Each
+// Regression tests for the compute-config plan-time validators. Each
 // of these is a plan-time ConfigValidator with no backend dependency, so
 // `terraform validate` against a freshly-built binary (reusing
 // buildProviderBinaryForCLICheck/runTerraformValidate/tfValidateJSON from
@@ -9,22 +9,22 @@ package acctest
 // surface warning-level diagnostics, and none of these four need a real API
 // call to validate.
 //
-// Severity ruling:
-//   - V1 max_nodes >= 1 / >= min_nodes: HARD error (backend already 422s this
-//     today; the client validator is free hardening, non-breaking).
-//   - V2 instance_type + required_resources both set: WARNING (backend
+// Severity:
+//   - max_nodes >= 1 / >= min_nodes: HARD error (the backend 422s this too;
+//     the client validator is hardening, non-breaking).
+//   - instance_type + required_resources both set: WARNING (backend
 //     accepts both side-by-side with no deterministic preference, live-
 //     confirmed; redundant but discoverable in the user's own config).
-//   - V3 unrecognized market_type string: WARNING (backend has no market_type
-//     field at all; our own missing switch default silently coerced to
-//     ON_DEMAND - discoverable, low-stakes).
-//   - F4 fractional custom_resources: HARD error. A real apply against this
-//     crashes Terraform Core outright - "provider produced inconsistent
+//   - unrecognized market_type string: WARNING (backend has no market_type
+//     field at all; an unrecognized value would otherwise silently become ON_DEMAND -
+//     discoverable, low-stakes).
+//   - fractional custom_resources: HARD error. Without it a real apply
+//     fails in Terraform Core - "provider produced inconsistent
 //     result after apply" - since custom_resources is backend-typed as a
 //     plain integer and gets silently truncated (2.5 -> 2) before the Core
 //     consistency check ever runs. A plan-time reject replaces a confusing
-//     crash with a clear diagnostic; nothing that works today is broken, so
-//     this is Fixed/non-breaking despite being a hard validator.
+//     crash with a clear diagnostic; no config that could apply successfully
+//     is rejected, so it is non-breaking despite being a hard validator.
 
 import (
 	"fmt"
@@ -150,7 +150,7 @@ resource "anyscale_compute_config" "test" {
 		}
 	}
 
-	// Same dev_overrides-boilerplate-warning trap as the V2 test above:
+	// Same dev_overrides-boilerplate-warning trap as the instance_type + required_resources test above:
 	// require the warning to actually name market_type or the bogus value,
 	// not just any warning at all.
 	found := false
@@ -207,7 +207,7 @@ resource "anyscale_compute_config" "test" {
 }
 
 // TestAccComputeConfigResource_WholeNumberCustomResourceAllowed is the
-// negative-space companion to the fractional-rejection test above: F4's
+// negative-space companion to the fractional-rejection test above: the
 // validator must reject non-integers WITHOUT rejecting the ordinary, valid
 // whole-number case it's meant to keep working.
 func TestAccComputeConfigResource_WholeNumberCustomResourceAllowed(t *testing.T) {

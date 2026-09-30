@@ -10,15 +10,14 @@ import (
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 )
 
-// The sweeper half of the GATE-11 Part B orphan-prevention proof.
-// sweepContainerImageResult (see sweeper_container_image_test.go) carries no
-// build-related field at all -- ID, Name, CreatedAt, DeletedAt, Anonymous,
-// IsDefault -- so a template-without-a-build candidate is not a special case
-// the sweeper has to detect, it's the only shape the sweeper ever sees.
-// What had zero test coverage before this file is sweepContainerImages
-// itself: only its search helper (searchContainerImagesByContains, in
-// sweeper_container_image_pagination_test.go) was tested in isolation. These
-// tests drive the real top-level orchestration -- search, cross-prefix dedup,
+// The sweeper half of the registry orphan-prevention proof. The sweeper
+// decodes candidates into provider.ApplicationTemplateResult and never reads
+// its LatestBuild field -- it decides on ID, Name, CreatedAt, DeletedAt,
+// Anonymous, and IsDefault -- so a template-without-a-build candidate is not a
+// special case the sweeper has to detect. The search helper
+// (searchContainerImagesByContains) is tested in isolation in
+// sweeper_container_image_pagination_test.go; these tests cover
+// sweepContainerImages itself, driving the real top-level orchestration -- search, cross-prefix dedup,
 // age filter, prefix filter, already-archived filter, archive call -- against
 // a mock server, using t.Setenv to redirect the package-internal
 // GetTestClient() call the same way helpers_checkdestroy_test.go does.
@@ -78,7 +77,7 @@ func newBuildlessSweepServer(t *testing.T, candidate provider.ApplicationTemplat
 	return server, &searchCalls, &archivedPaths
 }
 
-// TestSweepContainerImages_BuildlessOrphan_ArchivesCleanly is the main GATE
+// TestSweepContainerImages_BuildlessOrphan_ArchivesCleanly is the main
 // proof: a build-less template old enough to sweep, correctly prefixed, not
 // anonymous/default, and not yet archived must be archived exactly once, with
 // no error -- using nothing but the candidate's own id.

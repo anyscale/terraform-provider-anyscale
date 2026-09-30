@@ -1,19 +1,16 @@
 package acctest
 
-// F3 regression: the 404 handling bug had two distinct, opposite-direction
-// symptoms -
-//   - bug A: DoRequestAndParse lists StatusNotFound as ACCEPTED, so a genuine
-//     404 decodes to (zero-struct, nil-err) and the "not found -> remove"
-//     branch never fires - a deleted compute config looks perfectly healthy
+// Read/ImportState must distinguish "genuinely not found" from "some other
+// error", in both directions:
+//   - A genuine 404 must remove the resource from state. DoRequestAndParse
+//     lists StatusNotFound as ACCEPTED, so a 404 would otherwise decode to
+//     (zero-struct, nil-err) and a deleted compute config would look healthy
 //     forever.
-//   - bug B (the more alarming one, needs no real deletion): apiResult is
-//     ALWAYS nil whenever DoRequestAndParse returns any error, so a genuinely
-//     transient error (500, network blip) hits the exact same "not found"
-//     branch a 404 would - silently wiping a HEALTHY resource from state.
-// The fix is a typed ErrNotFound sentinel (api_helpers.go) so Read/ImportState
-// can tell "genuinely not found" apart from "some other error" instead of
-// using apiResult==nil as a proxy for both. This file proves both directions
-// with a mock server that returns the real error-shaped 404 body
+//   - A transient error (500, network blip) must surface as an error and
+//     leave a HEALTHY resource in state. Treating "no result" as a proxy for
+//     "not found" would silently wipe it.
+// Both rely on the typed ErrNotFound sentinel (api_helpers.go). The mock
+// returns the real error-shaped 404 body
 // ({"error":{"detail":"Could not find entity with id ..."}}) for the
 // genuine-404 case, and a real 500 for the transient case - not an idealized
 // empty response either mock could get away with echoing.
@@ -31,7 +28,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-type f3NotFoundMockServer struct {
+type readErrorsMockServer struct {
 	mu     sync.Mutex
 	record map[string]any
 	// nextGetStatus, when non-zero, overrides EVERY subsequent GET's response
@@ -46,9 +43,9 @@ type f3NotFoundMockServer struct {
 	nextGetStatus int
 }
 
-func newF3NotFoundMockServer(t *testing.T) (*httptest.Server, *f3NotFoundMockServer) {
+func newReadErrorsMockServer(t *testing.T) (*httptest.Server, *readErrorsMockServer) {
 	t.Helper()
-	state := &f3NotFoundMockServer{}
+	state := &readErrorsMockServer{}
 	mux := http.NewServeMux()
 
 	// Registered under both the subtree and bare-path forms (see
@@ -125,7 +122,7 @@ func newF3NotFoundMockServer(t *testing.T) (*httptest.Server, *f3NotFoundMockSer
 func TestAccComputeConfigResource_ReadRemovesOnGenuine404_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	server, state := newF3NotFoundMockServer(t)
+	server, state := newReadErrorsMockServer(t)
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_compute_config" "test" {
   name     = "cc-f3-notfound"
@@ -174,7 +171,7 @@ resource "anyscale_compute_config" "test" {
 func TestAccComputeConfigResource_ReadSurfacesTransientErrorWithoutRemoving_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	server, state := newF3NotFoundMockServer(t)
+	server, state := newReadErrorsMockServer(t)
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_compute_config" "test" {
   name     = "cc-f3-notfound"
@@ -215,7 +212,7 @@ resource "anyscale_compute_config" "test" {
 func TestAccComputeConfigResource_ImportBogusIDProducesClearDiagnostic_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
-	server, _ := newF3NotFoundMockServer(t)
+	server, _ := newReadErrorsMockServer(t)
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_compute_config" "test" {
   name     = "cc-f3-notfound-import"
