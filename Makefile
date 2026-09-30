@@ -7,7 +7,7 @@ INSTALL_DIR := $(HOME)/.terraform.d/plugins/registry.terraform.io/anyscale/anysc
 GO := go
 GOFLAGS := -v
 GOLANGCI_LINT := golangci-lint
-TFPLUGINDOCS := tfplugindocs
+TFPLUGINDOCS := go tool tfplugindocs
 
 # Per-run suffix used by example apply/destroy targets to isolate state and
 # cloud names across parallel runs. Defaults to a timestamp.
@@ -270,22 +270,12 @@ deps-update: ## Update all dependencies
 .PHONY: docs
 docs: ## Generate provider documentation
 	@echo "==> Generating documentation..."
-	@if command -v $(TFPLUGINDOCS) >/dev/null 2>&1; then \
-		$(TFPLUGINDOCS) generate --provider-name $(BINARY_NAME); \
-	else \
-		echo "tfplugindocs not installed. Install with: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest"; \
-		exit 1; \
-	fi
+	$(TFPLUGINDOCS) generate --provider-name $(BINARY_NAME)
 
 .PHONY: docs-validate
 docs-validate: ## Validate provider documentation
 	@echo "==> Validating documentation..."
-	@if command -v $(TFPLUGINDOCS) >/dev/null 2>&1; then \
-		$(TFPLUGINDOCS) validate --provider-name $(BINARY_NAME); \
-	else \
-		echo "tfplugindocs not installed. Install with: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest"; \
-		exit 1; \
-	fi
+	$(TFPLUGINDOCS) validate --provider-name $(BINARY_NAME)
 
 # ============================================================================
 # CLEAN

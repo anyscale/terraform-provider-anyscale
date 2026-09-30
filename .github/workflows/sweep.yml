@@ -5,6 +5,15 @@ on:
     - cron: "0 3 * * *"  # daily at 03:00 UTC
   workflow_dispatch:  # also runnable manually
 
+permissions:
+  contents: read
+
+# A second sweep must queue behind a running one, not cancel it: a hard-cancelled
+# sweep leaves the resources it was cleaning up half-deleted.
+concurrency:
+  group: sweep
+  cancel-in-progress: false
+
 jobs:
   sweep:
     runs-on: ubuntu-latest
@@ -12,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

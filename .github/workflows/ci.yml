@@ -24,6 +24,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Detect docs-only diff
         # Lets the two real-infra acctest steps below skip when nothing in
@@ -99,11 +102,7 @@ jobs:
         if: matrix.shard == 'lint-and-unit'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.13
-
-      - name: Install tfplugindocs
-        if: matrix.shard == 'lint-and-unit'
-        run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest
+          version: v2.13.2
 
       - name: Install TFLint
         if: matrix.shard == 'lint-and-unit'
@@ -220,7 +219,7 @@ jobs:
         # updated deps) and release-preflight. To force real acctests on a
         # specific bump, push a commit to its branch so the run is
         # human-triggered (secrets are then available).
-        if: (matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource') && github.actor == 'dependabot[bot]'
+        if: (matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource') && github.actor == 'dependabot[bot]'  # zizmor: ignore[bot-conditions] notice-only step; the actor only chooses whether to print a message, and the acctest steps use the inverse check so real secrets are never exposed to a Dependabot run
         run: echo "::notice::Acceptance tests skipped for Dependabot PR (Actions secrets are unavailable to Dependabot runs); this PR is gated by lint-and-unit + release-preflight instead."
 
       - name: Acceptance Tests skipped (docs-only diff)
