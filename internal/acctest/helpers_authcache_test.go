@@ -1,27 +1,62 @@
 package acctest
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 )
 
-// resetAuthProbeCache clears ValidateAuthOrSkip's package-level cache and
-// restores it after the test, so this test can never leak a cached answer
-// into a real acceptance test sharing the same test binary run.
+// resetAuthProbeCache clears ValidateAuth's package-level cache and restores
+// it after the test, so this test can never leak a cached answer into a real
+// acceptance test sharing the same test binary run.
 func resetAuthProbeCache(t *testing.T) {
 	t.Helper()
 	authProbeMutex.Lock()
-	origDone, origInvalid := authProbeDone, authProbeInvalid
-	authProbeDone, authProbeInvalid = false, false
+	origDone, origStatus := authProbeDone, authProbeStatus
+	authProbeDone, authProbeStatus = false, 0
 	authProbeMutex.Unlock()
 
 	t.Cleanup(func() {
 		authProbeMutex.Lock()
-		authProbeDone, authProbeInvalid = origDone, origInvalid
+		authProbeDone, authProbeStatus = origDone, origStatus
 		authProbeMutex.Unlock()
 	})
+}
+
+// recordingAuthT stands in for *testing.T so validateAuth's fail/skip outcome
+// can be observed without failing the calling test. Fatalf and Skipf stop the
+// call the way the real methods do, via a panic that runValidateAuth recovers.
+type recordingAuthT struct {
+	fataled, skipped bool
+	msg              string
+}
+
+type authStop struct{}
+
+func (r *recordingAuthT) Helper()             {}
+func (r *recordingAuthT) Logf(string, ...any) {}
+func (r *recordingAuthT) Fatalf(format string, args ...any) {
+	r.fataled, r.msg = true, fmt.Sprintf(format, args...)
+	panic(authStop{})
+}
+func (r *recordingAuthT) Skipf(format string, args ...any) {
+	r.skipped, r.msg = true, fmt.Sprintf(format, args...)
+	panic(authStop{})
+}
+
+func runValidateAuth() (r *recordingAuthT) {
+	r = &recordingAuthT{}
+	defer func() {
+		if v := recover(); v != nil {
+			if _, ok := v.(authStop); !ok {
+				panic(v)
+			}
+		}
+	}()
+	validateAuth(r)
+	return r
 }
 
 // resetAllConfiguredCloudsCache clears GetAllConfiguredClouds's package-level
@@ -41,35 +76,56 @@ func resetAllConfiguredCloudsCache(t *testing.T) {
 	})
 }
 
-func TestValidateAuthOrSkip_CachesA401AndDoesNotReprobe(t *testing.T) {
+// TestValidateAuth_RejectedTokenFailsAndIsCached pins the fail-closed
+// contract: a token the API rejects must fail the test, never skip it. When
+// this skipped, an expired CI secret made every acceptance test skip and both
+// acctest shards reported green with nothing executed.
+func TestValidateAuth_RejectedTokenFailsAndIsCached(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			resetAuthProbeCache(t)
+
+			var requestCount int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt64(&requestCount, 1)
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+
+			t.Setenv("ANYSCALE_API_URL", server.URL)
+			t.Setenv("ANYSCALE_CLI_TOKEN", "rejected-token")
+
+			for i, label := range []string{"live probe", "cached answer"} {
+				r := runValidateAuth()
+				if !r.fataled || r.skipped {
+					t.Fatalf("call %d (%s): fataled=%v skipped=%v, want a failure, not a skip", i+1, label, r.fataled, r.skipped)
+				}
+			}
+			if got := atomic.LoadInt64(&requestCount); got != 1 {
+				t.Errorf("request count = %d, want exactly 1 - the second call should have used the cached answer, not reprobed", got)
+			}
+		})
+	}
+}
+
+func TestValidateAuth_AcceptedTokenPasses(t *testing.T) {
 	resetAuthProbeCache(t)
 
-	var requestCount int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&requestCount, 1)
-		w.WriteHeader(http.StatusUnauthorized)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results":[]}`))
 	}))
 	defer server.Close()
 
 	t.Setenv("ANYSCALE_API_URL", server.URL)
-	t.Setenv("ANYSCALE_CLI_TOKEN", "invalid-token")
+	t.Setenv("ANYSCALE_CLI_TOKEN", "good-token")
 
-	t.Run("first call probes live and skips", func(t *testing.T) {
-		ValidateAuthOrSkip(t)
-		t.Fatal("expected ValidateAuthOrSkip to skip on 401, execution continued")
-	})
-
-	t.Run("second call uses the cached answer, no new request", func(t *testing.T) {
-		ValidateAuthOrSkip(t)
-		t.Fatal("expected ValidateAuthOrSkip to skip from cache on 401, execution continued")
-	})
-
-	if got := atomic.LoadInt64(&requestCount); got != 1 {
-		t.Errorf("request count = %d, want exactly 1 - the second call should have used the cached answer, not reprobed", got)
+	if r := runValidateAuth(); r.fataled || r.skipped {
+		t.Fatalf("fataled=%v skipped=%v (%s), want neither for an accepted token", r.fataled, r.skipped, r.msg)
 	}
 }
 
-func TestValidateAuthOrSkip_DoesNotCacheARequestError(t *testing.T) {
+func TestValidateAuth_DoesNotCacheARequestError(t *testing.T) {
 	resetAuthProbeCache(t)
 
 	// Point at a server that immediately closes the connection, so every
@@ -81,12 +137,14 @@ func TestValidateAuthOrSkip_DoesNotCacheARequestError(t *testing.T) {
 	t.Setenv("ANYSCALE_API_URL", server.URL)
 	t.Setenv("ANYSCALE_CLI_TOKEN", "some-token")
 
-	// Neither call should skip: a request error is logged and tolerated, not
-	// treated as a confirmed-invalid token, and must not be cached as one -
-	// otherwise a single transient blip would silently suppress the real 401
-	// check for every later test in the run.
-	ValidateAuthOrSkip(t)
-	ValidateAuthOrSkip(t)
+	// A request error is logged and tolerated, not treated as a rejected
+	// token, and must not be cached as one - otherwise a single transient
+	// blip would suppress the real auth check for every later test.
+	for i := 0; i < 2; i++ {
+		if r := runValidateAuth(); r.fataled || r.skipped {
+			t.Fatalf("call %d: fataled=%v skipped=%v, want neither on a request error", i+1, r.fataled, r.skipped)
+		}
+	}
 
 	authProbeMutex.Lock()
 	done := authProbeDone
