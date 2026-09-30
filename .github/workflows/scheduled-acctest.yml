@@ -24,9 +24,14 @@ on:
     # ANYSCALE_SWEEP_MIN_AGE guard (default 2h), which already protects
     # against this on its own.
     - cron: "24 4 * * *"
-  workflow_dispatch: # also runnable manually -- e.g. to confirm this
-    # workflow works at all before trusting the cron, or to get same-day
-    # signal after landing a fix.
+  # Also runnable manually, e.g. to confirm this workflow works at all before
+  # trusting the cron, or to get same-day signal after landing a fix.
+  workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: "Fail immediately, to exercise the failure notification (creates or updates the tracking issue)."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,6 +49,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Simulate a failure
+        if: ${{ inputs.simulate_failure }}
+        run: |
+          echo "::error::Simulated failure (workflow_dispatch simulate_failure=true), used to exercise the failure notification."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,3 +105,36 @@ jobs:
           TF_ACC=1 go test ./internal/acctest/ -v -timeout 30m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' 2>&1 | tee /tmp/acctest.log
           .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Resources"
           .github/scripts/summarize-compute-config-coverage.sh /tmp/acctest.log "Acceptance Tests - Resources"
+
+  # Opens (or comments on) one tracking issue when the run fails, so a red
+  # nightly run is not only an email. The issues: write grant is scoped to this
+  # job; the job above keeps read-only permissions.
+  notify-failure:
+    name: Notify on failure
+    needs: scheduled-acctest
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          ISSUE_TITLE: "Scheduled acceptance tests are failing"
+        run: |
+          set -euo pipefail
+          body="Run failed: ${RUN_URL} (trigger: ${EVENT}, commit ${SHA})"
+          existing="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" --json number,title \
+            --jq "[.[] | select(.title == \"${ISSUE_TITLE}\")][0].number // empty")"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "Commented on #$existing"
+          else
+            gh issue create --title "${ISSUE_TITLE}" --body "$body"
+          fi
