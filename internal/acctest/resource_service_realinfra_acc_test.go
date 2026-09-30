@@ -40,11 +40,7 @@ func TestAccServiceResource_RealInfra(t *testing.T) {
 	SkipIfNoRealInfra(t)
 	t.Parallel()
 
-	vmClouds := GetAllVMClouds(t)
-	if len(vmClouds) == 0 {
-		t.Skip("No VM cloud available for real-infra service testing")
-	}
-	cloud := vmClouds[0]
+	cloud := pinnedVMCloud(t)
 	instanceTypes := cloud.InstanceTypes()
 	if !instanceTypes.IsValid() {
 		t.Skip("No valid instance types on the resolved cloud")
@@ -240,11 +236,7 @@ func TestAccServiceResource_RealInfra_InPlaceRollout(t *testing.T) {
 	SkipIfNoRealInfra(t)
 	t.Parallel()
 
-	vmClouds := GetAllVMClouds(t)
-	if len(vmClouds) == 0 {
-		t.Skip("No VM cloud available for real-infra service testing")
-	}
-	cloud := vmClouds[0]
+	cloud := pinnedVMCloud(t)
 	instanceTypes := cloud.InstanceTypes()
 	if !instanceTypes.IsValid() {
 		t.Skip("No valid instance types on the resolved cloud")
