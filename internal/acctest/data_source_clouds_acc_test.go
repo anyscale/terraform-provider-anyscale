@@ -47,10 +47,14 @@ func TestAccCloudsDataSource_FilterByProvider(t *testing.T) {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// The known test cloud is AWS - GCP must exclude it entirely.
+				// The known test cloud is AWS - GCP must exclude it. Not
+				// clouds.# == 0: any GCP cloud in the shared test org (another
+				// run's real-infra test) is a legitimate result and would fail
+				// that. See testAccCheckCloudsListExcludesID.
 				Config: testAccCloudsDataSourceFilterByProviderConfig("GCP"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("data.anyscale_clouds.test", "clouds.#", "0"),
+					testAccCheckCloudsListExcludesID("data.anyscale_clouds.test", cloudID),
+					testAccCheckCloudsListAllMatch("data.anyscale_clouds.test", "cloud_provider", "GCP"),
 				),
 			},
 			{
