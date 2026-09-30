@@ -217,18 +217,17 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 
 			// ─── Optional rollout inputs ───
 			"rollout_strategy": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  stringdefault.StaticString(serviceRolloutStrategyRollout),
-				MarkdownDescription: "Either `ROLLOUT` (default) or `IN_PLACE`. Controls how UPDATES roll in a new version - the initial create always performs a standard deploy, since there is no existing version yet to upgrade in place (the backend rejects `IN_PLACE` outright on a fresh create), so this attribute can be set from the start and left unchanged across create and every later update. `ROLLOUT` deploys the new version on a newly started cluster and shifts traffic over, then converges to RUNNING. `IN_PLACE` upgrades the existing cluster in place - faster, but the backend permits changing only `ray_serve_config` under it; changing `build_id`, `compute_config_id`, or `connection_ids` in the same apply as `rollout_strategy = \"IN_PLACE\"` is rejected at plan time (see this resource's plan-time validation) rather than left to fail opaquely at apply. " +
-					"Not readable back from the API, so - like `tags` - drift on this attribute is never detected; it is a pure rollout directive re-sent on every apply.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString(serviceRolloutStrategyRollout),
+				MarkdownDescription: "How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config` - changing `build_id`, `compute_config_id`, or `connection_ids` under `IN_PLACE` is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(serviceRolloutStrategyRollout, serviceRolloutStrategyInPlace),
 				},
 			},
 			"max_surge_percent": schema.Int64Attribute{
 				Optional:            true,
-				MarkdownDescription: "Pacing knob only (0-100): how much excess capacity to allocate during the rollout. The rollout always still converges to 100% - this does not hold the rollout at a partial percent. Null lets the backend pick its own pacing. Not readable back from the API (see `rollout_strategy`).",
+				MarkdownDescription: "Rollout pacing (0-100): how much excess capacity to allocate during a deploy. The rollout still converges to 100%; this never holds it at a partial percent. Null lets the backend choose. Like `rollout_strategy`, it is not readable from the API and a change to it alone takes effect on the next deploy.",
 				Validators: []validator.Int64{
 					int64validator.Between(0, 100),
 				},
@@ -826,13 +825,19 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 // so changing only one of them must not redeploy an otherwise-unchanged, healthy running
 // service. name/project_id are RequiresReplace and so cannot differ here at all (Update is
 // never called with either changed - that goes through Create+Delete instead).
+//
+// rollout_strategy and max_surge_percent are excluded too: they control HOW a deploy happens,
+// not WHAT is deployed, and neither is readable back from the API. Counting them made import
+// redeploy the service - both are null after ImportState, so the first apply of an unchanged
+// config (rollout_strategy's "ROLLOUT" default, or a configured max_surge_percent) looked like a
+// deploy-field change. A change to only these two is therefore a state-only update that takes
+// effect on the next real deploy; when a real deploy field changes alongside them, Update builds
+// the PUT /apply body from the plan, so the new values are sent with that deploy.
 func serviceDeployFieldsChanged(plan, state *ServiceResourceModel) bool {
 	return !plan.RayServeConfig.Equal(state.RayServeConfig) ||
 		!plan.BuildID.Equal(state.BuildID) ||
 		!plan.ComputeConfigID.Equal(state.ComputeConfigID) ||
 		!plan.ConnectionIDs.Equal(state.ConnectionIDs) ||
-		!plan.RolloutStrategy.Equal(state.RolloutStrategy) ||
-		!plan.MaxSurgePercent.Equal(state.MaxSurgePercent) ||
 		!plan.Description.Equal(state.Description)
 }
 
@@ -864,7 +869,8 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	if !serviceDeployFieldsChanged(&plan, &state) {
 		// H2 (contract section H): nothing that requires a new version changed - e.g. only
-		// timeouts, or only tags (already synced above) - so skip the PUT /apply +
+		// timeouts, only tags (already synced above), or only rollout_strategy/max_surge_percent
+		// (persisted from plan below, sent with the next real deploy) - so skip the PUT /apply +
 		// rollout wait against an otherwise-unchanged, healthy running service.
 		// serviceDeployFieldsChanged deliberately never compares Timeouts (same as it never
 		// compared the old flat RolloutTimeout) - a timeouts-only change must never look like
