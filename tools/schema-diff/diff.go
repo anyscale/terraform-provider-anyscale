@@ -295,7 +295,7 @@ func (d *differ) compareAttribute(subject, path string, b, h *tfjson.SchemaAttri
 	if b.Sensitive && !h.Sensitive {
 		d.add(Breaking, RuleSensitiveRemoved, subject, "attribute %s is no longer sensitive", path)
 	} else if !b.Sensitive && h.Sensitive {
-		d.add(NeedsReview, RuleSensitiveAdded, subject, "attribute %s is now sensitive; outputs that reference it must be marked sensitive", path)
+		d.add(NeedsReview, RuleSensitiveAdded, subject, "attribute %s is now sensitive; a root module output that references it without sensitive = true now fails plan", path)
 	}
 	if b.WriteOnly != h.WriteOnly {
 		d.add(NeedsReview, RuleWriteOnlyChanged, subject, "attribute %s write_only changed from %t to %t", path, b.WriteOnly, h.WriteOnly)

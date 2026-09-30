@@ -73,7 +73,7 @@ func TestDiff_Fixtures(t *testing.T) {
 		"review_version_bump":      {{NeedsReview, RuleVersionChanged, r + ": schema version changed from 0 to 1; confirm a state upgrader handles every prior version"}},
 		"review_deprecation_added": {{NeedsReview, RuleDeprecatedAdded, r + ": attribute size deprecated"}},
 		"review_computed_added":    {{NeedsReview, RuleComputedAdded, r + ": attribute size changed from optional to optional+computed"}},
-		"review_sensitive_added":   {{NeedsReview, RuleSensitiveAdded, r + ": attribute size is now sensitive; outputs that reference it must be marked sensitive"}},
+		"review_sensitive_added":   {{NeedsReview, RuleSensitiveAdded, r + ": attribute size is now sensitive; a root module output that references it without sensitive = true now fails plan"}},
 
 		// Non-breaking.
 		"nonbreaking_new_resource":           {{NonBreaking, RuleSchemaAdded, "resource/anyscale_gizmo: new resource"}},
