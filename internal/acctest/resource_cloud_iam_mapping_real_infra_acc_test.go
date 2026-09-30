@@ -21,12 +21,14 @@ import (
 // this repo's testing conventions forbid. They require:
 //
 //   - TF_ACC=1 and ANYSCALE_TEST_REAL_INFRA=1 (via SkipIfNoRealInfra)
-//   - ANYSCALE_TEST_CLOUD_ID set to a dedicated, real AWS or GCP VM/K8S cloud
-//     with an attached cloud_resource. It is read directly, never through
-//     GetTestCloudID: that resolver falls back to the static fixture and then
-//     to auto-discovery, and the mutating tests here must never land on a
-//     cloud anything else might be concurrently relying on. The static
-//     fixture is refused by name even when set explicitly.
+//   - ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID set to a dedicated, real AWS or GCP
+//     VM/K8S cloud with an attached cloud_resource. It is read directly,
+//     never through GetTestCloudID: that resolver falls back to the static
+//     fixture and then to auto-discovery, and the mutating tests here must
+//     never land on a cloud anything else might be concurrently relying on.
+//     It is deliberately not ANYSCALE_TEST_CLOUD_ID, which pins the cloud for
+//     every test in the suite. The static fixture is refused by name even
+//     when set explicitly.
 //
 // A plain "empty cloud" (createEphemeralTestCloud) is not sufficient - the
 // config endpoint requires a resolvable cloud_resource, which an empty cloud
@@ -42,9 +44,9 @@ func requireRealIAMMappingTestCloud(t *testing.T) (cloudID, cloudResourceID stri
 	SkipIfNotAcceptanceTest(t)
 	SkipIfNoRealInfra(t)
 
-	cloudID = os.Getenv("ANYSCALE_TEST_CLOUD_ID")
+	cloudID = os.Getenv("ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID")
 	if cloudID == "" {
-		t.Skip("ANYSCALE_TEST_CLOUD_ID not set: these tests overwrite the cloud's IAM mapping, so they need an " +
+		t.Skip("ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID not set: these tests overwrite the cloud's IAM mapping, so they need an " +
 			"explicitly chosen dedicated cloud and never fall back to a resolved or shared one")
 	}
 
@@ -58,7 +60,7 @@ func requireRealIAMMappingTestCloud(t *testing.T) (cloudID, cloudResourceID stri
 		} `json:"result"`
 	}](context.Background(), client, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil, 200)
 	if err != nil {
-		t.Fatalf("failed to look up ANYSCALE_TEST_CLOUD_ID %s: %v", cloudID, err)
+		t.Fatalf("failed to look up ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID %s: %v", cloudID, err)
 	}
 	if err := refuseSharedIAMMappingTestCloud(cloud.Result.Name); err != nil {
 		t.Fatal(err)
@@ -78,7 +80,7 @@ func requireRealIAMMappingTestCloud(t *testing.T) (cloudID, cloudResourceID stri
 // against the fixture would break every other test that relies on it.
 func refuseSharedIAMMappingTestCloud(cloudName string) error {
 	if cloudName == defaultKnownGoodCloudName {
-		return fmt.Errorf("ANYSCALE_TEST_CLOUD_ID points at the shared fixture %q; these tests overwrite the "+
+		return fmt.Errorf("ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID points at the shared fixture %q; these tests overwrite the "+
 			"cloud's IAM mapping, so point it at a dedicated cloud instead", cloudName)
 	}
 	return nil
@@ -181,7 +183,7 @@ func getRealCloudDeploymentConfig(t *testing.T, cloudID, cloudResourceID string)
 // realIAMMappingBaseSpec returns the cloud_provider/compute_stack pair the
 // write endpoint requires on every call, resolved from the real cloud's own
 // current config rather than hardcoded - this suite is meant to run against
-// whichever real AWS/GCP VM or K8S cloud is provided via ANYSCALE_TEST_CLOUD_ID.
+// whichever real AWS/GCP VM or K8S cloud ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID names.
 func realIAMMappingBaseSpec(t *testing.T, cloudID, cloudResourceID string) (cloudProvider, computeStack string) {
 	t.Helper()
 	current := getRealCloudDeploymentConfig(t, cloudID, cloudResourceID)
