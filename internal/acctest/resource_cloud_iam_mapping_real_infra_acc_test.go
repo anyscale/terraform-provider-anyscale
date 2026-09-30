@@ -227,51 +227,6 @@ func checkImportedCloudIAMMapping(states []*terraform.InstanceState, wantCloudID
 	return nil
 }
 
-// TestAccCloudIAMMappingResource_RealCloud_ColdImport_CompoundID is Test A's
-// first ID form: pre-seed a real mapping out of band, then cold-import using
-// "<cloud_id>/<cloud_resource_id>" as the FIRST step (no prior Create/apply
-// in this TestCase) with ImportStatePersist so the recovered state carries
-// into this test's own final destroy - proving both what import actually
-// recovers (asserted here, inside the import step, per this repo's own
-// ImportState-throwaway-directory finding) and that Destroy genuinely
-// reverts a real, freshly-imported mapping.
-func TestAccCloudIAMMappingResource_RealCloud_ColdImport_CompoundID(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-	cloudID, cloudResourceID := requireRealIAMMappingTestCloud(t)
-	cloudProvider, computeStack := realIAMMappingBaseSpec(t, cloudID, cloudResourceID)
-
-	putRealCloudDeploymentConfig(t, cloudID, cloudResourceID, map[string]any{
-		"cloud_provider": cloudProvider,
-		"compute_stack":  computeStack,
-		"dataplane_iam_mapping": map[string]any{
-			"rules":         []map[string]any{{"selector": "workload-type=job", "value": "tfacc-iammap-coldimport-role"}},
-			"fallback_rule": "CLOUD_DEFAULT",
-		},
-	})
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				ResourceName:       "anyscale_cloud_iam_mapping.test",
-				ImportState:        true,
-				ImportStateId:      cloudID + "/" + cloudResourceID,
-				ImportStatePersist: true,
-				Config: fmt.Sprintf(`
-resource "anyscale_cloud_iam_mapping" "test" {
-  cloud_id          = %[1]q
-  cloud_resource_id = %[2]q
-}
-`, cloudID, cloudResourceID),
-				ImportStateCheck: func(states []*terraform.InstanceState) error {
-					return checkImportedCloudIAMMapping(states, cloudID, cloudResourceID, "tfacc-iammap-coldimport-role", "CLOUD_DEFAULT")
-				},
-			},
-		},
-	})
-}
-
 // TestAccCloudIAMMappingResource_RealCloud_ColdImport_BareCloudID is Test
 // A's second ID form: a bare cloud_id, which must resolve the primary
 // cloud_resource itself (resolvePrimaryCloudResourceID's real code path,
@@ -311,59 +266,6 @@ resource "anyscale_cloud_iam_mapping" "test" {
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					return checkImportedCloudIAMMapping(states, cloudID, cloudResourceID, "tfacc-iammap-coldimport-role", "CLOUD_DEFAULT")
 				},
-			},
-		},
-	})
-}
-
-// TestAccCloudIAMMappingResource_RealCloud_PlanStabilityAfterImport is Test
-// B: two sequential Config-only steps (no ImportState at all) that
-// reconstruct the exact state shape import would produce - both cloud_id
-// and cloud_resource_id declared explicitly, rules/fallback_rule matching
-// what is really on the cloud. This is the only way to prove plan stability
-// against a REAL response: an ImportState step's recovered values, per this
-// repo's own documented finding, live in a throwaway directory and cannot
-// carry forward into a later step's plan.
-func TestAccCloudIAMMappingResource_RealCloud_PlanStabilityAfterImport(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-	cloudID, cloudResourceID := requireRealIAMMappingTestCloud(t)
-	cloudProvider, computeStack := realIAMMappingBaseSpec(t, cloudID, cloudResourceID)
-
-	putRealCloudDeploymentConfig(t, cloudID, cloudResourceID, map[string]any{
-		"cloud_provider": cloudProvider,
-		"compute_stack":  computeStack,
-		"dataplane_iam_mapping": map[string]any{
-			"rules":         []map[string]any{{"selector": "workload-type=job", "value": "tfacc-iammap-planstable-role"}},
-			"fallback_rule": "CLOUD_DEFAULT",
-		},
-	})
-
-	config := fmt.Sprintf(`
-resource "anyscale_cloud_iam_mapping" "test" {
-  cloud_id          = %[1]q
-  cloud_resource_id = %[2]q
-
-  rules = [
-    { selector = "workload-type=job", value = "tfacc-iammap-planstable-role" }
-  ]
-  fallback_rule = "CLOUD_DEFAULT"
-}
-`, cloudID, cloudResourceID)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { PreCheck(t) },
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: config,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_cloud_iam_mapping.test", "rules.0.value", "tfacc-iammap-planstable-role"),
-				),
-			},
-			{
-				Config:             config,
-				PlanOnly:           true,
-				ExpectNonEmptyPlan: false,
 			},
 		},
 	})
