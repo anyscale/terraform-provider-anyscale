@@ -51,10 +51,20 @@ func TestAccOrganizationUserDataSource_ByID(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "name"),
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "permission_level"),
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "created_at"),
-					// Verify ID matches from list
+					// id is the lookup key (read from users[0].id), so pairing it
+					// would compare the input to itself. Pair the fields the lookup
+					// had to resolve instead.
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "id",
-						"data.anyscale_organization_users.all", "users.0.id",
+						"data.anyscale_organization_user.test", "email",
+						"data.anyscale_organization_users.all", "users.0.email",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_organization_user.test", "name",
+						"data.anyscale_organization_users.all", "users.0.name",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_organization_user.test", "user_id",
+						"data.anyscale_organization_users.all", "users.0.user_id",
 					),
 				),
 			},
@@ -78,10 +88,20 @@ func TestAccOrganizationUserDataSource_ByUserID(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "email"),
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "name"),
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "permission_level"),
-					// Verify it matches from list
+					// user_id is the lookup key (read from users[0].user_id), so
+					// pairing it would compare the input to itself. Pair the fields
+					// the lookup had to resolve instead.
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "user_id",
-						"data.anyscale_organization_users.all", "users.0.user_id",
+						"data.anyscale_organization_user.test", "id",
+						"data.anyscale_organization_users.all", "users.0.id",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_organization_user.test", "email",
+						"data.anyscale_organization_users.all", "users.0.email",
+					),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_organization_user.test", "name",
+						"data.anyscale_organization_users.all", "users.0.name",
 					),
 				),
 			},
@@ -127,14 +147,15 @@ func TestAccOrganizationUserDataSource_FromListToSingle(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "email"),
 					resource.TestCheckResourceAttrSet("data.anyscale_organization_user.test", "name"),
-					// Verify it matches the first user from the list
+					// Looked up by email, so id and name are what the lookup
+					// resolved - they must match the first user from the list.
 					resource.TestCheckResourceAttrPair(
 						"data.anyscale_organization_user.test", "id",
 						"data.anyscale_organization_users.all", "users.0.id",
 					),
 					resource.TestCheckResourceAttrPair(
-						"data.anyscale_organization_user.test", "email",
-						"data.anyscale_organization_users.all", "users.0.email",
+						"data.anyscale_organization_user.test", "name",
+						"data.anyscale_organization_users.all", "users.0.name",
 					),
 				),
 			},

@@ -20,17 +20,9 @@ import (
 // (see those files' header comments): plan-emptiness, import round-tripping,
 // and inconsistent-result-after-apply are terraform FRAMEWORK properties.
 // This mock is gated only by the ordinary SkipIfNotAcceptanceTest, so it runs
-// in CI.
-//
-// v0.25.0: the collaborator block was removed from anyscale_project (with no
-// in-provider replacement in that release - project collaborators are managed
-// through the console or API for now), so the
-// collaborator lifecycle test (old AC2) and the write-permission symmetry test
-// (old AC5) that used to live here are gone, along with the mock's
-// collaborator endpoints and its {owner,write,readonly} enum guard - the
-// resource no longer calls any of them. What remains is the part that was
-// never collaborator-specific: create, refresh to an empty plan, and import
-// with full ImportStateVerify.
+// in CI. It covers create, refresh to an empty plan, and import with full
+// ImportStateVerify. anyscale_project has no collaborator block, so the mock
+// serves no collaborator endpoints.
 
 type mockProjectServer struct {
 	mu       sync.Mutex

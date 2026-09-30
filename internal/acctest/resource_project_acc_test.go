@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -352,18 +353,17 @@ func TestIsProjectDisappears403Extendable(t *testing.T) {
 }
 
 // TestExtendProjectDeleteRetry covers the extended retry layer (see extendProjectDeleteRetry's
-// doc comment). Mutation-tested (2026-07-20): forcing the loop to stop after 1 attempt failed the
-// "succeeds on a later extended attempt" subtest as expected, then reverted clean.
+// doc comment). Forcing the loop to stop after 1 attempt fails the "succeeds on a later extended
+// attempt" subtest.
 func TestExtendProjectDeleteRetry(t *testing.T) {
 	withFastProjectDisappearsExtendedRetryTiming(t)
 	initialErr := fmt.Errorf(`unexpected status 403: {"error":{"detail":"Permission denied"}}`)
 
 	t.Run("succeeds on a later extended attempt", func(t *testing.T) {
 		const projectID = "prj_extend_succeeds"
-		var requestCount int
+		var requestCount atomic.Int32
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
-			if requestCount < 3 {
+			if requestCount.Add(1) < 3 {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
@@ -377,16 +377,16 @@ func TestExtendProjectDeleteRetry(t *testing.T) {
 		if err := extendProjectDeleteRetry(t, client, projectID, initialErr); err != nil {
 			t.Fatalf("expected the extended retry to eventually succeed, got: %v", err)
 		}
-		if requestCount != 3 {
-			t.Fatalf("expected exactly 3 requests (2 failed + 1 success), got %d", requestCount)
+		if got := requestCount.Load(); got != 3 {
+			t.Fatalf("expected exactly 3 requests (2 failed + 1 success), got %d", got)
 		}
 	})
 
 	t.Run("exhausts the extended window and returns a non-swallowed error", func(t *testing.T) {
 		const projectID = "prj_extend_exhausts"
-		var requestCount int
+		var requestCount atomic.Int32
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
+			requestCount.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
@@ -398,16 +398,16 @@ func TestExtendProjectDeleteRetry(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected the extended retry to exhaust and surface an error, got nil - a genuine permanent denial must never be silently tolerated")
 		}
-		if requestCount == 0 {
+		if requestCount.Load() == 0 {
 			t.Fatal("expected at least one extended attempt to have been made")
 		}
 	})
 
 	t.Run("a clean success needs only one extended attempt", func(t *testing.T) {
 		const projectID = "prj_extend_clean"
-		var requestCount int
+		var requestCount atomic.Int32
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
+			requestCount.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		defer server.Close()
@@ -416,8 +416,8 @@ func TestExtendProjectDeleteRetry(t *testing.T) {
 		if err := extendProjectDeleteRetry(t, client, projectID, initialErr); err != nil {
 			t.Fatalf("expected a clean delete, got: %v", err)
 		}
-		if requestCount != 1 {
-			t.Fatalf("expected exactly 1 request, got %d", requestCount)
+		if got := requestCount.Load(); got != 1 {
+			t.Fatalf("expected exactly 1 request, got %d", got)
 		}
 	})
 }
@@ -461,11 +461,10 @@ func TestAccProjectResourceDisappearsRetryExtension(t *testing.T) {
 
 	const projectID = "prj_disappears_engagement"
 	const failCount = 15
-	var requestCount int
+	var requestCount atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		if requestCount <= failCount {
+		if requestCount.Add(1) <= failCount {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":{"detail":"Permission denied"}}`))
@@ -482,12 +481,13 @@ func TestAccProjectResourceDisappearsRetryExtension(t *testing.T) {
 	if err := checkFn(projectDisappearsState(projectID)); err != nil {
 		t.Fatalf("expected the real schedule to exhaust and the extension to then succeed, got: %v", err)
 	}
-	if requestCount != failCount+1 {
+	got := requestCount.Load()
+	if got != failCount+1 {
 		t.Fatalf("expected exactly %d requests (%d failed across the real schedule + extension attempts, then 1 success), got %d",
-			failCount+1, failCount, requestCount)
+			failCount+1, failCount, got)
 	}
-	if requestCount <= 15 {
+	if got <= 15 {
 		t.Fatalf("expected more requests than the production schedule's own ~15-attempt ceiling makes alone (got %d) - "+
-			"this would mean the extension never actually engaged", requestCount)
+			"this would mean the extension never actually engaged", got)
 	}
 }

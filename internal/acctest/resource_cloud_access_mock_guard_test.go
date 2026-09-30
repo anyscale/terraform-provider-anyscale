@@ -18,9 +18,9 @@ import (
 // the unrevokable entry and the seeded member is deleted in step 1, leaving
 // every later step running against a backend that matches the config. The
 // fixture would still PASS, having stopped testing anything: the placebo shape
-// its own header warns about. It cannot self-check that, because it stays
-// skipped until the resource exists, so this drives the mock's HTTP surface
-// directly with no provider involved.
+// its own header warns about. It cannot self-check that, and it is skipped
+// whenever TF_ACC is unset, so this drives the mock's HTTP surface directly
+// with no provider involved and runs in every `go test`.
 //
 // Asserts the BEHAVIORAL chain only (revoke fails, member survives), never the
 // status or reason text - see cloudAccessMockUnrevokableReason.

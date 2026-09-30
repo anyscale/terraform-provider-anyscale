@@ -111,6 +111,52 @@ func testAccCheckNoProjectIsDefault(resourceName string) resource.TestCheckFunc 
 	}
 }
 
+// testAccCheckCreatedProjectFieldsPopulated finds the project created as
+// resName in the plural data source's result set (by name) and asserts its
+// fields match the created resource: same id, the given cloud_id and
+// description, and non-empty created_at/directory_name. Locating the entry by
+// name rather than reading projects.0 is what makes this about the created
+// project and not whichever project the API happened to list first.
+func testAccCheckCreatedProjectFieldsPopulated(dsName, resName, cloudID, description string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		res, ok := s.RootModule().Resources[resName]
+		if !ok {
+			return fmt.Errorf("resource not found: %s", resName)
+		}
+		ds, ok := s.RootModule().Resources[dsName]
+		if !ok {
+			return fmt.Errorf("data source not found: %s", dsName)
+		}
+		name := res.Primary.Attributes["name"]
+		count, err := strconv.Atoi(ds.Primary.Attributes["projects.#"])
+		if err != nil {
+			return fmt.Errorf("failed to parse projects.#: %w", err)
+		}
+		for i := 0; i < count; i++ {
+			attr := func(k string) string { return ds.Primary.Attributes[fmt.Sprintf("projects.%d.%s", i, k)] }
+			if attr("name") != name {
+				continue
+			}
+			if got := attr("id"); got != res.Primary.ID {
+				return fmt.Errorf("projects.%d.id = %q, want %q (the created project's id)", i, got, res.Primary.ID)
+			}
+			if got := attr("cloud_id"); got != cloudID {
+				return fmt.Errorf("projects.%d.cloud_id = %q, want %q", i, got, cloudID)
+			}
+			if got := attr("description"); got != description {
+				return fmt.Errorf("projects.%d.description = %q, want %q", i, got, description)
+			}
+			for _, k := range []string{"created_at", "directory_name"} {
+				if attr(k) == "" {
+					return fmt.Errorf("projects.%d.%s is empty for the created project", i, k)
+				}
+			}
+			return nil
+		}
+		return fmt.Errorf("created project %q not found in the %d-project result set", name, count)
+	}
+}
+
 func TestAccProjectsDataSource_NoFilters(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -123,10 +169,10 @@ func TestAccProjectsDataSource_NoFilters(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectsDataSourceNoFiltersConfig(cloudID),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// Should return at least some projects
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.#"),
-				),
+				// Every cloud has a default project and include_defaults
+				// defaults to true, so the result is non-empty, and every entry
+				// must belong to the requested cloud.
+				Check: testAccCheckAllProjectsHaveCloudID("data.anyscale_projects.test", cloudID),
 			},
 		},
 	})
@@ -259,18 +305,8 @@ func TestAccProjectsDataSource_ProjectFieldsPopulated(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccProjectsDataSourceProjectFieldsConfig(cloudID, projectName, description),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify at least one project is returned
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.#"),
-					// Verify the first project has expected fields populated
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.id"),
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.name"),
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.cloud_id"),
-					// Note: creator_id might not be returned by API for all projects
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.created_at"),
-					resource.TestCheckResourceAttrSet("data.anyscale_projects.test", "projects.0.directory_name"),
-					// Note: description might be empty for some projects, so we don't check it
-					// Note: collaborators are NOT included in plural data source
+				Check: testAccCheckCreatedProjectFieldsPopulated(
+					"data.anyscale_projects.test", "anyscale_project.test", cloudID, description,
 				),
 			},
 		},

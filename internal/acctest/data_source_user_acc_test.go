@@ -43,11 +43,14 @@ func TestAccUserDataSource_OrganizationData(t *testing.T) {
 			{
 				Config: testAccUserDataSourceConfig_basic(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Check organization IDs list exists
-					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organization_ids.#"),
-					// Check organizations list exists
-					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organizations.#"),
-					// Check first organization has required fields (if at least one org exists)
+					// userinfo is token-scoped: the handler always returns exactly
+					// one organization, even though the field is typed as a list.
+					resource.TestCheckResourceAttr("data.anyscale_user.test", "organization_ids.#", "1"),
+					resource.TestCheckResourceAttr("data.anyscale_user.test", "organizations.#", "1"),
+					resource.TestCheckResourceAttrPair(
+						"data.anyscale_user.test", "organization_ids.0",
+						"data.anyscale_user.test", "organizations.0.id",
+					),
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organizations.0.id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organizations.0.name"),
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organizations.0.public_identifier"),
@@ -58,12 +61,9 @@ func TestAccUserDataSource_OrganizationData(t *testing.T) {
 	})
 }
 
-// TestAccUserDataSource_CloudAccess previously asserted only that
-// "cloud_ids.#" was set, which holds even for an empty list - a data source
-// that returned zero clouds would pass identically to a correctly working
-// one. Replaced per the RBAC test-gap review: resolve the real test cloud
-// and assert it actually appears in cloud_ids, rather than that the attribute
-// merely exists.
+// TestAccUserDataSource_CloudAccess resolves the real test cloud and asserts
+// it appears in cloud_ids. Checking only that "cloud_ids.#" is set would pass
+// on an empty list.
 func TestAccUserDataSource_CloudAccess(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
@@ -77,7 +77,6 @@ func TestAccUserDataSource_CloudAccess(t *testing.T) {
 			{
 				Config: testAccUserDataSourceConfig_basic(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "cloud_ids.#"),
 					testAccCheckUserCloudIDsContains("data.anyscale_user.test", cloudID),
 				),
 			},
@@ -143,22 +142,39 @@ func TestAccUserDataSource_OutputsWork(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserDataSourceConfig_withOutputs(),
+				// Each declared output must carry the data source attribute it
+				// references, and that attribute must be non-empty.
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Check user data is populated
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "id"),
 					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "email"),
-					// organization_ids/cloud_ids are populated — checking the count
-					// attribute (matches the .# pattern used elsewhere in this file)
-					// rather than an exact length, since both lists are whole-account
-					// (every org/cloud the current credential can see) and can
-					// legitimately gain or lose entries between reads if anything
-					// else touches the same shared test org concurrently.
-					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organization_ids.#"),
-					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "cloud_ids.#"),
+					resource.TestCheckResourceAttrSet("data.anyscale_user.test", "organization_permission_level"),
+					testAccCheckOutputMatchesAttr("user_id", "data.anyscale_user.test", "id"),
+					testAccCheckOutputMatchesAttr("user_email", "data.anyscale_user.test", "email"),
+					testAccCheckOutputMatchesAttr("user_permission_level", "data.anyscale_user.test", "organization_permission_level"),
 				),
 			},
 		},
 	})
+}
+
+// testAccCheckOutputMatchesAttr asserts the root output outputName equals
+// resourceName's attr.
+func testAccCheckOutputMatchesAttr(outputName, resourceName, attr string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found: %s", resourceName)
+		}
+		out, ok := s.RootModule().Outputs[outputName]
+		if !ok {
+			return fmt.Errorf("output %q not found in state", outputName)
+		}
+		want := rs.Primary.Attributes[attr]
+		if got, _ := out.Value.(string); got != want {
+			return fmt.Errorf("output %q = %#v, want %q (%s.%s)", outputName, out.Value, want, resourceName, attr)
+		}
+		return nil
+	}
 }
 
 // Configuration templates
