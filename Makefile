@@ -7,7 +7,9 @@ INSTALL_DIR := $(HOME)/.terraform.d/plugins/registry.terraform.io/anyscale/anysc
 GO := go
 GOFLAGS := -v
 GOLANGCI_LINT := golangci-lint
-TFPLUGINDOCS := go tool tfplugindocs
+# tfplugindocs is pinned by its own module (tools/docsgen) so its ~25 dependencies
+# never enter the provider's go.mod. -modfile points the go tool at that module.
+TFPLUGINDOCS := go tool -modfile=tools/docsgen/go.mod tfplugindocs
 
 # Per-run suffix used by example apply/destroy targets to isolate state and
 # cloud names across parallel runs. Defaults to a timestamp.

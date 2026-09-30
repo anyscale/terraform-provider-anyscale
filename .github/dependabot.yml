@@ -46,3 +46,14 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  - package-ecosystem: "gomod"
+    directory: "/tools/docsgen"
+    labels:
+      - "dependencies"
+      - "go"
+      - "skip-changelog"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
