@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -159,19 +160,12 @@ func TestRegistryCheckDestroy_BuildlessTemplate_GoneSucceeds(t *testing.T) {
 	}
 }
 
-// TestRegistryCheckDestroy_KeyingOnBuildIDWouldSilentlySkipBuildlessOrphan is
-// the regression guard for part B: it proves WHY the real call site keys
-// directly on the resource's own id (rs.Primary.ID, via the plain
-// non-ByAttr check) rather than a separate build_id attribute. A build-less
-// orphan's state has no build_id attribute at all, so rs.Primary.Attributes["build_id"]
-// evaluates to "" (Go's zero value for a missing map key, not an error or
-// panic) and newAPIDestroyCheckImpl's `if id == "" { continue }` guard
-// silently skips the resource entirely -- CheckDestroy reports success (nil)
-// even though the mock server below never receives a single request and
-// would have reported the template as a live, unarchived leak if asked. A
-// false green, not a caught leak. This is the concrete failure mode the
-// real code's choice of attribute avoids.
-func TestRegistryCheckDestroy_KeyingOnBuildIDWouldSilentlySkipBuildlessOrphan(t *testing.T) {
+// TestRegistryCheckDestroy_EmptyKeyAttributeFailsInsteadOfSkipping pins the
+// fail-closed empty-id rule. A build-less orphan's state has no build_id
+// attribute, so a check keyed on build_id resolves "" for it. The check used
+// to skip such a resource and return success without a single request, a
+// false green for a live, unarchived leak. It must now fail.
+func TestRegistryCheckDestroy_EmptyKeyAttributeFailsInsteadOfSkipping(t *testing.T) {
 	const templateID = "apptemp_buildless_wouldleak"
 	var requestCount int
 
@@ -192,15 +186,15 @@ func TestRegistryCheckDestroy_KeyingOnBuildIDWouldSilentlySkipBuildlessOrphan(t 
 	)
 
 	err := wrongKeyCheckFn(buildlessRegistryState(templateID))
-	if err != nil {
-		t.Fatalf("expected the build_id-keyed check to silently report success (that's the bug being demonstrated), got an error instead: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "empty build_id") {
+		t.Fatalf("expected an empty build_id to fail the check, got: %v", err)
 	}
 	if requestCount != 0 {
-		t.Fatalf("expected the build_id-keyed check to never even call the API (empty id -> skipped), got %d requests -- if this now fails, newAPIDestroyCheckImpl's empty-id handling changed and this test should be revisited", requestCount)
+		t.Fatalf("expected no API request for an empty id, got %d", requestCount)
 	}
 }
 
-// TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDWouldSilentlySkip
+// TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDFails
 // is the regression guard for the specific V1(c) bug this session found and
 // fixed: before the fix, the registry's real CheckDestroy call was
 // NewAPIArchivedDestroyCheckByAttr("anyscale_container_image_registry",
@@ -227,7 +221,7 @@ func TestRegistryCheckDestroy_KeyingOnBuildIDWouldSilentlySkipBuildlessOrphan(t 
 // down without adding coverage. The property this test needs to prove is
 // narrower and cheaper to observe: does the real call shape query the API
 // at all (requestCount), not how it resolves once it does.
-func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDWouldSilentlySkip(t *testing.T) {
+func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDFails(t *testing.T) {
 	const templateID = "apptemp_v1c_wouldskip"
 	var requestCount int
 
@@ -245,11 +239,11 @@ func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDWouldSilentlySk
 		"anyscale_container_image_registry", "cluster_environment_id",
 		"/api/v2/application_templates/%s", "result.archived_at",
 	)
-	if err := wrongKeyCheckFn(state); err != nil {
-		t.Fatalf("expected the cluster_environment_id-keyed check to silently report success against a post-V1(c) state (that's the pre-fix bug this test documents), got an error instead: %v", err)
+	if err := wrongKeyCheckFn(state); err == nil || !strings.Contains(err.Error(), "empty cluster_environment_id") {
+		t.Fatalf("expected a check keyed on the removed cluster_environment_id attribute to fail, not silently pass, got: %v", err)
 	}
 	if requestCount != 0 {
-		t.Fatalf("expected the cluster_environment_id-keyed check to never even call the API (empty id -> skipped), got %d requests -- it should have no way to resolve an id from a state that never carries this attribute", requestCount)
+		t.Fatalf("expected no API request for an empty id, got %d", requestCount)
 	}
 
 	// Now prove the actual fix does NOT share this blind spot: the plain
@@ -265,4 +259,50 @@ func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDWouldSilentlySk
 	if requestCount != 1 {
 		t.Fatalf("expected exactly 1 GET request from the real check (it must resolve rs.Primary.ID and actually query the API), got %d", requestCount)
 	}
+}
+
+// TestCheckDestroy_UnverifiableResponsesFail pins that only a 404 (or an
+// archive marker) counts as destroyed. A 403, a persistent 5xx, or a
+// persistent transport error used to be logged and treated as success.
+func TestCheckDestroy_UnverifiableResponsesFail(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		closed  bool
+		wantErr string
+	}{
+		{name: "403", status: http.StatusForbidden, wantErr: "unexpected status 403"},
+		{name: "persistent 503", status: http.StatusServiceUnavailable, wantErr: "returned 503 until the poll deadline"},
+		{name: "persistent transport error", closed: true, wantErr: "request error until the poll deadline"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			if tc.closed {
+				server.Close()
+			} else {
+				defer server.Close()
+			}
+			t.Setenv("ANYSCALE_API_URL", server.URL)
+			t.Setenv("ANYSCALE_CLI_TOKEN", "fake-token-checkdestroy-unverifiable")
+
+			check := newAPIDestroyCheckImplWithTimeout("anyscale_project", "", "/api/v2/projects/%s", "", 0)
+			err := check(projectState("prj_unverifiable"))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// projectState returns a minimal state holding one anyscale_project.
+func projectState(id string) *terraform.State {
+	return &terraform.State{Modules: []*terraform.ModuleState{{
+		Path: []string{"root"},
+		Resources: map[string]*terraform.ResourceState{
+			"anyscale_project.test": {Type: "anyscale_project", Primary: &terraform.InstanceState{ID: id, Attributes: map[string]string{}}},
+		},
+	}}}
 }

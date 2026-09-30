@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -46,11 +47,12 @@ var (
 	allConfiguredCloudsCached bool
 	allConfiguredCloudsMutex  sync.Mutex
 
-	// Cache for ValidateAuthOrSkip's live probe - see its doc comment for why
-	// only a definitive answer (not a request error) is cached.
-	authProbeDone    bool
-	authProbeInvalid bool
-	authProbeMutex   sync.Mutex
+	// Cache for ValidateAuth's live probe - see its doc comment for why only a
+	// definitive answer (not a request error) is cached. authProbeStatus is
+	// the rejecting HTTP status, or 0 when the token was accepted.
+	authProbeDone   bool
+	authProbeStatus int
+	authProbeMutex  sync.Mutex
 
 	// Track ephemeral clouds created by tests for cleanup. Keyed by cloud ID
 	// so concurrent createEphemeralTestCloud calls do not clobber each other.
@@ -73,14 +75,27 @@ type ephemeralCloud struct {
 // ANYSCALE_TEST_CLOUD_NAME.
 const defaultKnownGoodCloudName = "tfp-test-aws-useast1-STATIC"
 
+// errCloudNameNotFound and errNoCloudsInOrg mark the only resolution outcomes
+// that may fall through to the next resolver step or skip a test. Any other
+// failure (transport error, non-200, undecodable body) is a harness failure:
+// turning it into a skip is how an outage or a revoked token reads as a green
+// acctest run.
+var (
+	errCloudNameNotFound = errors.New("no cloud found with name")
+	errNoCloudsInOrg     = errors.New("no clouds found in the account")
+)
+
 // resolveDefaultKnownGoodCloudID resolves defaultKnownGoodCloudName to a cloud
-// ID via the API. Returns "" (caller falls through to auto-discovery) when the
-// name cannot be resolved in the current org. The ID is deliberately not
-// hardcoded in the repo.
+// ID via the API. Returns "" (caller falls through to auto-discovery) only when
+// the name does not exist in the current org; any other error fails the test.
+// The ID is deliberately not hardcoded in the repo.
 func resolveDefaultKnownGoodCloudID(t *testing.T) string {
 	id, err := resolveCloudNameToID(t, defaultKnownGoodCloudName)
-	if err != nil {
+	if errors.Is(err, errCloudNameNotFound) {
 		return ""
+	}
+	if err != nil {
+		t.Fatalf("resolving default test cloud %q: %v", defaultKnownGoodCloudName, err)
 	}
 	ensureCloudAwake(t, id, cloudLabelFor(defaultKnownGoodCloudName))
 	return id
@@ -135,6 +150,9 @@ func resolveTestCloudID(t *testing.T) string {
 	if envCloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); envCloudName != "" {
 		t.Logf("Resolving test cloud name from ANYSCALE_TEST_CLOUD_NAME: %s", envCloudName)
 		cloudID, err = resolveCloudNameToID(t, envCloudName)
+		if err != nil && !errors.Is(err, errCloudNameNotFound) {
+			t.Fatalf("resolving ANYSCALE_TEST_CLOUD_NAME %q: %v", envCloudName, err)
+		}
 		if err != nil {
 			t.Logf("Warning: Failed to resolve cloud name '%s': %v", envCloudName, err)
 		} else {
@@ -159,9 +177,11 @@ func resolveTestCloudID(t *testing.T) string {
 	t.Logf("Auto-discovering test cloud...")
 	var cloudName string
 	cloudID, cloudName, err = autoDiscoverTestCloud(t)
-	if err != nil {
-		t.Logf("Warning: Failed to auto-discover test cloud: %v", err)
+	if errors.Is(err, errNoCloudsInOrg) {
 		t.Skip("No test cloud ID available. Set ANYSCALE_TEST_CLOUD_ID or ANYSCALE_TEST_CLOUD_NAME, or ensure at least one cloud exists in the account.")
+	}
+	if err != nil {
+		t.Fatalf("auto-discovering test cloud: %v", err)
 	}
 
 	cachedTestCloudID = cloudID
@@ -194,6 +214,9 @@ func GetTestCloudName(t *testing.T) string {
 	if envCloudName := os.Getenv("ANYSCALE_TEST_CLOUD_NAME"); envCloudName != "" {
 		t.Logf("Validating test cloud name from ANYSCALE_TEST_CLOUD_NAME: %s", envCloudName)
 		cloudID, err := resolveCloudNameToID(t, envCloudName)
+		if err != nil && !errors.Is(err, errCloudNameNotFound) {
+			t.Fatalf("resolving ANYSCALE_TEST_CLOUD_NAME %q: %v", envCloudName, err)
+		}
 		if err != nil {
 			t.Logf("Warning: Failed to resolve cloud name '%s': %v", envCloudName, err)
 			// Fall through to auto-discovery
@@ -215,9 +238,11 @@ func GetTestCloudName(t *testing.T) string {
 	// Priority 3: Auto-discover (this will populate both ID and Name caches)
 	t.Logf("Auto-discovering test cloud for name...")
 	cloudID, cloudName, err := autoDiscoverTestCloud(t)
-	if err != nil {
-		t.Logf("Warning: Failed to auto-discover test cloud: %v", err)
+	if errors.Is(err, errNoCloudsInOrg) {
 		t.Skip("No test cloud name available. Set ANYSCALE_TEST_CLOUD_NAME or ensure at least one cloud exists in the account.")
+	}
+	if err != nil {
+		t.Fatalf("auto-discovering test cloud: %v", err)
 	}
 
 	cachedTestCloudID = cloudID
@@ -342,7 +367,7 @@ func resolveCloudNameToIDCore(cloudName string) (string, int, error) {
 	}
 
 	if matchedCloudID == "" {
-		return "", 0, fmt.Errorf("no cloud found with name '%s'", cloudName)
+		return "", 0, fmt.Errorf("%w '%s'", errCloudNameNotFound, cloudName)
 	}
 
 	return matchedCloudID, matchCount, nil
@@ -560,7 +585,7 @@ func autoDiscoverTestCloud(t *testing.T) (cloudID string, cloudName string, err 
 			t.Logf("No clouds found, ANYSCALE_TEST_CREATE_CLOUD=1: Creating ephemeral test cloud...")
 			return createEphemeralTestCloud(t)
 		}
-		return "", "", fmt.Errorf("no clouds found in the account (set ANYSCALE_TEST_CREATE_CLOUD=1 to auto-create)")
+		return "", "", fmt.Errorf("%w (set ANYSCALE_TEST_CREATE_CLOUD=1 to auto-create)", errNoCloudsInOrg)
 	}
 
 	// MAY CREATE, MAY NOT ADOPT.
@@ -632,31 +657,23 @@ func GetAnyCloudID(t *testing.T) string {
 
 	client, err := GetTestClient()
 	if err != nil {
-		t.Logf("Warning: Failed to get test client: %v", err)
-		t.Skip("No cloud available - failed to get test client.")
-		return ""
+		t.Fatalf("GetAnyCloudID: failed to get test client: %v", err)
 	}
 
 	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
 	if err != nil {
-		t.Logf("Warning: Failed to list clouds: %v", err)
-		t.Skip("No cloud available - failed to list clouds.")
-		return ""
+		t.Fatalf("GetAnyCloudID: failed to list clouds: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		t.Logf("Warning: API returned status %d: %s", resp.StatusCode, string(body))
-		t.Skip("No cloud available - API error.")
-		return ""
+		t.Fatalf("GetAnyCloudID: list clouds returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Logf("Warning: Failed to read response: %v", err)
-		t.Skip("No cloud available - failed to read response.")
-		return ""
+		t.Fatalf("GetAnyCloudID: failed to read response: %v", err)
 	}
 
 	var cloudsResp struct {
@@ -667,9 +684,7 @@ func GetAnyCloudID(t *testing.T) string {
 	}
 
 	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		t.Logf("Warning: Failed to parse clouds response: %v", err)
-		t.Skip("No cloud available - failed to parse response.")
-		return ""
+		t.Fatalf("GetAnyCloudID: failed to parse clouds response: %v", err)
 	}
 
 	if len(cloudsResp.Results) == 0 {
@@ -801,26 +816,23 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 
 	client, err := GetTestClient()
 	if err != nil {
-		t.Logf("Failed to get test client: %v", err)
-		return nil
+		t.Fatalf("GetAllConfiguredClouds: failed to get test client: %v", err)
 	}
 
 	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
 	if err != nil {
-		t.Logf("Failed to list clouds: %v", err)
-		return nil
+		t.Fatalf("GetAllConfiguredClouds: failed to list clouds: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		t.Logf("API returned status %d", resp.StatusCode)
-		return nil
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GetAllConfiguredClouds: list clouds returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Logf("Failed to read response: %v", err)
-		return nil
+		t.Fatalf("GetAllConfiguredClouds: failed to read response: %v", err)
 	}
 
 	var cloudsResp struct {
@@ -833,8 +845,7 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	}
 
 	if err := json.Unmarshal(body, &cloudsResp); err != nil {
-		t.Logf("Failed to parse response: %v", err)
-		return nil
+		t.Fatalf("GetAllConfiguredClouds: failed to parse clouds response: %v", err)
 	}
 
 	var clouds []CloudInfo
@@ -1178,31 +1189,28 @@ func GetAllK8sClouds(t *testing.T) []CloudInfo {
 // registered/discovered set, not a fixed provider-wide SKU list like
 // "m5.large", which is why InstanceTypeSet.InstanceTypes() returns empty
 // placeholders for K8S clouds (see that function's TODO comment). Returns ""
-// if the cloud has no registered instance types (caller should skip).
+// only if the cloud has no registered instance types (caller should skip); an
+// API failure fails the test.
 func ResolveK8sInstanceType(t *testing.T, cloudID string) string {
 	t.Helper()
 	client, err := GetTestClient()
 	if err != nil {
-		t.Logf("ResolveK8sInstanceType: failed to get test client: %v", err)
-		return ""
+		t.Fatalf("ResolveK8sInstanceType: failed to get test client: %v", err)
 	}
 
 	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s/additional_instance_types", cloudID), nil)
 	if err != nil {
-		t.Logf("ResolveK8sInstanceType: request failed: %v", err)
-		return ""
+		t.Fatalf("ResolveK8sInstanceType: request failed: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		t.Logf("ResolveK8sInstanceType: API returned status %d", resp.StatusCode)
-		return ""
+		t.Fatalf("ResolveK8sInstanceType: API returned status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Logf("ResolveK8sInstanceType: failed to read response: %v", err)
-		return ""
+		t.Fatalf("ResolveK8sInstanceType: failed to read response: %v", err)
 	}
 
 	var instanceTypesResp struct {
@@ -1213,8 +1221,7 @@ func ResolveK8sInstanceType(t *testing.T, cloudID string) string {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &instanceTypesResp); err != nil {
-		t.Logf("ResolveK8sInstanceType: failed to parse response: %v", err)
-		return ""
+		t.Fatalf("ResolveK8sInstanceType: failed to parse response: %v", err)
 	}
 
 	var smallestName string
@@ -1351,26 +1358,23 @@ func GetTestServiceID(t *testing.T) string {
 
 	client, err := GetTestClient()
 	if err != nil {
-		t.Skip("No service available - failed to get test client.")
-		return ""
+		t.Fatalf("GetTestServiceID: failed to get test client: %v", err)
 	}
 
 	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/services-v2", nil)
 	if err != nil {
-		t.Skip("No service available - failed to list services.")
-		return ""
+		t.Fatalf("GetTestServiceID: failed to list services: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		t.Skip("No service available - API error listing services.")
-		return ""
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GetTestServiceID: list services returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Skip("No service available - failed to read response.")
-		return ""
+		t.Fatalf("GetTestServiceID: failed to read response: %v", err)
 	}
 
 	var servicesResp struct {
@@ -1381,8 +1385,7 @@ func GetTestServiceID(t *testing.T) string {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &servicesResp); err != nil {
-		t.Skip("No service available - failed to parse response.")
-		return ""
+		t.Fatalf("GetTestServiceID: failed to parse services response: %v", err)
 	}
 
 	if len(servicesResp.Results) == 0 {
@@ -1552,32 +1555,46 @@ func PreCheck(t *testing.T) {
 		}
 	}
 
-	// Verify the token actually works against the API. If it's expired/invalid,
-	// skip rather than fail so CI doesn't go red on a stale secret.
-	ValidateAuthOrSkip(t)
+	ValidateAuth(t)
 
 	// Note: We don't require ANYSCALE_TEST_CLOUD_ID here anymore
 	// Tests should use GetTestCloudID() which handles auto-discovery
 }
 
-// ValidateAuthOrSkip probes the Anyscale API with the configured token and
-// SKIPS the test if the API returns 401. Other errors (network, etc.) are
-// logged and ignored — they will surface naturally if they affect the test.
+// authT is the subset of *testing.T that validateAuth uses, so its
+// fail/skip decision can be unit tested without failing the calling test.
+type authT interface {
+	Helper()
+	Fatalf(format string, args ...any)
+	Skipf(format string, args ...any)
+	Logf(format string, args ...any)
+}
+
+// ValidateAuth probes the Anyscale API with the configured token and FAILS the
+// test if the API rejects it (401 or 403). A rejected token must turn CI red:
+// skipping instead makes every acceptance test skip, and an all-skip run
+// reports green with nothing tested. The test is skipped only when no
+// credential source exists at all. A request error is logged and tolerated;
+// it will surface in the test itself if it persists.
 //
-// The live probe result (valid vs. 401-invalid) is cached for the run once
+// The live probe result (accepted vs. rejected) is cached for the run once
 // definitively known, since this is called from PreCheck on every single
 // acceptance test (100+ call sites) and the token's validity doesn't change
-// mid-run. A request error is deliberately NOT cached - unlike an actual
-// 401, that's the same "inconclusive, try again" case the uncached version
-// already tolerated per-test, and caching it would let one transient network
-// blip silently suppress the real 401 check for every later test in the run.
-func ValidateAuthOrSkip(t *testing.T) {
+// mid-run. A request error is deliberately NOT cached: caching it would let
+// one transient network blip suppress the real auth check for every later
+// test in the run.
+func ValidateAuth(t *testing.T) {
+	validateAuth(t)
+}
+
+func validateAuth(t authT) {
+	t.Helper()
 	authProbeMutex.Lock()
 	if authProbeDone {
-		invalid := authProbeInvalid
+		status := authProbeStatus
 		authProbeMutex.Unlock()
-		if invalid {
-			t.Skip("ANYSCALE_CLI_TOKEN is invalid or expired (401 from /api/v2/clouds); skipping acceptance test")
+		if status != 0 {
+			t.Fatalf("Anyscale API rejected the configured token (HTTP %d from /api/v2/clouds); refresh ANYSCALE_CLI_TOKEN or the credentials file", status)
 		}
 		return
 	}
@@ -1586,6 +1603,7 @@ func ValidateAuthOrSkip(t *testing.T) {
 	client, err := GetTestClient()
 	if err != nil {
 		t.Skipf("No usable Anyscale credentials: %v", err)
+		return
 	}
 	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/clouds", nil)
 	if err != nil {
@@ -1594,13 +1612,17 @@ func ValidateAuthOrSkip(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	rejected := resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden
 	authProbeMutex.Lock()
 	authProbeDone = true
-	authProbeInvalid = resp.StatusCode == 401
+	authProbeStatus = 0
+	if rejected {
+		authProbeStatus = resp.StatusCode
+	}
 	authProbeMutex.Unlock()
 
-	if resp.StatusCode == 401 {
-		t.Skip("ANYSCALE_CLI_TOKEN is invalid or expired (401 from /api/v2/clouds); skipping acceptance test")
+	if rejected {
+		t.Fatalf("Anyscale API rejected the configured token (HTTP %d from /api/v2/clouds); refresh ANYSCALE_CLI_TOKEN or the credentials file", resp.StatusCode)
 	}
 }
 
@@ -1788,6 +1810,13 @@ const (
 // archived variant the check polls up to destroyCheckPollTimeout because the
 // backend sets the archive marker asynchronously.
 func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath string) resource.TestCheckFunc {
+	return newAPIDestroyCheckImplWithTimeout(resourceType, attrName, getPathFmt, archivedJSONPath, destroyCheckPollTimeout)
+}
+
+// newAPIDestroyCheckImplWithTimeout is newAPIDestroyCheckImpl with the poll
+// bound injectable, so unit tests of the fail-closed paths need not wait out
+// the real timeout.
+func newAPIDestroyCheckImplWithTimeout(resourceType, attrName, getPathFmt, archivedJSONPath string, pollTimeout time.Duration) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		if len(s.RootModule().Resources) == 0 {
 			return nil
@@ -1811,21 +1840,33 @@ func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath
 				id = rs.Primary.Attributes[attrName]
 			}
 			if id == "" {
+				// An empty id cannot be checked. Skipping it let a destroy
+				// check pass while verifying nothing.
+				field := attrName
+				if field == "" {
+					field = "id"
+				}
+				leaks = append(leaks, fmt.Sprintf("%s has an empty %s in state; cannot verify it was destroyed", name, field))
 				continue
 			}
 
 			path := fmt.Sprintf(getPathFmt, id)
 
 			// Poll so we don't race the backend's asynchronous archive/delete.
-			// Definitive outcomes (404 gone, or a truthy archive marker) exit
-			// immediately; only a still-present, not-yet-archived resource is
-			// retried until destroyCheckPollTimeout elapses.
-			deadline := time.Now().Add(destroyCheckPollTimeout)
+			// Only a 404 or a truthy archive marker counts as destroyed. A
+			// transport error or 5xx is retried until destroyCheckPollTimeout
+			// and then fails; any other status (403 included) fails at once.
+			// No resource type here has a traced reason to read 403 as gone.
+			deadline := time.Now().Add(pollTimeout)
 			for {
 				resp, err := client.DoRequest(context.Background(), "GET", path, nil)
 				if err != nil {
-					log.Printf("[WARN] CheckDestroy(%s) network error for %s (id=%s): %v", resourceType, name, id, err)
-					break
+					if time.Now().After(deadline) {
+						leaks = append(leaks, fmt.Sprintf("%s (id=%s): could not verify destroy, request error until the poll deadline: %v", name, id, err))
+						break
+					}
+					time.Sleep(destroyCheckPollInterval)
+					continue
 				}
 
 				body, readErr := io.ReadAll(resp.Body)
@@ -1835,11 +1876,15 @@ func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath
 					break // gone — success
 				}
 				if resp.StatusCode >= 500 {
-					log.Printf("[WARN] CheckDestroy(%s) transient %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
-					break
+					if time.Now().After(deadline) {
+						leaks = append(leaks, fmt.Sprintf("%s (id=%s): could not verify destroy, %s returned %d until the poll deadline", name, id, path, resp.StatusCode))
+						break
+					}
+					time.Sleep(destroyCheckPollInterval)
+					continue
 				}
 				if resp.StatusCode != 200 && resp.StatusCode != 201 {
-					log.Printf("[WARN] CheckDestroy(%s) unexpected status %d for %s (id=%s)", resourceType, resp.StatusCode, name, id)
+					leaks = append(leaks, fmt.Sprintf("%s (id=%s): could not verify destroy, %s returned unexpected status %d: %s", name, id, path, resp.StatusCode, truncateBody(string(body), 256)))
 					break
 				}
 
@@ -1849,12 +1894,12 @@ func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath
 					break
 				}
 				if readErr != nil {
-					log.Printf("[WARN] CheckDestroy(%s) failed to read body for %s (id=%s): %v", resourceType, name, id, readErr)
+					leaks = append(leaks, fmt.Sprintf("%s (id=%s): could not verify destroy, failed to read body: %v", name, id, readErr))
 					break
 				}
 				archived, perr := extractArchivedValue(body, archivedJSONPath)
 				if perr != nil {
-					log.Printf("[WARN] CheckDestroy(%s) failed to parse %s for %s (id=%s): %v", resourceType, archivedJSONPath, name, id, perr)
+					leaks = append(leaks, fmt.Sprintf("%s (id=%s): could not verify destroy, failed to parse %s: %v", name, id, archivedJSONPath, perr))
 					break
 				}
 				if archived {
@@ -1872,7 +1917,7 @@ func newAPIDestroyCheckImpl(resourceType, attrName, getPathFmt, archivedJSONPath
 		}
 
 		if len(leaks) > 0 {
-			return fmt.Errorf("CheckDestroy(%s) found leaked resources:\n  %s", resourceType, strings.Join(leaks, "\n  "))
+			return fmt.Errorf("CheckDestroy(%s) found leaked or unverifiable resources:\n  %s", resourceType, strings.Join(leaks, "\n  "))
 		}
 		return nil
 	}
