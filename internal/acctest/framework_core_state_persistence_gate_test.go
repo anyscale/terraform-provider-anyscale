@@ -19,8 +19,8 @@ import (
 
 // This file answers cloud_access design gate 2.1 (docs/decisions/rbac-surface-consolidation):
 // does Terraform Core persist resource state that a provider wrote via
-// resp.State.Set before returning an error diagnostic from Create, Update, or
-// Delete? unmanaged_grants' converge-and-record contract is built entirely on
+// resp.State.Set before returning an error diagnostic from Create or Delete?
+// (Update is not exercised; see the Update method.) unmanaged_grants' converge-and-record contract is built entirely on
 // the answer being yes. Framework source (server_createresource.go) proves
 // only that the framework puts such state on the *wire response* - it says
 // nothing about what Core, on the other side of that wire, chooses to persist
@@ -100,9 +100,11 @@ func (r *coreGateResource) Create(ctx context.Context, req fwresource.CreateRequ
 	}
 }
 
-// Update unconditionally errors with a distinctive message so that, in the
-// tests below, seeing it fire is unambiguous proof Core called Update rather
-// than Create for a given step.
+// Update unconditionally errors with a distinctive message, as a tripwire:
+// if Core ever routed a step here, the failure would name Update rather than
+// Create or Delete. Neither test below reaches it - a failed Create leaves the
+// resource tainted, so the next apply is a replace (Delete then Create), not
+// an Update - so nothing here exercises Update's state persistence.
 func (r *coreGateResource) Update(ctx context.Context, req fwresource.UpdateRequest, resp *fwresource.UpdateResponse) {
 	var data coreGateResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
@@ -155,14 +157,10 @@ func coreGateProviderFactories() map[string]func() (tfprotov6.ProviderServer, er
 // (trigger_err is false this time) - no error, test would fail on the
 // ExpectError below.
 //
-// Named TestAcc*Resource, not TestFrameworkCoreGate_*, so ci.yml's
-// acctest-resource shard (-run '^TestAcc[A-Za-z]+Resource') actually runs
-// it. Under the old name this test was unreachable by any CI workflow:
-// lint-and-unit's `make test` never sets TF_ACC (resource.Test self-skips
-// without it), and the only invocation that runs the package unfiltered is
-// a bare `make testacc`, which no workflow calls. It needs no real
-// credentials - the provider under test is the throwaway "coregate" fake -
-// so it costs nothing extra in the shard it now runs in.
+// Named TestAcc*Resource so ci.yml's acctest-resource shard
+// (-run '^TestAcc[A-Za-z]+Resource') runs it: lint-and-unit's `make test`
+// never sets TF_ACC, so resource.Test would self-skip there. It needs no real
+// credentials - the provider under test is the throwaway "coregate" fake.
 //
 // What actually happens, confirmed by running this: Core PERSISTS the
 // partial state AND taints the resource, so step 2 plans a destroy-then-
@@ -210,9 +208,7 @@ resource "coregate_gate" "test" {
 // is only possible if Core still believes the resource exists with its
 // last-known attributes - i.e. the errored Delete did not wipe it.
 //
-// Renamed alongside its Create-half sibling above - see that comment for
-// why the TestAcc*Resource shape matters here (CI-shard reachability, not
-// style).
+// Named TestAcc*Resource for CI-shard reachability; see the Create half.
 func TestAccFrameworkCoreGateErroredDeleteStatePersistsResource(t *testing.T) {
 	coreGateDeleteFailureBudget.Store(1)
 	config := `

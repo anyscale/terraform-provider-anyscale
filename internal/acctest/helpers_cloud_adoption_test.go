@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ import (
 // about what happens when it does NOT resolve, which is the wrong-org signal.
 func newCloudResolverServer(t *testing.T, cloudNames ...string) (*httptest.Server, func() bool) {
 	t.Helper()
-	created := false
+	var created atomic.Bool
 
 	mux := http.NewServeMux()
 	// BOTH the exact path and the subtree. createEphemeralTestCloud POSTs to
@@ -28,7 +29,7 @@ func newCloudResolverServer(t *testing.T, cloudNames ...string) (*httptest.Serve
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost {
-			created = true
+			created.Store(true)
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"result":{"id":"cld_created","name":"tfacc-ephemeral-x"}}`))
 			return
@@ -49,7 +50,7 @@ func newCloudResolverServer(t *testing.T, cloudNames ...string) (*httptest.Serve
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	return server, func() bool { return created }
+	return server, created.Load
 }
 
 // pointResolverAt redirects the acctest client at a mock and clears every

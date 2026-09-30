@@ -10,32 +10,28 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM is the fail-first
-// regression test for the customer-reported AWS VM import destroy-and-recreate
-// bug: requiredImportConfigBlocks recovers aws_config on import but leaves
+// TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM is the regression
+// test for the customer-reported AWS VM import destroy-and-recreate bug:
+// requiredImportConfigBlocks used to recover aws_config on import but leave
 // object_storage and file_storage null for a VM cloud, and both are
-// ForceNew, so a configuration that matches the live cloud plans as a full
+// ForceNew, so a configuration matching the live cloud planned a full
 // replace instead of a no-op.
 //
-// Mirrors the customer's exact config per the ratified fix contract: AWS,
-// VM, private, object_storage with bucket_name ONLY (no region, no
-// endpoint), file_storage with file_storage_id and mount_path left to the
-// schema default. The mock also bakes in the two landmines the contract
-// calls out, so a naive recover-whatever-the-API-returns fix is caught
-// here, not just the base "nothing is recovered" bug:
+// Mirrors the customer's config: AWS, VM, private, object_storage with
+// bucket_name ONLY (no region, no endpoint), file_storage with
+// file_storage_id and mount_path omitted. The mock reproduces the real API
+// shape for both omissions, so a fix that fabricates a value is caught here,
+// not just the base "nothing is recovered" bug:
 //
-//   - L1 (object_storage.region auto-fill): the backend defaults the bucket
-//     region to the cloud-resource's own region and returns it even though
-//     the user set only bucket_name. resourcesJSON's object_storage.region
-//     is deliberately equal to the cloud-resource region ("us-east-2") -
-//     copying it verbatim would write a non-null region into state against
-//     a config that never set one, forcing the exact same destroy-and-
-//     recreate this test exists to catch, just relocated to a new attribute.
-//   - L2 (file_storage.mount_path): AWS has no real backend field for
-//     mount_path at all - resourcesJSON's file_storage deliberately omits
-//     it, matching what the real AWS API returns. D1 stopped fabricating a
-//     default for this case, so both create and import must resolve it to
-//     null; this test proves the two paths agree.
+//   - object_storage.region: resourcesJSON sends "region": null, as the real
+//     backend does when the user set only bucket_name. Create and import
+//     must both leave region null. The case where the backend returns a
+//     region equal to the cloud's own region is covered by
+//     TestAccCloudResource_ObjectStorageRegionSemanticEqualOnImport_AWSVM.
+//   - file_storage.mount_path: AWS has no backend field for mount_path -
+//     resourcesJSON's file_storage omits it, matching the real AWS API. The
+//     provider does not fabricate a default, so create and import must both
+//     resolve it to null; this test proves the two paths agree.
 //
 // Step 1 creates against the mock and captures real applied state; its
 // implicit post-apply plan must be empty. Step 2 imports: ImportStateVerify
@@ -53,10 +49,10 @@ func TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM(t *testing.T) {
 		"status": "ready", "state": "ACTIVE", "compute_stack": "VM", "is_default": false,
 		"is_private_cloud": true
 	}`, cloudID)
-	// L1 + L2 hazards baked in deliberately - see doc comment above. Do not
-	// "clean up" region or add a mount_path here without updating the test's
-	// intent: a mock that idealizes the response instead of reproducing these
-	// two real API quirks would let a naive fix pass when it shouldn't.
+	// Null region and absent mount_path reproduce the real API shape - see
+	// the doc comment above. Do not add a region or mount_path here without
+	// updating the test's intent: a mock that echoes values the config never
+	// set would let a fabricating fix pass.
 	resourcesJSON := `[{
 		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_storage_mock_default",
 		"compute_stack": "VM", "region": "us-east-2",
@@ -124,15 +120,8 @@ resource "anyscale_cloud" "test" {
 			},
 			{
 				// THE regression proof: import must recover object_storage and
-				// file_storage to exactly what create produced, landmines
-				// included. object_storage.region stays null through both
-				// steps here - config never sets it, and the mock's
-				// resources-list response also carries no real region value
-				// (matching the real backend precisely: it never returns a
-				// region equal to the cloud's own region - see
-				// TestAccCloudResource_ObjectStorageRegionSemanticEqualOnImport_AWSVM
-				// for the explicit-equal case this reflects, and its own doc
-				// comment for the backend trace).
+				// file_storage to exactly what create produced. object_storage.region stays null through both
+				// steps - config never sets it and the mock returns null.
 				ResourceName:      resourceName,
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -310,20 +299,17 @@ func TestAccCloudResource_MountTargetsRecoveredShapeIsPlanStable_AWSVM(t *testin
 }
 
 // TestAccCloudResource_ImportRecoversStorageBlocks_K8S is the K8S companion:
-// the ratified fix contract scopes recovery to "both object_storage and
-// file_storage, VM and K8S" explicitly, not just the VM case the customer
-// happened to report. Neither block is in ImportStateVerifyIgnore, so the
-// import step fails if either is not recovered to exactly Create's state;
-// step 1's post-apply plan being empty then covers the plan against that
-// shape (see the AWS-VM sibling's doc comment).
+// recovery covers object_storage and file_storage on both VM and K8S, not
+// just the VM case the customer reported. Neither block is in
+// ImportStateVerifyIgnore, so the import step fails if either is not
+// recovered to exactly Create's state; step 1's post-apply plan being empty
+// then covers the plan against that shape (see the AWS-VM sibling's doc
+// comment).
 //
-// Also re-exercises L1 (region auto-fill) on the K8S path: the K8S
-// lifecycle test's object_storage mock fixture never includes a region
-// field at all, so it could not have caught L1 even though K8S recovery
-// shares the exact same flattenObjectStorage call as VM. This test's mock
-// does include it, matching the cloud-resource region, so a fix that
-// handles L1 for VM but not K8S (e.g. by branching on compute_stack instead
-// of reusing one shared helper) gets caught here instead of shipping silently.
+// Also exercises the null object_storage.region on the K8S path: the K8S
+// lifecycle test's object_storage mock fixture has no region key at all,
+// while this mock sends "region": null like the VM test, so a K8S-specific
+// flatten path that mishandled an explicit null would be caught here.
 func TestAccCloudResource_ImportRecoversStorageBlocks_K8S(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -333,9 +319,9 @@ func TestAccCloudResource_ImportRecoversStorageBlocks_K8S(t *testing.T) {
 		"status": "ready", "state": "ACTIVE", "compute_stack": "K8S", "is_default": false,
 		"is_private_cloud": true
 	}`, cloudID)
-	// L1 hazard: object_storage.region equal to the cloud-resource region,
-	// same as the VM test above. No L2 (mount_path) here - K8S's file_storage
-	// uses persistent_volume_claim/csi_ephemeral_volume_driver, not mount_path.
+	// object_storage.region is null, same as the VM test above. No mount_path
+	// here - K8S's file_storage uses persistent_volume_claim/
+	// csi_ephemeral_volume_driver, not mount_path.
 	resourcesJSON := `[{
 		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_storage_k8s_mock_default",
 		"compute_stack": "K8S", "region": "us-east-2",

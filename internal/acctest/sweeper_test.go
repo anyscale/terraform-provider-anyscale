@@ -12,11 +12,11 @@ import (
 
 func TestMain(m *testing.M) {
 	// Sweep-target org guard. Deliberately here rather than inside each
-	// sweeper's F: there are eight registered sweepers and a ninth added later
+	// sweeper's F: there are seven registered sweepers, and one added later
 	// would silently miss a per-sweeper check. The dry-run flag is the cautionary
-	// precedent - it was documented as safe for months while nothing read it,
-	// because the check lived where each sweeper had to remember it (see
-	// isSweepDryRun below). One choke point cannot be forgotten.
+	// precedent - it was documented as safe while nothing read it, because the
+	// check lived where each sweeper had to remember it (see isSweepDryRun
+	// below). One choke point cannot be forgotten.
 	if sweepRequested() {
 		if err := assertSweepTargetOrg(); err != nil {
 			fmt.Fprintf(os.Stderr, "\n[sweep] REFUSING TO SWEEP: %v\n\n", err)
@@ -28,11 +28,10 @@ func TestMain(m *testing.M) {
 
 // isSweepDryRun reports whether ANYSCALE_SWEEP_DRY_RUN is set. Every sweeper's
 // delete/archive helper MUST check this immediately before its mutating
-// DoRequest call and log-and-return instead of sending it. CLAUDE.md and
-// `make sweep-dry-run` have documented this env var as a safe preview mode
-// since it was introduced, but nothing ever actually read it — dry-run was a
-// full-strength sweep under a misleading name. Discovered 2026-07-02 when a
-// "dry run" archived 96 real container images.
+// DoRequest call and log-and-return instead of sending it. `make
+// sweep-dry-run` is documented as a safe preview; a sweeper that skips this
+// check turns that preview into a full-strength sweep (a "dry run" once
+// archived 96 real container images that way).
 func isSweepDryRun() bool {
 	return os.Getenv("ANYSCALE_SWEEP_DRY_RUN") != ""
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
@@ -27,7 +29,8 @@ import (
 // query params, just a different include_archived value (sweep wants
 // archived rows visible too, so it can log alreadyArchivedCount).
 func TestSearchContainerImagesByContains_MultiPage(t *testing.T) {
-	requestCount := 0
+	var requestCount atomic.Int32
+	var mu sync.Mutex // guards pagingTokens and includeArchivedValues
 	var pagingTokens []string
 	var includeArchivedValues []string
 
@@ -40,13 +43,15 @@ func TestSearchContainerImagesByContains_MultiPage(t *testing.T) {
 			return
 		}
 
-		requestCount++
+		call := requestCount.Add(1)
+		mu.Lock()
 		pagingTokens = append(pagingTokens, r.URL.Query().Get("paging_token"))
 		includeArchivedValues = append(includeArchivedValues, r.URL.Query().Get("include_archived"))
+		mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
 
-		if requestCount == 1 {
+		if call == 1 {
 			resp := provider.ApplicationTemplatesListResponse{
 				Results: []provider.ApplicationTemplateResult{
 					{ID: "apptemp_page1_a", Name: "tfacc-multipage-a", CreatedAt: "2024-01-01T00:00:00Z"},
@@ -75,9 +80,11 @@ func TestSearchContainerImagesByContains_MultiPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("searchContainerImagesByContains returned error: %v", err)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 
-	if requestCount != 2 {
-		t.Fatalf("expected exactly 2 HTTP requests (one per page), got %d", requestCount)
+	if requestCount.Load() != 2 {
+		t.Fatalf("expected exactly 2 HTTP requests (one per page), got %d", requestCount.Load())
 	}
 	if pagingTokens[0] != "" {
 		t.Errorf("first request should not carry a paging_token, got %q", pagingTokens[0])
@@ -115,7 +122,7 @@ func TestSearchContainerImagesByContains_MultiPage(t *testing.T) {
 // that always re-requests (or infinite-loops on a nil/empty token) would
 // only show up as a hang or a duplicate-results bug, not a clean failure.
 func TestSearchContainerImagesByContains_SinglePageStopsAfterOnePage(t *testing.T) {
-	requestCount := 0
+	var requestCount atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/application_templates/" {
@@ -124,7 +131,7 @@ func TestSearchContainerImagesByContains_SinglePageStopsAfterOnePage(t *testing.
 			return
 		}
 
-		requestCount++
+		requestCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		resp := provider.ApplicationTemplatesListResponse{
 			Results: []provider.ApplicationTemplateResult{
@@ -141,8 +148,8 @@ func TestSearchContainerImagesByContains_SinglePageStopsAfterOnePage(t *testing.
 		t.Fatalf("searchContainerImagesByContains returned error: %v", err)
 	}
 
-	if requestCount != 1 {
-		t.Errorf("expected exactly 1 HTTP request for a single-page response, got %d", requestCount)
+	if requestCount.Load() != 1 {
+		t.Errorf("expected exactly 1 HTTP request for a single-page response, got %d", requestCount.Load())
 	}
 	if len(results) != 1 || results[0].ID != "apptemp_only" {
 		t.Errorf("got %+v, want exactly one result with ID apptemp_only", results)

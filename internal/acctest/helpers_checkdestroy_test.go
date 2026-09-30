@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -99,12 +100,12 @@ func buildlessRegistryState(templateID string) *terraform.State {
 // require, a build_id.
 func TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds(t *testing.T) {
 	const templateID = "apptemp_buildless_archived"
-	var requestCount int
-	var requestedPath string
+	var requestCount atomic.Int32
+	var requestedPath atomic.Value // string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		requestedPath = r.URL.Path
+		requestCount.Add(1)
+		requestedPath.Store(r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -123,12 +124,12 @@ func TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds(t *testing.T) {
 	if err := checkFn(buildlessRegistryState(templateID)); err != nil {
 		t.Fatalf("CheckDestroy reported an error for a properly-archived build-less template: %v", err)
 	}
-	if requestCount != 1 {
-		t.Fatalf("expected exactly 1 GET request, got %d", requestCount)
+	if requestCount.Load() != 1 {
+		t.Fatalf("expected exactly 1 GET request, got %d", requestCount.Load())
 	}
 	wantPath := "/api/v2/application_templates/" + templateID
-	if requestedPath != wantPath {
-		t.Errorf("requested path = %q, want %q -- CheckDestroy must key on the template id, not a build id", requestedPath, wantPath)
+	if got, _ := requestedPath.Load().(string); got != wantPath {
+		t.Errorf("requested path = %q, want %q -- CheckDestroy must key on the template id, not a build id", got, wantPath)
 	}
 }
 
@@ -137,10 +138,10 @@ func TestRegistryCheckDestroy_BuildlessTemplate_ArchivedSucceeds(t *testing.T) {
 // already-archived. Same build-less state as above.
 func TestRegistryCheckDestroy_BuildlessTemplate_GoneSucceeds(t *testing.T) {
 	const templateID = "apptemp_buildless_gone"
-	var requestCount int
+	var requestCount atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		requestCount.Add(1)
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
@@ -155,8 +156,8 @@ func TestRegistryCheckDestroy_BuildlessTemplate_GoneSucceeds(t *testing.T) {
 	if err := checkFn(buildlessRegistryState(templateID)); err != nil {
 		t.Fatalf("CheckDestroy reported an error for a 404'd build-less template: %v", err)
 	}
-	if requestCount != 1 {
-		t.Fatalf("expected exactly 1 GET request, got %d", requestCount)
+	if requestCount.Load() != 1 {
+		t.Fatalf("expected exactly 1 GET request, got %d", requestCount.Load())
 	}
 }
 
@@ -167,10 +168,10 @@ func TestRegistryCheckDestroy_BuildlessTemplate_GoneSucceeds(t *testing.T) {
 // false green for a live, unarchived leak. It must now fail.
 func TestRegistryCheckDestroy_EmptyKeyAttributeFailsInsteadOfSkipping(t *testing.T) {
 	const templateID = "apptemp_buildless_wouldleak"
-	var requestCount int
+	var requestCount atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		requestCount.Add(1)
 		// A genuine, un-archived leak: 200 with no archived_at set.
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -189,8 +190,8 @@ func TestRegistryCheckDestroy_EmptyKeyAttributeFailsInsteadOfSkipping(t *testing
 	if err == nil || !strings.Contains(err.Error(), "empty build_id") {
 		t.Fatalf("expected an empty build_id to fail the check, got: %v", err)
 	}
-	if requestCount != 0 {
-		t.Fatalf("expected no API request for an empty id, got %d", requestCount)
+	if requestCount.Load() != 0 {
+		t.Fatalf("expected no API request for an empty id, got %d", requestCount.Load())
 	}
 }
 
@@ -223,10 +224,10 @@ func TestRegistryCheckDestroy_EmptyKeyAttributeFailsInsteadOfSkipping(t *testing
 // at all (requestCount), not how it resolves once it does.
 func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDFails(t *testing.T) {
 	const templateID = "apptemp_v1c_wouldskip"
-	var requestCount int
+	var requestCount atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		requestCount.Add(1)
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
@@ -242,8 +243,8 @@ func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDFails(t *testin
 	if err := wrongKeyCheckFn(state); err == nil || !strings.Contains(err.Error(), "empty cluster_environment_id") {
 		t.Fatalf("expected a check keyed on the removed cluster_environment_id attribute to fail, not silently pass, got: %v", err)
 	}
-	if requestCount != 0 {
-		t.Fatalf("expected no API request for an empty id, got %d", requestCount)
+	if requestCount.Load() != 0 {
+		t.Fatalf("expected no API request for an empty id, got %d", requestCount.Load())
 	}
 
 	// Now prove the actual fix does NOT share this blind spot: the plain
@@ -256,8 +257,8 @@ func TestRegistryCheckDestroy_KeyingOnRemovedClusterEnvironmentIDFails(t *testin
 	if err := realCheckFn(state); err != nil {
 		t.Fatalf("expected the real (plain, ID-based) CheckDestroy to confirm a 404'd template as cleanly gone, got an error instead: %v", err)
 	}
-	if requestCount != 1 {
-		t.Fatalf("expected exactly 1 GET request from the real check (it must resolve rs.Primary.ID and actually query the API), got %d", requestCount)
+	if requestCount.Load() != 1 {
+		t.Fatalf("expected exactly 1 GET request from the real check (it must resolve rs.Primary.ID and actually query the API), got %d", requestCount.Load())
 	}
 }
 

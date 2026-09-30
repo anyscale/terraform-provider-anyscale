@@ -28,9 +28,9 @@ var (
 //  2. Auto-discover: list services, prefer one whose current_state is
 //     RUNNING (stable to assert against), else the first result.
 //
-// Unlike GetTestProjectID/GetTestCloudID, a fresh or minimal test org can
-// plausibly have zero services — there is no equivalent to a project's
-// always-present default project to fall back on. Skips with an actionable
+// Unlike clouds (GetTestCloudID has a pinned fixture to fall back on) or
+// projects (every org has a default project), a fresh or minimal test org
+// can plausibly have zero services. Skips with an actionable
 // message (rather than silently passing with no coverage) when neither the
 // env var nor auto-discovery resolves anything, so a CI org with no service
 // fixture is a visible gap, not a silent one.

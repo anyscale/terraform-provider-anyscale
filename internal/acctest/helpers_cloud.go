@@ -88,14 +88,16 @@ func resolveDefaultKnownGoodCloudID(t *testing.T) string {
 }
 
 // GetTestCloudID returns a test cloud ID with the following priority:
-// 1. ANYSCALE_TEST_CLOUD_ID environment variable (explicit override)
-// 2. ANYSCALE_TEST_CLOUD_NAME environment variable (resolve name to ID)
-// 3. Known-good static fixture cloud (validated; falls through if absent)
-// 4. Auto-discover any available cloud (prefers test-named clouds)
+//  1. ANYSCALE_TEST_CLOUD_ID environment variable (explicit override, returned
+//     as-is: no API call checks that the cloud exists)
+//  2. ANYSCALE_TEST_CLOUD_NAME environment variable (resolve name to ID)
+//  3. Known-good static fixture cloud (resolved by name; falls through if absent)
+//  4. Auto-discover any available cloud (prefers test-named clouds)
 //
 // The result is cached after the first successful resolution.
 // Unlike sync.Once, this will retry on failure.
-// Cached values are validated to ensure the cloud still exists.
+// On later calls the cached ID is checked with GET /api/v2/clouds/{id} and
+// re-resolved if the cloud is gone.
 func GetTestCloudID(t *testing.T) string {
 	id := resolveTestCloudID(t)
 	cloudIDMutex.Lock()
@@ -176,11 +178,14 @@ func resolveTestCloudID(t *testing.T) string {
 }
 
 // GetTestCloudName returns a test cloud name with the following priority:
-// 1. ANYSCALE_TEST_CLOUD_NAME environment variable (explicit override, validated to exist)
-// 2. Auto-discover any available cloud and return its name
+//  1. ANYSCALE_TEST_CLOUD_NAME environment variable (explicit override; falls
+//     through if the name does not resolve)
+//  2. Known-good static fixture cloud (falls through if absent)
+//  3. Auto-discover any available cloud and return its name
 //
-// This function ensures GetTestCloudID has been called first to populate the cache.
-// Cached values are validated to ensure the cloud still exists.
+// It shares GetTestCloudID's cache: a name cached alongside its ID is returned
+// after checking the cloud still exists. ANYSCALE_TEST_CLOUD_ID is not
+// consulted here.
 func GetTestCloudName(t *testing.T) string {
 	cloudIDMutex.Lock()
 	defer cloudIDMutex.Unlock()
@@ -779,13 +784,9 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 
 	// Collect all clouds with a healthy resource. GET /api/v2/clouds never
 	// embeds cloud_resources inline (confirmed against the real API: the key
-	// is simply absent from each result, not an empty array) - a prior
-	// version of this function checked that inline field directly, which
-	// meant the len(...) > 0 condition could never be true for ANY cloud in
-	// ANY org, so TestAccComputeConfigResource_Basic/_Disappears silently
-	// skipped everywhere, including CI, regardless of how many healthy
-	// clouds actually existed. Resource-health now comes from the real
-	// per-cloud endpoint instead.
+	// is absent from each result, not an empty array), so checking an inline
+	// field would exclude every cloud and silently skip every caller.
+	// Resource health comes from the per-cloud endpoint instead.
 	for _, cloud := range cloudsResp.Results {
 		computeStack := normalizeComputeStack(cloud.ComputeStack)
 		if !isKnownProvider(cloud.Provider, computeStack) {
@@ -821,12 +822,7 @@ func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
 	// We also intentionally do NOT substitute the static fixture here, so
 	// TestAccComputeConfigResource_Basic/_Disappears (which iterate
 	// GetAllVMClouds) skip rather than run against a cloud with no healthy
-	// resource. _Disappears exposes a separate unresolved issue: it archives
-	// the config out-of-band and expects a non-empty plan, but the
-	// compute-config Read returns an archived config as still-present, so the
-	// disappearance is not detected ("expected non-empty plan, got empty").
-	// That needs the provider Read to treat archived_at as gone (tracked
-	// separately).
+	// resource.
 
 	t.Logf("Found %d configured clouds for testing", len(clouds))
 	for _, c := range clouds {

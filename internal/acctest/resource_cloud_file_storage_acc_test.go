@@ -836,18 +836,13 @@ func newMountPathMockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON
 	return server
 }
 
-// TestAccCloudResource_MountPathOmittedDoesNotForceReplace pins D1's Gate 2:
-// a real resource.Test proving the Framework/Core plan-modifier contract,
-// since a plain mapping-function unit test can't exercise it. Before D1,
-// mount_path carried only RequiresReplace(): an Optional+Computed attribute
-// the config omits plans to Unknown on every subsequent apply, and
-// RequiresReplace treats "planned Unknown, prior state known" as a
-// difference - forcing a destroy-and-recreate of an already-live cloud on
-// every single plan, with no real config change.
-// stringplanmodifier.UseStateForUnknown(), placed before RequiresReplace()
-// in PlanModifiers, resolves the Unknown to the prior state value first, so
-// RequiresReplace sees no diff - mirroring the pre-existing mount_targets
-// list attribute's identical ordering.
+// TestAccCloudResource_MountPathOmittedDoesNotForceReplace is a real
+// resource.Test of the plan-modifier contract, which a mapping-function unit
+// test can't exercise. mount_path is Optional+Computed, so a config that
+// omits it plans Unknown on every apply after Create; its
+// stringplanmodifier.UseStateForUnknown() resolves that Unknown to the prior
+// state value, so re-applying the same config plans a no-op rather than a
+// change to a value the backend already resolved.
 func TestAccCloudResource_MountPathOmittedDoesNotForceReplace(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -906,9 +901,8 @@ resource "anyscale_cloud" "test" {
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Create resolves mount_path from the real add_resource
-				// response (D1's mergeFileStorageDerivedFields path), not a
-				// fabricated default.
+				// Create resolves mount_path from the add_resource response
+				// (mergeFileStorageDerivedFields), not a fabricated default.
 				Config: config,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "file_storage.file_storage_id", "filestore-omit-test"),
@@ -917,8 +911,8 @@ resource "anyscale_cloud" "test" {
 				ExpectNonEmptyPlan: false,
 			},
 			{
-				// G2.1: re-applying the SAME config (mount_path still
-				// omitted) must plan a no-op, not a forced replace.
+				// Re-applying the SAME config (mount_path still omitted)
+				// must plan a no-op.
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
