@@ -167,12 +167,12 @@ testacc-cover: ## Run acceptance tests with coverage (token from Keychain, fails
 .PHONY: sweep
 sweep: ## Run sweepers to clean up leaked test resources
 	@echo "==> Running sweepers..."
-	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 60m -sweep=anyscale -sweep-run=
+	TF_ACC=1 $(GO) test ./internal/acctest/ -v -timeout 50m -sweep=anyscale -sweep-run=
 
 .PHONY: sweep-dry-run
 sweep-dry-run: ## List what sweepers would delete without actually deleting
 	@echo "==> Running sweepers in dry-run mode..."
-	TF_ACC=1 ANYSCALE_SWEEP_DRY_RUN=1 $(GO) test ./internal/acctest/ -v -timeout 60m -sweep=anyscale -sweep-run=
+	TF_ACC=1 ANYSCALE_SWEEP_DRY_RUN=1 $(GO) test ./internal/acctest/ -v -timeout 50m -sweep=anyscale -sweep-run=
 
 .PHONY: test-compile
 test-compile: ## Verify tests compile without running
