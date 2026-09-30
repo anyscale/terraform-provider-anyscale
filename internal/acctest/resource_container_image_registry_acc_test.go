@@ -29,8 +29,8 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 	// Use a public Anyscale Ray image that's guaranteed to exist
 	// Note: For Anyscale images, we cannot provide a custom name - the API only
 	// allows cluster_env_name for external registry images
-	// Also note: Anyscale-provided images (anyscale/ray:*) are NOT considered BYOD,
-	// only external registry images are marked as is_byod=true
+	// The API reports every image registered through this resource as BYOD,
+	// Anyscale-published images included.
 	imageURI := "anyscale/ray:2.53.0-slim-py312"
 
 	resource.Test(t, resource.TestCase{
@@ -48,8 +48,7 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "image_uri", imageURI),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "build_id"),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "build_status", "succeeded"),
-					// Anyscale-provided images are NOT considered BYOD
-					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "is_byod", "false"),
+					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "is_byod", "true"),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "created_at"),
 					testAccCheckContainerImageRegistryExistsInAPI("anyscale_container_image_registry.test"),
 				),
