@@ -235,6 +235,8 @@ func checkImportedCloudIAMMapping(states []*terraform.InstanceState, wantCloudID
 // independent tests, each runnable alone under -run, even though both
 // happen to target the same real deployment's config with an idempotent
 // overwrite.
+//
+// Run: TF_ACC=1 ANYSCALE_TEST_REAL_INFRA=1 ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID=<dedicated cloud> go test ./internal/acctest -run '^TestAccCloudIAMMappingResource_RealCloud_ColdImport_BareCloudID$' -v -count=1
 func TestAccCloudIAMMappingResource_RealCloud_ColdImport_BareCloudID(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	cloudID, cloudResourceID := requireRealIAMMappingTestCloud(t)
@@ -276,6 +278,8 @@ resource "anyscale_cloud_iam_mapping" "test" {
 // independent real GET rather than terraform state - the same distinction
 // that would have caught the destroy-empty-spec-no-op trap through the
 // provider rather than only at the curl level.
+//
+// Run: TF_ACC=1 ANYSCALE_TEST_REAL_INFRA=1 ANYSCALE_TEST_IAM_MAPPING_CLOUD_ID=<dedicated cloud> go test ./internal/acctest -run '^TestAccCloudIAMMappingResource_RealCloud_Lifecycle$' -v -count=1
 func TestAccCloudIAMMappingResource_RealCloud_Lifecycle(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	cloudID, cloudResourceID := requireRealIAMMappingTestCloud(t)

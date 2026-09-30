@@ -46,8 +46,8 @@ import (
 // each test asserts exactly that - the member is still there afterwards.
 
 // requireRealInfraTestUser returns the disposable test identity's email, or
-// skips. Kept separate from the org_user tests' identity-ID gate because this
-// resource is email-keyed.
+// skips when ANYSCALE_TEST_USER_EMAIL is unset. Once it is set,
+// ANYSCALE_TEST_ORG_NAME is mandatory.
 func requireRealInfraTestUser(t *testing.T) string {
 	t.Helper()
 	// These tests write to the real API, so they must never run under a plain
@@ -82,8 +82,8 @@ func requireRealInfraTestUser(t *testing.T) string {
 	// that is UNSET both end up somewhere that works.
 	//
 	// Printing the org name costs one request and makes that invisible choice
-	// visible at the top of the log, before anything is created. Set
-	// ANYSCALE_TEST_ORG_NAME to turn this from a disclosure into a hard assertion.
+	// visible at the top of the log, before anything is created. The mandatory
+	// ANYSCALE_TEST_ORG_NAME check below turns it into a hard assertion.
 	org := authenticatedOrgName(t)
 	if org != "" {
 		t.Logf("REAL-INFRA TARGET ORGANIZATION: %q", org)
@@ -457,6 +457,8 @@ resource "anyscale_organization_user_role" "realinfra" {
 // state would look correct, the plan would be clean, and the person's real
 // permissions would not have moved. Only reading the backend after the second
 // apply distinguishes that from a working write.
+//
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists$' -v -count=1
 func TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	email := requireRealInfraTestUser(t)

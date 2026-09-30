@@ -214,6 +214,8 @@ resource "anyscale_cloud_access" "live" {
 // ephemeral cloud, since one lifecycle naturally produces both: seed a
 // member out-of-band, import, then let the test's own automatic destroy
 // (asserted via CheckDestroy) prove the revoke.
+//
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccCloudAccessResource_LiveColdImportAndDelete$' -v -count=1
 func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 	email := requireRealInfraTestUser(t)
 	PreCheck(t)
@@ -318,6 +320,8 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 // revokes them. The fixture is added out-of-band BEFORE Terraform ever runs,
 // then Create declares an EMPTY member set - the starkest form of "the
 // configuration does not declare this person."
+//
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers$' -v -count=1
 func TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers(t *testing.T) {
 	email := requireRealInfraTestUser(t)
 	PreCheck(t)
@@ -449,6 +453,8 @@ func TestAccCloudAccessResource_LiveProjectRoleDropRevokes(t *testing.T) {
 // identical either way: AC-26 is about the ROUTE the drift arrives through
 // (roles path vs legacy path, the J.19 distinction), not about grant vs.
 // role-change.
+//
+// Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected$' -v -count=1
 func TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected(t *testing.T) {
 	email := requireRealInfraTestUser(t)
 	PreCheck(t)
