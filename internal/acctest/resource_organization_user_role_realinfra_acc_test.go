@@ -50,6 +50,9 @@ import (
 // resource is email-keyed.
 func requireRealInfraTestUser(t *testing.T) string {
 	t.Helper()
+	// These tests write to the real API, so they must never run under a plain
+	// `go test` / `make test` just because the env vars happen to be set.
+	SkipIfNotAcceptanceTest(t)
 
 	email := strings.TrimSpace(os.Getenv("ANYSCALE_TEST_USER_EMAIL"))
 	if email == "" {

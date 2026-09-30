@@ -16,30 +16,25 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// warnDestructiveCollaboratorTest logs a loud, explicit warning before any
-// test that imports a real organization user via resource.Test.
+// warnRealOrgMemberTest logs a warning before any test that imports a real
+// organization member via resource.Test.
 //
-// resource.Test ALWAYS calls the resource's real Delete() at teardown,
-// whether the test passes or fails — CheckDestroy only controls whether
-// there's a post-destroy verification, not whether destroy itself runs. For
-// this resource, Delete() calls DELETE /api/v2/organization_collaborators/{id},
-// which genuinely removes that identity from the organization. There is no
-// undo: restoring a removed member requires re-inviting and re-accepting from
-// scratch.
-//
-// This test class is gated behind ANYSCALE_TEST_USER_IDENTITY_ID specifically
-// so it stays opt-in, but the destructive-teardown behavior itself is not
-// obvious from the env var name alone — a real, shared test-org identity
-// (brent+testtfprovider@anyscale.com) was deprovisioned this way during
-// development because that risk wasn't stated loudly enough. Point this env
-// var only at a genuinely disposable identity you can afford to lose; the
-// default, CI-safe coverage for this resource is the mocked httptest-based
-// unit tests, which consume nothing real.
-func warnDestructiveCollaboratorTest(t *testing.T, identityID string) {
+// resource.Test always calls the resource's real Delete() at teardown, pass or
+// fail; CheckDestroy only adds a post-destroy verification. For an imported
+// member, Delete() removes nothing: the membership was not created by this
+// resource, so destroy leaves the person in the organization (see
+// deleteMembership in resource_organization_user.go). The gate stays because a
+// regression in that branch would remove a real person from the organization,
+// and a removed member can only be restored by re-inviting them. Point
+// ANYSCALE_TEST_USER_EMAIL only at a dedicated test member you can afford to
+// lose; the default, CI-safe coverage for this resource is the mock-backed
+// tests, which touch nothing real.
+func warnRealOrgMemberTest(t *testing.T, email string) {
 	t.Helper()
-	t.Logf("WARNING: this test imports identity %s and resource.Test WILL delete it from the "+
-		"organization at teardown, pass or fail — there is no undo. Only point "+
-		"ANYSCALE_TEST_USER_IDENTITY_ID at a disposable identity you can afford to lose.", identityID)
+	t.Logf("WARNING: this test imports org member %s against the real API, and resource.Test destroys it at "+
+		"teardown. Destroy is expected to leave the member in place; if it does not, they are removed from "+
+		"the organization and must be re-invited. Only point ANYSCALE_TEST_USER_EMAIL at a dedicated test member.",
+		email)
 }
 
 func TestAccOrganizationUserResource_Import(t *testing.T) {
@@ -50,21 +45,21 @@ func TestAccOrganizationUserResource_Import(t *testing.T) {
 	if testUserEmail == "" {
 		t.Skip("ANYSCALE_TEST_USER_EMAIL not set, skipping import test")
 	}
-	warnDestructiveCollaboratorTest(t, testUserEmail)
+	warnRealOrgMemberTest(t, testUserEmail)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		// No CheckDestroy: the API has no GET-by-ID endpoint for collaborators
 		// (only list-and-filter). CheckDestroy would only verify what happens
-		// after destroy, not prevent it — see warnDestructiveCollaboratorTest:
-		// destroy WILL remove this identity from the org for real.
+		// after destroy, not prevent it — see warnRealOrgMemberTest:
+		// destroy must leave this member in place.
 		Steps: []resource.TestStep{
 			// Import existing collaborator. ImportStateVerify is NOT usable here:
 			// it verifies import against an *already-established* prior resource
 			// state from an earlier step (normally created via Create()), but this
 			// test has no earlier step at all - it is a single cold import against
-			// a real, disposable identity (see warnDestructiveCollaboratorTest
+			// a real, disposable identity (see warnRealOrgMemberTest
 			// above). That is a choice about THIS test, not a limitation of the
 			// resource: Create adopts an existing member or invites a new one (see
 			// resource_organization_user.go's own doc comment), it is not blocked.
@@ -120,7 +115,7 @@ func TestAccOrganizationUserResource_Delete(t *testing.T) {
 	if testUserEmail == "" {
 		t.Skip("ANYSCALE_TEST_USER_EMAIL not set, skipping destroy test")
 	}
-	warnDestructiveCollaboratorTest(t, testUserEmail)
+	warnRealOrgMemberTest(t, testUserEmail)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },

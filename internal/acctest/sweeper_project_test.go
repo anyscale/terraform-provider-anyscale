@@ -32,8 +32,8 @@ func init() {
 // SpiceDB owner tuple at creation time: DELETE permanently 403s for any
 // caller, including this sweeper, no matter how many times or how long
 // after creation it retries. They are intentionally left alive in the test
-// org for backend investigation (Anyscale backend eng Matt Weber, as of
-// 2026-07-12) and must never be deleted.
+// org for backend investigation (as of 2026-07-12) and must never be
+// deleted.
 //
 // These IDs - not just the shape "every failure this run was 403" - are
 // what finalizeSweepResult uses to tell "the eternal known specimens,
@@ -43,7 +43,7 @@ func init() {
 // succeeds again) or the project is gone.
 var knownPermanentlyStuck403ProjectIDs = map[string]bool{
 	"prj_3qdcd9k622abrtbvnrqtd9ifss": true, // tfacc-project-desc-9uc3s9pf
-	"prj_suumi2fbarpw2h25ac5jmyheqd": true, // tfacc-project-desc-f9cymgmb (Matt's specimen)
+	"prj_suumi2fbarpw2h25ac5jmyheqd": true, // tfacc-project-desc-f9cymgmb (backend investigation specimen)
 }
 
 // isKnownPermanentlyStuckProject reports whether id is one of the tracked
