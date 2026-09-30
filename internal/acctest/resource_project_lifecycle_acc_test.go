@@ -19,10 +19,8 @@ import (
 // resource_compute_config_lifecycle_acc_test.go close for their resources
 // (see those files' header comments): plan-emptiness, import round-tripping,
 // and inconsistent-result-after-apply are terraform FRAMEWORK properties.
-// Every OTHER project acctest that exercises real behavior is skip-gated on
-// credentials or on ANYSCALE_TEST_USER_EMAIL_*, which CI never sets - this
-// mock, gated only by the ordinary SkipIfNotAcceptanceTest, is the one that
-// actually runs in CI.
+// This mock is gated only by the ordinary SkipIfNotAcceptanceTest, so it runs
+// in CI.
 //
 // v0.25.0: the collaborator block was removed from anyscale_project (with no
 // in-provider replacement in that release - project collaborators are managed

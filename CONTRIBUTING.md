@@ -14,24 +14,16 @@ workflow; for building, testing, and project layout see the [README](README.md#d
    `ANYSCALE_TEST_REAL_INFRA=1 make testacc` before relying on them as evidence, and prefer a mocked
    unit test for anything you need CI to enforce on every PR.
 
-   The real-infra lifecycle tests for `anyscale_organization_invitation` and
-   `anyscale_organization_user` have their own separate opt-in gates (unrelated to
-   `ANYSCALE_TEST_REAL_INFRA` above) — CI-enforced coverage for both resources comes from mocked
-   `httptest`-based tests instead (see `TestAccProjectResource_WriteCollaboratorSymmetry` in
-   `internal/acctest/resource_project_lifecycle_acc_test.go` for the established pattern), so a
-   green CI run does not exercise the paths below either. Only set these locally, and only if you
-   mean to:
-   - `ANYSCALE_TEST_INVITATIONS=1` runs the invitation resource's real create/read/delete lifecycle.
-     It sends a real email invitation every run.
-   - `ANYSCALE_TEST_USER_IDENTITY_ID=<identity_id>` runs the organization_user resource's import/update
-     lifecycle against that identity.
-   - `ANYSCALE_TEST_USER_IDENTITY_ID_DELETABLE=<identity_id>` runs the organization_user resource's delete
-     lifecycle against that identity.
-   - **Both identity variables genuinely remove that identity from the organization at test teardown —
-     pass or fail, every run, no undo.** Point them only at a disposable identity created for this
-     purpose. A real shared test-org identity was deprovisioned this way once already during
-     development; see the warning in `warnDestructiveCollaboratorTest` in the same test file before
-     setting either variable.
+   The real-infra tests for `anyscale_organization_user_role` and `anyscale_cloud_access` have their
+   own opt-in gate — CI-enforced coverage for both comes from mocked `httptest`-based tests, so a
+   green CI run does not exercise these paths either. Only set these locally, and only if you mean
+   to:
+   - `ANYSCALE_TEST_USER_EMAIL=<email>` runs them against that organization member. They change the
+     member's real organization and cloud roles (the cloud_access tests also create and destroy their own
+     clouds); destroy leaves the member in the organization. Point it only at a disposable, non-owner
+     member that is not the token's own identity.
+   - `ANYSCALE_TEST_ORG_NAME=<org name>` is required whenever `ANYSCALE_TEST_USER_EMAIL` is set: the
+     tests fail unless the token authenticates against that organization.
 3. Run `make docs` if you changed a schema (description, attribute, resource/data source) — docs are generated, don't hand-edit files under `docs/`.
 4. Run `make fmt lint test` before pushing.
 5. Run `pre-commit install` once, so formatting hooks run automatically on commit.
