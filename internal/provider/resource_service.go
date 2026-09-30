@@ -220,14 +220,14 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(serviceRolloutStrategyRollout),
-				MarkdownDescription: "How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config` - changing `build_id`, `compute_config_id`, or `connection_ids` under `IN_PLACE` is rejected at plan time. Create always performs a standard deploy, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
+				MarkdownDescription: "How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config` - changing `build_id`, `compute_config_id`, or `connection_ids` under `IN_PLACE` is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(serviceRolloutStrategyRollout, serviceRolloutStrategyInPlace),
 				},
 			},
 			"max_surge_percent": schema.Int64Attribute{
 				Optional:            true,
-				MarkdownDescription: "Rollout pacing (0-100): how much excess capacity to allocate during a deploy. The rollout still converges to 100%; this never holds it at a partial percent. Null lets the backend choose. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
+				MarkdownDescription: "Rollout pacing (0-100): how much excess capacity to allocate during a deploy. The rollout still converges to 100%; this never holds it at a partial percent. Null lets the backend choose. Like `rollout_strategy`, it is not readable from the API and a change to it alone takes effect on the next deploy.",
 				Validators: []validator.Int64{
 					int64validator.Between(0, 100),
 				},

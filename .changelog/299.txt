@@ -1,6 +1,6 @@
 ```
 release-note:fixed
-resource/anyscale_service: Importing a service and then applying unchanged configuration no longer redeploys it.
+resource/anyscale_service: Importing a service and then applying unchanged configuration no longer redeploys it. The first plan after import still shows an in-place update of `rollout_strategy` or `max_surge_percent`; applying it only records the values in state.
 ```
 
 ```

@@ -7,3 +7,6 @@ terraform import anyscale_service.example service2_abc123
 # after an import may therefore show a normalization diff between the imported value and your own
 # HCL, which you resolve by reconciling your configuration with the imported value - a known
 # limitation of importing any open/schemaless config.
+
+# rollout_strategy and max_surge_percent cannot be read back, so the first plan after an import shows
+# an in-place update of them. Applying it only records the values in state; it does not redeploy.
