@@ -181,6 +181,9 @@ func TestAccComputeConfigResource_InconsistentResultRegressions(t *testing.T) {
 					testAccCheckComputeConfigExistsInAPI("anyscale_compute_config.test"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_compute_config.test", plancheck.ResourceActionUpdate),
+					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},
@@ -420,6 +423,9 @@ func TestAccComputeConfigResource_Update(t *testing.T) {
 					testAccCheckComputeConfigIDChanged("anyscale_compute_config.test", &initialConfigID),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_compute_config.test", plancheck.ResourceActionUpdate),
+					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},

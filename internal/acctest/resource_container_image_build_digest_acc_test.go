@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -266,6 +267,11 @@ EOF
 					resource.TestCheckResourceAttr("anyscale_container_image_build.test", "digest", digest2),
 					checkDigestChanged("anyscale_container_image_build.test", digest1),
 				),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_container_image_build.test", plancheck.ResourceActionUpdate),
+					},
+				},
 			},
 		},
 	})

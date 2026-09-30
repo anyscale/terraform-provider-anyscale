@@ -420,6 +420,11 @@ resource "anyscale_organization_user_role" "mock" {
 			},
 			{
 				Config: baseRoleOnlyUpdate,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_organization_user_role.mock", plancheck.ResourceActionUpdate),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "base_role", "owner"),
 					// deny_roles must survive this update untouched, even though

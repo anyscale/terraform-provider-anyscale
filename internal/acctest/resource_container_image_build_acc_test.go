@@ -142,6 +142,9 @@ RUN sudo mkdir -p /anyscale/init`
 					VerifyResourceAttrUnchanged("anyscale_container_image_build.test", "id", &clusterEnvID),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_container_image_build.test", plancheck.ResourceActionUpdate),
+					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},
