@@ -12,6 +12,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // This file closes the same framework-level gap for Compute Config that
@@ -502,13 +503,24 @@ resource "anyscale_compute_config" "test" {
 				ImportStateId:      configID,
 				ImportStatePersist: true,
 				Config:             configOmittingWriteOnlyFields,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "config_id", configID),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "flags.cc12-marker-flag", "true"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "flags.cc12-marker-count", "3"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "advanced_instance_config.disk_size", "100"),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "advanced_instance_config.enable_monitoring", "true"),
-				),
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported instance state, got %d", len(states))
+					}
+					attrs := states[0].Attributes
+					for attr, want := range map[string]string{
+						"config_id":                                  configID,
+						"flags.cc12-marker-flag":                     "true",
+						"flags.cc12-marker-count":                    "3",
+						"advanced_instance_config.disk_size":         "100",
+						"advanced_instance_config.enable_monitoring": "true",
+					} {
+						if got, ok := attrs[attr]; !ok || got != want {
+							return fmt.Errorf("imported %s = %q (present=%t), want %q", attr, got, ok, want)
+						}
+					}
+					return nil
+				},
 			},
 			{
 				// Gate 1 + gate 3 together: a config that now states the
@@ -683,12 +695,27 @@ resource "anyscale_compute_config" "test" {
 				ImportStateId:      configID,
 				ImportStatePersist: true,
 				Config:             configOmittingPerNodeFields,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "config_id", configID),
-					resource.TestCheckResourceAttr("anyscale_compute_config.test", "worker_nodes.#", "2"),
-					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "worker_nodes.0.advanced_instance_config"),
-					resource.TestCheckResourceAttrSet("anyscale_compute_config.test", "worker_nodes.1.advanced_instance_config"),
-				),
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported instance state, got %d", len(states))
+					}
+					attrs := states[0].Attributes
+					if got := attrs["config_id"]; got != configID {
+						return fmt.Errorf("imported config_id = %q, want %q", got, configID)
+					}
+					if got := attrs["worker_nodes.#"]; got != "2" {
+						return fmt.Errorf("imported worker_nodes.# = %q, want 2", got)
+					}
+					for _, attr := range []string{
+						"worker_nodes.0.advanced_instance_config",
+						"worker_nodes.1.advanced_instance_config",
+					} {
+						if attrs[attr] == "" {
+							return fmt.Errorf("imported %s is empty; per-node advanced_instance_config was not recovered", attr)
+						}
+					}
+					return nil
+				},
 			},
 			{
 				// The actual gate: does the recovered per-node JSON string

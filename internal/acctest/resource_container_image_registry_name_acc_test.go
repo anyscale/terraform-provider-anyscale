@@ -188,14 +188,17 @@ resource "anyscale_container_image_registry" "test" {
 				// Step 2: config now declares name at exactly the value step 1 recovered -
 				// reconstructing the shape a cold import followed by a config update to match
 				// would leave. The original bug: state null, config sets a value, plans
-				// null -> value on RequiresReplace = destroy-and-recreate. This step proves
-				// that exact transition (recovered non-null state, config now declaring the
-				// same value) no longer forces a replace.
+				// null -> value on RequiresReplace = destroy-and-recreate. PreApply asserts
+				// this transition plans a no-op; PostApplyPostRefresh alone cannot, because a
+				// replace applies and then plans empty too.
 				Config: configNameDeclared,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "name", realBackendName),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_container_image_registry.test", plancheck.ResourceActionNoop),
+					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
 					},

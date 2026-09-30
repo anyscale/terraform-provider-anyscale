@@ -144,9 +144,13 @@ func (s *mockOrganizationUserOriginServer) handleListCollaborators(w http.Respon
 	results := []map[string]any{}
 	wanted := r.URL.Query().Get("email")
 	if s.memberEmail != "" && (wanted == "" || strings.EqualFold(wanted, s.memberEmail)) {
+		// The real backend stores and returns emails lower-cased, whatever casing
+		// the caller used. Echoing the seed verbatim would make a provider that
+		// writes the API's email into state indistinguishable from one that keeps
+		// the operator's.
 		results = append(results, map[string]any{
 			"id":               s.identityID,
-			"email":            s.memberEmail,
+			"email":            strings.ToLower(s.memberEmail),
 			"name":             "Already A Member",
 			"permission_level": "collaborator",
 			"base_role":        "collaborator",
@@ -349,10 +353,12 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 // config to match the backend's normalization.
 //
 // The rule is therefore: IMPORT WRITES THE EMAIL AS GIVEN IN THE IMPORT ID -
-// what the operator typed - never the API echo. That is what step 2's
-// ImportStateVerify pins below - it compares the freshly imported resource
-// against the one Create already applied, in the same throwaway directory,
-// before either is discarded.
+// what the operator typed - never the API echo. Step 2 pins it twice: its
+// ImportStateCheck asserts the imported email and id directly, and its
+// ImportStateVerify compares the freshly imported resource against the one
+// Create already applied, in the same throwaway directory, before either is
+// discarded. Both depend on the mock returning the backend's lower-cased email;
+// a mock that echoed the operator's casing made the write-back invisible.
 //
 // ON WHICH STEP ACTUALLY CATCHES WHAT - measured, because the obvious story is
 // wrong for this resource and a wrong story here invites a bad "simplification":
@@ -361,6 +367,10 @@ func TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation(t *testing.T
 //	  -> caught by STEP 2. ImportStateVerify matches by ID, and the mutation
 //	     changed the ID, so imported and created state diverge:
 //	     "Failed state verification, resource with ID alice.import@example.com not found"
+//
+//	MUT: ImportState writes the collaborator's API email into email, id intact
+//	  -> caught by STEP 2's ImportStateCheck (and ImportStateVerify's attribute
+//	     diff), because the mock returns the lower-cased email the backend does.
 //
 //	MUT: the SHARED apply path normalizes email to the API's echo, so Create and
 //	Import agree and only the CONFIG differs - the case ImportStateVerify cannot
@@ -395,7 +405,8 @@ func TestAccOrganizationUserResourceImportRoundTripPreservesCasing(t *testing.T)
 
 	// Seeded as an existing member so Create adopts rather than inviting, and so
 	// the import has something real to find. The mock's collaborator lookup is
-	// case-insensitive, matching findOrgCollaboratorByEmail's EqualFold.
+	// case-insensitive, matching findOrgCollaboratorByEmail's EqualFold, and it
+	// returns the email lower-cased, as the backend does.
 	httpServer, _ := newMockOrganizationUserOriginServer(t, operatorCasing)
 
 	const resourceName = "anyscale_organization_user.test"
@@ -411,10 +422,24 @@ func TestAccOrganizationUserResourceImportRoundTripPreservesCasing(t *testing.T)
 			},
 			{
 				// 2. Import by the email the operator typed, casing and all.
-				Config:            config,
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateId:     operatorCasing,
+				Config:        config,
+				ResourceName:  resourceName,
+				ImportState:   true,
+				ImportStateId: operatorCasing,
+				// Asserts what import itself wrote, against the lower-cased API
+				// email the mock returns.
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported instance, got %d", len(states))
+					}
+					for _, attr := range []string{"email", "id"} {
+						if got := states[0].Attributes[attr]; got != operatorCasing {
+							return fmt.Errorf("imported %s = %q, want the import ID's casing %q (not the API's lower-cased email)",
+								attr, got, operatorCasing)
+						}
+					}
+					return nil
+				},
 				ImportStateVerify: true,
 				// Nothing is ignored on purpose. reinvite_if_expired has no backend
 				// representation and would normally need the R8 exemption, but

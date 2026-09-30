@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
 type f3NotFoundMockServer struct {
@@ -146,8 +147,19 @@ resource "anyscale_compute_config" "test" {
 					state.nextGetStatus = http.StatusNotFound
 					state.mu.Unlock()
 				},
-				Config:             config,
-				ExpectNonEmptyPlan: true, // Read must remove it -> plan shows a create
+				Config: config,
+				// Read must remove it, so the refreshed plan is a create.
+				// ExpectNonEmptyPlan alone is also satisfied by a Read that
+				// keeps a corrupted state (planning an update or replace), so
+				// the action is asserted on the post-refresh plan itself. The
+				// mock keeps returning 404 after the re-create, so the
+				// post-apply plan is non-empty too.
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_compute_config.test", plancheck.ResourceActionCreate),
+					},
+				},
+				ExpectNonEmptyPlan: true,
 			},
 		},
 	})

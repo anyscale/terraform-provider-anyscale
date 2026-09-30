@@ -13,7 +13,8 @@ package acctest
 // Each test asserts that the step COMPLETES. That is the load-bearing
 // assertion, and it is deliberately not "a warning was emitted": a build that
 // hard-errors emits diagnostics too, and a warning-presence check alone would
-// pass one.
+// pass one. The validate-endpoint tests also assert the call was made: a build
+// that never validates completes the step just as well.
 
 import (
 	"testing"
@@ -43,6 +44,9 @@ const schedulerFailOpenReadConfig = `{"resource_flavors":[{"name":"cpu-standard"
 // The mock answers 503 on /config/validate - the server never got as far as
 // reading the document - while the apply path itself stays healthy. A build
 // that treated "could not validate" as "invalid" would fail this step outright.
+//
+// Overlaps TestAccSchedulerConfigResourceProceedsWhenValidateUnavailableAtCreate
+// in resource_scheduler_config_plan_validation_acc_test.go (same 503 case).
 func TestAccSchedulerConfigResourceValidationUnreachableDoesNotBlockPlan(t *testing.T) {
 	server, mock := newSchedulerConfigServer(t, schedulerConfigServerOpts{
 		ReadConfig:     schedulerFailOpenReadConfig,
@@ -64,7 +68,11 @@ func TestAccSchedulerConfigResourceValidationUnreachableDoesNotBlockPlan(t *test
 	})
 
 	// The plan proceeding is not the same as the validate call being skipped:
-	// it was attempted, it failed, and the provider carried on.
+	// it was attempted, it failed, and the provider carried on. At least one,
+	// not exactly one: the harness plans more than once per step.
+	if hits := mock.ValidateHits(); hits < 1 {
+		t.Fatalf("expected at least 1 call to the validate endpoint, got %d - a build that skips validation passes the rest of this test", hits)
+	}
 	if mock.WriteCount() != 1 {
 		t.Fatalf("expected the apply to proceed to exactly 1 write despite an unreachable validate endpoint, got %d", mock.WriteCount())
 	}
@@ -97,6 +105,9 @@ func TestAccSchedulerConfigResourceAdmissionFlag403DoesNotBlockPlan(t *testing.T
 		},
 	})
 
+	if hits := mock.ValidateHits(); hits < 1 {
+		t.Fatalf("expected at least 1 call to the validate endpoint, got %d - a build that skips validation passes the rest of this test", hits)
+	}
 	if mock.WriteCount() != 1 {
 		t.Fatalf("expected the apply to proceed to exactly 1 write despite an admission-flag 403 on validate, got %d", mock.WriteCount())
 	}
