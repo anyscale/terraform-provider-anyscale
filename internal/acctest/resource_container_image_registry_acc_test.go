@@ -48,8 +48,8 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "image_uri", imageURI),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "build_id"),
 					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "build_status", "succeeded"),
-					// Note: Anyscale-provided images are NOT considered BYOD
-					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "is_byod"),
+					// Anyscale-provided images are NOT considered BYOD
+					resource.TestCheckResourceAttr("anyscale_container_image_registry.test", "is_byod", "false"),
 					resource.TestCheckResourceAttrSet("anyscale_container_image_registry.test", "created_at"),
 					testAccCheckContainerImageRegistryExistsInAPI("anyscale_container_image_registry.test"),
 				),
@@ -59,14 +59,76 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 					},
 				},
 			},
+			// Create leaves ray_version null when the create response carries
+			// none; the first refresh fills it from the build. Persist that
+			// refresh so import is compared against it.
+			{
+				RefreshState: true,
+			},
 			// ImportState testing
 			{
 				ResourceName:      "anyscale_container_image_registry.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+				// ray_version is compared: import and the refresh above resolve
+				// it from the same build (see
+				// TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer).
 				ImportStateVerifyIgnore: []string{
 					"registry_login_secret", // sensitive: API never returns auth secrets after create
-					"ray_version",           // Optional-only schema field; rehydrated only when the user set it, so import on null configs is ignored
+				},
+			},
+		},
+	})
+}
+
+// TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer
+// proves an omitted ray_version imports to the same value a refreshed state
+// holds. Import is a passthrough, so Read fills ray_version from the build's
+// resolved value. Create leaves it null when the create response carries none
+// (the real contract), and the next refresh fills it - so the comparison is
+// against refreshed state, as in the Basic test. The mock's decorated GET
+// carries a byod_ray_version that disagrees with the stored plain field, so a
+// Create that records the request-side default instead diverges from import.
+func TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const templateID = "apptemp_rayversion_import_mock"
+	const buildID = "bld_rayversion_import_mock"
+	const name = "tfacc-rayversion-import-mock"
+	const imageURI = "123456789012.dkr.ecr.us-west-2.amazonaws.com/tfacc-rayversion-import:v1"
+	const resolvedRayVersion = "9.9.9-mock-resolved"
+	const storedPlainRayVersion = "2.44.0"
+	const digest = "sha256:rayversionimportmock00000000000000000000000000000000000000000000"
+
+	server := newRegistryF4MockServer(t, templateID, buildID, name, imageURI, "", resolvedRayVersion, storedPlainRayVersion, digest)
+	config := testAccProviderBlock(server.URL) + fmt.Sprintf(`
+resource "anyscale_container_image_registry" "test" {
+  name      = %[1]q
+  image_uri = %[2]q
+}
+`, name, imageURI)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				RefreshState: true,
+			},
+			{
+				ResourceName:      "anyscale_container_image_registry.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported instance state, got %d", len(states))
+					}
+					if got := states[0].Attributes["ray_version"]; got != resolvedRayVersion {
+						return fmt.Errorf("imported ray_version = %q, want %q", got, resolvedRayVersion)
+					}
+					return nil
 				},
 			},
 		},

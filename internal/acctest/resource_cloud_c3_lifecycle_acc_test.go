@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
@@ -18,7 +17,7 @@ import (
 // property, not just a mapping-function property. A plan modifier or attr
 // interaction can still diff even when the mapping function is provably
 // correct in isolation, so these run the real create -> apply -> plan(empty)
-// -> import -> plan(empty) lifecycle through resource.Test, backed by an
+// -> import lifecycle through resource.Test, backed by an
 // httptest mock server (the provider's api_url points at it) instead of a
 // real API. No real AWS/GCP infra, no ANYSCALE_TEST_REAL_INFRA gate needed -
 // this runs in ordinary CI.
@@ -99,7 +98,14 @@ func newC3MockCloudServer(t *testing.T, cloudID, cloudJSON, resourcesJSON, cloud
 
 // TestAccCloudResource_Lifecycle_AWS_MockServer proves C3's headline gates for the AWS
 // all-in-one pattern against a mock backend: fresh create -> apply -> plan
-// empty; import -> populates cleanly, ImportStateVerify matches, no replace.
+// empty; import recovers every block, including object_storage, to exactly
+// Create's state (ImportStateVerify ignores only credentials/is_empty_cloud).
+//
+// Together those two facts mean a plan against the imported state is empty
+// for this config: the import step compares shapes, step 1's post-apply plan
+// proves that shape plans clean. There is no post-import plan step - one
+// would plan against Create's state, not the imported one, because an
+// ImportState step without ImportStatePersist runs in a throwaway directory.
 func TestAccCloudResource_Lifecycle_AWS_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -184,30 +190,6 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
-					"object_storage", // optional for VM (only aws_config/gcp_config is compute-stack-required); not recovered at import by design (C3-v2)
-				},
-			},
-			{
-				// This does NOT prove import-recovery correctness.
-				// ImportState above runs without ImportStatePersist, so per
-				// terraform-plugin-testing's own documented behavior (and
-				// testing_new_import_state.go's actual implementation) it
-				// executes in a throwaway working directory that is discarded
-				// at the end of that step - this step's plan is computed
-				// against whatever the CREATE step above left, never against
-				// what import recovered. What this genuinely proves: Create's
-				// own state stays stable under a same-config re-apply - a
-				// real property, just not the import round-trip one. See
-				// resource_cloud_import_object_storage_region_acc_test.go for
-				// the two-test shape that actually proves import recovery
-				// (ImportStateCheck on the import step itself) and plan
-				// stability against a recovered shape (two Config-only
-				// steps, no Import) as separate proofs.
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
-					},
 				},
 			},
 		},
@@ -276,30 +258,6 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
-					"object_storage", // optional for VM (only aws_config/gcp_config is compute-stack-required); not recovered at import by design (C3-v2)
-				},
-			},
-			{
-				// This does NOT prove import-recovery correctness.
-				// ImportState above runs without ImportStatePersist, so per
-				// terraform-plugin-testing's own documented behavior (and
-				// testing_new_import_state.go's actual implementation) it
-				// executes in a throwaway working directory that is discarded
-				// at the end of that step - this step's plan is computed
-				// against whatever the CREATE step above left, never against
-				// what import recovered. What this genuinely proves: Create's
-				// own state stays stable under a same-config re-apply - a
-				// real property, just not the import round-trip one. See
-				// resource_cloud_import_object_storage_region_acc_test.go for
-				// the two-test shape that actually proves import recovery
-				// (ImportStateCheck on the import step itself) and plan
-				// stability against a recovered shape (two Config-only
-				// steps, no Import) as separate proofs.
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
-					},
 				},
 			},
 		},
@@ -368,15 +326,10 @@ func TestAccCloudResource_Lifecycle_K8S_MockServer(t *testing.T) {
 		"id": %[1]q, "name": "c3-k8s-mock", "provider": "AWS", "region": "us-east-2",
 		"status": "ready", "state": "ACTIVE", "compute_stack": "K8S"
 	}`, cloudID)
-	// file_storage.persistent_volume_claim (C6) is set here to prove it
-	// applies cleanly on create, but is deliberately NOT asserted after
-	// import: file_storage is optional even for K8S (only kubernetes_config
-	// + object_storage are the compute-stack-required blocks C3-v2
-	// recovers), so it is never recovered at import by design - see
-	// ImportStateVerifyIgnore below. kubernetes_config.redis_endpoint, by
-	// contrast, IS inside a recovered block, so it is asserted after import
-	// too (not added to the ignore list) - that is real round-trip proof,
-	// not just a create-time echo.
+	// file_storage and kubernetes_config are both recovered at import
+	// (requiredImportConfigBlocks), so neither is in ImportStateVerifyIgnore:
+	// file_storage.persistent_volume_claim and kubernetes_config.redis_endpoint
+	// must round-trip to exactly Create's values.
 	resourcesJSON := `[{
 		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mock_default",
 		"compute_stack": "K8S", "region": "us-east-2",
@@ -433,30 +386,6 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
-					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
-				},
-			},
-			{
-				// This does NOT prove import-recovery correctness.
-				// ImportState above runs without ImportStatePersist, so per
-				// terraform-plugin-testing's own documented behavior (and
-				// testing_new_import_state.go's actual implementation) it
-				// executes in a throwaway working directory that is discarded
-				// at the end of that step - this step's plan is computed
-				// against whatever the CREATE step above left, never against
-				// what import recovered. What this genuinely proves: Create's
-				// own state stays stable under a same-config re-apply - a
-				// real property, just not the import round-trip one. See
-				// resource_cloud_import_object_storage_region_acc_test.go for
-				// the two-test shape that actually proves import recovery
-				// (ImportStateCheck on the import step itself) and plan
-				// stability against a recovered shape (two Config-only
-				// steps, no Import) as separate proofs.
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
-					},
 				},
 			},
 		},
@@ -469,21 +398,9 @@ resource "anyscale_cloud" "test" {
 // persistent_volume_claim - the backend rejects setting both on the same
 // file_storage block (see cloud_helpers_test.go / K10).
 //
-// Honesty check on what this actually proves (verified by mutation-testing
-// flattenFileStorage): like the pre-existing persistent_volume_claim
-// assertion in the AWS test above, the csi_ephemeral_volume_driver Check
-// below only proves clean create-time materialization (expand + no
-// plan-modifier drift) - NOT a flatten/import round-trip, since file_storage
-// is deliberately excluded from C3-v2's import recovery (requiredImportConfigBlocks)
-// and therefore also from ImportStateVerifyIgnore's complement here. Injecting
-// a regression into flattenFileStorage's csi mapping does NOT fail this test.
-// The genuine flatten-correctness proof for both fields lives at the unit
-// level (TestFlattenFileStorage_PVCAndCSIDriver, cloud_config_flatten_test.go).
-// kubernetes_config.redis_endpoint below is different: kubernetes_config IS a
-// C3-v2-recovered block, so it is NOT in ImportStateVerifyIgnore and its
-// import-time assertion is a real round-trip proof (confirmed by mutation
-// test: breaking flattenKubernetesConfig's redis_endpoint mapping does fail
-// this test, at the ImportStateVerify step specifically).
+// file_storage is recovered at import and not in ImportStateVerifyIgnore, so
+// a regression in flattenFileStorage's csi_ephemeral_volume_driver mapping, or
+// in kubernetes_config's redis_endpoint mapping, fails the import step.
 func TestAccCloudResource_Lifecycle_GCP_K8S_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -548,30 +465,6 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
-					"file_storage", // optional even for K8S; not recovered at import by design (C3-v2)
-				},
-			},
-			{
-				// This does NOT prove import-recovery correctness.
-				// ImportState above runs without ImportStatePersist, so per
-				// terraform-plugin-testing's own documented behavior (and
-				// testing_new_import_state.go's actual implementation) it
-				// executes in a throwaway working directory that is discarded
-				// at the end of that step - this step's plan is computed
-				// against whatever the CREATE step above left, never against
-				// what import recovered. What this genuinely proves: Create's
-				// own state stays stable under a same-config re-apply - a
-				// real property, just not the import round-trip one. See
-				// resource_cloud_import_object_storage_region_acc_test.go for
-				// the two-test shape that actually proves import recovery
-				// (ImportStateCheck on the import step itself) and plan
-				// stability against a recovered shape (two Config-only
-				// steps, no Import) as separate proofs.
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
-					},
 				},
 			},
 		},
@@ -865,33 +758,6 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
-					"object_storage", // optional for VM; not recovered at import by design (C3-v2)
-				},
-			},
-			{
-				// This does NOT prove import-recovery correctness.
-				// ImportState above runs without ImportStatePersist, so per
-				// terraform-plugin-testing's own documented behavior (and
-				// testing_new_import_state.go's actual implementation) it
-				// executes in a throwaway working directory that is discarded
-				// at the end of that step - this step's plan is computed
-				// against whatever the CREATE step above left, never against
-				// what import recovered. What this genuinely proves: Create's
-				// own state stays stable under a same-config re-apply - a
-				// real property, just not the import round-trip one. See
-				// resource_cloud_import_object_storage_region_acc_test.go for
-				// the two-test shape that actually proves import recovery
-				// (ImportStateCheck on the import step itself) and plan
-				// stability against a recovered shape (two Config-only
-				// steps, no Import) as separate proofs. Note this is distinct from the PlanOnly
-				// step earlier in this test (which runs BEFORE import,
-				// against Create's own state) - this step specifically covers
-				// the post-import scenario the PlanOnly step does not reach.
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("anyscale_cloud.test", plancheck.ResourceActionNoop),
-					},
 				},
 			},
 		},

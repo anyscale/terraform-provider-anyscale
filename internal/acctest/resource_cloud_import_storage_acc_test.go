@@ -2,6 +2,7 @@ package acctest
 
 import (
 	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -36,14 +37,13 @@ import (
 //     default for this case, so both create and import must resolve it to
 //     null; this test proves the two paths agree.
 //
-// Step 1 creates against the mock and captures real applied state. Step 2
-// imports: ImportStateVerify must match that state EXACTLY - unlike the
-// pre-existing C3 lifecycle tests, object_storage and file_storage are
-// deliberately NOT in ImportStateVerifyIgnore, since proving they now
-// round-trip is the entire point of this test. Step 3 re-applies the same
-// config and asserts the plan is a no-op: the literal customer complaint
-// ("Plan: 1 to import, 1 to add, 0 to change, 1 to destroy") must never
-// happen for a configuration that matches reality.
+// Step 1 creates against the mock and captures real applied state; its
+// implicit post-apply plan must be empty. Step 2 imports: ImportStateVerify
+// must match that state EXACTLY, with object_storage and file_storage not
+// ignored. Imported state equal to a state that plans empty is what rules out
+// the customer's "1 to add, 1 to destroy" for a config matching reality. A
+// post-import plan step would add nothing: without ImportStatePersist it
+// plans against Create's state, not the imported one.
 func TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -140,71 +140,44 @@ resource "anyscale_cloud" "test" {
 					"credentials", "is_empty_cloud",
 				},
 			},
-			{
-				// The literal customer bar: for a matching config, the plan
-				// after import is a no-op - never a replace.
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop),
-					},
-				},
-			},
 		},
 	})
 }
 
-// TestAccCloudResource_ImportRecoversMountTargets_AWSVM replaces
-// TestAccCloudResource_ImportDropsMountTargets_AWSVM: mount_targets is now
-// Optional+Computed (schema.ListNestedAttribute, not a Block - see
-// mount_targets_state_compat_test.go), so recovering the real value at
-// import is correct and self-heals, the same as memorydb/memorystore.
-//
-// This mock (newC3MockCloudServer) doesn't return file_storage from
-// add_resource, so step 1's Create leaves mount_targets null - a legitimate
-// "derived data wasn't available at create time" outcome, not a bug (see
-// resource_cloud_import_mounttargets_acc_test.go for the create-path
-// resolve proof). Step 2 imports from a mock response that DOES carry a
-// real mount_targets entry, and step 3 confirms the plan converges cleanly
-// on the recovered value - proving self-heal, not the old drop-it premise.
-func TestAccCloudResource_ImportRecoversMountTargets_AWSVM(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
+// mountTargetsImportResourcesJSON is the resources listing for the
+// mount_targets import tests: mount_targets IS populated server-side
+// (simulating real EFS auto-discovery for a cloud registered out of band)
+// even though config only ever sets file_storage_id. Exactly one entry,
+// address only, no zone - what a real AWS backend response contains.
+const mountTargetsImportResourcesJSON = `[{
+	"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mount_targets_mock_default",
+	"compute_stack": "VM", "region": "us-east-2",
+	"aws_config": {
+		"vpc_id": "vpc-mounttargets",
+		"subnet_ids": ["subnet-mounttargets1", "subnet-mounttargets2"],
+		"zones": ["us-east-2a", "us-east-2b"],
+		"security_group_ids": ["sg-mounttargets"],
+		"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/mounttargets-crossaccount",
+		"cluster_iam_role_id": "arn:aws:iam::123456789012:role/mounttargets-cluster-node",
+		"external_id": "mounttargets-external-id"
+	},
+	"object_storage": {"bucket_name": "s3://my-mounttargets-bucket"},
+	"file_storage": {
+		"file_storage_id": "fs-mt123",
+		"mount_targets": [
+			{"address": "fs-mt123.efs.us-east-2.amazonaws.com"}
+		]
+	}
+}]`
 
-	const cloudID = "cld_mount_targets_import_aws_mock"
-	cloudJSON := fmt.Sprintf(`{
-		"id": %[1]q, "name": "mount-targets-import-aws-mock", "provider": "AWS", "region": "us-east-2",
-		"status": "ready", "state": "ACTIVE", "compute_stack": "VM", "is_default": false,
-		"is_private_cloud": true
-	}`, cloudID)
-	// mount_targets IS populated server-side (simulating real EFS
-	// auto-discovery for a cloud registered out of band) even though config
-	// only ever sets file_storage_id. Exactly one entry, address only, no
-	// zone - what a real AWS backend response actually contains (see doc
-	// comment above).
-	resourcesJSON := `[{
-		"name": "default", "is_default": true, "cloud_resource_id": "cldrsrc_mount_targets_mock_default",
-		"compute_stack": "VM", "region": "us-east-2",
-		"aws_config": {
-			"vpc_id": "vpc-mounttargets",
-			"subnet_ids": ["subnet-mounttargets1", "subnet-mounttargets2"],
-			"zones": ["us-east-2a", "us-east-2b"],
-			"security_group_ids": ["sg-mounttargets"],
-			"anyscale_iam_role_id": "arn:aws:iam::123456789012:role/mounttargets-crossaccount",
-			"cluster_iam_role_id": "arn:aws:iam::123456789012:role/mounttargets-cluster-node",
-			"external_id": "mounttargets-external-id"
-		},
-		"object_storage": {"bucket_name": "s3://my-mounttargets-bucket"},
-		"file_storage": {
-			"file_storage_id": "fs-mt123",
-			"mount_targets": [
-				{"address": "fs-mt123.efs.us-east-2.amazonaws.com"}
-			]
-		}
-	}]`
+const mountTargetsImportAddress = "fs-mt123.efs.us-east-2.amazonaws.com"
 
-	server := newC3MockCloudServer(t, cloudID, cloudJSON, resourcesJSON, "cldrsrc_mount_targets_mock_default")
-	resourceName := "anyscale_cloud.test"
-	config := testAccProviderBlock(server.URL) + `
+// mountTargetsImportConfig renders the mount_targets import tests' config.
+// fileStorageExtra is spliced into the file_storage block; "" gives the
+// out-of-band-registration mirror (file_storage_id only - mount_targets
+// addresses are AWS-assigned and unknowable to whoever writes the config).
+func mountTargetsImportConfig(serverURL, fileStorageExtra string) string {
+	return testAccProviderBlock(serverURL) + fmt.Sprintf(`
 resource "anyscale_cloud" "test" {
   name             = "mount-targets-import-aws-mock"
   cloud_provider   = "AWS"
@@ -228,42 +201,53 @@ resource "anyscale_cloud" "test" {
     bucket_name = "my-mounttargets-bucket"
   }
 
-  # Out-of-band-registration mirror: file_storage_id only. mount_targets
-  # cannot be set here - the addresses are AWS-assigned and unknowable to
-  # whoever writes this config.
   file_storage {
     file_storage_id = "fs-mt123"
+%s
   }
 }
-`
+`, fileStorageExtra)
+}
+
+func newMountTargetsImportMockServer(t *testing.T, cloudID string) *httptest.Server {
+	t.Helper()
+	cloudJSON := fmt.Sprintf(`{
+		"id": %[1]q, "name": "mount-targets-import-aws-mock", "provider": "AWS", "region": "us-east-2",
+		"status": "ready", "state": "ACTIVE", "compute_stack": "VM", "is_default": false,
+		"is_private_cloud": true
+	}`, cloudID)
+	return newC3MockCloudServer(t, cloudID, cloudJSON, mountTargetsImportResourcesJSON, "cldrsrc_mount_targets_mock_default")
+}
+
+// TestAccCloudResource_ImportRecoversMountTargets_AWSVM is Test A for
+// mount_targets import recovery: mount_targets is Optional+Computed, so
+// recovering the real value at import is correct, the same as
+// memorydb/memorystore.
+//
+// newC3MockCloudServer's add_resource response carries no file_storage, so
+// Create leaves mount_targets empty - nothing to derive it from yet. Import
+// reads a resources listing that DOES carry a real entry, so mount_targets
+// legitimately differs from Create's state; it is ignored in
+// ImportStateVerify and asserted exactly in ImportStateCheck instead. Plan
+// stability against that recovered value is
+// TestAccCloudResource_MountTargetsRecoveredShapeIsPlanStable_AWSVM.
+func TestAccCloudResource_ImportRecoversMountTargets_AWSVM(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	server := newMountTargetsImportMockServer(t, "cld_mount_targets_import_aws_mock")
+	resourceName := "anyscale_cloud.test"
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Establish real applied state. This mock's add_resource
-				// response doesn't carry file_storage, so mount_targets
-				// legitimately resolves to null at create time (nothing to
-				// derive it from yet) - not a bug, see
-				// resource_cloud_import_mounttargets_acc_test.go for the
-				// create-path-resolve proof when the response does carry it.
-				Config: config,
+				Config: mountTargetsImportConfig(server.URL, ""),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(resourceName, "file_storage.file_storage_id", "fs-mt123"),
 					resource.TestCheckResourceAttr(resourceName, "file_storage.mount_targets.#", "0"),
 				),
-				ExpectNonEmptyPlan: false,
 			},
 			{
-				// THE regression proof: import must recover the real
-				// mount_targets value from the API's resources listing.
-				// mount_targets is expected to legitimately differ from
-				// step 1 (null -> real value), so it's excluded from
-				// ImportStateVerify's byte-for-byte comparison and checked
-				// explicitly instead via ImportStateCheck - this is a
-				// deliberate is-different-by-design case, not a placebo:
-				// ImportStateCheck asserts the exact recovered value, not
-				// just "ignore and move on".
 				ResourceName:      resourceName,
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -279,22 +263,47 @@ resource "anyscale_cloud" "test" {
 					if got := attrs["file_storage.mount_targets.#"]; got != "1" {
 						return fmt.Errorf("file_storage.mount_targets.# = %q, want \"1\" - the real value must be recovered at import", got)
 					}
-					if got := attrs["file_storage.mount_targets.0.address"]; got != "fs-mt123.efs.us-east-2.amazonaws.com" {
+					if got := attrs["file_storage.mount_targets.0.address"]; got != mountTargetsImportAddress {
 						return fmt.Errorf("file_storage.mount_targets.0.address = %q, want the real recovered address", got)
 					}
 					return nil
 				},
 			},
+		},
+	})
+}
+
+// TestAccCloudResource_MountTargetsRecoveredShapeIsPlanStable_AWSVM is Test B
+// for mount_targets: the plan against the state import produces must be a
+// no-op for a config that omits mount_targets. Two Config-only steps carry
+// state forward (an ImportState step's state would not): step 1 declares the
+// recovered value so state holds exactly what import recovers (see the Test A
+// sibling's ImportStateCheck), step 2 omits it as a real config does.
+func TestAccCloudResource_MountTargetsRecoveredShapeIsPlanStable_AWSVM(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	server := newMountTargetsImportMockServer(t, "cld_mount_targets_shape_aws_mock")
+	resourceName := "anyscale_cloud.test"
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
 			{
-				// The self-heal bar: for a config matching the live cloud,
-				// the plan after import is a no-op - the recovered value
-				// converges cleanly, never a destroy-and-recreate.
-				Config: config,
+				Config: mountTargetsImportConfig(server.URL, fmt.Sprintf(`    mount_targets = [{ address = %q }]`, mountTargetsImportAddress)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "file_storage.mount_targets.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "file_storage.mount_targets.0.address", mountTargetsImportAddress),
+					resource.TestCheckNoResourceAttr(resourceName, "file_storage.mount_targets.0.zone"),
+				),
+			},
+			{
+				Config: mountTargetsImportConfig(server.URL, ""),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop),
+						plancheck.ExpectEmptyPlan(),
 					},
 				},
+				Check: resource.TestCheckResourceAttr(resourceName, "file_storage.mount_targets.0.address", mountTargetsImportAddress),
 			},
 		},
 	})
@@ -303,17 +312,13 @@ resource "anyscale_cloud" "test" {
 // TestAccCloudResource_ImportRecoversStorageBlocks_K8S is the K8S companion:
 // the ratified fix contract scopes recovery to "both object_storage and
 // file_storage, VM and K8S" explicitly, not just the VM case the customer
-// happened to report. object_storage is already recovered for K8S today (it
-// is one of the two compute-stack-required blocks); file_storage is not,
-// exactly like VM, and the pre-existing TestAccCloudResource_Lifecycle_K8S_MockServer
-// proves it: it puts "file_storage" in ImportStateVerifyIgnore with the
-// comment "optional even for K8S; not recovered at import by design
-// (C3-v2)" - the same silencing pattern the AWS/VM test used for
-// object_storage before this bug was reported. This test removes that
-// silencing for file_storage.
+// happened to report. Neither block is in ImportStateVerifyIgnore, so the
+// import step fails if either is not recovered to exactly Create's state;
+// step 1's post-apply plan being empty then covers the plan against that
+// shape (see the AWS-VM sibling's doc comment).
 //
-// Also re-exercises L1 (region auto-fill) on the K8S path: the pre-existing
-// K8S lifecycle test's object_storage mock fixture never includes a region
+// Also re-exercises L1 (region auto-fill) on the K8S path: the K8S
+// lifecycle test's object_storage mock fixture never includes a region
 // field at all, so it could not have caught L1 even though K8S recovery
 // shares the exact same flattenObjectStorage call as VM. This test's mock
 // does include it, matching the cloud-resource region, so a fix that
@@ -380,9 +385,8 @@ resource "anyscale_cloud" "test" {
 				ExpectNonEmptyPlan: false,
 			},
 			{
-				// file_storage is deliberately NOT ignored here, unlike the
-				// pre-existing K8S lifecycle test - proving it now round-trips
-				// is the point. object_storage.region stays null through both
+				// object_storage and file_storage are not ignored: proving
+				// they round-trip is the point. object_storage.region stays null through both
 				// steps, same reasoning as the AWS-VM sibling test - the mock
 				// reflects the real backend, which never returns a region
 				// equal to the cloud's own region.
@@ -391,14 +395,6 @@ resource "anyscale_cloud" "test" {
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
 					"credentials", "is_empty_cloud",
-				},
-			},
-			{
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(resourceName, plancheck.ResourceActionNoop),
-					},
 				},
 			},
 		},

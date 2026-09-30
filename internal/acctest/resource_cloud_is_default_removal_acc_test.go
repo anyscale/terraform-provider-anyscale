@@ -1,10 +1,12 @@
 package acctest
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // TestAccCloudResource_IsDefaultRemovalNoSpuriousDiff is the import round-trip
@@ -17,12 +19,13 @@ import (
 // auth-independent GET /clouds path, no plan-consistency hazard since data
 // sources carry no prior-state contract).
 //
-// Guards the same three shapes the original idle-plan investigation cared
-// about - a second independent plan right after Create; the same, byte
-// identical config across separate TestSteps rather than relying on a single
-// step's own PostApplyPostRefresh check; and the same again right after
-// Import - proving the resource is clean end to end now that the attribute
-// causing the noise is simply gone, not patched.
+// Guards the shapes the original idle-plan investigation cared about: a
+// second, independent plan of the byte-identical config in a separate
+// TestStep, and import. The import step verifies every recovered block
+// against Create's state (only credentials/is_empty_cloud ignored), so the
+// imported state is the same state step 2 already planned empty. There is no
+// post-import plan step: without ImportStatePersist it would plan against
+// Create's state, not the imported one.
 func TestAccCloudResource_IsDefaultRemovalNoSpuriousDiff(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -81,29 +84,23 @@ resource "anyscale_cloud" "test" {
 				},
 			},
 			// Import, mirroring the reported workflow (terraform import
-			// against an already-existing cloud, not a Terraform-driven
-			// Create). ImportStateVerify has nothing to compare is_default
-			// against since it no longer exists on either side.
+			// against an already-existing cloud). is_default must stay absent
+			// and every recovered block must match Create's state.
 			{
 				ResourceName:      resourceAddr,
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"credentials", "aws_config", "gcp_config", "azure_config",
-					"kubernetes_config", "object_storage", "file_storage", "is_empty_cloud",
+					"credentials", "is_empty_cloud",
 				},
-			},
-			// The same config again, right after import - the exact moment
-			// the original bug report was made against: the first
-			// `terraform plan` a user runs right after `terraform import` to
-			// confirm it matches config. No is_default attribute means
-			// nothing left to show `(known after apply)` noise on.
-			{
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported instance state, got %d", len(states))
+					}
+					if v, ok := states[0].Attributes["is_default"]; ok {
+						return fmt.Errorf("is_default = %q present in imported state, want absent", v)
+					}
+					return nil
 				},
 			},
 		},
