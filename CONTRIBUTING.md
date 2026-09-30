@@ -96,6 +96,6 @@ The `Schema Gate` check compares the provider schema at the PR's merge-base with
 
 **If the check fails with "could not produce a provider schema".** The provider failed to build, or `terraform providers schema` failed, at the merge-base or the PR head. This is not a breaking-change finding, and the label does not bypass it. Fix the build or the schema-time error shown in the job log.
 
-**Run it locally.** `.github/scripts/schema-gate.sh gate origin/main HEAD` (needs git, go, jq, and Terraform 1.15 or later). Set `PR_NUMBER` and `PR_LABELS_JSON` to exercise the label and fragment checks.
+**Run it locally.** `.github/scripts/schema-gate.sh gate origin/main HEAD` (needs git, go, jq, and Terraform 1.15 or later). Set `PR_NUMBER` and `PR_LABELS_JSON` to exercise the label and fragment checks. The check uses the gate rules from the merge-base, so a PR that changes the gate is judged by the rules on main and its own changes apply from the next PR; the summary flags any PR that edits the gate.
 
 **Limitations.** The schema JSON does not include plan modifiers, so a newly added `RequiresReplace` is invisible to this check. The check also does not compare `min_items`/`max_items` on nested attributes, or resource identity schemas. Reviewers should still look for all three.
