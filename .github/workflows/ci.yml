@@ -140,6 +140,13 @@ jobs:
         if: matrix.shard == 'lint-and-unit'
         run: make test
 
+      - name: Vulnerability check
+        if: matrix.shard == 'lint-and-unit'
+        # Fails only when the code calls a vulnerable symbol; findings in
+        # modules the code does not call are reported but do not fail. Pinned so
+        # a new govulncheck release cannot change the result of an unchanged PR.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
       - name: Validate Examples
         if: matrix.shard == 'lint-and-unit'
         # The actual fmt / tflint / init+validate work lives in `make

@@ -1,0 +1,42 @@
+name: Zizmor
+
+# Static analysis of the workflows themselves: unpinned actions, template
+# injection, excessive permissions, persisted credentials and similar. Runs on
+# pull requests that touch .github/ and weekly, so a new zizmor audit or a newly
+# published advisory against a pinned action is noticed without a workflow edit.
+# Online audits (known-vulnerable actions, impostor commits) use the read-only
+# GITHUB_TOKEN.
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+  schedule:
+    - cron: "41 5 * * 1" # Mondays, off the top of the hour
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zizmor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: Zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          version: v1.30.1
+          # Report findings as annotations and fail the check, rather than
+          # uploading SARIF (which needs security-events: write).
+          advanced-security: false
+          token: ${{ secrets.GITHUB_TOKEN }}
