@@ -227,6 +227,9 @@ func newMockCloudAccessServer(t *testing.T) *httptest.Server {
 		orgMembers: map[string]struct{ identityID, userID string }{
 			"alice@example.com": {identityID: "ide_mock_alice", userID: "usr_mock_alice"},
 			"bob@example.com":   {identityID: "ide_mock_bob", userID: "usr_mock_bob"},
+			// The cloud owner is an org member too, so a test can declare it at its
+			// real role and assert an empty plan.
+			cloudAccessMockImplicitMember: {identityID: "ide_mock_cloud_owner", userID: "usr_mock_cloud_owner"},
 		},
 		// Deliberately a distinct identity from every declared/implicit member
 		// above, so the caller-exclusion logic never overlaps with what this
@@ -551,9 +554,15 @@ func (s *mockCloudAccessServer) handleProjects(w http.ResponseWriter, r *http.Re
 	case rest == "collaborators/users" && r.Method == http.MethodGet:
 		results := []map[string]any{}
 		for email, c := range s.projectCollaborators[projectID] {
+			// value.id is the user's real user_id, the same one the cloud member
+			// list reports; Read matches project roles on it.
+			userID := "usr_" + email
+			if ids, ok := s.orgMembers[email]; ok {
+				userID = ids.userID
+			}
 			results = append(results, map[string]any{
 				"id":               c.identityID,
-				"value":            map[string]any{"id": "usr_" + email, "email": email},
+				"value":            map[string]any{"id": userID, "email": email},
 				"permission_level": c.permissionLevel,
 			})
 		}
