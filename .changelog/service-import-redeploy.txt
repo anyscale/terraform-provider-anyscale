@@ -1,0 +1,9 @@
+```
+release-note:fixed
+resource/anyscale_service: Importing a service and then applying unchanged configuration no longer redeploys it.
+```
+
+```
+release-note:changed
+resource/anyscale_service: Changing only `rollout_strategy` or `max_surge_percent` no longer triggers a deploy; the new values take effect on the next deploy.
+```
