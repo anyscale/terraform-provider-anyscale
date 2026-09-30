@@ -230,10 +230,19 @@ func cloudAccessDesiredMembers(ctx context.Context, member types.Map) (map[strin
 				denyRoles = declared
 			}
 		}
+		// Nil when undeclared, as in cloudAccessPriorProjectDeclarations.
+		var projects map[string]string
+		if !m.Projects.IsNull() && !m.Projects.IsUnknown() {
+			diags.Append(m.Projects.ElementsAs(ctx, &projects, false)...)
+			if diags.HasError() {
+				return out, diags
+			}
+		}
 		out[cloudAccessFoldEmail(email)] = cloudAccessDesiredMember{
 			Email:     email,
 			BaseRole:  m.BaseRole.ValueString(),
 			DenyRoles: denyRoles,
+			Projects:  projects,
 		}
 	}
 	return out, diags
