@@ -484,12 +484,8 @@ func TestAccComputeConfigResource_Disappears(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	// K8S clouds use operator-defined pod shapes, not the basic instance_type
-	// shape used here. Pick the first VM cloud, mirroring TestAccComputeConfigResource_Basic.
-	vmClouds := GetAllVMClouds(t)
-	if len(vmClouds) == 0 {
-		t.Skip("No VM clouds available for compute config testing")
-	}
-	cloud := vmClouds[0]
+	// shape used here. Use the pinned VM cloud, not whichever VM cloud the org lists first.
+	cloud := pinnedVMCloud(t)
 	instanceTypes := cloud.InstanceTypes()
 	if !instanceTypes.IsValid() {
 		t.Skipf("Skipping %s - no valid instance types (K8S clouds use operator-defined pod shapes)", cloud.Provider)

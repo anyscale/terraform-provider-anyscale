@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -373,6 +375,60 @@ func TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers(t *testing.T)
 	})
 }
 
+// freshResourceRetryWindow bounds the propagation retries below.
+const freshResourceRetryWindow = 90 * time.Second
+
+// createProjectOnFreshCloud creates an ephemeral project under a cloud this test
+// created moments earlier. Creating a project on a just-created cloud 403s until
+// the owner grant on the new cloud propagates (measured on the real API: 403
+// immediately, 201 after about 10s), so a 403 is retried every 5s until
+// freshResourceRetryWindow after cloudCreatedAt. Any other error, or a 403 after
+// the window, is returned as is. A failed attempt creates nothing and registers
+// no cleanup; only the attempt that succeeds registers one, inside
+// CreateEphemeralTestProjectForCloud.
+func createProjectOnFreshCloud(t *testing.T, cloudID string, cloudCreatedAt time.Time) (string, error) {
+	t.Helper()
+	for {
+		projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloudID)
+		if err == nil {
+			return projectID, nil
+		}
+		// CreateEphemeralTestProjectForCloud reports a non-2xx as "(status N)".
+		if !strings.Contains(err.Error(), "(status 403)") || time.Since(cloudCreatedAt) >= freshResourceRetryWindow {
+			return "", err
+		}
+		t.Logf("project create on fresh cloud %s returned 403 (owner grant not yet propagated); retrying in 5s", cloudID)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// waitForProjectGrantable blocks until the caller may grant roles on a project
+// this test just created. The creator's permission to manage a new project's
+// collaborators propagates separately from the project itself: batch_create
+// 403s for roughly 8-23s after creation (measured on the real API), and the
+// provider records that 403 in ungranted_members rather than failing the apply,
+// so the test's first step would otherwise check for a grant that was never
+// made. An empty batch_create passes the same permission check and writes
+// nothing (204 once ready, 403 before), so it is used as the probe.
+func waitForProjectGrantable(t *testing.T, client *provider.Client, projectID string) {
+	t.Helper()
+	deadline := time.Now().Add(freshResourceRetryWindow)
+	path := fmt.Sprintf("/api/v2/projects/%s/collaborators/users/batch_create", projectID)
+	for {
+		_, err := provider.DoRequestRaw(context.Background(), client, http.MethodPost, path,
+			strings.NewReader("[]"), http.StatusOK, http.StatusNoContent)
+		if err == nil {
+			return
+		}
+		var statusErr *provider.UnexpectedStatusError
+		if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusForbidden || time.Now().After(deadline) {
+			t.Fatalf("project %s never accepted collaborator writes: %v", projectID, err)
+		}
+		t.Logf("project %s not yet grantable (403); retrying in 5s", projectID)
+		time.Sleep(5 * time.Second)
+	}
+}
+
 // TestAccCloudAccessResource_LiveProjectRoleDropRevokes is AC-15: dropping a
 // project entry from a member's config revokes that project role on the
 // real backend.
@@ -385,14 +441,16 @@ func TestAccCloudAccessResource_LiveProjectRoleDropRevokes(t *testing.T) {
 		t.Fatalf("failed to get test client: %v", err)
 	}
 
+	cloudCreatedAt := time.Now()
 	cloudID, _, err := createEphemeralTestCloud(t)
 	if err != nil {
 		t.Fatalf("failed to create ephemeral test cloud: %v", err)
 	}
-	projectID, _, err := CreateEphemeralTestProjectForCloud(t, cloudID)
+	projectID, err := createProjectOnFreshCloud(t, cloudID, cloudCreatedAt)
 	if err != nil {
 		t.Fatalf("failed to create ephemeral test project: %v", err)
 	}
+	waitForProjectGrantable(t, client, projectID)
 
 	resourceName := "anyscale_cloud_access.live"
 	withProjectRole := cloudAccessLiveConfig(cloudID, fmt.Sprintf(`    %[1]q = {
