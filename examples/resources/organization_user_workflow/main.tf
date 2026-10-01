@@ -84,13 +84,11 @@ output "invitation_expires_at" {
 #   description = "Email of the managed member"
 # }
 
-# Managing a team: one locals map as the single source of truth for both the invitation
-# loop below and the role loop further down. This is the idiomatic Terraform pattern for
-# a "team" or "group" here, not a workaround -- Anyscale groups exist but cannot yet be
-# populated (membership is written only by directory sync, not yet available to
-# customers), so there is nothing for a group resource to usefully wrap today. Adding a
-# teammate is one line, in one place, and every resource that reads this map follows. See
-# the RBAC guide's section on managing a team this way for the full argument.
+# Managing a team's organization roles: one locals map as the single source of truth for both
+# the invitation loop below and the role loop further down. Anyscale user groups (Alpha) are
+# a separate concept -- they manage who belongs to a named set, not each person's organization
+# role; see the RBAC guide's "User groups (Alpha)" section. Adding a teammate is one line, in
+# one place, and every resource that reads this map follows.
 locals {
   ml_team = {
     "dev1@example.com" = "collaborator"

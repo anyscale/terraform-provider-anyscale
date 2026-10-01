@@ -22,6 +22,7 @@ Read this before writing configuration that spans more than one scope.
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | Cloud membership, cloud role, and project role | [`anyscale_cloud_access`](../resources/cloud_access.md) | One cloud's **entire** member list, each member's `base_role`/`deny_roles` on that cloud, and their per-project roles under it. Authoritative from the first `apply` - see [`anyscale_cloud_access`: authoritative over one cloud's whole member list](#anyscale_cloud_access-authoritative-over-one-clouds-whole-member-list), below, before writing configuration against it. |
+| User groups (Alpha) | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md) | A group's name, and its **entire** member list. Not group roles or cloud/project grants. See [User groups (Alpha)](#user-groups-alpha). |
 
 The two role resources above use the word "authoritative" to mean: authoritative over the one row
 each manages, never over a whole population - see
@@ -34,13 +35,96 @@ under incompatible authority models (one row vs. the whole set), and running bot
 cloud would mean `anyscale_cloud_access` silently revoking members `anyscale_cloud_user_role` thinks
 it still manages. There was never a version where declaring both was safe.
 
-## Managing a team without a group resource
+## User groups (Alpha)
 
-Anyscale groups exist (`/api/v2/user_groups`, org-scoped, with create/delete/set-roles) but cannot
-yet be populated - group membership is written only by WorkOS directory-sync events, and directory
-sync is not yet available to customers. A group nobody can join has nothing for a group resource to
-usefully wrap, which is why there is no `anyscale_group` resource here today. The recommended
-pattern is a `locals` map, keyed by email, that drives both the invitation loop and the role loop:
+~> **Alpha.** User groups are an Alpha feature. The Anyscale API and this provider's schema for them
+may change drastically before Beta, including breaking changes in a minor release. Every breaking
+change is still listed in the changelog; Alpha relaxes the deprecation period, not disclosure. Pin the
+provider version if you depend on these resources, and read the changelog before upgrading.
+
+An Anyscale **user group** is a named set of organization members. This provider manages groups in
+four types:
+
+| Type | Does |
+|---|---|
+| [`anyscale_user_group`](../resources/user_group.md) | Creates, renames, and deletes one group. Does not manage who is in it. |
+| [`anyscale_user_group_members`](../resources/user_group_members.md) | The **complete** member list of one group, keyed by email. |
+| [`anyscale_user_group`](../data-sources/user_group.md) data source | Reads one group by `id` or `name`, including directory-synced groups. |
+| [`anyscale_user_groups`](../data-sources/user_groups.md) data source | Lists the organization's groups. |
+
+Managing groups needs the organization-level permission to manage IAM (an organization admin).
+
+### What is in scope, and what is not
+
+In scope: creating and renaming groups, and managing who belongs to them. **Not managed yet:** a
+group's organization roles, and grants of cloud or project access to a group. Granting a group
+access to a cloud is still done with [`anyscale_cloud_access`](../resources/cloud_access.md), per
+member, or in the Anyscale console. A group that exists and has members does not by itself give
+anyone any access.
+
+### Members must already be in the organization
+
+`anyscale_user_group_members` takes **email addresses** and resolves each to a user in your
+organization. An email that is not an organization member fails the apply; invite the person first
+with [`anyscale_organization_invitation`](../resources/organization_invitation.md) and wait for them to
+accept. Emails match case-insensitively, and state keeps the spelling from your configuration.
+
+### `anyscale_user_group_members` is authoritative
+
+Anyone in the group who is not in `members` is **removed** - including people added through the
+Anyscale console, and including on the first apply. `members = []` is allowed and empties the group.
+Declare exactly one `anyscale_user_group_members` per group; two configurations managing the same
+group remove each other's members on every apply, and nothing can detect that from either state. A
+person who leaves the organization drops out of the group; the next plan proposes re-adding them and
+the apply fails, because they are no longer an organization member.
+
+### Directory-synced groups are read-only here
+
+Groups created by directory sync (SCIM) are owned by your identity provider. The resources refuse to
+manage them: importing one, or declaring members for it, fails with an error. Read them with the
+`anyscale_user_group` data source (its `source` attribute is `scim`) and reference their IDs from
+other configuration. Groups created before April 2026 may report no `source`; those are treated as
+managed and can be imported.
+
+### Destroying
+
+Destroying `anyscale_user_group_members` removes every member and leaves the group. Destroying
+`anyscale_user_group` removes the members first, then deletes the group. The members are removed
+first deliberately: deleting a group does not, on its own, revoke everything that was derived from
+its membership. Access derived from a group's cloud or project grants can take roughly 30 seconds
+to converge after membership changes; the provider does not wait for it.
+
+### Cost of a refresh
+
+Reading membership fetches the whole organization's group memberships once per
+`anyscale_user_group_members`. That is fine for typical organizations; if you manage many groups,
+expect refreshes to scale with the number of groups.
+
+### Example
+
+```hcl
+resource "anyscale_organization_invitation" "dev" {
+  email = "dev1@example.com"
+}
+
+resource "anyscale_user_group" "ml_platform" {
+  name = "ml-platform"
+}
+
+resource "anyscale_user_group_members" "ml_platform" {
+  group_id = anyscale_user_group.ml_platform.id
+  members  = ["dev1@example.com", "dev2@example.com"] # must already be organization members
+}
+```
+
+See [`examples/resources/anyscale_user_group_members`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/anyscale_user_group_members)
+for a runnable configuration.
+
+### Managing a team without groups
+
+Groups are one way to model a team. When you only need each person's *organization role*, which
+groups do not manage, a `locals` map keyed by email can drive both the invitation loop and the role
+loop:
 
 ```hcl
 locals {
@@ -65,7 +149,7 @@ resource "anyscale_organization_user_role" "team_member_roles" {
 
 One map is the single source of truth for the whole team: adding a teammate is one line, in one
 place, and every resource that reads the map follows. This is the idiomatic Terraform answer for
-this shape, not a workaround for a missing primitive. See the full staged workflow - invitation,
+this shape. See the full staged workflow - invitation,
 then role, once the invitation is accepted - in
 [`examples/resources/organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/resources/organization_user_workflow).
 
