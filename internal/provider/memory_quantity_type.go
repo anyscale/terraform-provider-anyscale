@@ -18,9 +18,8 @@ import (
 // number. required_resources.memory is a plain (non-Computed) string
 // attribute, so without this type, Terraform Core would reject a config of
 // "4Gi" once state ends up holding "4294967296" - the exact "provider
-// produced inconsistent result after apply" crash class F4 (custom_resources)
-// already taught this repo to fix, found again here via a real acceptance
-// test run against the integrated branch.
+// produced inconsistent result after apply" crash class already fixed for
+// custom_resources, found again here via a real acceptance test run.
 //
 // StringSemanticEquals treats two memory strings as equal whenever they
 // parse (parseMemoryToBytes) to the same byte count, which the framework
@@ -86,16 +85,12 @@ var (
 	_ basetypes.StringValuableWithSemanticEquals = MemoryQuantityValue{}
 )
 
-// MemoryQuantityValueNull, MemoryQuantityValueUnknown, and
-// NewMemoryQuantityValue construct MemoryQuantityValue the same way
-// types.StringNull/StringUnknown/StringValue do for a plain string, for call
+// MemoryQuantityValueNull and NewMemoryQuantityValue construct
+// MemoryQuantityValue the same way types.StringNull/StringValue do for a
+// plain string, for call
 // sites building one directly rather than through the schema/ValueFromString.
 func MemoryQuantityValueNull() MemoryQuantityValue {
 	return MemoryQuantityValue{StringValue: basetypes.NewStringNull()}
-}
-
-func MemoryQuantityValueUnknown() MemoryQuantityValue {
-	return MemoryQuantityValue{StringValue: basetypes.NewStringUnknown()}
 }
 
 func NewMemoryQuantityValue(value string) MemoryQuantityValue {

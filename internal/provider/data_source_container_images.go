@@ -37,8 +37,7 @@ type ContainerImagesDataSourceModel struct {
 	ProjectID       types.String `tfsdk:"project_id"`
 	IncludeArchived types.Bool   `tfsdk:"include_archived"`
 
-	// DS-IMG-3 (Phase B): new filters, both genuinely distinct params the
-	// backend already accepts.
+	// Both are distinct query params the backend accepts.
 	ImageNameContains types.String `tfsdk:"image_name_contains"`
 	CloudID           types.String `tfsdk:"cloud_id"`
 
@@ -58,7 +57,7 @@ type ContainerImageSummaryModel struct {
 	Revision          types.Int64  `tfsdk:"revision"`
 	NameVersion       types.String `tfsdk:"name_version"`
 
-	// DS-IMG-2/DS-IMG-4 (Phase B): shared with the singular via
+	// Shared with the singular via
 	// containerImageSharedAttributes.
 	ImageURI       types.String `tfsdk:"image_uri"`
 	CloudID        types.String `tfsdk:"cloud_id"`
@@ -104,7 +103,7 @@ func (d *ContainerImagesDataSource) Schema(ctx context.Context, req datasource.S
 				Optional:            true,
 				MarkdownDescription: "Filter container images by partial name match.",
 			},
-			// DS-IMG-3 (Phase B): a second, distinct filter from name_contains -
+			// A second, distinct filter from name_contains -
 			// this matches the underlying base/BYOD image name, not the
 			// user-given template name.
 			"image_name_contains": schema.StringAttribute{
@@ -171,7 +170,7 @@ func (d *ContainerImagesDataSource) Read(ctx context.Context, req datasource.Rea
 		params.Set("name_contains", config.NameContains.ValueString())
 	}
 
-	// DS-IMG-3 (Phase B): distinct from name_contains above.
+	// Distinct from name_contains above.
 	if !config.ImageNameContains.IsNull() && config.ImageNameContains.ValueString() != "" {
 		params.Set("image_name_contains", config.ImageNameContains.ValueString())
 	}
@@ -238,7 +237,7 @@ func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, pa
 			Name:       types.StringValue(tmpl.Name),
 			CreatedAt:  types.StringValue(tmpl.CreatedAt),
 			IsArchived: types.BoolValue(tmpl.IsArchived()),
-			// DS-IMG-4 (Phase B): template-level fields, always available.
+			// Template-level fields, always available.
 			CloudID:        types.StringPointerValue(tmpl.CloudID),
 			IsDefault:      types.BoolValue(tmpl.IsDefault),
 			IsExperimental: types.BoolValue(tmpl.IsExperimental),
@@ -252,7 +251,7 @@ func (d *ContainerImagesDataSource) fetchContainerImages(ctx context.Context, pa
 			imageModel.LatestBuildStatus = types.StringValue(tmpl.LatestBuild.Status)
 			imageModel.Revision = types.Int64Value(int64(tmpl.LatestBuild.Revision))
 			imageModel.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", tmpl.Name, tmpl.LatestBuild.Revision))
-			// DS-IMG-2 (Phase B): free per-item image_uri, no extra call - the
+			// Per-item image_uri needs no extra call - the
 			// embedded latest_build summary already carries docker_image_name.
 			imageModel.ImageURI = types.StringPointerValue(tmpl.LatestBuild.DockerImageName)
 		} else {

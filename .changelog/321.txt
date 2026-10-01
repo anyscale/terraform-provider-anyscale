@@ -1,0 +1,29 @@
+```
+release-note:fixed
+resource/anyscale_compute_config: Removing a worker group from the middle of `worker_nodes`, or an entry from the middle of `additional_resources`, no longer gives the group or entry that moves into its position the removed one's `name` and `resources`, which were previously sent to the API as if configured. This changes plan behavior in a way the schema does not show: such a plan now shows those values as known after apply.
+```
+
+```
+release-note:fixed
+resource/anyscale_compute_config: An unrecognized `worker_nodes[].market_type` is now rejected at plan time with the accepted values. It used to warn, create the version, and then fail the apply. This is a behavior change the schema does not show; no such configuration could ever apply.
+```
+
+```
+release-note:fixed
+resource/anyscale_compute_config: Per-node `flags` and `advanced_instance_config` now compare by JSON meaning, so valid JSON in any formatting applies without an "inconsistent result" error. Invalid JSON is rejected at plan time; it used to fail the apply, and for `advanced_instance_config` it was left out of the request. This is a behavior change the schema does not show. Existing state is unaffected.
+```
+
+```
+release-note:fixed
+resource/anyscale_compute_config: `terraform destroy` on an Azure control plane, where archiving compute configs is not supported, now removes the config from state with a warning instead of failing.
+```
+
+```
+release-note:fixed
+data-source/anyscale_compute_config: `versions` now lists only versions in the config's own cloud, and a lookup by `name` prefers a non-archived config, warning when only an archived one matches. A by-name lookup without `cloud_id` can therefore resolve a different config, in a different cloud, than before.
+```
+
+```
+release-note:changed
+resource/anyscale_compute_config: The `idle_termination_minutes` description now states that removing it from configuration keeps the current value.
+```

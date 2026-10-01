@@ -50,7 +50,7 @@ type ContainerImageDataSourceModel struct {
 	Digest      types.String `tfsdk:"digest"`
 	NameVersion types.String `tfsdk:"name_version"` // Formatted as "name:revision" for use with Anyscale APIs
 
-	// DS-IMG-4 (Phase B). BuildErrorMessage is singular-only: it comes from the
+	// BuildErrorMessage is singular-only: it comes from the
 	// full per-build GET, which only this data source makes.
 	BuildErrorMessage types.String `tfsdk:"build_error_message"`
 	CloudID           types.String `tfsdk:"cloud_id"`
@@ -102,7 +102,7 @@ func (d *ContainerImageDataSource) Schema(ctx context.Context, req datasource.Sc
 		Computed:            true,
 		MarkdownDescription: "The content digest of the built container image (e.g. `sha256:...`). Null if the image has no build yet, if the build's details couldn't be retrieved, or if the latest build hasn't produced a digest yet.",
 	}
-	// DS-IMG-4 (Phase B): is_default/is_experimental/last_modified_at/cloud_id are
+	// is_default/is_experimental/last_modified_at/cloud_id are
 	// template-level fields, present on both the get-by-id and list responses -
 	// shared with the plural via containerImageSharedAttributes below except
 	// build_error_message, which only this data source's second per-build GET
@@ -169,7 +169,7 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 	config.CreatedAt = types.StringValue(template.CreatedAt)
 	config.CreatorID = stringOrNull(template.CreatorID)
 
-	// DS-IMG-4 (Phase B): template-level fields, always available regardless
+	// Template-level fields, always available regardless
 	// of whether a build exists.
 	config.CloudID = types.StringPointerValue(template.CloudID)
 	config.IsDefault = types.BoolValue(template.IsDefault)
@@ -177,8 +177,8 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 	config.LastModifiedAt = stringOrNull(template.LastModifiedAt)
 
 	// Resolve the latest build contract-based, via the template's own latest_build
-	// reference. DS-IMG-2: image_uri now reads straight off the embedded
-	// latest_build.docker_image_name - it no longer depends on the second
+	// reference. image_uri reads straight off the embedded
+	// latest_build.docker_image_name - it does not depend on the second
 	// per-build GET succeeding, unlike build_status/is_byod/revision/digest/
 	// name_version/build_error_message below, which still need that full
 	// build record.
@@ -205,7 +205,7 @@ func (d *ContainerImageDataSource) Read(ctx context.Context, req datasource.Read
 			config.IsBYOD = types.BoolValue(build.IsBYOD)
 			config.Revision = types.Int64Value(int64(build.Revision))
 			config.NameVersion = types.StringValue(fmt.Sprintf("%s:%d", template.Name, build.Revision))
-			// DS-IMG-1: resolves to byod_ray_version when the plain ray_version
+			// Resolves to byod_ray_version when the plain ray_version
 			// field is absent (the common case for BYOD images), instead of
 			// reporting null for a version the backend actually knows.
 			config.RayVersion = types.StringPointerValue(build.ResolvedRayVersion())
@@ -287,7 +287,7 @@ func (d *ContainerImageDataSource) getApplicationTemplateByName(ctx context.Cont
 	// (cluster_environments_dao.go's DEFAULT_ORDER_BY_CLAUSES), so "first match" already
 	// meant "most recently modified" before this helper existed. Keying on CreatedAt here
 	// instead would silently pick a different duplicate whenever a template is modified
-	// after creation (X-2).
+	// after creation.
 	matchedID := PickMostRecentMatch(ctx, "cluster environment", name, matches,
 		func(t ApplicationTemplateResult) bool { return true },
 		func(t ApplicationTemplateResult) string { return t.ID },

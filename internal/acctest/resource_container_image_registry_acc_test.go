@@ -73,7 +73,7 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 				// it from the same build (see
 				// TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer).
 				ImportStateVerifyIgnore: []string{
-					"registry_login_secret", // sensitive: API never returns auth secrets after create
+					"registry_login_secret", // not recovered at import: Read never refreshes it, though the build GET returns the secret's name
 				},
 			},
 		},

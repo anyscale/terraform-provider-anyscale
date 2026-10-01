@@ -427,15 +427,12 @@ func (r *ContainerImageBuildResource) Update(ctx context.Context, req resource.U
 	// never compared the old flat BuildTimeout), so a timeouts-only change never triggers
 	// a new build.
 	//
-	// Still need a fresh GET to populate the computed outputs before persisting (mirrors
-	// resource_service.go's H2/H5 handling of the same shape): every Computed attribute
+	// Still need a fresh GET to populate the computed outputs before persisting (the same
+	// approach resource_service.go takes for the same shape): every Computed attribute
 	// here has no UseStateForUnknown plan modifier, so all of them (build_status,
 	// created_at, digest, image_uri, name_version, ray_version, revision) are Unknown in
 	// this plan once anything triggers Update at all - confirmed by a real acceptance run
-	// failing with "provider produced invalid result" before this fix, not assumed. This
-	// bug pre-dates PR2 (any build_timeout-only change would have hit it too - nothing
-	// ever tested that path before), surfaced by the PR2 test that closes exactly that
-	// coverage gap.
+	// failing with "provider produced invalid result" without this GET, not assumed.
 	if !containerfileChanged {
 		build, err := getBuild(ctx, r.client, state.BuildID.ValueString())
 		if err != nil {

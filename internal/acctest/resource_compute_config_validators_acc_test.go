@@ -121,7 +121,7 @@ resource "anyscale_compute_config" "test" {
 	}
 }
 
-func TestAccComputeConfigResource_UnknownMarketTypeWarns(t *testing.T) {
+func TestAccComputeConfigResource_UnknownMarketTypeRejected(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	binDir := buildProviderBinaryForCLICheck(t)
 
@@ -144,28 +144,18 @@ resource "anyscale_compute_config" "test" {
 `
 	result := runTerraformValidate(t, binDir, resourceHCL)
 
-	for _, d := range result.Diagnostics {
-		if d.Severity == "error" {
-			t.Errorf("an unrecognized market_type must warn, not error (non-breaking per the ruling) - got error: %s: %s", d.Summary, d.Detail)
-		}
-	}
-
-	// Same dev_overrides-boilerplate-warning trap as the instance_type + required_resources test above:
-	// require the warning to actually name market_type or the bogus value,
-	// not just any warning at all.
+	// An unrecognized market_type is an error at validate time: there is no
+	// wire field for it, so it could only ever fail the apply after creating
+	// the version.
 	found := false
 	for _, d := range result.Diagnostics {
-		if d.Severity != "warning" {
-			continue
-		}
-		if strings.Contains(d.Summary, "market_type") || strings.Contains(d.Detail, "market_type") ||
-			strings.Contains(d.Detail, "NOT_A_REAL_MARKET_TYPE") {
+		if d.Severity == "error" && strings.Contains(d.Detail, "market_type") && strings.Contains(d.Detail, "NOT_A_REAL_MARKET_TYPE") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected a warning diagnostic mentioning market_type or the unrecognized value, got: %+v", result.Diagnostics)
+		t.Errorf("expected an error diagnostic naming market_type and the unrecognized value, got: %+v", result.Diagnostics)
 	}
 }
 

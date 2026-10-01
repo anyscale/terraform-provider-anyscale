@@ -113,7 +113,7 @@ output "compute_config_id" {
 - `cloud_resource` (String) The cloud resource to use for this workload. Defaults to the primary cloud resource of the Cloud. Use this to target a specific deployment within a cloud that has multiple resources.
 - `enable_cross_zone_scaling` (Boolean) Allow instances in the cluster to be run across multiple zones. Defaults to `false`. Recommended for production services.
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
-- `idle_termination_minutes` (Number) Number of minutes after which idle clusters using this compute config will be terminated. `0` disables idle termination. Defaults to the backend's own default (120) when unset.
+- `idle_termination_minutes` (Number) Number of minutes after which idle clusters using this compute config will be terminated. `0` disables idle termination. If never set, the backend default (120) applies. Removing it from configuration later keeps the current value; set `120` explicitly to restore the default.
 - `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`).
 - `maximum_uptime_minutes` (Number) Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum.
 - `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`).
