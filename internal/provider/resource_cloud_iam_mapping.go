@@ -34,7 +34,7 @@ const defaultCloudIAMMappingTimeout = 2 * time.Minute
 // WHY A SEPARATE RESOURCE AND NOT A BLOCK ON anyscale_cloud_resource.
 // anyscale_cloud_resource's config blocks (aws_config, gcp_config,
 // kubernetes_config, ...) are deliberately not Read-refreshed, to avoid the
-// C12 "provider produced inconsistent result after apply" regression. IAM
+// "provider produced inconsistent result after apply" regression. IAM
 // mapping is exactly the kind of setting that gets changed out-of-band
 // (console, CLI), so a surface that cannot show it drifted would be worse
 // than no surface. This resource's Read is a real GET every time - that is
@@ -307,6 +307,9 @@ func (r *CloudIAMMappingResource) Create(ctx context.Context, req resource.Creat
 			return
 		}
 		cloudResourceID = resolved
+	} else if err := checkCloudResourceBelongsToCloud(ctx, r.client, cloudID, cloudResourceID); err != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("cloud_resource_id"), "Invalid cloud_resource_id", err.Error())
+		return
 	}
 
 	mode, diags := r.writeCloudIAMMapping(ctx, cloudID, cloudResourceID, plan.Rules, plan.FallbackRule)
@@ -339,7 +342,7 @@ func (r *CloudIAMMappingResource) Read(ctx context.Context, req resource.ReadReq
 
 	current, err := getCloudDeploymentConfig(ctx, r.client, cloudID, cloudResourceID)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if cloudResourceConfirmedGone(ctx, r.client, cloudID, cloudResourceID, err) {
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -415,7 +418,7 @@ func (r *CloudIAMMappingResource) Delete(ctx context.Context, req resource.Delet
 
 	current, err := getCloudDeploymentConfig(ctx, r.client, cloudID, cloudResourceID)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if cloudResourceConfirmedGone(ctx, r.client, cloudID, cloudResourceID, err) {
 			// Already gone - nothing to revert.
 			return
 		}
@@ -486,6 +489,9 @@ func (r *CloudIAMMappingResource) ImportState(ctx context.Context, req resource.
 			return
 		}
 		cloudResourceID = resolved
+	} else if err := checkCloudResourceBelongsToCloud(ctx, r.client, cloudID, cloudResourceID); err != nil {
+		resp.Diagnostics.AddError("Invalid cloud_resource_id", err.Error())
+		return
 	}
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue(cloudID+"/"+cloudResourceID))...)

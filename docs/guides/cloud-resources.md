@@ -75,8 +75,11 @@ destroy-then-recreate triggered by changing any `RequiresReplace` attribute — 
 on the re-attach step. Initial creation is unaffected, and GCP is unaffected either way; this is a
 backend issue under investigation, not something this provider can currently retry around.
 
-A K8S cloud with no explicit `region` and nothing to infer one from produces a clear error at plan time
-rather than sending an empty region to the API — set `region` explicitly on the resource.
+An all-in-one `anyscale_cloud` (one with `aws_config`, `gcp_config`, `azure_config`, or
+`kubernetes_config`) is checked for what it needs before any cloud is created: `compute_stack`, a `region`
+(inferred only from `aws_config.subnet_ids_to_az`, so set it explicitly otherwise), and the blocks its
+provider and compute stack require. A gap fails at plan time when the values are known, otherwise at the
+start of apply, and in neither case leaves a cloud behind.
 
 ## Renaming a cloud
 
@@ -247,8 +250,10 @@ attached.
 
 ## Deleting a cloud
 
-Deleting an `anyscale_cloud` resource first detaches any machine pools attached to it, then deletes the
-cloud itself. This happens automatically — there's no separate step to take beforehand.
+Deleting an `anyscale_cloud` resource first attempts to detach any machine pools attached to it, then
+deletes the cloud itself. If a detach fails, the delete still goes ahead and the apply reports a warning
+naming the pool; if the delete then fails because a pool is still attached, detach it with the Anyscale CLI or
+console and apply again.
 
 ## Importing an existing cloud
 
@@ -274,6 +279,9 @@ addition to the block(s) the compute stack requires:
   and unlike `object_storage`/`file_storage` these remain out of scope for import recovery. Add these
   to your `.tf` after importing if you use them; expect a replace on the next `apply`; there's no
   supported way around that for these specific blocks.
+
+Import needs the cloud's resource listing to recover those blocks, so `terraform import
+anyscale_cloud` fails if that request fails rather than importing without them; retry the import.
 
 This is not purely new coverage: recovering `object_storage` through one shared code path for both
 compute stacks also fixes a pre-existing bug in **K8S** import specifically. The backend fills in a
@@ -314,7 +322,9 @@ A few more things worth knowing:
   plain list form. A plan modifier now treats the two forms as equivalent whenever they describe
   the same set of subnets, regardless of order, so importing a cloud that used either form plans
   cleanly. A genuine subnet change — adding, removing, or swapping a subnet — still correctly
-  proposes a replace, exactly as before.
+  proposes a replace, exactly as before. A config that uses the list form against an imported cloud
+  (import records the map form) shows a one-time in-place update that records the list form; it does
+  not replace anything.
 - **`aws_config.memorydb_cluster_arn`/`memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint`
   are Computed and now round-trip cleanly whether or not your configuration sets them.** All three
   are backend-derived from `memorydb_cluster_name` (AWS) or `memorystore_instance_name` (GCP)

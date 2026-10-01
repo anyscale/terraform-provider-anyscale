@@ -16,7 +16,7 @@ import (
 
 // azureCloudNotSupportedMessage and genericCloudNotSupportedMessage are the
 // single source of truth for the AZURE/GENERIC rejection, shared between each
-// resource's ValidateConfig (plan-time guard, added for K9 - catches the
+// resource's ValidateConfig (plan-time guard - catches the
 // common case where the value is already known in the config) and
 // buildProviderConfig's runtime check below (kept as the last line of
 // defense for a value that's still unknown at plan time, e.g. interpolated
@@ -26,12 +26,11 @@ import (
 //
 // The Anyscale Platform API genuinely supports AZURE (Kubernetes compute
 // stack only) and GENERIC clouds - this is a provider-side gap, not a
-// platform limitation. See K8S-CLOUD-CONTRACT.md K8/K9 for the disposition
-// trail; the message deliberately does not promise a timeline.
+// platform limitation. The message deliberately does not promise a timeline.
 const genericCloudNotSupportedMessage = "generic clouds are not yet supported by this provider"
 
 // validateAzureK8SOnly is the plan-time guard shared by CloudResource and
-// CloudResourceResource's ValidateConfig for the AZURE provider (K9/AKS):
+// CloudResourceResource's ValidateConfig for the AZURE provider (AKS):
 // Anyscale does not support Azure VM clouds (confirmed against the backend's
 // own validator, which rejects AZURE/GENERIC for any compute_stack other than
 // K8S), and an Azure cloud's object storage bucket must be a full abfss://
@@ -77,7 +76,7 @@ func validateAzureK8SOnly(ctx context.Context, computeStack string, objectStorag
 
 // validateMountPathSupported rejects file_storage.mount_path on AWS, where
 // the backend genuinely has no field to store it, confirmed by live-infra
-// readback (see MOUNT-PATH-BUG-TRACE.md): AWSNFSResources has only
+// readback: AWSNFSResources has only
 // efs_id/mount_target_ip, no path field - a live apply-then-readback showed
 // the value silently discarded. GCP Filestore (root_dir) and Azure/Generic
 // (their own NfsMountPath) both have a real field and are left alone here.
@@ -323,7 +322,7 @@ func findDefaultInCloudResources(results []CloudDeploymentResult) *CloudDeployme
 // same AWS/GCP x VM/K8S required-vs-optional rules that anyscale_cloud and
 // anyscale_cloud_resource both need. Consolidates what was previously near-identical
 // branching duplicated in resource_cloud.go's addCloudResource and
-// resource_cloud_resource.go's addProviderConfig (workbench #6) - resource-agnostic, so
+// resource_cloud_resource.go's addProviderConfig - resource-agnostic, so
 // both resources' Create paths call this directly rather than keeping their own copies.
 //
 // provider is normalized via strings.ToUpper so a lowercase/mixed-case value (e.g. "aws")
@@ -761,119 +760,76 @@ func stringSetsEqual(a, b []string) bool {
 	return true
 }
 
-// awsSubnetIDsSemanticEqualPlanModifier is the fix for the aws_config
-// list/map import round-trip bug: subnet_ids and subnet_ids_to_az are two
-// alternate representations of the same underlying subnets, but the API
-// only ever returns the parallel-array shape, so flattenAWSConfig recovers
-// ONLY subnet_ids_to_az at import (see its own doc comment) - subnet_ids
-// always comes back null. A configuration originally written with plain
-// subnet_ids therefore diffs on import: config sets subnet_ids (state is
-// null), state has subnet_ids_to_az populated (config is null there) - two
-// independent RequiresReplace triggers, on two different attributes, both
-// pointing at the same substance-free difference.
+// awsSubnetIDsRequiresReplaceUnlessEquivalent and
+// awsSubnetIDsToAZRequiresReplaceUnlessEquivalent replace RequiresReplace on
+// aws_config.subnet_ids and subnet_ids_to_az.
 //
-// This modifier handles the subnet_ids side: when the plan (config) sets
-// subnet_ids explicitly but state has no subnet_ids of its own (the case
-// above), it compares the plan's ID set against the sibling
-// subnet_ids_to_az's recovered STATE key set - subnet_ids_to_az's own state
-// is the only place a real recovered value can be found, since subnet_ids
-// itself is never recovered. On an exact set match, it pins subnet_ids'
-// plan value back to its (null) state value, so the subsequent
-// RequiresReplace in the same attribute's PlanModifiers slice sees no
-// change. Must be ordered BEFORE listplanmodifier.RequiresReplace().
-//
-// No-ops when state already has a real value (ordinary plan-vs-state
-// handles that) or when the sets genuinely differ (a real topology change
-// still replaces).
-type awsSubnetIDsSemanticEqualPlanModifier struct{}
+// The API returns subnets only as parallel arrays, so import recovers
+// subnet_ids_to_az and leaves subnet_ids null. A config written with the list
+// form therefore differs from the imported state on both attributes, though
+// both describe the same subnets. These modifiers suppress the replacement when
+// the two forms name the same subnet IDs, and never touch the plan value: Core
+// rejects a plan that differs from a known, non-null config value on a
+// non-Computed attribute, which is what rewriting the plan to the recovered
+// state produced ("Provider produced invalid plan"). The result is a one-time
+// in-place update that records the configured form; a real change of subnets
+// still replaces. Create and destroy never replace, as with RequiresReplace.
+type awsSubnetIDsRequiresReplaceUnlessEquivalent struct{}
 
-func (m awsSubnetIDsSemanticEqualPlanModifier) Description(ctx context.Context) string {
-	return "Treats subnet_ids as unchanged when its values match aws_config.subnet_ids_to_az's recovered keys as a set, so a configuration using the list form does not force replacement against the map form recovered at import."
+func (awsSubnetIDsRequiresReplaceUnlessEquivalent) Description(context.Context) string {
+	return "Requires replacement when subnet_ids changes, unless it names the same subnets as the subnet_ids_to_az recorded at import."
 }
 
-func (m awsSubnetIDsSemanticEqualPlanModifier) MarkdownDescription(ctx context.Context) string {
+func (m awsSubnetIDsRequiresReplaceUnlessEquivalent) MarkdownDescription(ctx context.Context) string {
 	return m.Description(ctx)
 }
 
-func (m awsSubnetIDsSemanticEqualPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
-	if req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
+func (awsSubnetIDsRequiresReplaceUnlessEquivalent) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() || req.PlanValue.Equal(req.StateValue) {
 		return
 	}
-	if !req.StateValue.IsNull() {
-		// subnet_ids already carries a real state value (or this is Create,
-		// where StateValue is unknown/absent) - ordinary plan-vs-state
-		// comparison already does the right thing, nothing to reconcile via
-		// the sibling attribute.
-		return
+	if req.StateValue.IsNull() && !req.PlanValue.IsNull() && !req.PlanValue.IsUnknown() {
+		var planIDs []string
+		var stateSubnetToAZ map[string]string
+		if !req.PlanValue.ElementsAs(ctx, &planIDs, false).HasError() && len(planIDs) > 0 &&
+			!req.State.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids_to_az"), &stateSubnetToAZ).HasError() &&
+			stringSetsEqual(planIDs, mapKeys(stateSubnetToAZ)) {
+			return
+		}
 	}
-
-	var planIDs []string
-	if d := req.PlanValue.ElementsAs(ctx, &planIDs, false); d.HasError() || len(planIDs) == 0 {
-		return
-	}
-
-	var stateSubnetToAZ map[string]string
-	if d := req.State.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids_to_az"), &stateSubnetToAZ); d.HasError() || len(stateSubnetToAZ) == 0 {
-		return
-	}
-
-	stateIDs := make([]string, 0, len(stateSubnetToAZ))
-	for id := range stateSubnetToAZ {
-		stateIDs = append(stateIDs, id)
-	}
-
-	if stringSetsEqual(planIDs, stateIDs) {
-		resp.PlanValue = req.StateValue
-	}
+	resp.RequiresReplace = true
 }
 
-// awsSubnetIDsToAZSemanticEqualPlanModifier is
-// awsSubnetIDsSemanticEqualPlanModifier's sibling for subnet_ids_to_az -
-// same bug, same fix shape, opposite direction: reads subnet_ids' CONFIG
-// instead of STATE, since subnet_ids' own state is never populated. Must be
-// ordered BEFORE mapplanmodifier.RequiresReplace().
-//
-// Neither modifier depends on the other's output - each reads a value
-// that's already known going in (this one config, the sibling state), never
-// the other's in-flight plan - so there is no ordering dependency between
-// the two attributes' modifier chains.
-type awsSubnetIDsToAZSemanticEqualPlanModifier struct{}
+type awsSubnetIDsToAZRequiresReplaceUnlessEquivalent struct{}
 
-func (m awsSubnetIDsToAZSemanticEqualPlanModifier) Description(ctx context.Context) string {
-	return "Treats subnet_ids_to_az as unchanged when its keys match aws_config.subnet_ids's configured values as a set, so a configuration using the list form does not force replacement on the map form recovered at import."
+func (awsSubnetIDsToAZRequiresReplaceUnlessEquivalent) Description(context.Context) string {
+	return "Requires replacement when subnet_ids_to_az changes, unless the config omits it and names the same subnets through subnet_ids."
 }
 
-func (m awsSubnetIDsToAZSemanticEqualPlanModifier) MarkdownDescription(ctx context.Context) string {
+func (m awsSubnetIDsToAZRequiresReplaceUnlessEquivalent) MarkdownDescription(ctx context.Context) string {
 	return m.Description(ctx)
 }
 
-func (m awsSubnetIDsToAZSemanticEqualPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
-	if req.StateValue.IsNull() || req.StateValue.IsUnknown() {
+func (awsSubnetIDsToAZRequiresReplaceUnlessEquivalent) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() || req.PlanValue.Equal(req.StateValue) {
 		return
 	}
-	if !req.PlanValue.IsNull() {
-		// Explicit config value for subnet_ids_to_az itself - compare
-		// directly against state as normal, nothing to reconcile via the
-		// sibling attribute.
-		return
+	if req.PlanValue.IsNull() && !req.StateValue.IsNull() && !req.StateValue.IsUnknown() {
+		var stateSubnetToAZ map[string]string
+		var configSubnetIDs []string
+		if !req.StateValue.ElementsAs(ctx, &stateSubnetToAZ, false).HasError() && len(stateSubnetToAZ) > 0 &&
+			!req.Config.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids"), &configSubnetIDs).HasError() &&
+			len(configSubnetIDs) > 0 && stringSetsEqual(configSubnetIDs, mapKeys(stateSubnetToAZ)) {
+			return
+		}
 	}
+	resp.RequiresReplace = true
+}
 
-	var stateSubnetToAZ map[string]string
-	if d := req.StateValue.ElementsAs(ctx, &stateSubnetToAZ, false); d.HasError() || len(stateSubnetToAZ) == 0 {
-		return
+func mapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
 	}
-
-	var configSubnetIDs []string
-	if d := req.Config.GetAttribute(ctx, path.Root("aws_config").AtName("subnet_ids"), &configSubnetIDs); d.HasError() || len(configSubnetIDs) == 0 {
-		return
-	}
-
-	stateIDs := make([]string, 0, len(stateSubnetToAZ))
-	for id := range stateSubnetToAZ {
-		stateIDs = append(stateIDs, id)
-	}
-
-	if stringSetsEqual(configSubnetIDs, stateIDs) {
-		resp.PlanValue = req.StateValue
-	}
+	return keys
 }

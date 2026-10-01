@@ -544,9 +544,13 @@ func assertFileStorageUpdatableInPlace(t *testing.T, s schema.Schema) {
 		if mountPath.Default != nil {
 			t.Error("file_storage.mount_path must not have a Default - D1 stopped fabricating a value for it")
 		}
-		if indexOfPlanModifierDescription(mountPath.PlanModifiers, descUseStateForUnknown) == -1 {
-			t.Error("file_storage.mount_path must include stringplanmodifier.UseStateForUnknown() (D1) - " +
-				"defensive parity with mount_targets' Optional+Computed handling")
+		if indexOfPlanModifierDescription(mountPath.PlanModifiers, fileStorageDerivedModifierDescription) == -1 {
+			t.Error("file_storage.mount_path must include fileStorageDerivedStringModifier - it carries state " +
+				"forward only while file_storage_id is unchanged, which stock UseStateForUnknown does not")
+		}
+		if indexOfPlanModifierDescription(mountPath.PlanModifiers, descUseStateForUnknown) != -1 {
+			t.Error("file_storage.mount_path must NOT use stock stringplanmodifier.UseStateForUnknown(): it carries " +
+				"the old file system's value onto a changed file_storage_id")
 		}
 	})
 
@@ -564,8 +568,13 @@ func assertFileStorageUpdatableInPlace(t *testing.T, s schema.Schema) {
 		if !mountTargets.Optional {
 			t.Error("file_storage.mount_targets must remain Optional - a config may still set it explicitly")
 		}
-		if indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descUseStateForUnknown) == -1 {
-			t.Error("file_storage.mount_targets must include listplanmodifier.UseStateForUnknown()")
+		if indexOfListPlanModifierDescription(mountTargets.PlanModifiers, fileStorageDerivedModifierDescription) == -1 {
+			t.Error("file_storage.mount_targets must include fileStorageDerivedListModifier - it carries state " +
+				"forward only while file_storage_id is unchanged, which stock UseStateForUnknown does not")
+		}
+		if indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descUseStateForUnknown) != -1 {
+			t.Error("file_storage.mount_targets must NOT use stock listplanmodifier.UseStateForUnknown(): it carries " +
+				"the old file system's address onto a changed file_storage_id")
 		}
 		if indexOfListPlanModifierDescription(mountTargets.PlanModifiers, descRequiresReplace) != -1 {
 			t.Error("file_storage.mount_targets must NOT include listplanmodifier.RequiresReplace() - see " +
