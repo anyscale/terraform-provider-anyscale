@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -256,6 +257,7 @@ func (r *UserGroupMembersResource) applyMembers(ctx context.Context, plan *UserG
 	}
 
 	desired := map[string]struct{}{}
+	resolvedEmailByID := map[string]string{}
 	if len(emails) > 0 {
 		resolved, err := resolveOrgUserIDsByEmail(ctx, r.client, emails)
 		if err != nil {
@@ -263,8 +265,9 @@ func (r *UserGroupMembersResource) applyMembers(ctx context.Context, plan *UserG
 				fmt.Sprintf("Some members of user group %s could not be resolved: %s.", groupID, err))
 			return
 		}
-		for _, userID := range resolved {
+		for email, userID := range resolved {
 			desired[userID] = struct{}{}
+			resolvedEmailByID[userID] = email
 		}
 	}
 
@@ -299,6 +302,17 @@ func (r *UserGroupMembersResource) applyMembers(ctx context.Context, plan *UserG
 	})
 
 	if err := addUserGroupMembers(ctx, r.client, groupID, toAdd); err != nil {
+		// The organization member listing used to resolve emails includes
+		// Anyscale support users, but the member routes do not treat them as
+		// organization members and reject them with 404 "User IDs not found".
+		// Name the emails rather than the user IDs the backend reports.
+		if errors.Is(err, ErrNotFound) && !isUserGroupNotFound(err) {
+			AddConfigError(diags, "Cannot Add User Group Members",
+				fmt.Sprintf("The Anyscale API rejected some members of user group %s as not belonging to the organization: %s. "+
+					"This happens for Anyscale support users and for users removed from the organization since this apply started. Remove them from members.",
+					groupID, emailsForUserIDsInError(extractAPIErrorDetail(err), resolvedEmailByID)))
+			return
+		}
 		AddAPIError(diags, "add user group members", err)
 		return
 	}
@@ -306,6 +320,23 @@ func (r *UserGroupMembersResource) applyMembers(ctx context.Context, plan *UserG
 		AddAPIError(diags, "remove user group members", err)
 		return
 	}
+}
+
+// emailsForUserIDsInError lists the emails of the resolved user IDs named in
+// the backend's "User IDs not found: id1, id2" detail. If none can be mapped,
+// the detail itself is returned so the cause is never hidden.
+func emailsForUserIDsInError(detail string, emailByID map[string]string) string {
+	var named []string
+	for id, email := range emailByID {
+		if strings.Contains(detail, id) {
+			named = append(named, email)
+		}
+	}
+	if len(named) == 0 {
+		return detail
+	}
+	sort.Strings(named)
+	return strings.Join(named, ", ")
 }
 
 // memberEmailsPreferringSpelling returns the API members' emails, using the
