@@ -341,8 +341,8 @@ func emailsForUserIDsInError(detail string, emailByID map[string]string) string 
 
 // memberEmailsPreferringSpelling returns the API members' emails, using the
 // spelling from prior wherever it names the same address case-insensitively.
-// The backend stores emails lowercased; keeping the configured spelling stops
-// a mixed-case config from planning a change on every refresh.
+// The backend lowercases emails when it creates users; keeping the configured
+// spelling stops a mixed-case config from planning a change on every refresh.
 func memberEmailsPreferringSpelling(prior []string, members []userGroupMemberAPI) []string {
 	spelling := make(map[string]string, len(prior))
 	for _, p := range prior {
