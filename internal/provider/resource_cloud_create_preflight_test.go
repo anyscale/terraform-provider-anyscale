@@ -221,7 +221,7 @@ func TestValidateEmbeddedCreateConfig(t *testing.T) {
 		p := preflightPlan(t, "x", "AWS", "K8S", "")
 		p.Region = types.StringNull() // omitted in config
 		p.KubernetesConfig = preflightK8SConfig(t)
-		diags := validateEmbeddedCreateConfig(ctx, &p)
+		diags := validateEmbeddedCreateConfig(ctx, &p, noCloudNamed)
 		if !diagsContainSummary(diags, "Region Could Not Be Determined") {
 			t.Fatalf("want a region error, got: %v", diags)
 		}
@@ -230,7 +230,7 @@ func TestValidateEmbeddedCreateConfig(t *testing.T) {
 	t.Run("control: unknown compute_stack is skipped", func(t *testing.T) {
 		p := preflightPlan(t, "x", "AWS", "", "us-east-1")
 		p.AWSConfig = preflightAWSConfig(t) // compute_stack stays unknown
-		if diags := validateEmbeddedCreateConfig(ctx, &p); len(diags) != 0 {
+		if diags := validateEmbeddedCreateConfig(ctx, &p, noCloudNamed); len(diags) != 0 {
 			t.Fatalf("an unknown compute_stack must not error at plan time, got: %v", diags)
 		}
 	})
@@ -239,7 +239,7 @@ func TestValidateEmbeddedCreateConfig(t *testing.T) {
 		p := preflightPlan(t, "x", "AWS", "K8S", "")
 		p.Region = types.StringUnknown()
 		p.KubernetesConfig = preflightK8SConfig(t)
-		if diags := validateEmbeddedCreateConfig(ctx, &p); len(diags) != 0 {
+		if diags := validateEmbeddedCreateConfig(ctx, &p, noCloudNamed); len(diags) != 0 {
 			t.Fatalf("an unknown region must not error at plan time, got: %v", diags)
 		}
 	})
@@ -255,7 +255,7 @@ func TestValidateEmbeddedCreateConfig(t *testing.T) {
 				"subnet-1": types.StringValue("us-east-2a"),
 			}),
 		})
-		if diags := validateEmbeddedCreateConfig(ctx, &p); len(diags) != 0 {
+		if diags := validateEmbeddedCreateConfig(ctx, &p, noCloudNamed); len(diags) != 0 {
 			t.Fatalf("an inferable region must not error, got: %v", diags)
 		}
 	})
@@ -263,7 +263,7 @@ func TestValidateEmbeddedCreateConfig(t *testing.T) {
 	t.Run("control: empty cloud is exempt", func(t *testing.T) {
 		p := preflightPlan(t, "x", "AWS", "", "")
 		p.ComputeStack, p.Region = types.StringNull(), types.StringNull()
-		if diags := validateEmbeddedCreateConfig(ctx, &p); len(diags) != 0 {
+		if diags := validateEmbeddedCreateConfig(ctx, &p, noCloudNamed); len(diags) != 0 {
 			t.Fatalf("an empty cloud has no embedded requirements, got: %v", diags)
 		}
 	})
@@ -406,3 +406,7 @@ func TestCloudResourceDelete_FailedMachinePoolDetachWarns(t *testing.T) {
 		}
 	})
 }
+
+// noCloudNamed is a lookup that finds no existing cloud, so the plan-time
+// checks are not exempted by an adopt.
+func noCloudNamed(context.Context, string) (string, error) { return "", nil }

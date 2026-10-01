@@ -1138,7 +1138,11 @@ func (r *CloudResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 		var config CloudResourceModel
 		resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 		if !resp.Diagnostics.HasError() {
-			resp.Diagnostics.Append(validateEmbeddedCreateConfig(ctx, &config)...)
+			var lookup cloudNameLookup
+			if r.client != nil {
+				lookup = r.findCloudByName
+			}
+			resp.Diagnostics.Append(validateEmbeddedCreateConfig(ctx, &config, lookup)...)
 		}
 		return
 	}

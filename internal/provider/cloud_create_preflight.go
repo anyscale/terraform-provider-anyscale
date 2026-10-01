@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -101,11 +103,24 @@ func objectFullyKnown(ctx context.Context, obj attr.Value) bool {
 	return v.IsFullyKnown()
 }
 
+// cloudNameLookup resolves a cloud name to the ID of the existing cloud that
+// Create would adopt: ("", nil) when none exists, a *multipleCloudsWithNameError
+// when several do.
+type cloudNameLookup func(ctx context.Context, name string) (string, error)
+
 // validateEmbeddedCreateConfig is the plan-time form of
 // embeddedCreateRequirementError, run on a create plan against the raw config.
 // A check whose inputs are not yet known is skipped, never failed: it still
 // runs inside Create once the values resolve.
-func validateEmbeddedCreateConfig(ctx context.Context, data *CloudResourceModel) diag.Diagnostics {
+//
+// Create adopts an existing cloud of the same name before it runs these checks,
+// so a plan that would otherwise fail is exempt when that cloud exists. The
+// lookup runs only when a check would fail, so a valid config costs no API
+// call. A lookup that fails or finds several clouds fails the plan with the
+// error Create would raise, rather than guessing that the cloud is absent.
+// lookup is nil when the provider client is not configured yet (its own
+// settings are unknown at plan time); the failing check is then skipped.
+func validateEmbeddedCreateConfig(ctx context.Context, data *CloudResourceModel, lookup cloudNameLookup) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	if !hasEmbeddedCloudConfig(data) {
@@ -127,7 +142,24 @@ func validateEmbeddedCreateConfig(ctx context.Context, data *CloudResourceModel)
 		region = inferRegionFromAWSConfig(ctx, data.AWSConfig)
 	}
 
-	if summary, detail, bad := embeddedCreateRequirementError(ctx, data, provider, data.ComputeStack.ValueString(), region); bad {
+	summary, detail, bad := embeddedCreateRequirementError(ctx, data, provider, data.ComputeStack.ValueString(), region)
+	if !bad {
+		return diags
+	}
+	if data.Name.IsUnknown() || lookup == nil {
+		return diags
+	}
+
+	existingID, err := lookup(ctx, data.Name.ValueString())
+	var ambiguous *multipleCloudsWithNameError
+	switch {
+	case errors.As(err, &ambiguous):
+		diags.AddError("Multiple Clouds Found", ambiguous.Error())
+	case err != nil:
+		diags.AddError("Cloud Lookup Failed",
+			fmt.Sprintf("Cannot tell whether a cloud named %q already exists (Create adopts one instead of creating, "+
+				"which skips this check): %s", data.Name.ValueString(), err.Error()))
+	case existingID == "":
 		diags.AddError(summary, detail)
 	}
 	return diags

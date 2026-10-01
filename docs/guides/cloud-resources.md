@@ -79,7 +79,9 @@ An all-in-one `anyscale_cloud` (one with `aws_config`, `gcp_config`, `azure_conf
 `kubernetes_config`) is checked for what it needs before any cloud is created: `compute_stack`, a `region`
 (inferred only from `aws_config.subnet_ids_to_az`, so set it explicitly otherwise), and the blocks its
 provider and compute stack require. A gap fails at plan time when the values are known, otherwise at the
-start of apply, and in neither case leaves a cloud behind.
+start of apply, and in neither case leaves a cloud behind. The checks do not apply when a cloud with the same
+`name` already exists, since apply adopts it instead of creating one; a plan that would otherwise fail looks the
+name up to find out, and fails with the lookup error if that listing fails or finds several clouds of that name.
 
 ## Renaming a cloud
 
