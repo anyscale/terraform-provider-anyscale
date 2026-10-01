@@ -1,4 +1,0 @@
-```
-release-note:breaking-change
-resource/anyscale_project: Removed `initial_cluster_config_id`, which never worked (the API rejected every create that set it, so no working configuration uses it); delete it from any configuration that still declares it, and existing state upgrades automatically.
-```

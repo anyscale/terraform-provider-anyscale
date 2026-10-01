@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-10-01
+
+### Breaking Changes
+
+- resource/anyscale_project: Removed `initial_cluster_config_id`, which never worked (the API rejected every create that set it, so no working configuration uses it); delete it from any configuration that still declares it, and existing state upgrades automatically.
+- resource/anyscale_compute_config: `maximum_uptime_minutes` and node `resources` (in `head_node`, `worker_nodes`, and `additional_resources`) are now Optional instead of Optional+Computed, so removing either from configuration now clears it on the next apply instead of silently keeping the old value; to keep a value, leave it set in configuration, and expect a planned update on any config that already removed one but still carries the old value in state.
+
+### Changed
+
+- provider: A `token` or `api_url` that is unknown at plan time is now an error that names the `ANYSCALE_CLI_TOKEN` / `ANYSCALE_API_URL` workaround, instead of silently falling back to the environment or the default host; `token = ""` is now treated as unset and falls back to `ANYSCALE_CLI_TOKEN` and `~/.anyscale/credentials.json` instead of failing; and a trailing slash on `api_url` is ignored.
+- provider: Missing credentials now produce one error that lists every source checked (the `token` argument, `ANYSCALE_CLI_TOKEN`, and the credentials file path), and an unusable credentials file is reported separately; failed API calls now show `Failed to <operation> (HTTP <status>): <backend message>` in place of the raw response body.
+- resource/anyscale_organization_default_cloud: When the organization has no explicit default cloud, importing the cloud the console shows as default now explains that the console shows a per-user fallback, and says to apply the resource instead. When the organization has a default, the error names it.
+- resource/anyscale_compute_config: The `idle_termination_minutes` description now states that removing it from configuration keeps the current value.
+- resource/anyscale_cloud: Behavior change: a missing `compute_stack`, an undeterminable `region`, or a missing provider block now fails at plan time when the values are known (a new plan-time failure for configurations that already failed at apply), and otherwise before the cloud is created, instead of after a real cloud already exists; a config whose `name` matches an existing cloud is exempt because apply adopts that cloud. Behavior change: `terraform import` now fails if the cloud's resource listing cannot be read instead of importing without its configuration blocks, except for Anyscale-hosted clouds, whose listing the backend rejects with HTTP 400 and which still import (every other listing error fails). Behavior change: a failed machine pool detach on destroy is reported as a warning naming the pool, or saying the machine pools could not be listed when the listing failed.
+- resource/anyscale_cloud_iam_mapping: Behavior change: an explicit `cloud_resource_id` that does not belong to `cloud_id` is now rejected on create and import instead of writing another cloud's IAM mapping, and a mapping whose deployment was deleted out of band is now removed from state on refresh and on destroy instead of failing every plan.
+- resource/anyscale_organization_user_role: `base_role` must now be `owner` or `collaborator`, and `deny_roles` may only contain `image_reader` and `image_reader_no_base_images`, with no duplicates; other values used to fail or silently demote the member at apply and are now rejected at plan time.
+- resource/anyscale_organization_user_role: With `deny_roles` omitted, `base_role` is now written through the organization roles API, with the member's current deny roles sent back unchanged, so the console and permission checks see the new role; organizations without the roles API still use the previous endpoint.
+- resource/anyscale_cloud_access: A project role other than `owner`, `write` or `readonly`, a deny role other than `cloud_read_only`, and `cloud_read_only` on a cloud `owner` are now rejected at plan time instead of surfacing as an ungranted member after apply.
+- resource/anyscale_organization_user_role: A failed per-member roles lookup is now an error, and likewise for the `anyscale_organization_user` and `anyscale_organization_users` data sources, instead of silently returning a null `additional_roles`.
+- resource/anyscale_organization_user: Create, read and import now fail when the per-member roles lookup fails, even though this resource does not manage roles; previously the failure was ignored.
+- resource/anyscale_organization_user_role: Changing only the letter case of `email` now updates in place instead of replacing the resource, and `terraform import` with a mixed-case email keeps that spelling so the next plan is empty.
+- resource/anyscale_cloud: Documentation corrected: `credentials` is optional, the `cloud_provider` and `region` inference rules and the `subnet_ids`/`subnet_ids_to_az` precedence are stated accurately, and the import behavior for `credentials` is documented.
+- data-source/anyscale_compute_config: Documentation now describes the archived-config fallback.
+- resource/anyscale_container_image_build: Documentation now states that editing the file behind an unchanged `containerfile_path` does not rebuild, and documents the import behavior for `project_id`.
+- resource/anyscale_container_image_registry: Documentation now describes the import behavior for `registry_login_secret`.
+- resource/anyscale_service: Documentation for `project_id` and `timeouts.update` now describes current behavior.
+- resource/anyscale_system_cluster: Documentation now states that only creation starts the cluster and that `is_enabled` is refreshed.
+- resource/anyscale_cloud_access: Documentation shortened and corrected.
+- resource/anyscale_organization_user: Documentation shortened and corrected.
+- resource/anyscale_organization_user_role: Documentation shortened and corrected.
+- data-source/anyscale_organization_user: Documentation shortened and corrected.
+- data-source/anyscale_organization_users: Documentation shortened and corrected.
+- provider: The Kitchen Sink guide and README feature lists are corrected.
+
+### Fixed
+
+- resource/anyscale_container_image_registry: Declaring `registry_login_secret` on an imported container image no longer replaces it. Terraform records the value in state without sending it and shows a warning; use `-replace` to recreate the image with the secret. This changes the plan action from replace to update, a behavior change the schema does not show.
+- resource/anyscale_cloud: Declaring `credentials` on an imported cloud no longer replaces the cloud. Terraform records the value in state without sending it and shows a warning; use `-replace` to recreate the cloud with these credentials. This changes the plan action from replace to update, a behavior change the schema does not show.
+- resource/anyscale_container_image_build: `terraform import` now recovers `project_id` instead of leaving it null, so a config that sets it no longer plans a replacement after import. An image built in a project, imported into a config that omits `project_id`, now shows that difference as a planned replacement. State imported by an earlier provider version keeps a null `project_id`, and upgrading does not correct it; to recover it, run `terraform state rm` on the resource and import it again.
+- resource/anyscale_service: Changing `description` while `rollout_strategy = "IN_PLACE"` is now rejected at plan time. The IN_PLACE backend path silently discarded the change, so the plan previously reported success and showed the same diff on every apply; set `rollout_strategy = "ROLLOUT"` to change it.
+- resource/anyscale_service: Fix `connection_ids` being treated as changed after `terraform import`, which redeployed the service (or failed the plan under `rollout_strategy = "IN_PLACE"`) even when the configured connections already matched the live service.
+- resource/anyscale_project: A `name` the API would rewrite on create (for example `"my project"`, which the API stores as `"my-project"`) is now rejected at plan time. Previously the project was created and the apply then failed as an inconsistent result. Use only ASCII letters, digits, `_` and single `-`.
+- resource/anyscale_project: `description = ""` is now rejected at plan time. The API replaces an empty description with a generated one, so the apply previously created the project and then failed as an inconsistent result. Omit `description` to let the API generate one.
+- resource/anyscale_scheduler_config: An empty nested list (`selector`, `values`, `resource_groups`, `resources`) or an empty or null `advanced_instance_config` is now rejected at plan time. Each one previously produced a diff that never resolved, and every apply created another config version. Omit the attribute to leave it unset.
+- data-source/anyscale_project: A failure to read the project's collaborators now fails the read. Previously it returned `collaborators = []`, which reads as a project with no collaborators. A configuration that relied on the read succeeding during such an error now gets an error instead.
+- resource/anyscale_compute_config: Removing a worker group from the middle of `worker_nodes`, or an entry from the middle of `additional_resources`, no longer gives the group or entry that moves into its position the removed one's `name` and `resources`, which were previously sent to the API as if configured. This changes plan behavior in a way the schema does not show: such a plan now shows those values as known after apply.
+- resource/anyscale_compute_config: An unrecognized `worker_nodes[].market_type` is now rejected at plan time with the accepted values. It used to warn, create the version, and then fail the apply. This is a behavior change the schema does not show; no such configuration could ever apply.
+- resource/anyscale_compute_config: Per-node `flags` and `advanced_instance_config` now compare by JSON meaning, so valid JSON in any formatting applies without an "inconsistent result" error. Invalid JSON is rejected at plan time; it used to fail the apply, and for `advanced_instance_config` it was left out of the request. This is a behavior change the schema does not show. Existing state is unaffected.
+- resource/anyscale_compute_config: `terraform destroy` on an Azure control plane, where archiving compute configs is not supported, now removes the config from state with a warning instead of failing.
+- data-source/anyscale_compute_config: `versions` now lists only versions in the config's own cloud, and a lookup by `name` prefers a non-archived config, warning when only an archived one matches. A by-name lookup without `cloud_id` can therefore resolve a different config, in a different cloud, than before.
+- resource/anyscale_cloud: Changing `file_storage.file_storage_id` now re-derives `mount_targets` and `mount_path` from the new file system instead of sending the previous file system's address with the new ID, and adding a `file_storage` block to an existing cloud no longer records `mount_targets` and `mount_path` as null, and editing `file_storage` no longer fails with "inconsistent result after apply" when the recorded `mount_targets` is null; the same applies to `anyscale_cloud_resource`.
+- resource/anyscale_cloud: Importing a cloud and then writing its subnets as `aws_config.subnet_ids` no longer fails with "Provider produced invalid plan"; the list form for the same subnets plans a one-time in-place update, and changing the subnets still replaces; the same applies to `anyscale_cloud_resource`.
+- resource/anyscale_cloud: Debug logs no longer include the create and add-resource response bodies unredacted.
+- resource/anyscale_organization_user_role: An `email` with capital letters, or `deny_roles` listed in a different order than the API returns them, no longer fails the apply with an inconsistent result; the configured spelling and order are kept.
+- resource/anyscale_cloud_access: A `member` key with capital letters no longer shows a change on every plan.
+- data-source/anyscale_organization_user: Looking up a user by an `email` with capital letters no longer fails.
+- resource/anyscale_cloud: Adopting an existing cloud by name no longer fails with "Provider returned invalid result object after apply" when the configuration omits backend-derived attributes (`aws_config.memorydb_cluster_arn` and `memorydb_cluster_endpoint`, `gcp_config.memorystore_endpoint`, `file_storage.mount_targets` and `mount_path`); they are now read from the adopted cloud, or recorded as null when it has no value.
+
 ## [0.28.3] - 2026-09-30
 
 ### Changed
@@ -1094,7 +1152,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.28.3...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.29.0
 [0.28.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.3
 [0.28.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.2
 [0.28.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.1

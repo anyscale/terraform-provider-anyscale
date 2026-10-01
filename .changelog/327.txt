@@ -1,4 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_cloud: Adopting an existing cloud by name no longer fails with "Provider returned invalid result object after apply" when the configuration omits backend-derived attributes (`aws_config.memorydb_cluster_arn` and `memorydb_cluster_endpoint`, `gcp_config.memorystore_endpoint`, `file_storage.mount_targets` and `mount_path`); they are now read from the adopted cloud, or recorded as null when it has no value.
-```

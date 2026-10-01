@@ -1,9 +1,0 @@
-```
-release-note:changed
-provider: A `token` or `api_url` that is unknown at plan time is now an error that names the `ANYSCALE_CLI_TOKEN` / `ANYSCALE_API_URL` workaround, instead of silently falling back to the environment or the default host; `token = ""` is now treated as unset and falls back to `ANYSCALE_CLI_TOKEN` and `~/.anyscale/credentials.json` instead of failing; and a trailing slash on `api_url` is ignored.
-```
-
-```
-release-note:changed
-provider: Missing credentials now produce one error that lists every source checked (the `token` argument, `ANYSCALE_CLI_TOKEN`, and the credentials file path), and an unusable credentials file is reported separately; failed API calls now show `Failed to <operation> (HTTP <status>): <backend message>` in place of the raw response body.
-```
