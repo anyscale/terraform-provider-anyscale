@@ -194,7 +194,7 @@ data "anyscale_organization_users" "all" {}
 					ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 					Steps: []resource.TestStep{{
 						Config:      config(httpServer.URL, mock),
-						ExpectError: regexp.MustCompile(`(?s)(HTTP|status) 500`),
+						ExpectError: regexp.MustCompile(`(?s)(HTTP|status)\s+500`),
 					}},
 				})
 			})
