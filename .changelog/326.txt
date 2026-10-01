@@ -1,0 +1,4 @@
+```
+release-note:breaking-change
+resource/anyscale_compute_config: `maximum_uptime_minutes` and node `resources` (in `head_node`, `worker_nodes`, and `additional_resources`) are now Optional instead of Optional+Computed, so removing either from configuration now clears it on the next apply instead of silently keeping the old value; to keep a value, leave it set in configuration, and expect a planned update on any config that already removed one but still carries the old value in state.
+```

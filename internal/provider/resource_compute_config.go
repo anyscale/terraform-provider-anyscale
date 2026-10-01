@@ -284,16 +284,14 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				MarkdownDescription: "Number of minutes after which idle clusters using this compute config will be terminated. `0` disables idle termination. If never set, the backend default (120) applies. Removing it from configuration later keeps the current value; set `120` explicitly to restore the default.",
 			},
 			"maximum_uptime_minutes": schema.Int64Attribute{
+				// Optional only: the backend applies no default and returns null
+				// when it is unset, so omitting it means "no maximum".
 				Optional: true,
-				Computed: true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
 				Validators: []validator.Int64{
 					int64validator.AtLeast(1),
 				},
-				Description:         "Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum.",
-				MarkdownDescription: "Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum.",
+				Description:         "Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum; removing it from configuration removes the maximum on the next apply.",
+				MarkdownDescription: "Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum; removing it from configuration removes the maximum on the next apply.",
 			},
 			"advanced_instance_config": schema.DynamicAttribute{
 				Optional:            true,
@@ -433,17 +431,12 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 			MarkdownDescription: "Cloud provider instance type (e.g., `m5.2xlarge` on AWS, `n2-standard-8` on GCP). Use `custom` when `required_resources` is provided.",
 		},
 		"resources": schema.MapAttribute{
+			// Optional only: the backend never fills it in when omitted, so
+			// omitting it means "use the instance's capacity".
 			ElementType:         types.Float64Type,
 			Optional:            true,
-			Computed:            true,
 			Description:         "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.",
 			MarkdownDescription: "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.",
-			// Plain UseStateForUnknown is only safe at the top level: inside an
-			// additional_resources entry the node can shift to another entry's
-			// index. workerNodeConfigAttributes adds the worker-group check.
-			PlanModifiers: []planmodifier.Map{
-				nodeResourcesUseStateForSameNode(false),
-			},
 		},
 		"required_resources": schema.SingleNestedAttribute{
 			Optional:            true,
@@ -559,10 +552,6 @@ func workerNodeConfigAttributes() map[string]schema.Attribute {
 			workerNameUseStateForSameWorker(),
 		},
 	}
-	// Same index-shift protection for resources, plus the worker-group check.
-	workerResources := attrs["resources"].(schema.MapAttribute)
-	workerResources.PlanModifiers = []planmodifier.Map{nodeResourcesUseStateForSameNode(true)}
-	attrs["resources"] = workerResources
 	attrs["min_nodes"] = schema.Int64Attribute{
 		Optional:            true,
 		Computed:            true,
@@ -1325,16 +1314,13 @@ func populateComputedFieldsFromResponse(
 	plan *ComputeConfigResourceModel,
 	diags *diag.Diagnostics,
 ) {
-	// idle/max-uptime are top-level only (see effectiveComputeConfig).
-	// Explicit else-Null (not just "leave it"), mirroring Read exactly: both
-	// attributes are
-	// Optional+Computed+UseStateForUnknown with no Default, so an Unknown
-	// left unresolved here (e.g. a defensive nil from the API that should
-	// not happen given the backend's own idle default, but costs nothing to
-	// handle) would hit the identical "Provider produced inconsistent result
-	// after apply" this function exists to prevent.
+	// idle_termination_minutes is top-level only (see effectiveComputeConfig)
+	// and Optional+Computed+UseStateForUnknown with no Default, so it is
+	// Unknown here whenever config omits it and must be resolved from the
+	// response, explicitly null included, or the apply fails as an
+	// inconsistent result. maximum_uptime_minutes is Optional only: the plan
+	// already holds the configured value, so it is left alone.
 	plan.IdleTerminationMinutes = types.Int64PointerValue(configData.IdleTerminationMinutes)
-	plan.MaximumUptimeMinutes = types.Int64PointerValue(configData.MaximumUptimeMinutes)
 
 	// Same primary/additional split Read uses, but matched against the
 	// PLAN's own cloud_resource/additional_resources as "prior" instead of

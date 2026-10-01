@@ -105,7 +105,8 @@ func TestAccComputeConfigResource_RemovedWorkerDoesNotLendResourcesToShiftedWork
     { name = "b", instance_type = "m5.xlarge" },`),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectUnknownValue(workerShiftAddr, tfjsonpath.New("worker_nodes").AtSliceIndex(0).AtMapKey("resources")),
+						// resources is Optional only: b never configured it, so it plans null.
+						plancheck.ExpectKnownValue(workerShiftAddr, tfjsonpath.New("worker_nodes").AtSliceIndex(0).AtMapKey("resources"), knownvalue.Null()),
 					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
