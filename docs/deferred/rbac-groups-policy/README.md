@@ -46,8 +46,7 @@ member write path, tests create their own groups, so that failure mode no longer
 - **Group delete does not revoke what the group's membership derived.** It soft-deletes the group and
   its memberships but does not touch the role bindings the group wrote, and a later policy write can
   carry the dead group's id forward. `anyscale_user_group` therefore empties the group before deleting
-  it. Whether a removed member's access is actually revoked is confirmed only by a real write probe;
-  do not document it as guaranteed until that probe is logged.
+  it. That a removed member actually loses access is not yet confirmed by a real write probe.
 - **Deleting a directory-synced group is not guarded by the API** (rename is, with a 409). The provider
   guards it by refusing to manage `scim` groups.
 - **`/memberships/list` silently drops departed users** and is unpaginated; the members resource
