@@ -239,8 +239,8 @@ resource "anyscale_organization_default_cloud" "test" {
 
 // TestAccOrganizationDefaultCloudResource_ImportNotCurrentDefault_MockServer
 // covers importing a cloud that EXISTS but is not the
-// current organization default must fail with a clear diagnostic, not
-// silently import garbage state.
+// current organization default: it must fail, not silently import garbage
+// state, and the diagnostic names the cloud that is the default.
 func TestAccOrganizationDefaultCloudResource_ImportNotCurrentDefault_MockServer(t *testing.T) {
 	const orgID = "org_default_cloud_notdefault_mock"
 	const realDefaultCloudID = "cld_default_cloud_notdefault_real"
@@ -262,7 +262,7 @@ resource "anyscale_organization_default_cloud" "test" {
 				ImportStateId:      nonDefaultCloudID,
 				Config:             config,
 				ImportStatePersist: false,
-				ExpectError:        regexp.MustCompile(`(?s)Cloud\s+"cld_default_cloud_notdefault_other"\s+is\s+not\s+the\s+current\s+organization\s+default`),
+				ExpectError:        regexp.MustCompile(`(?s)Cloud\s+"cld_default_cloud_notdefault_other"\s+is\s+not\s+the\s+organization\s+default;\s+the\s+organization's\s+default\s+cloud\s+is\s+"cld_default_cloud_notdefault_real"`),
 			},
 		},
 	})

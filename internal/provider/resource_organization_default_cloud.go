@@ -282,8 +282,7 @@ func (r *OrganizationDefaultCloudResource) ImportState(ctx context.Context, req 
 	}
 
 	if !cloudResp.Result.IsDefault {
-		AddConfigError(&resp.Diagnostics, "Not The Organization Default",
-			fmt.Sprintf("Cloud %q is not the current organization default; import the cloud that is.", cloudID))
+		AddConfigError(&resp.Diagnostics, "Not The Organization Default", notOrganizationDefaultDetail(ctx, r.client, cloudID))
 		return
 	}
 
@@ -295,4 +294,30 @@ func (r *OrganizationDefaultCloudResource) ImportState(ctx context.Context, req 
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), org.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_id"), types.StringValue(cloudID))...)
+}
+
+// notOrganizationDefaultDetail explains a failed import. When the
+// organization has no explicit default cloud, the console and `anyscale cloud
+// list` still mark one cloud as default: that is a per-user fallback, not an
+// organization setting, so there is nothing to import. Telling the user to
+// "import the cloud that is" would send them looking for a cloud that does not
+// exist. If the organization cannot be read, the generic message stands.
+func notOrganizationDefaultDetail(ctx context.Context, client *Client, cloudID string) string {
+	generic := fmt.Sprintf("Cloud %q is not the current organization default; import the cloud that is.", cloudID)
+	org, err := fetchCurrentOrganization(ctx, client)
+	if err != nil {
+		tflog.Debug(ctx, "Could not read the organization to explain the import failure", map[string]any{"error": err.Error()})
+		return generic
+	}
+	if org.DefaultCloudID.IsNull() {
+		return fmt.Sprintf("Organization %s has no explicit default cloud, so there is nothing to import. "+
+			"The default cloud shown in the console and by `anyscale cloud list` is a per-user fallback "+
+			"(your last-used cloud, else the first cloud you can access), not an organization setting. "+
+			"To make %q the organization default, remove the import and run `terraform apply` with this resource instead.",
+			org.ID.ValueString(), cloudID)
+	}
+	if other := org.DefaultCloudID.ValueString(); other != cloudID {
+		return fmt.Sprintf("Cloud %q is not the organization default; the organization's default cloud is %q. Import that ID instead.", cloudID, other)
+	}
+	return generic
 }
