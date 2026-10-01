@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -81,25 +82,47 @@ func (s *mockProjectServer) handleCreate(w http.ResponseWriter, r *http.Request)
 
 	s.nextSeq++
 	id := fmt.Sprintf("prj_mock_%d", s.nextSeq)
+	name := mockSlugifyProjectName(req.Name)
+	// Like the API, an empty or missing description is replaced with a
+	// generated one.
 	desc := ""
 	if req.Description != nil {
 		desc = *req.Description
 	}
+	if desc == "" {
+		desc = name + " created by user_mock_creator on 2026-01-01"
+	}
 	result := map[string]any{
 		"id":                 id,
-		"name":               req.Name,
+		"name":               name,
 		"description":        desc,
 		"parent_cloud_id":    req.ParentCloudID,
 		"creator_id":         "user_mock_creator",
 		"created_at":         "2026-01-01T00:00:00Z",
 		"last_used_cloud_id": req.ParentCloudID,
 		"is_default":         false,
-		"directory_name":     req.Name + "-dir",
+		"directory_name":     name + "-dir",
 	}
 	s.projects[id] = result
 
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{"result": result})
+}
+
+var (
+	mockSlugDropped  = regexp.MustCompile(`[^A-Za-z0-9_\t\n\v\f\r\x1c-\x1f -]`)
+	mockSlugCollapse = regexp.MustCompile(`[-\t\n\v\f\r\x1c-\x1f ]+`)
+)
+
+// mockSlugifyProjectName applies the API's create-time name rewrite: drop
+// every character other than letters, digits, underscores, whitespace and
+// hyphens, trim, then collapse each run of hyphens and whitespace into one
+// hyphen. The API first transliterates to ASCII (so "é" becomes "e"); this
+// mock simply drops non-ASCII characters, which is enough to change any name
+// the provider must reject.
+func mockSlugifyProjectName(name string) string {
+	name = strings.Trim(mockSlugDropped.ReplaceAllString(name, ""), "\t\n\v\f\r\x1c\x1d\x1e\x1f ")
+	return mockSlugCollapse.ReplaceAllString(name, "-")
 }
 
 func (s *mockProjectServer) handleGet(w http.ResponseWriter, path string) {
