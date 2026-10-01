@@ -63,11 +63,11 @@ for other cases like this.
   ```
 
 `gcp_region`, `gcp_zone`, `billing_account_id`, `root_folder_number`, `customer_ingress_cidr_ranges`,
-and `anyscale_org_id` all have no default and must be supplied - there's no
-`terraform.tfvars.example` for this one, so create your own `terraform.tfvars` or pass them with
-`-var`. As with `gcp-vm-basic`, there's no `anyscale_external_id` here - GCP's workload identity
-federation setup doesn't need the cross-account IAM trust relationship that concept exists for on
-AWS.
+and `anyscale_org_id` all have no default and must be supplied - copy
+[`terraform.tfvars.example`](./terraform.tfvars.example) to `terraform.tfvars` (already gitignored)
+and edit it, or pass them with `-var`. As with `gcp-vm-basic`, there's no `anyscale_external_id`
+here - GCP's workload identity federation setup doesn't need the cross-account IAM trust
+relationship that concept exists for on AWS.
 
 ## Running the example
 

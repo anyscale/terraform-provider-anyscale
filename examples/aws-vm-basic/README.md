@@ -43,8 +43,8 @@ Kubernetes-based cloud instead of VM, see [aws-eks-basic](../aws-eks-basic/).
   ```
 
 `aws_region`, `customer_ingress_cidr_ranges`, `anyscale_external_id`, and `anyscale_org_id` all
-have no default and must be supplied - there's no `terraform.tfvars.example` for this one (unlike
-the Kubernetes examples), so create your own `terraform.tfvars` or pass them with `-var`.
+have no default and must be supplied - copy [`terraform.tfvars.example`](./terraform.tfvars.example)
+to `terraform.tfvars` (already gitignored) and edit it, or pass them with `-var`.
 `anyscale_external_id` is your own choice of string; it just has to match between the IAM trust
 policy this example creates and whatever Anyscale stores for the cloud, which this example handles
 for you automatically since both come from the same variable.
