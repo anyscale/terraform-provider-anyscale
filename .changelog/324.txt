@@ -5,7 +5,7 @@ resource/anyscale_cloud: Changing `file_storage.file_storage_id` now re-derives 
 
 ```
 release-note:changed
-resource/anyscale_cloud: A missing `compute_stack`, an undeterminable `region`, or a missing provider block now fails at plan time when the values are known, and otherwise before the cloud is created, instead of after a real cloud already exists (unless a cloud of that name exists and is adopted); `terraform import` now fails if the cloud's resource listing cannot be read instead of importing without its configuration blocks; and a failed machine pool detach on destroy is reported as a warning naming the pool.
+resource/anyscale_cloud: Behavior change: a missing `compute_stack`, an undeterminable `region`, or a missing provider block now fails at plan time when the values are known (a new plan-time failure for configurations that already failed at apply), and otherwise before the cloud is created, instead of after a real cloud already exists; a config whose `name` matches an existing cloud is exempt because apply adopts that cloud. Behavior change: `terraform import` now fails if the cloud's resource listing cannot be read instead of importing without its configuration blocks; and a failed machine pool detach on destroy is reported as a warning naming the pool.
 ```
 
 ```
@@ -15,7 +15,7 @@ resource/anyscale_cloud: Importing a cloud and then writing its subnets as `aws_
 
 ```
 release-note:changed
-resource/anyscale_cloud_iam_mapping: An explicit `cloud_resource_id` that does not belong to `cloud_id` is now rejected on create and import instead of writing another cloud's IAM mapping, and a mapping whose deployment was deleted out of band is now removed from state on refresh and on destroy instead of failing every plan.
+resource/anyscale_cloud_iam_mapping: Behavior change: an explicit `cloud_resource_id` that does not belong to `cloud_id` is now rejected on create and import instead of writing another cloud's IAM mapping, and a mapping whose deployment was deleted out of band is now removed from state on refresh and on destroy instead of failing every plan.
 ```
 
 ```
