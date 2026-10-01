@@ -45,9 +45,9 @@ import (
 // describe for status - see its own doc comment below.
 
 // systemWorkloadNameRayObsEventsAPIService is the only SystemWorkloadName this provider ever
-// sends or expects. The backend enum has more values, but the console/mission only ever deals
-// with this one, and the mission explicitly forbids exposing workload_name as configurable
-// (changing it on a live cluster forces a backend-triggered restart).
+// sends or expects. The backend enum has more values, but the console only ever deals with this
+// one, and workload_name is deliberately not configurable: changing it on a live cluster forces
+// a backend-triggered restart.
 const systemWorkloadNameRayObsEventsAPIService = "RAY_OBS_EVENTS_API_SERVICE"
 
 // systemWorkloadClusterNameFilter is the stable, hardcoded literal name the backend assigns a
@@ -62,8 +62,7 @@ const systemWorkloadClusterNameFilter = "system_workload_cluster"
 // (anyscale_cloud.enable_system_cluster) - relocated here as part of consolidating System
 // Cluster management into this resource, not reimplemented differently: same path, same query
 // parameter, same empty body/response. enabled=false is a legitimate call this resource never
-// makes itself (delete is state-only, and there is no exposed "disable" surface per the mission's
-// non-goals) but is kept as a real parameter rather than hardcoded true, since it costs nothing
+// makes itself (delete is state-only, and there is deliberately no exposed "disable" surface) but is kept as a real parameter rather than hardcoded true, since it costs nothing
 // and matches the underlying endpoint's real shape.
 func enableSystemCluster(ctx context.Context, client *Client, cloudID string, enabled bool) error {
 	path := fmt.Sprintf("/api/v2/clouds/%s/update_system_cluster_config?is_enabled=%t", cloudID, enabled)
@@ -173,10 +172,10 @@ func describeSystemWorkload(ctx context.Context, client *Client, cloudID string,
 	return &resp.Result, nil
 }
 
-// terminateSystemCluster calls POST /api/v2/system_workload/{cloud_id}/terminate. Not called by
-// this resource's own Create/Read/Update/Delete (Delete is deliberately state-only - see the
-// resource's own doc comment) - exposed here only for a possible future explicit-terminate
-// capability and for acceptance-test teardown of real infra created during testing.
+// terminateSystemCluster calls POST /api/v2/system_workload/{cloud_id}/terminate. Nothing in
+// the provider calls it yet: Delete is deliberately state-only (see the resource's own doc
+// comment). It is kept for the deferred anyscale_system_cluster_terminate Action, whose design
+// in docs/deferred/actions-adoption/README.md invokes it.
 //
 // The backend 404s if no system cluster exists for cloudID, and 409s if it is already
 // Terminated (unlike start, already-terminated is an error here, not a silent no-op) - both
@@ -271,21 +270,20 @@ var systemClusterErrorStates = map[string]bool{
 // bucket the server itself uses to decide whether a start request is a no-op): Running is
 // excluded here because for OUR wait loop it is the success target, not a "still going" state.
 //
-// Terminated IS in this set, unlike Terminating/Unknown below - confirmed live (AC26 smoke
-// test) that describe(start_cluster=true) against a cloud with no prior cluster creates one and
+// Terminated IS in this set, unlike Terminating/Unknown below - confirmed live that describe(start_cluster=true) against a cloud with no prior cluster creates one and
 // returns immediately with status=Terminated, since the StartingUp transition is genuinely
 // async and not visible in that same response. So the very first poll after every Create
 // observes Terminated as a normal, expected step, not an anomaly - logging a warning on every
 // single Create would be noise, not signal.
 //
 // Terminating and Unknown are deliberately NOT in this set. They fall through to the
-// "unrecognized, continue with a warning" branch as any genuinely unknown future state (F6
-// forward-compat, mirroring service_helpers.go's evaluateServiceState) rather than being treated
-// as an expected transitional state, since the backend's own no-op-retry-start bucket excludes
-// them (a start call against a Terminating cluster is an untraced risk). This wait loop never
-// re-issues start_cluster=true after the initial Create request regardless (see
-// describeSystemWorkload's own doc comment), so this only affects how loudly we log while
-// waiting, not correctness.
+// "unrecognized, continue with a warning" branch as any genuinely unknown future state
+// (forward-compatible, mirroring service_helpers.go's evaluateServiceState) rather than being
+// treated as an expected transitional state, since the backend's own no-op-retry-start bucket
+// excludes them (a start call against a Terminating cluster is an untraced risk). Membership
+// here only affects how loudly the wait loop logs. Its one start re-issue is keyed on
+// consecutive Terminated polls, never on Terminating or Unknown (see
+// waitForSystemClusterStateWithTiming).
 var systemClusterContinueStates = map[string]bool{
 	"StartingUp":      true,
 	"Updating":        true,
@@ -296,7 +294,7 @@ var systemClusterContinueStates = map[string]bool{
 // evaluateSystemClusterState classifies result against target the same way
 // evaluateServiceState/evaluateBuildStatus do: done=true+nil=terminal success, done=true+err=
 // terminal failure, done=false=keep polling (including for a state not in either map - the
-// caller is responsible for logging that case, matching service_helpers.go's F6 pattern).
+// caller is responsible for logging that case, matching service_helpers.go's pattern).
 // cloudID is included only to identify which cloud's error this is - describe's response has no
 // separate message field to enrich it with (see systemClusterErrorStates' doc comment).
 func evaluateSystemClusterState(result *DescribeSystemWorkloadResult, target, cloudID string) (done bool, err error) {
@@ -321,10 +319,9 @@ func evaluateSystemClusterState(result *DescribeSystemWorkloadResult, target, cl
 // defaultSystemClusterCreateTimeout if unset), not pinned - there is no
 // single real constant to pin the way e.g. waitForBuildDigest pins both of its own.
 //
-// Every poll in this loop passes startCluster=false - never true again after the initial Create
-// request - so this can never re-trigger an actual start against a cloud whose cluster is
-// Terminating or in any other state, regardless of how evaluateSystemClusterState/the continue
-// map classify what comes back.
+// Polls pass startCluster=false. The one exception is a single start re-issue after two
+// consecutive Terminated polls (see waitForSystemClusterStateWithTiming); no other state,
+// Terminating included, ever triggers a start.
 //
 // Consumed by resource_system_cluster.go's Create/Update.
 func waitForSystemClusterState(ctx context.Context, client *Client, cloudID, target string, timeout time.Duration) (*DescribeSystemWorkloadResult, error) {
@@ -384,7 +381,7 @@ func waitForSystemClusterStateWithTiming(ctx context.Context, client *Client, cl
 		if done, evalErr := evaluateSystemClusterState(result, target, cloudID); done {
 			return result, evalErr
 		} else if !systemClusterContinueStates[status] {
-			// F6: an unrecognized state (including the deliberately-excluded Terminating and
+			// An unrecognized state (including the deliberately-excluded Terminating and
 			// Unknown, see systemClusterContinueStates) continues polling rather than hard-
 			// erroring immediately - the timeout below still backstops a state that never
 			// resolves, this only keeps the gap visible.

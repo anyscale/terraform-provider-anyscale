@@ -583,9 +583,8 @@ func (r *ProjectResource) readProject(ctx context.Context, projectID string, mod
 	model.ID = types.StringValue(result.ID)
 	model.Name = types.StringValue(result.Name)
 
-	// DS-PROJ-1: parent_cloud_id is genuinely nullable server-side in
-	// principle, but cloud_id is Required on this resource (cloud_name
-	// removed, R1), so every config has a concrete value on create and this
+	// parent_cloud_id is genuinely nullable server-side in principle, but
+	// cloud_id is Required on this resource, so every config has a concrete value on create and this
 	// is a stable non-null refresh in practice. types.StringPointerValue
 	// rather than types.StringValue defensively handles the case the
 	// backend ever does report a null parent_cloud_id on an existing

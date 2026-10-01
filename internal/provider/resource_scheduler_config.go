@@ -617,8 +617,10 @@ func expandSchedulerConfig(model *SchedulerConfigResourceModel, diags *[]string)
 
 // flattenAdvancedInstanceConfig renders the API's object back to a JSON string.
 // No prior-state comparison is needed: the attribute is a
-// jsontypes.Normalized, which compares unmarshalled values, so the API's key
-// reordering and its widening of 1 to 1.0 are both equal to what was written.
+// jsontypes.Normalized, which ignores key order and whitespace, so the API's
+// key reordering compares equal. Numbers compare as written, but an integer
+// the API returns as 1.0 decodes to float64 and re-encodes here as 1, so it
+// matches a config that wrote 1.
 func flattenAdvancedInstanceConfig(apiValue map[string]any) (jsontypes.Normalized, error) {
 	if len(apiValue) == 0 {
 		return jsontypes.NewNormalizedNull(), nil

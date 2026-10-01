@@ -225,10 +225,10 @@ func (r *SystemClusterResource) Read(ctx context.Context, req resource.ReadReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// Update only ever runs for a start_timeout-only change (cloud_id is
-// RequiresReplace, and no other attribute is configurable) - per the design
-// record, this needs no enable/start call, just an accurate refresh of the
-// Computed fields alongside adopting the new timeout value.
+// Update only ever runs for a timeouts-only change (cloud_id is
+// RequiresReplace, and timeouts is the only other configurable block), so it
+// needs no enable/start call, just an accurate refresh of the Computed fields
+// alongside adopting the new timeout values.
 func (r *SystemClusterResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan SystemClusterResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
