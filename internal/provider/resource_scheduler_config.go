@@ -142,24 +142,26 @@ func schedulerMatchExpressionAttributes(what string) map[string]schema.Attribute
 		"values": schema.ListAttribute{
 			Optional:            true,
 			ElementType:         types.StringType,
+			Validators:          []validator.List{nonEmptyListValidator{attrName: "values"}},
 			MarkdownDescription: "Values compared against `key`. Required for `in` and `not_in`; must be omitted for `exists` and `does_not_exist`.",
 		},
 	}
 }
 
-// nonEmptyListValidator rejects a section that is declared but empty, and
-// names the fix a practitioner actually wants: omit the section entirely.
+// nonEmptyListValidator rejects an optional list that is declared but empty,
+// and names the fix a practitioner actually wants: omit the attribute entirely.
 //
 // The reason to reject the empty list is that it is INDISTINGUISHABLE from
-// omission, not that it differs. All three sections are Go slices tagged
-// omitempty (see SchedulerConfig in scheduler_api.go), and encoding/json drops
-// a zero-length slice, so `section = []` and no section at all serialize to the
-// same bytes. Accepting the empty form would therefore mean silently treating
-// "I declared this section" as "leave this section unset". Two consequences,
-// both inviting wrong next moves: the guard is not redundant (there is no empty
-// array on the wire to be harmless), and no wire-level assertion can test it
-// (byte-identical documents, so such a test passes against any build). The
-// behavior exists only as a plan-time diagnostic, which is where it is tested.
+// omission, not that it differs. Every optional list in the document is a Go
+// slice tagged omitempty (see scheduler_api.go), and encoding/json drops a
+// zero-length slice, so `attr = []` and no attribute at all serialize to the
+// same bytes. Read then maps the absent key back to null, so a declared `[]`
+// would diff against state on every plan, and every apply would mint another
+// config version. Two consequences, both inviting wrong next moves: the guard
+// is not redundant (there is no empty array on the wire to be harmless), and
+// no wire-level assertion can test it (byte-identical documents, so such a
+// test passes against any build). The behavior exists only as a plan-time
+// diagnostic, which is where it is tested.
 type nonEmptyListValidator struct {
 	attrName string
 }
@@ -181,11 +183,51 @@ func (v nonEmptyListValidator) ValidateList(_ context.Context, req validator.Lis
 	}
 	resp.Diagnostics.AddAttributeError(
 		req.Path,
-		fmt.Sprintf("Empty %s Section", v.attrName),
+		fmt.Sprintf("Empty %s List", v.attrName),
 		fmt.Sprintf(
-			"`%s` was declared as an empty list. Omit the `%s` attribute entirely to leave the section unset - "+
-				"an empty list is sent to the Anyscale API as no section at all, so declaring one would quietly "+
+			"`%s` was declared as an empty list. Omit the `%s` attribute entirely to leave it unset - "+
+				"an empty list is sent to the Anyscale API as if the attribute were absent, so declaring one would quietly "+
 				"mean the opposite of what it looks like.",
+			v.attrName, v.attrName,
+		),
+	)
+}
+
+// nonEmptyJSONObjectValidator rejects a JSON attribute declared as `{}` or
+// `null`, for the same reason nonEmptyListValidator rejects `[]`: the request
+// drops an empty object (omitempty on a map), and Read maps the absent key
+// back to null, so the declared value would diff forever. Malformed JSON is
+// left to the attribute's JSON type, which reports it.
+type nonEmptyJSONObjectValidator struct {
+	attrName string
+}
+
+func (v nonEmptyJSONObjectValidator) Description(ctx context.Context) string {
+	return v.MarkdownDescription(ctx)
+}
+
+func (v nonEmptyJSONObjectValidator) MarkdownDescription(_ context.Context) string {
+	return fmt.Sprintf("if `%s` is declared it must be a non-empty JSON object; omit it entirely to leave it unset", v.attrName)
+}
+
+func (v nonEmptyJSONObjectValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(req.ConfigValue.ValueString()), &decoded); err != nil {
+		return
+	}
+	if obj, isObject := decoded.(map[string]any); decoded != nil && (!isObject || len(obj) > 0) {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(
+		req.Path,
+		fmt.Sprintf("Empty %s", v.attrName),
+		fmt.Sprintf(
+			"`%s` was declared as an empty JSON object or null. Omit the `%s` attribute entirely to leave it unset - "+
+				"an empty value is sent to the Anyscale API as if the attribute were absent, so it would never match "+
+				"the applied config and every apply would create another config version.",
 			v.attrName, v.attrName,
 		),
 	)
@@ -225,12 +267,14 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 						},
 						"selector": schema.ListNestedAttribute{
 							Optional:            true,
+							Validators:          []validator.List{nonEmptyListValidator{attrName: "selector"}},
 							MarkdownDescription: "Node label expressions selecting the machines this flavor covers. All expressions must match (AND).",
 							NestedObject:        schema.NestedAttributeObject{Attributes: schedulerMatchExpressionAttributes("the node")},
 						},
 						"advanced_instance_config": schema.StringAttribute{
 							Optional:   true,
 							CustomType: jsontypes.NormalizedType{},
+							Validators: []validator.String{nonEmptyJSONObjectValidator{attrName: "advanced_instance_config"}},
 							MarkdownDescription: "Cloud-provider-specific instance configuration applied to machines in this flavor, as a JSON string. Use `jsonencode()` for HCL objects. " +
 								"This can't be a native/dynamic value: it lives inside a list, and Terraform doesn't support a dynamic type nested inside a list - the same constraint that shapes `advanced_instance_config` on `anyscale_compute_config`. " +
 								"Compared semantically rather than by text, so key order and whitespace never produce a diff - `{\"a\":1,\"b\":2}` and `{ \"b\":2, \"a\":1 }` are the same value. Numbers are compared as written, so `1` and `1.0` are *not* the same value; `jsonencode()` avoids the question entirely. " +
@@ -276,6 +320,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 						},
 						"resource_groups": schema.ListNestedAttribute{
 							Optional:            true,
+							Validators:          []validator.List{nonEmptyListValidator{attrName: "resource_groups"}},
 							MarkdownDescription: "Quota for this queue, grouped by the resource types each group governs.",
 							NestedObject: schema.NestedAttributeObject{
 								Attributes: map[string]schema.Attribute{
@@ -295,6 +340,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 												},
 												"resources": schema.ListNestedAttribute{
 													Optional:            true,
+													Validators:          []validator.List{nonEmptyListValidator{attrName: "resources"}},
 													MarkdownDescription: "Quota for each covered resource type on this flavor.",
 													NestedObject: schema.NestedAttributeObject{
 														Attributes: map[string]schema.Attribute{
@@ -338,6 +384,7 @@ func (r *SchedulerConfigResource) Schema(ctx context.Context, req resource.Schem
 						},
 						"selector": schema.ListNestedAttribute{
 							Optional:            true,
+							Validators:          []validator.List{nonEmptyListValidator{attrName: "selector"}},
 							MarkdownDescription: "Workload label expressions this rule matches on. All expressions must match (AND). Omit for a catch-all rule.",
 							NestedObject:        schema.NestedAttributeObject{Attributes: schedulerMatchExpressionAttributes("the workload")},
 						},
