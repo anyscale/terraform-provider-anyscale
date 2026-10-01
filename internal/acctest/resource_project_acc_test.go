@@ -360,6 +360,13 @@ func TestExtendProjectDeleteRetry(t *testing.T) {
 	initialErr := fmt.Errorf(`unexpected status 403: {"error":{"detail":"Permission denied"}}`)
 
 	t.Run("succeeds on a later extended attempt", func(t *testing.T) {
+		// This subtest checks that the loop keeps retrying, not when it gives
+		// up, so it gets a window it cannot exhaust. Under the shared 10ms
+		// window, a loaded machine ran out of time after two attempts.
+		prevMaxWait := projectDisappearsExtendedRetryMaxWait
+		projectDisappearsExtendedRetryMaxWait = time.Minute
+		t.Cleanup(func() { projectDisappearsExtendedRetryMaxWait = prevMaxWait })
+
 		const projectID = "prj_extend_succeeds"
 		var requestCount atomic.Int32
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
