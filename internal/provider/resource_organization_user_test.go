@@ -2,9 +2,11 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -24,7 +26,10 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 		defer server.Close()
 
 		fromList := OrganizationCollaboratorResult{ID: "identity-1", UserID: &userID, BaseRole: "owner"}
-		got := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		got, err := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		if got.AdditionalRoles == nil {
 			t.Fatal("AdditionalRoles = nil, want a populated, non-nil slice")
@@ -60,7 +65,10 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 		defer server.Close()
 
 		fromList := OrganizationCollaboratorResult{ID: "identity-1", UserID: &userID, BaseRole: "collaborator"}
-		got := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		got, err := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		if got.BaseRole != "collaborator" {
 			t.Errorf("BaseRole = %q, want the list-derived %q preserved even though the singular GET (a real, permanently stale SpiceDB source) says %q - list is the one guaranteed to agree with permission_level", got.BaseRole, "collaborator", "owner")
@@ -80,7 +88,10 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 		defer server.Close()
 
 		fromList := OrganizationCollaboratorResult{ID: "identity-1", UserID: &userID, BaseRole: "owner"}
-		got := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		got, err := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		if got.AdditionalRoles == nil {
 			t.Fatal("AdditionalRoles = nil, want a non-nil empty slice (queried and genuinely none is not the same as undetermined)")
@@ -98,7 +109,10 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 		defer server.Close()
 
 		fromList := OrganizationCollaboratorResult{ID: "identity-2", UserID: nil, BaseRole: "collaborator"}
-		got := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		got, err := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		if got.AdditionalRoles != nil {
 			t.Errorf("AdditionalRoles = %v, want nil (undetermined) for a collaborator with no user_id", got.AdditionalRoles)
@@ -108,21 +122,42 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 		}
 	})
 
-	t.Run("null - singular GET fails, degrades gracefully rather than erroring", func(t *testing.T) {
+	// A 404 from the per-user GET must not read as "not a member": callers treat
+	// ErrNotFound as that (org_user Create would invite, the role resource would
+	// drop itself from state), and the list just returned this member.
+	t.Run("singular GET 404 is an error that is not ErrNotFound", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"error":{"detail":"No user found"}}`)
+		}))
+		defer server.Close()
+		fromList := OrganizationCollaboratorResult{ID: "identity-1", UserID: &userID, Email: "member@example.com"}
+		_, err := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		if err == nil {
+			t.Fatal("a failed lookup must be an error")
+		}
+		if errors.Is(err, ErrNotFound) {
+			t.Errorf("a per-user lookup failure must not satisfy errors.Is(ErrNotFound): %v", err)
+		}
+	})
+
+	t.Run("singular GET fails - an error, not a silent null", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = fmt.Fprint(w, `{"error":{"detail":"internal error"}}`)
 		}))
 		defer server.Close()
 
-		fromList := OrganizationCollaboratorResult{ID: "identity-1", UserID: &userID, BaseRole: "owner"}
-		got := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
-
-		if got.AdditionalRoles != nil {
-			t.Errorf("AdditionalRoles = %v, want nil (undetermined) when the singular GET itself fails", got.AdditionalRoles)
+		fromList := OrganizationCollaboratorResult{ID: "identity-1", UserID: &userID, Email: "member@example.com", BaseRole: "owner"}
+		_, err := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		if err == nil {
+			t.Fatal("a failed per-user lookup returned no error: a real deny-role list would silently read as null")
 		}
-		if got.BaseRole != "owner" {
-			t.Errorf("BaseRole = %q, want the list-derived value %q preserved on a hydration failure", got.BaseRole, "owner")
+		if !strings.Contains(err.Error(), "500") {
+			t.Errorf("error should carry the 500, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "member@example.com") {
+			t.Errorf("error should name the member, got: %v", err)
 		}
 	})
 }

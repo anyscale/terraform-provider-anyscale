@@ -713,13 +713,6 @@ func TestCloudAccessValidateConfig_RejectsCloudWriteRoleOnAProject(t *testing.T)
 			projects: cloudAccessNoProjects(),
 		},
 		{
-			// Proves the check is exact rather than a substring or prefix match:
-			// "writer" appears inside a longer role name that is not the typo.
-			name:     "a longer role name containing writer is not the typo",
-			baseRole: cloudAccessCloudWriteRole,
-			projects: cloudAccessProjects(map[string]string{projectID: "writer_of_nothing"}),
-		},
-		{
 			name:     "no projects declared at all",
 			baseRole: cloudAccessCloudWriteRole,
 			projects: cloudAccessNoProjects(),
@@ -814,5 +807,60 @@ func TestCloudAccessValidateConfig_OneMemberFailingDoesNotSuppressAnother(t *tes
 		if cloudAccessFindError(diags, "Project Role Conflicts With cloud_read_only") == nil {
 			t.Fatalf("run %d: the other member's cloud_read_only conflict was suppressed by the first member's error. Both are true of this configuration and one validate pass must report both, or the practitioner fixes one, re-plans, and meets the next: %v", i, diags)
 		}
+	}
+}
+
+// TestCloudAccessValidateConfig_RejectsValuesTheBackendRefuses covers values the
+// backend rejects (422/400) that are knowable from the config alone. Each used
+// to fail only at apply, where the failed grant is reported as an ungranted
+// member and suppresses every revoke in that apply.
+func TestCloudAccessValidateConfig_RejectsValuesTheBackendRefuses(t *testing.T) {
+	const (
+		email     = "someone@example.com"
+		projectID = "prj_1"
+	)
+
+	for _, tc := range []struct {
+		name        string
+		baseRole    string
+		denyRoles   types.List
+		projects    types.Map
+		wantSummary string // empty: the config is valid
+	}{
+		// Positive controls: valid values on the same paths.
+		{name: "valid cloud role", baseRole: "writer", denyRoles: cloudAccessNoDenyRoles(), projects: cloudAccessNoProjects()},
+		{name: "owner without deny roles", baseRole: "owner", denyRoles: cloudAccessNoDenyRoles(), projects: cloudAccessNoProjects()},
+		{name: "collaborator may be cloud_read_only", baseRole: "collaborator", denyRoles: cloudAccessDenyRoles("cloud_read_only"), projects: cloudAccessNoProjects()},
+		{name: "owner project role", baseRole: "writer", denyRoles: cloudAccessNoDenyRoles(), projects: cloudAccessProjects(map[string]string{projectID: "owner"})},
+		{name: "write project role", baseRole: "writer", denyRoles: cloudAccessNoDenyRoles(), projects: cloudAccessProjects(map[string]string{projectID: "write"})},
+		{name: "readonly project role", baseRole: "writer", denyRoles: cloudAccessNoDenyRoles(), projects: cloudAccessProjects(map[string]string{projectID: "readonly"})},
+
+		{name: "unknown project role", baseRole: "writer", denyRoles: cloudAccessNoDenyRoles(), projects: cloudAccessProjects(map[string]string{projectID: "read"}), wantSummary: "Unknown Project Role"},
+		{name: "unknown deny role", baseRole: "writer", denyRoles: cloudAccessDenyRoles("readonly"), projects: cloudAccessNoProjects(), wantSummary: "Unknown Cloud Deny Role"},
+		{name: "owner cannot be cloud_read_only", baseRole: "owner", denyRoles: cloudAccessDenyRoles("cloud_read_only"), projects: cloudAccessNoProjects(), wantSummary: "Cloud Owner Cannot Be Read-Only"},
+		// "writer" gets its own did-you-mean; a longer name that merely contains it
+		// is an unknown role, not that typo.
+		{name: "a longer role name containing writer is an unknown role", baseRole: "writer", denyRoles: cloudAccessNoDenyRoles(), projects: cloudAccessProjects(map[string]string{projectID: "writer_of_nothing"}), wantSummary: "Unknown Project Role"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diags := runCloudAccessValidateConfig(t, cloudAccessConfigModel(cloudAccessMemberMap(map[string]attr.Value{
+				email: cloudAccessMember(tc.baseRole, tc.denyRoles, tc.projects),
+			})))
+			if tc.wantSummary == "" {
+				if diags.HasError() {
+					t.Fatalf("unexpected error: %v", diags)
+				}
+				return
+			}
+			d := cloudAccessFindError(diags, tc.wantSummary)
+			if d == nil {
+				t.Fatalf("expected an %q error, got: %v", tc.wantSummary, diags)
+			}
+			// Only that error: the "writer" did-you-mean must not also fire.
+			cloudAccessAssertOnlyErrorSummary(t, diags, tc.wantSummary)
+			if !strings.Contains(d.Detail(), email) {
+				t.Errorf("error detail does not name the member %q: %s", email, d.Detail())
+			}
+		})
 	}
 }

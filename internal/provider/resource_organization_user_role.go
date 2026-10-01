@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -17,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -147,10 +150,11 @@ func setOrganizationPermissionLevel(ctx context.Context, client *Client, identit
 // claim's origin file - it was copied from here onto cloud_access - so removing
 // this record is exactly what would let it spread a third time.
 //
-// Matched on the status text DoRequestRaw produces, since the helper does not
-// return the status code itself.
+// Matched on UnexpectedStatusError's status code, never on text: a 403 whose body
+// happens to mention a 501 is not the feature gate.
 func orgRolesFeatureDisabled(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "unexpected status 501")
+	var statusErr *UnexpectedStatusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotImplemented
 }
 
 // orgSelfModification reports whether an error is the backend refusing to let a
@@ -245,7 +249,7 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The email of the organization member whose role this resource manages. Same value as `email`.",
+				MarkdownDescription: "The email of the organization member whose role this resource manages. The same address as `email`, in the letter case first recorded.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -253,10 +257,17 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 			"email": schema.StringAttribute{
 				Required: true,
 				MarkdownDescription: "Email of the organization member whose role this manages. The member must already " +
-					"exist in the organization. Matched case-insensitively against the API, but changing this value " +
-					"replaces the resource - it identifies a different person.",
+					"exist in the organization. Matched case-insensitively against the API. Changing it to a different " +
+					"address replaces the resource - it identifies a different person; changing only its letter case " +
+					"updates in place.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.RequiresReplaceIf(
+						func(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+							resp.RequiresReplace = !strings.EqualFold(req.PlanValue.ValueString(), req.StateValue.ValueString())
+						},
+						"Replaces the resource when the email is a different address; a letter-case change updates in place.",
+						"Replaces the resource when the email is a different address; a letter-case change updates in place.",
+					),
 				},
 			},
 			"user_id": schema.StringAttribute{
@@ -282,12 +293,15 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				// default is only safe where guessing wrong is harmless, and a privilege
 				// change is not. Stating the role is this resource's entire job.
 				//
-				// No OneOf validator: the roles API is being actively extended, and a
-				// hard-coded enum would reject a new backend role until a provider release.
-				// Known values are documented here instead, per the permissive-validation
-				// decision.
-				MarkdownDescription: "The member's organization base role. Known values are `owner` and `collaborator`; " +
-					"the API may accept newer values, so this is not validated against a fixed list. Required - " +
+				// Validated against the two roles the backend accepts. Any other value
+				// either 422s at apply or, on the legacy endpoint, is silently collapsed to
+				// collaborator (demoting an owner) and then fails as an inconsistent
+				// result - and the only value Read can return is owner or collaborator, so
+				// nothing else could ever round-trip.
+				Validators: []validator.String{
+					stringvalidator.OneOf("owner", "collaborator"),
+				},
+				MarkdownDescription: "The member's organization base role: `owner` or `collaborator`. Required - " +
 					"there is deliberately no default, because guessing it during adoption of an existing member " +
 					"could silently change their privileges.",
 			},
@@ -296,8 +310,10 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				Optional:    true,
 				Computed:    true,
 				// Optional+Computed, and the two states mean different things:
-				//   omitted  -> leave whatever the organization already has, and write via
-				//               the ungated legacy endpoint (works in every organization).
+				//   omitted  -> leave whatever the organization already has: the base role is
+				//               written through the roles API with the current deny roles sent
+				//               back unchanged, or through the legacy endpoint in an
+				//               organization without the roles API (works everywhere).
 				//   declared -> authoritative over the whole set, including an explicit []
 				//               which genuinely clears, via the gated roles endpoint.
 				//
@@ -327,19 +343,22 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
 				},
+				Validators: []validator.List{
+					listvalidator.UniqueValues(),
+					listvalidator.ValueStringsAre(stringvalidator.OneOf("image_reader", "image_reader_no_base_images")),
+				},
 				MarkdownDescription: "Container image deny roles for the member - restrictions layered on top of " +
 					"`base_role`, never extra capability. Known values are `image_reader` (cannot create custom " +
 					"images or register external images) and `image_reader_no_base_images` (the same, and " +
-					"additionally cannot deploy Anyscale base images). Not validated against a fixed list, as the " +
-					"API is being extended.\n\n" +
+					"additionally cannot deploy Anyscale base images). Order is not significant and " +
+					"duplicates are rejected.\n\n" +
 					"Note these **also restrict organization owners**, unlike cloud deny roles, which do not " +
 					"restrict organization or project owners.\n\n" +
 					"Omit this attribute to leave the organization's existing deny roles untouched. Set it - " +
 					"including to an empty list `[]`, which removes all deny roles - to manage the set " +
 					"authoritatively.\n\n" +
 					"**Setting this attribute at all requires the organization roles API**, which is not enabled in " +
-					"every organization. Managing only `base_role` uses a different endpoint that works " +
-					"everywhere.\n\n" +
+					"every organization. Managing only `base_role` works everywhere.\n\n" +
 					"The underlying API field is named `additional_roles`; that name is misleading and this " +
 					"attribute deliberately does not copy it.",
 			},
@@ -463,6 +482,45 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 	var diags diag.Diagnostics
 
 	if !denyRolesDeclared {
+		// deny_roles was not declared, so the member's deny roles are not ours to
+		// change - but the base role still has to land where the console and
+		// permission checks read it. The legacy endpoint writes Postgres only, so in
+		// an organization with the roles API enabled SpiceDB would keep the old role
+		// while state and every plan showed the new one. Where the roles API is
+		// available, write through it, sending the member's CURRENT deny roles back
+		// unchanged (the same read-modify-write the console does). Fall back to the
+		// legacy endpoint only when the roles API is not enabled (501) or the
+		// current roles cannot be determined (no user_id).
+		if userID != "" {
+			//
+			// Known limitation: if the organization has the roles write enabled but its
+			// roles READ disabled, the per-user GET reports no deny roles and this write
+			// sends [], clearing real ones. Both are on by default; where both are off
+			// (for example Azure) the write answers 501 and the legacy fallback below
+			// applies.
+			current, readErr := r.currentDenyRoles(ctx, userID)
+			if readErr != nil {
+				// Setting base_role without touching deny_roles needs the member's
+				// current deny roles first; without them the write could clear them.
+				AddAPIError(&diags, "read the member's current deny roles before setting base_role", readErr)
+				return diags
+			}
+			err := setOrganizationRoles(ctx, r.client, userID, model.BaseRole.ValueString(), current)
+			switch {
+			case err == nil:
+				return diags
+			case orgRolesFeatureDisabled(err):
+				// Roles API not enabled in this organization: the legacy endpoint is the
+				// only write path, and in such an organization it is also what the
+				// permission checks read.
+			case orgSelfModification(err):
+				diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
+				return diags
+			default:
+				diags.AddError("Could Not Set Organization Roles", collaboratorErrorDiagnosticDetail(err))
+				return diags
+			}
+		}
 		if err := setOrganizationPermissionLevel(ctx, r.client, identityID, model.BaseRole.ValueString()); err != nil {
 			if orgSelfModification(err) {
 				diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
@@ -503,6 +561,22 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 	return diags
 }
 
+// currentDenyRoles reads a member's current additional roles from the singular
+// per-user endpoint, the only source that reports them (the list hardcodes an
+// empty set). Never nil on success, so a roles write sends [] rather than null.
+func (r *OrganizationUserRoleResource) currentDenyRoles(ctx context.Context, userID string) ([]string, error) {
+	singular, err := DoRequestAndParse[OrganizationCollaboratorSingularResponse](
+		ctx, r.client, "GET", fmt.Sprintf("/api/v2/organization_collaborators/%s", userID), nil, http.StatusOK,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if singular.Result.AdditionalRoles == nil {
+		return []string{}, nil
+	}
+	return singular.Result.AdditionalRoles, nil
+}
+
 // findOrgCollaboratorByEmail resolves an org member's full record from their
 // email, with additional_roles hydrated from the singular per-user endpoint.
 //
@@ -528,7 +602,10 @@ func findOrgCollaboratorByEmail(ctx context.Context, client *Client, email strin
 		if !strings.EqualFold(c.Email, email) {
 			continue
 		}
-		hydrated := hydrateCollaboratorRoles(ctx, client, c)
+		hydrated, err := hydrateCollaboratorRoles(ctx, client, c)
+		if err != nil {
+			return nil, err
+		}
 		return &hydrated, nil
 	}
 	return nil, fmt.Errorf("%w: no organization member found with email %s", ErrNotFound, email)
@@ -538,15 +615,31 @@ func findOrgCollaboratorByEmail(ctx context.Context, client *Client, email strin
 func applyCollaboratorToModel(ctx context.Context, model *OrganizationUserRoleResourceModel, c *OrganizationCollaboratorResult) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	model.ID = types.StringValue(c.Email)
-	model.Email = types.StringValue(c.Email)
+	// The backend stores emails lowercased. Email is Required + RequiresReplace, so
+	// replacing the configured spelling with the API's would make Core reject the
+	// result as inconsistent (and plan a replacement forever after). Keep the
+	// configured spelling when it names the same address, and derive the ID from it.
+	if model.Email.IsNull() || model.Email.IsUnknown() || !strings.EqualFold(model.Email.ValueString(), c.Email) {
+		model.Email = types.StringValue(c.Email)
+	}
+	// ID is the address as first recorded: a later case-only edit of email updates in
+	// place and must not change it (the planned value is the prior one).
+	if model.ID.IsNull() || model.ID.IsUnknown() {
+		model.ID = model.Email
+	}
 	model.IdentityID = types.StringValue(c.ID)
 	model.UserID = stringPtrOrNull(c.UserID)
 	model.BaseRole = types.StringValue(c.BaseRole)
 
-	denyRoles, listDiags := additionalRolesToList(ctx, c.AdditionalRoles)
-	diags.Append(listDiags...)
-	model.DenyRoles = denyRoles
+	// The backend stores deny roles as a set and returns them deduplicated in its own
+	// fixed order, so a list declared in another order would come back "different".
+	// When the returned roles are the same set as the model's, keep the model's
+	// order; a genuinely different set is real drift and takes the API's value.
+	if !sameStringSet(ctx, model.DenyRoles, c.AdditionalRoles) {
+		denyRoles, listDiags := additionalRolesToList(ctx, c.AdditionalRoles)
+		diags.Append(listDiags...)
+		model.DenyRoles = denyRoles
+	}
 
 	return diags
 }
@@ -843,7 +936,10 @@ func (r *OrganizationUserRoleResource) ImportState(ctx context.Context, req reso
 		return
 	}
 
-	var model OrganizationUserRoleResourceModel
+	// Seed the email from the import ID so a mixed-case import keeps the spelling the
+	// practitioner wrote: the API returns it lowercased, and email is Required, so a
+	// config spelled the same way as the import ID would otherwise plan a replace.
+	model := OrganizationUserRoleResourceModel{Email: types.StringValue(email)}
 	resp.Diagnostics.Append(applyCollaboratorToModel(ctx, &model, collaborator)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -852,12 +948,11 @@ func (r *OrganizationUserRoleResource) ImportState(ctx context.Context, req reso
 }
 
 // stringListToSlice converts a types.List of strings to a []string, treating a null or
-// unknown list as empty - the deny_roles Optional-not-Computed contract means "omitted"
-// must translate to "send an empty additional_roles set," never "omit the field," since
-// SetOrganizationRolesRequest.AdditionalRoles is a required field on the wire (see
-// setOrganizationRoles above). Relocated from resource_cloud_user_role.go, which shared
-// this exact same Optional-not-Computed-list contract before that resource was removed;
-// this is now its only caller.
+// unknown list as empty. SetOrganizationRolesRequest.AdditionalRoles is a required field
+// on the wire (see setOrganizationRoles above), so it is always sent. deny_roles is
+// Optional+Computed, and it is only called when deny_roles was declared, so it sees the
+// user's list (including an explicit []); an omitted deny_roles takes the read-modify-write
+// path in writeOrganizationRole instead.
 //
 // APPLY-TIME ONLY. ElementsAs errors on an unknown element, which at APPLY time
 // cannot happen - every value is resolved by then - but at VALIDATE or PLAN time
@@ -903,4 +998,30 @@ func resolveIdentityForEmail(ctx context.Context, client *Client, email string) 
 		return c.ID, *c.UserID, nil
 	}
 	return "", "", fmt.Errorf("no organization member found with email %s", email)
+}
+
+// sameStringSet reports whether the known, non-null list holds exactly the
+// elements of want, ignoring order. A null or unknown list, or an undetermined
+// (nil) want, is never "the same": the caller then takes the API's value.
+func sameStringSet(ctx context.Context, have types.List, want []string) bool {
+	if have.IsNull() || have.IsUnknown() || want == nil {
+		return false
+	}
+	var got []string
+	if have.ElementsAs(ctx, &got, false).HasError() {
+		return false
+	}
+	set := make(map[string]struct{}, len(got))
+	for _, g := range got {
+		set[g] = struct{}{}
+	}
+	if len(got) != len(want) || len(set) != len(want) {
+		return false
+	}
+	for _, w := range want {
+		if _, ok := set[w]; !ok {
+			return false
+		}
+	}
+	return true
 }

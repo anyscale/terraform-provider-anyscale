@@ -196,14 +196,14 @@ Required:
 
 Optional:
 
-- `deny_roles` (List of String) Restrictions layered on top of `base_role`, never extra capability. The only known value is `cloud_read_only`.
+- `deny_roles` (List of String) Restrictions layered on top of `base_role`, never extra capability. The only accepted value is `cloud_read_only`, which a cloud `owner` cannot have; either mistake is rejected at plan time.
 
 Unlike the organization-scope equivalent, cloud deny roles do **not** restrict organization or project owners.
 
 A member with `cloud_read_only` may only hold `readonly` on this cloud's projects; anything else is rejected at plan time.
-- `projects` (Map of String) This member's roles on projects under this cloud, keyed by project ID. Known values are `owner`, `write` and `readonly`.
+- `projects` (Map of String) This member's roles on projects under this cloud, keyed by project ID. Must be `owner`, `write` or `readonly`; anything else is rejected at plan time.
 
-Note `write` here, not `writer` - the project vocabulary and the cloud vocabulary genuinely differ. `writer` on a project is rejected at plan time with a did-you-mean, rather than left to fail as an API error partway through an apply.
+Note `write` here, not the cloud spelling `writer`; the two vocabularies differ.
 
 ~> **Authority here is scoped to the projects you name.** This resource is authoritative over these project roles and no others: a role dropped from this map is revoked, but a role granted out of band on a project no configuration mentions is invisible to Terraform and is left alone. That is deliberate - reading every project under the cloud would mean adopting this resource silently took ownership of projects you never mentioned.
 

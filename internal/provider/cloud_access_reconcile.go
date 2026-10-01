@@ -591,17 +591,12 @@ func reconcileCloudAccess(
 	result.Ungranted = append(result.Ungranted, projectUngranted...)
 	diags.Append(projectDiags...)
 	if diags.HasError() {
-		// Only a genuine READ failure reaches here (the re-read of cloud members or
-		// project roles that planning itself needs) - reconcileProjectRoles no
-		// longer returns an error for a project GRANT failure, which is recorded in
-		// Ungranted instead. A read failure this late is still dangerous: cloud
-		// grants above may already have succeeded, so this still risks the same
-		// taint this whole rewrite exists to avoid. It is left as a hard error
-		// anyway, deliberately, because there is no member list to reason about at
-		// all without it - there is nothing safe to record and nothing to skip
-		// noting. This is the one remaining gap the design record's "verification
-		// still owed" section should track until a plan/read failure this late is
-		// itself converted to a recorded, non-fatal outcome.
+		// reconcileProjectRoles records both of its read failures (the cloud-member
+		// and project-role reads planning needs) as an unplanned shortfall rather
+		// than an error, and a project GRANT failure goes to Ungranted, so it does
+		// not return error diagnostics today. Kept as a guard: a future error path
+		// there must stop the reconcile rather than continue with state that
+		// claims project grants nothing applied.
 		return result, diags
 	}
 	anyGrantFailed = anyGrantFailed || len(result.Ungranted) > 0
@@ -895,13 +890,11 @@ func cloudAccessRevokeFailureReason(err error) string {
 // anywhere suppresses every destructive action in the apply, not only the
 // ones downstream of the specific failure. See reconcileCloudAccess.
 //
-// The two read failures below remain fatal - a known, tracked gap, not an
-// oversight. Converting a cloud grant failure to a recorded outcome was this
-// change's job; a READ failure this late (after cloud grants may have already
-// succeeded) still risks the identical taint this whole rewrite exists to
-// avoid, but there is no member list to plan against at all without it, so
-// there is nothing safe to record in its place. Track this in the design
-// record's verification-owed section rather than silently accepting it.
+// A READ failure inside this function - the cloud-member or project-role read that
+// planning needs - is not fatal: it is recorded as an unplanned shortfall (see
+// cloudAccessUnplannedProjectShortfall), so the apply converges and the next
+// plan shows what was not reconciled. The returned diagnostics stay empty for
+// those paths.
 func reconcileProjectRoles(
 	ctx context.Context,
 	client *Client,

@@ -48,8 +48,7 @@ type OrganizationUserModel struct {
 	PermissionLevel types.String `tfsdk:"permission_level"`
 	CreatedAt       types.String `tfsdk:"created_at"`
 
-	// DS-OU-2 (Phase B): permission_level above is deprecated backend-side in
-	// favor of these two.
+	// permission_level above is deprecated backend-side in favor of these two.
 	BaseRole        types.String `tfsdk:"base_role"`
 	AdditionalRoles types.List   `tfsdk:"additional_roles"`
 }
@@ -150,7 +149,7 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 		return
 	}
 
-	// Convert to Terraform model. DS-OU-1: name is genuinely nullable server-side,
+	// Convert to Terraform model. name is genuinely nullable server-side,
 	// mapped via StringPointerValue matching the adjacent UserID field - a null
 	// name must never collapse to "".
 	//
@@ -165,7 +164,11 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 	// trade-off for an auditing data source, not an oversight.
 	users := make([]OrganizationUserModel, len(collaborators))
 	for i, user := range collaborators {
-		user = hydrateCollaboratorRoles(ctx, d.client, user)
+		user, err = hydrateCollaboratorRoles(ctx, d.client, user)
+		if err != nil {
+			AddAPIError(&resp.Diagnostics, "read the roles of an organization user", err)
+			return
+		}
 
 		additionalRoles, diags := additionalRolesToList(ctx, user.AdditionalRoles)
 		resp.Diagnostics.Append(diags...)
