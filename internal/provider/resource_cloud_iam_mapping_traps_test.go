@@ -56,6 +56,10 @@ func newCloudIAMMappingTrapMockServer(t *testing.T, cloudID, cloudResourceID str
 	var putBodies []map[string]any
 
 	mux := http.NewServeMux()
+	// An explicit cloud_resource_id is checked against the cloud's own resources before any write.
+	mux.HandleFunc("/api/v2/clouds/"+cloudID+"/resources", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"results": [{"name": "default", "is_default": true, "cloud_resource_id": "` + cloudResourceID + `"}], "metadata": {"total": 1, "next_paging_token": null}}`))
+	})
 	path := "/api/v2/clouds/" + cloudID + "/deployment/" + cloudResourceID + "/config"
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

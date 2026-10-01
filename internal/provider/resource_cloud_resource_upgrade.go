@@ -566,7 +566,6 @@ func cloudResourceResourceSchemaV1() *schema.Schema {
 						Optional:            true,
 						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.",
 						PlanModifiers: []planmodifier.List{
-							awsSubnetIDsSemanticEqualPlanModifier{},
 							listplanmodifier.RequiresReplace(),
 						},
 					},
@@ -575,7 +574,6 @@ func cloudResourceResourceSchemaV1() *schema.Schema {
 						Optional:            true,
 						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).",
 						PlanModifiers: []planmodifier.Map{
-							awsSubnetIDsToAZSemanticEqualPlanModifier{},
 							mapplanmodifier.RequiresReplace(),
 						},
 					},

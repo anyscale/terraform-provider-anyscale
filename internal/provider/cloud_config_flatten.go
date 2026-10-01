@@ -16,7 +16,7 @@ import (
 // aws_config/gcp_config/kubernetes_config/object_storage/file_storage blocks -
 // the reverse of expandAWSConfig etc. in resource_cloud_resource.go.
 //
-// C3-v2: config-block recovery from the API happens ONLY in ImportState (see
+// Config-block recovery from the API happens ONLY in ImportState (see
 // requiredImportConfigBlocks below), never in Create/Read. These blocks are
 // not Computed, so Terraform requires them to equal exactly what the plan
 // configured - populating one during Create/Read that the user's .tf never
@@ -27,7 +27,7 @@ import (
 // resolveIsEmptyCloud derives is_empty_cloud from "does this cloud have zero
 // resources attached right now", but ONLY while current is null/unknown (a
 // fresh import, since Create always sets it explicitly and Read never
-// touched it before C3). Once resolved - true or false - it must never be
+// touched it). Once resolved - true or false - it must never be
 // re-derived: a live empty cloud that later gets a resource attached would
 // otherwise flip to non-empty on its next refresh, which would incorrectly
 // un-gate config-block population onto a cloud whose own .tf never had one.
@@ -196,7 +196,8 @@ func flattenAWSConfig(ctx context.Context, cfg *AWSConfig) (types.Object, diag.D
 // already carries these fields fully resolved by the time Create's response
 // arrives (the backend's own _populate_aws_values gates its derivation on
 // "unset", the identical fill-when-omitted semantics this mirrors). Called
-// from Create only - Update never touches aws_config (see C3-v2), and these
+// from Create only - Update never recovers aws_config (only anyscale_cloud_resource's
+// Update copies the planned subnet forms, see carryAWSSubnetForms), and these
 // 3 fields are Computed+UseStateForUnknown, so Update's plan value is
 // already resolved before Update ever runs.
 //
@@ -360,7 +361,7 @@ func stripBucketPrefix(provider, bucketName string) string {
 // equals the cloud's own region - "user never set it" and "user explicitly
 // set it to the same value" are byte-identical in storage and on the wire,
 // so there is nothing here for this function to recover differently either
-// way. PR #180's guard predates that finding: it assumed nulling a
+// way. An earlier guard assumed nulling a
 // same-as-cloud-region value was necessary to avoid re-deriving the
 // backend's auto-fill, but the backend already never sends that value back
 // - the guard was never actually preventing anything real from round-tripping,
@@ -382,7 +383,7 @@ func flattenObjectStorage(cfg *ObjectStorage, provider string) (types.Object, di
 	return obj, diags
 }
 
-// fileStorageDefaultMountPath is the mount_path value pre-D1 schema
+// fileStorageDefaultMountPath is the mount_path value older schema
 // versions defaulted to; resource_cloud_upgrade.go and
 // resource_cloud_resource_upgrade.go still reference it as their frozen
 // schema's Default. The live schema no longer fabricates this value - see
@@ -391,7 +392,7 @@ const fileStorageDefaultMountPath = "/mnt/shared"
 
 // flattenFileStorage populates file_storage from the API's FileStorage.
 //
-// L2: mount_path is Optional+Computed with no Default (D1 - the provider
+// mount_path is Optional+Computed with no Default (the provider
 // stopped fabricating a value for it). It is recovered verbatim like every
 // other field below; an empty API value resolves to null rather than
 // fileStorageDefaultMountPath. AWS has no backend field for mount_path at
@@ -399,19 +400,16 @@ const fileStorageDefaultMountPath = "/mnt/shared"
 // always resolves to null there. GCP/Azure/Generic carry a real value and
 // round-trip it unchanged.
 //
-// L3: mount_targets IS recovered here again, reversing the v0.15.2-through-
-// v0.16.1 history - v0.15.2/PR #180 recovered it verbatim; v0.16.1/PR #189
-// stopped recovering it because it was then a schema.ListNestedBlock, which
-// cannot be Computed, so a recovered value against an omitting config forced
-// listplanmodifier.RequiresReplace() to destroy-and-recreate the live cloud
-// (a real customer report). This release converts mount_targets to a
-// ListNestedAttribute with Optional+Computed+UseStateForUnknown (see the
-// schema), which makes recovering it here safe again: a recovered value
+// mount_targets is recovered here. It was once a schema.ListNestedBlock,
+// which cannot be Computed, so a recovered value against an omitting config
+// forced listplanmodifier.RequiresReplace() to destroy-and-recreate the live
+// cloud (a real customer report). It is now a ListNestedAttribute with
+// Optional+Computed (see the schema), which makes recovering it safe: a recovered value
 // against an omitting config is absorbed by Computed instead of diffing.
 // The create path is unaffected either way - expandFileStorage still sends
 // a config-supplied mount_targets to the backend. An explicit config change
-// is now an in-place update, not a replacement: D2 removed RequiresReplace
-// from every file_storage attribute and added the resources-PUT write path.
+// is an in-place update, not a replacement: no file_storage attribute
+// requires replacement, and Update writes through the resources PUT.
 //
 // persistent_volume_claim/csi_ephemeral_volume_driver have no Default and no
 // AWS-specific quirk - still recovered exactly as the API carries them,
@@ -468,16 +466,21 @@ func flattenMountTargets(mountTargets []MountTarget) (types.List, diag.Diagnosti
 
 // mergeFileStorageDerivedFields is mergeAWSDerivedFields for
 // file_storage.mount_targets and mount_path - same fill-when-omitted rule,
-// same Create-only call site, same nil-derived-resolves-Unknown-to-null
+// same nil-derived-resolves-Unknown-to-null
 // reasoning for the early pre-add_resource State.Set. mount_targets gates
 // on "unset" the identical way as memorydb/memorystore (EFS/Filestore
 // auto-discovery - see clouds_resource.py's _populate_aws_values/
 // _populate_gcp_values); mount_path is Optional+Computed with no Default
-// (D1), so it must resolve here too or Terraform errors on an
+// (no fabricated default), so it must resolve here too or Terraform errors on an
 // unknown Computed value after apply. derived is the add_resource
 // response's own FileStorage. Returns fileStorage unchanged if it is null
 // (no file_storage in this plan).
-func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorage) (types.Object, diag.Diagnostics) {
+//
+// fillNull selects whether a known null slot is filled too. Create passes true: it has no prior
+// state, so null there means "not yet resolved". Update passes false: a known null in the plan is
+// the value the plan committed to (carried from state), and Terraform rejects an apply that
+// replaces it, so only Unknown slots may take the backend's value.
+func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorage, fillNull bool) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if fileStorage.IsNull() || fileStorage.IsUnknown() {
 		return fileStorage, diags
@@ -485,7 +488,7 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 
 	patched := fileStorage.Attributes()
 
-	if v, ok := patched["mount_targets"]; ok && (v.IsNull() || v.IsUnknown()) {
+	if v, ok := patched["mount_targets"]; ok && (v.IsUnknown() || (fillNull && v.IsNull())) {
 		var apiMountTargets []MountTarget
 		if derived != nil {
 			apiMountTargets = derived.MountTargets
@@ -495,7 +498,7 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 		patched["mount_targets"] = mountTargets
 	}
 
-	if v, ok := patched["mount_path"]; ok && (v.IsNull() || v.IsUnknown()) {
+	if v, ok := patched["mount_path"]; ok && (v.IsUnknown() || (fillNull && v.IsNull())) {
 		var apiMountPath string
 		if derived != nil {
 			apiMountPath = derived.MountPath
@@ -508,21 +511,21 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 	return obj, diags
 }
 
-// checkFileStorageDrift is D3: Read-only visibility into how the live
+// checkFileStorageDrift is Read-only visibility into how the live
 // cloud's file_storage has diverged from state, in both directions - a
 // field state declares that live no longer has, or has a different value
 // for, is "declared-but-dropped"; a field live has that state never
 // declared is "live-but-undeclared". It only appends warnings and never
 // writes to fileStorage - the config blocks stay recover-only-on-import
-// (see this file's header comment on C3-v2), so this is a mitigation, not a
+// (see this file's header comment), so this is a mitigation, not a
 // fix. Full drift management needs file_storage converted from a Block to
 // an Attribute, which the ratified design explicitly deferred as breaking.
 //
-// Suppression: state written before D1 (mount_path Optional+Computed, no
-// fabricated default) still carries fileStorageDefaultMountPath even on
+// Suppression: state written before mount_path stopped defaulting still
+// carries fileStorageDefaultMountPath even on
 // AWS, which has no backend field for mount_path at all and never returns
 // one. Comparing that residue against a genuinely empty live value would
-// warn on every plan for every pre-D1 user. Narrow on purpose - only
+// warn on every plan for every such user. Narrow on purpose - only
 // mount_path, only when live is empty AND state is exactly
 // fileStorageDefaultMountPath - so a GCP user who really configured
 // "/mnt/shared" and lost it on the backend still gets the warning.
@@ -634,10 +637,10 @@ func formatMountTargets(mountTargets []MountTarget) string {
 // resource's API data. Returns an empty map if there's nothing to recover
 // (nil resource, e.g. a genuinely empty cloud) - never an error on its own.
 //
-// Provider config is still compute-stack-gated (see C3-v2): VM gets
+// Provider config is compute-stack-gated: VM gets
 // aws_config OR gcp_config; K8S gets kubernetes_config. Recovering the
 // OTHER provider's block (e.g. aws_config on a K8S cloud, where it's
-// optional) would reintroduce the ambiguity C3-v2 was written to avoid: a
+// optional) would reintroduce an ambiguity: a
 // later Read has no way to tell "recovered at import" apart from
 // "genuinely absent" for an optional block, but for a compute-stack-
 // required block that distinction never arises, since a valid config could
@@ -647,8 +650,8 @@ func formatMountTargets(mountTargets []MountTarget) string {
 // whenever the API actually returns data for them - this is the fix for a
 // real customer report (AWS VM cloud, object_storage/file_storage
 // configured, import forced a destroy-and-recreate because both are
-// ForceNew and neither was recovered for VM). This does NOT reopen C3-v2's
-// ambiguity concern the way recovering aws_config on K8S would: both
+// ForceNew and neither was recovered for VM). This does NOT reopen that
+// ambiguity the way recovering aws_config on K8S would: both
 // flatten functions already return ObjectNull for a nil cfg, so a live
 // resource that genuinely has no storage configured still comes back null,
 // matching an omitted block exactly - the only residual risk is the
@@ -657,7 +660,7 @@ func formatMountTargets(mountTargets []MountTarget) string {
 // which is a plan diff to review, not a destructive replace, and is called
 // out explicitly in the changelog/docs for this fix rather than buried.
 // file_storage's mount_path additionally guards against collapsing the
-// schema's Computed default (see flattenFileStorage, L2) - a real, verified
+// schema's Computed default (see flattenFileStorage) - a real, verified
 // landmine a naive "recover whatever the API returns" change would have
 // hit. object_storage.region has no equivalent guard here: it is recovered
 // unconditionally (never anything but null to recover in the one case that
@@ -712,4 +715,22 @@ func requiredImportConfigBlocks(ctx context.Context, provider string, defaultRes
 	}
 
 	return blocks, diags
+}
+
+// carryAWSSubnetForms copies subnet_ids and subnet_ids_to_az from planned into
+// current. Those two attributes are the only aws_config fields that can change
+// in place (see awsSubnetIDsRequiresReplaceUnlessEquivalent); every other
+// change replaces the resource, so nothing else needs carrying. Either object
+// being null or unknown leaves current unchanged.
+func carryAWSSubnetForms(current, planned types.Object) (types.Object, diag.Diagnostics) {
+	if current.IsNull() || current.IsUnknown() || planned.IsNull() || planned.IsUnknown() {
+		return current, nil
+	}
+	patched := current.Attributes()
+	for _, name := range []string{"subnet_ids", "subnet_ids_to_az"} {
+		if v, ok := planned.Attributes()[name]; ok {
+			patched[name] = v
+		}
+	}
+	return types.ObjectValue(awsConfigAttrTypes(), patched)
 }

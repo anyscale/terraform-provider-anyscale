@@ -60,6 +60,11 @@ func newCloudIAMMappingMockServer(t *testing.T, cloudID, cloudResourceID string)
 	}
 
 	mux := http.NewServeMux()
+	// An explicit cloud_resource_id is checked against the cloud's own resources before any write.
+	mux.HandleFunc(fmt.Sprintf("/api/v2/clouds/%s/resources", cloudID), func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"results": [{"name": "default", "is_default": true, "cloud_resource_id": %q}], "metadata": {"total": 1, "next_paging_token": null}}`, cloudResourceID)
+	})
 	path := fmt.Sprintf("/api/v2/clouds/%s/deployment/%s/config", cloudID, cloudResourceID)
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()

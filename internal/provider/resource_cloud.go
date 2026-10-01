@@ -21,7 +21,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -285,8 +284,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Optional:            true,
 						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.",
 						PlanModifiers: []planmodifier.List{
-							awsSubnetIDsSemanticEqualPlanModifier{},
-							listplanmodifier.RequiresReplace(),
+							awsSubnetIDsRequiresReplaceUnlessEquivalent{},
 						},
 					},
 					"subnet_ids_to_az": schema.MapAttribute{
@@ -294,8 +292,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Optional:            true,
 						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).",
 						PlanModifiers: []planmodifier.Map{
-							awsSubnetIDsToAZSemanticEqualPlanModifier{},
-							mapplanmodifier.RequiresReplace(),
+							awsSubnetIDsToAZRequiresReplaceUnlessEquivalent{},
 						},
 					},
 					"security_group_ids": schema.ListAttribute{
@@ -544,7 +541,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 						Computed:            true,
 						MarkdownDescription: "The mount path for the file storage. Only meaningful on GCP Filestore and Azure/Generic NFS-backed clouds; AWS rejects it at plan time, and it is ignored for `persistent_volume_claim`/`csi_ephemeral_volume_driver` configs. Null when the backend has no value - never fabricated - and recovered from the live value at import. On GCP, if `mount_targets` is unset Anyscale auto-discovers the Filestore share and overwrites this value. `file_storage` is not refreshed on read, so state keeps the import-time value; `terraform plan` warns when it drifts, except for a legacy `/mnt/shared` value that the backend has no counterpart for. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver`.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.UseStateForUnknown(),
+							fileStorageDerivedStringModifier{},
 						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
@@ -576,9 +573,9 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"mount_targets": schema.ListNestedAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "Mount targets, each an address with an optional zone. The NFS-style mechanism; mutually exclusive with the Kubernetes-native `persistent_volume_claim`/`csi_ephemeral_volume_driver`. Derived from `file_storage_id` when unset - the backend discovers the address once the EFS/Filestore resource exists. Set it only to pin a value, e.g. a sibling EFS/Filestore module output (see the aws-vm/gcp-vm examples). `file_storage` is not refreshed on read, so this is a create/import-time snapshot; `terraform plan` warns if the address later changes. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value.",
+						MarkdownDescription: "Mount targets, each an address with an optional zone. The NFS-style mechanism; mutually exclusive with the Kubernetes-native `persistent_volume_claim`/`csi_ephemeral_volume_driver`. Derived from `file_storage_id` when unset, and re-derived whenever that ID changes - the backend discovers the address once the EFS/Filestore resource exists. Set it only to pin a value, e.g. a sibling EFS/Filestore module output (see the aws-vm/gcp-vm examples). `file_storage` is not refreshed on read, so this is a create/import-time snapshot; `terraform plan` warns if the address later changes. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value.",
 						PlanModifiers: []planmodifier.List{
-							listplanmodifier.UseStateForUnknown(),
+							fileStorageDerivedListModifier{},
 						},
 						NestedObject: schema.NestedAttributeObject{
 							Attributes: map[string]schema.Attribute{
@@ -621,16 +618,16 @@ func (r *CloudResource) Configure(ctx context.Context, req resource.ConfigureReq
 	r.client = client
 }
 
-// ValidateConfig rejects, at plan time, any configuration that would
-// otherwise sail through `terraform plan` clean and only fail deep inside
-// buildProviderConfig - by which point Create has already run the POST
-// /api/v2/clouds step and persisted a real (permanently resource-less) cloud
-// to state (K9). It intentionally mirrors buildProviderConfig's own
-// AZURE/GENERIC rejection rather than replacing it: this is a plan-time
-// preview for the common case where the value is already known in the
-// config; buildProviderConfig's runtime check remains the last line of
-// defense for a provider value that's still unknown at plan time (e.g.
-// interpolated from another resource's computed output).
+// ValidateConfig rejects, at plan time, configuration the provider can already
+// tell is unsupported (AZURE VM, GENERIC, AWS mount_path, Kubernetes-only
+// networking fields). It mirrors buildProviderConfig's AZURE/GENERIC rejection
+// rather than replacing it: this is the plan-time preview for values already
+// known in the config, while Create runs buildProviderConfig before it posts the
+// cloud (see embeddedCreateRequirementError), so a provider value that is still
+// unknown at plan time also fails before any cloud exists. The create-only
+// requirements (compute_stack, region, required blocks) are checked in
+// ModifyPlan instead, because ValidateConfig also runs for an existing cloud,
+// whose omitted compute_stack and region come from state.
 //
 // Scoped to exactly the configurations that would reach buildProviderConfig:
 // hasEmbeddedResourceConfig must be true (an empty cloud - no aws_config/
@@ -721,18 +718,18 @@ func generateRandomString(length int) string {
 // separate from aws_config/gcp_config/azure_config: aws_config/gcp_config are
 // optional for K8S clouds (see addCloudResource), so a K8S cloud can be
 // defined by kubernetes_config alone. Omitting it here (as this function did
-// before - F2/C12) misclassified such a cloud as empty, so Create took the
+// before) misclassified such a cloud as empty, so Create took the
 // empty-cloud branch and never called addCloudResource at all - no K8S
 // resource was ever created, and the cloud rolled up to VM on read
 // ("Provider produced inconsistent result after apply: .compute_stack: was
 // K8S, but now VM").
 func (r *CloudResource) hasEmbeddedResourceConfig(plan *CloudResourceModel) bool {
-	return !plan.AWSConfig.IsNull() || !plan.GCPConfig.IsNull() || !plan.AzureConfig.IsNull() || !plan.KubernetesConfig.IsNull()
+	return hasEmbeddedCloudConfig(plan)
 }
 
 // regionRequiredForCreateError returns a diagnostic-ready error for an
 // all-in-one create whose region could not be determined by the time
-// addCloudResource is about to be called - see C13. A non-empty region
+// addCloudResource is about to be called. A non-empty region
 // produces no error.
 func regionRequiredForCreateError(region string) (summary, detail string, hasError bool) {
 	if region != "" {
@@ -818,19 +815,10 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// Determine if this is an empty cloud (no embedded config)
 	isEmptyCloud := !r.hasEmbeddedResourceConfig(&plan)
 
-	// Auto-detect cloud provider from config blocks
+	// Auto-detect cloud provider from config blocks (AWS for an empty cloud)
 	provider := plan.CloudProvider.ValueString()
 	if provider == "" {
-		if !plan.AWSConfig.IsNull() {
-			provider = "AWS"
-		} else if !plan.GCPConfig.IsNull() {
-			provider = "GCP"
-		} else if !plan.AzureConfig.IsNull() {
-			provider = "AZURE"
-		} else {
-			// Default to AWS for empty clouds
-			provider = "AWS"
-		}
+		provider = detectCloudProvider("", plan.AWSConfig, plan.GCPConfig, plan.AzureConfig)
 		plan.CloudProvider = types.StringValue(provider)
 	}
 
@@ -840,22 +828,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	// Extract region from config blocks if not explicitly set
 	if region == "" {
-		if !plan.AWSConfig.IsNull() {
-			// Try to infer from subnet_ids_to_az
-			var awsModel AWSConfigModel
-			diags := plan.AWSConfig.As(ctx, &awsModel, basetypes.ObjectAsOptions{})
-			if !diags.HasError() && !awsModel.SubnetIDsToAZ.IsNull() {
-				// Get first AZ and extract region
-				subnetMap := make(map[string]string)
-				awsModel.SubnetIDsToAZ.ElementsAs(ctx, &subnetMap, false)
-				for _, az := range subnetMap {
-					if len(az) > 2 {
-						region = az[:len(az)-1] // Remove last char (e.g., us-east-2a -> us-east-2)
-					}
-					break
-				}
-			}
-		}
+		region = inferRegionFromAWSConfig(ctx, plan.AWSConfig)
 		// Use placeholder region for empty cloud pattern
 		if region == "" && isEmptyCloud {
 			region = "us-east-1"
@@ -895,13 +868,23 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
+	// Every check that depends only on local values runs before the POST, so a config that cannot
+	// succeed fails here instead of after a real cloud exists. A cloud adopted above skips these:
+	// it already exists and nothing is created.
+	if !isEmptyCloud {
+		if summary, detail, bad := embeddedCreateRequirementError(ctx, &plan, provider, computeStack, region); bad {
+			resp.Diagnostics.AddError(summary, detail)
+			return
+		}
+	}
+
 	// Get or generate credentials
 	credentials, wasPlaceholder, err := r.getOrGenerateCredentials(ctx, &plan, provider, isEmptyCloud)
 	if err != nil {
 		resp.Diagnostics.AddError("Credentials Error", err.Error())
 		return
 	}
-	// C9: a placeholder is expected and silent for a pure empty cloud (BYOC -
+	// A placeholder is expected and silent for a pure empty cloud (BYOC -
 	// real credentials attach later via anyscale_cloud_resource). It's
 	// suspicious for an all-in-one cloud: the user supplied a config block
 	// but we still couldn't derive a credential from it, most likely a
@@ -964,7 +947,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	tflog.Debug(ctx, "POST /api/v2/clouds response", map[string]any{"status": httpResp.StatusCode, "body": string(body)})
+	tflog.Debug(ctx, "POST /api/v2/clouds response", map[string]any{"status": httpResp.StatusCode, "body": SanitizeJSONForLog(string(body))})
 
 	if httpResp.StatusCode != http.StatusCreated && httpResp.StatusCode != http.StatusOK {
 		resp.Diagnostics.AddError(
@@ -1026,7 +1009,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	} else {
 		resp.Diagnostics.Append(d...)
 	}
-	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil); !d.HasError() {
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil, true); !d.HasError() {
 		plan.FileStorage = fileStorage
 	} else {
 		resp.Diagnostics.Append(d...)
@@ -1059,31 +1042,6 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		}
 
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-		return
-	}
-
-	// For all-in-one pattern, compute_stack is required
-	if computeStack == "" {
-		resp.Diagnostics.AddError(
-			"Missing Required Field",
-			"compute_stack is required when using embedded config (aws_config, gcp_config, or kubernetes_config)",
-		)
-		return
-	}
-
-	// C13: region auto-detection only has a source to infer from for AWS
-	// (subnet_ids_to_az) and only defaults a placeholder for the empty-cloud
-	// pattern - a K8S-only cloud (no aws_config/gcp_config) with no explicit
-	// region has neither, and plan.Region would otherwise still be an empty
-	// string here. Guard rather than send Region: "" to add_resource: a
-	// clear error here is far better than an opaque API failure.
-	// Deliberately NOT inferring from kubernetes_config.zones
-	// (region-from-zone parsing is provider-specific and error-prone - AWS
-	// "us-west-2a" vs GCP "us-central1-a") and NOT making region Required on
-	// the schema, which would break AWS users who rely on subnet inference
-	// and never hit this path at all.
-	if summary, detail, hasError := regionRequiredForCreateError(plan.Region.ValueString()); hasError {
-		resp.Diagnostics.AddError(summary, detail)
 		return
 	}
 
@@ -1164,12 +1122,28 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// Update updates the resource and sets the updated Terraform state on success.
-// ModifyPlan surfaces the Anyscale-managed file_storage refusal at plan time rather than letting
-// the apply discover it - see D2 in docs/decisions/cloud-file-storage-lifecycle/README.md.
+// ModifyPlan runs the create-time checks of an all-in-one cloud, and on an update surfaces the
+// Anyscale-managed file_storage refusal at plan time rather than letting the apply discover it - see
+// docs/decisions/cloud-file-storage-lifecycle/README.md.
 func (r *CloudResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	// Null state is a create and null plan is a destroy; neither updates file_storage.
-	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+	// A null plan is a destroy; nothing to check.
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	// A null state is a create. The embedded-config requirements are enforced here rather than in
+	// ValidateConfig because ValidateConfig also runs for an imported or existing cloud, whose
+	// omitted compute_stack and region legitimately come from state.
+	if req.State.Raw.IsNull() {
+		var config CloudResourceModel
+		resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+		if !resp.Diagnostics.HasError() {
+			var lookup cloudNameLookup
+			if r.client != nil {
+				lookup = r.findCloudByName
+			}
+			resp.Diagnostics.Append(validateEmbeddedCreateConfig(ctx, &config, lookup)...)
+		}
 		return
 	}
 
@@ -1196,14 +1170,24 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	cloudID := plan.ID.ValueString()
 	tflog.Info(ctx, "Updating Anyscale Cloud", map[string]any{"id": cloudID})
 
-	// Issue the resources PUT before updateMutableFields - see D2 in
+	// Issue the resources PUT before updateMutableFields - see
 	// docs/decisions/cloud-file-storage-lifecycle/README.md. No transaction spans these calls, so
 	// the failure-prone one (running clusters can 400 this) goes first.
-	updateFileStorageIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
+	updated, liveFileStorage := updateFileStorageIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
 		plan.FileStorage, state.FileStorage, plan.IsPrivateCloud.ValueBool(),
 		state.CloudProvider.ValueString(), state.ComputeStack.ValueString(), state.Region.ValueString())
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	if updated {
+		// A changed file_storage_id leaves mount_targets/mount_path unknown in the plan; fill them
+		// from the value the backend now holds, not from the PUT (which returns null).
+		fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, liveFileStorage, false)
+		resp.Diagnostics.Append(d...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.FileStorage = fileStorage
 	}
 
 	if err := r.updateMutableFields(ctx, cloudID, plan, state); err != nil {
@@ -1365,7 +1349,20 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 			"cloud_id": cloudID,
 			"error":    err.Error(),
 		})
-		// Continue with deletion - the API will tell us if we can't delete
+		// Continue with deletion - the API will tell us if we can't delete. Surface the failure
+		// too: if the delete then fails (or succeeds), the practitioner needs to know pools may
+		// still be attached.
+		// A list failure cannot name a pool; a per-pool failure names the pool in err.
+		summary := fmt.Sprintf("Could not detach machine pools from cloud %s before deleting it", cloudID)
+		if errors.Is(err, errListMachinePools) {
+			summary = fmt.Sprintf("Could not list machine pools, so any attached to cloud %s were not detached before deleting it", cloudID)
+		}
+		resp.Diagnostics.AddWarning(
+			"Machine Pool Detach Failed",
+			fmt.Sprintf("%s: %s. The delete was attempted anyway. "+
+				"If it fails because a pool is still attached, detach that machine pool from the cloud with the Anyscale CLI or console and apply again.",
+				summary, err.Error()),
+		)
 	}
 
 	_, err := DoRequestRaw(ctx, r.client, "DELETE", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil,
@@ -1378,6 +1375,9 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	tflog.Info(ctx, "Cloud deleted successfully", map[string]any{"id": cloudID})
 }
+
+// errListMachinePools marks a detach failure that happened before any pool was identified.
+var errListMachinePools = errors.New("failed to list machine pools")
 
 // detachMachinePoolsFromCloud detaches all machine pools attached to the given cloud.
 func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID string) error {
@@ -1393,7 +1393,7 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 		http.StatusOK,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to list machine pools: %w", err)
+		return fmt.Errorf("%w: %w", errListMachinePools, err)
 	}
 
 	// Find and detach pools attached to this cloud
@@ -1441,7 +1441,7 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 
 // ImportState imports an existing resource into Terraform state.
 //
-// C3-v2: this is the ONLY place that recovers aws_config/gcp_config/
+// This is the ONLY place that recovers aws_config/gcp_config/
 // kubernetes_config/object_storage/file_storage from the API - never Create
 // or Read (see backfillComputedCloudFields). ImportState runs once, before
 // Terraform's plan-consistency machinery is in the loop, so setting a
@@ -1451,7 +1451,7 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 // Provider config stays compute-stack-REQUIRED-only - VM gets aws_config or
 // gcp_config (whichever the provider is), K8S gets kubernetes_config.
 // Recovering the other stack's optional provider block would reintroduce
-// the ambiguity C3-v2 exists to avoid: a later Read can never safely
+// the ambiguity this rule exists to avoid: a later Read can never safely
 // distinguish "recovered at import" from "genuinely absent" for a block
 // that a valid config could legitimately have never set, the way it can for
 // a block a valid config could never have omitted in the first place.
@@ -1482,8 +1482,15 @@ func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStat
 	}
 
 	resources, err := listCloudResources(ctx, r.client, cloudID)
+	if err != nil && isHostedCloudResourcesError(err) {
+		// An Anyscale-hosted cloud has no resources to list and no blocks to recover; Read
+		// tolerates the same response.
+		return
+	}
 	if err != nil {
-		tflog.Warn(ctx, "Failed to list cloud resources during import; config blocks will not be recovered", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+		// Fail closed: every config block is RequiresReplace, so importing without them would
+		// look like success and then plan a replacement of the live cloud.
+		AddAPIError(&resp.Diagnostics, "list cloud resources during import, so the cloud's configuration blocks cannot be recovered; retry the import", err)
 		return
 	}
 
@@ -1505,7 +1512,7 @@ func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStat
 // anyscale_cloud_resource is attached later).
 //
 // wasPlaceholder tells the caller whether the last resort fired, so it can
-// decide whether to warn (C9): a fabricated credential is expected and
+// decide whether to warn: a fabricated credential is expected and
 // silent for a pure empty cloud, but suspicious - almost certainly a
 // forgotten role/service-account field - when the user DID supply a config
 // block and we still couldn't derive anything from it.
@@ -1532,8 +1539,7 @@ func (r *CloudResource) getOrGenerateCredentials(ctx context.Context, plan *Clou
 		// identity before falling through to a placeholder. Without this, every
 		// correctly-configured all-in-one AWS+K8S cloud hit the placeholder path
 		// and fired a "set aws_config.controlplane_iam_role_arn" warning that
-		// does not apply to K8S clouds at all - confirmed live during native-B's
-		// EKS validation.
+		// does not apply to K8S clouds at all - confirmed on a live EKS cloud.
 		if !plan.KubernetesConfig.IsNull() {
 			var k8sModel KubernetesConfigModel
 			diags := plan.KubernetesConfig.As(ctx, &k8sModel, basetypes.ObjectAsOptions{})
@@ -1684,7 +1690,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		return err
 	}
 
-	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource response", map[string]any{"status": deployResp.StatusCode, "body": string(deployBody)})
+	tflog.Debug(ctx, "PUT /api/v2/clouds/"+cloudID+"/add_resource response", map[string]any{"status": deployResp.StatusCode, "body": SanitizeJSONForLog(string(deployBody))})
 
 	if deployResp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to add cloud resource: %s - %s", deployResp.Status, string(deployBody))
@@ -1710,7 +1716,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		} else {
 			tflog.Warn(ctx, "Failed to merge memorystore-derived fields into gcp_config", map[string]any{"diagnostics": d.Errors()})
 		}
-		if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResult.Result.FileStorage); !d.HasError() {
+		if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResult.Result.FileStorage, true); !d.HasError() {
 			plan.FileStorage = fileStorage
 		} else {
 			tflog.Warn(ctx, "Failed to merge mount_targets-derived fields into file_storage", map[string]any{"diagnostics": d.Errors()})
@@ -1723,10 +1729,10 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 
 // readCloudState reads the cloud from the API and updates the state model.
 //
-// driftDiags is D3's opt-in hook: nil from Create/Update, which must not warn
-// on file_storage drift mid-apply (Create can legitimately see the pre-D1
-// mount_path residue resolve, and a just-applied Update has nothing to warn
-// about yet). Read passes &resp.Diagnostics so the warning actually surfaces.
+// driftDiags is the opt-in hook for file_storage drift warnings: nil from Create/Update, which
+// must not warn mid-apply (Create can legitimately see a legacy mount_path value resolve, and a
+// just-applied Update has nothing to warn about yet). Read passes &resp.Diagnostics so the warning
+// actually surfaces.
 func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, state *CloudResourceModel, driftDiags *diag.Diagnostics) error {
 	resp, err := r.client.DoRequest(ctx, "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
 	if err != nil {
@@ -1765,16 +1771,16 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 	state.LineageTrackingEnabled = types.BoolValue(cloudResp.Result.LineageTrackingEnabled)
 	state.AggregatedLogsEnabled = types.BoolValue(cloudResp.Result.IsAggregatedLogsEnabled)
 
-	// C3 v2: backfill ONLY the Computed fields (is_empty_cloud,
+	// Backfill ONLY the Computed fields (is_empty_cloud,
 	// cloud_resource_id) from the cloud's resources. Config blocks
 	// (aws_config/gcp_config/kubernetes_config/object_storage/file_storage)
 	// are NOT Computed, so they may only ever equal what Create/Update saw in
 	// the plan - populating them here, in the shared Create/Read path, is
-	// exactly what caused the C12-exposed regression: a K8S-only create
-	// (aws_config/gcp_config genuinely absent, optional for K8S) got
-	// aws_config injected on the very first post-create Read, and Terraform
-	// hard-errored with "inconsistent result after apply: .aws_config was
-	// absent, but now present" - a fresh create's first Read starts with
+	// exactly what broke a K8S-only create (aws_config/gcp_config genuinely
+	// absent, optional for K8S): aws_config was injected on the very first
+	// post-create Read, and Terraform hard-errored with "inconsistent result
+	// after apply: .aws_config was absent, but now present" - a fresh
+	// create's first Read starts with
 	// null blocks exactly like a fresh import does, and this function had no
 	// way to tell the two apart. Config-block recovery now lives ONLY in
 	// ImportState (see there), which runs once, before Terraform's own
@@ -1822,7 +1828,7 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 			state.ComputeStack = types.StringValue(cloudResp.Result.ComputeStack)
 		}
 
-		// D3: same defaultResource this block already resolved for
+		// Same defaultResource this block already resolved for
 		// compute_stack carries the live file_storage to compare against
 		// state - zero extra API calls. Only Read wires driftDiags non-nil.
 		if driftDiags != nil && defaultResource != nil {
@@ -1837,8 +1843,8 @@ func (r *CloudResource) readCloudState(ctx context.Context, cloudID string, stat
 // backfillComputedCloudFields fills in is_empty_cloud and cloud_resource_id
 // from the cloud's resources. Both are Computed,
 // so the provider may set them at any time without risking a
-// plan-consistency error - unlike the non-Computed config blocks (see
-// C3-v2; this function deliberately does not touch them).
+// plan-consistency error - unlike the non-Computed config blocks, which this function
+// deliberately does not touch (see ImportState).
 //
 // is_empty_cloud is sticky: it's derived from "zero resources attached" only
 // while still null/unknown (a fresh import never ran Create, so it starts

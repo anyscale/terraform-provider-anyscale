@@ -23,13 +23,13 @@ func findCloudResourceByID(results []CloudDeploymentResult, cloudResourceID stri
 }
 
 // buildCloudResourceUpdateRequest assembles the body for PUT /api/v2/clouds/{cloud_id}/resources
-// per D2's frozen spec (docs/decisions/cloud-file-storage-lifecycle/README.md): round-trip the
+// per the design in docs/decisions/cloud-file-storage-lifecycle/README.md: round-trip the
 // live deployment's own scalars and its one owned provider-config block verbatim from a fresh
 // GET, derive networking_mode from isPrivateCloud rather than echoing the GET, and take
 // file_storage from the plan (nil clears it).
 //
 // live must come from a listCloudResources call made during this same Update - not a stale or
-// cross-deployment copy - because G1.7 found the GET is not a lossless representation of the
+// cross-deployment copy - because the GET is not a lossless representation of the
 // record: aws_config.anyscale_iam_role_id comes back blank whenever it isn't a valid ARN, and
 // echoing that blank verbatim would erase the stored credential.
 //
@@ -92,9 +92,8 @@ func buildCloudResourceUpdateRequest(
 // first - every resources PUT unconditionally rewrites provider/compute_stack/region/
 // networking_mode on the record, so an unneeded call is pure downside, never a no-op.
 //
-// The response body is intentionally discarded rather than parsed into a typed struct: its shape
-// was not part of what Gate 1 confirmed, and every caller re-reads the deployment via
-// listCloudResources/readCloudState/readCloudResource immediately afterward regardless.
+// The response body is intentionally discarded: the endpoint returns null, so the written values
+// are read back by listing the resources afterward (see updateFileStorageIfChanged).
 func updateCloudResourceFileStorage(
 	ctx context.Context,
 	client *Client,
@@ -150,9 +149,8 @@ const anyscaleManagedFileStorageRefusal = "`file_storage` cannot be changed in p
 // refusals the backend can raise all arrive as the same opaque 400, so they are told apart by their
 // message body.
 //
-// The substrings below are taken from backend source, NOT from a captured response - G1.3 and G1.5
-// were never run (see the Gate 1 results table in
-// docs/decisions/cloud-file-storage-lifecycle/README.md). So a match adds guidance and a miss falls
+// The substrings below are taken from backend source, NOT from a captured response (see the Gate 1
+// results table in docs/decisions/cloud-file-storage-lifecycle/README.md). So a match adds guidance and a miss falls
 // through to the generic branch; neither presents backend wording as the provider's own, and the
 // API's real message is always included so an unmatched refusal is still actionable.
 func addFileStorageUpdateError(diags *diag.Diagnostics, cloudResourceID string, err error) {
@@ -192,6 +190,12 @@ func addFileStorageUpdateError(diags *diag.Diagnostics, cloudResourceID string, 
 // updateFileStorageIfChanged issues the resources PUT when planFileStorage differs from
 // stateFileStorage, and does nothing otherwise. Shared verbatim by anyscale_cloud and
 // anyscale_cloud_resource, whose Update paths differ only in which model holds these values.
+//
+// It reports whether a PUT was made and, if so, the deployment's file_storage as the backend now
+// holds it. The PUT response is null, and the backend derives mount_targets and mount_path from
+// file_storage_id when the request omits them, so the only source for those values is a fresh
+// listing after the write. Callers resolve their unknown plan values from it. On any error the
+// diagnostics carry it and the returned values are meaningless.
 func updateFileStorageIfChanged(
 	ctx context.Context,
 	client *Client,
@@ -200,32 +204,45 @@ func updateFileStorageIfChanged(
 	planFileStorage, stateFileStorage types.Object,
 	isPrivateCloud bool,
 	wantProvider, wantComputeStack, wantRegion string,
-) {
+) (updated bool, live *FileStorage) {
 	if planFileStorage.Equal(stateFileStorage) {
-		return
+		return false, nil
 	}
 
 	fileStorage, err := expandFileStorage(ctx, planFileStorage)
 	if err != nil {
 		diags.AddError("Update Error", fmt.Sprintf("failed to convert file_storage: %s", err))
-		return
+		return false, nil
 	}
 
 	results, err := listCloudResources(ctx, client, cloudID)
 	if err != nil {
 		AddAPIError(diags, "list cloud resources before updating file_storage", err)
-		return
+		return false, nil
 	}
-	live := findCloudResourceByID(results, cloudResourceID)
-	if live == nil {
+	current := findCloudResourceByID(results, cloudResourceID)
+	if current == nil {
 		diags.AddError("Update Error", fmt.Sprintf("cloud resource %s not found while updating file_storage", cloudResourceID))
-		return
+		return false, nil
 	}
 
-	if err := updateCloudResourceFileStorage(ctx, client, cloudID, live, fileStorage, isPrivateCloud,
+	if err := updateCloudResourceFileStorage(ctx, client, cloudID, current, fileStorage, isPrivateCloud,
 		wantProvider, wantComputeStack, wantRegion); err != nil {
 		addFileStorageUpdateError(diags, cloudResourceID, err)
+		return false, nil
 	}
+
+	results, err = listCloudResources(ctx, client, cloudID)
+	if err != nil {
+		AddAPIError(diags, "list cloud resources after updating file_storage", err)
+		return true, nil
+	}
+	after := findCloudResourceByID(results, cloudResourceID)
+	if after == nil {
+		diags.AddError("Update Error", fmt.Sprintf("cloud resource %s not found after updating file_storage", cloudResourceID))
+		return true, nil
+	}
+	return true, after.FileStorage
 }
 
 // refuseFileStorageChangeOnManagedCloud raises the Anyscale-managed refusal at plan time, so the

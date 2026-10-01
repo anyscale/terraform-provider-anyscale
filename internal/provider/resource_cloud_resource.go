@@ -19,7 +19,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -304,8 +303,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.",
 						PlanModifiers: []planmodifier.List{
-							awsSubnetIDsSemanticEqualPlanModifier{},
-							listplanmodifier.RequiresReplace(),
+							awsSubnetIDsRequiresReplaceUnlessEquivalent{},
 						},
 					},
 					"subnet_ids_to_az": schema.MapAttribute{
@@ -313,8 +311,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Optional:            true,
 						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).",
 						PlanModifiers: []planmodifier.Map{
-							awsSubnetIDsToAZSemanticEqualPlanModifier{},
-							mapplanmodifier.RequiresReplace(),
+							awsSubnetIDsToAZRequiresReplaceUnlessEquivalent{},
 						},
 					},
 					"security_group_ids": schema.ListAttribute{
@@ -560,7 +557,7 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 						Computed:            true,
 						MarkdownDescription: "The mount path for the file storage. Only meaningful on GCP Filestore and Azure/Generic NFS-backed clouds; AWS rejects it at plan time, and it is ignored for `persistent_volume_claim`/`csi_ephemeral_volume_driver` configs. Null when the backend has no value - never fabricated - and recovered from the live value at import. On GCP, if `mount_targets` is unset Anyscale auto-discovers the Filestore share and overwrites this value. `file_storage` is not refreshed on read, so state keeps the import-time value; `terraform plan` warns when it drifts, except for a legacy `/mnt/shared` value that the backend has no counterpart for. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value. Mutually exclusive with `persistent_volume_claim` and `csi_ephemeral_volume_driver`.",
 						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.UseStateForUnknown(),
+							fileStorageDerivedStringModifier{},
 						},
 						Validators: []validator.String{
 							stringvalidator.ConflictsWith(
@@ -592,9 +589,9 @@ func (r *CloudResourceResource) Schema(ctx context.Context, req resource.SchemaR
 					"mount_targets": schema.ListNestedAttribute{
 						Optional:            true,
 						Computed:            true,
-						MarkdownDescription: "Mount targets, each an address with an optional zone. The NFS-style mechanism; mutually exclusive with the Kubernetes-native `persistent_volume_claim`/`csi_ephemeral_volume_driver`. Derived from `file_storage_id` when unset - the backend discovers the address once the EFS/Filestore resource exists. Set it only to pin a value, e.g. a sibling EFS/Filestore module output (see the aws-vm/gcp-vm examples). `file_storage` is not refreshed on read, so this is a create/import-time snapshot; `terraform plan` warns if the address later changes. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value.",
+						MarkdownDescription: "Mount targets, each an address with an optional zone. The NFS-style mechanism; mutually exclusive with the Kubernetes-native `persistent_volume_claim`/`csi_ephemeral_volume_driver`. Derived from `file_storage_id` when unset, and re-derived whenever that ID changes - the backend discovers the address once the EFS/Filestore resource exists. Set it only to pin a value, e.g. a sibling EFS/Filestore module output (see the aws-vm/gcp-vm examples). `file_storage` is not refreshed on read, so this is a create/import-time snapshot; `terraform plan` warns if the address later changes. Applying a new value corrects state in place; re-import is needed only if config already matches the stale value.",
 						PlanModifiers: []planmodifier.List{
-							listplanmodifier.UseStateForUnknown(),
+							fileStorageDerivedListModifier{},
 						},
 						NestedObject: schema.NestedAttributeObject{
 							Attributes: map[string]schema.Attribute{
@@ -637,12 +634,10 @@ func (r *CloudResourceResource) Configure(ctx context.Context, req resource.Conf
 }
 
 // ValidateConfig is CloudResource.ValidateConfig's counterpart for the
-// multi-resource cloud (empty cloud + separately-attached resource) pattern (K9). Unlike
-// CloudResource, this resource has no azure_config block and no is-empty
-// escape hatch - Create always resolves a provider and always calls
-// buildProviderConfig unconditionally (see Create below), so the only way to
-// reach the AZURE/GENERIC dead end here is an explicit cloud_provider value;
-// no hasEmbeddedResourceConfig-style gating is needed.
+// multi-resource cloud (empty cloud + separately-attached resource) pattern. Unlike
+// CloudResource, this resource has no is-empty escape hatch - Create always
+// resolves a provider and always calls buildProviderConfig unconditionally
+// (see Create below), so no hasEmbeddedResourceConfig-style gating is needed.
 func (r *CloudResourceResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var data CloudResourceResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
@@ -773,7 +768,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	// resource_cloud.go's identical placeholder before its own
 	// buildProviderConfig call. The real merge below (using the add_resource
 	// response) overwrites this placeholder for the final State.Set.
-	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil); !d.HasError() {
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil, true); !d.HasError() {
 		plan.FileStorage = fileStorage
 	} else {
 		resp.Diagnostics.Append(d...)
@@ -841,7 +836,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	} else {
 		resp.Diagnostics.Append(d...)
 	}
-	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResp.Result.FileStorage); !d.HasError() {
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResp.Result.FileStorage, true); !d.HasError() {
 		plan.FileStorage = fileStorage
 	} else {
 		resp.Diagnostics.Append(d...)
@@ -937,9 +932,8 @@ func (r *CloudResourceResource) Read(ctx context.Context, req resource.ReadReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// Update updates the resource and sets the updated Terraform state on success.
 // ModifyPlan surfaces the Anyscale-managed file_storage refusal at plan time rather than letting
-// the apply discover it - see D2 in docs/decisions/cloud-file-storage-lifecycle/README.md.
+// the apply discover it - see docs/decisions/cloud-file-storage-lifecycle/README.md.
 func (r *CloudResourceResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	// Null state is a create and null plan is a destroy; neither updates file_storage.
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
@@ -978,8 +972,8 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	// See D2 in docs/decisions/cloud-file-storage-lifecycle/README.md.
-	updateFileStorageIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
+	// See docs/decisions/cloud-file-storage-lifecycle/README.md.
+	_, liveFileStorage := updateFileStorageIfChanged(ctx, r.client, &resp.Diagnostics, cloudID, state.CloudResourceID.ValueString(),
 		plan.FileStorage, state.FileStorage, plan.IsPrivate.ValueBool(),
 		state.CloudProvider.ValueString(), state.ComputeStack.ValueString(), state.Region.ValueString())
 	if resp.Diagnostics.HasError() {
@@ -989,13 +983,22 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 	// file_storage and timeouts are the only fields that update in place, and readCloudResource
 	// refreshes neither, so carry the applied values into state. Otherwise state keeps the
 	// pre-update values and Terraform rejects the apply as inconsistent.
-	fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil)
+	fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, liveFileStorage, false)
 	resp.Diagnostics.Append(d...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 	state.FileStorage = fileStorage
 	state.Timeouts = plan.Timeouts
+
+	// The one other in-place change is switching between subnet_ids and the equivalent
+	// subnet_ids_to_az; readCloudResource does not refresh aws_config, so record the planned form.
+	awsConfig, d := carryAWSSubnetForms(state.AWSConfig, plan.AWSConfig)
+	resp.Diagnostics.Append(d...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.AWSConfig = awsConfig
 
 	if err := r.readCloudResource(ctx, cloudID, resourceName, &state, nil); err != nil {
 		AddAPIError(&resp.Diagnostics, "read cloud resource", err)
@@ -1054,7 +1057,7 @@ func (r *CloudResourceResource) Delete(ctx context.Context, req resource.DeleteR
 
 // ImportState imports an existing resource into Terraform state.
 //
-// C3-v2: this is the ONLY place that recovers aws_config/gcp_config/
+// This is the ONLY place that recovers aws_config/gcp_config/
 // kubernetes_config/object_storage/file_storage from the API - never Create
 // or Read (see readCloudResource). Provider config stays compute-stack-
 // REQUIRED-only; object_storage/file_storage are recovered on every stack
@@ -1119,14 +1122,14 @@ func parseCloudResourceID(id string) (cloudID, resourceName string, err error) {
 // readCloudResource reads the cloud resource from the API and updates the
 // state model.
 //
-// driftDiags is D3's opt-in hook: nil from Create/Update (see readCloudState
+// driftDiags is the opt-in hook for file_storage drift warnings: nil from Create/Update (see readCloudState
 // in resource_cloud.go, same reasoning), &resp.Diagnostics from Read.
 func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, resourceName string, state *CloudResourceResourceModel, driftDiags *diag.Diagnostics) error {
 	// listCloudResources pages through every page rather than just the first:
 	// Read calls this and removes the resource from state on a "not found", so
 	// a resource whose name only appears past page 1 would otherwise be
-	// phantom-deleted from state - the same bug class task d35713ef fixed for
-	// organization_user (née organization_collaborator).
+	// phantom-deleted from state - the same bug class as organization_user's
+	// collaborator lookup.
 	results, err := listCloudResources(ctx, r.client, cloudID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -1166,7 +1169,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 
 	state.OperatorStatus = types.StringPointerValue(foundResource.OperatorStatus)
 
-	// C4: operator_version/reported_at are only present once a K8s
+	// operator_version/reported_at are only present once a K8s
 	// resource's operator has reported in at least once - null for VM,
 	// and null for a K8s resource that hasn't reported yet.
 	if foundResource.OperatorStatusDetails != nil {
@@ -1183,7 +1186,7 @@ func (r *CloudResourceResource) readCloudResource(ctx context.Context, cloudID, 
 		state.IsPrivate = types.BoolValue(false)
 	}
 
-	// D3: foundResource is already this resource's live snapshot - zero
+	// foundResource is already this resource's live snapshot - zero
 	// extra API calls. Only Read wires driftDiags non-nil.
 	if driftDiags != nil {
 		driftDiags.Append(checkFileStorageDrift(ctx, state.FileStorage, foundResource.FileStorage, fmt.Sprintf("cloud_resource %s:%s", cloudID, resourceName))...)
@@ -1408,7 +1411,7 @@ func expandFileStorage(ctx context.Context, obj types.Object) (*FileStorage, err
 		FileStorageID: storageModel.FileStorageID.ValueString(),
 	}
 
-	if !storageModel.MountPath.IsNull() {
+	if !storageModel.MountPath.IsNull() && !storageModel.MountPath.IsUnknown() {
 		storage.MountPath = storageModel.MountPath.ValueString()
 	}
 

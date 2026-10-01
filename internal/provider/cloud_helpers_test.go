@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -988,6 +990,27 @@ func TestStripAnyBucketSchemePrefix(t *testing.T) {
 	for input, want := range cases {
 		if got := stripAnyBucketSchemePrefix(input); got != want {
 			t.Errorf("stripAnyBucketSchemePrefix(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestIsHostedCloudResourcesError(t *testing.T) {
+	hosted := &UnexpectedStatusError{StatusCode: http.StatusBadRequest, Body: `{"error":{"detail":"Cloud resources for Anyscale-hosted clouds can not be fetched."}}`}
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"hosted 400, wrapped", fmt.Errorf("failed to list cloud resources: %w", fmt.Errorf("pagination request failed: %w", hosted)), true},
+		{"other 400", &UnexpectedStatusError{StatusCode: http.StatusBadRequest, Body: `{"detail":"bad request"}`}, false},
+		{"hosted text on 500", &UnexpectedStatusError{StatusCode: http.StatusInternalServerError, Body: hosted.Body}, false},
+		{"403", &UnexpectedStatusError{StatusCode: http.StatusForbidden, Body: "forbidden"}, false},
+		{"network", errors.New("connection refused"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		if got := isHostedCloudResourcesError(tc.err); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

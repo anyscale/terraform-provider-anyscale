@@ -215,6 +215,45 @@ func resolvePrimaryCloudResourceID(ctx context.Context, client *Client, cloudID 
 	}
 }
 
+// checkCloudResourceBelongsToCloud confirms cloudResourceID is one of
+// cloudID's own resources. The config endpoint authorizes on the cloud in the
+// path but loads the deployment by its ID alone, so an ID from another cloud
+// would be written to without any error, replacing that other cloud's
+// mapping. A listing failure is an error rather than a pass: the guard exists
+// to stop a write that cannot be undone from the response.
+func checkCloudResourceBelongsToCloud(ctx context.Context, client *Client, cloudID, cloudResourceID string) error {
+	results, err := listCloudResources(ctx, client, cloudID)
+	if err != nil {
+		return fmt.Errorf("could not list the resources of cloud %q to confirm that cloud_resource_id %q belongs to it: %w", cloudID, cloudResourceID, err)
+	}
+	if findCloudResourceByID(results, cloudResourceID) == nil {
+		return fmt.Errorf("cloud_resource_id %q is not a resource of cloud %q; use the ID of one of that cloud's own resources, or omit cloud_resource_id to use its primary resource", cloudResourceID, cloudID)
+	}
+	return nil
+}
+
+// cloudResourceConfirmedGone reports whether a failed config GET means the
+// deployment no longer exists. A deployment deleted while its cloud still
+// exists makes the backend answer 500 rather than 404 (its "does not exist"
+// error is raised inside a handler that converts every non-RPC failure to a
+// 500), so the status alone cannot say. For a 5xx the cloud's resource list
+// decides: absent from it, or the cloud itself gone, means gone. Any failure
+// to establish that returns false and the caller reports the original error.
+func cloudResourceConfirmedGone(ctx context.Context, client *Client, cloudID, cloudResourceID string, getErr error) bool {
+	if errors.Is(getErr, ErrNotFound) {
+		return true
+	}
+	var statusErr *UnexpectedStatusError
+	if !errors.As(getErr, &statusErr) || statusErr.StatusCode < http.StatusInternalServerError {
+		return false
+	}
+	results, err := listCloudResources(ctx, client, cloudID)
+	if err != nil {
+		return errors.Is(err, ErrNotFound)
+	}
+	return findCloudResourceByID(results, cloudResourceID) == nil
+}
+
 // cloudIAMMappingRuleAttrTypes/Model back the rules ListNestedAttribute.
 func cloudIAMMappingRuleAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
