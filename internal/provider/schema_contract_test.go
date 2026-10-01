@@ -611,9 +611,9 @@ func TestProjectCollaboratorRemoved(t *testing.T) {
 		t.Fatal("anyscale_project.collaborator must be fully removed (v0.25.0), not converted to an attribute - " +
 			"found it declared in the Attributes map")
 	}
-	if s.Version != 1 {
-		t.Errorf("anyscale_project schema Version = %d, want 1 - removing collaborator changes the stored state "+
-			"shape, so the version bump and its state upgrader must ship with it", s.Version)
+	if s.Version < 1 {
+		t.Errorf("anyscale_project schema Version = %d, want at least 1 - removing collaborator changes the stored "+
+			"state shape, so the version bump and its state upgrader must ship with it", s.Version)
 	}
 }
 

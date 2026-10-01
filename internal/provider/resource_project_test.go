@@ -93,12 +93,10 @@ func TestProjectResourceCreate_RequestBody(t *testing.T) {
 	defer server.Close()
 
 	r := &ProjectResource{client: NewClientWithToken(server.URL, "test-token")}
-	configID := "ccfg_123"
 	_, diags := runProjectResourceCreate(t, r, ProjectResourceModel{
-		Name:                   types.StringValue("test-project"),
-		CloudID:                types.StringValue("cld_123"),
-		Description:            types.StringValue("a description"),
-		InitialClusterConfigID: types.StringValue(configID),
+		Name:        types.StringValue("test-project"),
+		CloudID:     types.StringValue("cld_123"),
+		Description: types.StringValue("a description"),
 	})
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
@@ -113,10 +111,10 @@ func TestProjectResourceCreate_RequestBody(t *testing.T) {
 	if capturedBody["description"] != "a description" {
 		t.Errorf("wire description = %v, want %q", capturedBody["description"], "a description")
 	}
-	// The Go field is InitialClusterConfigID but the wire key is
-	// cluster_config -- the API's own name for it (see models.go).
-	if capturedBody["cluster_config"] != configID {
-		t.Errorf("wire cluster_config = %v, want %q (API field is cluster_config, not initial_cluster_config_id)", capturedBody["cluster_config"], configID)
+	// The API rejects unknown keys with a 422, and cluster_config is not one
+	// of its fields.
+	if _, sent := capturedBody["cluster_config"]; sent {
+		t.Errorf("wire body carries cluster_config = %v; the API rejects it", capturedBody["cluster_config"])
 	}
 }
 

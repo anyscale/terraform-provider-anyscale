@@ -75,7 +75,6 @@ output "project_directory_name" {
 ### Optional
 
 - `description` (String) Description of the project. If omitted, the API generates one; an empty string is rejected at plan time because the API would replace it the same way. The Anyscale API has no endpoint to update a project's description in place, so explicitly changing this value to something different forces replacement of the project; omitting it (letting the API-generated value persist) never does.
-- `initial_cluster_config_id` (String) The initial cluster configuration ID to use for workspaces in this project. This is a create-time-only input (API field `cluster_config`): the provider does not read its current value back from the API after creation, so it is not refreshed on `terraform plan`/`refresh` and will always be null immediately after `terraform import`. Changing it forces replacement of the project.
 
 ### Read-Only
 

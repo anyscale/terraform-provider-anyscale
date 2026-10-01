@@ -89,8 +89,8 @@ func TestProjectStateUpgradeV0toV1_DropsCollaborator(t *testing.T) {
 	if v1SchemaResp.Diagnostics.HasError() {
 		t.Fatalf("failed to build v1 (current) schema: %v", v1SchemaResp.Diagnostics)
 	}
-	if v1SchemaResp.Schema.Version != 1 {
-		t.Fatalf("current schema Version = %d, want 1 (bumped for the collaborator removal)", v1SchemaResp.Schema.Version)
+	if v1SchemaResp.Schema.Version != 2 {
+		t.Fatalf("current schema Version = %d, want 2", v1SchemaResp.Schema.Version)
 	}
 	if _, present := v1SchemaResp.Schema.Blocks["collaborator"]; present {
 		t.Fatal("current schema still declares the collaborator block - it should be fully removed")
@@ -108,7 +108,7 @@ func TestProjectStateUpgradeV0toV1_DropsCollaborator(t *testing.T) {
 	}
 	upgrader.StateUpgrader(ctx, req, resp)
 	if resp.Diagnostics.HasError() {
-		t.Fatalf("upgradeProjectStateV0toV1() diagnostics: %v", resp.Diagnostics)
+		t.Fatalf("upgradeProjectStateV0() diagnostics: %v", resp.Diagnostics)
 	}
 
 	// THE load-bearing assertion: the upgraded value must decode cleanly into
@@ -129,7 +129,6 @@ func TestProjectStateUpgradeV0toV1_DropsCollaborator(t *testing.T) {
 		{"CloudID", v1.CloudID.ValueString(), "cld_v0tov1"},
 		{"Name", v1.Name.ValueString(), "project-v0-to-v1"},
 		{"Description", v1.Description.ValueString(), "a v0 project"},
-		{"InitialClusterConfigID", v1.InitialClusterConfigID.ValueString(), "ccfg_v0tov1"},
 		{"CreatorID", v1.CreatorID.ValueString(), "usr_creator_v0tov1"},
 		{"CreatedAt", v1.CreatedAt.ValueString(), "2026-01-01T00:00:00Z"},
 		{"LastUsedCloudID", v1.LastUsedCloudID.ValueString(), "cld_v0tov1"},
@@ -189,7 +188,7 @@ func TestProjectStateUpgradeV0toV1_EmptyCollaboratorList(t *testing.T) {
 	}
 	upgrader.StateUpgrader(ctx, resource.UpgradeStateRequest{State: priorState}, resp)
 	if resp.Diagnostics.HasError() {
-		t.Fatalf("upgradeProjectStateV0toV1() diagnostics on an empty collaborator list: %v", resp.Diagnostics)
+		t.Fatalf("upgradeProjectStateV0() diagnostics on an empty collaborator list: %v", resp.Diagnostics)
 	}
 
 	var v1 ProjectResourceModel
@@ -198,11 +197,6 @@ func TestProjectStateUpgradeV0toV1_EmptyCollaboratorList(t *testing.T) {
 	}
 	if v1.Name.ValueString() != "project-never-used-collaborators" {
 		t.Errorf("Name = %q, want unchanged", v1.Name.ValueString())
-	}
-	// initial_cluster_config_id was never set in this fixture; it must stay
-	// null rather than being defaulted to "" by the upgrade.
-	if !v1.InitialClusterConfigID.IsNull() {
-		t.Errorf("InitialClusterConfigID = %#v, want null (never set in v0 state, must not be defaulted)", v1.InitialClusterConfigID)
 	}
 }
 
@@ -213,7 +207,7 @@ func TestProjectStateUpgradeV0toV1_NilPriorState(t *testing.T) {
 	ctx := context.Background()
 
 	resp := &resource.UpgradeStateResponse{}
-	upgradeProjectStateV0toV1(ctx, resource.UpgradeStateRequest{State: nil}, resp)
+	upgradeProjectStateV0(ctx, resource.UpgradeStateRequest{State: nil}, resp)
 
 	if !resp.Diagnostics.HasError() {
 		t.Fatal("expected an error diagnostic for nil prior state, got none")
