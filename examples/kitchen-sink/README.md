@@ -5,8 +5,7 @@ comprehensive, multi-cloud configuration (it does not declare `anyscale_service`
 `anyscale_scheduler_config`, `anyscale_system_cluster`, `anyscale_cloud_access`,
 `anyscale_cloud_iam_mapping`, `anyscale_organization_user_role`, or
 `anyscale_organization_default_cloud`). This absorbs what used to be a separate `multi-resource-cloud-basic`
-example (multiple resource deployments on one cloud) as one piece of a larger build, so it is now
-the single place to see the whole provider surface working together. Use the other, smaller
+example (multiple resource deployments on one cloud) as one piece of a larger build. Use the other, smaller
 examples in this directory for a focused look at any one piece.
 
 > [!WARNING]

@@ -1,11 +1,11 @@
 ---
-page_title: "Kitchen Sink: A Tour of the Full Provider Surface"
+page_title: "Kitchen Sink: A Tour of the Provider"
 subcategory: "Concepts & Reference"
 description: |-
   A curated tour of the kitchen-sink example - a representative subset of this provider's resources and data sources, wired together, with the non-obvious Terraform patterns it exists to demonstrate.
 ---
 
-# Kitchen sink: a tour of the full provider surface
+# Kitchen sink: a tour of the provider
 
 [`examples/kitchen-sink`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/kitchen-sink)
 wires a representative subset of this provider's resources and data sources into one configuration.

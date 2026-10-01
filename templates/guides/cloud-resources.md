@@ -225,8 +225,10 @@ wouldn't fit a boolean). Prefer `compute_stack == "K8S"` in new configurations.
 
 ## Credentials handling
 
-The provider does not read `anyscale_cloud.credentials` back from the API, and import does not recover it, so it will
-never appear in a `terraform plan` diff after creation and is never exposed through either data source.
+The provider does not read `anyscale_cloud.credentials` back from the API, and import does not recover it, so
+out-of-band changes never show as drift. Changing it in configuration replaces the cloud (see
+[Importing an existing cloud](#importing-an-existing-cloud) for the one exception). It is never exposed through
+either data source.
 Treat the value itself (an AWS IAM role ARN, or a JSON blob for GCP) as sensitive in your own tooling —
 the provider marks the attribute `Sensitive` in state, but redaction is only as good as how you source
 the value into your configuration.
@@ -283,7 +285,7 @@ addition to the block(s) the compute stack requires:
 Import needs the cloud's resource listing to recover those blocks, so `terraform import
 anyscale_cloud` fails if that request fails rather than importing without them; retry the import.
 
-Import does not recover `credentials`. If your configuration sets it, the first plan after import shows an in-place update with a "Value Recorded Without Replacement" warning. Applying records the value in state and sends nothing; the cloud is unchanged. Use `-replace` only if you actually want to recreate the cloud with new credentials. Omitting `credentials` plans clean. A cloud that Terraform created itself still replaces when you change `credentials`.
+Import does not recover `credentials`. If your configuration sets it, the first plan after import shows an in-place update with a "Value Recorded Without Replacement" warning. Applying records the value in state and sends nothing; the cloud is unchanged. Use `-replace` only if you actually want to recreate the cloud with new credentials. Omitting `credentials` plans clean. A cloud created by this provider version or later still replaces when you change `credentials`.
 
 This is not purely new coverage: recovering `object_storage` through one shared code path for both
 compute stacks also fixes a pre-existing bug in **K8S** import specifically. The backend fills in a
