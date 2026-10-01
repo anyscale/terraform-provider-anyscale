@@ -134,7 +134,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 			Sensitive:           true,
 			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries.",
 			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.RequiresReplace(),
+				RequiresReplaceUnlessUnrecoverable("registry_login_secret", "container image"),
 			},
 		},
 
@@ -328,6 +328,7 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	plan.IsBYOD = types.BoolValue(true)
 	plan.Revision = types.Int64Value(0)
 	plan.NameVersion = types.StringNull()
+	MarkCreatedByTerraform(ctx, resp)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -550,11 +551,31 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// Update updates the resource and sets the updated Terraform state on success.
+// Update handles exactly one change: registry_login_secret being set on an
+// imported container image, which RequiresReplaceUnlessUnrecoverable plans as
+// an in-place update because the API never returns the secret. The value is
+// recorded in state and not sent - the image is not changed. Every other
+// attribute requires replacement, so any other diff reaching here is an error.
 func (r *ContainerImageRegistryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// All attributes require replacement, so Update should not be called
-	AddConfigError(&resp.Diagnostics, "Update Not Supported",
-		"Container image registry resources cannot be updated in-place. All changes require replacement.")
+	var plan, state ContainerImageRegistryResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	adoptOnly := state.RegistryLoginSecret.IsNull() && !plan.RegistryLoginSecret.IsNull() &&
+		plan.Name.Equal(state.Name) &&
+		plan.ImageURI.Equal(state.ImageURI) &&
+		plan.RayVersion.Equal(state.RayVersion)
+	if !adoptOnly {
+		AddConfigError(&resp.Diagnostics, "Update Not Supported",
+			"Container image registry resources cannot be updated in-place. All changes require replacement.")
+		return
+	}
+
+	state.RegistryLoginSecret = plan.RegistryLoginSecret
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
 // Delete deletes the resource and removes the Terraform state on success.

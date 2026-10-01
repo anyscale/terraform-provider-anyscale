@@ -550,6 +550,24 @@ func (r *ContainerImageBuildResource) Delete(ctx context.Context, req resource.D
 func (r *ContainerImageBuildResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Import by cluster environment ID
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// project_id is a create-time input that Read does not refresh, so
+	// import is the one place to recover it. The API stores it as sent, and a
+	// template created without one reads back null.
+	template, err := r.getApplicationTemplate(ctx, req.ID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			AddConfigError(&resp.Diagnostics, "Container Image Not Found",
+				fmt.Sprintf("No container image (cluster environment) exists with ID %q.", req.ID))
+			return
+		}
+		AddAPIError(&resp.Diagnostics, "read container image for import", err)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), types.StringPointerValue(template.ProjectID))...)
 }
 
 // Helper functions

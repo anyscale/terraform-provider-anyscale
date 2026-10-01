@@ -232,7 +232,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Sensitive:           true,
 				MarkdownDescription: "Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using the multi-resource cloud pattern (empty cloud + cloud_resource).",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					RequiresReplaceUnlessUnrecoverable("credentials", "cloud"),
 				},
 			},
 
@@ -1036,6 +1036,11 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// step (add_resource, wait, read-back) that can fail. Without this, a
 	// mid-create failure below would leave the cloud orphaned in the backend
 	// with no Terraform record to destroy it.
+	//
+	// Only this fresh-create path is marked. The adopt-by-name path above takes
+	// over a cloud this provider did not create, so it stays unmarked like an
+	// imported one.
+	MarkCreatedByTerraform(ctx, resp)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
