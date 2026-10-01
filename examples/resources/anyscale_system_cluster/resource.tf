@@ -1,6 +1,6 @@
-# Ensure this cloud's System Cluster (task/actor observability dashboards) is enabled and
-# running. Creating this resource enables the System Cluster if needed, starts it if it is
-# terminated, and waits until it reaches RUNNING.
+# Enable and start this cloud's System Cluster (task/actor observability dashboards).
+# Creating this resource waits until it reaches RUNNING. Later applies do not restart a
+# terminated cluster; use `terraform apply -replace` for that.
 resource "anyscale_system_cluster" "primary" {
   cloud_id = "cld_abc123"
 }

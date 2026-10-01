@@ -62,7 +62,7 @@ func (r *SystemClusterResource) Metadata(ctx context.Context, req resource.Metad
 func (r *SystemClusterResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Version: 1,
-		MarkdownDescription: `Ensures the System Cluster for an Anyscale Cloud - the always-on cluster that backs the task and actor observability dashboards - is enabled and running. Declarative: applying this resource enables the System Cluster if it is not already enabled, starts it if it is terminated, and waits until it reaches a healthy ` + "`RUNNING`" + ` state. Re-applying against an already-running cluster is a no-op.
+		MarkdownDescription: `Enables and starts the System Cluster for an Anyscale Cloud - the always-on cluster that backs the task and actor observability dashboards - and waits until it reaches ` + "`RUNNING`" + `. Only creation does this: a later apply does not restart a cluster that has since terminated (use ` + "`terraform apply -replace`" + `).
 
 A cloud's System Cluster is tied to that cloud's primary (default) ` + "`anyscale_cloud_resource`" + ` - a secondary cloud resource on the same cloud never gets a working System Cluster of its own today. Anyscale engineering is actively working on multi-resource System Cluster support; this limitation is not enforced by this resource (the Anyscale API currently exposes no way to detect or check it), so it is a documentation caveat rather than a plan/apply-time guard.
 
@@ -92,7 +92,7 @@ A cloud's System Cluster is tied to that cloud's primary (default) ` + "`anyscal
 			},
 			"is_enabled": schema.BoolAttribute{
 				Computed:            true,
-				MarkdownDescription: "Whether the System Cluster is enabled for this cloud. Always `true` once this resource has been successfully created or imported - `Create`/`Update` unconditionally ensure the System Cluster is enabled before starting it, so there is no separate user-facing toggle on this resource for enable-vs-disable (unlike the removed `anyscale_cloud.enable_system_cluster`, which this resource supersedes). Exposed read-only for observability: `is_enabled = true` together with a non-running `state` is a real, valid combination (e.g. the cluster is enabled but has since been terminated), not something this attribute collapses away.",
+				MarkdownDescription: "Whether the System Cluster is enabled for this cloud. Set to `true` by create and refreshed from the API afterward, so it becomes `false` if the cluster is disabled outside Terraform. `true` with a non-running `state` is valid (enabled, then terminated).",
 			},
 			"workload_service_url": schema.StringAttribute{
 				Computed:            true,

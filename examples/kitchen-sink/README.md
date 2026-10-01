@@ -1,8 +1,10 @@
 # Kitchen Sink Example
 
-Every resource and data source this provider registers, wired together into one comprehensive,
-multi-cloud configuration - with one deliberate exception: the `anyscale_service` resource,
-explained below. This absorbs what used to be a separate `multi-resource-cloud-basic`
+A representative subset of this provider's resources and data sources, wired together into one
+comprehensive, multi-cloud configuration (it does not declare `anyscale_service`,
+`anyscale_scheduler_config`, `anyscale_system_cluster`, `anyscale_cloud_access`,
+`anyscale_cloud_iam_mapping`, `anyscale_organization_user_role`, or
+`anyscale_organization_default_cloud`). This absorbs what used to be a separate `multi-resource-cloud-basic`
 example (multiple resource deployments on one cloud) as one piece of a larger build, so it is now
 the single place to see the whole provider surface working together. Use the other, smaller
 examples in this directory for a focused look at any one piece.
@@ -72,7 +74,7 @@ them directly once they've accepted, no import required. See
 [`organization_user_workflow`](../resources/organization_user_workflow/main.tf) for the full
 invite -> wait -> adopt -> manage lifecycle.
 
-**Data sources (all 13 registered by the provider):** `anyscale_cloud`, `anyscale_clouds`,
+**Data sources (all except `anyscale_cloud_iam_mapping`, `anyscale_scheduler_config`, and `anyscale_system_cluster`):** `anyscale_cloud`, `anyscale_clouds`,
 `anyscale_compute_config`, `anyscale_container_image`, `anyscale_container_images`,
 `anyscale_project`, `anyscale_projects`, `anyscale_user`, `anyscale_organization`,
 `anyscale_organization_user`, `anyscale_organization_users`, `anyscale_services`,

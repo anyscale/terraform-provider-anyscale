@@ -27,7 +27,7 @@ func TestRequiresReplaceUnlessUnrecoverable_ImportedAdoptWarns(t *testing.T) {
 		wantReplace     bool
 		wantWarningText string
 	}{
-		{name: "imported null, config sets value: adopt with warning", state: types.StringNull(), config: types.StringValue("s1"), wantWarningText: "cannot be read back from Anyscale after import"},
+		{name: "imported null, config sets value: adopt with warning", state: types.StringNull(), config: types.StringValue("s1"), wantWarningText: "is not recovered by import"},
 		{name: "non-null change still replaces", state: types.StringValue("s1"), config: types.StringValue("s2"), wantReplace: true},
 		{name: "removing a value still replaces", state: types.StringValue("s1"), config: types.StringNull(), wantReplace: true},
 		{name: "unchanged is a no-op", state: types.StringValue("s1"), config: types.StringValue("s1")},

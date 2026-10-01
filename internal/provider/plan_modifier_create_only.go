@@ -27,8 +27,9 @@ func MarkCreatedByTerraform(ctx context.Context, resp *resource.CreateResponse) 
 }
 
 // RequiresReplaceUnlessUnrecoverable is RequiresReplace for a create-only input
-// that the Anyscale API never returns, so import cannot recover it and leaves it
-// null.
+// that import does not recover (the API may return it, but import deliberately
+// leaves it null), so a config declaring it after import would otherwise force
+// replacement.
 //
 // It behaves exactly like stringplanmodifier.RequiresReplace except in one case:
 // the prior state value is null, the config sets a value, and the resource was
@@ -76,7 +77,7 @@ func (m requiresReplaceUnlessUnrecoverableModifier) PlanModifyString(ctx context
 		}
 		if marker == nil {
 			resp.Diagnostics.AddAttributeWarning(req.Path, "Value Recorded Without Replacement",
-				fmt.Sprintf("%s cannot be read back from Anyscale after import; Terraform will record the configured value without sending it. "+
+				fmt.Sprintf("%s is not recovered by import; Terraform will record the configured value without sending it. "+
 					"The existing %s is not changed. Use -replace to recreate it with this value.", m.attrName, m.objectName))
 			return
 		}

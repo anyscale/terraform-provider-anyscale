@@ -96,7 +96,7 @@ func (d *ComputeConfigDataSource) Schema(ctx context.Context, req datasource.Sch
 			"name": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "The name of the compute config. Either `id` or `name` must be specified. This field is computed when looking up by ID. If multiple compute configs have the same name, the most recently created one will be returned.",
+				MarkdownDescription: "The name of the compute config. Either `id` or `name` must be specified. This field is computed when looking up by ID. If multiple compute configs have the same name, the most recently created non-archived one is returned; an archived config is used, with a warning, only when no non-archived one matches.",
 			},
 
 			// Computed fields

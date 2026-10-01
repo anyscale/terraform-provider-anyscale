@@ -28,10 +28,12 @@ problem — getting a container image Anyscale can run Ray workloads from — th
 lifecycles, and they aren't interchangeable:
 
 - **`anyscale_container_image_build`** builds a new image from a `containerfile` (inline, via
-  Terraform's heredoc syntax) or `containerfile_path` (a file Terraform reads the contents of).
-  Anyscale runs the build for you. Changing the Containerfile's contents on a later `apply` triggers
-  a new build **revision** under the same name — this resource updates in place; nothing here is
-  `RequiresReplace`.
+  Terraform's heredoc syntax) or `containerfile_path` (a file path).
+  Anyscale runs the build for you. Changing `containerfile` on a later `apply` triggers a new build
+  **revision** under the same name without replacing the resource (changing `name` or `project_id`
+  does replace it). Changing `containerfile_path` to a different path also rebuilds, but editing the
+  file behind an unchanged path does not, so use `containerfile = file("...")` if you want content
+  edits to rebuild.
 - **`anyscale_container_image_registry`** registers an image that already exists in a container
   registry you control (`image_uri`), skipping the build step entirely. Anyscale validates the image
   and makes it available immediately. Because there's no build to revise, this resource is fully
@@ -82,7 +84,7 @@ output "training_image_digest" {
 inconsistency:
 
 - **`anyscale_container_image_build`** rebuilds *in place* — changing `containerfile` /
-  `containerfile_path` triggers a new build revision under `Update`, not a replacement — so `digest`
+  `containerfile_path` (the value, not the file's contents) triggers a new build revision, updating in place rather than replacing — so `digest`
   legitimately changes on a rebuild. It has no plan modifiers: Terraform shows it as "known after apply"
   on any plan that changes the Containerfile, the same way `image_uri` and `build_id` do.
 - **`anyscale_container_image_registry`** doesn't rebuild in place, but that immutability doesn't pin
@@ -185,6 +187,8 @@ management happens to be one of these — for example, if you imported it — `D
 backend's "cannot archive a default" error as a successful no-op: Terraform removes the resource from
 state without actually deleting anything server-side. This is deliberate: the alternative is a
 `destroy` that fails every time, for a resource the backend will never actually let you remove.
+
+On an Azure control plane, archiving container images is not supported: destroy removes the resource from state, leaves the image in Anyscale, and shows a "Container Image Left In Place" warning.
 
 ## Looking up images with data sources
 

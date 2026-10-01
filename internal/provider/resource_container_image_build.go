@@ -109,7 +109,7 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			},
 			"containerfile_path": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`. Updating this value triggers a new build revision.",
+				MarkdownDescription: "Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`. Changing the path triggers a new build revision; editing the file's contents does not. To rebuild whenever the contents change, use `containerfile = file(\"...\")` instead.",
 			},
 			"project_id": schema.StringAttribute{
 				Optional:            true,

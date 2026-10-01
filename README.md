@@ -55,6 +55,10 @@ provider "anyscale" {
   - Container images (build from a Containerfile, or register existing images from a registry)
   - Services (deploy Ray Serve applications and roll out new versions)
   - Projects
+  - Organization default cloud (sets which cloud is the organization default)
+  - System Cluster (enables and starts a cloud's System Cluster)
+  - Cloud access (authoritative cloud membership, deny roles, and project roles)
+  - Cloud IAM mapping (dataplane IAM mapping rules for a cloud deployment)
   - Organization invitations
   - Organization users (invites new people or adopts existing members; membership only)
   - Organization user roles (grants an organization-level role, with optional container-image deny roles)
@@ -68,7 +72,12 @@ provider "anyscale" {
   - Services (single lookup and list/filter)
   - The current authenticated user and their connected organization
   - Organization users (single lookup and list/filter)
-- **Automatic Detection**: Cloud provider and region auto-detected from configuration blocks
+  - System Cluster status
+  - Cloud IAM mapping
+  - Anyscale Scheduler configuration
+- Currently supported ephemeral resources:
+  - Service credentials (live service authentication token, never stored in state)
+- **Automatic Detection**: Cloud provider is detected from configuration blocks; region is inferred only from AWS `subnet_ids_to_az`
 - **Flexible Authentication**: Environment variable, credentials file, or provider configuration
 
 ## Current Limitations
@@ -152,7 +161,7 @@ See the [`examples/`](examples/) directory for complete, working examples:
 - **GCP GKE**: [`examples/gcp-gke-basic/`](examples/gcp-gke-basic/) - GCP GKE Kubernetes cloud
 - **Azure AKS**: [`examples/azure-aks-basic/`](examples/azure-aks-basic/) - Azure AKS Kubernetes cloud (schema-validated only - see the example's README for status)
 - **Multi-Resource Cloud**: [`examples/aws-vm-basic-resource/`](examples/aws-vm-basic-resource/) - Empty cloud with separate resource deployment
-- **Kitchen Sink**: [`examples/kitchen-sink/`](examples/kitchen-sink/) - Comprehensive multi-cloud build mixing VM and EKS resources on one cloud, plus every resource and data source this provider registers
+- **Kitchen Sink**: [`examples/kitchen-sink/`](examples/kitchen-sink/) - Comprehensive multi-cloud build mixing VM and EKS resources on one cloud, plus a representative subset of the provider's resources and data sources
 
 ## Versioning
 

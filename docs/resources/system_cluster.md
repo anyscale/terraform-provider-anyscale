@@ -3,14 +3,14 @@
 page_title: "anyscale_system_cluster Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Ensures the System Cluster for an Anyscale Cloud - the always-on cluster that backs the task and actor observability dashboards - is enabled and running. Declarative: applying this resource enables the System Cluster if it is not already enabled, starts it if it is terminated, and waits until it reaches a healthy RUNNING state. Re-applying against an already-running cluster is a no-op.
+  Enables and starts the System Cluster for an Anyscale Cloud - the always-on cluster that backs the task and actor observability dashboards - and waits until it reaches RUNNING. Only creation does this: a later apply does not restart a cluster that has since terminated (use terraform apply -replace).
   A cloud's System Cluster is tied to that cloud's primary (default) anyscale_cloud_resource - a secondary cloud resource on the same cloud never gets a working System Cluster of its own today. Anyscale engineering is actively working on multi-resource System Cluster support; this limitation is not enforced by this resource (the Anyscale API currently exposes no way to detect or check it), so it is a documentation caveat rather than a plan/apply-time guard.
   ~> Note: terraform destroy only removes this resource from Terraform state. It does not stop, disable, or terminate the underlying System Cluster, which keeps running afterward. This provider does not support stopping or disabling the System Cluster from this resource - use the Anyscale console's Clouds > Settings > Observability page, the anyscale cloud terminate-system-cluster CLI command, or the anyscale.cloud.terminate_system_cluster SDK call to do so directly. A future stop/restart capability may arrive later as a separate provider Action layered on top of this resource, not as a change to this resource's converging lifecycle (the same design choice this provider already made for anyscale_service's canary promote/rollback).
 ---
 
 # anyscale_system_cluster (Resource)
 
-Ensures the System Cluster for an Anyscale Cloud - the always-on cluster that backs the task and actor observability dashboards - is enabled and running. Declarative: applying this resource enables the System Cluster if it is not already enabled, starts it if it is terminated, and waits until it reaches a healthy `RUNNING` state. Re-applying against an already-running cluster is a no-op.
+Enables and starts the System Cluster for an Anyscale Cloud - the always-on cluster that backs the task and actor observability dashboards - and waits until it reaches `RUNNING`. Only creation does this: a later apply does not restart a cluster that has since terminated (use `terraform apply -replace`).
 
 A cloud's System Cluster is tied to that cloud's primary (default) `anyscale_cloud_resource` - a secondary cloud resource on the same cloud never gets a working System Cluster of its own today. Anyscale engineering is actively working on multi-resource System Cluster support; this limitation is not enforced by this resource (the Anyscale API currently exposes no way to detect or check it), so it is a documentation caveat rather than a plan/apply-time guard.
 
@@ -19,9 +19,9 @@ A cloud's System Cluster is tied to that cloud's primary (default) `anyscale_clo
 ## Example Usage
 
 ```terraform
-# Ensure this cloud's System Cluster (task/actor observability dashboards) is enabled and
-# running. Creating this resource enables the System Cluster if needed, starts it if it is
-# terminated, and waits until it reaches RUNNING.
+# Enable and start this cloud's System Cluster (task/actor observability dashboards).
+# Creating this resource waits until it reaches RUNNING. Later applies do not restart a
+# terminated cluster; use `terraform apply -replace` for that.
 resource "anyscale_system_cluster" "primary" {
   cloud_id = "cld_abc123"
 }
@@ -55,7 +55,7 @@ output "system_cluster_workload_service_url" {
 
 - `cluster_id` (String) The System Cluster's own identifier. Null until the cluster has been created at least once (which happens automatically as part of this resource's `Create`) - a cloud that has never had its System Cluster started has no `cluster_id` yet.
 - `id` (String) Mirrors `cloud_id`. Present for import/tooling convention; use `cloud_id` for the real identity.
-- `is_enabled` (Boolean) Whether the System Cluster is enabled for this cloud. Always `true` once this resource has been successfully created or imported - `Create`/`Update` unconditionally ensure the System Cluster is enabled before starting it, so there is no separate user-facing toggle on this resource for enable-vs-disable (unlike the removed `anyscale_cloud.enable_system_cluster`, which this resource supersedes). Exposed read-only for observability: `is_enabled = true` together with a non-running `state` is a real, valid combination (e.g. the cluster is enabled but has since been terminated), not something this attribute collapses away.
+- `is_enabled` (Boolean) Whether the System Cluster is enabled for this cloud. Set to `true` by create and refreshed from the API afterward, so it becomes `false` if the cluster is disabled outside Terraform. `true` with a non-running `state` is valid (enabled, then terminated).
 - `state` (String) The System Cluster's current status (e.g. `Running`, `StartingUp`, `Terminated`, `Terminating`, `StartupErrored`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list. Refreshed on every `terraform plan`/`apply` - if the cluster is terminated outside Terraform (e.g. from the console, or by the backend's own idle auto-termination), this reflects `Terminated` rather than hiding the change; re-run `terraform apply -replace` against this resource to start it again (this resource does not auto-recreate on an observed termination).
 - `workload_service_url` (String) The URL the task and actor observability dashboards use to reach this System Cluster's workload service. Null until the cluster has been created and reaches a state where this URL is populated.
 

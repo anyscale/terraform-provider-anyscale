@@ -552,7 +552,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 
 // Update handles exactly one change: registry_login_secret being set on an
 // imported container image, which RequiresReplaceUnlessUnrecoverable plans as
-// an in-place update because the API never returns the secret. The value is
+// an in-place update because import does not recover the secret. The value is
 // recorded in state and not sent - the image is not changed. Every other
 // attribute requires replacement, so any other diff reaching here is an error.
 func (r *ContainerImageRegistryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {

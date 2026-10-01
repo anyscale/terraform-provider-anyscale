@@ -21,7 +21,7 @@ behavior-and-limitations reference to reach for once you know the shape and need
 
 ## Supported cloud providers
 
-**AWS** and **GCP** support both VM and Kubernetes (AKS-equivalent) compute stacks. **Azure**
+**AWS** and **GCP** support both VM and Kubernetes (EKS and GKE) compute stacks. **Azure**
 supports Kubernetes only — Anyscale does not support Azure VM clouds, so setting
 `cloud_provider = "AZURE"` (directly, via `azure_config`, or via auto-detection) together with any
 `compute_stack` other than `"K8S"` (including the default when `compute_stack` is omitted) fails
@@ -94,16 +94,13 @@ recreate it deliberately.
 
 The other mutable fields on `anyscale_cloud` — `auto_add_user`, `lineage_tracking_enabled`, and
 `aggregated_logs_enabled` — update in place normally; each is backed by its own dedicated API
-endpoint, called only when its value actually changes. (`enable_system_cluster` was removed in
-v0.18.0 — System Cluster support is now the dedicated `anyscale_system_cluster` resource instead of
-a config flag; see its [migration note](../resources/cloud.md) if you're still on an older
-version.)
+endpoint, called only when its value actually changes. System Cluster is managed by
+`anyscale_system_cluster`.
 
 ## Kubernetes operator status
 
 `anyscale_cloud_resource` exposes three Computed attributes sourced from the Anyscale Operator running
-in a Kubernetes cluster: `operator_status` (the same value as `status`, named explicitly for clarity),
-`operator_version`, and `reported_at`. All three are null for VM resources, and null for a Kubernetes
+in a Kubernetes cluster: `operator_status`, `operator_version`, and `reported_at`. All three are null for VM resources, and null for a Kubernetes
 resource whose operator hasn't reported in yet — they populate once it has.
 
 ## Multiple resource deployments on one cloud
@@ -228,7 +225,7 @@ wouldn't fit a boolean). Prefer `compute_stack == "K8S"` in new configurations.
 
 ## Credentials handling
 
-`anyscale_cloud.credentials` is write-only: the provider never reads it back from the API, so it will
+The provider does not read `anyscale_cloud.credentials` back from the API, and import does not recover it, so it will
 never appear in a `terraform plan` diff after creation and is never exposed through either data source.
 Treat the value itself (an AWS IAM role ARN, or a JSON blob for GCP) as sensitive in your own tooling —
 the provider marks the attribute `Sensitive` in state, but redaction is only as good as how you source

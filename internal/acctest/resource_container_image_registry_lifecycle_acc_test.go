@@ -183,7 +183,7 @@ resource "anyscale_container_image_registry" "test" {
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"registry_login_secret", // sensitive: API never returns auth secrets after create
+					"registry_login_secret", // sensitive: import does not recover it
 				},
 			},
 			// ImportStateVerify above only proves imported state matches
