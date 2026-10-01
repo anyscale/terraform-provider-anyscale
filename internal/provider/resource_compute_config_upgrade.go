@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -13,7 +14,7 @@ import (
 // Ensure ComputeConfigResource satisfies the state-upgrade interface.
 var _ resource.ResourceWithUpgradeState = &ComputeConfigResource{}
 
-// UpgradeState implements the v0 -> v1 migration for CC1: physical_resources
+// UpgradeState implements the v0 -> v1 migration: physical_resources
 // was renamed to required_resources on head_node and worker_nodes, since the
 // Anyscale API has always rejected physical_resources outright on any
 // non-empty value (the only state that can exist under v0 has it null, or
@@ -28,7 +29,8 @@ func (r *ComputeConfigResource) UpgradeState(ctx context.Context) map[int64]reso
 	}
 }
 
-// computeConfigResourceModelV0 is the v0 (pre-CC1/CC2) resource model. Only
+// computeConfigResourceModelV0 is the v0 resource model (physical_resources,
+// no idle_termination_minutes/maximum_uptime_minutes). Only
 // the top level needs its own type: head_node/worker_nodes stay generic
 // types.Object/types.List containers here exactly as in the current model,
 // since decoding the outer struct does not inspect what is nested inside
@@ -58,8 +60,8 @@ type computeConfigResourceModelV0 struct {
 	WorkerNodes            types.List    `tfsdk:"worker_nodes"`
 }
 
-// computeConfigSchemaV0 is a frozen copy of the schema as shipped before CC1
-// (required_resources rename) and CC2 (idle/max-uptime) added: physical_resources
+// computeConfigSchemaV0 is a frozen copy of the schema as shipped before the
+// required_resources rename and the idle/max-uptime attributes: physical_resources
 // instead of required_resources, no cpu_architecture, no
 // idle_termination_minutes/maximum_uptime_minutes. It exists solely so
 // UpgradeState can decode v0 state; do not evolve it going forward -- it is a
@@ -142,7 +144,7 @@ func computeConfigSchemaV0() *schema.Schema {
 
 // upgradeComputeConfigStateV0toV1 renames physical_resources to
 // required_resources inside head_node and every worker_nodes element, and
-// fills the two attributes added by CC2 with null (there is nothing to
+// fills the two idle/max-uptime attributes added in v1 with null (nothing to
 // migrate for them -- they never existed under v0).
 func upgradeComputeConfigStateV0toV1(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
 	if req.State == nil {
@@ -176,15 +178,15 @@ func upgradeComputeConfigStateV0toV1(ctx context.Context, req resource.UpgradeSt
 		Name:        priorState.Name,
 		CloudID:     priorState.CloudID,
 		// priorState.CloudName is deliberately dropped: cloud_name was removed
-		// from the current model entirely (R1), so a v0 state that set it
+		// from the current model entirely, so a v0 state that set it
 		// loses that value on upgrade the same way any real v1 state does.
 		CloudResource:          priorState.CloudResource,
 		Zones:                  priorState.Zones,
 		MinResources:           priorState.MinResources,
 		MaxResources:           priorState.MaxResources,
 		EnableCrossZoneScaling: priorState.EnableCrossZoneScaling,
-		IdleTerminationMinutes: types.Int64Null(), // CC2: new in v1, nothing to migrate
-		MaximumUptimeMinutes:   types.Int64Null(), // CC2: new in v1, nothing to migrate
+		IdleTerminationMinutes: types.Int64Null(), // new in v1, nothing to migrate
+		MaximumUptimeMinutes:   types.Int64Null(), // new in v1, nothing to migrate
 		AdvancedInstanceConfig: priorState.AdvancedInstanceConfig,
 		AutoSelectWorkerConfig: priorState.AutoSelectWorkerConfig,
 		Flags:                  priorState.Flags,
@@ -193,7 +195,7 @@ func upgradeComputeConfigStateV0toV1(ctx context.Context, req resource.UpgradeSt
 		LastModifiedAt:         priorState.LastModifiedAt,
 		HeadNode:               upgradedHeadNode,
 		WorkerNodes:            upgradedWorkerNodes,
-		// Option C: new in this version, nothing to migrate.
+		// additional_resources is new in this version, nothing to migrate.
 		AdditionalResources: types.ListNull(types.ObjectType{AttrTypes: additionalResourceAttrTypes()}),
 	}
 
@@ -202,7 +204,7 @@ func upgradeComputeConfigStateV0toV1(ctx context.Context, req resource.UpgradeSt
 
 // upgradeNodeV0toV1 renames the physical_resources attribute of a single v0
 // node object (head_node, or one worker_nodes element) to required_resources,
-// adding a null cpu_architecture (CC4: new in v1, nothing to migrate). Every
+// adding a null cpu_architecture (new in v1, nothing to migrate). Every
 // other attribute -- including worker-only ones like name/min_nodes when
 // called for a worker element -- passes through untouched, so the same
 // function serves both head_node and worker_nodes callers; only the target
@@ -232,7 +234,7 @@ func upgradeNodeV0toV1(ctx context.Context, v0Node types.Object, attrTypes map[s
 		}
 		reqAttrs["cpu_architecture"] = types.StringNull()
 		// memory's type changed from a plain string to MemoryQuantityType
-		// (the F2 follow-up crash fix) - v0's persisted value is still a
+		// (so "4Gi" and the API's byte count compare equal) - v0's value is a
 		// plain types.String, so re-wrap it rather than pass it through
 		// unchanged, or types.ObjectValue below rejects the type mismatch.
 		if oldMemory, ok := physAttrs["memory"].(types.String); ok {
@@ -244,6 +246,15 @@ func upgradeNodeV0toV1(ctx context.Context, v0Node types.Object, attrTypes map[s
 		requiredResources = reqObj
 	}
 	newAttrs["required_resources"] = requiredResources
+
+	// advanced_instance_config and flags are now jsontypes.Normalized; v0
+	// persisted them as plain strings, so re-wrap them for the same reason as
+	// memory above.
+	for _, k := range []string{"advanced_instance_config", "flags"} {
+		if old, ok := v0Attrs[k].(types.String); ok {
+			newAttrs[k] = jsontypes.Normalized{StringValue: old}
+		}
+	}
 
 	// A1: required_labels is new in this schema version too - nothing to
 	// migrate for it either, same as cpu_architecture/idle_termination_minutes.

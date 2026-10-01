@@ -113,8 +113,9 @@ func AddDigestNotSettledWarning(diags *diag.Diagnostics, buildID string) {
 	)
 }
 
-// archiveClusterEnvironment archives (the closest analogue to delete - the underlying
-// /ext/v0/cluster_environments/ endpoint has no DELETE) a cluster environment on Destroy.
+// archiveClusterEnvironment archives (the closest analogue to delete - the backend has no
+// DELETE for these) a cluster environment on Destroy, via
+// /api/v2/application_templates/{id}/archive.
 // Shared by resource_container_image_build.go and resource_container_image_registry.go, whose
 // Delete methods both back the same cluster-environment resource and so must tolerate the same
 // already-gone states: a 404 (already archived or deleted) and the backend's

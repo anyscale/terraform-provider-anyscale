@@ -343,7 +343,7 @@ func TestFindComputeConfigByName_MultipleMatchesReturnsMostRecent(t *testing.T) 
 
 	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
 
-	got, err := d.findComputeConfigByName(ctx, "test-config", "")
+	got, _, err := d.findComputeConfigByName(ctx, "test-config", "")
 	if err != nil {
 		t.Fatalf("findComputeConfigByName() error = %v", err)
 	}
@@ -367,7 +367,7 @@ func TestFindComputeConfigByName_NotFound(t *testing.T) {
 
 	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
 
-	got, err := d.findComputeConfigByName(ctx, "does-not-exist", "")
+	got, _, err := d.findComputeConfigByName(ctx, "does-not-exist", "")
 	if err != nil {
 		t.Fatalf("findComputeConfigByName() error = %v, want nil", err)
 	}
@@ -396,7 +396,7 @@ func TestFindComputeConfigByName_FiltersByCloudID(t *testing.T) {
 
 	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
 
-	if _, err := d.findComputeConfigByName(ctx, "test-config", "cld_target"); err != nil {
+	if _, _, err := d.findComputeConfigByName(ctx, "test-config", "cld_target"); err != nil {
 		t.Fatalf("findComputeConfigByName() error = %v", err)
 	}
 	if !sawCloudIDFilter {
@@ -407,11 +407,18 @@ func TestFindComputeConfigByName_FiltersByCloudID(t *testing.T) {
 // TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions exercises the
 // real fetchComputeConfigVersions: the search API returns one row per
 // version (not deduplicated), and the documented behavior is a unique,
-// ascending-sorted version list.
+// ascending-sorted version list. It also confirms cloud_id is forwarded into
+// the search payload: names are unique per cloud, so an unscoped search
+// would merge a same-named config's versions from another cloud.
 func TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions(t *testing.T) {
 	ctx := context.Background()
+	var sawCloudIDFilter bool
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"cloud_id":"cld_target"`) {
+			sawCloudIDFilter = true
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"results": [
 			{"id": "ccfg_v3", "name": "test-config", "version": 3},
@@ -424,9 +431,12 @@ func TestFetchComputeConfigVersions_CollectsAndSortsUniqueVersions(t *testing.T)
 
 	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
 
-	got, err := d.fetchComputeConfigVersions(ctx, "test-config")
+	got, err := d.fetchComputeConfigVersions(ctx, "test-config", "cld_target")
 	if err != nil {
 		t.Fatalf("fetchComputeConfigVersions() error = %v", err)
+	}
+	if !sawCloudIDFilter {
+		t.Error("fetchComputeConfigVersions() did not forward cloud_id into the search payload")
 	}
 
 	want := []int64{1, 2, 3}
@@ -489,7 +499,7 @@ func TestFetchComputeConfigVersions_RequestsAllVersionsNotJustLatest(t *testing.
 
 	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
 
-	got, err := d.fetchComputeConfigVersions(ctx, "test-config")
+	got, err := d.fetchComputeConfigVersions(ctx, "test-config", "")
 	if err != nil {
 		t.Fatalf("fetchComputeConfigVersions() error = %v", err)
 	}
@@ -556,7 +566,7 @@ func TestFetchComputeConfigVersions_FollowsPagingToken(t *testing.T) {
 
 	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
 
-	got, err := d.fetchComputeConfigVersions(ctx, "test-config")
+	got, err := d.fetchComputeConfigVersions(ctx, "test-config", "")
 	if err != nil {
 		t.Fatalf("fetchComputeConfigVersions() error = %v", err)
 	}
@@ -613,7 +623,7 @@ func TestFindComputeConfigByName_ExactMatchOnPageTwo(t *testing.T) {
 
 	d := &ComputeConfigDataSource{client: NewClientWithToken(server.URL, "test-token")}
 
-	got, err := d.findComputeConfigByName(ctx, "test-config", "")
+	got, _, err := d.findComputeConfigByName(ctx, "test-config", "")
 	if err != nil {
 		t.Fatalf("findComputeConfigByName() error = %v", err)
 	}

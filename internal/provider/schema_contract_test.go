@@ -28,14 +28,6 @@ const (
 	// test tell the two modifiers apart, since neither exposes its
 	// underlying type publicly.
 	descRequiresReplaceIfConfigured = "If the value of this attribute is configured and changes, Terraform will destroy and recreate the resource."
-	// descUseNonNullStateForUnknown is distinct from descUseStateForUnknown
-	// (note "to a non-null value") — required instead of plain
-	// UseStateForUnknown for an attribute nested inside a list, because
-	// UseStateForUnknown copies a MISSING element's null state into the plan
-	// for an update that adds a brand-new list element, producing "Provider
-	// produced inconsistent result after apply" (task 1f2d592f, found via a
-	// live update-add-worker-group repro).
-	descUseNonNullStateForUnknown = "Once set to a non-null value, the value of this attribute in state will not change."
 	// descRegionSemanticEqual matches regionSemanticEqualPlanModifier's own
 	// Description() (cloud_helpers.go) - our own unexported type, unlike the
 	// framework built-ins above, but the same identify-by-Description
@@ -255,8 +247,9 @@ func TestComputeConfigResourceContract(t *testing.T) {
 			"This is F11's regression guard.")
 	}
 
-	// head_node.resources and worker_nodes[].resources: Optional+Computed+USFU.
-	assertResourcesMap := func(t *testing.T, label string, attrs map[string]schema.Attribute) {
+	// head_node.resources and worker_nodes[].resources: Optional+Computed, with
+	// UseStateForUnknown on head_node and the index-safe variant on workers.
+	assertResourcesMap := func(t *testing.T, label string, attrs map[string]schema.Attribute, wantModifier string) {
 		t.Helper()
 		ra, ok := attrs["resources"].(schema.MapAttribute)
 		if !ok {
@@ -266,10 +259,10 @@ func TestComputeConfigResourceContract(t *testing.T) {
 			t.Errorf("%s.resources must be Optional: true", label)
 		}
 		if !ra.Computed {
-			t.Errorf("%s.resources must be Computed: true (the API auto-fills it from instance_type)", label)
+			t.Errorf("%s.resources must be Computed: true", label)
 		}
-		if !hasMapPlanModifierDescription(ra.PlanModifiers, descUseStateForUnknown) {
-			t.Errorf("%s.resources must include mapplanmodifier.UseStateForUnknown()", label)
+		if !hasMapPlanModifierDescription(ra.PlanModifiers, wantModifier) {
+			t.Errorf("%s.resources must include the plan modifier described as %q", label, wantModifier)
 		}
 	}
 
@@ -277,13 +270,16 @@ func TestComputeConfigResourceContract(t *testing.T) {
 	if !ok {
 		t.Fatalf("head_node is not a schema.SingleNestedAttribute (got %T)", s.Attributes["head_node"])
 	}
-	assertResourcesMap(t, "head_node", headNode.Attributes)
+	assertResourcesMap(t, "head_node", headNode.Attributes, descUseStateForUnknown)
 
 	workerNodes, ok := s.Attributes["worker_nodes"].(schema.ListNestedAttribute)
 	if !ok {
 		t.Fatalf("worker_nodes is not a schema.ListNestedAttribute (got %T)", s.Attributes["worker_nodes"])
 	}
-	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes)
+	// A plain UseStateForUnknown here copies a removed worker's resources onto
+	// whichever worker shifts into its index.
+	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes,
+		workerResourcesUseStateForSameWorker().Description(context.Background()))
 }
 
 // TestComputeConfigCC1RequiredResourcesRename pins CC1: physical_resources
@@ -707,9 +703,11 @@ func TestComputeConfigWorkerNodeNameIsServerInferred(t *testing.T) {
 			"state into the plan instead of leaving it unknown, producing 'Provider produced inconsistent " +
 			"result after apply' on the new element (task 1f2d592f's regression). Use UseNonNullStateForUnknown instead.")
 	}
-	if !hasPlanModifierDescription(name.PlanModifiers, descUseNonNullStateForUnknown) {
-		t.Errorf("worker_nodes[].name must include stringplanmodifier.UseNonNullStateForUnknown() — the variant " +
-			"safe for an attribute nested inside a list that can be null after creation (task 451e2845 + 1f2d592f)")
+	// The index-safe variant: like UseNonNullStateForUnknown it leaves a
+	// brand-new element unknown, and it also refuses to reuse the name of a
+	// different worker group that used to sit at the same index.
+	if !hasPlanModifierDescription(name.PlanModifiers, workerNameUseStateForSameWorker().Description(context.Background())) {
+		t.Errorf("worker_nodes[].name must use workerNameUseStateForSameWorker()")
 	}
 }
 

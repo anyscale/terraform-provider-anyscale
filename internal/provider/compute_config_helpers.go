@@ -538,7 +538,7 @@ func additionalResourceToDeploymentConfig(ctx context.Context, entry AdditionalR
 // e.g. first read after this entry was added, or a cold import with no
 // additional_resources in state at all yet).
 //
-// forImport mirrors CC12: advanced_instance_config and flags (this entry's
+// forImport mirrors the top-level rule: advanced_instance_config and flags (this entry's
 // own custom, non-synthetic flags) are write-only-ish and are never
 // refreshed from the API on an ordinary Read (they stay on whatever prior
 // state/ImportState already seeded) - forImport=true is the one path that
@@ -604,7 +604,7 @@ func apiDeploymentConfigToAdditionalResource(ctx context.Context, entry cloudDep
 			diags.Append(maxDiags...)
 			attrs["max_resources"] = restoreMapKeyCasing(ctx, maxMap, priorMaxResources)
 		}
-		// CC14 applies per-entry too: resolve unconditionally, not just when
+		// As at the top level, resolve unconditionally, not just when
 		// present, so ImportState (no prior to lean on) still settles on a
 		// real false instead of a permanent phantom-null diff.
 		if enableCrossZone, ok := entry.Flags["allow-cross-zone-autoscaling"].(bool); ok {

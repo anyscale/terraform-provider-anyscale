@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
@@ -31,8 +32,8 @@ func TestNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"required_labels":          types.MapType{ElemType: types.StringType},
-					"advanced_instance_config": types.StringType,
-					"flags":                    types.StringType,
+					"advanced_instance_config": jsontypes.NormalizedType{},
+					"flags":                    jsontypes.NormalizedType{},
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 				},
 				map[string]attr.Value{
@@ -47,8 +48,8 @@ func TestNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"required_labels":          types.MapNull(types.StringType),
-					"advanced_instance_config": types.StringNull(),
-					"flags":                    types.StringNull(),
+					"advanced_instance_config": jsontypes.NewNormalizedNull(),
+					"flags":                    jsontypes.NewNormalizedNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
 				},
 			),
@@ -71,8 +72,8 @@ func TestNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"required_labels":          types.MapType{ElemType: types.StringType},
-					"advanced_instance_config": types.StringType,
-					"flags":                    types.StringType,
+					"advanced_instance_config": jsontypes.NormalizedType{},
+					"flags":                    jsontypes.NormalizedType{},
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 				},
 				map[string]attr.Value{
@@ -81,8 +82,8 @@ func TestNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"required_labels":          types.MapNull(types.StringType),
-					"advanced_instance_config": types.StringValue(`{"disk_size": 100, "enable_monitoring": true}`),
-					"flags":                    types.StringNull(),
+					"advanced_instance_config": jsontypes.NewNormalizedValue(`{"disk_size": 100, "enable_monitoring": true}`),
+					"flags":                    jsontypes.NewNormalizedNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
 				},
 			),
@@ -184,8 +185,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"required_labels":          types.MapType{ElemType: types.StringType},
-					"advanced_instance_config": types.StringType,
-					"flags":                    types.StringType,
+					"advanced_instance_config": jsontypes.NormalizedType{},
+					"flags":                    jsontypes.NormalizedType{},
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 				},
 				map[string]attr.Value{
@@ -198,8 +199,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"required_labels":          types.MapNull(types.StringType),
-					"advanced_instance_config": types.StringNull(),
-					"flags":                    types.StringNull(),
+					"advanced_instance_config": jsontypes.NewNormalizedNull(),
+					"flags":                    jsontypes.NewNormalizedNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
 				},
 			),
@@ -226,8 +227,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"required_labels":          types.MapType{ElemType: types.StringType},
-					"advanced_instance_config": types.StringType,
-					"flags":                    types.StringType,
+					"advanced_instance_config": jsontypes.NormalizedType{},
+					"flags":                    jsontypes.NormalizedType{},
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 				},
 				map[string]attr.Value{
@@ -240,8 +241,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"required_labels":          types.MapNull(types.StringType),
-					"advanced_instance_config": types.StringNull(),
-					"flags":                    types.StringNull(),
+					"advanced_instance_config": jsontypes.NewNormalizedNull(),
+					"flags":                    jsontypes.NewNormalizedNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
 				},
 			),
@@ -268,8 +269,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 					"labels":                   types.MapType{ElemType: types.StringType},
 					"required_labels":          types.MapType{ElemType: types.StringType},
-					"advanced_instance_config": types.StringType,
-					"flags":                    types.StringType,
+					"advanced_instance_config": jsontypes.NormalizedType{},
+					"flags":                    jsontypes.NormalizedType{},
 					"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 				},
 				map[string]attr.Value{
@@ -282,8 +283,8 @@ func TestWorkerNodeConfigToAPI(t *testing.T) {
 					"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 					"labels":                   types.MapNull(types.StringType),
 					"required_labels":          types.MapNull(types.StringType),
-					"advanced_instance_config": types.StringNull(),
-					"flags":                    types.StringNull(),
+					"advanced_instance_config": jsontypes.NewNormalizedNull(),
+					"flags":                    jsontypes.NewNormalizedNull(),
 					"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
 				},
 			),
@@ -462,8 +463,8 @@ func TestWorkerNameDefaulting(t *testing.T) {
 			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
 			"required_labels":          types.MapType{ElemType: types.StringType},
-			"advanced_instance_config": types.StringType,
-			"flags":                    types.StringType,
+			"advanced_instance_config": jsontypes.NormalizedType{},
+			"flags":                    jsontypes.NormalizedType{},
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 		},
 		map[string]attr.Value{
@@ -476,8 +477,8 @@ func TestWorkerNameDefaulting(t *testing.T) {
 			"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 			"labels":                   types.MapNull(types.StringType),
 			"required_labels":          types.MapNull(types.StringType),
-			"advanced_instance_config": types.StringNull(),
-			"flags":                    types.StringNull(),
+			"advanced_instance_config": jsontypes.NewNormalizedNull(),
+			"flags":                    jsontypes.NewNormalizedNull(),
 			"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
 		},
 	)
@@ -527,8 +528,8 @@ func TestRequiredResourcesConversion(t *testing.T) {
 			"required_resources":       requiredResourcesObj.Type(ctx),
 			"labels":                   types.MapType{ElemType: types.StringType},
 			"required_labels":          types.MapType{ElemType: types.StringType},
-			"advanced_instance_config": types.StringType,
-			"flags":                    types.StringType,
+			"advanced_instance_config": jsontypes.NormalizedType{},
+			"flags":                    jsontypes.NormalizedType{},
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 		},
 		map[string]attr.Value{
@@ -537,8 +538,8 @@ func TestRequiredResourcesConversion(t *testing.T) {
 			"required_resources":       requiredResourcesObj,
 			"labels":                   types.MapNull(types.StringType),
 			"required_labels":          types.MapNull(types.StringType),
-			"advanced_instance_config": types.StringNull(),
-			"flags":                    types.StringNull(),
+			"advanced_instance_config": jsontypes.NewNormalizedNull(),
+			"flags":                    jsontypes.NewNormalizedNull(),
 			"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
 		},
 	)
@@ -611,8 +612,8 @@ func TestCloudDeploymentConversion(t *testing.T) {
 			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
 			"required_labels":          types.MapType{ElemType: types.StringType},
-			"advanced_instance_config": types.StringType,
-			"flags":                    types.StringType,
+			"advanced_instance_config": jsontypes.NormalizedType{},
+			"flags":                    jsontypes.NormalizedType{},
 			"cloud_deployment":         cloudDepObj.Type(ctx),
 		},
 		map[string]attr.Value{
@@ -621,8 +622,8 @@ func TestCloudDeploymentConversion(t *testing.T) {
 			"required_resources":       types.ObjectNull(map[string]attr.Type{}),
 			"labels":                   types.MapNull(types.StringType),
 			"required_labels":          types.MapNull(types.StringType),
-			"advanced_instance_config": types.StringNull(),
-			"flags":                    types.StringNull(),
+			"advanced_instance_config": jsontypes.NewNormalizedNull(),
+			"flags":                    jsontypes.NewNormalizedNull(),
 			"cloud_deployment":         cloudDepObj,
 		},
 	)
@@ -683,8 +684,8 @@ func TestNodeLabelsConversion(t *testing.T) {
 			"required_resources":       types.ObjectType{AttrTypes: map[string]attr.Type{}},
 			"labels":                   types.MapType{ElemType: types.StringType},
 			"required_labels":          types.MapType{ElemType: types.StringType},
-			"advanced_instance_config": types.StringType,
-			"flags":                    types.StringType,
+			"advanced_instance_config": jsontypes.NormalizedType{},
+			"flags":                    jsontypes.NormalizedType{},
 			"cloud_deployment":         types.ObjectType{AttrTypes: map[string]attr.Type{}},
 		},
 		map[string]attr.Value{
@@ -699,8 +700,8 @@ func TestNodeLabelsConversion(t *testing.T) {
 				},
 			),
 			"required_labels":          types.MapNull(types.StringType),
-			"advanced_instance_config": types.StringNull(),
-			"flags":                    types.StringNull(),
+			"advanced_instance_config": jsontypes.NewNormalizedNull(),
+			"flags":                    jsontypes.NewNormalizedNull(),
 			"cloud_deployment":         types.ObjectNull(map[string]attr.Type{}),
 		},
 	)
@@ -749,7 +750,7 @@ func TestCommonNodeFieldsToAPI_HeadWorkerParity(t *testing.T) {
 	labels := types.MapValueMust(types.StringType, map[string]attr.Value{
 		"team": types.StringValue("ml-platform"),
 	})
-	advancedInstanceConfig := types.StringValue(`{"disk_size": 100}`)
+	advancedInstanceConfig := jsontypes.NewNormalizedValue(`{"disk_size": 100}`)
 	cloudDeployment := types.ObjectValueMust(
 		map[string]attr.Type{"provider": types.StringType, "region": types.StringType, "machine_pool": types.StringType, "id": types.StringType},
 		map[string]attr.Value{
@@ -757,7 +758,7 @@ func TestCommonNodeFieldsToAPI_HeadWorkerParity(t *testing.T) {
 			"machine_pool": types.StringNull(), "id": types.StringNull(),
 		},
 	)
-	flags := types.StringValue(`{"custom_flag": true}`)
+	flags := jsontypes.NewNormalizedValue(`{"custom_flag": true}`)
 
 	// Call twice - simulating a head call and a worker call with the same inputs - and confirm
 	// byte-identical output plus no shared-map aliasing (mutating one result must not affect
@@ -816,30 +817,27 @@ func TestCommonNodeFieldsToAPI_HeadWorkerParity(t *testing.T) {
 	}
 }
 
-// TestCommonNodeFieldsToAPI_FlagsParseErrorPropagates proves the pre-existing asymmetry survives
-// the extraction: a flags JSON parse failure is a hard error (matching both original copies),
-// while an equivalent advanced_instance_config parse failure is silently skipped (also matching
-// both original copies) rather than becoming an inconsistency introduced by this refactor.
-func TestCommonNodeFieldsToAPI_FlagsParseErrorPropagates(t *testing.T) {
+// TestCommonNodeFieldsToAPI_InvalidJSONErrors: invalid JSON in either per-node
+// JSON string is a hard error. advanced_instance_config used to be skipped
+// silently, which left it out of the request and failed the apply as an
+// inconsistent result instead of naming the bad value.
+func TestCommonNodeFieldsToAPI_InvalidJSONErrors(t *testing.T) {
 	ctx := context.Background()
 	nullMap := types.MapNull(types.Float64Type)
 	nullObj := types.ObjectNull(map[string]attr.Type{})
-	nullStr := types.StringNull()
+	nullJSON := jsontypes.NewNormalizedNull()
 
 	t.Run("invalid flags JSON errors", func(t *testing.T) {
-		_, err := commonNodeFieldsToAPI(ctx, nullMap, nullObj, types.MapNull(types.StringType), types.MapNull(types.StringType), nullStr, nullObj, types.StringValue("not valid json"))
-		if err == nil {
-			t.Fatal("commonNodeFieldsToAPI() expected an error for invalid flags JSON, got nil")
+		_, err := commonNodeFieldsToAPI(ctx, nullMap, nullObj, types.MapNull(types.StringType), types.MapNull(types.StringType), nullJSON, nullObj, jsontypes.NewNormalizedValue("not valid json"))
+		if err == nil || !strings.Contains(err.Error(), "flags") {
+			t.Fatalf("commonNodeFieldsToAPI() error = %v, want one naming flags", err)
 		}
 	})
 
-	t.Run("invalid advanced_instance_config JSON is silently skipped, not an error", func(t *testing.T) {
-		result, err := commonNodeFieldsToAPI(ctx, nullMap, nullObj, types.MapNull(types.StringType), types.MapNull(types.StringType), types.StringValue("not valid json"), nullObj, nullStr)
-		if err != nil {
-			t.Fatalf("commonNodeFieldsToAPI() unexpected error = %v (advanced_instance_config parse failures are silently skipped, matching the original)", err)
-		}
-		if _, ok := result["advanced_configurations_json"]; ok {
-			t.Error("commonNodeFieldsToAPI() should not set advanced_configurations_json when the JSON is invalid")
+	t.Run("invalid advanced_instance_config JSON errors", func(t *testing.T) {
+		_, err := commonNodeFieldsToAPI(ctx, nullMap, nullObj, types.MapNull(types.StringType), types.MapNull(types.StringType), jsontypes.NewNormalizedValue("not valid json"), nullObj, nullJSON)
+		if err == nil || !strings.Contains(err.Error(), "advanced_instance_config") {
+			t.Fatalf("commonNodeFieldsToAPI() error = %v, want one naming advanced_instance_config", err)
 		}
 	})
 }
@@ -898,7 +896,7 @@ func TestCommonNodeAttrsFromAPI_HeadWorkerParity(t *testing.T) {
 		t.Errorf("cloud_deployment = %+v, want provider=aws region=us-east-2", cloudDep)
 	}
 
-	flagsStr, ok := workerAttrs["flags"].(types.String)
+	flagsStr, ok := workerAttrs["flags"].(jsontypes.Normalized)
 	if !ok || flagsStr.IsNull() {
 		t.Fatal("commonNodeAttrsFromAPI() flags not populated")
 	}

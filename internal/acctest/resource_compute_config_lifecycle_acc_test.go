@@ -561,7 +561,7 @@ func newPerNodeImportRecoveryMockComputeConfigServer(t *testing.T, configID, con
 		"archived_at": "",
 		"config": {
 			"cloud_id": %[3]q,
-			"head_node_type": {"name": "head", "instance_type": "m5.2xlarge"},
+			"head_node_type": {"name": "head", "instance_type": "m5.2xlarge", "advanced_configurations_json": {"IamInstanceProfile": {"Arn": "arn:aws:iam::123456789012:instance-profile/head-role"}}},
 			"worker_node_types": [
 				{
 					"name": "general-compute", "instance_type": "m5.4xlarge",
@@ -650,6 +650,11 @@ resource "anyscale_compute_config" "test" {
 
   head_node = {
     instance_type = "m5.2xlarge"
+    advanced_instance_config = jsonencode({
+      IamInstanceProfile = {
+        Arn = "arn:aws:iam::123456789012:instance-profile/head-role"
+      }
+    })
   }
 
   worker_nodes = [
@@ -702,6 +707,7 @@ resource "anyscale_compute_config" "test" {
 						return fmt.Errorf("imported worker_nodes.# = %q, want 2", got)
 					}
 					for _, attr := range []string{
+						"head_node.advanced_instance_config",
 						"worker_nodes.0.advanced_instance_config",
 						"worker_nodes.1.advanced_instance_config",
 					} {

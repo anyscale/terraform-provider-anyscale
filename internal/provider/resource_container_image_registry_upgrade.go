@@ -11,15 +11,15 @@ import (
 // Ensure ContainerImageRegistryResource satisfies the state-upgrade interface.
 var _ resource.ResourceWithUpgradeState = &ContainerImageRegistryResource{}
 
-// UpgradeState implements the v0 -> v1 migration for F3 + V1(c): id held the build ID under
+// UpgradeState implements the v0 -> v1 migration: id held the build ID under
 // v0, but a registry's build can be superseded by a new latest build without the resource
 // itself being replaced, so the build ID cannot serve as stable identity (see the identity
 // comment on ContainerImageRegistryResourceModel.ID). v1 re-keys id to the cluster
 // environment id instead - already present under v0 as the separate cluster_environment_id
 // field, just not the one id pointed at, so no API call is needed to migrate it.
 // cluster_environment_id itself is then dropped rather than carried forward as its own v1
-// field (V1(c): id alone is the durable handle, no redundant attribute) - its value survives
-// only via id, which the transform below sets from it. F5 (digest) landed in this same
+// field (id alone is the durable handle, no redundant attribute) - its value survives
+// only via id, which the transform below sets from it. digest landed in this same
 // version bump; it is new in v1 and has nothing to migrate.
 func (r *ContainerImageRegistryResource) UpgradeState(ctx context.Context) map[int64]resource.StateUpgrader {
 	return map[int64]resource.StateUpgrader{
@@ -30,10 +30,10 @@ func (r *ContainerImageRegistryResource) UpgradeState(ctx context.Context) map[i
 	}
 }
 
-// containerImageRegistryResourceModelV0 is the v0 (pre-F3/F5/V1(c)) resource model. It
-// differs from the current (v1) model in two ways: there is no digest field (added by F5),
-// and there is a separate cluster_environment_id field that v1 does not carry forward
-// (removed by V1(c); id alone is the durable handle in v1). id's Go type is unchanged
+// containerImageRegistryResourceModelV0 is the v0 resource model. It differs from the
+// current (v1) model in two ways: there is no digest field (added in v1), and there is a
+// separate cluster_environment_id field that v1 does not carry forward (id alone is the
+// durable handle in v1). id's Go type is unchanged
 // (types.String), only its meaning differs, so it does not need a distinct field name here.
 type containerImageRegistryResourceModelV0 struct {
 	ID                   types.String `tfsdk:"id"`
@@ -50,10 +50,10 @@ type containerImageRegistryResourceModelV0 struct {
 	NameVersion          types.String `tfsdk:"name_version"`
 }
 
-// containerImageRegistrySchemaV0 is a frozen copy of the schema as shipped before F3 (id
-// identity change), F5 (digest), and V1(c) (cluster_environment_id removal) landed: id held
-// the build ID instead of the cluster environment id, there is no digest attribute, and
-// cluster_environment_id is present as its own attribute (dropped from v1 by V1(c)).
+// containerImageRegistrySchemaV0 is a frozen copy of the schema as shipped before the id
+// identity change, the digest attribute, and the cluster_environment_id removal landed: id
+// held the build ID instead of the cluster environment id, there is no digest attribute, and
+// cluster_environment_id is present as its own attribute (dropped from v1).
 // Descriptions and plan modifiers are deliberately omitted - PriorSchema is only ever used
 // to decode raw state into containerImageRegistryResourceModelV0, never to plan against -
 // matching computeConfigSchemaV0's precedent. Do not evolve this going forward; it is a
@@ -79,9 +79,9 @@ func containerImageRegistrySchemaV0() *schema.Schema {
 }
 
 // upgradeContainerImageRegistryStateV0toV1 re-keys id from the old build-ID identity to the
-// value previously held in cluster_environment_id (V1(c): that field itself is not carried
-// into v1 - id alone is the durable handle) and fills digest with null (F5: new in v1,
-// nothing to migrate; the next Read backfills it from the API, since digest is plain
+// value previously held in cluster_environment_id (that field itself is not carried into
+// v1 - id alone is the durable handle) and fills digest with null (new in v1, nothing to
+// migrate; the next Read backfills it from the API, since digest is plain
 // Computed with no fill-guard, unlike ray_version).
 func upgradeContainerImageRegistryStateV0toV1(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
 	if req.State == nil {
@@ -124,7 +124,7 @@ func upgradeContainerImageRegistryStateV0toV1(ctx context.Context, req resource.
 		CreatedAt:           priorState.CreatedAt,
 		IsBYOD:              priorState.IsBYOD,
 		Revision:            priorState.Revision,
-		Digest:              types.StringNull(), // F5: new in v1, nothing to migrate
+		Digest:              types.StringNull(), // new in v1, nothing to migrate
 		NameVersion:         priorState.NameVersion,
 	}
 
