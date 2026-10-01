@@ -100,8 +100,8 @@ func runUserGroupSweep(t *testing.T, m *userGroupSweepMock) error {
 }
 
 // TestSweepUserGroups_RemovesMembersBeforeDelete guards the one ordering that
-// keeps a swept group from leaking access: the backend's group delete leaves
-// its members' grants behind, so members must be removed first.
+// keeps a swept group from leaking access: per the backend source, group
+// delete does not revoke its members' grants, so members are removed first.
 func TestSweepUserGroups_RemovesMembersBeforeDelete(t *testing.T) {
 	t.Setenv("ANYSCALE_SWEEP_DRY_RUN", "")
 	m := &userGroupSweepMock{

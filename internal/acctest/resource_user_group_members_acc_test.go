@@ -23,9 +23,9 @@ import (
 //
 // Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccUserGroupMembersResource_RealAPI$' -v -count=1
 
-// liveOrgUserID resolves an email to the member's usr_ ID through the same
-// listing the provider uses.
-func liveOrgUserID(t *testing.T, email string) string {
+// liveOrgUser resolves an email to the member's usr_ ID and the email as the
+// API spells it, through the same listing the provider uses.
+func liveOrgUser(t *testing.T, email string) (userID, apiEmail string) {
 	t.Helper()
 	status, body := userGroupAPI(t, "GET", "/api/v2/organization_collaborators/?count=50&email="+url.QueryEscape(email), nil)
 	if status != http.StatusOK {
@@ -42,11 +42,11 @@ func liveOrgUserID(t *testing.T, email string) string {
 	}
 	for _, c := range resp.Results {
 		if strings.EqualFold(c.Email, email) && c.UserID != nil {
-			return *c.UserID
+			return *c.UserID, c.Email
 		}
 	}
 	t.Fatalf("%s is not an organization member", email)
-	return ""
+	return "", ""
 }
 
 // liveGroupMemberIDs returns a group's member usr_ IDs from the API, and
@@ -118,9 +118,9 @@ resource "anyscale_user_group_members" "test" {
 // and destroy. Every membership claim is checked against the API, not state.
 func TestAccUserGroupMembersResource_RealAPI(t *testing.T) {
 	email := requireRealInfraTestUser(t)
-	userID := liveOrgUserID(t, email)
-	// The backend stores emails lowercased; an uppercased config exercises the
-	// case-insensitive match and the kept spelling.
+	userID, apiEmail := liveOrgUser(t, email)
+	// An uppercased config exercises the case-insensitive match and the kept
+	// spelling.
 	configEmail := strings.ToUpper(email)
 	name := UniqueName(t, "ug-members")
 	var groupID string
@@ -157,8 +157,8 @@ func TestAccUserGroupMembersResource_RealAPI(t *testing.T) {
 						return fmt.Errorf("expected 1 imported instance, got %d", len(states))
 					}
 					a := states[0].Attributes
-					if a["members.#"] != "1" || a["members.0"] != strings.ToLower(email) {
-						return fmt.Errorf("import recovered members %v, want the backend's lowercase %q", a, strings.ToLower(email))
+					if a["members.#"] != "1" || a["members.0"] != apiEmail {
+						return fmt.Errorf("import recovered members %v, want the API's spelling %q", a, apiEmail)
 					}
 					return nil
 				},

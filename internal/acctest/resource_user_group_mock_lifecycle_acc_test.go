@@ -98,8 +98,8 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 			if m.groupCount() != 0 {
 				return fmt.Errorf("%d group(s) left in the backend after destroy", m.groupCount())
 			}
-			// Destroying the group must remove its members first: the backend's
-			// group delete leaves the access they held through it behind.
+			// Destroying the group must remove its members first: per the backend
+			// source, group delete does not revoke the access they held through it.
 			w := m.takeWrites()
 			var memberDel, groupDel = -1, -1
 			for i, e := range w {
@@ -117,7 +117,7 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 		},
 		Steps: []resource.TestStep{
 			{
-				// Mixed case in config; the backend stores lowercase.
+				// Mixed case in config; the backend lowercases emails when it creates users.
 				Config: ugMockConfig(m, name, "Alice@Example.com", "bob@example.com"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					ugExpectMembers(m, ugUserA.UserID, ugUserB.UserID),
@@ -208,8 +208,8 @@ func TestAccUserGroupMembersResource_MockLifecycle(t *testing.T) {
 
 // TestAccUserGroupResource_MockDestroyRemovesMembersFirst: destroying a group
 // that Terraform manages without a members resource still removes the members
-// someone added outside Terraform before deleting it. The backend's group
-// delete would otherwise leave the access they held through the group behind.
+// someone added outside Terraform before deleting it. Per the backend source,
+// group delete does not revoke the access they held through the group.
 func TestAccUserGroupResource_MockDestroyRemovesMembersFirst(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newUserGroupMockServer(t, ugUserA, ugUserB)
@@ -267,7 +267,7 @@ func TestAccUserGroupMembersResource_MockEmptySet(t *testing.T) {
 
 // TestAccUserGroupMembersResource_MockImport is Test A of the import pair:
 // what import actually recovers, asserted inside the import step. Import has
-// no config spelling to prefer, so it recovers the backend's lowercase emails;
+// no config spelling to prefer, so it recovers the emails as the backend returns them (lowercase);
 // that divergence from the mixed-case config is the one ignored field, and it
 // is asserted explicitly rather than excluded silently.
 func TestAccUserGroupMembersResource_MockImport(t *testing.T) {

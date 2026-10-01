@@ -164,8 +164,8 @@ func listUserGroupMembersForSweep(ctx context.Context, client *provider.Client) 
 }
 
 // sweepDeleteUserGroup removes a group's members, then deletes the group. The
-// order matters: the backend's group delete does not revoke the access its
-// members held through the group, while member removal does. If removal fails
+// order matters: per the backend source, group delete does not revoke the
+// access its members held through the group, while member removal does. If removal fails
 // the group is left in place, so the next sweep can retry rather than leaking
 // that access permanently.
 func sweepDeleteUserGroup(ctx context.Context, client *provider.Client, g sweepUserGroupResult, memberIDs []string) error {

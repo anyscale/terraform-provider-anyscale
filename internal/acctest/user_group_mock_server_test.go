@@ -17,8 +17,8 @@ import (
 // userGroupMockServer is a stateful fake of the user_groups API and the
 // organization_collaborators listing the provider resolves emails through.
 //
-// Shapes and semantics follow what the backend actually does, as recorded
-// against the test org and traced in source:
+// Shapes and semantics follow the backend: the group routes as recorded
+// against the test org, the member and collaborator routes as traced in source:
 //   - IDs are ug_ + 26 chars; source is "user" for API-created groups.
 //   - Create and rename strip the name; a name taken by a live group is 409
 //     "A user group with the name '<n>' already exists in this organization."
@@ -27,11 +27,12 @@ import (
 //     found.". Both start "User group with id".
 //   - Member routes 404 "User IDs not found: <ids>" for a non-member user ID,
 //     409 on a scim group, and write only the delta.
-//   - DELETE of a scim group is NOT rejected, and does not revoke anything.
+//   - DELETE of a scim group is not rejected.
 //   - /memberships/list returns every live group including empty ones, sorted
 //     by name with members sorted by email, and drops members who are no
 //     longer active org users.
-//   - Collaborator emails are stored lowercased.
+//   - Collaborator emails are lowercase (the backend lowercases them when it
+//     creates users).
 type userGroupMockServer struct {
 	*httptest.Server
 	t *testing.T
