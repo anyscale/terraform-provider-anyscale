@@ -41,8 +41,7 @@ type OrganizationUserDataSourceModel struct {
 	PermissionLevel types.String `tfsdk:"permission_level"`
 	CreatedAt       types.String `tfsdk:"created_at"`
 
-	// DS-OU-2 (Phase B): permission_level above is deprecated backend-side in
-	// favor of these two.
+	// permission_level above is deprecated backend-side in favor of these two.
 	BaseRole        types.String `tfsdk:"base_role"`
 	AdditionalRoles types.List   `tfsdk:"additional_roles"`
 }
@@ -168,12 +167,19 @@ func (d *OrganizationUserDataSource) Read(ctx context.Context, req datasource.Re
 		return
 	}
 
+	// The API lowercases emails. A by-email lookup matched case-insensitively, so echo
+	// the configured spelling back: Core rejects a data source result that changes a
+	// value the configuration set.
+	if !config.Email.IsNull() && !config.Email.IsUnknown() && strings.EqualFold(user.Email.ValueString(), config.Email.ValueString()) {
+		user.Email = config.Email
+	}
+
 	// Set state
 	resp.Diagnostics.Append(resp.State.Set(ctx, user)...)
 }
 
 // organizationCollaboratorToUserModel converts a shared API result into this
-// data source's model. DS-OU-1: name is genuinely nullable server-side (see
+// data source's model. name is genuinely nullable server-side (see
 // models.go's OrganizationCollaboratorResult.Name) and mapped via
 // StringPointerValue, matching the adjacent UserID field's existing handling
 // - a null name must never collapse to "". u is expected to already be
@@ -209,7 +215,11 @@ func (d *OrganizationUserDataSource) findUser(ctx context.Context, queryParams u
 
 	for _, u := range users {
 		if match(u) {
-			model, diags := organizationCollaboratorToUserModel(ctx, hydrateCollaboratorRoles(ctx, d.client, u))
+			hydrated, err := hydrateCollaboratorRoles(ctx, d.client, u)
+			if err != nil {
+				return nil, nil, err
+			}
+			model, diags := organizationCollaboratorToUserModel(ctx, hydrated)
 			return model, diags, nil
 		}
 	}

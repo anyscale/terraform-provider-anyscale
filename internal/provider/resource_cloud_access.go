@@ -135,6 +135,10 @@ const cloudRolesDisabledDetail = "The cloud roles API is not enabled for this or
 const (
 	cloudAccessProjectWriteRole = "write"
 	cloudAccessCloudWriteRole   = "writer"
+	// cloudAccessProjectOwnerRole and cloudAccessCloudOwnerRole share a spelling
+	// but are different vocabularies: a project owner versus a cloud owner.
+	cloudAccessProjectOwnerRole = "owner"
+	cloudAccessCloudOwnerRole   = "owner"
 )
 
 var (
@@ -349,7 +353,8 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 							ElementType: types.StringType,
 							Optional:    true,
 							MarkdownDescription: "Restrictions layered on top of `base_role`, never extra capability. " +
-								"The only known value is `cloud_read_only`.\n\n" +
+								"The only accepted value is `cloud_read_only`, which a cloud `owner` cannot have; either mistake is " +
+								"rejected at plan time.\n\n" +
 								"Unlike the organization-scope equivalent, cloud deny roles do **not** restrict " +
 								"organization or project owners.\n\n" +
 								"A member with `cloud_read_only` may only hold `readonly` on this cloud's projects; " +
@@ -359,10 +364,8 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 							ElementType: types.StringType,
 							Optional:    true,
 							MarkdownDescription: "This member's roles on projects under this cloud, keyed by project ID. " +
-								"Known values are `owner`, `write` and `readonly`.\n\n" +
-								"Note `write` here, not `writer` - the project vocabulary and the cloud vocabulary " +
-								"genuinely differ. `writer` on a project is rejected at plan time with a did-you-mean, " +
-								"rather than left to fail as an API error partway through an apply.\n\n" +
+								"Must be `owner`, `write` or `readonly`; anything else is rejected at plan time.\n\n" +
+								"Note `write` here, not the cloud spelling `writer`; the two vocabularies differ.\n\n" +
 								"~> **Authority here is scoped to the projects you name.** This resource is authoritative " +
 								"over these project roles and no others: a role dropped from this map is revoked, but a role " +
 								"granted out of band on a project no configuration mentions is invisible to Terraform and is " +
@@ -971,6 +974,47 @@ func (r *CloudAccessResource) ValidateConfig(ctx context.Context, req resource.V
 			)
 		}
 
+		// Any project role outside the three the backend accepts is a 422 at apply.
+		// "writer" is the near-miss with its own did-you-mean above.
+		for projectID, level := range projects {
+			if strings.EqualFold(strings.TrimSpace(level), cloudAccessCloudWriteRole) {
+				continue // reported above, with its did-you-mean
+			}
+			switch level {
+			case cloudAccessProjectOwnerRole, cloudAccessProjectWriteRole, cloudAccessReadOnlyProjectRole:
+			default:
+				resp.Diagnostics.AddAttributeError(
+					memberPath.AtName("projects").AtMapKey(projectID),
+					"Unknown Project Role",
+					fmt.Sprintf("Member %q is granted %q on project %s, but a project only accepts `owner`, `write` or `readonly`.",
+						email, level, projectID),
+				)
+			}
+		}
+
+		// Cloud deny roles: the backend accepts only cloud_read_only, and refuses it
+		// for an owner ("Cloud owners cannot be read-only").
+		for _, role := range denyRoles {
+			if role != cloudAccessReadOnlyDenyRole {
+				resp.Diagnostics.AddAttributeError(
+					memberPath.AtName("deny_roles"),
+					"Unknown Cloud Deny Role",
+					fmt.Sprintf("Member %q has deny role %q, but the only cloud deny role is %q.",
+						email, role, cloudAccessReadOnlyDenyRole),
+				)
+			}
+		}
+		if !m.BaseRole.IsUnknown() && strings.TrimSpace(m.BaseRole.ValueString()) == cloudAccessCloudOwnerRole &&
+			slices.Contains(denyRoles, cloudAccessReadOnlyDenyRole) {
+			resp.Diagnostics.AddAttributeError(
+				memberPath.AtName("deny_roles"),
+				"Cloud Owner Cannot Be Read-Only",
+				fmt.Sprintf("Member %q is a cloud `owner` and also has the %q deny role. Anyscale rejects this "+
+					"combination. Remove the deny role, or give the member a different base_role.",
+					email, cloudAccessReadOnlyDenyRole),
+			)
+		}
+
 		// A member carrying cloud_read_only can only hold readonly on this cloud's
 		// projects - the backend 422s anything else. This is genuinely a cross-field
 		// constraint spanning a member's cloud deny roles and their project roles,
@@ -1060,6 +1104,7 @@ func cloudAccessMembersToState(
 	// response of "alice@x.com" are one person; matching them exactly would treat
 	// the API's spelling as a new member and the config's as a departed one.
 	prior := make(map[string]CloudAccessMemberModel)
+	priorSpelling := make(map[string]string)
 	if !priorMember.IsNull() && !priorMember.IsUnknown() {
 		raw := make(map[string]CloudAccessMemberModel, len(priorMember.Elements()))
 		diags.Append(priorMember.ElementsAs(ctx, &raw, false)...)
@@ -1068,6 +1113,7 @@ func cloudAccessMembersToState(
 		}
 		for email, m := range raw {
 			prior[strings.ToLower(strings.TrimSpace(email))] = m
+			priorSpelling[strings.ToLower(strings.TrimSpace(email))] = email
 		}
 	}
 
@@ -1172,11 +1218,16 @@ func cloudAccessMembersToState(
 			return types.MapNull(cloudAccessMemberType()), diags
 		}
 
-		// Keyed by the API's own spelling of the email, not prior state's. The two
-		// can differ in case, and the API's is what a fresh import would produce -
-		// so using it keeps an imported state and a refreshed state identical rather
-		// than making the key depend on which path got there first.
-		elements[m.Email] = obj
+		// Keyed by prior state's spelling of the email when there is one. The API
+		// lowercases emails, and the map key is not Computed, so re-keying a
+		// configured "Alice@x.com" to "alice@x.com" would plan a remove-and-add on
+		// every run. Only a member with no prior entry (an import) takes the API's
+		// spelling.
+		key := m.Email
+		if spelled, ok := priorSpelling[strings.ToLower(strings.TrimSpace(m.Email))]; ok {
+			key = spelled
+		}
+		elements[key] = obj
 	}
 
 	result, resultDiags := types.MapValue(cloudAccessMemberType(), elements)

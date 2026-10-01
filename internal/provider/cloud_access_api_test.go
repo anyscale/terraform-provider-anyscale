@@ -526,13 +526,14 @@ func TestCloudAccessMembersToState_CarriesProjectsAcrossEmailCasing(t *testing.T
 		t.Fatalf("unexpected error: %v", convDiags)
 	}
 
-	// Keyed by the API's spelling, so a refreshed state and a freshly imported
-	// state are identical rather than depending on which path got there first.
-	if _, ok := got.Elements()["alice@example.com"]; !ok {
-		t.Fatalf("the member map is not keyed by the API's spelling of the email: %v", got.Elements())
+	// Keyed by the spelling prior state (the configuration) used, so the plan
+	// against a mixed-case config stays empty. The API's spelling would re-key the
+	// member on every refresh.
+	if _, ok := got.Elements()["Alice@Example.com"]; !ok {
+		t.Fatalf("the member map is not keyed by the configured spelling of the email: %v", got.Elements())
 	}
 
-	entry := cloudAccessStateEntry(t, ctx, got, "alice@example.com")
+	entry := cloudAccessStateEntry(t, ctx, got, "Alice@Example.com")
 	if entry.Projects.IsNull() {
 		t.Fatalf("project roles were dropped. They are not refreshed from the API, so prior state is the only place they exist - losing them here means the next authoritative apply revokes them")
 	}
@@ -713,5 +714,20 @@ func TestCloudRolesFeatureDisabled(t *testing.T) {
 	}
 	if strings.Contains(cloudRolesDisabledDetail, "Azure") {
 		t.Errorf("the 501 detail names Azure, which no backend 501 site gates on: %s - if there is a real source for Azure behavior it must be attributed and hedged, not stated absolutely", cloudRolesDisabledDetail)
+	}
+}
+
+// Positive control for the keying rule above: a member with no prior entry
+// (an import) takes the API's spelling.
+func TestCloudAccessMembersToState_NoPriorKeepsAPISpelling(t *testing.T) {
+	ctx := context.Background()
+	got, diags := cloudAccessMembersToState(ctx, []cloudAccessRemoteMember{{
+		Email: "alice@example.com", UserID: "usr_1", BaseRoles: []string{"writer"},
+	}}, types.MapNull(cloudAccessMemberType()), nil)
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if _, ok := got.Elements()["alice@example.com"]; !ok {
+		t.Fatalf("an import must key by the API's spelling: %v", got.Elements())
 	}
 }

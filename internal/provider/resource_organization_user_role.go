@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -17,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -282,12 +285,15 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				// default is only safe where guessing wrong is harmless, and a privilege
 				// change is not. Stating the role is this resource's entire job.
 				//
-				// No OneOf validator: the roles API is being actively extended, and a
-				// hard-coded enum would reject a new backend role until a provider release.
-				// Known values are documented here instead, per the permissive-validation
-				// decision.
-				MarkdownDescription: "The member's organization base role. Known values are `owner` and `collaborator`; " +
-					"the API may accept newer values, so this is not validated against a fixed list. Required - " +
+				// Validated against the two roles the backend accepts. Any other value
+				// either 422s at apply or, on the legacy endpoint, is silently collapsed to
+				// collaborator (demoting an owner) and then fails as an inconsistent
+				// result - and the only value Read can return is owner or collaborator, so
+				// nothing else could ever round-trip.
+				Validators: []validator.String{
+					stringvalidator.OneOf("owner", "collaborator"),
+				},
+				MarkdownDescription: "The member's organization base role: `owner` or `collaborator`. Required - " +
 					"there is deliberately no default, because guessing it during adoption of an existing member " +
 					"could silently change their privileges.",
 			},
@@ -327,11 +333,15 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
 				},
+				Validators: []validator.List{
+					listvalidator.UniqueValues(),
+					listvalidator.ValueStringsAre(stringvalidator.OneOf("image_reader", "image_reader_no_base_images")),
+				},
 				MarkdownDescription: "Container image deny roles for the member - restrictions layered on top of " +
 					"`base_role`, never extra capability. Known values are `image_reader` (cannot create custom " +
 					"images or register external images) and `image_reader_no_base_images` (the same, and " +
-					"additionally cannot deploy Anyscale base images). Not validated against a fixed list, as the " +
-					"API is being extended.\n\n" +
+					"additionally cannot deploy Anyscale base images). Order is not significant and " +
+					"duplicates are rejected.\n\n" +
 					"Note these **also restrict organization owners**, unlike cloud deny roles, which do not " +
 					"restrict organization or project owners.\n\n" +
 					"Omit this attribute to leave the organization's existing deny roles untouched. Set it - " +
@@ -528,7 +538,10 @@ func findOrgCollaboratorByEmail(ctx context.Context, client *Client, email strin
 		if !strings.EqualFold(c.Email, email) {
 			continue
 		}
-		hydrated := hydrateCollaboratorRoles(ctx, client, c)
+		hydrated, err := hydrateCollaboratorRoles(ctx, client, c)
+		if err != nil {
+			return nil, err
+		}
 		return &hydrated, nil
 	}
 	return nil, fmt.Errorf("%w: no organization member found with email %s", ErrNotFound, email)
@@ -538,15 +551,27 @@ func findOrgCollaboratorByEmail(ctx context.Context, client *Client, email strin
 func applyCollaboratorToModel(ctx context.Context, model *OrganizationUserRoleResourceModel, c *OrganizationCollaboratorResult) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	model.ID = types.StringValue(c.Email)
-	model.Email = types.StringValue(c.Email)
+	// The backend stores emails lowercased. Email is Required + RequiresReplace, so
+	// replacing the configured spelling with the API's would make Core reject the
+	// result as inconsistent (and plan a replacement forever after). Keep the
+	// configured spelling when it names the same address, and derive the ID from it.
+	if model.Email.IsNull() || model.Email.IsUnknown() || !strings.EqualFold(model.Email.ValueString(), c.Email) {
+		model.Email = types.StringValue(c.Email)
+	}
+	model.ID = model.Email
 	model.IdentityID = types.StringValue(c.ID)
 	model.UserID = stringPtrOrNull(c.UserID)
 	model.BaseRole = types.StringValue(c.BaseRole)
 
-	denyRoles, listDiags := additionalRolesToList(ctx, c.AdditionalRoles)
-	diags.Append(listDiags...)
-	model.DenyRoles = denyRoles
+	// The backend stores deny roles as a set and returns them deduplicated in its own
+	// fixed order, so a list declared in another order would come back "different".
+	// When the returned roles are the same set as the model's, keep the model's
+	// order; a genuinely different set is real drift and takes the API's value.
+	if !sameStringSet(ctx, model.DenyRoles, c.AdditionalRoles) {
+		denyRoles, listDiags := additionalRolesToList(ctx, c.AdditionalRoles)
+		diags.Append(listDiags...)
+		model.DenyRoles = denyRoles
+	}
 
 	return diags
 }
@@ -852,12 +877,10 @@ func (r *OrganizationUserRoleResource) ImportState(ctx context.Context, req reso
 }
 
 // stringListToSlice converts a types.List of strings to a []string, treating a null or
-// unknown list as empty - the deny_roles Optional-not-Computed contract means "omitted"
-// must translate to "send an empty additional_roles set," never "omit the field," since
-// SetOrganizationRolesRequest.AdditionalRoles is a required field on the wire (see
-// setOrganizationRoles above). Relocated from resource_cloud_user_role.go, which shared
-// this exact same Optional-not-Computed-list contract before that resource was removed;
-// this is now its only caller.
+// unknown list as empty. SetOrganizationRolesRequest.AdditionalRoles is a required field
+// on the wire (see setOrganizationRoles above), so it is always sent. deny_roles is
+// Optional+Computed and an omitted one never reaches this helper (the legacy endpoint
+// is used instead), so in practice this sees a declared list, including an explicit [].
 //
 // APPLY-TIME ONLY. ElementsAs errors on an unknown element, which at APPLY time
 // cannot happen - every value is resolved by then - but at VALIDATE or PLAN time
@@ -903,4 +926,30 @@ func resolveIdentityForEmail(ctx context.Context, client *Client, email string) 
 		return c.ID, *c.UserID, nil
 	}
 	return "", "", fmt.Errorf("no organization member found with email %s", email)
+}
+
+// sameStringSet reports whether the known, non-null list holds exactly the
+// elements of want, ignoring order. A null or unknown list, or an undetermined
+// (nil) want, is never "the same": the caller then takes the API's value.
+func sameStringSet(ctx context.Context, have types.List, want []string) bool {
+	if have.IsNull() || have.IsUnknown() || want == nil {
+		return false
+	}
+	var got []string
+	if have.ElementsAs(ctx, &got, false).HasError() {
+		return false
+	}
+	set := make(map[string]struct{}, len(got))
+	for _, g := range got {
+		set[g] = struct{}{}
+	}
+	if len(set) != len(want) {
+		return false
+	}
+	for _, w := range want {
+		if _, ok := set[w]; !ok {
+			return false
+		}
+	}
+	return true
 }
