@@ -52,8 +52,8 @@ member write path, tests create their own groups, so that failure mode no longer
   guards it by refusing to manage `scim` groups.
 - **`/memberships/list` silently drops departed users** and is unpaginated; the members resource
   re-reads the whole organization's memberships on every refresh.
-- **Duplicate group names** are not reported cleanly by the API on create; the provider checks the
-  group list and returns an actionable error.
+- **Duplicate group names** return a 409 on create. The provider surfaces it with a hint to import
+  the existing group, and does not retry.
 
 ## Why membership is keyed by email
 
