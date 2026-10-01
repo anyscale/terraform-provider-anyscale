@@ -160,3 +160,46 @@ func TestAccComputeConfigResource_RemovingLastWorkerKeepsOthersStable_MockServer
 		},
 	})
 }
+
+// An unnamed group whose instance_type matches the prior element must still
+// not take a name another group was configured with.
+func TestAccComputeConfigResource_RemovedNamedWorkerDoesNotLendNameToUnnamedSameType_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server, mock := newMockComputeConfigServerWithState(t)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: workerShiftConfig(server.URL, "cc-shift-same-type", `
+    { name = "a", instance_type = "m5.large", resources = { CPU = 2 } },
+    { instance_type = "m5.large" },`)},
+			{
+				Config: workerShiftConfig(server.URL, "cc-shift-same-type", `
+    { instance_type = "m5.large" },`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectUnknownValue(workerShiftAddr, tfjsonpath.New("worker_nodes").AtSliceIndex(0).AtMapKey("name")),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(workerShiftAddr, "worker_nodes.0.name", "m5.large"),
+					resource.TestCheckNoResourceAttr(workerShiftAddr, "worker_nodes.0.resources.%"),
+					func(*terraform.State) error {
+						worker, err := lastSentWorker(mock)
+						if err != nil {
+							return err
+						}
+						if name, ok := worker["name"]; ok && name != "m5.large" {
+							return fmt.Errorf("sent worker name %v, want unset or m5.large", name)
+						}
+						if res, ok := worker["resources"]; ok {
+							return fmt.Errorf("sent resources %v for a worker that never configured them", res)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}

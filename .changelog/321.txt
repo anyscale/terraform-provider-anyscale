@@ -1,6 +1,6 @@
 ```
 release-note:fixed
-resource/anyscale_compute_config: Removing a worker group from the middle of `worker_nodes` no longer gives the group that moves into its position the removed group's `name` and `resources`, which were previously sent to the API as if configured.
+resource/anyscale_compute_config: Removing a worker group from the middle of `worker_nodes`, or an entry from the middle of `additional_resources`, no longer gives the group or entry that moves into its position the removed one's `name` and `resources`, which were previously sent to the API as if configured. This changes plan behavior in a way the schema does not show: such a plan now shows those values as known after apply.
 ```
 
 ```
@@ -10,7 +10,7 @@ resource/anyscale_compute_config: An unrecognized `worker_nodes[].market_type` i
 
 ```
 release-note:fixed
-resource/anyscale_compute_config: Per-node `flags` and `advanced_instance_config` now compare by JSON meaning, so valid JSON in any formatting applies without an "inconsistent result" error, and invalid JSON is rejected at plan time instead of being silently dropped. Existing state is unaffected.
+resource/anyscale_compute_config: Per-node `flags` and `advanced_instance_config` now compare by JSON meaning, so valid JSON in any formatting applies without an "inconsistent result" error. Invalid JSON is rejected at plan time; it used to fail the apply, and for `advanced_instance_config` it was left out of the request. This is a behavior change the schema does not show. Existing state is unaffected.
 ```
 
 ```
@@ -20,7 +20,7 @@ resource/anyscale_compute_config: `terraform destroy` on an Azure control plane,
 
 ```
 release-note:fixed
-data-source/anyscale_compute_config: `versions` now lists only versions in the config's own cloud, and a lookup by `name` prefers a non-archived config, warning when only an archived one matches.
+data-source/anyscale_compute_config: `versions` now lists only versions in the config's own cloud, and a lookup by `name` prefers a non-archived config, warning when only an archived one matches. A by-name lookup without `cloud_id` can therefore resolve a different config, in a different cloud, than before.
 ```
 
 ```

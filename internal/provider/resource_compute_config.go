@@ -22,7 +22,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -439,8 +438,11 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			Description:         "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.",
 			MarkdownDescription: "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.",
+			// Plain UseStateForUnknown is only safe at the top level: inside an
+			// additional_resources entry the node can shift to another entry's
+			// index. workerNodeConfigAttributes adds the worker-group check.
 			PlanModifiers: []planmodifier.Map{
-				mapplanmodifier.UseStateForUnknown(),
+				nodeResourcesUseStateForSameNode(false),
 			},
 		},
 		"required_resources": schema.SingleNestedAttribute{
@@ -557,10 +559,9 @@ func workerNodeConfigAttributes() map[string]schema.Attribute {
 			workerNameUseStateForSameWorker(),
 		},
 	}
-	// Same index-shift protection for resources, which nodeConfigAttributes
-	// gives a plain UseStateForUnknown that is only safe outside a list.
+	// Same index-shift protection for resources, plus the worker-group check.
 	workerResources := attrs["resources"].(schema.MapAttribute)
-	workerResources.PlanModifiers = []planmodifier.Map{workerResourcesUseStateForSameWorker()}
+	workerResources.PlanModifiers = []planmodifier.Map{nodeResourcesUseStateForSameNode(true)}
 	attrs["resources"] = workerResources
 	attrs["min_nodes"] = schema.Int64Attribute{
 		Optional:            true,
@@ -1559,12 +1560,15 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	// We extract special flags (min_resources, max_resources, allow-cross-zone-autoscaling) above,
 	// but user's custom flags are preserved as-is from their configuration.
 	//
-	// The one exception is ImportState, which populates flags and
-	// advanced_instance_config (top-level and per-node) directly from the API
-	// exactly once, since that is the only point where recovered-at-import and
-	// genuinely-never-configured are not ambiguous. Read leaves them on prior
-	// state untouched either way, so whatever ImportState seeds here persists
-	// through every later refresh.
+	// The one exception is ImportState, which populates the top-level flags and
+	// advanced_instance_config from the API exactly once, since that is the
+	// only point where recovered-at-import and genuinely-never-configured are
+	// not ambiguous. Read leaves them on prior state untouched either way, so
+	// whatever ImportState seeds persists through every later refresh.
+	// Per-node flags and advanced_instance_config are different: the node
+	// conversion below reads them, and maskNodeFromPrior keeps them null only
+	// where prior state was null - so after an import, with no prior, they come
+	// back exactly as the API sent them.
 
 	if eff.HeadNodeType != nil {
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, eff.HeadNodeType)
@@ -1910,10 +1914,9 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 		return
 	}
 
-	// Fetch the config once, here, to recover the write-only fields
-	// (flags, advanced_instance_config -- top-level and per-node) that
-	// ordinary Read intentionally never reads back (see the NOTE comments in
-	// Read). Import is the one place recovering them is unambiguous: there is
+	// Fetch the config once, here, to recover the top-level write-only fields
+	// (flags, advanced_instance_config) that ordinary Read intentionally never
+	// reads back (see the NOTE comments in Read). Import is the one place recovering them is unambiguous: there is
 	// no prior state yet to confuse "recovered at import" with "genuinely
 	// never configured", and Read always preserves whatever these fields
 	// already say in prior state, so whatever is seeded here survives every
@@ -2055,9 +2058,9 @@ func resourceMapToAPI(resources types.Map) map[string]interface{} {
 // use_spot/fallback_to_ondemand for worker).
 //
 // Returns a fresh map per call (never shared/aliased between head and worker conversions).
-// Only the flags parse failure is a hard error, matching the original two copies' behavior -
-// advanced_instance_config's parse failure is silently skipped there too, not an inconsistency
-// introduced here.
+// A flags or advanced_instance_config value that is not a JSON object is an error naming the
+// attribute; both are validated as JSON at plan time, so this only catches valid JSON that is
+// not an object.
 func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredResources types.Object, labels types.Map, requiredLabels types.Map, advancedInstanceConfig jsontypes.Normalized, cloudDeployment types.Object, flags jsontypes.Normalized) (map[string]interface{}, error) {
 	config := map[string]interface{}{}
 

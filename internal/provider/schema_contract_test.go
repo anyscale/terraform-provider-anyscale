@@ -248,7 +248,8 @@ func TestComputeConfigResourceContract(t *testing.T) {
 	}
 
 	// head_node.resources and worker_nodes[].resources: Optional+Computed, with
-	// UseStateForUnknown on head_node and the index-safe variant on workers.
+	// the index-safe UseStateForUnknown variants (head_node can sit inside an
+	// additional_resources entry, which can shift too).
 	assertResourcesMap := func(t *testing.T, label string, attrs map[string]schema.Attribute, wantModifier string) {
 		t.Helper()
 		ra, ok := attrs["resources"].(schema.MapAttribute)
@@ -270,7 +271,8 @@ func TestComputeConfigResourceContract(t *testing.T) {
 	if !ok {
 		t.Fatalf("head_node is not a schema.SingleNestedAttribute (got %T)", s.Attributes["head_node"])
 	}
-	assertResourcesMap(t, "head_node", headNode.Attributes, descUseStateForUnknown)
+	assertResourcesMap(t, "head_node", headNode.Attributes,
+		nodeResourcesUseStateForSameNode(false).Description(context.Background()))
 
 	workerNodes, ok := s.Attributes["worker_nodes"].(schema.ListNestedAttribute)
 	if !ok {
@@ -279,7 +281,7 @@ func TestComputeConfigResourceContract(t *testing.T) {
 	// A plain UseStateForUnknown here copies a removed worker's resources onto
 	// whichever worker shifts into its index.
 	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes,
-		workerResourcesUseStateForSameWorker().Description(context.Background()))
+		nodeResourcesUseStateForSameNode(true).Description(context.Background()))
 }
 
 // TestComputeConfigCC1RequiredResourcesRename pins CC1: physical_resources
@@ -638,7 +640,7 @@ func TestProjectDescriptionRequiresReplaceIfConfigured(t *testing.T) {
 	}
 	if !hasPlanModifierDescription(desc.PlanModifiers, descRequiresReplaceIfConfigured) {
 		t.Errorf("description must include stringplanmodifier.RequiresReplaceIfConfigured() so replacement only " +
-			"triggers on a user-configured change, not a server-side one (task 452e7154)")
+			"triggers on a user-configured change, not a server-side one")
 	}
 	if !hasPlanModifierDescription(desc.PlanModifiers, descUseStateForUnknown) {
 		t.Errorf("description must include stringplanmodifier.UseStateForUnknown() so a server-assigned value " +
@@ -695,13 +697,13 @@ func TestComputeConfigWorkerNodeNameIsServerInferred(t *testing.T) {
 	if !name.Computed {
 		t.Errorf("worker_nodes[].name must be Computed: true — without it, omitting the name plans a hard null " +
 			"that can never reconcile against the non-null name the server/provider assigns, producing " +
-			"'Provider produced inconsistent result after apply' (task 451e2845)")
+			"'Provider produced inconsistent result after apply'")
 	}
 	if hasPlanModifierDescription(name.PlanModifiers, descUseStateForUnknown) {
 		t.Errorf("worker_nodes[].name must NOT use plain stringplanmodifier.UseStateForUnknown() — for an " +
 			"update that adds a brand-new worker group, that modifier copies the missing element's null prior " +
 			"state into the plan instead of leaving it unknown, producing 'Provider produced inconsistent " +
-			"result after apply' on the new element (task 1f2d592f's regression). Use UseNonNullStateForUnknown instead.")
+			"result after apply' on the new element. Use workerNameUseStateForSameWorker instead.")
 	}
 	// The index-safe variant: like UseNonNullStateForUnknown it leaves a
 	// brand-new element unknown, and it also refuses to reuse the name of a

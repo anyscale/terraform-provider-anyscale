@@ -256,7 +256,7 @@ func upgradeNodeV0toV1(ctx context.Context, v0Node types.Object, attrTypes map[s
 		}
 	}
 
-	// A1: required_labels is new in this schema version too - nothing to
+	// required_labels is new in this schema version too - nothing to
 	// migrate for it either, same as cpu_architecture/idle_termination_minutes.
 	newAttrs["required_labels"] = types.MapNull(types.StringType)
 
