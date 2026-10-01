@@ -81,7 +81,7 @@ type ServiceResourceModel struct {
 
 	// Computed outputs. The four nested-object fields are typed as types.Object rather than the
 	// concrete ServiceObservabilityURLsModel/ServiceVersionModel/ServiceStatusChecklistModel
-	// structs the data sources use for the SAME shape a plain Go
+	// structs the data sources use for the SAME shape: a plain Go
 	// struct/pointer cannot represent Unknown, and on Create (and on Update/ModifyPlan before an
 	// apply has run) these Computed-only nested objects are genuinely Unknown in the plan -
 	// req.Plan.Get decoding them into a bare struct field crashes with "Value Conversion Error"
@@ -842,7 +842,7 @@ func serviceConnectionIDsChanged(plan, state *ServiceResourceModel) bool {
 }
 
 // serviceDeployFieldsChanged reports whether any field that requires a new PUT /apply + rollout
-// wait differs between plan and state timeouts (purely local
+// wait differs between plan and state. timeouts (purely local
 // to this provider) and tags (its own always-run sync via syncServiceTags, independent of
 // whether a deploy happens) are deliberately excluded: neither has a version/rollout concept,
 // so changing only one of them must not redeploy an otherwise-unchanged, healthy running

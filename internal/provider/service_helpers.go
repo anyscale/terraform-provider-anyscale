@@ -54,8 +54,8 @@ const defaultServiceRolloutPollInterval = 10 * time.Second
 // NOT terminal here: the service is already being torn down, so its health no longer matters,
 // and hard-erroring would make Delete itself fail on exactly the resources most in need of being
 // deleted (a Create-tainted service's only recovery path is destroy-then-recreate). err is nil
-// for terminal success, while still in progress, or an unrecognized/unexpected state (treated as CONTINUE rather than a hard error, so a backend adding a new
-// benign transitional state does not break every apply against an otherwise-healthy service; the
+// for terminal success, while still in progress, or an unrecognized/unexpected state (treated as CONTINUE rather than a hard error, so a
+// backend adding a new benign transitional state does not break every apply against an otherwise-healthy service; the
 // caller's timeout still backstops a genuinely stuck or new-terminal state, and logs a warning
 // so the gap stays visible - see waitForServiceStateWithTiming).
 func evaluateServiceState(service *ServiceResult, target string) (done bool, err error) {

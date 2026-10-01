@@ -1,5 +1,5 @@
 ```
-release-note:breaking-change
+release-note:fixed
 resource/anyscale_service: Changing `description` while `rollout_strategy = "IN_PLACE"` is now rejected at plan time. The IN_PLACE backend path silently discarded the change, so the plan previously reported success and showed the same diff on every apply; set `rollout_strategy = "ROLLOUT"` to change it.
 ```
 
