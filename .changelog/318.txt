@@ -1,0 +1,14 @@
+```
+release-note:fixed
+resource/anyscale_container_image_registry: Declaring `registry_login_secret` on an imported container image no longer replaces it. Terraform records the value in state without sending it and shows a warning; use `-replace` to recreate the image with the secret. This changes the plan action from replace to update, a behavior change the schema does not show.
+```
+
+```
+release-note:fixed
+resource/anyscale_cloud: Declaring `credentials` on an imported cloud no longer replaces the cloud. Terraform records the value in state without sending it and shows a warning; use `-replace` to recreate the cloud with these credentials. This changes the plan action from replace to update, a behavior change the schema does not show.
+```
+
+```
+release-note:fixed
+resource/anyscale_container_image_build: `terraform import` now recovers `project_id` instead of leaving it null, so a config that sets it no longer plans a replacement after import. An image built in a project, imported into a config that omits `project_id`, now shows that difference as a planned replacement.
+```
