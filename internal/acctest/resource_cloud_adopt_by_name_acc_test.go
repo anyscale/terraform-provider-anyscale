@@ -94,10 +94,6 @@ resource "anyscale_cloud" "test" {
     vpc_id             = "vpc-adopt"
     subnet_ids         = ["subnet-a"]
     security_group_ids = ["sg-adopt"]
-    # Pinned so the adopted state has no unknown nested value; an adopt does not
-    # resolve these, which is separate from what these tests cover.
-    memorydb_cluster_arn      = "arn:aws:memorydb:us-east-2:123456789012:cluster/adopt"
-    memorydb_cluster_endpoint = "adopt.clustercfg.memorydb.us-east-2.amazonaws.com:6379"
   }
 
   object_storage {
