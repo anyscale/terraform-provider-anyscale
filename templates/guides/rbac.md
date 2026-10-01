@@ -69,6 +69,9 @@ organization. An email that is not an organization member fails the apply; invit
 with [`anyscale_organization_invitation`](../resources/organization_invitation.md) and wait for them to
 accept. Emails match case-insensitively, and state keeps the spelling from your configuration.
 
+Anyscale support staff accounts cannot be added to a group: the apply fails with an error that names the
+email, and nothing is changed.
+
 ### `anyscale_user_group_members` is authoritative
 
 Anyone in the group who is not in `members` is **removed** - including people added through the
