@@ -140,7 +140,7 @@ func (d *UserDataSource) Configure(ctx context.Context, req datasource.Configure
 }
 
 // userInfoResponse is the subset of GET /api/v2/userinfo this data source
-// needs. DS-USER-1/DS-USER-2: organization_permission_level and each
+// needs. organization_permission_level and each
 // organization's default_cloud_id are genuinely nullable server-side (see
 // backend/server/api/product/models/users.go's UserInfo.organization_permission_level
 // docstring: "absent if the user does not have a permission level assigned",
@@ -168,7 +168,7 @@ type userInfoResponse struct {
 func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var state UserDataSourceModel
 
-	// DS-USER-4: adopt DoRequestAndParse, matching anyscale_organization's
+	// Adopt DoRequestAndParse, matching anyscale_organization's
 	// fetchCurrentOrganization, instead of hand-rolling the request/read/parse
 	// sequence. Same empty-organizations guard as that data source too.
 	userResp, err := DoRequestAndParse[userInfoResponse](ctx, d.client, "GET", "/api/v2/userinfo", nil, http.StatusOK)

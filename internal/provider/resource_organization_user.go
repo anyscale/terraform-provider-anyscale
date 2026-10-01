@@ -735,7 +735,7 @@ func (r *OrganizationUserResource) reportLapsedInvitation(
 // created_at is write-once. It starts null (nobody has one while an invitation
 // is pending), gets its single write the first time the person is seen in the
 // member list, and is never re-read - the API has returned different created_at
-// values across reads for the same member (task 4745d9fb), and re-syncing it
+// values across reads for the same member, and re-syncing it
 // caused "Provider produced inconsistent result after apply".
 func applyMemberIdentity(model *OrganizationUserResourceModel, collaborator *OrganizationCollaboratorResult) {
 	model.IdentityID = types.StringValue(collaborator.ID)
@@ -1334,14 +1334,16 @@ func invitationErrorDetail(err error) string {
 //     singular GET is keyed by user_id, so it cannot be reached at all: nil.
 //   - the call fails for any other reason (transport, status, parse - flag-off
 //     itself returns a clean 200, so this is a genuine failure, not a normal
-//     case): nil. Never surfaced as a Read/Import error either way.
-func hydrateCollaboratorRoles(ctx context.Context, client *Client, fromList OrganizationCollaboratorResult) OrganizationCollaboratorResult {
+//     case): an ERROR. Returning nil here would present a real deny-role list as
+//     "undetermined" on the strength of a transient failure, and deny roles
+//     restrict even organization owners. Null is reserved for "no user_id".
+func hydrateCollaboratorRoles(ctx context.Context, client *Client, fromList OrganizationCollaboratorResult) (OrganizationCollaboratorResult, error) {
 	if fromList.UserID == nil || *fromList.UserID == "" {
 		tflog.Debug(ctx, "Collaborator has no user_id; additional_roles is undetermined (not empty)", map[string]any{
 			"identity_id": fromList.ID,
 		})
 		fromList.AdditionalRoles = nil
-		return fromList
+		return fromList, nil
 	}
 
 	singular, err := DoRequestAndParse[OrganizationCollaboratorSingularResponse](
@@ -1349,17 +1351,11 @@ func hydrateCollaboratorRoles(ctx context.Context, client *Client, fromList Orga
 		http.StatusOK,
 	)
 	if err != nil {
-		fromList.AdditionalRoles = nil
-		tflog.Warn(ctx, "Singular collaborator GET failed; additional_roles is undetermined (not empty)", map[string]any{
-			"identity_id": fromList.ID,
-			"user_id":     *fromList.UserID,
-			"error":       err.Error(),
-		})
-		return fromList
+		return fromList, fmt.Errorf("could not read the roles of organization member %s (user %s): %w", fromList.Email, *fromList.UserID, err)
 	}
 
 	fromList.AdditionalRoles = singular.Result.AdditionalRoles
-	return fromList
+	return fromList, nil
 }
 
 // additionalRolesToList converts the tri-state AdditionalRoles field populated by

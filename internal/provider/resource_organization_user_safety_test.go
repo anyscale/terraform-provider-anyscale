@@ -112,7 +112,25 @@ func (s *mockOrgUserServer) handle(w http.ResponseWriter, r *http.Request) {
 
 func (s *mockOrgUserServer) handleCollaboratorList(w http.ResponseWriter, r *http.Request, reqPath string) {
 	// Singular per-user GET.
+	// Served faithfully: a member the list returns is also returned here, with the
+	// roles the real singular endpoint carries. An unconditional 404 would model a
+	// member that exists but cannot be read back, which the provider now reports
+	// as an error rather than as an undetermined deny-role list.
 	if strings.HasPrefix(reqPath, "/api/v2/organization_collaborators/") {
+		userID := strings.TrimPrefix(reqPath, "/api/v2/organization_collaborators/")
+		for _, m := range s.members {
+			if m.userID != userID {
+				continue
+			}
+			uid := m.userID
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(OrganizationCollaboratorSingularResponse{Result: OrganizationCollaboratorResult{
+				ID: m.identityID, UserID: &uid, Email: strings.ToLower(m.email),
+				CreatedAt: "2026-01-01T00:00:00.000000+00:00",
+				BaseRole:  "collaborator", AdditionalRoles: []string{},
+			}})
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}

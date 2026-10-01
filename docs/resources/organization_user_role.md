@@ -77,12 +77,12 @@ output "analyst_current_role" {
 
 ### Required
 
-- `base_role` (String) The member's organization base role. Known values are `owner` and `collaborator`; the API may accept newer values, so this is not validated against a fixed list. Required - there is deliberately no default, because guessing it during adoption of an existing member could silently change their privileges.
+- `base_role` (String) The member's organization base role: `owner` or `collaborator`. Required - there is deliberately no default, because guessing it during adoption of an existing member could silently change their privileges.
 - `email` (String) Email of the organization member whose role this manages. The member must already exist in the organization. Matched case-insensitively against the API, but changing this value replaces the resource - it identifies a different person.
 
 ### Optional
 
-- `deny_roles` (List of String) Container image deny roles for the member - restrictions layered on top of `base_role`, never extra capability. Known values are `image_reader` (cannot create custom images or register external images) and `image_reader_no_base_images` (the same, and additionally cannot deploy Anyscale base images). Not validated against a fixed list, as the API is being extended.
+- `deny_roles` (List of String) Container image deny roles for the member - restrictions layered on top of `base_role`, never extra capability. Known values are `image_reader` (cannot create custom images or register external images) and `image_reader_no_base_images` (the same, and additionally cannot deploy Anyscale base images). Order is not significant and duplicates are rejected.
 
 Note these **also restrict organization owners**, unlike cloud deny roles, which do not restrict organization or project owners.
 

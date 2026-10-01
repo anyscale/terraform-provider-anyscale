@@ -425,7 +425,7 @@ func getEmailDomain(email string) string {
 // caseInsensitiveEmailPlanModifier suppresses a plan diff (and the replacement
 // this attribute would otherwise trigger) when the only difference between the
 // configured email and the stored value is letter case. The Anyscale API dedups
-// invitations by lower-cased email (contract I2/I-OPEN, traced against
+// invitations by lower-cased email (traced against
 // organization_invitations_dao.py's create_invitation/find_invitation, both of
 // which normalize through LOWER), so a case-only edit is the same invitation to
 // the backend - forcing a destroy+recreate over it would be a real

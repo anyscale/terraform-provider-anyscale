@@ -37,9 +37,10 @@ type mockOrgUserRoleServer struct {
 
 	baseRole        string
 	additionalRoles []string
-	writes          int // count of PUT calls received, either write path
-	legacyWrites    int // count of PUTs to the legacy permission_level path specifically
-	rolesWrites     int // count of PUTs to the gated roles path specifically
+	writes          int  // count of PUT calls received, either write path
+	legacyWrites    int  // count of PUTs to the legacy permission_level path specifically
+	rolesWrites     int  // count of PUTs to the gated roles path specifically
+	failSingular    bool // the per-user GET answers 500
 }
 
 func newMockOrgUserRoleServer(t *testing.T) (*httptest.Server, *mockOrgUserRoleServer) {
@@ -81,6 +82,9 @@ func (s *mockOrgUserRoleServer) handle(w http.ResponseWriter, r *http.Request) {
 				{ID: s.identityID, Email: s.email, UserID: &s.userID, PermissionLevel: s.baseRole, BaseRole: s.baseRole},
 			},
 		})
+	case r.Method == http.MethodGet && path == singularPath && s.failSingular:
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, `{"error":{"detail":"internal error"}}`)
 	case r.Method == http.MethodGet && path == singularPath:
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(provider.OrganizationCollaboratorSingularResponse{
@@ -103,10 +107,10 @@ func (s *mockOrgUserRoleServer) handle(w http.ResponseWriter, r *http.Request) {
 		var body provider.SetOrganizationRolesRequest
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		s.baseRole = body.BaseRole
-		s.additionalRoles = body.AdditionalRoles
-		if s.additionalRoles == nil {
-			s.additionalRoles = []string{}
-		}
+		// The backend stores the roles as a set and reads them back in a fixed
+		// order (_ORDERED_ADDITIONAL_GROUP_TYPES), deduplicated - never in the
+		// order or multiplicity that was sent.
+		s.additionalRoles = canonicalOrgAdditionalRoles(body.AdditionalRoles)
 		s.writes++
 		s.rolesWrites++
 		w.WriteHeader(http.StatusNoContent)
@@ -806,4 +810,20 @@ func (e expectPlanBeforeValue) CheckPlan(ctx context.Context, req plancheck.Chec
 		return
 	}
 	resp.Error = fmt.Errorf("no plan change found for resource %s", e.addr)
+}
+
+// canonicalOrgAdditionalRoles mirrors the backend's read-back of a roles set:
+// deduplicated, in the fixed order image_reader, image_reader_no_base_images.
+// Unknown values are kept after the known ones so a test can still see them.
+func canonicalOrgAdditionalRoles(sent []string) []string {
+	out := []string{}
+	for _, want := range []string{"image_reader", "image_reader_no_base_images"} {
+		for _, got := range sent {
+			if got == want {
+				out = append(out, want)
+				break
+			}
+		}
+	}
+	return out
 }
