@@ -24,6 +24,8 @@ func TestFailClosedResolverChild(t *testing.T) {
 		GetTestCloudID(t)
 	case "anycloud":
 		GetAnyCloudID(t)
+	case "computeconfig":
+		GetComputeConfigCloudID(t)
 	}
 }
 
