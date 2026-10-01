@@ -109,11 +109,11 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			},
 			"containerfile_path": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`. Updating this value triggers a new build revision.",
+				MarkdownDescription: "Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`. Changing the path triggers a new build revision; editing the file's contents does not. To rebuild whenever the contents change, use `containerfile = file(\"...\")` instead.",
 			},
 			"project_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The ID of the project to associate this container image with. Changing this replaces the resource.",
+				MarkdownDescription: "The ID of the project to associate this container image with. Changing this replaces the resource. Recovered by `terraform import`; config that disagrees with the imported value plans a replacement.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

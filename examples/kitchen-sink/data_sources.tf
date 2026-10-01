@@ -1,4 +1,4 @@
-# All 13 data sources this provider registers, reading back what the resource files above created.
+# Most of this provider's data sources, reading back what the resource files above created.
 # Two ordering patterns are in play:
 #
 # 1. Singular lookups below reference the resource's own name/id attribute directly (e.g.

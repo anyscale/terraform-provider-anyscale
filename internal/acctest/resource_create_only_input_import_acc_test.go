@@ -1,6 +1,6 @@
 package acctest
 
-// Create-only inputs the Anyscale API never returns (registry_login_secret,
+// Create-only inputs that import does not recover (registry_login_secret,
 // cloud credentials) are null after `terraform import`. A config that declares
 // one must then plan an in-place update that records the value without sending
 // it, not a replacement of the live object. These tests drive

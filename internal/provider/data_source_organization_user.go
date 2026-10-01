@@ -55,22 +55,19 @@ func (d *OrganizationUserDataSource) Metadata(ctx context.Context, req datasourc
 func (d *OrganizationUserDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	attributes := organizationUserSharedAttributes()
 	attributes["id"] = schema.StringAttribute{
-		Optional: true,
-		Computed: true,
-		MarkdownDescription: "The identity ID of the user. Either `id`, `user_id`, or `email` must be specified.\n\n" +
-			"Note this is **not** the same as the `id` of the `anyscale_organization_user` **resource**, which is the email\n" +
-			"address. The two surfaces share a name and key on different values; use `email` when you need a value the\n" +
-			"resource will accept.",
+		Optional:            true,
+		Computed:            true,
+		MarkdownDescription: "The identity ID of the user. Specify exactly one of `id`, `user_id`, or `email`. Not the `id` of the `anyscale_organization_user` resource, which is the email address; use `email` for a value that resource accepts.",
 	}
 	attributes["user_id"] = schema.StringAttribute{
 		Optional:            true,
 		Computed:            true,
-		MarkdownDescription: "The user ID of the user. Either `id`, `user_id`, or `email` must be specified.",
+		MarkdownDescription: "The user ID of the user. Specify exactly one of `id`, `user_id`, or `email`.",
 	}
 	attributes["email"] = schema.StringAttribute{
 		Optional:            true,
 		Computed:            true,
-		MarkdownDescription: "The email address of the user. Either `id`, `user_id`, or `email` must be specified.",
+		MarkdownDescription: "The email address of the user. Specify exactly one of `id`, `user_id`, or `email`.",
 	}
 
 	resp.Schema = schema.Schema{

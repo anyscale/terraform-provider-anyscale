@@ -135,21 +135,12 @@ output "user_additional_roles" {
 
 ### Optional
 
-- `reinvite_if_expired` (Boolean) Whether to send a new invitation when a previous one expired without being accepted. Defaults to `false`.
-
-When `false`, a lapsed invitation produces a **warning on every refresh** and no email is sent - Terraform will not silently invite someone again because an invitation aged out.
-
-Set this to `true` to have the resource issue a new invitation. Nothing is "resent": an expired invitation is dead, and this mints a **new invitation with a new link** - the link in the original email will not work, so point the recipient at the new message. It counts against the organization's daily invitation limit.
-
-Because the expiry is only noticed during a refresh, a lapsed resource with this set to `true` is removed from state during `terraform plan`/`refresh` and shown as a **create** in the resulting plan. The new invitation is sent when you apply it, not before.
+- `reinvite_if_expired` (Boolean) Issue a new invitation if a previous one expired unaccepted (default `false`). When `false`, each refresh warns and sends nothing. When `true`, refresh drops the lapsed resource and the plan shows a create; the new invitation has a new link (the old one stays dead) and counts against the daily invitation limit.
 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the member was added to the organization. Null while an invitation is still pending. Write-once: populated the first time the member is seen and never re-read afterward, since the API has returned different values for it across reads.
-- `id` (String) The member's email address. Same value as `email`. Note this is **not** the same as the `id` of the
-`anyscale_organization_user` **data source**, which is the identity ID - the two surfaces share a name and key on
-different values. When you need to pass a member's identity from a data source into this resource, use the data
-source's `email` attribute, not its `id`.
+- `id` (String) The member's email address, same value as `email`. Not the `id` of the `anyscale_organization_user` data source, which is the identity ID; pass that data source's `email` to this resource instead.
 - `identity_id` (String) The identity ID of the member, once they exist. Null while an invitation is still pending. This was the resource's ID before it was re-keyed to email.
 - `name` (String) The name of the organization member. Null while an invitation is still pending.
 - `user_id` (String) The user ID of the member, once they exist. Null while an invitation is still pending, and null for identity types that do not have one.

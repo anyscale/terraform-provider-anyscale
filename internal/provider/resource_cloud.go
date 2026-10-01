@@ -179,7 +179,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"cloud_provider": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE. Auto-detected from aws_config/gcp_config/azure_config, or defaults to AWS for empty clouds. AWS and GCP support both VM and K8S compute stacks; AZURE supports K8S only (AKS) - Anyscale does not support Azure VM clouds, and setting azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported by this provider.",
+				MarkdownDescription: "Cloud provider: AWS, GCP, or AZURE. Inferred from whichever of aws_config/gcp_config/azure_config is set; otherwise (an empty cloud, or only kubernetes_config) it defaults to AWS, so set it explicitly for GKE or AKS. AZURE supports K8S only (AKS); azure_config with any other compute_stack is a plan-time error. GENERIC is not yet supported.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -202,7 +202,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"region": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "The region where the cloud is deployed. Auto-detected from config or defaults to us-east-1 for empty clouds. For AWS, Anyscale does not support the China or GovCloud partitions.",
+				MarkdownDescription: "The region where the cloud is deployed. Inferred only from the availability zones in `aws_config.subnet_ids_to_az`, and defaults to us-east-1 for an empty cloud; every other cloud (GCP, Kubernetes, or AWS with `subnet_ids`) must set it explicitly. For AWS, Anyscale does not support the China or GovCloud partitions.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -229,7 +229,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"credentials": schema.StringAttribute{
 				Optional:            true,
 				Sensitive:           true,
-				MarkdownDescription: "Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Required when using the multi-resource cloud pattern (empty cloud + cloud_resource).",
+				MarkdownDescription: "Cloud credentials: the AWS IAM role ARN, or for GCP a JSON object with provider_id, project_id and service_account_email. Optional: derived from the config blocks when omitted (see [Credentials handling](../guides/cloud-resources.md#credentials-handling)). Changing it replaces the cloud, except the first value set after `terraform import`, which is recorded in state without being sent (see [Importing an existing cloud](../guides/cloud-resources.md#importing-an-existing-cloud)).",
 				PlanModifiers: []planmodifier.String{
 					RequiresReplaceUnlessUnrecoverable("credentials", "cloud"),
 				},
@@ -282,7 +282,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"subnet_ids": schema.ListAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR subnet_ids_to_az. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Left unchecked, this alone would risk a confusing subnet-and-zone-count mismatch; combined with `subnet_ids_to_az` it would silently corrupt the registered networking instead.",
+						MarkdownDescription: "List of subnet IDs for Anyscale resources. Use this OR `subnet_ids_to_az`; if both are set, `subnet_ids_to_az` is used and this is ignored. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time.",
 						PlanModifiers: []planmodifier.List{
 							awsSubnetIDsRequiresReplaceUnlessEquivalent{},
 						},
@@ -290,7 +290,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 					"subnet_ids_to_az": schema.MapAttribute{
 						ElementType:         types.StringType,
 						Optional:            true,
-						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over subnet_ids. VM compute only - EKS networking comes entirely from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time rather than silently corrupting the registered networking (the backend applies this unconditionally after the Kubernetes zone list is written).",
+						MarkdownDescription: "Map of subnet ID to availability zone (e.g., {\"subnet-123\": \"us-east-2a\"}). Preferred over `subnet_ids`, which is ignored when both are set. VM compute only: EKS networking comes from `kubernetes_config.zones`, so setting this on a Kubernetes cloud is rejected at plan time. Also the source for inferring `region` on AWS.",
 						PlanModifiers: []planmodifier.Map{
 							awsSubnetIDsToAZRequiresReplaceUnlessEquivalent{},
 						},

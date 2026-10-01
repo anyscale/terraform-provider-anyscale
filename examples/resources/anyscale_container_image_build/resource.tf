@@ -14,7 +14,8 @@ resource "anyscale_container_image_build" "inline" {
 }
 
 # Build from a Containerfile checked into the repo, scoped to a project.
-# Updating the file's contents triggers a new build revision.
+# Editing the file's contents does not rebuild; changing the path does. To rebuild on
+# content changes, use `containerfile = file("${path.module}/Containerfile")` instead.
 resource "anyscale_container_image_build" "from_file" {
   name               = "training-image"
   containerfile_path = "${path.module}/Containerfile"

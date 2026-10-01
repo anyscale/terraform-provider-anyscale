@@ -82,15 +82,7 @@ output "analyst_current_role" {
 
 ### Optional
 
-- `deny_roles` (List of String) Container image deny roles for the member - restrictions layered on top of `base_role`, never extra capability. Known values are `image_reader` (cannot create custom images or register external images) and `image_reader_no_base_images` (the same, and additionally cannot deploy Anyscale base images). Order is not significant and duplicates are rejected.
-
-Note these **also restrict organization owners**, unlike cloud deny roles, which do not restrict organization or project owners.
-
-Omit this attribute to leave the organization's existing deny roles untouched. Set it - including to an empty list `[]`, which removes all deny roles - to manage the set authoritatively.
-
-**Setting this attribute at all requires the organization roles API**, which is not enabled in every organization. Managing only `base_role` works everywhere.
-
-The underlying API field is named `additional_roles`; that name is misleading and this attribute deliberately does not copy it.
+- `deny_roles` (List of String) Container image deny roles, layered on `base_role` and never extra capability. Allowed values: `image_reader` (cannot create or register images) and `image_reader_no_base_images` (the same, and cannot deploy base images); order is not significant and duplicates are rejected. Also restricts organization owners. Omit to leave existing deny roles untouched; set it, including `[]` to clear all, to manage the set authoritatively. Setting it at all requires the organization roles API, which not every organization has.
 
 ### Read-Only
 
@@ -105,7 +97,6 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the member's email address directly -- no identity_id or user_id lookup needed,
-# unlike anyscale_organization_user's import.
+# Import using the member's email address.
 terraform import anyscale_organization_user_role.example user@example.com
 ```

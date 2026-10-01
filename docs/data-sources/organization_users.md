@@ -3,13 +3,13 @@
 page_title: "anyscale_organization_users Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving id values before importing anyscale_organization_user resources, or filtering users by email or account type.
+  Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving emails before importing anyscale_organization_user resources, or filtering users by email or account type.
   The organization role model is migrating from a single permission_level to base_role plus additional_roles - see those attributes below, and the RBAC guide ../guides/rbac.md for the fuller picture across scopes.
 ---
 
 # anyscale_organization_users (Data Source)
 
-Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving `id` values before importing `anyscale_organization_user` resources, or filtering users by email or account type.
+Use this data source to retrieve a list of all users (including service accounts) in your organization. Useful for auditing organization membership, resolving emails before importing `anyscale_organization_user` resources, or filtering users by email or account type.
 
 The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below, and the [RBAC guide](../guides/rbac.md) for the fuller picture across scopes.
 
@@ -80,7 +80,7 @@ output "users_with_additional_roles" {
 
 Read-Only:
 
-- `additional_roles` (List of String) Additional restriction (deny) roles applied on top of the user's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Three states: populated means the user genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a user with no `user_id`. Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.
+- `additional_roles` (List of String) Deny roles applied on top of `base_role` (for example `image_reader`), never extra capability. `[]` means none, including in an organization where the roles feature is off. `null` only for a user with no `user_id`; a failed lookup is an error, not null. Use `coalesce(additional_roles, [])` before `length()`.
 - `base_role` (String) The user's base role in the organization (`owner` or `collaborator`). `permission_level` is deprecated in favor of this attribute plus `additional_roles`; prefer these for new configurations.
 - `created_at` (String) The timestamp when the user was added to the organization.
 - `email` (String) The email address of the user.

@@ -187,7 +187,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 			"compute_config_id": schema.StringAttribute{
 				Required: true,
 				MarkdownDescription: "The ID of the compute config this service uses, e.g. from `anyscale_compute_config`. Pins the cloud the service runs in - there is no separate top-level `cloud_id` argument because it is fully determined by this value. Changing this rolls out a new service version; it is not a replace. " +
-					"See `project_id` for the plan-time check that catches a mismatch between this value's cloud and an explicitly-set `project_id`'s cloud.",
+					"See `project_id` for the plan-time check that catches a mismatch between this value's cloud and the project's cloud.",
 			},
 
 			// ─── Optional service-level inputs ───
@@ -199,8 +199,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				Optional: true,
 				Computed: true,
 				MarkdownDescription: "The ID of the project this service starts clusters in. If omitted, the backend resolves your organization's default project for the compute config's cloud - that resolved value is written back here, so leaving this unset does not produce a diff on later plans. " +
-					"Immutable: the backend has no move-project endpoint, so changing this (including changing which project an omitted value would resolve to, e.g. by changing `compute_config_id` to a different cloud) replaces the resource. " +
-					"When explicitly set, its own cloud must match `compute_config_id`'s cloud - a plan-time check catches a mismatch here (naming both cloud IDs and a remedy) rather than letting the backend reject the cluster after apply.",
+					"Immutable: changing it replaces the resource. Its cloud must match `compute_config_id`'s cloud, and a plan-time check rejects a mismatch (naming both cloud IDs; skipped when either ID is unknown or a lookup fails). To move to a compute config on a different cloud, change `project_id` in the same apply; leaving it unset keeps the project in state, so the check fails.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
@@ -354,7 +353,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				Update:            true,
 				Delete:            true,
 				CreateDescription: "Maximum time to wait for a create rollout to reach `RUNNING` (e.g. `20m`, `1h`). Defaults to `30m` - a standard `ROLLOUT` genuinely takes real time on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), but observed real rollouts run closer to ~20m, so this default carries real margin without being needlessly long. Purely local to this provider - never sent to or read from the Anyscale API.",
-				UpdateDescription: "Maximum time to wait for an update rollout to reach `RUNNING`. Same default and rationale as `create`. Only consulted when the update actually triggers a new rollout (see `ray_serve_config`/`build_id`/`compute_config_id`/`connection_ids`/`description`) - an update that only changes `tags` or this `timeouts` block itself never applies a new version, so this value is not consulted for those.",
+				UpdateDescription: "Maximum time to wait for an update rollout to reach `RUNNING`. Same default and rationale as `create`. Only consulted when the update actually triggers a new rollout (see `ray_serve_config`/`build_id`/`compute_config_id`/`connection_ids`/`description`) - an update that changes only `tags`, `rollout_strategy`, `max_surge_percent`, or this `timeouts` block does not wait.",
 				DeleteDescription: "Maximum time to wait for destroy to wait for termination to reach `TERMINATED` before deleting. Same default and rationale as `create`.",
 			}),
 		},

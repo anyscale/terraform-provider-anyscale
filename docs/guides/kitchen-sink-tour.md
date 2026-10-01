@@ -1,15 +1,17 @@
 ---
-page_title: "Kitchen Sink: A Tour of the Full Provider Surface"
+page_title: "Kitchen Sink: A Tour of the Provider"
 subcategory: "Concepts & Reference"
 description: |-
-  A curated tour of the kitchen-sink example - every resource and data source this provider registers (with one deliberate exception), wired together, with the non-obvious Terraform patterns it exists to demonstrate.
+  A curated tour of the kitchen-sink example - a representative subset of this provider's resources and data sources, wired together, with the non-obvious Terraform patterns it exists to demonstrate.
 ---
 
-# Kitchen sink: a tour of the full provider surface
+# Kitchen sink: a tour of the provider
 
 [`examples/kitchen-sink`](https://github.com/anyscale/terraform-provider-anyscale/tree/main/examples/kitchen-sink)
-is every resource and data source this provider registers, wired together into one configuration -
-with one deliberate exception: the `anyscale_service` resource (see below).
+wires a representative subset of this provider's resources and data sources into one configuration.
+It does not cover `anyscale_service`, `anyscale_scheduler_config`, `anyscale_system_cluster`,
+`anyscale_cloud_access`, `anyscale_cloud_iam_mapping`, `anyscale_organization_user_role`, or
+`anyscale_organization_default_cloud`, and `anyscale_organization_user` appears only commented out (see below).
 It's not a getting-started example - if you haven't yet, read [Create a VM
 cloud](./create-a-vm-cloud.md) or [Create a Kubernetes cloud](./create-a-kubernetes-cloud.md)
 first. This guide is a tour of what kitchen-sink demonstrates and why, for when you're ready to see
@@ -121,7 +123,8 @@ away from a 404.
   invite/adopt lifecycle it needs;
   see [`organization_user_workflow`](https://github.com/anyscale/terraform-provider-anyscale/blob/main/examples/resources/organization_user_workflow/main.tf)
   for that full flow.
-- **All 13 data sources** the provider registers, in one file - including the two zero-argument
+- **Most data sources**, in one file (all except `anyscale_cloud_iam_mapping`,
+  `anyscale_scheduler_config`, and `anyscale_system_cluster`) - including the two zero-argument
   connection-level singletons, `anyscale_user` and `anyscale_organization`, which have no
   dependency on anything else in the config and are always safe to read.
 - **Two pieces of this config are opt-in, off by default**: the `anyscale_organization_invitation`

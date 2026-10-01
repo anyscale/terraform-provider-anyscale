@@ -132,7 +132,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		"registry_login_secret": schema.StringAttribute{
 			Optional:            true,
 			Sensitive:           true,
-			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries.",
+			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it replaces the image, except the first value set after `terraform import`, which is recorded in state without being sent (see [Importing an existing image](../guides/container-images.md#importing-an-existing-container-image)).",
 			PlanModifiers: []planmodifier.String{
 				RequiresReplaceUnlessUnrecoverable("registry_login_secret", "container image"),
 			},
@@ -552,7 +552,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 
 // Update handles exactly one change: registry_login_secret being set on an
 // imported container image, which RequiresReplaceUnlessUnrecoverable plans as
-// an in-place update because the API never returns the secret. The value is
+// an in-place update because import does not recover the secret. The value is
 // recorded in state and not sent - the image is not changed. Every other
 // attribute requires replacement, so any other diff reaching here is an error.
 func (r *ContainerImageRegistryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {

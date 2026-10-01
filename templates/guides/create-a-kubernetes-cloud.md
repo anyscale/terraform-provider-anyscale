@@ -265,7 +265,7 @@ terraform destroy
   across every cloud shape this provider supports, not just this one.
 - [Create a VM cloud (AWS)](./create-a-vm-cloud.md) - the simpler sibling to this guide, if you
   landed here first.
-- [Kitchen Sink tour](./kitchen-sink-tour.md) - a tour of every resource and data source this
-  provider registers, including a second cloud resource sharing this same EKS cluster's VPC.
+- [Kitchen Sink tour](./kitchen-sink-tour.md) - a tour of a representative subset of this
+  provider's resources and data sources, including a second cloud resource sharing this same EKS cluster's VPC.
 - [Anyscale's own Gateway (Envoy) setup documentation](https://docs.anyscale.com/clouds/kubernetes/gateway-envoy) -
   the manual/CLI equivalent of what Step 5 automates.
