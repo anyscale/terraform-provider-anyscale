@@ -158,7 +158,7 @@ func TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan(t *testing.T
 // list (which restricts even organization owners) as "undetermined" on the
 // strength of a transient failure. Positive control: the same configs succeed
 // when the lookup works.
-func TestAccOrganizationUserRoles_PerUserLookupFailureIsAnError(t *testing.T) {
+func TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	surfaces := map[string]func(url string, mock *mockOrgUserRoleServer) string{
