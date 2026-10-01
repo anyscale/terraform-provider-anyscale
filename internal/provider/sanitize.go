@@ -26,14 +26,15 @@ var sensitiveFields = []string{
 }
 
 // SanitizeJSONForLog sanitizes a JSON string by redacting sensitive fields.
-// It returns the sanitized JSON string, or the original if parsing fails.
+// It handles a top-level object or array, and returns the sanitized JSON
+// string, or the original if parsing fails.
 func SanitizeJSONForLog(jsonStr string) string {
 	if jsonStr == "" {
 		return ""
 	}
 
 	// Try to parse as JSON
-	var data map[string]interface{}
+	var data interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 		// If it's not valid JSON, just return it as-is
 		// (Better to see malformed data than crash)
@@ -41,7 +42,16 @@ func SanitizeJSONForLog(jsonStr string) string {
 	}
 
 	// Sanitize the data
-	sanitized := sanitizeMap(data)
+	var sanitized interface{}
+	switch v := data.(type) {
+	case map[string]interface{}:
+		sanitized = sanitizeMap(v)
+	case []interface{}:
+		sanitized = sanitizeSlice(v)
+	default:
+		// A bare scalar has no field names to redact against.
+		return jsonStr
+	}
 
 	// Marshal back to JSON
 	result, err := json.Marshal(sanitized)

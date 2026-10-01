@@ -89,7 +89,7 @@ resource "anyscale_organization_default_cloud" "test" {
 				PreConfig:   func() { failStatus.Store(http.StatusInternalServerError) },
 				Config:      config,
 				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`(?s)Failed to read cloud:.*unexpected status 500`),
+				ExpectError: regexp.MustCompile(`(?s)Failed to read cloud \(HTTP 500\)`),
 			},
 			{
 				// API recovered: the resource must still be in state, so the
@@ -128,7 +128,7 @@ resource "anyscale_organization_default_cloud" "test" {
 				ImportState:   true,
 				ImportStateId: cloudID,
 				Config:        config,
-				ExpectError:   regexp.MustCompile(`(?s)API Request Failed.*unexpected status 403`),
+				ExpectError:   regexp.MustCompile(`(?s)API Request Failed.*HTTP 403`),
 			},
 		},
 	})

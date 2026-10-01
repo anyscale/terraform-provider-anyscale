@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -98,5 +99,42 @@ func TestWarnIfMultipleMatches(t *testing.T) {
 	t.Run("multiple matches - logs warning", func(t *testing.T) {
 		// Should not panic
 		WarnIfMultipleMatches(ctx, "cloud", "test-cloud", 3, "cloud-456")
+	})
+}
+
+func TestAddAPIError_StatusAndBackendDetail(t *testing.T) {
+	detailOf := func(err error) (string, string) {
+		var diags diag.Diagnostics
+		AddAPIError(&diags, "read cloud", err)
+		return diags[0].Summary(), diags[0].Detail()
+	}
+
+	t.Run("status error with backend detail", func(t *testing.T) {
+		err := fmt.Errorf("wrapped: %w", &UnexpectedStatusError{
+			StatusCode: 403,
+			Body:       `{"error":{"detail":"You do not have permission to read this cloud."}}`,
+		})
+		summary, detail := detailOf(err)
+		if summary != "API Request Failed" {
+			t.Errorf("summary must stay stable, got %q", summary)
+		}
+		if want := "Failed to read cloud (HTTP 403): You do not have permission to read this cloud."; detail != want {
+			t.Errorf("detail = %q, want %q", detail, want)
+		}
+	})
+
+	t.Run("status error with non-JSON body", func(t *testing.T) {
+		_, detail := detailOf(&UnexpectedStatusError{StatusCode: 502, Body: "bad gateway"})
+		if want := "Failed to read cloud (HTTP 502): bad gateway"; detail != want {
+			t.Errorf("detail = %q, want %q", detail, want)
+		}
+	})
+
+	// Positive control: an error with no HTTP status keeps the old shape.
+	t.Run("transport error", func(t *testing.T) {
+		_, detail := detailOf(errors.New("connection timeout"))
+		if want := "Failed to read cloud: connection timeout"; detail != want {
+			t.Errorf("detail = %q, want %q", detail, want)
+		}
 	})
 }

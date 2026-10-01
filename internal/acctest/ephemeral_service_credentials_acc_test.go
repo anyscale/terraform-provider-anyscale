@@ -227,7 +227,7 @@ func TestAccServiceCredentialsEphemeralResource(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config:      serviceCredentialsConfig(server.URL, "svc_does_not_exist", "test_unknown"),
-					ExpectError: regexp.MustCompile(`(?s)API Request Failed.*unexpected status 404`),
+					ExpectError: regexp.MustCompile(`(?s)API Request Failed.*HTTP 404`),
 				},
 			},
 		})

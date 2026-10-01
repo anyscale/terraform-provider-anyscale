@@ -299,7 +299,7 @@ type ProjectResult struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	Description *string `json:"description"`
-	// DS-PROJ-1: genuinely Optional[str] server-side; shared by both data
+	// Genuinely Optional[str] server-side; shared by both data
 	// sources and resource_project.go's Read - all three must map it via
 	// StringPointerValue, never collapse a null cloud association to "".
 	ParentCloudID   *string `json:"parent_cloud_id"`
@@ -394,7 +394,7 @@ type OrganizationCollaboratorResult struct {
 	PermissionLevel string  `json:"permission_level"` // "owner" or "collaborator"
 	CreatedAt       string  `json:"created_at"`
 
-	// DS-OU-2: permission_level above is deprecated backend-side in favor of these
+	// permission_level above is deprecated backend-side in favor of these
 	// two - base_role is a required enum (never null); additional_roles is a
 	// required list (can be empty, never null). Both traced against
 	// product backend/server/api/product/models/organization_collaborators.py.
@@ -542,7 +542,7 @@ type ApplicationTemplateResult struct {
 	Anonymous      bool             `json:"anonymous"`
 	IsDefault      bool             `json:"is_default"`
 	LatestBuild    *MiniBuildResult `json:"latest_build,omitempty"`
-	// DS-IMG-4: CloudID is genuinely Optional[str] server-side (AppConfig.cloud_id);
+	// CloudID is genuinely Optional[str] server-side (AppConfig.cloud_id);
 	// IsExperimental is a plain bool with a backend default, never null.
 	CloudID        *string `json:"cloud_id,omitempty"`
 	IsExperimental bool    `json:"is_experimental"`
@@ -566,7 +566,7 @@ type MiniBuildResult struct {
 	ID       string `json:"id"`
 	Revision int    `json:"revision"`
 	Status   string `json:"status"`
-	// DS-IMG-2: both genuinely Optional[str] server-side (MiniBuild.docker_image_name/
+	// Both genuinely Optional[str] server-side (MiniBuild.docker_image_name/
 	// cloud_id) - present on the SAME embedded object both DS already fetch for free,
 	// so the plural gains a per-item image_uri with zero extra calls, and the singular
 	// can populate image_uri without needing the second GET /builds/{id} call (still
@@ -580,15 +580,6 @@ type MiniBuildResult struct {
 // ByodRayVersion is only populated by the latter.
 type BuildResponse struct {
 	Result BuildResult `json:"result"`
-}
-
-// BuildsListResponse represents the response from listing builds
-type BuildsListResponse struct {
-	Results  []BuildResult `json:"results"`
-	Metadata struct {
-		Total           int     `json:"total"`
-		NextPagingToken *string `json:"next_paging_token"`
-	} `json:"metadata"`
 }
 
 // BuildResult represents a build from the API.

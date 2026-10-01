@@ -12,7 +12,7 @@ import (
 // Deliberately excluded: id/name (singular carries the either-id-or-name selector clause
 // and Optional; plural's are Computed-only output). Singular-only (is_empty_cloud) fields
 // have no counterpart to share against.
-// is_k8s is identical text on both sides (DS-CLOUD-4) but stays defined directly on each
+// is_k8s is identical text on both sides but stays defined directly on each
 // DS's own Schema function rather than hoisted here, matching how the plural already had it.
 // lineage_tracking_enabled/aggregated_logs_enabled are a similar case as of this
 // provider's naming-unification rename (see CHANGELOG.md): the anyscale_cloud resource and
@@ -66,8 +66,7 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			MarkdownDescription: "Whether users are automatically added to this cloud.",
 		},
-		// DS-CLOUD-5 (Phase B): cheap additive parity fields, present on the backend Cloud
-		// model and stable.
+		// Cheap additive parity fields, present on the backend Cloud model and stable.
 		"availability_zones": schema.ListAttribute{
 			ElementType:         types.StringType,
 			Computed:            true,
@@ -95,7 +94,7 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 // already-shipped names - same class as the cloud pair's excluded fields, so it stays local
 // on both sides rather than being unified via a rename. ray_version/is_byod/digest
 // (singular-only, since they still depend on the second per-build GET) and is_archived
-// (plural-only) have no counterpart to share against. image_uri (DS-IMG-2) moved into this
+// (plural-only) have no counterpart to share against. image_uri moved into this
 // shared map since it is now identical text on both sides, no longer singular-only.
 func containerImageSharedAttributes() map[string]schema.Attribute {
 	return map[string]schema.Attribute{
@@ -119,7 +118,7 @@ func containerImageSharedAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			MarkdownDescription: "The registry image URI (docker image path) of the container image's latest build. Null if the image has no build yet, or if the latest build hasn't produced an image yet (pending, in progress, or failed).",
 		},
-		// DS-IMG-4 (Phase B): template-level fields, present on both the get-by-id
+		// Template-level fields, present on both the get-by-id
 		// and list responses.
 		"cloud_id": schema.StringAttribute{
 			Computed:            true,
@@ -158,8 +157,7 @@ func organizationUserSharedAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			MarkdownDescription: "The organization permission level (`owner` or `collaborator`), deprecated in favor of `base_role` plus `additional_roles`; prefer those for new configurations.",
 		},
-		// DS-OU-2 (Phase B): permission_level above is deprecated backend-side in
-		// favor of these two.
+		// permission_level above is deprecated backend-side in favor of these two.
 		"base_role": schema.StringAttribute{
 			Computed:            true,
 			MarkdownDescription: "The user's base role in the organization (`owner` or `collaborator`). `permission_level` is deprecated in favor of this attribute plus `additional_roles`; prefer these for new configurations.",

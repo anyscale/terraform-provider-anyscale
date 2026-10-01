@@ -3,12 +3,17 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // Client represents the Anyscale API client
@@ -44,7 +49,7 @@ func NewClient(baseURL string) (*Client, error) {
 	}
 
 	return &Client{
-		BaseURL: baseURL,
+		BaseURL: strings.TrimRight(baseURL, "/"),
 		Token:   token,
 		// No blanket Timeout here: it would cap every request (including
 		// long-running ones like add_resource) regardless of context, which
@@ -57,47 +62,77 @@ func NewClient(baseURL string) (*Client, error) {
 // NewClientWithToken creates a new Anyscale API client with explicit token
 func NewClientWithToken(baseURL, token string) *Client {
 	return &Client{
-		BaseURL:    baseURL,
+		// A trailing slash would turn every request into //api/v2/...
+		BaseURL:    strings.TrimRight(baseURL, "/"),
 		Token:      token,
 		HTTPClient: &http.Client{},
 	}
 }
 
-// GetAuthToken retrieves the authentication token from either
-// ANYSCALE_CLI_TOKEN environment variable or ~/.anyscale/credentials.json
-func GetAuthToken() (string, error) {
-	// First, try to get token from environment variable
-	token := os.Getenv("ANYSCALE_CLI_TOKEN")
-	if token != "" {
-		return token, nil
-	}
+// Credential sources reported by resolveAuthToken, for diagnostics and logs.
+const (
+	tokenSourceEnv  = "ANYSCALE_CLI_TOKEN environment variable"
+	tokenSourceFile = "credentials file"
+)
 
-	// If not found, try to read from ~/.anyscale/credentials.json
+// errCredentialsFileNotFound means there is no credentials file at all, as
+// opposed to one that exists but cannot be used. Configure reports the two
+// differently: "nothing supplied" versus "supplied but broken".
+var errCredentialsFileNotFound = errors.New("credentials file not found")
+
+// credentialsFilePath is where the Anyscale CLI (`anyscale login`) stores credentials.
+func credentialsFilePath() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
+	return filepath.Join(homeDir, ".anyscale", "credentials.json"), nil
+}
 
-	credentialsPath := filepath.Join(homeDir, ".anyscale", "credentials.json")
+// GetAuthToken retrieves the authentication token from either
+// ANYSCALE_CLI_TOKEN environment variable or ~/.anyscale/credentials.json
+func GetAuthToken() (string, error) {
+	token, _, err := resolveAuthToken(context.Background())
+	return token, err
+}
+
+// resolveAuthToken is GetAuthToken plus the source the token came from. A
+// missing credentials file wraps errCredentialsFileNotFound; any other error
+// means a file was found but could not be used.
+func resolveAuthToken(ctx context.Context) (token, source string, err error) {
+	// First, try to get token from environment variable
+	if token := os.Getenv("ANYSCALE_CLI_TOKEN"); token != "" {
+		return token, tokenSourceEnv, nil
+	}
+
+	// If not found, try to read from ~/.anyscale/credentials.json
+	credentialsPath, err := credentialsFilePath()
+	if err != nil {
+		return "", "", err
+	}
+
 	file, err := os.Open(credentialsPath)
 	if err != nil {
-		return "", fmt.Errorf("no ANYSCALE_CLI_TOKEN environment variable set and failed to read %s: %w", credentialsPath, err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", "", fmt.Errorf("no ANYSCALE_CLI_TOKEN environment variable set and failed to read %s: %w", credentialsPath, errors.Join(errCredentialsFileNotFound, err))
+		}
+		return "", "", fmt.Errorf("no ANYSCALE_CLI_TOKEN environment variable set and failed to read %s: %w", credentialsPath, err)
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
 			// Log the error but don't override the primary error
-			fmt.Fprintf(os.Stderr, "warning: failed to close credentials file: %v\n", closeErr)
+			tflog.Warn(ctx, "failed to close credentials file", map[string]any{"error": closeErr.Error()})
 		}
 	}()
 
 	data, err := io.ReadAll(file)
 	if err != nil {
-		return "", fmt.Errorf("failed to read credentials file: %w", err)
+		return "", "", fmt.Errorf("failed to read credentials file: %w", err)
 	}
 
 	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
-		return "", fmt.Errorf("failed to parse credentials file: %w", err)
+		return "", "", fmt.Errorf("failed to parse credentials file: %w", err)
 	}
 
 	// Try cli_token first, then fall back to token
@@ -107,10 +142,10 @@ func GetAuthToken() (string, error) {
 	}
 
 	if token == "" {
-		return "", fmt.Errorf("token field is empty in credentials file")
+		return "", "", fmt.Errorf("token field is empty in credentials file")
 	}
 
-	return token, nil
+	return token, tokenSourceFile, nil
 }
 
 // DoRequest performs an authenticated HTTP request to the Anyscale API.
