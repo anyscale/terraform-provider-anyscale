@@ -283,6 +283,8 @@ addition to the block(s) the compute stack requires:
 Import needs the cloud's resource listing to recover those blocks, so `terraform import
 anyscale_cloud` fails if that request fails rather than importing without them; retry the import.
 
+Import does not recover `credentials`. If your configuration sets it, the first plan after import shows an in-place update with a "Value Recorded Without Replacement" warning. Applying records the value in state and sends nothing; the cloud is unchanged. Use `-replace` only if you actually want to recreate the cloud with new credentials. Omitting `credentials` plans clean. A cloud that Terraform created itself still replaces when you change `credentials`.
+
 This is not purely new coverage: recovering `object_storage` through one shared code path for both
 compute stacks also fixes a pre-existing bug in **K8S** import specifically. The backend fills in a
 bucket's region to match the cloud's own region even when you never configured one, and previously

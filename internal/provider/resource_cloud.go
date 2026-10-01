@@ -229,7 +229,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"credentials": schema.StringAttribute{
 				Optional:            true,
 				Sensitive:           true,
-				MarkdownDescription: "Cloud credentials. For AWS: the IAM role ARN. For GCP: JSON with provider_id, project_id, service_account_email. Optional: when omitted, the provider derives them from the config blocks, or generates a placeholder (see [Credentials handling](../guides/cloud-resources.md#credentials-handling)). Changing this value replaces the cloud, except when first setting it on an imported cloud.",
+				MarkdownDescription: "Cloud credentials: the AWS IAM role ARN, or for GCP a JSON object with provider_id, project_id and service_account_email. Optional: derived from the config blocks when omitted (see [Credentials handling](../guides/cloud-resources.md#credentials-handling)). Changing it replaces the cloud, except the first value set after `terraform import`, which is recorded in state without being sent (see [Importing an existing cloud](../guides/cloud-resources.md#importing-an-existing-cloud)).",
 				PlanModifiers: []planmodifier.String{
 					RequiresReplaceUnlessUnrecoverable("credentials", "cloud"),
 				},

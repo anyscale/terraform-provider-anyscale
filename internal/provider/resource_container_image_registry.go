@@ -132,7 +132,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		"registry_login_secret": schema.StringAttribute{
 			Optional:            true,
 			Sensitive:           true,
-			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries.",
+			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it replaces the image, except the first value set after `terraform import`, which is recorded in state without being sent (see [Importing an existing image](../guides/container-images.md#importing-an-existing-container-image)).",
 			PlanModifiers: []planmodifier.String{
 				RequiresReplaceUnlessUnrecoverable("registry_login_secret", "container image"),
 			},

@@ -113,7 +113,7 @@ func (r *ContainerImageBuildResource) Schema(ctx context.Context, req resource.S
 			},
 			"project_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The ID of the project to associate this container image with. Changing this replaces the resource.",
+				MarkdownDescription: "The ID of the project to associate this container image with. Changing this replaces the resource. Recovered by `terraform import`; config that disagrees with the imported value plans a replacement.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

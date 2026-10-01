@@ -68,7 +68,7 @@ output "build_image_digest" {
 
 - `containerfile` (String) The content of the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile_path`. Updating this value triggers a new build revision.
 - `containerfile_path` (String) Path to the Containerfile (Dockerfile) to build. Mutually exclusive with `containerfile`. Changing the path triggers a new build revision; editing the file's contents does not. To rebuild whenever the contents change, use `containerfile = file("...")` instead.
-- `project_id` (String) The ID of the project to associate this container image with. Changing this replaces the resource.
+- `project_id` (String) The ID of the project to associate this container image with. Changing this replaces the resource. Recovered by `terraform import`; config that disagrees with the imported value plans a replacement.
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
 ### Read-Only
@@ -100,4 +100,7 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 ```shell
 # Import using the cluster environment ID
 terraform import anyscale_container_image_build.example cenv_abc123
+
+# Import recovers `project_id`. Set it in your config if the image was built in a project, and
+# omit it otherwise; a mismatch plans a replacement.
 ```

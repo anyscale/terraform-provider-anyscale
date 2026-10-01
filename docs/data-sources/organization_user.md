@@ -53,17 +53,13 @@ output "user_additional_roles" {
 
 ### Optional
 
-- `email` (String) The email address of the user. Either `id`, `user_id`, or `email` must be specified.
-- `id` (String) The identity ID of the user. Either `id`, `user_id`, or `email` must be specified.
-
-Note this is **not** the same as the `id` of the `anyscale_organization_user` **resource**, which is the email
-address. The two surfaces share a name and key on different values; use `email` when you need a value the
-resource will accept.
-- `user_id` (String) The user ID of the user. Either `id`, `user_id`, or `email` must be specified.
+- `email` (String) The email address of the user. Specify exactly one of `id`, `user_id`, or `email`.
+- `id` (String) The identity ID of the user. Specify exactly one of `id`, `user_id`, or `email`. Not the `id` of the `anyscale_organization_user` resource, which is the email address; use `email` for a value that resource accepts.
+- `user_id` (String) The user ID of the user. Specify exactly one of `id`, `user_id`, or `email`.
 
 ### Read-Only
 
-- `additional_roles` (List of String) Additional restriction (deny) roles applied on top of the user's base role (for example `image_reader`, which restricts container-image creation a plain collaborator could otherwise do), if any - never an alternative permission level, and never additional capability beyond the base role. Three states: populated means the user genuinely has one or more additional roles; empty means the backend was queried and reports none (including in an organization where the underlying roles-read feature is off - there, the concept is simply inactive); null means the provider could not query it at all, which only happens for a user with no `user_id`. Guard against null in your configuration before calling `length()` or iterating over this value - for example `length(coalesce(additional_roles, []))` rather than `length(additional_roles)` directly, which errors on a null list.
+- `additional_roles` (List of String) Deny roles applied on top of `base_role` (for example `image_reader`), never extra capability. `[]` means none, including in an organization where the roles feature is off. `null` only for a user with no `user_id`; a failed lookup is an error, not null. Use `coalesce(additional_roles, [])` before `length()`.
 - `base_role` (String) The user's base role in the organization (`owner` or `collaborator`). `permission_level` is deprecated in favor of this attribute plus `additional_roles`; prefer these for new configurations.
 - `created_at` (String) The timestamp when the user was added to the organization.
 - `name` (String) The name of the user. Null if the user has no name set.

@@ -55,7 +55,7 @@ output "registry_image_digest" {
 
 - `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated and recorded here after create/import - the generated value is not derivable from config (it embeds a timestamp), so it lives only in state.
 - `ray_version` (String) The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; the API rejects unsupported values at creation time. If not specified, a supported default is used automatically.
-- `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries.
+- `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it replaces the image, except the first value set after `terraform import`, which is recorded in state without being sent (see [Importing an existing image](../guides/container-images.md#importing-an-existing-container-image)).
 
 ### Read-Only
 
@@ -77,4 +77,7 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 ```shell
 # Import using the cluster environment ID
 terraform import anyscale_container_image_registry.example cenv_abc123
+
+# Import does not recover `registry_login_secret`. If your config sets it, the first plan after
+# import records it in state with a warning and does not replace the image.
 ```
