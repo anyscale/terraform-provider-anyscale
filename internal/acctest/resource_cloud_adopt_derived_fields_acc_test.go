@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -19,6 +20,8 @@ import (
 
 const adoptDerivedCloudID = "cld_adopt_derived_mock"
 
+// adoptDerivedServer answers the resource listing with defaultResourceJSON, or
+// with a 500 when defaultResourceJSON is empty.
 func adoptDerivedServer(t *testing.T, defaultResourceJSON string) *httptest.Server {
 	t.Helper()
 	cloudJSON := fmt.Sprintf(`{"id": %q, "name": "adopt-derived", "provider": "AWS", "region": "us-east-2",
@@ -40,6 +43,11 @@ func adoptDerivedServer(t *testing.T, defaultResourceJSON string) *httptest.Serv
 		_, _ = fmt.Fprintf(w, `{"result": %s}`, cloudJSON)
 	})
 	mux.HandleFunc("/api/v2/clouds/"+adoptDerivedCloudID+"/resources", func(w http.ResponseWriter, r *http.Request) {
+		if defaultResourceJSON == "" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = fmt.Fprint(w, `{"error": {"detail": "listing unavailable"}}`)
+			return
+		}
 		_, _ = fmt.Fprintf(w, `{"results": [%s], "metadata": {"total": 1, "next_paging_token": null}}`, defaultResourceJSON)
 	})
 	mux.HandleFunc("/api/v2/machine_pools/", func(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +137,22 @@ func TestAccCloudResource_AdoptByNameWithoutDerivedFieldsResolvesNull(t *testing
 				resource.TestCheckNoResourceAttr("anyscale_cloud.test", "aws_config.memorydb_cluster_arn"),
 				resource.TestCheckNoResourceAttr("anyscale_cloud.test", "aws_config.memorydb_cluster_endpoint"),
 			),
+		}},
+	})
+}
+
+// If the adopted cloud's resources cannot be listed, the apply fails rather
+// than recording null for values the backend may hold: config blocks are not
+// refreshed, so a wrong null would never be corrected.
+func TestAccCloudResource_AdoptByNameFailsWhenResourcesCannotBeListed(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	server := adoptDerivedServer(t, "")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      adoptDerivedConfig(server.URL, `memorydb_cluster_name = "adopt-memdb"`, ""),
+			ExpectError: regexp.MustCompile(`(?s)Failed to list the resources of existing cloud\s+cld_adopt_derived_mock.*retry\s+the\s+apply.*HTTP 500`),
 		}},
 	})
 }

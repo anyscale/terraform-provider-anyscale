@@ -1737,15 +1737,22 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 // them from the add_resource response; an adopted cloud never calls
 // add_resource, so they would otherwise stay unknown and fail the apply. Values
 // come from the cloud's default resource. A slot the config set is kept, and a
-// slot the backend has no value for becomes null. If the listing cannot be
-// read, every unresolved slot becomes null, and the next refresh shows any
-// difference as drift.
+// slot the backend has no value for becomes null.
+//
+// If the listing cannot be read, the adopt fails. Recording null instead would
+// be permanent: config blocks are not refreshed by Read, so a value the
+// backend does hold would never reach state or show in a plan. The adopt has
+// created nothing, so re-running the apply is safe. An Anyscale-hosted cloud,
+// which has no resources to list, is tolerated as ImportState tolerates it.
 func (r *CloudResource) resolveAdoptedDerivedFields(ctx context.Context, cloudID string, plan *CloudResourceModel, diags *diag.Diagnostics) {
 	var defaultResource *CloudDeploymentResult
 	resources, err := listCloudResources(ctx, r.client, cloudID)
-	if err != nil {
-		tflog.Warn(ctx, "Failed to list the adopted cloud's resources; unset derived fields are recorded as null", map[string]any{"cloud_id": cloudID, "error": err.Error()})
-	} else {
+	switch {
+	case err != nil && isHostedCloudResourcesError(err):
+	case err != nil:
+		AddAPIError(diags, fmt.Sprintf("list the resources of existing cloud %s, which is needed to adopt it; nothing was created, so retry the apply", cloudID), err)
+		return
+	default:
 		defaultResource = findDefaultInCloudResources(resources)
 	}
 
