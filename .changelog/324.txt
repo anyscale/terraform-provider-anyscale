@@ -1,11 +1,11 @@
 ```
 release-note:fixed
-resource/anyscale_cloud: Changing `file_storage.file_storage_id` now re-derives `mount_targets` and `mount_path` from the new file system instead of sending the previous file system's address with the new ID, and adding a `file_storage` block to an existing cloud no longer records `mount_targets` and `mount_path` as null; the same applies to `anyscale_cloud_resource`.
+resource/anyscale_cloud: Changing `file_storage.file_storage_id` now re-derives `mount_targets` and `mount_path` from the new file system instead of sending the previous file system's address with the new ID, and adding a `file_storage` block to an existing cloud no longer records `mount_targets` and `mount_path` as null, and editing `file_storage` no longer fails with "inconsistent result after apply" when the recorded `mount_targets` is null; the same applies to `anyscale_cloud_resource`.
 ```
 
 ```
 release-note:changed
-resource/anyscale_cloud: Behavior change: a missing `compute_stack`, an undeterminable `region`, or a missing provider block now fails at plan time when the values are known (a new plan-time failure for configurations that already failed at apply), and otherwise before the cloud is created, instead of after a real cloud already exists; a config whose `name` matches an existing cloud is exempt because apply adopts that cloud. Behavior change: `terraform import` now fails if the cloud's resource listing cannot be read instead of importing without its configuration blocks; and a failed machine pool detach on destroy is reported as a warning naming the pool.
+resource/anyscale_cloud: Behavior change: a missing `compute_stack`, an undeterminable `region`, or a missing provider block now fails at plan time when the values are known (a new plan-time failure for configurations that already failed at apply), and otherwise before the cloud is created, instead of after a real cloud already exists; a config whose `name` matches an existing cloud is exempt because apply adopts that cloud. Behavior change: `terraform import` now fails if the cloud's resource listing cannot be read instead of importing without its configuration blocks, except for Anyscale-hosted clouds, whose listing the backend rejects with HTTP 400 and which still import (every other listing error fails). Behavior change: a failed machine pool detach on destroy is reported as a warning naming the pool, or saying the machine pools could not be listed when the listing failed.
 ```
 
 ```

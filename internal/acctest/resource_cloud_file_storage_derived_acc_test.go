@@ -45,6 +45,12 @@ type derivingBackend struct {
 	resources atomic.Int32 // GET /resources calls
 	// failResourcesList makes GET /resources answer 500 while set.
 	failResourcesList atomic.Bool
+	// hostedResources makes GET /resources answer the 400 the backend gives for Anyscale-hosted
+	// clouds while set.
+	hostedResources atomic.Bool
+	// noDeriveOnAdd turns derivation off for add_resource only, so a resource is created with the
+	// file_storage_id but no mount_targets, as when the address was not yet discoverable.
+	noDeriveOnAdd atomic.Bool
 }
 
 func (b *derivingBackend) derive(fs map[string]interface{}) {
@@ -105,7 +111,9 @@ func newDerivingBackend(t *testing.T, cloudID, cloudName string) (*httptest.Serv
 		}
 		name, _ := req["name"].(string)
 		fs, _ := req["file_storage"].(map[string]interface{})
-		b.derive(fs)
+		if !b.noDeriveOnAdd.Load() {
+			b.derive(fs)
+		}
 		b.mu.Lock()
 		req["cloud_resource_id"] = "cldrsrc_mock_" + name
 		req["is_default"] = len(b.order) == 0
@@ -120,6 +128,11 @@ func newDerivingBackend(t *testing.T, cloudID, cloudName string) (*httptest.Serv
 		switch r.Method {
 		case http.MethodGet:
 			b.resources.Add(1)
+			if b.hostedResources.Load() {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = fmt.Fprint(w, `{"error": {"detail": "Cloud resources for Anyscale-hosted clouds can not be fetched."}}`)
+				return
+			}
 			if b.failResourcesList.Load() {
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = fmt.Fprint(w, `{"error": {"detail": "resources unavailable"}}`)
@@ -407,6 +420,52 @@ func runDerivedFileStorageBlockAdded(t *testing.T, kind derivedFSKind, cloudID, 
 	})
 }
 
+// runFileStorageUpdateKeepsNullMountTargets covers state that holds a file_storage_id but a null
+// mount_targets (the address was not derivable when the resource was created). An unrelated edit
+// to the block then reaches Update with a known null in the plan; recording the value the backend
+// derived in the PUT would change a planned null and fail the apply as inconsistent. Only slots
+// the plan left unknown may be filled.
+func runFileStorageUpdateKeepsNullMountTargets(t *testing.T, kind derivedFSKind, cloudID, resName string) {
+	server, backend := newDerivingBackend(t, cloudID, resName)
+	backend.noDeriveOnAdd.Store(true)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: kind.config(server.URL, cloudID, resName, derivedFSBlock("fs-a"), ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(kind.address, "file_storage.file_storage_id", "fs-a"),
+					resource.TestCheckResourceAttr(kind.address, "file_storage.mount_targets.#", "0"),
+				),
+			},
+			{
+				PreConfig: func() { backend.noDeriveOnAdd.Store(false) },
+				Config: kind.config(server.URL, cloudID, resName, `
+  file_storage {
+    file_storage_id = "fs-a"
+    mount_path      = "/explicit"
+  }
+`, ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(kind.address, plancheck.ResourceActionUpdate)},
+				},
+				Check: resource.TestCheckResourceAttr(kind.address, "file_storage.mount_path", "/explicit"),
+			},
+		},
+	})
+}
+
+func TestAccCloudResource_FileStorageUpdateKeepsNullMountTargets(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	runFileStorageUpdateKeepsNullMountTargets(t, derivedFSCloud, "cld_fs_nullmt_mock", UniqueName(t, "fsnullmt"))
+}
+
+func TestAccCloudResourceResource_FileStorageUpdateKeepsNullMountTargets(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	runFileStorageUpdateKeepsNullMountTargets(t, derivedFSCloudResource, "cld_fs_nullmt_res_mock", UniqueName(t, "fsnullmtres"))
+}
+
 func TestAccCloudResource_FileStorageIDChangeRederivesMountFields(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	runDerivedFileStorageIDChange(t, derivedFSCloud, "cld_derived_fs_change_mock", UniqueName(t, "fsderived"))
@@ -481,6 +540,44 @@ func TestAccCloudResource_ImportFailsClosedWhenResourcesListFails(t *testing.T) 
 				},
 			},
 		},
+	})
+}
+
+// TestAccCloudResource_ImportToleratesHostedCloudResourcesList proves import still works for an
+// Anyscale-hosted cloud, whose GET /resources the backend rejects with a 400 (there are no
+// configuration blocks to recover). The first step is the control: a 500 on the same
+// route must still fail the import.
+func TestAccCloudResource_ImportToleratesHostedCloudResourcesList(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+
+	const cloudID = "cld_import_hosted_mock"
+	name := UniqueName(t, "importhosted")
+	server, backend := newDerivingBackend(t, cloudID, name)
+	config := derivedFSCloud.config(server.URL, cloudID, name, "", "")
+
+	step := func(pre func()) resource.TestStep {
+		return resource.TestStep{
+			PreConfig:          pre,
+			Config:             config,
+			ResourceName:       "anyscale_cloud.test",
+			ImportState:        true,
+			ImportStateId:      cloudID,
+			ImportStatePersist: true,
+		}
+	}
+	failing := step(func() { backend.failResourcesList.Store(true) })
+	failing.ExpectError = regexp.MustCompile(`(?s)cannot be recovered`)
+	hosted := step(func() { backend.failResourcesList.Store(false); backend.hostedResources.Store(true) })
+	hosted.ImportStateCheck = func(states []*terraform.InstanceState) error {
+		if len(states) != 1 || states[0].ID != cloudID {
+			return fmt.Errorf("want one imported state for %s, got %v", cloudID, states)
+		}
+		return nil
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps:                    []resource.TestStep{failing, hosted},
 	})
 }
 

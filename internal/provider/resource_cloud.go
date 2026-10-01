@@ -1009,7 +1009,7 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 	} else {
 		resp.Diagnostics.Append(d...)
 	}
-	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil); !d.HasError() {
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil, true); !d.HasError() {
 		plan.FileStorage = fileStorage
 	} else {
 		resp.Diagnostics.Append(d...)
@@ -1182,7 +1182,7 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	if updated {
 		// A changed file_storage_id leaves mount_targets/mount_path unknown in the plan; fill them
 		// from the value the backend now holds, not from the PUT (which returns null).
-		fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, liveFileStorage)
+		fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, liveFileStorage, false)
 		resp.Diagnostics.Append(d...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -1352,11 +1352,16 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		// Continue with deletion - the API will tell us if we can't delete. Surface the failure
 		// too: if the delete then fails (or succeeds), the practitioner needs to know pools may
 		// still be attached.
+		// A list failure cannot name a pool; a per-pool failure names the pool in err.
+		summary := fmt.Sprintf("Could not detach machine pools from cloud %s before deleting it", cloudID)
+		if errors.Is(err, errListMachinePools) {
+			summary = fmt.Sprintf("Could not list machine pools, so any attached to cloud %s were not detached before deleting it", cloudID)
+		}
 		resp.Diagnostics.AddWarning(
 			"Machine Pool Detach Failed",
-			fmt.Sprintf("Could not detach machine pools from cloud %s before deleting it: %s. The delete was attempted anyway. "+
+			fmt.Sprintf("%s: %s. The delete was attempted anyway. "+
 				"If it fails because a pool is still attached, detach that machine pool from the cloud with the Anyscale CLI or console and apply again.",
-				cloudID, err.Error()),
+				summary, err.Error()),
 		)
 	}
 
@@ -1370,6 +1375,9 @@ func (r *CloudResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	tflog.Info(ctx, "Cloud deleted successfully", map[string]any{"id": cloudID})
 }
+
+// errListMachinePools marks a detach failure that happened before any pool was identified.
+var errListMachinePools = errors.New("failed to list machine pools")
 
 // detachMachinePoolsFromCloud detaches all machine pools attached to the given cloud.
 func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID string) error {
@@ -1385,7 +1393,7 @@ func (r *CloudResource) detachMachinePoolsFromCloud(ctx context.Context, cloudID
 		http.StatusOK,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to list machine pools: %w", err)
+		return fmt.Errorf("%w: %w", errListMachinePools, err)
 	}
 
 	// Find and detach pools attached to this cloud
@@ -1474,6 +1482,11 @@ func (r *CloudResource) ImportState(ctx context.Context, req resource.ImportStat
 	}
 
 	resources, err := listCloudResources(ctx, r.client, cloudID)
+	if err != nil && isHostedCloudResourcesError(err) {
+		// An Anyscale-hosted cloud has no resources to list and no blocks to recover; Read
+		// tolerates the same response.
+		return
+	}
 	if err != nil {
 		// Fail closed: every config block is RequiresReplace, so importing without them would
 		// look like success and then plan a replacement of the live cloud.
@@ -1703,7 +1716,7 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 		} else {
 			tflog.Warn(ctx, "Failed to merge memorystore-derived fields into gcp_config", map[string]any{"diagnostics": d.Errors()})
 		}
-		if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResult.Result.FileStorage); !d.HasError() {
+		if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResult.Result.FileStorage, true); !d.HasError() {
 			plan.FileStorage = fileStorage
 		} else {
 			tflog.Warn(ctx, "Failed to merge mount_targets-derived fields into file_storage", map[string]any{"diagnostics": d.Errors()})

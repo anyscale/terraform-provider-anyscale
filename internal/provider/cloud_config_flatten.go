@@ -27,7 +27,7 @@ import (
 // resolveIsEmptyCloud derives is_empty_cloud from "does this cloud have zero
 // resources attached right now", but ONLY while current is null/unknown (a
 // fresh import, since Create always sets it explicitly and Read never
-// touched it before C3). Once resolved - true or false - it must never be
+// touched it). Once resolved - true or false - it must never be
 // re-derived: a live empty cloud that later gets a resource attached would
 // otherwise flip to non-empty on its next refresh, which would incorrectly
 // un-gate config-block population onto a cloud whose own .tf never had one.
@@ -466,7 +466,7 @@ func flattenMountTargets(mountTargets []MountTarget) (types.List, diag.Diagnosti
 
 // mergeFileStorageDerivedFields is mergeAWSDerivedFields for
 // file_storage.mount_targets and mount_path - same fill-when-omitted rule,
-// same Create-only call site, same nil-derived-resolves-Unknown-to-null
+// same nil-derived-resolves-Unknown-to-null
 // reasoning for the early pre-add_resource State.Set. mount_targets gates
 // on "unset" the identical way as memorydb/memorystore (EFS/Filestore
 // auto-discovery - see clouds_resource.py's _populate_aws_values/
@@ -475,7 +475,12 @@ func flattenMountTargets(mountTargets []MountTarget) (types.List, diag.Diagnosti
 // unknown Computed value after apply. derived is the add_resource
 // response's own FileStorage. Returns fileStorage unchanged if it is null
 // (no file_storage in this plan).
-func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorage) (types.Object, diag.Diagnostics) {
+//
+// fillNull selects whether a known null slot is filled too. Create passes true: it has no prior
+// state, so null there means "not yet resolved". Update passes false: a known null in the plan is
+// the value the plan committed to (carried from state), and Terraform rejects an apply that
+// replaces it, so only Unknown slots may take the backend's value.
+func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorage, fillNull bool) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if fileStorage.IsNull() || fileStorage.IsUnknown() {
 		return fileStorage, diags
@@ -483,7 +488,7 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 
 	patched := fileStorage.Attributes()
 
-	if v, ok := patched["mount_targets"]; ok && (v.IsNull() || v.IsUnknown()) {
+	if v, ok := patched["mount_targets"]; ok && (v.IsUnknown() || (fillNull && v.IsNull())) {
 		var apiMountTargets []MountTarget
 		if derived != nil {
 			apiMountTargets = derived.MountTargets
@@ -493,7 +498,7 @@ func mergeFileStorageDerivedFields(fileStorage types.Object, derived *FileStorag
 		patched["mount_targets"] = mountTargets
 	}
 
-	if v, ok := patched["mount_path"]; ok && (v.IsNull() || v.IsUnknown()) {
+	if v, ok := patched["mount_path"]; ok && (v.IsUnknown() || (fillNull && v.IsNull())) {
 		var apiMountPath string
 		if derived != nil {
 			apiMountPath = derived.MountPath

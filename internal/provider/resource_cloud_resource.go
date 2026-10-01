@@ -768,7 +768,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	// resource_cloud.go's identical placeholder before its own
 	// buildProviderConfig call. The real merge below (using the add_resource
 	// response) overwrites this placeholder for the final State.Set.
-	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil); !d.HasError() {
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, nil, true); !d.HasError() {
 		plan.FileStorage = fileStorage
 	} else {
 		resp.Diagnostics.Append(d...)
@@ -836,7 +836,7 @@ func (r *CloudResourceResource) Create(ctx context.Context, req resource.CreateR
 	} else {
 		resp.Diagnostics.Append(d...)
 	}
-	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResp.Result.FileStorage); !d.HasError() {
+	if fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, deployResp.Result.FileStorage, true); !d.HasError() {
 		plan.FileStorage = fileStorage
 	} else {
 		resp.Diagnostics.Append(d...)
@@ -983,7 +983,7 @@ func (r *CloudResourceResource) Update(ctx context.Context, req resource.UpdateR
 	// file_storage and timeouts are the only fields that update in place, and readCloudResource
 	// refreshes neither, so carry the applied values into state. Otherwise state keeps the
 	// pre-update values and Terraform rejects the apply as inconsistent.
-	fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, liveFileStorage)
+	fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, liveFileStorage, false)
 	resp.Diagnostics.Append(d...)
 	if resp.Diagnostics.HasError() {
 		return

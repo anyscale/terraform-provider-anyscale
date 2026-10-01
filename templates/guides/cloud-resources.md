@@ -254,8 +254,9 @@ attached.
 
 Deleting an `anyscale_cloud` resource first attempts to detach any machine pools attached to it, then
 deletes the cloud itself. If a detach fails, the delete still goes ahead and the apply reports a warning
-naming the pool; if the delete then fails because a pool is still attached, detach it with the Anyscale CLI or
-console and apply again.
+(naming the pool if one failed to detach, or saying the machine pools could not be listed); if the
+delete then fails because a pool is still attached, detach it with the Anyscale CLI or console and
+apply again.
 
 ## Importing an existing cloud
 
@@ -317,16 +318,14 @@ A few more things worth knowing:
   equivalent, so there's no scheme-tolerance to speak of there — write the exact URI, since it's
   the only valid form to begin with (see [Supported cloud providers](#supported-cloud-providers)
   above).
-- **`aws_config.subnet_ids` (the plain list form) and `subnet_ids_to_az` (the map form) now both
-  round-trip cleanly on import, in either direction.** The backend always returns subnets sorted
-  by availability zone, which previously looked like a real order change to Terraform's
-  order-sensitive list comparison and forced a replace on import for any cloud registered with the
-  plain list form. A plan modifier now treats the two forms as equivalent whenever they describe
-  the same set of subnets, regardless of order, so importing a cloud that used either form plans
-  cleanly. A genuine subnet change — adding, removing, or swapping a subnet — still correctly
-  proposes a replace, exactly as before. A config that uses the list form against an imported cloud
-  (import records the map form) shows a one-time in-place update that records the list form; it does
-  not replace anything.
+- **`aws_config.subnet_ids` (the plain list form) and `subnet_ids_to_az` (the map form) describe the
+  same subnets interchangeably.** The backend always returns subnets sorted by availability zone,
+  which previously looked like an order change and forced a replace on import for any cloud
+  registered with the plain list form. A plan modifier now treats the two forms as equivalent
+  whenever they describe the same set of subnets, regardless of order. Import records the map form,
+  so a config that writes the list form for the same subnets against an imported cloud shows a
+  one-time in-place update that records the list form. Adding, removing, or swapping a subnet still
+  replaces.
 - **`aws_config.memorydb_cluster_arn`/`memorydb_cluster_endpoint` and `gcp_config.memorystore_endpoint`
   are Computed and now round-trip cleanly whether or not your configuration sets them.** All three
   are backend-derived from `memorydb_cluster_name` (AWS) or `memorystore_instance_name` (GCP)

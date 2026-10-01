@@ -3,7 +3,9 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -302,6 +304,17 @@ func listCloudResources(ctx context.Context, client *Client, cloudID string) ([]
 		return nil, fmt.Errorf("failed to list cloud resources: %w", err)
 	}
 	return results, nil
+}
+
+// isHostedCloudResourcesError reports whether err from listCloudResources is the backend's
+// rejection of the listing for an Anyscale-hosted cloud: a 400 whose detail says so. Such a cloud
+// has no resources to list, so callers that can proceed without the listing may tolerate exactly
+// this and nothing else (5xx, 403, network and decode errors all stay errors).
+func isHostedCloudResourcesError(err error) bool {
+	var statusErr *UnexpectedStatusError
+	return errors.As(err, &statusErr) &&
+		statusErr.StatusCode == http.StatusBadRequest &&
+		strings.Contains(statusErr.Body, "Anyscale-hosted")
 }
 
 // findDefaultInCloudResources returns the resource flagged as the cloud's

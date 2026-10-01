@@ -399,6 +399,48 @@ func TestCloudResourceDelete_FailedMachinePoolDetachWarns(t *testing.T) {
 		}
 	})
 
+	t.Run("failed pool listing is a warning that names the cloud and says the pools could not be listed", func(t *testing.T) {
+		var deleteCalls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/machine_pools/":
+				w.WriteHeader(http.StatusInternalServerError)
+			case r.Method == http.MethodDelete && r.URL.Path == "/api/v2/clouds/"+cloudID:
+				deleteCalls.Add(1)
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		r := &CloudResource{client: NewClientWithToken(server.URL, "test-token")}
+		var schemaResp resource.SchemaResponse
+		r.Schema(context.Background(), resource.SchemaRequest{}, &schemaResp)
+		state := tfsdk.State{Schema: schemaResp.Schema}
+		model := preflightPlan(t, "tfacc-detach-list", "AWS", "VM", "us-east-1")
+		model.ID = types.StringValue(cloudID)
+		model.IsEmptyCloud = types.BoolValue(false)
+		model.CloudResourceID = types.StringNull()
+		if d := state.Set(context.Background(), &model); d.HasError() {
+			t.Fatalf("state fixture: %v", d)
+		}
+		resp := &resource.DeleteResponse{}
+		r.Delete(context.Background(), resource.DeleteRequest{State: state}, resp)
+		out := fmt.Sprint(resp.Diagnostics)
+		if resp.Diagnostics.ErrorsCount() != 0 || resp.Diagnostics.WarningsCount() != 1 || deleteCalls.Load() != 1 {
+			t.Fatalf("want one warning and a delete; diags=%s deletes=%d", out, deleteCalls.Load())
+		}
+		for _, want := range []string{cloudID, "Could not list machine pools"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the warning should contain %q: %s", want, out)
+			}
+		}
+		if strings.Contains(out, "Could not detach machine pools") {
+			t.Errorf("a list failure must not claim a detach was attempted: %s", out)
+		}
+	})
+
 	t.Run("control: clean detach adds no warning", func(t *testing.T) {
 		out, warnings, errs, deletes := run(t, http.StatusOK)
 		if errs != 0 || warnings != 0 || deletes != 1 {
