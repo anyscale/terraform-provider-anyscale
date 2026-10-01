@@ -87,8 +87,8 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 }
 
 // containerImageRegistryAttributes returns the v1 (current) attribute map. It must NOT be
-// reused as the v0 PriorSchema in UpgradeState: F5 added the digest attribute and V1(c)
-// removed cluster_environment_id after v0 shipped, so v0's real on-disk state has digest
+// reused as the v0 PriorSchema in UpgradeState: v1 added the digest attribute and
+// removed cluster_environment_id, so v0's real on-disk state has digest
 // absent and cluster_environment_id present - the opposite of this function - and id's
 // MarkdownDescription here describes the current (v1) meaning, not what it meant under v0.
 // See containerImageRegistrySchemaV0 in resource_container_image_registry_upgrade.go for
@@ -319,8 +319,7 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	// comment on ContainerImageRegistryResourceModel.ID) - it is never reassigned
 	// once the build completes below. Read() below tolerates a null BuildID so a
 	// resource left in this partial state survives a refresh instead of being
-	// mistaken for deleted (see GATE test: call-2 fails -> state holds the template ->
-	// Delete archives it -> no orphan).
+	// mistaken for deleted, and a later Delete archives the template - no orphan.
 	plan.ID = types.StringValue(templateID)
 	plan.BuildID = types.StringNull()
 	plan.BuildStatus = types.StringNull()
@@ -514,8 +513,8 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	}
 
 	// ray_version is Optional+Computed and RequiresReplace (immutable): only fill it
-	// when state does not already carry a value (unset at Create time, e.g. an
-	// upgraded pre-F4 resource, or - defensively - a still-null value somehow left over
+	// when state does not already carry a value (unset at Create time, e.g. a
+	// resource from a provider version that left ray_version null, or - defensively - a still-null value somehow left over
 	// from Create). A previously-set value, whether user-typed or filled on an earlier
 	// refresh, is preserved untouched; see the matching comment in Create for why the
 	// API's echoed value cannot safely overwrite it.

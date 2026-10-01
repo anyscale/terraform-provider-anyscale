@@ -11,7 +11,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -20,7 +22,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -93,14 +94,14 @@ type AdditionalResourceModel struct {
 
 // NodeConfigModel describes a node configuration.
 type NodeConfigModel struct {
-	InstanceType           types.String `tfsdk:"instance_type"`
-	Resources              types.Map    `tfsdk:"resources"`                // Map of Float64
-	RequiredResources      types.Object `tfsdk:"required_resources"`       // RequiredResourcesModel
-	Labels                 types.Map    `tfsdk:"labels"`                   // Map of String
-	RequiredLabels         types.Map    `tfsdk:"required_labels"`          // Map of String
-	AdvancedInstanceConfig types.String `tfsdk:"advanced_instance_config"` // JSON string
-	Flags                  types.String `tfsdk:"flags"`                    // JSON string
-	CloudDeployment        types.Object `tfsdk:"cloud_deployment"`         // CloudDeploymentModel
+	InstanceType           types.String         `tfsdk:"instance_type"`
+	Resources              types.Map            `tfsdk:"resources"`                // Map of Float64
+	RequiredResources      types.Object         `tfsdk:"required_resources"`       // RequiredResourcesModel
+	Labels                 types.Map            `tfsdk:"labels"`                   // Map of String
+	RequiredLabels         types.Map            `tfsdk:"required_labels"`          // Map of String
+	AdvancedInstanceConfig jsontypes.Normalized `tfsdk:"advanced_instance_config"` // JSON string, compared semantically
+	Flags                  jsontypes.Normalized `tfsdk:"flags"`                    // JSON string, compared semantically
+	CloudDeployment        types.Object         `tfsdk:"cloud_deployment"`         // CloudDeploymentModel
 }
 
 // RequiredResourcesModel describes explicit hardware requirements for custom instances.
@@ -147,7 +148,7 @@ type computeTemplateRequest struct {
 
 type computeTemplateConfig struct {
 	CloudID                    string                         `json:"cloud_id"`
-	Region                     string                         `json:"region,omitempty"` // read-only today: CC5a data-source parity, not settable on the resource
+	Region                     string                         `json:"region,omitempty"` // read-only today: decoded so the data source can expose it, not settable on the resource
 	DeploymentConfigs          []cloudDeploymentComputeConfig `json:"deployment_configs,omitempty"`
 	AllowedAZs                 []string                       `json:"allowed_azs,omitempty"`
 	HeadNodeType               map[string]interface{}         `json:"head_node_type,omitempty"`
@@ -179,7 +180,7 @@ type computeTemplateResponse struct {
 type computeTemplate struct {
 	ID             string                `json:"id"`
 	Name           string                `json:"name"`
-	ProjectID      string                `json:"project_id,omitempty"` // read-only today: CC5a data-source parity, not settable on the resource
+	ProjectID      string                `json:"project_id,omitempty"` // read-only today: decoded so the data source can expose it, not settable on the resource
 	Version        int64                 `json:"version"`
 	CreatedAt      string                `json:"created_at"`
 	LastModifiedAt string                `json:"last_modified_at"`
@@ -267,8 +268,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				// create, but a static Default here would silently force an
 				// existing config's real value (e.g. imported, or set before
 				// this attribute existed) back to 120 on the next apply
-				// whenever the user's config omits it -- the same
-				// silent-overwrite class CC12 fixes for flags. UseStateForUnknown
+				// whenever the user's config omits it -- the same silent
+				// overwrite ImportState's flags recovery avoids. UseStateForUnknown
 				// plus populating from the API response in Create/Update
 				// (mirroring Read) is the correct idiom for a server-defaulted
 				// value: it reflects whatever the backend actually set, once,
@@ -279,8 +280,8 @@ func (r *ComputeConfigResource) Schema(ctx context.Context, req resource.SchemaR
 				Validators: []validator.Int64{
 					int64validator.AtLeast(0),
 				},
-				Description:         "Number of minutes after which idle clusters using this compute config will be terminated. 0 disables idle termination. Defaults to the backend's own default (120) when unset.",
-				MarkdownDescription: "Number of minutes after which idle clusters using this compute config will be terminated. `0` disables idle termination. Defaults to the backend's own default (120) when unset.",
+				Description:         "Number of minutes after which idle clusters using this compute config will be terminated. 0 disables idle termination. If never set, the backend default (120) applies. Removing it from configuration later keeps the current value; set 120 explicitly to restore the default.",
+				MarkdownDescription: "Number of minutes after which idle clusters using this compute config will be terminated. `0` disables idle termination. If never set, the backend default (120) applies. Removing it from configuration later keeps the current value; set `120` explicitly to restore the default.",
 			},
 			"maximum_uptime_minutes": schema.Int64Attribute{
 				Optional: true,
@@ -437,8 +438,11 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 			Computed:            true,
 			Description:         "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.",
 			MarkdownDescription: "The logical resources Ray schedules against for this node group (CPU, GPU, memory, and custom resources). Leave it unset to fall back to the instance's actual capacity; set it to override what Ray sees, independent of the instance's real hardware.",
+			// Plain UseStateForUnknown is only safe at the top level: inside an
+			// additional_resources entry the node can shift to another entry's
+			// index. workerNodeConfigAttributes adds the worker-group check.
 			PlanModifiers: []planmodifier.Map{
-				mapplanmodifier.UseStateForUnknown(),
+				nodeResourcesUseStateForSameNode(false),
 			},
 		},
 		"required_resources": schema.SingleNestedAttribute{
@@ -497,11 +501,13 @@ func nodeConfigAttributes() map[string]schema.Attribute {
 			MarkdownDescription: "Required labels that must be present on the node for scheduling purposes. Only `ray.io/accelerator-type` and `ray.io/tpu-topology` are supported - any other key is rejected. Setting `ray.io/accelerator-type` to a non-TPU value requires `required_resources.gpu` to be set (> 0); setting it to a TPU value (starting with `TPU`) requires `required_resources.tpu` and `required_resources.tpu_hosts` (both > 0) plus a `ray.io/tpu-topology` value here or in `labels`.",
 		},
 		"advanced_instance_config": schema.StringAttribute{
+			CustomType:          jsontypes.NormalizedType{},
 			Optional:            true,
 			Description:         "Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use jsonencode() for HCL objects. Unlike the top-level advanced_instance_config, this can't be a native/dynamic value: it's also used inside the worker_nodes list, and Terraform doesn't support a dynamic type nested inside a list.",
 			MarkdownDescription: "Advanced instance configurations that will be passed through to the cloud provider as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `advanced_instance_config`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.",
 		},
 		"flags": schema.StringAttribute{
+			CustomType:          jsontypes.NormalizedType{},
 			Optional:            true,
 			Description:         "Node-level flags specifying advanced or experimental options as a JSON string. Use jsonencode() for HCL objects. Unlike the top-level flags, this can't be a native/dynamic value: it's also used inside the worker_nodes list, and Terraform doesn't support a dynamic type nested inside a list.",
 			MarkdownDescription: "Node-level flags specifying advanced or experimental options as a JSON string. Use `jsonencode()` for HCL objects. Unlike the top-level `flags`, this can't be a native/dynamic value: it's also used inside the `worker_nodes` list, and Terraform doesn't support a dynamic type nested inside a list.",
@@ -547,18 +553,16 @@ func workerNodeConfigAttributes() map[string]schema.Attribute {
 		Description:         "Unique name of this worker group. Defaults to the worker's instance_type when not set.",
 		MarkdownDescription: "Unique name of this worker group. Defaults to the worker's `instance_type` when not set.",
 		PlanModifiers: []planmodifier.String{
-			// UseNonNullStateForUnknown, not UseStateForUnknown: name is an
-			// attribute nested inside a list element (worker_nodes), and a
-			// brand-new element added by this plan has no corresponding prior
-			// state at its index. Plain UseStateForUnknown copies that missing
-			// state's null straight into the plan, so a genuinely new worker
-			// group's name plans as null instead of unknown - the API then
-			// returns a real value and Terraform rejects the apply as
-			// inconsistent. UseNonNullStateForUnknown leaves it unknown
-			// instead when there is no non-null prior value to reuse.
-			stringplanmodifier.UseNonNullStateForUnknown(),
+			// Reuses the prior name only for the same worker group at this
+			// index; a shifted or brand-new element stays unknown and takes the
+			// name the API assigns. See compute_config_worker_plan_modifiers.go.
+			workerNameUseStateForSameWorker(),
 		},
 	}
+	// Same index-shift protection for resources, plus the worker-group check.
+	workerResources := attrs["resources"].(schema.MapAttribute)
+	workerResources.PlanModifiers = []planmodifier.Map{nodeResourcesUseStateForSameNode(true)}
+	attrs["resources"] = workerResources
 	attrs["min_nodes"] = schema.Int64Attribute{
 		Optional:            true,
 		Computed:            true,
@@ -579,6 +583,13 @@ func workerNodeConfigAttributes() map[string]schema.Attribute {
 		Default:             stringdefault.StaticString("ON_DEMAND"),
 		Description:         "The type of instances to use: ON_DEMAND (standard pricing), SPOT (discounted, interruptible), or PREFER_SPOT (prefer spot with on-demand fallback).",
 		MarkdownDescription: "The type of instances to use: `ON_DEMAND` (standard pricing), `SPOT` (discounted, interruptible), or `PREFER_SPOT` (prefer spot with on-demand fallback).",
+		// The wire has no market_type field, only the use_spot/fallback_to_ondemand
+		// pair workerNodeConfigToAPI derives from these three values. Anything else
+		// would send neither, read back as ON_DEMAND, and fail the apply as an
+		// inconsistent result after the version was already created.
+		Validators: []validator.String{
+			stringvalidator.OneOf("ON_DEMAND", "SPOT", "PREFER_SPOT"),
+		},
 	}
 
 	return attrs
@@ -611,14 +622,6 @@ var customResourceNamedSlots = map[string]struct{}{
 	"cpu": {}, "gpu": {}, "memory": {}, "object_store_memory": {},
 }
 
-// validMarketTypes are the market_type values the backend/SDK actually
-// understand; anything else silently falls through to ON_DEMAND today
-// with no default case to catch it (resource_compute_config.go's own
-// market_type switch has none).
-var validMarketTypes = map[string]struct{}{
-	"ON_DEMAND": {}, "SPOT": {}, "PREFER_SPOT": {},
-}
-
 // ValidateConfig runs the compute_config-specific plan-time checks the
 // backend doesn't reliably enforce for us: rejecting a non-integer custom
 // resource amount (hard - the backend truncates a fractional custom resource
@@ -628,9 +631,8 @@ var validMarketTypes = map[string]struct{}{
 // warning cannot prevent that crash, so this one must reject), worker node
 // bounds (hard - the backend already 422s this, so this is free hardening,
 // just earlier and clearer), and instance_type/required_resources conflicts
-// plus unrecognized market_type values (warning - the backend accepts both
-// today, so a hard reject here would newly break a currently-applying
-// config).
+// (warning - the backend accepts them today, so a hard reject here would
+// newly break a currently-applying config).
 func (r *ComputeConfigResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var data ComputeConfigResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
@@ -693,7 +695,6 @@ func (r *ComputeConfigResource) ValidateConfig(ctx context.Context, req resource
 		workerPath := path.Root("worker_nodes").AtListIndex(i)
 		resp.Diagnostics.Append(validateNodeConfig(ctx, workerPath, worker.NodeConfigModel)...)
 		resp.Diagnostics.Append(validateWorkerNodeBounds(workerPath, worker.MinNodes, worker.MaxNodes)...)
-		resp.Diagnostics.Append(validateMarketType(workerPath, worker.MarketType)...)
 
 		switch {
 		case !worker.Name.IsNull() && !worker.Name.IsUnknown():
@@ -1007,31 +1008,6 @@ func validateInstanceTypeXORRequiredResources(nodePath path.Path, instanceType t
 	return diags
 }
 
-// validateMarketType warns (not errors) on an unrecognized market_type: the
-// wire has no market_type field at all (only use_spot/fallback_to_ondemand
-// booleans our own switch computes), so an unrecognized value here is a
-// provider-side gap, not something the backend could ever reject - it
-// silently falls through to ON_DEMAND today. Warning, not error: this config
-// applies successfully today, so rejecting it would be a breaking change.
-func validateMarketType(workerPath path.Path, marketType types.String) diag.Diagnostics {
-	var diags diag.Diagnostics
-	if marketType.IsNull() || marketType.IsUnknown() {
-		return diags
-	}
-
-	v := marketType.ValueString()
-	if _, ok := validMarketTypes[v]; ok {
-		return diags
-	}
-
-	diags.AddAttributeWarning(
-		workerPath.AtName("market_type"),
-		"Unrecognized market_type",
-		fmt.Sprintf("market_type %q is not recognized (expected one of ON_DEMAND, SPOT, PREFER_SPOT). It will be silently treated as ON_DEMAND.", v),
-	)
-	return diags
-}
-
 // buildComputeConfigRequest builds the API request body for creating/updating a compute config.
 // Returns the request body and cloud_id, or an error via diagnostics.
 func (r *ComputeConfigResource) buildComputeConfigRequest(
@@ -1054,7 +1030,8 @@ func (r *ComputeConfigResource) buildComputeConfigRequest(
 		CloudID: cloudID,
 	}
 
-	// CC2 (see effectiveComputeConfig). Guard on IsUnknown too, not just
+	// idle/max-uptime are top-level only (see effectiveComputeConfig). Guard
+	// on IsUnknown too, not just
 	// IsNull: both attributes are Optional+Computed with UseStateForUnknown
 	// and no static Default, so an omitted value is Unknown (not Null)
 	// whenever there is no prior state to carry forward (i.e. on Create).
@@ -1266,10 +1243,10 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	// Capture what the user actually configured before it's overwritten below,
-	// so head_node/worker_nodes' Computed sub-attributes (e.g. resources, which
-	// the API auto-fills from instance_type) can be masked back to null when
-	// the user did not set them - mirroring Read's prior-state masking, using
-	// the plan itself as "prior" since this is the resource's first apply.
+	// so head_node/worker_nodes' Computed sub-attributes (e.g. resources) the
+	// user left null stay null in state, keeping state equal to config -
+	// mirroring Read's prior-state masking, using the plan itself as "prior"
+	// since this is the resource's first apply.
 	priorHeadNode := plan.HeadNode
 	priorWorkerNodes := plan.WorkerNodes
 
@@ -1335,7 +1312,7 @@ func (r *ComputeConfigResource) Create(ctx context.Context, req resource.CreateR
 // create/update API response is the only source of truth for: head_node and
 // worker_nodes' Computed sub-attributes (name, resources, ...), masked
 // against prior the same way Read does, plus the top-level
-// idle_termination_minutes/maximum_uptime_minutes (CC2). Both Create and
+// idle_termination_minutes/maximum_uptime_minutes. Both Create and
 // Update must call this: unlike Read, they have no earlier chance to observe
 // these values, and any Computed attribute left Unknown when state is Set
 // causes Terraform to reject the apply with "Provider produced inconsistent
@@ -1348,8 +1325,9 @@ func populateComputedFieldsFromResponse(
 	plan *ComputeConfigResourceModel,
 	diags *diag.Diagnostics,
 ) {
-	// CC2 (see effectiveComputeConfig). Explicit else-Null (not just "leave
-	// it"), mirroring Read exactly: both attributes are
+	// idle/max-uptime are top-level only (see effectiveComputeConfig).
+	// Explicit else-Null (not just "leave it"), mirroring Read exactly: both
+	// attributes are
 	// Optional+Computed+UseStateForUnknown with no Default, so an Unknown
 	// left unresolved here (e.g. a defensive nil from the API that should
 	// not happen given the backend's own idle default, but costs nothing to
@@ -1417,9 +1395,9 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	// Capture the prior nested objects so we can mask API-normalized defaults
-	// (e.g. resources/required_resources auto-filled from instance_type) back to
-	// null when the user did not explicitly set them.
+	// Capture the prior nested objects so nested fields that were null in prior
+	// state (e.g. resources/required_resources the user omitted) stay null,
+	// keeping state equal to config.
 	priorHeadNode := state.HeadNode
 	priorWorkerNodes := state.WorkerNodes
 	priorMinResources := state.MinResources
@@ -1460,7 +1438,7 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 
 	resultData := apiResult.Result
 
-	// CC11: a config archived out of band (e.g. via the console, or archived
+	// A config archived out of band (e.g. via the console, or archived
 	// alongside a rename replace) returns 200 with archived_at populated, not
 	// a 404 -- without this check it would linger in state forever instead of
 	// planning a clean recreate, same as the existing 404/removed path below.
@@ -1497,9 +1475,9 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 		state.CloudID = types.StringValue(configData.CloudID)
 	}
 
-	// CC2 (see effectiveComputeConfig): read directly off configData rather
-	// than through resolveEffectiveComputeConfig, unlike flags/head_node/
-	// worker_nodes below.
+	// Read directly off configData rather than through
+	// resolveEffectiveComputeConfig, unlike flags/head_node/worker_nodes below:
+	// these two live only on the top-level config (see effectiveComputeConfig).
 	state.IdleTerminationMinutes = types.Int64PointerValue(configData.IdleTerminationMinutes)
 	state.MaximumUptimeMinutes = types.Int64PointerValue(configData.MaximumUptimeMinutes)
 
@@ -1557,8 +1535,8 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 			state.MaxResources = restoreMapKeyCasing(ctx, maxResourcesMap, priorMaxResources)
 		}
 
-		// CC14: resolve unconditionally, not just when the key is present.
-		// The backend omits this flag entirely once it is false (confirmed
+		// allow-cross-zone-autoscaling: resolve unconditionally, not just when
+		// the key is present. The backend omits this flag entirely once it is false (confirmed
 		// live: a freshly created config that never touched cross-zone
 		// scaling comes back with an empty flags object, no key at all), so
 		// "only assign when present" silently relied on prior state already
@@ -1582,12 +1560,15 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 	// We extract special flags (min_resources, max_resources, allow-cross-zone-autoscaling) above,
 	// but user's custom flags are preserved as-is from their configuration.
 	//
-	// CC12: the one exception is ImportState, which populates flags and
-	// advanced_instance_config (top-level and per-node) directly from the API
-	// exactly once, since that is the only point where recovered-at-import and
-	// genuinely-never-configured are not ambiguous. Read leaves them on prior
-	// state untouched either way, so whatever ImportState seeds here persists
-	// through every later refresh.
+	// The one exception is ImportState, which populates the top-level flags and
+	// advanced_instance_config from the API exactly once, since that is the
+	// only point where recovered-at-import and genuinely-never-configured are
+	// not ambiguous. Read leaves them on prior state untouched either way, so
+	// whatever ImportState seeds persists through every later refresh.
+	// Per-node flags and advanced_instance_config are different: the node
+	// conversion below reads them, and maskNodeFromPrior keeps them null only
+	// where prior state was null - so after an import, with no prior, they come
+	// back exactly as the API sent them.
 
 	if eff.HeadNodeType != nil {
 		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, eff.HeadNodeType)
@@ -1610,8 +1591,8 @@ func (r *ComputeConfigResource) Read(ctx context.Context, req resource.ReadReque
 
 // maskNodeFromPrior preserves null on nested node attributes (resources,
 // required_resources, labels, advanced_instance_config, flags, cloud_deployment)
-// that were null in the prior state. The Anyscale API auto-fills these from the
-// instance_type which would otherwise cause drift when the user did not set them.
+// that were null in the prior state, keeping state equal to config for fields
+// the user omitted, and restores the prior key casing of resources.
 func maskNodeFromPrior(ctx context.Context, apiNode types.Object, priorNode types.Object, diags *diag.Diagnostics) types.Object {
 	if priorNode.IsNull() || priorNode.IsUnknown() || apiNode.IsNull() {
 		return apiNode
@@ -1739,6 +1720,8 @@ func nullValueOf(v attr.Value) attr.Value {
 		return types.ObjectNull(t.AttributeTypes(context.Background()))
 	case types.String:
 		return types.StringNull()
+	case jsontypes.Normalized:
+		return jsontypes.NewNormalizedNull()
 	case types.Bool:
 		return types.BoolNull()
 	case types.Int64:
@@ -1782,12 +1765,13 @@ func (r *ComputeConfigResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	// CC3b: the cloud is immutable in place. A compute config's identity is
+	// The cloud is immutable in place. A compute config's identity is
 	// tied to the cloud it was created under; unlike Cloud resources, there is
 	// no per-field PATCH here, so an in-place cloud change would silently
 	// create a new version under the NEW cloud while leaving the old
 	// version's cloud unmanaged and unaware anything moved -- the same shape
-	// of orphan CC3a fixes for renames, just not detectable at plan time
+	// of orphan that name's RequiresReplace prevents for renames, just not
+	// detectable at plan time
 	// (only an apply-time comparison catches it).
 	if !state.CloudID.IsNull() && plan.CloudID.ValueString() != state.CloudID.ValueString() {
 		AddConfigError(&resp.Diagnostics,
@@ -1877,6 +1861,20 @@ func (r *ComputeConfigResource) Delete(ctx context.Context, req resource.DeleteR
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound,
 	)
 	if err != nil {
+		// Azure control planes reject every archive. Failing here would make
+		// destroy impossible there, so the config is left in place with a
+		// warning instead - the same handling container images get.
+		var statusErr *UnexpectedStatusError
+		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest &&
+			strings.Contains(statusErr.Body, "not supported on Azure Control Plane") {
+			resp.Diagnostics.AddWarning(
+				"Compute Config Left In Place",
+				fmt.Sprintf("Compute config %q (%s) was removed from Terraform state but not archived: "+
+					"archiving compute configs is not supported on this Azure control plane. "+
+					"The config remains in Anyscale.", state.Name.ValueString(), configID),
+			)
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "delete compute config", err)
 		return
 	}
@@ -1916,16 +1914,15 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 		return
 	}
 
-	// CC12: fetch the config once, here, to recover the write-only fields
-	// (flags, advanced_instance_config -- top-level and per-node) that
-	// ordinary Read intentionally never reads back (see the NOTE comments in
-	// Read). Import is the one place recovering them is unambiguous: there is
+	// Fetch the config once, here, to recover the top-level write-only fields
+	// (flags, advanced_instance_config) that ordinary Read intentionally never
+	// reads back (see the NOTE comments in Read). Import is the one place recovering them is unambiguous: there is
 	// no prior state yet to confuse "recovered at import" with "genuinely
 	// never configured", and Read always preserves whatever these fields
 	// already say in prior state, so whatever is seeded here survives every
 	// later refresh untouched.
 	//
-	// CC11: this fetch doubles as an early, clear rejection of importing an
+	// This fetch doubles as an early, clear rejection of importing an
 	// already-archived config, instead of importing a phantom that Read would
 	// silently remove on the very next refresh.
 	// StatusNotFound deliberately excluded, same reasoning as Read - see there.
@@ -1969,7 +1966,7 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 		}
 		eff = resolveEffectiveComputeConfigWithOverride(resultData.Config, primaryEntry)
 
-		// CC12 applies per-entry too: recover each additional entry's own
+		// The same import-only recovery applies per-entry: recover each additional entry's own
 		// flags/advanced_instance_config directly from the API here, exactly
 		// once - ordinary Read never refreshes them (see the NOTE below), so
 		// import is the only unambiguous chance for these entries just like it
@@ -1999,36 +1996,13 @@ func (r *ComputeConfigResource) ImportState(ctx context.Context, req resource.Im
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("advanced_instance_config"), advDynamic)...)
 	}
 
-	// Per-node flags/advanced_instance_config: apiNodeTypeToTerraform and
-	// apiWorkerNodeTypeToTerraform already extract these from the live API
-	// response as real values -- Read only ever loses them via
-	// maskNodeFromPrior, which nulls them because prior state was null.
-	//
-	// resources/required_resources/labels/required_labels/node
-	// cloud_deployment recover here too, unmasked, the same as
-	// flags/advanced_instance_config above - these are NOT ambiguous the way
-	// maskNodeFromPrior's nulling exists to handle. Live-confirmed: the
-	// backend never auto-fills any of these five fields when omitted - a
-	// freshly created config that never set them reads back with them null,
-	// no invented default - so recovering whatever the API actually returns
-	// cannot mistake a backend-invented value for a real one. A config that
-	// DID set them now imports to complete state instead of a null that
-	// silently drops what the user configured.
-	if eff.HeadNodeType != nil {
-		headNodeObj, headNodeDiags := apiNodeTypeToTerraform(ctx, eff.HeadNodeType)
-		resp.Diagnostics.Append(headNodeDiags...)
-		if !resp.Diagnostics.HasError() {
-			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("head_node"), headNodeObj)...)
-		}
-	}
-
-	if len(eff.WorkerNodeTypes) > 0 {
-		workerNodesList, workerNodesDiags := apiWorkerNodeTypesToTerraform(ctx, eff.WorkerNodeTypes)
-		resp.Diagnostics.Append(workerNodesDiags...)
-		if !resp.Diagnostics.HasError() {
-			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("worker_nodes"), workerNodesList)...)
-		}
-	}
+	// head_node and worker_nodes need nothing here. Core always runs Read
+	// right after ImportState, and Read's maskNodeFromPrior /
+	// maskWorkerNodesFromPrior mask only against a non-null prior: with the
+	// null prior an import leaves, they return every per-node field
+	// (resources, labels, flags, advanced_instance_config, ...) exactly as the
+	// API sent it. The backend never auto-fills those fields when omitted, so
+	// nothing invented can come back this way.
 }
 
 // Helper functions for converting nested objects
@@ -2084,10 +2058,10 @@ func resourceMapToAPI(resources types.Map) map[string]interface{} {
 // use_spot/fallback_to_ondemand for worker).
 //
 // Returns a fresh map per call (never shared/aliased between head and worker conversions).
-// Only the flags parse failure is a hard error, matching the original two copies' behavior -
-// advanced_instance_config's parse failure is silently skipped there too, not an inconsistency
-// introduced here.
-func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredResources types.Object, labels types.Map, requiredLabels types.Map, advancedInstanceConfig types.String, cloudDeployment types.Object, flags types.String) (map[string]interface{}, error) {
+// A flags or advanced_instance_config value that is not a JSON object is an error naming the
+// attribute; both are validated as JSON at plan time, so this only catches valid JSON that is
+// not an object.
+func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredResources types.Object, labels types.Map, requiredLabels types.Map, advancedInstanceConfig jsontypes.Normalized, cloudDeployment types.Object, flags jsontypes.Normalized) (map[string]interface{}, error) {
 	config := map[string]interface{}{}
 
 	if resourcesMap := resourceMapToAPI(resources); len(resourcesMap) > 0 {
@@ -2167,15 +2141,16 @@ func commonNodeFieldsToAPI(ctx context.Context, resources types.Map, requiredRes
 	// Add advanced_instance_config (JSON string) - map to API field name
 	if !advancedInstanceConfig.IsNull() && advancedInstanceConfig.ValueString() != "" {
 		var advancedConfig map[string]interface{}
-		if err := json.Unmarshal([]byte(advancedInstanceConfig.ValueString()), &advancedConfig); err == nil {
-			config["advanced_configurations_json"] = advancedConfig
+		if err := json.Unmarshal([]byte(advancedInstanceConfig.ValueString()), &advancedConfig); err != nil {
+			return nil, fmt.Errorf("advanced_instance_config is not a JSON object: %w", err)
 		}
+		config["advanced_configurations_json"] = advancedConfig
 	}
 
 	flagsMap := map[string]interface{}{}
 	if !flags.IsNull() && flags.ValueString() != "" {
 		if err := json.Unmarshal([]byte(flags.ValueString()), &flagsMap); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("flags is not a JSON object: %w", err)
 		}
 	}
 
@@ -2356,15 +2331,15 @@ func commonNodeAttrsFromAPI(ctx context.Context, apiMap map[string]interface{}) 
 	}
 
 	// Extract advanced_instance_config from advanced_configurations_json
-	advancedInstanceConfig := types.StringNull()
+	advancedInstanceConfig := jsontypes.NewNormalizedNull()
 	if advConfig := getAdvancedConfigJSON(apiMap); advConfig != nil {
 		if jsonBytes, err := json.Marshal(advConfig); err == nil {
-			advancedInstanceConfig = types.StringValue(string(jsonBytes))
+			advancedInstanceConfig = jsontypes.NewNormalizedValue(string(jsonBytes))
 		}
 	}
 
 	// Extract flags (excluding cloud_deployment which is handled separately)
-	flagsStr := types.StringNull()
+	flagsStr := jsontypes.NewNormalizedNull()
 	if flagsMap, ok := apiMap["flags"].(map[string]interface{}); ok {
 		// Remove cloud_deployment from flags for separate handling
 		flagsCopy := make(map[string]interface{})
@@ -2375,7 +2350,7 @@ func commonNodeAttrsFromAPI(ctx context.Context, apiMap map[string]interface{}) 
 		}
 		if len(flagsCopy) > 0 {
 			if jsonBytes, err := json.Marshal(flagsCopy); err == nil {
-				flagsStr = types.StringValue(string(jsonBytes))
+				flagsStr = jsontypes.NewNormalizedValue(string(jsonBytes))
 			}
 		}
 	}
@@ -2528,8 +2503,8 @@ func nodeConfigAttrTypes() map[string]attr.Type {
 		"required_resources":       requiredResourcesObjectType(),
 		"labels":                   types.MapType{ElemType: types.StringType},
 		"required_labels":          types.MapType{ElemType: types.StringType},
-		"advanced_instance_config": types.StringType,
-		"flags":                    types.StringType,
+		"advanced_instance_config": jsontypes.NormalizedType{},
+		"flags":                    jsontypes.NormalizedType{},
 		"cloud_deployment":         cloudDeploymentObjectType(),
 	}
 }

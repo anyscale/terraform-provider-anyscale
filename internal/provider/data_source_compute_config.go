@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -54,21 +55,19 @@ type ComputeConfigDataSourceModel struct {
 	CreatedAt              types.String `tfsdk:"created_at"`
 	LastModifiedAt         types.String `tfsdk:"last_modified_at"`
 
-	// DS-CC-7: cluster-level fields that were resource-only until now (see
-	// the "Known limitations" section this closes in the Compute Config
-	// guide). CloudResource/MinResources/MaxResources are genuinely Computed
-	// (freshly resolved every Read, same as the resource); Flags and
-	// AdvancedInstanceConfig instead follow the resource's ImportState
-	// recovery path, since a data source has no prior config to echo the
-	// way the resource's ordinary Read does for these two - see Read below.
+	// Cluster-level fields shared with the resource. CloudResource/MinResources/
+	// MaxResources are resolved fresh every Read, same as the resource; Flags and
+	// AdvancedInstanceConfig follow the resource's ImportState recovery path,
+	// since a data source has no prior config to echo the way the resource's
+	// ordinary Read does for these two - see Read below.
 	CloudResource          types.String  `tfsdk:"cloud_resource"`
 	MinResources           types.Map     `tfsdk:"min_resources"`
 	MaxResources           types.Map     `tfsdk:"max_resources"`
 	Flags                  types.Dynamic `tfsdk:"flags"`
 	AdvancedInstanceConfig types.Dynamic `tfsdk:"advanced_instance_config"`
 
-	// CC6: node topology parity with the resource. Same underlying shape
-	// (NodeConfigModel / WorkerNodeConfigModel), all Computed-only here.
+	// Node topology, same shape as the resource (NodeConfigModel /
+	// WorkerNodeConfigModel), all Computed-only here.
 	Zones       types.List   `tfsdk:"zones"`
 	HeadNode    types.Object `tfsdk:"head_node"`
 	WorkerNodes types.List   `tfsdk:"worker_nodes"`
@@ -250,10 +249,12 @@ func dataSourceNodeAttributes() map[string]schema.Attribute {
 			MarkdownDescription: "Required labels that must be present on the node for scheduling purposes, matching the resource's `required_labels` attribute.",
 		},
 		"advanced_instance_config": schema.StringAttribute{
+			CustomType:          jsontypes.NormalizedType{},
 			Computed:            true,
 			MarkdownDescription: "Advanced instance configuration passed through to the cloud provider, as a JSON string.",
 		},
 		"flags": schema.StringAttribute{
+			CustomType:          jsontypes.NormalizedType{},
 			Computed:            true,
 			MarkdownDescription: "Node-level flags, as a JSON string.",
 		},
@@ -407,10 +408,20 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 
 		tflog.Info(ctx, "Looking up compute config by name", map[string]any{"name": name, "cloud_id": cloudID})
 
-		configID, err = d.findComputeConfigByName(ctx, name, cloudID)
+		var archived bool
+		configID, archived, err = d.findComputeConfigByName(ctx, name, cloudID)
 		if err != nil {
 			AddAPIError(&resp.Diagnostics, "find compute config", err)
 			return
+		}
+
+		if archived {
+			resp.Diagnostics.AddWarning(
+				"Compute Config Is Archived",
+				fmt.Sprintf("No non-archived compute config named '%s' exists, so this lookup resolved to the archived config '%s'. "+
+					"An archived compute config has most likely been destroyed. If that is unexpected, recreate the compute config "+
+					"or point this lookup at a live one by name or id.", name, configID),
+			)
 		}
 
 		if configID == "" {
@@ -422,20 +433,16 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		}
 	}
 
-	// CC5a: fetch and parse using the same typed structs the resource uses
+	// Fetch and parse with the same typed structs the resource uses
 	// (computeTemplateResponse/computeTemplate/computeTemplateConfig, see
-	// resource_compute_config.go). CC5b: migrated onto api/v2/compute_templates
-	// (the resource already used this endpoint) - api/v2's response is a
-	// verified strict field superset of ext/v0's, same underlying record, so
-	// computeTemplateResponse decodes identically. Deliberately keeps only
-	// http.StatusOK as the accepted status (not adding http.StatusNotFound):
-	// DoRequestAndParse returns a non-nil zero-valued result on a 404 whose
-	// body happens to decode without error (json.Unmarshal doesn't fail on an
-	// unrecognized-shape object), so an "accept 404, check apiResult == nil"
-	// pattern silently fails to detect not-found - confirmed this is actually
-	// broken in resource_compute_config.go's Read/ImportState. Keeping only
-	// StatusOK here means a real 404 fails isStatusExpected and produces a
-	// genuine err != nil, which already flows correctly into AddAPIError below.
+	// resource_compute_config.go), against the same api/v2 endpoint.
+	// Only http.StatusOK is accepted, deliberately (the resource's Read and
+	// ImportState do the same): DoRequestAndParse returns a non-nil
+	// zero-valued result on a 404 whose body happens to decode without error
+	// (json.Unmarshal doesn't fail on an unrecognized-shape object), so an
+	// "accept 404, check result == nil" pattern would silently miss
+	// not-found. With StatusOK alone, a real 404 fails isStatusExpected and
+	// produces a genuine err != nil, which flows into AddAPIError below.
 	computeResp, err := DoRequestAndParse[computeTemplateResponse](
 		ctx,
 		d.client,
@@ -460,7 +467,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		config.Name = types.StringValue(configName)
 	}
 
-	// DS-CC-3: explicit null on the else branch - version numbers are 1-indexed,
+	// Explicit null on the else branch - version numbers are 1-indexed,
 	// so 0 means absent, matching computeTemplate.Version's own convention.
 	if resultData.Version > 0 {
 		config.Version = types.Int64Value(resultData.Version)
@@ -470,9 +477,12 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		config.NameVersion = types.StringNull()
 	}
 
-	// Fetch all versions of this compute config by name
+	// Fetch all versions of this compute config. Names are unique per cloud,
+	// not per organization, so the search is scoped to the resolved config's
+	// own cloud - otherwise a same-named config in another cloud would merge
+	// its version numbers into this one's.
 	if configName != "" {
-		versions, err := d.fetchComputeConfigVersions(ctx, configName)
+		versions, err := d.fetchComputeConfigVersions(ctx, configName, resultData.Config.CloudID)
 		if err != nil {
 			tflog.Warn(ctx, "Failed to fetch versions list", map[string]any{"error": err.Error()})
 			config.Versions = types.ListNull(types.Int64Type)
@@ -485,7 +495,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		config.Versions = types.ListNull(types.Int64Type)
 	}
 
-	// DS-CC-3: explicit stringOrNull instead of leaving the else case to an
+	// Explicit stringOrNull instead of leaving the else case to an
 	// implicit zero-value types.String (which happens to equal null today,
 	// but is fragile - not obviously so to a future reader/refactor).
 	config.CreatedAt = stringOrNull(resultData.CreatedAt)
@@ -513,11 +523,12 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 		}
 	}
 
-	// CC2 (see effectiveComputeConfig in resource_compute_config.go): read
-	// straight off configData rather than through resolveEffectiveComputeConfig.
+	// Cluster-level fields, so read straight off configData rather than through
+	// resolveEffectiveComputeConfig (see effectiveComputeConfig in
+	// resource_compute_config.go).
 	config.IdleTerminationMinutes = types.Int64PointerValue(configData.IdleTerminationMinutes)
 	config.MaximumUptimeMinutes = types.Int64PointerValue(configData.MaximumUptimeMinutes)
-	// DS-CC-3: explicit stringOrNull, same reasoning as created_at/last_modified_at above.
+	// Explicit stringOrNull, same reasoning as created_at/last_modified_at above.
 	config.Region = stringOrNull(configData.Region)
 
 	// A data source lookup has no prior state at all (always a cold read),
@@ -555,14 +566,12 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	}
 	config.AutoSelectWorkerConfig = types.BoolValue(eff.AutoSelect)
 
-	// DS-CC-7: cluster-level field parity with the resource (min_resources,
-	// max_resources, cloud_resource, top-level flags/advanced_instance_config
-	// - see the Compute Config guide's former "Known limitations" section,
-	// which this closes). cloud_resource/min_resources/max_resources are
-	// genuinely Computed, resolved fresh every Read exactly like
-	// enable_cross_zone_scaling above. flags/advanced_instance_config
-	// instead adapt the resource's ImportState recovery path (see
-	// resource_compute_config.go, tagged CC12/CC15), not its ordinary Read:
+	// Cluster-level field parity with the resource (min_resources,
+	// max_resources, cloud_resource, top-level flags/advanced_instance_config).
+	// cloud_resource/min_resources/max_resources are genuinely Computed,
+	// resolved fresh every Read exactly like enable_cross_zone_scaling above.
+	// flags/advanced_instance_config instead adapt the resource's ImportState
+	// recovery path (see resource_compute_config.go), not its ordinary Read:
 	// the resource's Read intentionally never reads these two back from the
 	// API (they are config-echo fields there), but a data source has no
 	// config to echo, so recovering them straight from the API - with no
@@ -594,7 +603,7 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 	}
 	config.AdvancedInstanceConfig = advancedInstanceConfigDynamic
 
-	// CC6: node topology parity with the resource. A data source has no
+	// Node topology parity with the resource. A data source has no
 	// prior state to mask Computed sub-attributes against (there is nothing
 	// analogous to "the user left this null on purpose" for a read-only
 	// lookup), so these report exactly what the API returns, unmasked --
@@ -637,13 +646,12 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 }
 
 // searchComputeTemplatesPaged pages through POST /api/v2/compute_templates/search until every
-// page is exhausted, decoding each page's body with decode. CC5b: unlike the ext/v0 predecessor
-// this replaces (searchClusterComputesPaged), this endpoint's pagination is split across two
-// transports - the filter fields in basePayload stay a JSON POST body (ComputeTemplateQuery,
-// unchanged in shape/semantics from ext/v0), but count/paging_token are a FastAPI
+// page is exhausted, decoding each page's body with decode. This endpoint's pagination is split
+// across two transports - the filter fields in basePayload are a JSON POST body
+// (ComputeTemplateQuery), but count/paging_token are a FastAPI
 // Depends(required_pagination_large) that reads them from the URL QUERY STRING, not the body.
-// Traced against product backend/server/api/product/routers/compute_templates_router.go
-// (search_compute_templates) and backend/server/api/common/models/common_parameters.py
+// Traced against product backend/server/api/product/routers/compute_templates_router.py
+// (search_compute_templates) and backend/server/common/models/common_parameters.py
 // (required_pagination_large). Sending paging/paging_token nested in the body here (the old
 // shape) would compile, hit the endpoint, get HTTP 200 back, and silently paginate wrong -
 // always page 1 - since api/v2 simply never reads those two fields out of the body. Kept as a
@@ -700,8 +708,8 @@ type computeConfigSearchResult struct {
 	CreatedAt string  `json:"created_at"`
 	Anonymous bool    `json:"anonymous"`
 	Version   float64 `json:"version"`
-	// Config.CloudID is only used by A2's ambiguous-name-across-clouds check
-	// (resolveComputeConfigImportID) - every other caller of this struct
+	// Config.CloudID is only used by the ambiguous-name-across-clouds check in
+	// resolveComputeConfigImportID - every other caller of this struct
 	// ignores it.
 	Config struct {
 		CloudID string `json:"cloud_id"`
@@ -723,20 +731,36 @@ func decodeComputeConfigSearchPage(body []byte) ([]computeConfigSearchResult, *s
 }
 
 // findComputeConfigByName looks for a compute config with the given name using the search API,
-// paging through every result (DS-CC-2: the search's default page size is 10, so a name with
-// more than 10 versions/anonymous variants could previously miss the real newest match).
-func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, name string, cloudID string) (string, error) {
+// paging through every result (the search's default page size is 10, so a name with more than
+// 10 versions/anonymous variants could otherwise miss the real newest match).
+//
+// Non-archived configs are preferred: api/v2 search filters by archive_status
+// (ARCHIVED/NOT_ARCHIVED/ALL, backend/server/common/models/common_parameters.py ArchiveStatus),
+// and an archived config is normally one that was destroyed. Only when no non-archived config
+// matches does the lookup fall back to ALL, in which case every match is archived and archived
+// is true so the caller can warn rather than silently resolve a destroyed config.
+func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, name string, cloudID string) (string, bool, error) {
+	configID, err := d.searchComputeConfigByName(ctx, name, cloudID, "NOT_ARCHIVED")
+	if err != nil || configID != "" {
+		return configID, false, err
+	}
+
+	configID, err = d.searchComputeConfigByName(ctx, name, cloudID, "ALL")
+	if err != nil || configID == "" {
+		return configID, false, err
+	}
+	return configID, true, nil
+}
+
+// searchComputeConfigByName runs one by-name search with the given archive_status and returns
+// the most recently created match, or "" when nothing matches.
+func (d *ComputeConfigDataSource) searchComputeConfigByName(ctx context.Context, name, cloudID, archiveStatus string) (string, error) {
 	searchPayload := map[string]interface{}{
 		"name": map[string]string{
 			"equals": name,
 		},
 		"include_anonymous": false,
-		// CC5b: api/v2 defaults to archive_status=NOT_ARCHIVED, which ext/v0 has no equivalent
-		// of and never filtered (its router has a literal "TODO: add an arg to indicate whether
-		// to show unarchived only" still unaddressed) - explicitly request ALL to preserve
-		// today's exact (unfiltered) behavior rather than silently narrowing results. Whether
-		// NOT_ARCHIVED would be a better default going forward is a separate, tracked follow-up.
-		"archive_status": "ALL",
+		"archive_status":    archiveStatus,
 	}
 
 	// Add cloud_id filter if provided
@@ -762,31 +786,36 @@ func (d *ComputeConfigDataSource) findComputeConfigByName(ctx context.Context, n
 	)
 
 	tflog.Info(ctx, "Found compute config by name", map[string]any{
-		"name":      name,
-		"config_id": matchedConfigID,
+		"name":           name,
+		"config_id":      matchedConfigID,
+		"archive_status": archiveStatus,
 	})
 
 	return matchedConfigID, nil
 }
 
-// fetchComputeConfigVersions retrieves all version numbers for a compute config by name.
+// fetchComputeConfigVersions retrieves all version numbers for the compute config with the
+// given name in the given cloud.
 //
-// DS-CC-1: the search payload previously sent no version field, which resolves to the
-// documented deprecated-equivalent-to-latest-only behavior (verified against
-// backend/server/api/base/models/cluster_computes.py's ClusterComputesQuery.version field and
-// its validator) - so "all versions" was structurally unable to return more than one. version:
-// -2 is the documented "do not filter by version" sentinel; combined with DS-CC-2's pagination
-// fix, this now genuinely enumerates every version rather than just the latest.
-func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context, name string) ([]int64, error) {
+// version: -2 is the documented "do not filter by version" sentinel; omitting version (or -1)
+// returns only the latest version (backend/server/services/dao/compute_templates_dao_models.py,
+// ComputeTemplateQuery.version). cloud_id scopes the search to one cloud: names are unique per
+// cloud, not per organization (the backend numbers new versions by cloud+name), and the search
+// filters by cloud only when cloud_id is set (compute_templates_dao.py
+// _apply_filters_to_list_compute_template_query), so without it a same-named config in another
+// cloud would contribute its version numbers here. archive_status ALL so an archived config -
+// reachable by id or by the by-name fallback - still reports its own versions.
+func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context, name string, cloudID string) ([]int64, error) {
 	searchPayload := map[string]interface{}{
 		"name": map[string]string{
 			"equals": name,
 		},
 		"include_anonymous": false,
 		"version":           -2,
-		// CC5b: see the matching comment in findComputeConfigByName - preserve ext/v0's
-		// never-filtered-by-archive-status behavior explicitly.
-		"archive_status": "ALL",
+		"archive_status":    "ALL",
+	}
+	if cloudID != "" {
+		searchPayload["cloud_id"] = cloudID
 	}
 
 	results, err := searchComputeTemplatesPaged(ctx, d.client, searchPayload)
@@ -809,6 +838,7 @@ func (d *ComputeConfigDataSource) fetchComputeConfigVersions(ctx context.Context
 
 	tflog.Debug(ctx, "Found compute config versions", map[string]any{
 		"name":     name,
+		"cloud_id": cloudID,
 		"versions": versions,
 	})
 

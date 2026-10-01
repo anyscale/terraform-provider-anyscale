@@ -76,7 +76,7 @@ RUN pip install emoji==2.15.0`
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateVerifyIgnore: []string{
-					"containerfile",      // client-only: Dockerfile body is sent to the build API and not echoed back
+					"containerfile",      // not recovered at import: the build GET returns it, but Read never refreshes it
 					"containerfile_path", // client-only: local filesystem path, never sent to the API
 					// timeouts needs no entry here - terraform-plugin-testing's
 					// ImportStateVerify already strips any "timeouts"/"timeouts.*"
