@@ -2,15 +2,18 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // Ensure AnyscaleProvider satisfies various provider interfaces.
@@ -54,15 +57,42 @@ func (p *AnyscaleProvider) Schema(ctx context.Context, req provider.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"api_url": schema.StringAttribute{
 				Optional:    true,
-				Description: "The Anyscale API URL. Can also be set via ANYSCALE_API_URL, ANYSCALE_API_HOST, or ANYSCALE_HOST environment variables (checked in that order). Defaults to https://console.anyscale.com",
+				Description: "The Anyscale API URL. Can also be set via ANYSCALE_API_URL, ANYSCALE_API_HOST, or ANYSCALE_HOST environment variables (checked in that order). Defaults to https://console.anyscale.com. Must be known at plan time.",
 			},
 			"token": schema.StringAttribute{
 				Optional:            true,
 				Sensitive:           true,
-				MarkdownDescription: "The Anyscale API token. Can also be set via ANYSCALE_CLI_TOKEN environment variable or read from ~/.anyscale/credentials.json. See the [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate one.",
+				MarkdownDescription: "The Anyscale API token. Falls back to the ANYSCALE_CLI_TOKEN environment variable, then ~/.anyscale/credentials.json; an empty value counts as unset. Must be known at plan time. See the [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate one.",
 			},
 		},
 	}
+}
+
+// addMissingCredentialsError reports why no token could be resolved. A
+// credentials file that is absent means nothing was supplied, so the message
+// lists every source tried; a file that exists but cannot be used is a
+// different problem and gets its own summary.
+func addMissingCredentialsError(diags *diag.Diagnostics, err error) {
+	credentialsPath, _ := credentialsFilePath()
+	if errors.Is(err, errCredentialsFileNotFound) {
+		diags.AddAttributeError(
+			path.Root("token"),
+			"No Anyscale API Token Found",
+			"The provider looked for an API token in these places, in order, and found none:\n"+
+				"  1. the `token` argument of the provider block (unset or empty)\n"+
+				"  2. the ANYSCALE_CLI_TOKEN environment variable (unset or empty)\n"+
+				"  3. the credentials file "+credentialsPath+" (does not exist)\n"+
+				"Set one of them, or run `anyscale login` to create the credentials file. "+
+				"See https://docs.anyscale.com/auth/api-keys to generate an API key.",
+		)
+		return
+	}
+	diags.AddAttributeError(
+		path.Root("token"),
+		"Invalid Anyscale Credentials File",
+		"No token was given in the `token` argument or ANYSCALE_CLI_TOKEN, and the credentials file "+credentialsPath+
+			" could not be used: "+err.Error()+". Fix or remove the file, set ANYSCALE_CLI_TOKEN, or run `anyscale login` again.",
+	)
 }
 
 // Configure prepares a Anyscale API client for data sources and resources.
@@ -75,51 +105,72 @@ func (p *AnyscaleProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
+	// A value that is not known until apply must not fall through to the
+	// environment or the default host: the provider would silently talk to a
+	// different control plane (or fail with a misleading "missing token").
+	if config.ApiUrl.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("api_url"),
+			"Unknown Anyscale API URL",
+			"The provider cannot be configured because `api_url` is not known until apply. "+
+				"Set it to a value known at plan time, or leave it out and set the ANYSCALE_API_URL environment variable instead.",
+		)
+	}
+	if config.Token.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("token"),
+			"Unknown Anyscale API Token",
+			"The provider cannot be configured because `token` is not known until apply. "+
+				"Set it to a value known at plan time, or leave it out and set the ANYSCALE_CLI_TOKEN environment variable "+
+				"(or run `anyscale login`) instead.",
+		)
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Get API URL from config or environment.
 	// Env var fallbacks are checked in priority order; the first non-empty wins.
-	// ANYSCALE_API_HOST and ANYSCALE_HOST are recognized to match the Anyscale CLI/SDK conventions.
+	// ANYSCALE_HOST is the variable the Anyscale CLI reads; ANYSCALE_API_URL and
+	// ANYSCALE_API_HOST are provider-specific aliases.
 	apiURL := "https://console.anyscale.com"
-	if !config.ApiUrl.IsNull() && config.ApiUrl.ValueString() != "" {
+	apiURLSource := "default"
+	if config.ApiUrl.ValueString() != "" {
 		apiURL = config.ApiUrl.ValueString()
+		apiURLSource = "provider configuration"
 	} else {
 		for _, envVar := range []string{"ANYSCALE_API_URL", "ANYSCALE_API_HOST", "ANYSCALE_HOST"} {
 			if envURL := os.Getenv(envVar); envURL != "" {
 				apiURL = envURL
+				apiURLSource = envVar
 				break
 			}
 		}
 	}
 
-	// Get token from config, environment, or credentials file
-	var token string
-	if !config.Token.IsNull() {
+	// Get token from config, environment, or credentials file. An empty
+	// `token = ""` counts as unset, like api_url, so a module that passes
+	// through an empty variable falls back to the other sources.
+	var token, tokenSource string
+	if config.Token.ValueString() != "" {
 		token = config.Token.ValueString()
-	} else if envToken := os.Getenv("ANYSCALE_CLI_TOKEN"); envToken != "" {
-		token = envToken
+		tokenSource = "provider configuration"
 	} else {
-		// Try to read from credentials file
-		client, err := NewClient(apiURL)
+		var err error
+		token, tokenSource, err = resolveAuthToken(ctx)
 		if err != nil {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("token"),
-				"Unable to Create Anyscale API Client",
-				"Unable to read token from environment or credentials file: "+err.Error(),
-			)
+			addMissingCredentialsError(&resp.Diagnostics, err)
 			return
 		}
-		token = client.Token
 	}
 
-	if token == "" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("token"),
-			"Missing Anyscale API Token",
-			"The provider cannot create the Anyscale API client as there is a missing or empty value for the Anyscale API token. "+
-				"Set the token value in the configuration or use the ANYSCALE_CLI_TOKEN environment variable. "+
-				"If either is already set, ensure the value is not empty.",
-		)
-		return
-	}
+	// Log which source won, never the token itself: a run that authenticates as
+	// an unexpected identity is otherwise impossible to explain from TF_LOG=debug.
+	tflog.Debug(ctx, "resolved Anyscale API credentials", map[string]any{
+		"token_source":   tokenSource,
+		"api_url":        apiURL,
+		"api_url_source": apiURLSource,
+	})
 
 	// Delegate to NewClientWithToken rather than a third hand-rolled Client
 	// literal, so its HTTPClient construction (no blanket Timeout - DoRequest

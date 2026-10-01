@@ -94,7 +94,7 @@ func TestCloudResourceDelete_Other400Errors(t *testing.T) {
 	if !diags.HasError() {
 		t.Fatal("Delete returned no error for a non-primary 400, want an API error")
 	}
-	if got := diags.Errors()[0].Detail(); !strings.Contains(got, "unexpected status 400") {
+	if got := diags.Errors()[0].Detail(); !strings.Contains(got, "(HTTP 400)") {
 		t.Fatalf("error detail = %q, want it to carry the 400", got)
 	}
 }

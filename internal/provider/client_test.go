@@ -8,8 +8,8 @@ import (
 // minAcceptableHTTPTimeout is the floor below which the API client's HTTP
 // timeout is considered a "blanket cap" bug rather than a deliberate bound.
 // Real backend operations like PUT /add_resource (registering real cloud
-// infrastructure) can legitimately run well past 30s — see task 1ea12959,
-// found via a real end-to-end apply against live AWS: the previous hardcoded
+// infrastructure) can legitimately run well past 30s. A real end-to-end apply
+// against live AWS found that the previous hardcoded
 // 30s http.Client.Timeout killed every request in flight past that mark,
 // including the flagship anyscale_cloud all-in-one create path used by
 // examples/aws-vm-basic (the provider's own quickstart example).
@@ -24,13 +24,13 @@ func assertNoBlanketTimeoutCap(t *testing.T, label string, timeout time.Duration
 	if timeout != 0 && timeout < minAcceptableHTTPTimeout {
 		t.Errorf("%s: http.Client.Timeout is %s, a blanket cap on every API call — "+
 			"real operations like add_resource legitimately exceed 30s on live infrastructure "+
-			"and will fail with 'context deadline exceeded' (task 1ea12959). Use 0 (unbounded, "+
+			"and will fail with 'context deadline exceeded'. Use 0 (unbounded, "+
 			"deferring to per-call context deadlines) or a generous bound of at least %s.",
 			label, timeout, minAcceptableHTTPTimeout)
 	}
 }
 
-// TestNewClientWithToken_NoBlanketTimeoutCap pins task 1ea12959's fix for the
+// TestNewClientWithToken_NoBlanketTimeoutCap pins the fix for the
 // explicit-token client constructor (used directly by acctest's GetTestClient
 // and available to any caller supplying its own token).
 func TestNewClientWithToken_NoBlanketTimeoutCap(t *testing.T) {
@@ -41,7 +41,7 @@ func TestNewClientWithToken_NoBlanketTimeoutCap(t *testing.T) {
 	assertNoBlanketTimeoutCap(t, "NewClientWithToken", client.HTTPClient.Timeout)
 }
 
-// TestNewClient_NoBlanketTimeoutCap pins task 1ea12959's fix for the
+// TestNewClient_NoBlanketTimeoutCap pins the fix for the
 // environment/credentials-resolving client constructor. Uses an env var
 // token so this stays infra-free and independent of any real credentials
 // file on the machine running the test.

@@ -113,5 +113,5 @@ Concepts & Reference:
 
 ### Optional
 
-- `api_url` (String) The Anyscale API URL. Can also be set via ANYSCALE_API_URL, ANYSCALE_API_HOST, or ANYSCALE_HOST environment variables (checked in that order). Defaults to https://console.anyscale.com
-- `token` (String, Sensitive) The Anyscale API token. Can also be set via ANYSCALE_CLI_TOKEN environment variable or read from ~/.anyscale/credentials.json. See the [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate one.
+- `api_url` (String) The Anyscale API URL. Can also be set via ANYSCALE_API_URL, ANYSCALE_API_HOST, or ANYSCALE_HOST environment variables (checked in that order). Defaults to https://console.anyscale.com. Must be known at plan time.
+- `token` (String, Sensitive) The Anyscale API token. Falls back to the ANYSCALE_CLI_TOKEN environment variable, then ~/.anyscale/credentials.json; an empty value counts as unset. Must be known at plan time. See the [Anyscale API keys documentation](https://docs.anyscale.com/auth/api-keys) for how to generate one.

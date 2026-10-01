@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,7 +12,12 @@ import (
 )
 
 // AddAPIError adds a diagnostic error for a general API operation failure.
-// Use this for errors from the HTTP client or other non-status-code errors.
+// Use this for errors from the HTTP client or from a non-accepted status code.
+//
+// When err carries an HTTP status (UnexpectedStatusError), the detail reads
+// "Failed to <operation> (HTTP <status>): <backend detail>": the status tells
+// a 403 from a 404 at a glance, and the backend's own message replaces the raw
+// JSON body. Any other error keeps the "Failed to <operation>: <error>" shape.
 //
 // Example usage:
 //
@@ -20,6 +26,23 @@ import (
 //	    return
 //	}
 func AddAPIError(diags *diag.Diagnostics, operation string, err error) {
+	var statusErr *UnexpectedStatusError
+	if errors.As(err, &statusErr) {
+		detail := extractAPIErrorDetail(statusErr)
+		if detail == statusErr.Error() {
+			// Not the backend's {"error": {"detail": ...}} shape: show the body
+			// itself rather than repeating the status inside the message.
+			detail = strings.TrimSpace(statusErr.Body)
+			if detail == "" {
+				detail = "the response had no body"
+			}
+		}
+		diags.AddError(
+			"API Request Failed",
+			fmt.Sprintf("Failed to %s (HTTP %d): %s", operation, statusErr.StatusCode, detail),
+		)
+		return
+	}
 	diags.AddError(
 		"API Request Failed",
 		fmt.Sprintf("Failed to %s: %s", operation, err.Error()),

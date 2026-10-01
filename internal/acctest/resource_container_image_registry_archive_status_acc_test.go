@@ -150,5 +150,5 @@ func TestAccContainerImageRegistryResource_ArchiveOther400FailsDestroy_MockServe
 	testAccArchiveStatusRegistry(t, "archive-other400", archiveResponse{
 		status: http.StatusBadRequest,
 		body:   `{"error": {"detail": "Invalid cluster environment id."}}`,
-	}, regexp.MustCompile(`(?s)Failed to archive cluster environment:.*unexpected status 400`))
+	}, regexp.MustCompile(`(?s)Failed to archive cluster environment \(HTTP 400\)`))
 }

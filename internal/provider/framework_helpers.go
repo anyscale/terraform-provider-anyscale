@@ -37,7 +37,7 @@ func InterfaceMapToFloat64(ctx context.Context, input map[string]interface{}) (t
 		default:
 			diags.AddWarning(
 				"Type Conversion Warning",
-				fmt.Sprintf("Key '%s' has type %T, attempting conversion to float64", key, v),
+				fmt.Sprintf("Key '%s' has non-numeric type %T and was ignored", key, v),
 			)
 			continue
 		}
@@ -113,35 +113,6 @@ func StringListToInterface(ctx context.Context, stringList types.List) ([]string
 	return result, diags
 }
 
-// InterfaceListToString converts a []interface{} from the API
-// to a types.List with StringType elements for use in Terraform state.
-func InterfaceListToString(ctx context.Context, input []interface{}) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	if len(input) == 0 {
-		return types.ListNull(types.StringType), diags
-	}
-
-	elements := make([]attr.Value, 0, len(input))
-
-	for _, value := range input {
-		if value == nil {
-			continue
-		}
-
-		strVal := fmt.Sprintf("%v", value)
-		elements = append(elements, types.StringValue(strVal))
-	}
-
-	if len(elements) == 0 {
-		return types.ListNull(types.StringType), diags
-	}
-
-	listValue, listDiags := types.ListValue(types.StringType, elements)
-	diags.Append(listDiags...)
-	return listValue, diags
-}
-
 // DynamicToInterface converts a types.Dynamic value to map[string]interface{}
 // for use with the Anyscale API. The Dynamic value is expected to contain a map.
 func DynamicToInterface(ctx context.Context, dynamicValue types.Dynamic) (map[string]interface{}, error) {
@@ -211,7 +182,7 @@ func convertAttrValueToInterface(val attr.Value) interface{} {
 		// principle have different shapes, which every object literal list does. Without this
 		// case, a real ray_serve_config's `applications` (always a list of objects) fell through
 		// to the nil default below, silently sending the backend `"applications": null` instead
-		// of the real list - confirmed as a real P1 via a real-infra apply (the mock suite never
+		// of the real list - confirmed via a real-infra apply (the mock suite never
 		// caught it because every mock config used an empty list, which types as List, not
 		// Tuple). Converts identically to the List case; Tuple otherwise behaves the same for
 		// this JSON-conversion purpose.
@@ -284,10 +255,6 @@ func interfaceToAttrValue(value interface{}) (attr.Value, attr.Type) {
 	case string:
 		return types.StringValue(v), types.StringType
 	case float64:
-		// Check if it's actually an integer
-		if v == float64(int64(v)) {
-			return types.NumberValue(big.NewFloat(v)), types.NumberType
-		}
 		return types.NumberValue(big.NewFloat(v)), types.NumberType
 	case int:
 		return types.NumberValue(big.NewFloat(float64(v))), types.NumberType
