@@ -122,6 +122,25 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 		}
 	})
 
+	// A 404 from the per-user GET must not read as "not a member": callers treat
+	// ErrNotFound as that (org_user Create would invite, the role resource would
+	// drop itself from state), and the list just returned this member.
+	t.Run("singular GET 404 is an error that is not ErrNotFound", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"error":{"detail":"No user found"}}`)
+		}))
+		defer server.Close()
+		fromList := OrganizationCollaboratorResult{ID: "identity-1", UserID: &userID, Email: "member@example.com"}
+		_, err := hydrateCollaboratorRoles(context.Background(), NewClientWithToken(server.URL, "test-token"), fromList)
+		if err == nil {
+			t.Fatal("a failed lookup must be an error")
+		}
+		if errors.Is(err, ErrNotFound) {
+			t.Errorf("a per-user lookup failure must not satisfy errors.Is(ErrNotFound): %v", err)
+		}
+	})
+
 	t.Run("singular GET fails - an error, not a silent null", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -134,8 +153,7 @@ func TestHydrateCollaboratorRoles_TriStates(t *testing.T) {
 		if err == nil {
 			t.Fatal("a failed per-user lookup returned no error: a real deny-role list would silently read as null")
 		}
-		var statusErr *UnexpectedStatusError
-		if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusInternalServerError {
+		if !strings.Contains(err.Error(), "500") {
 			t.Errorf("error should carry the 500, got: %v", err)
 		}
 		if !strings.Contains(err.Error(), "member@example.com") {

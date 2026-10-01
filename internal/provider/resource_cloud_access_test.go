@@ -856,6 +856,8 @@ func TestCloudAccessValidateConfig_RejectsValuesTheBackendRefuses(t *testing.T) 
 			if d == nil {
 				t.Fatalf("expected an %q error, got: %v", tc.wantSummary, diags)
 			}
+			// Only that error: the "writer" did-you-mean must not also fire.
+			cloudAccessAssertOnlyErrorSummary(t, diags, tc.wantSummary)
 			if !strings.Contains(d.Detail(), email) {
 				t.Errorf("error detail does not name the member %q: %s", email, d.Detail())
 			}

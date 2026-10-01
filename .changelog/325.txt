@@ -19,6 +19,16 @@ resource/anyscale_organization_user_role: A failed per-member roles lookup is no
 ```
 
 ```
+release-note:changed
+resource/anyscale_organization_user: Create, read and import now fail when the per-member roles lookup fails, even though this resource does not manage roles; previously the failure was ignored.
+```
+
+```
+release-note:changed
+resource/anyscale_organization_user_role: Changing only the letter case of `email` now updates in place instead of replacing the resource, and `terraform import` with a mixed-case email keeps that spelling so the next plan is empty.
+```
+
+```
 release-note:fixed
 resource/anyscale_organization_user_role: An `email` with capital letters, or `deny_roles` listed in a different order than the API returns them, no longer fails the apply with an inconsistent result; the configured spelling and order are kept.
 ```

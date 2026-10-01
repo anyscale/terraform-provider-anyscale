@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1122,5 +1123,45 @@ func TestOrganizationUserRoleImportState_RecoversFromSingularEndpoint(t *testing
 	}
 	if len(denyRoles) != 1 || denyRoles[0] != "image_reader" {
 		t.Errorf("got deny_roles=%v, want [image_reader] (from the singular endpoint, not the list's hardcoded empty)", denyRoles)
+	}
+}
+
+// The 501 fallback keys on the HTTP status, not on text: a 403 whose BODY happens
+// to mention "unexpected status 501" is not the feature gate.
+func TestOrgRolesFeatureDisabled_MatchesStatusNotText(t *testing.T) {
+	if !orgRolesFeatureDisabled(fmt.Errorf("wrapped: %w", &UnexpectedStatusError{StatusCode: http.StatusNotImplemented, Body: "x"})) {
+		t.Error("a 501 status error must be the feature gate")
+	}
+	if orgRolesFeatureDisabled(&UnexpectedStatusError{StatusCode: http.StatusForbidden, Body: "unexpected status 501"}) {
+		t.Error("a 403 whose body mentions 501 must not be treated as the feature gate")
+	}
+	if orgRolesFeatureDisabled(errors.New("unexpected status 501: plain text, not a status error")) {
+		t.Error("an error that is not an UnexpectedStatusError must not match on text")
+	}
+	if orgRolesFeatureDisabled(nil) {
+		t.Error("nil is not the feature gate")
+	}
+}
+
+func TestSameStringSet_CountsMultiplicity(t *testing.T) {
+	ctx := context.Background()
+	list := func(v ...string) types.List { return orgDenyRolesList(v...) }
+	for _, tc := range []struct {
+		name string
+		have types.List
+		want []string
+		same bool
+	}{
+		{"same set, different order", list("b", "a"), []string{"a", "b"}, true},
+		{"empty and empty", list(), []string{}, true},
+		{"duplicate in have is not the same", list("a", "a"), []string{"a"}, false},
+		{"duplicate in want is not the same", list("a"), []string{"a", "a"}, false},
+		{"different member", list("a"), []string{"b"}, false},
+		{"null have", types.ListNull(types.StringType), []string{"a"}, false},
+		{"undetermined want", list("a"), nil, false},
+	} {
+		if got := sameStringSet(ctx, tc.have, tc.want); got != tc.same {
+			t.Errorf("%s: sameStringSet = %v, want %v", tc.name, got, tc.same)
+		}
 	}
 }

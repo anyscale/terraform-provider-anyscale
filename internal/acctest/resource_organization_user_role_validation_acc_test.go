@@ -227,3 +227,64 @@ data "anyscale_organization_user" "u" {
 		})
 	}
 }
+
+// A cold import by a mixed-case email must plan a no-op against a config that
+// spells the email the same way. Import is the first step against a member
+// pre-seeded out of band, with ImportStatePersist so the imported state carries
+// into the plan. Positive control: the lowercase spelling.
+func TestAccOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	for name, email := range map[string]string{
+		"lowercase_control": "org-role-mock@example.com",
+		"mixed_case":        "Org-Role-Mock@Example.com",
+	} {
+		t.Run(name, func(t *testing.T) {
+			httpServer, _ := newMockOrgUserRoleServer(t)
+			cfg := orgUserRoleConfig(httpServer.URL, email, "collaborator", "")
+			resource.Test(t, resource.TestCase{
+				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						ResourceName:       "anyscale_organization_user_role.mock",
+						ImportState:        true,
+						ImportStateId:      email,
+						ImportStatePersist: true,
+						Config:             cfg,
+					},
+					{
+						Config:   cfg,
+						PlanOnly: true,
+					},
+				},
+			})
+		})
+	}
+}
+
+// Editing only the letter case of email is the same person: an in-place update,
+// not a replace, and the plan is clean afterwards. Positive control: a different
+// address still replaces.
+func TestAccOrganizationUserRoleResource_CaseOnlyEmailEditUpdatesInPlace(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	const addr = "anyscale_organization_user_role.mock"
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	lower := orgUserRoleConfig(httpServer.URL, mock.email, "collaborator", "")
+	mixed := orgUserRoleConfig(httpServer.URL, "Org-Role-Mock@Example.com", "collaborator", "")
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: lower},
+			{
+				Config: mixed,
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(addr, plancheck.ResourceActionUpdate),
+				}},
+				Check: resource.TestCheckResourceAttr(addr, "email", "Org-Role-Mock@Example.com"),
+			},
+			{
+				Config:           mixed,
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}},
+			},
+		},
+	})
+}

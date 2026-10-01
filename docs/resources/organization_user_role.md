@@ -78,7 +78,7 @@ output "analyst_current_role" {
 ### Required
 
 - `base_role` (String) The member's organization base role: `owner` or `collaborator`. Required - there is deliberately no default, because guessing it during adoption of an existing member could silently change their privileges.
-- `email` (String) Email of the organization member whose role this manages. The member must already exist in the organization. Matched case-insensitively against the API, but changing this value replaces the resource - it identifies a different person.
+- `email` (String) Email of the organization member whose role this manages. The member must already exist in the organization. Matched case-insensitively against the API. Changing it to a different address replaces the resource - it identifies a different person; changing only its letter case updates in place.
 
 ### Optional
 
@@ -88,13 +88,13 @@ Note these **also restrict organization owners**, unlike cloud deny roles, which
 
 Omit this attribute to leave the organization's existing deny roles untouched. Set it - including to an empty list `[]`, which removes all deny roles - to manage the set authoritatively.
 
-**Setting this attribute at all requires the organization roles API**, which is not enabled in every organization. Managing only `base_role` uses a different endpoint that works everywhere.
+**Setting this attribute at all requires the organization roles API**, which is not enabled in every organization. Managing only `base_role` works everywhere.
 
 The underlying API field is named `additional_roles`; that name is misleading and this attribute deliberately does not copy it.
 
 ### Read-Only
 
-- `id` (String) The email of the organization member whose role this resource manages. Same value as `email`.
+- `id` (String) The email of the organization member whose role this resource manages. The same address as `email`, in the letter case first recorded.
 - `identity_id` (String) The identity ID of the organization member, resolved from `email`. This is a different identifier from `user_id`; the two organization role endpoints are keyed by different ones.
 - `user_id` (String) The user ID of the organization member, resolved from `email`.
 

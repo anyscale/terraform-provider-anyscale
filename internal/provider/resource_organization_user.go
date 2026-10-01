@@ -1351,7 +1351,11 @@ func hydrateCollaboratorRoles(ctx context.Context, client *Client, fromList Orga
 		http.StatusOK,
 	)
 	if err != nil {
-		return fromList, fmt.Errorf("could not read the roles of organization member %s (user %s): %w", fromList.Email, *fromList.UserID, err)
+		// %v, not %w: wrapping would let a 404 from this per-user GET satisfy
+		// errors.Is(ErrNotFound), which callers read as "not a member" (org_user Create
+		// would invite them, the role resource would drop itself from state) even
+		// though the list call just returned this member.
+		return fromList, fmt.Errorf("could not read the roles of organization member %s (user %s): %v", fromList.Email, *fromList.UserID, err)
 	}
 
 	fromList.AdditionalRoles = singular.Result.AdditionalRoles
