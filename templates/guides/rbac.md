@@ -57,10 +57,11 @@ Managing groups needs the organization-level permission to manage IAM (an organi
 ### What is in scope, and what is not
 
 In scope: creating and renaming groups, and managing who belongs to them. **Not managed yet:** a
-group's organization roles, and grants of cloud or project access to a group. Granting a group
-access to a cloud is still done with [`anyscale_cloud_access`](../resources/cloud_access.md), per
-member, or in the Anyscale console. A group that exists and has members does not by itself give
-anyone any access.
+group's organization roles, and grants of cloud or project access to a group. Terraform does not
+manage them, but a group may already hold some (set in the Anyscale console or API), so adding or
+removing members can grant or revoke real access. To grant cloud access to a person, use
+[`anyscale_cloud_access`](../resources/cloud_access.md) for each person; group grants are
+console-only for now.
 
 ### Members must already be in the organization
 
@@ -94,8 +95,7 @@ managed and can be imported.
 Destroying `anyscale_user_group_members` removes every member and leaves the group. Destroying
 `anyscale_user_group` removes the members first, then deletes the group. The members are removed
 first deliberately: deleting a group does not, on its own, revoke everything that was derived from
-its membership. Access derived from a group's cloud or project grants can take roughly 30 seconds
-to converge after membership changes; the provider does not wait for it.
+its membership.
 
 ### Cost of a refresh
 
@@ -106,10 +106,8 @@ expect refreshes to scale with the number of groups.
 ### Example
 
 ```hcl
-resource "anyscale_organization_invitation" "dev" {
-  email = "dev1@example.com"
-}
-
+# Prerequisite: both people are already organization members. If not, invite them first with
+# anyscale_organization_invitation, wait for them to accept, then apply this configuration.
 resource "anyscale_user_group" "ml_platform" {
   name = "ml-platform"
 }
