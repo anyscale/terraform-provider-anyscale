@@ -105,6 +105,21 @@ func (s *mockOrganizationUserOriginServer) handle(w http.ResponseWriter, r *http
 	case r.Method == http.MethodGet && path == "/api/v2/organization_collaborators":
 		s.handleListCollaborators(w, r)
 
+	case r.Method == http.MethodGet && s.memberEmail != "" && path == "/api/v2/organization_collaborators/"+s.userID:
+		// The per-user GET the provider reads deny roles from. Served for an existing
+		// member, as the real endpoint does; a failure here is reported as an error.
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+			"id":               s.identityID,
+			"email":            strings.ToLower(s.memberEmail),
+			"name":             "Already A Member",
+			"permission_level": "collaborator",
+			"base_role":        "collaborator",
+			"additional_roles": []string{},
+			"created_at":       "2026-01-01T00:00:00Z",
+			"user_id":          s.userID,
+		}})
+
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v2/organization_collaborators/"):
 		// THE EVICTION CALL. Recording it is the entire purpose of this mock.
 		s.evictionCalled = true

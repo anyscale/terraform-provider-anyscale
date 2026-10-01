@@ -302,8 +302,10 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 				Optional:    true,
 				Computed:    true,
 				// Optional+Computed, and the two states mean different things:
-				//   omitted  -> leave whatever the organization already has, and write via
-				//               the ungated legacy endpoint (works in every organization).
+				//   omitted  -> leave whatever the organization already has: the base role is
+				//               written through the roles API with the current deny roles sent
+				//               back unchanged, or through the legacy endpoint in an
+				//               organization without the roles API (works everywhere).
 				//   declared -> authoritative over the whole set, including an explicit []
 				//               which genuinely clears, via the gated roles endpoint.
 				//
@@ -473,6 +475,39 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 	var diags diag.Diagnostics
 
 	if !denyRolesDeclared {
+		// deny_roles was not declared, so the member's deny roles are not ours to
+		// change - but the base role still has to land where the console and
+		// permission checks read it. The legacy endpoint writes Postgres only, so in
+		// an organization with the roles API enabled SpiceDB would keep the old role
+		// while state and every plan showed the new one. Where the roles API is
+		// available, write through it, sending the member's CURRENT deny roles back
+		// unchanged (the same read-modify-write the console does). Fall back to the
+		// legacy endpoint only when the roles API is not enabled (501) or the
+		// current roles cannot be determined (no user_id).
+		if userID != "" {
+			current, readErr := r.currentDenyRoles(ctx, userID)
+			if readErr != nil {
+				// Setting base_role without touching deny_roles needs the member's
+				// current deny roles first; without them the write could clear them.
+				AddAPIError(&diags, "read the member's current deny roles before setting base_role", readErr)
+				return diags
+			}
+			err := setOrganizationRoles(ctx, r.client, userID, model.BaseRole.ValueString(), current)
+			switch {
+			case err == nil:
+				return diags
+			case orgRolesFeatureDisabled(err):
+				// Roles API not enabled in this organization: the legacy endpoint is the
+				// only write path, and in such an organization it is also what the
+				// permission checks read.
+			case orgSelfModification(err):
+				diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
+				return diags
+			default:
+				diags.AddError("Could Not Set Organization Roles", collaboratorErrorDiagnosticDetail(err))
+				return diags
+			}
+		}
 		if err := setOrganizationPermissionLevel(ctx, r.client, identityID, model.BaseRole.ValueString()); err != nil {
 			if orgSelfModification(err) {
 				diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
@@ -511,6 +546,22 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 		)
 	}
 	return diags
+}
+
+// currentDenyRoles reads a member's current additional roles from the singular
+// per-user endpoint, the only source that reports them (the list hardcodes an
+// empty set). Never nil on success, so a roles write sends [] rather than null.
+func (r *OrganizationUserRoleResource) currentDenyRoles(ctx context.Context, userID string) ([]string, error) {
+	singular, err := DoRequestAndParse[OrganizationCollaboratorSingularResponse](
+		ctx, r.client, "GET", fmt.Sprintf("/api/v2/organization_collaborators/%s", userID), nil, http.StatusOK,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if singular.Result.AdditionalRoles == nil {
+		return []string{}, nil
+	}
+	return singular.Result.AdditionalRoles, nil
 }
 
 // findOrgCollaboratorByEmail resolves an org member's full record from their

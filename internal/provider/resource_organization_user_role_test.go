@@ -497,19 +497,15 @@ func orgDenyRolesStrings(t *testing.T, l types.List) []string {
 	return out
 }
 
-// TestOrganizationUserRoleCreate_DenyRolesOmittedUsesLegacyPathOnly is the
-// central regression test for the write-path split: when the practitioner did
-// not declare deny_roles, the write MUST go through the ungated legacy
-// permission_level endpoint and must never touch the gated roles endpoint.
+// TestOrganizationUserRoleCreate_DenyRolesOmittedWritesBaseRoleThroughRolesAPI:
+// with deny_roles omitted, the base role is written through the roles API (so
+// SpiceDB, which the console and permission checks read, moves with it) and the
+// member's CURRENT deny roles are sent back unchanged. The legacy endpoint is
+// Postgres-only and must not be used while the roles API is available.
 //
-// The unknown subtest is the load-bearing one. deny_roles is Optional+Computed,
-// and the framework presents an omitted Optional+Computed attribute as UNKNOWN
-// during Create, not as null - so a declared-check written as IsNull() alone
-// reads "omitted" as "declared" and routes every single Create onto the gated
-// endpoint, which fails outright in organizations without the feature. That is
-// the exact failure the Optional+Computed design exists to prevent, and it is
-// invisible to a null-only test.
-func TestOrganizationUserRoleCreate_DenyRolesOmittedUsesLegacyPathOnly(t *testing.T) {
+// The member is seeded with a NON-empty deny set, because an empty one cannot
+// tell "sent back unchanged" from "sent []".
+func TestOrganizationUserRoleCreate_DenyRolesOmittedWritesBaseRoleThroughRolesAPI(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		denyRoles types.List
@@ -520,7 +516,7 @@ func TestOrganizationUserRoleCreate_DenyRolesOmittedUsesLegacyPathOnly(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			httpServer, mock := newMockOrgUserRoleServer(t)
 			r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
-			mock.seedMember("Omitted@Example.com", "ide_omitted", "usr_omitted", "collaborator", nil)
+			mock.seedMember("Omitted@Example.com", "ide_omitted", "usr_omitted", "collaborator", []string{"image_reader_no_base_images"})
 
 			plan := OrganizationUserRoleResourceModel{
 				Email:     types.StringValue("omitted@example.com"),
@@ -534,23 +530,26 @@ func TestOrganizationUserRoleCreate_DenyRolesOmittedUsesLegacyPathOnly(t *testin
 			}
 
 			log := mock.callLogSnapshot()
-			if orgRoleCallLogHasRolesPUT(log) {
-				t.Fatalf("deny_roles was not declared, so the gated roles endpoint must never be called - call log: %v", log)
+			if orgRoleCallLogHas(log, "PUT /api/v2/organization_collaborators/ide_omitted") {
+				t.Fatalf("the legacy Postgres-only endpoint must not be used while the roles API is available - call log: %v", log)
 			}
-			if !orgRoleCallLogHas(log, "PUT /api/v2/organization_collaborators/ide_omitted") {
-				t.Fatalf("expected the legacy permission_level PUT keyed by identity_id, got call log: %v", log)
-			}
-
-			body := mock.legacyBody()
+			body, raw := mock.rolesBody()
 			if body == nil {
-				t.Fatal("expected a decoded legacy request body, got none")
+				t.Fatalf("expected the roles endpoint to be called, got call log: %v", log)
 			}
-			if body.PermissionLevel != "owner" {
-				t.Errorf("legacy body permission_level = %q, want the declared base_role %q", body.PermissionLevel, "owner")
+			if body.BaseRole != "owner" {
+				t.Errorf("roles body base_role = %q, want %q", body.BaseRole, "owner")
+			}
+			if len(body.AdditionalRoles) != 1 || body.AdditionalRoles[0] != "image_reader_no_base_images" {
+				t.Errorf("roles body additional_roles = %v (raw %s), want the member's current deny roles sent back unchanged", body.AdditionalRoles, raw)
 			}
 
-			if got := mock.memberState(t, "omitted@example.com").baseRole; got != "owner" {
-				t.Errorf("member base role = %q, want %q (the legacy write should have applied)", got, "owner")
+			got := mock.memberState(t, "omitted@example.com")
+			if got.baseRole != "owner" {
+				t.Errorf("member base role = %q, want %q", got.baseRole, "owner")
+			}
+			if len(got.additionalRoles) != 1 || got.additionalRoles[0] != "image_reader_no_base_images" {
+				t.Errorf("member deny roles = %v, want unchanged", got.additionalRoles)
 			}
 			if result.BaseRole.ValueString() != "owner" {
 				t.Errorf("state base_role = %q, want %q", result.BaseRole.ValueString(), "owner")
@@ -560,6 +559,59 @@ func TestOrganizationUserRoleCreate_DenyRolesOmittedUsesLegacyPathOnly(t *testin
 					result.IdentityID.ValueString(), result.UserID.ValueString())
 			}
 		})
+	}
+}
+
+// With the roles API not enabled (501), a base_role-only write falls back to the
+// legacy endpoint, which is the only write path in such an organization, and
+// leaves deny roles untouched.
+func TestOrganizationUserRoleCreate_DenyRolesOmittedFallsBackToLegacyOn501(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	mock.rolesEndpoint501 = true
+	r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
+	mock.seedMember("Omitted@Example.com", "ide_omitted", "usr_omitted", "collaborator", []string{"image_reader"})
+
+	result, diags := runOrganizationUserRoleCreate(t, r, OrganizationUserRoleResourceModel{
+		Email:     types.StringValue("omitted@example.com"),
+		BaseRole:  types.StringValue("owner"),
+		DenyRoles: types.ListNull(types.StringType),
+	})
+	if diags.HasError() {
+		t.Fatalf("a 501 from the roles API must fall back, not fail: %v", diags)
+	}
+	log := mock.callLogSnapshot()
+	if !orgRoleCallLogHas(log, "PUT /api/v2/organization_collaborators/ide_omitted") {
+		t.Fatalf("expected the legacy fallback PUT, got call log: %v", log)
+	}
+	if body := mock.legacyBody(); body == nil || body.PermissionLevel != "owner" {
+		t.Errorf("legacy body = %+v, want permission_level owner", body)
+	}
+	if got := mock.memberState(t, "omitted@example.com"); got.baseRole != "owner" || len(got.additionalRoles) != 1 {
+		t.Errorf("member = %+v, want base owner with deny roles untouched", got)
+	}
+	if result.BaseRole.ValueString() != "owner" {
+		t.Errorf("state base_role = %q", result.BaseRole.ValueString())
+	}
+}
+
+// Any other failure of the roles write is an error: falling back to the legacy
+// endpoint would write Postgres only and report success.
+func TestOrganizationUserRoleCreate_DenyRolesOmittedDoesNotFallBackOnOtherErrors(t *testing.T) {
+	httpServer, mock := newMockOrgUserRoleServer(t)
+	mock.selfModification = true // roles PUT answers 403
+	r := &OrganizationUserRoleResource{client: NewClientWithToken(httpServer.URL, "test-token")}
+	mock.seedMember("Omitted@Example.com", "ide_omitted", "usr_omitted", "collaborator", nil)
+
+	_, diags := runOrganizationUserRoleCreate(t, r, OrganizationUserRoleResourceModel{
+		Email:     types.StringValue("omitted@example.com"),
+		BaseRole:  types.StringValue("owner"),
+		DenyRoles: types.ListNull(types.StringType),
+	})
+	if !diags.HasError() {
+		t.Fatal("a 403 from the roles API must be reported")
+	}
+	if orgRoleCallLogHas(mock.callLogSnapshot(), "PUT /api/v2/organization_collaborators/ide_omitted") {
+		t.Fatalf("a non-501 failure must not fall back to the legacy endpoint: %v", mock.callLogSnapshot())
 	}
 }
 

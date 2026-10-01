@@ -369,17 +369,13 @@ resource "anyscale_organization_user_role" "mock" {
 	}
 }
 
-// TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesStaysOnLegacyPath
-// guards write-path selection in Update: with UseStateForUnknown on
-// deny_roles, plan.DenyRoles carries the prior value forward even when config
-// omits the attribute, so a selection that read the PLAN (rather than Config)
-// would send an ordinary base_role-only update down the GATED roles endpoint
-// instead of the ungated legacy one. Create and Update both select the path
-// from denyRolesDeclaredInConfig(ctx, req.Config). Distinguishing the two
-// paths by mock call count (not just the end value) is deliberate - a
-// value-preserving SET through the wrong endpoint would still pass a
-// value-only check.
-func TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesStaysOnLegacyPath(t *testing.T) {
+// TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesKeepsThemViaRolesAPI
+// guards that a base_role-only Update, with deny_roles omitted, writes through
+// the roles API (so SpiceDB moves with the base role) and sends the member's
+// current deny roles back unchanged, never the legacy Postgres-only endpoint.
+// The call counts distinguish the two paths: a value-preserving write through
+// the wrong endpoint would pass a value-only check.
+func TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesKeepsThemViaRolesAPI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
 	httpServer, mock := newMockOrgUserRoleServer(t)
@@ -431,15 +427,13 @@ resource "anyscale_organization_user_role" "mock" {
 
 	legacy, roles := mock.pathCounts()
 	t.Logf("legacy path writes=%d roles path writes=%d", legacy, roles)
-	// Create used the roles path once (deny_roles was declared). The Update
-	// above must use the legacy path, not the roles path, since its own
-	// config omits deny_roles - so roles-path writes must stay at 1 (from
-	// Create only) and legacy-path writes must reach 1 (from this Update).
-	if roles != 1 {
-		t.Fatalf("expected exactly 1 roles-path write (Create only), got %d - an Update routing through the gated endpoint for a base_role-only config", roles)
+	// Create used the roles path (deny_roles declared) and so does this Update:
+	// two roles-path writes, none through the legacy endpoint.
+	if roles != 2 {
+		t.Fatalf("expected 2 roles-path writes (Create and this Update), got %d", roles)
 	}
-	if legacy != 1 {
-		t.Fatalf("expected exactly 1 legacy-path write (this Update), got %d", legacy)
+	if legacy != 0 {
+		t.Fatalf("expected no legacy-path writes while the roles API is available, got %d", legacy)
 	}
 }
 
