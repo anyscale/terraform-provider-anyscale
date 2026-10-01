@@ -147,7 +147,7 @@ func preIssue219ProjectSchema() *schema.Schema {
 // TestProjectStateUpgradeV0toV1_PreIssue219ShapeWithCloudName is a
 // precise check: real pre-#219 state has a cloud_name key that
 // projectSchemaV0() (the PriorSchema 74e555e's upgrader actually declares)
-// does not. Does upgradeProjectStateV0toV1 succeed against that real older
+// does not. Does upgradeProjectStateV0 succeed against that real older
 // shape, or does decoding fail the moment it hits a key PriorSchema never
 // declared?
 func TestProjectStateUpgradeV0toV1_PreIssue219ShapeWithCloudName(t *testing.T) {
@@ -197,7 +197,7 @@ func TestProjectStateUpgradeV0toV1_PreIssue219ShapeWithCloudName(t *testing.T) {
 			Raw:    tftypes.NewValue(v1SchemaResp.Schema.Type().TerraformType(ctx), nil),
 		},
 	}
-	upgradeProjectStateV0toV1(ctx, resource.UpgradeStateRequest{State: priorState}, resp)
+	upgradeProjectStateV0(ctx, resource.UpgradeStateRequest{State: priorState}, resp)
 
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("the shipped upgrader FAILS against real pre-#219 state (has cloud_name): %v", resp.Diagnostics)

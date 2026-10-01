@@ -55,9 +55,8 @@ type ProjectResourceModel struct {
 	CloudID types.String `tfsdk:"cloud_id"`
 
 	// Core attributes
-	Name                   types.String `tfsdk:"name"`
-	Description            types.String `tfsdk:"description"`
-	InitialClusterConfigID types.String `tfsdk:"initial_cluster_config_id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
 
 	// Computed fields
 	CreatorID       types.String `tfsdk:"creator_id"`
@@ -80,7 +79,7 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 		// against this schema without the v0 -> v1 upgrader in
 		// resource_project_upgrade.go - see that file for why every existing
 		// anyscale_project state is affected, not just ones that used the block.
-		Version: 1,
+		Version: 2,
 		MarkdownDescription: "Manages an Anyscale Project. Projects organize workspaces and resources within a cloud.\n\n" +
 			"**`terraform destroy` shortly after `apply` may pause before succeeding.** Deleting a project created in the last five minutes can hit a transient backend permission-check race, which the provider retries for up to 90 seconds - invisible unless `TF_LOG` is `WARN` or higher. An older project, or one that still has active jobs or services, fails immediately instead: a real permission problem is never masked.",
 
@@ -127,13 +126,6 @@ func (r *ProjectResource) Schema(ctx context.Context, req resource.SchemaRequest
 					// Not RequiresReplace: that fires on any unrelated update when description is omitted, since unknown reads as "changed" before UseStateForUnknown resolves it.
 					stringplanmodifier.RequiresReplaceIfConfigured(),
 					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"initial_cluster_config_id": schema.StringAttribute{
-				Optional:            true,
-				MarkdownDescription: "The initial cluster configuration ID to use for workspaces in this project. This is a create-time-only input (API field `cluster_config`): the provider does not read its current value back from the API after creation, so it is not refreshed on `terraform plan`/`refresh` and will always be null immediately after `terraform import`. Changing it forces replacement of the project.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 				},
 			},
 
@@ -214,8 +206,6 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		ParentCloudID: cloudID,
 		Description:   &desc,
 	}
-
-	createReq.InitialClusterConfigID = plan.InitialClusterConfigID.ValueStringPointer()
 
 	// Marshal request to JSON
 	reqBody, err := MarshalRequestBody(createReq)

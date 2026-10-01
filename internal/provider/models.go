@@ -274,10 +274,9 @@ type DeploymentMetadata struct {
 
 // CreateProjectRequest is the request body for creating a project
 type CreateProjectRequest struct {
-	Name                   string  `json:"name"`
-	ParentCloudID          string  `json:"parent_cloud_id"`
-	Description            *string `json:"description,omitempty"`
-	InitialClusterConfigID *string `json:"cluster_config,omitempty"` // Note: API uses 'cluster_config' not 'initial_cluster_config'
+	Name          string  `json:"name"`
+	ParentCloudID string  `json:"parent_cloud_id"`
+	Description   *string `json:"description,omitempty"`
 }
 
 // ProjectResponse represents a single project from the Anyscale API

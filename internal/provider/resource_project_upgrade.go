@@ -16,9 +16,13 @@ import (
 // Ensure ProjectResource satisfies the state-upgrade interface.
 var _ resource.ResourceWithUpgradeState = &ProjectResource{}
 
-// UpgradeState implements the v0 -> v1 migration for the v0.25.0 removal of
-// anyscale_project's `collaborator` block (project access moved to a separate
-// resource).
+// UpgradeState migrates anyscale_project state to the current schema
+// (version 2). Version 1 removed the `collaborator` block in v0.25.0 (project
+// access moved to a separate resource); version 2 removed
+// `initial_cluster_config_id`, which never worked: the API rejected it on
+// create, so no state can hold a non-null value for it. The framework calls
+// exactly one upgrader per stored version and never chains them, so each one
+// below writes the current schema directly.
 //
 // This upgrader is NOT optional and NOT limited to people who actually used
 // the block. Terraform persists a resource's full SCHEMA SHAPE in state, so
@@ -44,7 +48,11 @@ func (r *ProjectResource) UpgradeState(ctx context.Context) map[int64]resource.S
 	return map[int64]resource.StateUpgrader{
 		0: {
 			PriorSchema:   projectSchemaV0(),
-			StateUpgrader: upgradeProjectStateV0toV1,
+			StateUpgrader: upgradeProjectStateV0,
+		},
+		1: {
+			PriorSchema:   projectSchemaV1(),
+			StateUpgrader: upgradeProjectStateV1,
 		},
 	}
 }
@@ -81,23 +89,72 @@ type projectResourceModelV0 struct {
 	DirectoryName          types.String `tfsdk:"directory_name"`
 }
 
-// toProjectResourceModel carries every v0 field except Collaborators and
-// CloudName into the current model - both were removed from the live schema. Written as an explicit field-by-field copy so that adding an
-// attribute to ProjectResourceModel later fails to compile here rather than
-// silently upgrading to a zero value.
+// toProjectResourceModel carries every v0 field except Collaborators,
+// CloudName and InitialClusterConfigID into the current model - all three were
+// removed from the live schema. Written as an explicit field-by-field copy so
+// that adding an attribute to ProjectResourceModel later fails to compile here
+// rather than silently upgrading to a zero value.
 func (m projectResourceModelV0) toProjectResourceModel() ProjectResourceModel {
 	return ProjectResourceModel{
-		ID:                     m.ID,
-		CloudID:                m.CloudID,
-		Name:                   m.Name,
-		Description:            m.Description,
-		InitialClusterConfigID: m.InitialClusterConfigID,
-		CreatorID:              m.CreatorID,
-		CreatedAt:              m.CreatedAt,
-		LastUsedCloudID:        m.LastUsedCloudID,
-		IsDefault:              m.IsDefault,
-		DirectoryName:          m.DirectoryName,
+		ID:              m.ID,
+		CloudID:         m.CloudID,
+		Name:            m.Name,
+		Description:     m.Description,
+		CreatorID:       m.CreatorID,
+		CreatedAt:       m.CreatedAt,
+		LastUsedCloudID: m.LastUsedCloudID,
+		IsDefault:       m.IsDefault,
+		DirectoryName:   m.DirectoryName,
 	}
+}
+
+// projectResourceModelV1 is the v1 resource model: the current model plus
+// initial_cluster_config_id, which version 2 removed.
+type projectResourceModelV1 struct {
+	ID                     types.String `tfsdk:"id"`
+	CloudID                types.String `tfsdk:"cloud_id"`
+	Name                   types.String `tfsdk:"name"`
+	Description            types.String `tfsdk:"description"`
+	InitialClusterConfigID types.String `tfsdk:"initial_cluster_config_id"`
+	CreatorID              types.String `tfsdk:"creator_id"`
+	CreatedAt              types.String `tfsdk:"created_at"`
+	LastUsedCloudID        types.String `tfsdk:"last_used_cloud_id"`
+	IsDefault              types.Bool   `tfsdk:"is_default"`
+	DirectoryName          types.String `tfsdk:"directory_name"`
+}
+
+// toProjectResourceModel drops InitialClusterConfigID and carries every other
+// field through, field by field for the same reason as the v0 conversion.
+func (m projectResourceModelV1) toProjectResourceModel() ProjectResourceModel {
+	return ProjectResourceModel{
+		ID:              m.ID,
+		CloudID:         m.CloudID,
+		Name:            m.Name,
+		Description:     m.Description,
+		CreatorID:       m.CreatorID,
+		CreatedAt:       m.CreatedAt,
+		LastUsedCloudID: m.LastUsedCloudID,
+		IsDefault:       m.IsDefault,
+		DirectoryName:   m.DirectoryName,
+	}
+}
+
+// projectSchemaV1 is a frozen copy of anyscale_project's schema at version 1:
+// projectSchemaV0 without cloud_name and the collaborator block. Like
+// projectSchemaV0 it is a historical snapshot used only to decode stored
+// state; do not evolve it alongside the live schema.
+func projectSchemaV1() *schema.Schema {
+	v1 := projectSchemaV0()
+	v1.Version = 1
+	attrs := make(map[string]schema.Attribute, len(v1.Attributes))
+	for name, attr := range v1.Attributes {
+		if name != "cloud_name" {
+			attrs[name] = attr
+		}
+	}
+	v1.Attributes = attrs
+	v1.Blocks = nil
+	return v1
 }
 
 // projectSchemaV0 is a frozen copy of anyscale_project's schema exactly as it
@@ -215,12 +272,13 @@ func projectSchemaV0() *schema.Schema {
 	}
 }
 
-// upgradeProjectStateV0toV1 drops collaborator and carries every other field
-// through unchanged. There is nothing to migrate for the dropped value: the
-// project's real collaborator grants live in the Anyscale backend and are
-// untouched by this upgrade - only Terraform's record of them goes away, since
-// this resource no longer manages them.
-func upgradeProjectStateV0toV1(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+// upgradeProjectStateV0 drops collaborator, cloud_name and
+// initial_cluster_config_id and carries every other field through unchanged.
+// There is nothing to migrate for the dropped values: the project's real
+// collaborator grants live in the Anyscale backend and are untouched by this
+// upgrade - only Terraform's record of them goes away, since this resource no
+// longer manages them.
+func upgradeProjectStateV0(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
 	if req.State == nil {
 		resp.Diagnostics.AddError(
 			"Missing Prior State",
@@ -230,6 +288,30 @@ func upgradeProjectStateV0toV1(ctx context.Context, req resource.UpgradeStateReq
 	}
 
 	var priorState projectResourceModelV0
+	resp.Diagnostics.Append(req.State.Get(ctx, &priorState)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	newState := priorState.toProjectResourceModel()
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
+}
+
+// upgradeProjectStateV1 drops initial_cluster_config_id and carries every
+// other field through unchanged. The API rejected the attribute on create, so
+// real state holds only null for it, but a non-null value is dropped the same
+// way.
+func upgradeProjectStateV1(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	if req.State == nil {
+		resp.Diagnostics.AddError(
+			"Missing Prior State",
+			"State upgrade from version 1 requires prior state data, but none was provided. This is a bug in the provider; please report it.",
+		)
+		return
+	}
+
+	var priorState projectResourceModelV1
 	resp.Diagnostics.Append(req.State.Get(ctx, &priorState)...)
 	if resp.Diagnostics.HasError() {
 		return
