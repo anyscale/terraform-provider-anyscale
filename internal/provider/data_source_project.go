@@ -187,25 +187,22 @@ func (d *ProjectDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		return
 	}
 
-	// Fetch collaborators
+	// A failed fetch is an error, not an empty list: `collaborators = []`
+	// would read as "this project has no collaborators". Anyone who can read
+	// the project may list its collaborators, so there is no expected denial
+	// to tolerate here.
 	collaborators, err := d.getCollaborators(ctx, projectID)
 	if err != nil {
-		tflog.Warn(ctx, "Failed to get collaborators", map[string]any{
-			"project_id": projectID,
-			"error":      err.Error(),
-		})
-		// Continue without collaborators rather than failing
-		collaborators = []ProjectDataSourceCollaboratorModel{}
+		AddAPIError(&resp.Diagnostics, "read project collaborators", err)
+		return
 	}
 
 	// Populate config
 	config.ID = types.StringValue(project.ID)
 	config.Name = types.StringValue(project.Name)
-	// DS-PROJ-1: parent_cloud_id is genuinely nullable server-side.
+	// parent_cloud_id is genuinely nullable server-side.
 	config.CloudID = types.StringPointerValue(project.ParentCloudID)
 
-	// X-1: all three are already *string - StringPointerValue directly
-	// instead of a verbose if-nil-else block.
 	config.Description = types.StringPointerValue(project.Description)
 	config.CreatorID = types.StringPointerValue(project.CreatorID)
 	config.CreatedAt = types.StringValue(project.CreatedAt)

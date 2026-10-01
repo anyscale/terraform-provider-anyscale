@@ -18,14 +18,14 @@ import (
 
 // This resource manages WHICH cloud is an organization's default cloud - the
 // org-level pointer (organizations.default_cloud_id) that anyscale_cloud's
-// own removed is_default attribute used to mirror read-only. See the
-// 2026-07-23 is_default quest design record for the full history: that
-// attribute was removed for being an unsafe-to-plan mirror of this exact
-// org-level fact; this resource is the manage half of the split (observe
-// half is anyscale_cloud's own is_default data source attribute, which reads
-// GET /clouds/{id} directly - auth-independent, unlike this resource's own
-// drift-detection Read below, which deliberately uses the SAME endpoint for
-// the SAME reason).
+// own removed is_default attribute used to mirror read-only. That attribute
+// was removed for being an unsafe-to-plan mirror of this exact org-level
+// fact; this resource is the manage half of the split. The observe half is
+// the anyscale_cloud data source's is_default attribute, which reads
+// GET /clouds/{id} directly, as this resource's drift-detection Read below
+// does: on that endpoint is_default compares the cloud against the
+// organization's default_cloud_id, so it is the same for every caller who can
+// read the cloud.
 //
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
@@ -147,9 +147,9 @@ func (r *OrganizationDefaultCloudResource) Create(ctx context.Context, req resou
 }
 
 // Read checks whether plan.CloudID is still the organization's default cloud
-// by reading THAT SPECIFIC cloud (GET /clouds/{cloud_id}, the same
-// auth-independent, unconditional DB-comparison endpoint anyscale_cloud's
-// own is_default attribute reads) rather than listing every cloud in the
+// by reading THAT SPECIFIC cloud (GET /clouds/{cloud_id}, the same endpoint
+// the anyscale_cloud data source's is_default reads; the read needs access to
+// the cloud, but is_default itself does not depend on the caller) rather than listing every cloud in the
 // organization. Two deliberate choices behind that:
 //
 //   - It only needs to answer "is the cloud I manage still the default,"
@@ -246,19 +246,16 @@ func (r *OrganizationDefaultCloudResource) Delete(ctx context.Context, req resou
 
 // ImportState imports by cloud_id - the cloud the user asserts is currently
 // the organization's default - NOT by organization id. Validated via the
-// same singular GET /clouds/{cloud_id} Read/drift already uses: auth-
-// independent, no userinfo involved in the validation itself. This
-// corrects an earlier draft that imported by organization id via userinfo
-// instead (caught both in review and by re-reading the authoritative
-// spec) - that version silently accepted any import ID, never validated
-// it against what the caller actually typed, and reintroduced the
-// unverified-user null blind spot this whole resource exists to avoid.
+// same singular GET /clouds/{cloud_id} Read/drift already uses, so the
+// validation does not depend on userinfo. Importing by organization id via
+// userinfo instead would accept any import ID without checking it against
+// what the caller typed.
 //
 // The schema's own "id" attribute is organization id, not cloud_id, so one
-// userinfo call is still needed here to populate it - that is populating a
-// separate Computed field, not validating the import target, so it does
-// not conflict with the spec's "auth-independent, no userinfo needed" for
-// the validation step itself.
+// userinfo call is still needed here to populate it. That populates a
+// separate Computed field rather than validating the import target. A failed
+// validation may also read userinfo, but only to explain the failure (see
+// notOrganizationDefaultDetail).
 func (r *OrganizationDefaultCloudResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	cloudID := req.ID
 
@@ -282,8 +279,7 @@ func (r *OrganizationDefaultCloudResource) ImportState(ctx context.Context, req 
 	}
 
 	if !cloudResp.Result.IsDefault {
-		AddConfigError(&resp.Diagnostics, "Not The Organization Default",
-			fmt.Sprintf("Cloud %q is not the current organization default; import the cloud that is.", cloudID))
+		AddConfigError(&resp.Diagnostics, "Not The Organization Default", notOrganizationDefaultDetail(ctx, r.client, cloudID))
 		return
 	}
 
@@ -295,4 +291,30 @@ func (r *OrganizationDefaultCloudResource) ImportState(ctx context.Context, req 
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), org.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cloud_id"), types.StringValue(cloudID))...)
+}
+
+// notOrganizationDefaultDetail explains a failed import. When the
+// organization has no explicit default cloud, the console and `anyscale cloud
+// list` still mark one cloud as default: that is a per-user fallback, not an
+// organization setting, so there is nothing to import. Telling the user to
+// "import the cloud that is" would send them looking for a cloud that does not
+// exist. If the organization cannot be read, the generic message stands.
+func notOrganizationDefaultDetail(ctx context.Context, client *Client, cloudID string) string {
+	generic := fmt.Sprintf("Cloud %q is not the current organization default; import the cloud that is.", cloudID)
+	org, err := fetchCurrentOrganization(ctx, client)
+	if err != nil {
+		tflog.Debug(ctx, "Could not read the organization to explain the import failure", map[string]any{"error": err.Error()})
+		return generic
+	}
+	if org.DefaultCloudID.IsNull() {
+		return fmt.Sprintf("Organization %s has no explicit default cloud, so there is nothing to import. "+
+			"The default cloud shown in the console and by `anyscale cloud list` is a per-user fallback "+
+			"(your last-used cloud, else the first cloud you can access), not an organization setting. "+
+			"To make %q the organization default, remove the import and run `terraform apply` with this resource instead.",
+			org.ID.ValueString(), cloudID)
+	}
+	if other := org.DefaultCloudID.ValueString(); other != cloudID {
+		return fmt.Sprintf("Cloud %q is not the organization default; the organization's default cloud is %q. Import that ID instead.", cloudID, other)
+	}
+	return generic
 }

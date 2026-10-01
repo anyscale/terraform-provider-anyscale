@@ -218,34 +218,11 @@ type SchedulerConfigResponse struct {
 	} `json:"result"`
 }
 
-// SchedulerConfigVersionSummary is one entry of the version history.
-type SchedulerConfigVersionSummary struct {
-	Version   int64  `json:"version"`
-	CreatedAt string `json:"created_at"`
-	CreatorID string `json:"creator_id"`
-}
-
-// ListSchedulerConfigVersionsResponse is the body of GET
-// /api/v2/scheduler/config/versions.
-//
-// Note the envelope: this endpoint returns {"results": [...], "metadata": {...}},
-// NOT the {"result": {...}} shape every other model in this provider uses.
-// Confirmed against the live API, not inferred. Reusing a `result` envelope
-// here unmarshals cleanly into an empty slice and looks like "no versions."
-type ListSchedulerConfigVersionsResponse struct {
-	Results  []SchedulerConfigVersionSummary `json:"results"`
-	Metadata struct {
-		Total           int64   `json:"total"`
-		NextPagingToken *string `json:"next_paging_token"`
-	} `json:"metadata"`
-}
-
 // --- Transport ---------------------------------------------------------------
 
 const (
 	schedulerConfigPath         = "/api/v2/scheduler/config"
 	schedulerConfigValidatePath = "/api/v2/scheduler/config/validate"
-	schedulerConfigVersionsPath = "/api/v2/scheduler/config/versions"
 )
 
 // ErrSchedulerConfigNotFound is returned by getActiveSchedulerConfig when the
@@ -471,16 +448,4 @@ func schedulerServerEvaluatedDocument(err error) bool {
 // can diverge without one silently changing the other.
 type ValidateSchedulerConfigRequest struct {
 	Config SchedulerConfig `json:"config"`
-}
-
-// listSchedulerConfigVersions returns the config version history, newest first
-// as the backend orders it.
-func listSchedulerConfigVersions(ctx context.Context, client *Client) ([]SchedulerConfigVersionSummary, error) {
-	resp, err := DoRequestAndParse[ListSchedulerConfigVersionsResponse](
-		ctx, client, http.MethodGet, schedulerConfigVersionsPath, nil, http.StatusOK,
-	)
-	if err != nil {
-		return nil, translateSchedulerAPIError(err)
-	}
-	return resp.Results, nil
 }

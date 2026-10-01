@@ -127,7 +127,74 @@ resource "anyscale_scheduler_config" "test" {
 					{
 						Config:      testAccProviderBlock(server.URL) + config,
 						PlanOnly:    true,
-						ExpectError: regexp.MustCompile(`(?s)Empty ` + attr + ` Section.*Omit the.*entirely`),
+						ExpectError: regexp.MustCompile(`(?s)Empty ` + attr + ` List.*Omit the.*entirely`),
+					},
+				},
+			})
+		})
+	}
+}
+
+// The same rule holds for every optional list nested inside the document, and
+// for an advanced_instance_config of `{}` or `null`. Each case is paired with
+// the same document holding a non-empty value, which must plan cleanly, so a
+// validator that rejected the attribute outright could not pass.
+func TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan(t *testing.T) {
+	const flavorSelector = `{ key = "node.kubernetes.io/instance-type", operator = "in", values = ["m5.large"] }`
+	const resourceQuota = `{ name = "cpu", nominal_quota = 8 }`
+	cases := []struct {
+		name, empty, filled, attr string
+	}{
+		{"flavor selector",
+			`resource_flavors = [{ name = "f", selector = [] }]`,
+			`resource_flavors = [{ name = "f", selector = [` + flavorSelector + `] }]`,
+			"selector"},
+		{"match expression values",
+			`resource_flavors = [{ name = "f", selector = [{ key = "k", operator = "exists", values = [] }] }]`,
+			`resource_flavors = [{ name = "f", selector = [{ key = "k", operator = "in", values = ["v"] }] }]`,
+			"values"},
+		{"rule selector",
+			`scheduling_rules = [{ resource_queue = "q", selector = [] }]`,
+			`scheduling_rules = [{ resource_queue = "q", selector = [{ key = "k", operator = "exists" }] }]`,
+			"selector"},
+		{"queue resource_groups",
+			`resource_queues = [{ name = "q", resource_groups = [] }]`,
+			`resource_queues = [{ name = "q", resource_groups = [{ covered_resources = ["cpu"], flavors = [{ name = "f" }] }] }]`,
+			"resource_groups"},
+		{"flavor quota resources",
+			`resource_queues = [{ name = "q", resource_groups = [{ covered_resources = ["cpu"], flavors = [{ name = "f", resources = [] }] }] }]`,
+			`resource_queues = [{ name = "q", resource_groups = [{ covered_resources = ["cpu"], flavors = [{ name = "f", resources = [` + resourceQuota + `] }] }] }]`,
+			"resources"},
+		{"advanced_instance_config empty object",
+			`resource_flavors = [{ name = "f", advanced_instance_config = jsonencode({}) }]`,
+			`resource_flavors = [{ name = "f", advanced_instance_config = jsonencode({ instance_type = "m5.large" }) }]`,
+			"advanced_instance_config"},
+		{"advanced_instance_config null",
+			`resource_flavors = [{ name = "f", advanced_instance_config = "null" }]`,
+			`resource_flavors = [{ name = "f", advanced_instance_config = jsonencode({ instance_type = "m5.large" }) }]`,
+			"advanced_instance_config"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server, _ := newSchedulerConfigServer(t, schedulerConfigServerOpts{})
+			defer server.Close()
+
+			doc := func(body string) string {
+				return testAccProviderBlock(server.URL) + "resource \"anyscale_scheduler_config\" \"test\" {\n  " + body + "\n}\n"
+			}
+			resource.Test(t, resource.TestCase{
+				ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      doc(tc.empty),
+						PlanOnly:    true,
+						ExpectError: regexp.MustCompile(`(?s)Empty ` + tc.attr + `.*Omit\s+the.*entirely`),
+					},
+					{
+						Config:             doc(tc.filled),
+						PlanOnly:           true,
+						ExpectNonEmptyPlan: true,
 					},
 				},
 			})

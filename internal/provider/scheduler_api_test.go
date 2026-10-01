@@ -287,24 +287,3 @@ func TestValidateSchedulerConfigAccepts204(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
-
-// The version list uses the results/metadata envelope, unlike every other
-// model in this provider. A fixture using {"result": {...}} here would
-// unmarshal cleanly into an empty slice and look exactly like "no versions",
-// so this test uses the real envelope and asserts a non-empty result.
-func TestListSchedulerConfigVersionsEnvelope(t *testing.T) {
-	client := schedulerTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"results":[{"version":2,"created_at":"2026-09-02T00:00:00Z","creator_id":"usr_2"},{"version":1,"created_at":"2026-09-01T00:00:00Z","creator_id":"usr_1"}],"metadata":{"total":2,"next_paging_token":null}}`))
-	}))
-
-	versions, err := listSchedulerConfigVersions(context.Background(), client)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(versions) != 2 {
-		t.Fatalf("got %d versions, want 2 - a result/results envelope mismatch parses as empty", len(versions))
-	}
-	if versions[0].Version != 2 || versions[0].CreatorID != "usr_2" {
-		t.Fatalf("first version not parsed: %+v", versions[0])
-	}
-}
