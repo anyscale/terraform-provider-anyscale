@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -129,6 +130,7 @@ func resolveTestCloudID(t *testing.T) string {
 
 	// Priority 1: Explicit cloud ID
 	if envCloudID := os.Getenv("ANYSCALE_TEST_CLOUD_ID"); envCloudID != "" {
+		requireTestCloudExists(t, envCloudID)
 		t.Logf("Using test cloud ID from ANYSCALE_TEST_CLOUD_ID: %s", envCloudID)
 		cachedTestCloudID = envCloudID
 		return cachedTestCloudID
@@ -255,6 +257,34 @@ func validateCloudExists(cloudID string) bool {
 	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == 200
+}
+
+// requireTestCloudExists fails the test unless GET /api/v2/clouds/{id}
+// returns 200. An explicit ANYSCALE_TEST_CLOUD_ID is used as given, so without
+// this check a mistyped ID, or one from another org, surfaces later as an
+// unrelated 404 deep inside a test. Any other error fails too, rather than
+// skipping, so an API outage cannot turn the suite green.
+func requireTestCloudExists(t *testing.T, cloudID string) {
+	t.Helper()
+	client, err := GetTestClient()
+	if err != nil {
+		t.Fatalf("ANYSCALE_TEST_CLOUD_ID: failed to get test client: %v", err)
+	}
+	resp, err := client.DoRequest(context.Background(), "GET", fmt.Sprintf("/api/v2/clouds/%s", cloudID), nil)
+	if err != nil {
+		t.Fatalf("ANYSCALE_TEST_CLOUD_ID: failed to look up cloud %s: %v", cloudID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return
+	case http.StatusNotFound:
+		t.Fatalf("ANYSCALE_TEST_CLOUD_ID=%s does not name a cloud visible to this token (404). "+
+			"Check the ID and that ANYSCALE_CLI_TOKEN belongs to the same org, or unset it to use the default test cloud.", cloudID)
+	default:
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("ANYSCALE_TEST_CLOUD_ID: looking up cloud %s returned status %d: %s", cloudID, resp.StatusCode, string(body))
+	}
 }
 
 // resolveCloudNameToID resolves a cloud name to its ID by querying the API.

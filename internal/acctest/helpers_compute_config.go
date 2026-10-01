@@ -80,6 +80,7 @@ func (i InstanceTypeSet) IsValid() bool {
 // override is honored first (the operator is asserting that cloud is healthy).
 func GetComputeConfigCloudID(t *testing.T) string {
 	if id := os.Getenv("ANYSCALE_TEST_CLOUD_ID"); id != "" {
+		requireTestCloudExists(t, id)
 		ensureCloudAwake(t, id, cloudLabelFor(os.Getenv("ANYSCALE_TEST_CLOUD_NAME")))
 		return id
 	}

@@ -22,15 +22,15 @@ func TestFailClosedResolverChild(t *testing.T) {
 		t.Skip("helper process for TestResolvers_APIErrorFailsNotSkips")
 	case "cloud":
 		GetTestCloudID(t)
-	case "service":
-		GetTestServiceID(t)
 	case "anycloud":
 		GetAnyCloudID(t)
+	case "computeconfig":
+		GetComputeConfigCloudID(t)
 	}
 }
 
 // TestResolvers_APIErrorFailsNotSkips pins that an API error while resolving
-// a test cloud or service fails the test. These resolvers used to turn any
+// a test cloud fails the test. These resolvers used to turn any
 // error into a skip, so an API outage made the cloud-dependent tests skip and
 // the acctest shards report green. A genuinely empty org still skips, which
 // the last case checks so the failing cases cannot pass by always failing.
@@ -63,7 +63,6 @@ func TestResolvers_APIErrorFailsNotSkips(t *testing.T) {
 		wantSkip bool
 	}{
 		{"cloud resolution on 500", "cloud", serverError, false},
-		{"service resolution on 500", "service", serverError, false},
 		{"any-cloud resolution on 500", "anycloud", serverError, false},
 		{"default fixture lookup error is not a not-found", "cloud", firstRequestFails, false},
 		{"cloud resolution in an empty org", "cloud", emptyOrg, true},
@@ -80,7 +79,6 @@ func TestResolvers_APIErrorFailsNotSkips(t *testing.T) {
 				"ANYSCALE_CLI_TOKEN=fake-token-failclosed",
 				"ANYSCALE_TEST_CLOUD_ID=",
 				"ANYSCALE_TEST_CLOUD_NAME=",
-				"ANYSCALE_TEST_SERVICE_ID=",
 				"ANYSCALE_TEST_CREATE_CLOUD=",
 			)
 			out, err := cmd.CombinedOutput()

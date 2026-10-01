@@ -2,101 +2,14 @@ package acctest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"sync"
 	"testing"
 
 	"github.com/anyscale/terraform-provider-anyscale/internal/provider"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
-
-var (
-	// Cache for a read-only test service ID. Unlike GetTestCloudID and the
-	// project helpers above, there is no CreateEphemeralTestService - this
-	// always resolves to an externally-created, real service.
-	cachedTestServiceID string
-	testServiceIDMutex  sync.Mutex
-)
-
-// GetTestServiceID returns a service ID for read-only acceptance tests
-// (anyscale_service / anyscale_services), with priority:
-//  1. ANYSCALE_TEST_SERVICE_ID environment variable (explicit override).
-//  2. Auto-discover: list services, prefer one whose current_state is
-//     RUNNING (stable to assert against), else the first result.
-//
-// Unlike clouds (GetTestCloudID has a pinned fixture to fall back on) or
-// projects (every org has a default project), a fresh or minimal test org
-// can plausibly have zero services. Skips with an actionable
-// message (rather than silently passing with no coverage) when neither the
-// env var nor auto-discovery resolves anything, so a CI org with no service
-// fixture is a visible gap, not a silent one.
-func GetTestServiceID(t *testing.T) string {
-	testServiceIDMutex.Lock()
-	defer testServiceIDMutex.Unlock()
-
-	if cachedTestServiceID != "" {
-		return cachedTestServiceID
-	}
-
-	if envServiceID := os.Getenv("ANYSCALE_TEST_SERVICE_ID"); envServiceID != "" {
-		t.Logf("Using test service ID from ANYSCALE_TEST_SERVICE_ID: %s", envServiceID)
-		cachedTestServiceID = envServiceID
-		return cachedTestServiceID
-	}
-
-	client, err := GetTestClient()
-	if err != nil {
-		t.Fatalf("GetTestServiceID: failed to get test client: %v", err)
-	}
-
-	resp, err := client.DoRequest(context.Background(), "GET", "/api/v2/services-v2", nil)
-	if err != nil {
-		t.Fatalf("GetTestServiceID: failed to list services: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GetTestServiceID: list services returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("GetTestServiceID: failed to read response: %v", err)
-	}
-
-	var servicesResp struct {
-		Results []struct {
-			ID           string `json:"id"`
-			Name         string `json:"name"`
-			CurrentState string `json:"current_state"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &servicesResp); err != nil {
-		t.Fatalf("GetTestServiceID: failed to parse services response: %v", err)
-	}
-
-	if len(servicesResp.Results) == 0 {
-		t.Skip("No service available - set ANYSCALE_TEST_SERVICE_ID to a persistent service's ID, or ensure at least one service exists in the test org.")
-		return ""
-	}
-
-	for _, s := range servicesResp.Results {
-		if s.CurrentState == "RUNNING" {
-			t.Logf("Using running service for test: %s (ID: %s)", s.Name, s.ID)
-			cachedTestServiceID = s.ID
-			return cachedTestServiceID
-		}
-	}
-
-	t.Logf("Using first available service for test: %s (ID: %s)", servicesResp.Results[0].Name, servicesResp.Results[0].ID)
-	cachedTestServiceID = servicesResp.Results[0].ID
-	return cachedTestServiceID
-}
 
 // CaptureServiceDiagnosticsOnFailure wraps a TestCheckFunc for an anyscale_service resource so a
 // check failure triggers one last live GET on the service, logged for post-mortem inspection,
