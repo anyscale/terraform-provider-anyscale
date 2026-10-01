@@ -13,7 +13,7 @@ import (
 )
 
 // TestEvaluateServiceState is the exhaustive, HTTP-free proof of the wait loop's state
-// classification (contract §5b): every traced ServiceEventCurrentState bucket, against both
+// classification: every traced ServiceEventCurrentState bucket, against both
 // possible targets (RUNNING for Create/Update, TERMINATED for Delete), plus the "anything else"
 // continue-polling default. evaluateServiceState is a pure function, so this needs no mock
 // server at all.
@@ -62,7 +62,7 @@ func TestEvaluateServiceState(t *testing.T) {
 		// arrive later (e.g. a service was mid-rollout when terminate was requested).
 		{"STARTING continues (waiting for TERMINATED)", "STARTING", nil, serviceStateTerminated, false, false, ""},
 
-		// Contract §F6: an unrecognized current_state is NOT a hard error. CONTINUE was
+		// An unrecognized current_state is NOT a hard error. CONTINUE was
 		// deliberately chosen over fail-fast here, since the loop is already timeout-bounded
 		// (so continuing is not an infinite poll) and the asymmetry favors it - hard-erroring on a
 		// new, benign, not-yet-modeled transitional state would break a healthy service's every
@@ -70,8 +70,8 @@ func TestEvaluateServiceState(t *testing.T) {
 		// just waits it out (or eventually times out naming the last-seen state if it truly never
 		// resolves). Production code also tflog.Warns on this branch (waitForServiceStateWithTiming,
 		// service_helpers.go), which a return-value table test can't observe here.
-		{"unrecognized state continues (does not hard-error), contract §F6", "SOME_FUTURE_STATE_NOT_YET_MODELED", nil, serviceStateRunning, false, false, ""},
-		{"empty current_state continues (does not hard-error), contract §F6", "", nil, serviceStateRunning, false, false, ""},
+		{"unrecognized state continues (does not hard-error)", "SOME_FUTURE_STATE_NOT_YET_MODELED", nil, serviceStateRunning, false, false, ""},
+		{"empty current_state continues (does not hard-error)", "", nil, serviceStateRunning, false, false, ""},
 	}
 
 	for _, tc := range cases {
@@ -97,15 +97,15 @@ func TestEvaluateServiceState(t *testing.T) {
 }
 
 // realCapturedClusterFailureMessage is the verbatim backend message from a real, manually
-// diagnosed UNHEALTHY service (see the fixture-cloud identity investigation this session) - the
+// diagnosed UNHEALTHY service (a real identity-related failure) - the
 // exact text a real user would need to see to self-diagnose, rather than resorting to a manual
-// API call the way this session had to.
+// API call.
 const realCapturedClusterFailureMessage = "Failed to create a cluster because the user who " +
 	"created it has either been removed from the organization or has had their permissions " +
 	"revoked. Resume the schedule to continue."
 
 // TestEvaluateServiceState_ChecklistFallback proves the service_status_checklist fallback added
-// after this session's real diagnosis: the backend can leave the top-level error_message null
+// after a real diagnosis: the backend can leave the top-level error_message null
 // while the actual, actionable cause lives only in a checklist item. The fixture below is the
 // REAL captured shape (not a synthetic guess) from that diagnosis - two RUNNING shared items with
 // messages, an UNHEALTHY CLUSTER item with the real message, an UNHEALTHY APPLICATION item with
@@ -308,7 +308,7 @@ func TestWaitForServiceStateWithTiming_TimesOutOnErrorStateWhileTerminating(t *t
 	}
 }
 
-// TestWaitForServiceStateWithTiming_SurfacesSystemFailure is the AC-R4 headline error-path
+// TestWaitForServiceStateWithTiming_SurfacesSystemFailure is the headline error-path
 // proof: a rollout that fails must surface as a returned error carrying error_message, not a
 // silent success or a hang - proven through the real polling loop (STARTING first), not just
 // evaluateServiceState in isolation.
@@ -362,7 +362,7 @@ func TestWaitForServiceStateWithTiming_SurfacesUnhealthyAndUserErrorFailure(t *t
 }
 
 // TestWaitForServiceStateWithTiming_TimesOutOnUnrecognizedState proves the specific safety
-// argument behind contract §F6 (see TestEvaluateServiceState): treating an unrecognized
+// argument behind the CONTINUE default (see TestEvaluateServiceState): treating an unrecognized
 // current_state as CONTINUE instead of a hard error is only safe because the timeout backstop
 // still catches a state that genuinely never resolves. A service stuck forever on some
 // not-yet-modeled state must still fail the apply eventually (naming that state), not hang
@@ -377,7 +377,7 @@ func TestWaitForServiceStateWithTiming_TimesOutOnUnrecognizedState(t *testing.T)
 		t.Fatal("err = nil, want a timeout error")
 	}
 	if !strings.Contains(err.Error(), "timed out") {
-		t.Errorf("err = %q, want it to mention timing out (an unrecognized state must not hard-error immediately per §F6, but must still time out rather than hang forever)", err.Error())
+		t.Errorf("err = %q, want it to mention timing out (an unrecognized state must not hard-error immediately, but must still time out rather than hang forever)", err.Error())
 	}
 	if service == nil || service.CurrentState != "SOME_FUTURE_STATE_NOT_YET_MODELED" {
 		t.Fatalf("service = %+v, want the last-observed unrecognized-state service returned alongside the timeout error", service)
@@ -506,7 +506,7 @@ func TestGetServiceByID_NotFoundSentinel(t *testing.T) {
 // timing is a deliberate, visible diff rather than silent.
 func TestWaitForServiceState_PinsRealInterval(t *testing.T) {
 	if defaultServiceRolloutPollInterval != 10*time.Second {
-		t.Fatalf("defaultServiceRolloutPollInterval = %s, want 10s (contract §5b production timing) - if this changed deliberately, update this assertion too", defaultServiceRolloutPollInterval)
+		t.Fatalf("defaultServiceRolloutPollInterval = %s, want 10s (production timing) - if this changed deliberately, update this assertion too", defaultServiceRolloutPollInterval)
 	}
 
 	server, requestCount := serviceStatePollTestServer(t, "svc_already_running", []string{"RUNNING"}, nil)

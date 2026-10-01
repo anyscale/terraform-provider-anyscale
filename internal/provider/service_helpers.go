@@ -30,7 +30,7 @@ var serviceErrorStates = map[string]bool{
 }
 
 // serviceContinueStates are non-terminal buckets the wait loop keeps polling through,
-// regardless of which target it is waiting for (contract 5b: is_updating plus TERMINATING).
+// regardless of which target it is waiting for (is_updating plus TERMINATING).
 var serviceContinueStates = map[string]bool{
 	"STARTING":     true,
 	"UPDATING":     true,
@@ -54,9 +54,8 @@ const defaultServiceRolloutPollInterval = 10 * time.Second
 // NOT terminal here: the service is already being torn down, so its health no longer matters,
 // and hard-erroring would make Delete itself fail on exactly the resources most in need of being
 // deleted (a Create-tainted service's only recovery path is destroy-then-recreate). err is nil
-// for terminal success, while still in progress, or an unrecognized/unexpected state (F6,
-// contract section F: treated as CONTINUE rather than a hard error, so a backend adding a new
-// benign transitional state does not break every apply against an otherwise-healthy service; the
+// for terminal success, while still in progress, or an unrecognized/unexpected state (treated as CONTINUE rather than a hard error, so a
+// backend adding a new benign transitional state does not break every apply against an otherwise-healthy service; the
 // caller's timeout still backstops a genuinely stuck or new-terminal state, and logs a warning
 // so the gap stays visible - see waitForServiceStateWithTiming).
 func evaluateServiceState(service *ServiceResult, target string) (done bool, err error) {
@@ -111,7 +110,7 @@ func serviceChecklistFailureDetail(checklist *ServiceStatusChecklistResult) stri
 // waitForServiceState polls GET /{id} until the service's current_state reaches target, a
 // terminal error bucket, or timeout, pinning the real poll interval. timeout remains a
 // caller-supplied parameter (not pinned) because Create/Update/Delete all read it from the
-// resource's own rollout_timeout attribute - there is no single real constant to pin the way
+// resource's own timeouts block - there is no single real constant to pin the way
 // waitForBuildDigest pins both of its own (that wait has no user-facing timeout knob at all).
 func waitForServiceState(ctx context.Context, client *Client, serviceID, target string, timeout time.Duration) (*ServiceResult, error) {
 	return waitForServiceStateWithTiming(ctx, client, serviceID, target, timeout, defaultServiceRolloutPollInterval)
@@ -127,8 +126,8 @@ func waitForServiceState(ctx context.Context, client *Client, serviceID, target 
 // The returned service may be nil when err is non-nil (e.g. a GET failure with nothing yet
 // observed, including an already-cancelled context caught mid-request rather than at the
 // select below) - callers must nil-check before dereferencing rather than assume the last
-// exit path's shape (contract section G, G1: uniform nil-on-GET-error, documented rather than
-// papered over with a last-observed fallback).
+// exit path's shape (a GET error is uniformly nil-service, rather than papered over with a
+// last-observed fallback).
 func waitForServiceStateWithTiming(ctx context.Context, client *Client, serviceID, target string, timeout, interval time.Duration) (*ServiceResult, error) {
 	deadline := time.Now().Add(timeout)
 
@@ -147,7 +146,7 @@ func waitForServiceStateWithTiming(ctx context.Context, client *Client, serviceI
 		if done, evalErr := evaluateServiceState(service, target); done {
 			return service, evalErr
 		} else if !serviceContinueStates[service.CurrentState] && (target != serviceStateTerminated || !serviceErrorStates[service.CurrentState]) {
-			// F6 (contract section F): an unrecognized current_state continues polling rather
+			// An unrecognized current_state continues polling rather
 			// than hard-erroring - a backend adding a new benign transitional state must not
 			// break every apply against a healthy, still-converging service. The timeout below
 			// backstops a genuinely stuck/new-terminal state; this only keeps it visible. An
