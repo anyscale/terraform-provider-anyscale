@@ -115,7 +115,7 @@ output "compute_config_id" {
 - `flags` (Dynamic) A set of advanced cluster-level flags that can be used to configure a particular workload. Supports strings, numbers, and booleans.
 - `idle_termination_minutes` (Number) Number of minutes after which idle clusters using this compute config will be terminated. `0` disables idle termination. If never set, the backend default (120) applies. Removing it from configuration later keeps the current value; set `120` explicitly to restore the default.
 - `max_resources` (Map of Number) Total maximum logical resources across all nodes in the cluster (e.g., `{"CPU": 100, "GPU": 8}`).
-- `maximum_uptime_minutes` (Number) Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum.
+- `maximum_uptime_minutes` (Number) Maximum uptime in minutes before clusters using this compute config are forcibly terminated. Unset means no maximum; removing it from configuration removes the maximum on the next apply.
 - `min_resources` (Map of Number) Total minimum logical resources across all nodes in the cluster (e.g., `{"CPU": 4, "GPU": 1}`).
 - `worker_nodes` (Attributes List) Configuration for the worker nodes of the cluster. If not provided, the cluster has no worker nodes (head node only). See `auto_select_worker_config` for a way to request an organization-managed worker pool instead of listing worker node types explicitly here. (see [below for nested schema](#nestedatt--worker_nodes))
 - `zones` (List of String) Availability zones to consider for this cluster. Defaults to all zones in the cloud's region.

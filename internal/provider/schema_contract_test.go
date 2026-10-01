@@ -103,15 +103,6 @@ func indexOfPlanModifierDescription(mods []planmodifier.String, want string) int
 	return -1
 }
 
-func hasMapPlanModifierDescription(mods []planmodifier.Map, want string) bool {
-	for _, m := range mods {
-		if m.Description(context.Background()) == want {
-			return true
-		}
-	}
-	return false
-}
-
 // indexOfListPlanModifierDescription is indexOfPlanModifierDescription's
 // planmodifier.List analogue - same ordering hazard, same reasoning, for
 // List-typed attributes like file_storage.mount_targets.
@@ -247,23 +238,20 @@ func TestComputeConfigResourceContract(t *testing.T) {
 			"This is F11's regression guard.")
 	}
 
-	// head_node.resources and worker_nodes[].resources: Optional+Computed, with
-	// the index-safe UseStateForUnknown variants (head_node can sit inside an
-	// additional_resources entry, which can shift too).
-	assertResourcesMap := func(t *testing.T, label string, attrs map[string]schema.Attribute, wantModifier string) {
+	// head_node.resources and worker_nodes[].resources: Optional only. The
+	// backend never fills them in, and Computed would make removing them from
+	// config keep the old value.
+	assertResourcesMap := func(t *testing.T, label string, attrs map[string]schema.Attribute) {
 		t.Helper()
 		ra, ok := attrs["resources"].(schema.MapAttribute)
 		if !ok {
 			t.Fatalf("%s.resources is not a schema.MapAttribute (got %T)", label, attrs["resources"])
 		}
-		if !ra.Optional {
-			t.Errorf("%s.resources must be Optional: true", label)
+		if !ra.Optional || ra.Computed {
+			t.Errorf("%s.resources must be Optional and not Computed (Optional=%v Computed=%v)", label, ra.Optional, ra.Computed)
 		}
-		if !ra.Computed {
-			t.Errorf("%s.resources must be Computed: true", label)
-		}
-		if !hasMapPlanModifierDescription(ra.PlanModifiers, wantModifier) {
-			t.Errorf("%s.resources must include the plan modifier described as %q", label, wantModifier)
+		if len(ra.PlanModifiers) != 0 {
+			t.Errorf("%s.resources must have no plan modifiers, got %d", label, len(ra.PlanModifiers))
 		}
 	}
 
@@ -271,17 +259,13 @@ func TestComputeConfigResourceContract(t *testing.T) {
 	if !ok {
 		t.Fatalf("head_node is not a schema.SingleNestedAttribute (got %T)", s.Attributes["head_node"])
 	}
-	assertResourcesMap(t, "head_node", headNode.Attributes,
-		nodeResourcesUseStateForSameNode(false).Description(context.Background()))
+	assertResourcesMap(t, "head_node", headNode.Attributes)
 
 	workerNodes, ok := s.Attributes["worker_nodes"].(schema.ListNestedAttribute)
 	if !ok {
 		t.Fatalf("worker_nodes is not a schema.ListNestedAttribute (got %T)", s.Attributes["worker_nodes"])
 	}
-	// A plain UseStateForUnknown here copies a removed worker's resources onto
-	// whichever worker shifts into its index.
-	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes,
-		nodeResourcesUseStateForSameNode(true).Description(context.Background()))
+	assertResourcesMap(t, "worker_nodes[]", workerNodes.NestedObject.Attributes)
 }
 
 // TestComputeConfigCC1RequiredResourcesRename pins CC1: physical_resources
@@ -411,7 +395,18 @@ func TestComputeConfigCC2IdleAndMaxUptimeSettable(t *testing.T) {
 	if !ok {
 		t.Fatalf("maximum_uptime_minutes is not a schema.Int64Attribute (got %T)", s.Attributes["maximum_uptime_minutes"])
 	}
-	assertServerDefaultedInt64(t, "maximum_uptime_minutes", maxUptime, "at least 1")
+	// maximum_uptime_minutes has no server default (the backend stores and
+	// returns null when unset), so it is Optional only: removing it from config
+	// must clear it, and with nothing Computed there is no Unknown to re-plan.
+	if !maxUptime.Optional || maxUptime.Computed {
+		t.Errorf("maximum_uptime_minutes must be Optional and not Computed (Optional=%v Computed=%v)", maxUptime.Optional, maxUptime.Computed)
+	}
+	if len(maxUptime.PlanModifiers) != 0 {
+		t.Errorf("maximum_uptime_minutes must have no plan modifiers, got %d", len(maxUptime.PlanModifiers))
+	}
+	if !hasInt64ValidatorContaining(maxUptime.Validators, "at least 1") {
+		t.Errorf("maximum_uptime_minutes must keep its at-least-1 validator")
+	}
 }
 
 // TestComputeConfigCC3aNameRequiresReplace pins CC3a: name gets RequiresReplace.

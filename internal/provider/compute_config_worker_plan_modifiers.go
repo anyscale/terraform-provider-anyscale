@@ -14,48 +14,15 @@ import (
 // The framework pairs a list element's nested attributes with prior state by
 // index. When a worker group is removed from or inserted into worker_nodes,
 // every later group shifts to a new index, so a plain UseStateForUnknown on a
-// worker's Computed attribute copies the value of whichever group used to sit
-// at that index - and Create/Update then send it as if configured.
+// worker's Computed name copies the name of whichever group used to sit at that
+// index - and Create/Update then send it as if configured. The same happens one
+// level up when an additional_resources entry is removed.
 //
-// The same happens one level up: removing an additional_resources entry shifts
-// every later entry, and each node inside it would inherit the removed entry's
-// values.
-//
-// These modifiers reuse the prior value only when the prior element at the same
-// index is the same node: the same additional_resources entry (same
-// cloud_resource), and for a worker group the same configured name, or, for an
-// unnamed group, the same instance_type with a prior name that was defaulted
-// from it. Otherwise the value stays unknown and resolves from the API response.
-
-// nodeResourcesUseStateForSameNode is UseStateForUnknown for a node's resources
-// map, limited to the same node (see above). worker selects the worker-group
-// check in addition to the additional_resources entry check.
-func nodeResourcesUseStateForSameNode(worker bool) planmodifier.Map {
-	return nodeResourcesModifier{worker: worker}
-}
-
-type nodeResourcesModifier struct{ worker bool }
-
-func (m nodeResourcesModifier) Description(_ context.Context) string {
-	return "Keeps the prior resources value when the node at this position is unchanged."
-}
-
-func (m nodeResourcesModifier) MarkdownDescription(ctx context.Context) string {
-	return m.Description(ctx)
-}
-
-func (m nodeResourcesModifier) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
-	if req.StateValue.IsUnknown() || !req.PlanValue.IsUnknown() || req.ConfigValue.IsUnknown() {
-		return
-	}
-	if !samePriorEntry(ctx, req.Path, req.Config, req.State) {
-		return
-	}
-	if m.worker && !samePriorWorker(ctx, req.Path, req.Config, req.State) {
-		return
-	}
-	resp.PlanValue = req.StateValue
-}
+// The modifier below reuses the prior name only when the prior element at the
+// same index is the same worker group: in the same additional_resources entry
+// (same cloud_resource), with the same configured name, or, for an unnamed
+// group, the same instance_type and a prior name that was defaulted from it.
+// Otherwise the name stays unknown and resolves from the API response.
 
 // workerNameUseStateForSameWorker is UseNonNullStateForUnknown for a worker's
 // name, limited to the same worker group (see above). A brand-new element has
