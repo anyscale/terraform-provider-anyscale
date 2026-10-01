@@ -17,8 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// UpgradeState is PR2's timeouts{} migration for anyscale_service - this
-// resource's first-ever schema version bump. v0 (rollout_timeout as a flat,
+// UpgradeState is the timeouts{} migration for anyscale_service. v0 (rollout_timeout as a flat,
 // always-materialized Optional+Computed+Default string) drops that
 // attribute and adopts the new (null-unless-set) timeouts{ create, update,
 // delete } block, one value governing all three ops exactly as
@@ -69,7 +68,7 @@ type serviceResourceModelV0 struct {
 }
 
 // serviceResourceSchemaV0 is a frozen copy of anyscale_service's schema
-// exactly as shipped through v0.19.0 (pre-PR2) - see cloudResourceSchemaV0's
+// exactly as shipped through v0.19.0 (before the timeouts{} migration) - see cloudResourceSchemaV0's
 // doc comment (resource_cloud_upgrade.go) for why flags don't need to match
 // historical values exactly but names/types/structure must, and why this
 // must not evolve alongside the live schema.
@@ -290,11 +289,10 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 // timeouts block null - a null timeouts{} resolves to
 // defaultServiceRolloutTimeout on the next apply via
 // plan/state.Timeouts.Create/Update/Delete(ctx, default), exactly matching
-// what an omitted rollout_timeout used to resolve to via its Default. No
-// information is lost: a user who had customized rollout_timeout away from
-// the old default would already see that as a real, non-null value here -
-// see the state-upgrade test for the customized-value case, not just the
-// default one.
+// what an omitted rollout_timeout used to resolve to via its Default. A
+// customized rollout_timeout has no successor value and is dropped, so
+// that service falls back to the default timeouts (see the state-upgrade
+// test for the customized-value case).
 func upgradeServiceResourceStateV0toV1(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
 	if req.State == nil {
 		resp.Diagnostics.AddError(

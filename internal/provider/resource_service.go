@@ -37,10 +37,8 @@ const (
 
 // defaultServiceRolloutTimeout governs create/update/delete alike (one value
 // for all three, per timeouts.Opts{Create,Update,Delete: true} below).
-// Lowered from an original 45m per the user 2026-07-22: a standard ROLLOUT
-// genuinely takes tens of minutes on real infra, but observed real rollouts
-// run closer to ~20m - 45m was excessive headroom, 30m keeps real margin
-// without being needlessly long for a default.
+// A standard ROLLOUT takes tens of minutes on real infra; observed rollouts run
+// closer to ~20m, so 30m keeps real margin without being needlessly long.
 const defaultServiceRolloutTimeout = 30 * time.Minute
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -83,15 +81,14 @@ type ServiceResourceModel struct {
 
 	// Computed outputs. The four nested-object fields are typed as types.Object rather than the
 	// concrete ServiceObservabilityURLsModel/ServiceVersionModel/ServiceStatusChecklistModel
-	// structs the data sources use for the SAME shape (P0, contract section P0): a plain Go
+	// structs the data sources use for the SAME shape a plain Go
 	// struct/pointer cannot represent Unknown, and on Create (and on Update/ModifyPlan before an
 	// apply has run) these Computed-only nested objects are genuinely Unknown in the plan -
 	// req.Plan.Get decoding them into a bare struct field crashes with "Value Conversion Error"
-	// on every single create (confirmed by actually running one against a mock server, not just
-	// reading the code). types.Object/types.List natively hold Unknown/Null/Known, so decoding
+	// on every single create. types.Object/types.List natively hold Unknown/Null/Known, so decoding
 	// works at every call site (Plan.Get, State.Get, State.Set) with no other change needed.
 	// Converted to/from the reused ServiceObservabilityURLsModel/ServiceVersionModel/
-	// ServiceStatusChecklistModel structs (Addendum A reuse preserved) via the attr-type maps
+	// ServiceStatusChecklistModel structs via the attr-type maps
 	// below and populateServiceResourceModelComputed - the shared service_conversion.go mapping
 	// helpers themselves are untouched.
 	ID                       types.String `tfsdk:"id"`
@@ -153,7 +150,7 @@ func (r *ServiceResource) Schema(ctx context.Context, req resource.SchemaRequest
 		Version: 1,
 		MarkdownDescription: `Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only ` + "`anyscale_service`" + `/` + "`anyscale_services`" + ` data sources, which share this resource's computed field shapes.
 
-A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute_config_id`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, or ` + "`description`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
 
 ~> **Note:** ` + "`terraform destroy`" + ` terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.`,
 
@@ -196,7 +193,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 			// ─── Optional service-level inputs ───
 			"description": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Description of the service. Null if not set.",
+				MarkdownDescription: "Description of the service. Null if not set. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.",
 			},
 			"project_id": schema.StringAttribute{
 				Optional: true,
@@ -220,7 +217,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(serviceRolloutStrategyRollout),
-				MarkdownDescription: "How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config` - changing `build_id`, `compute_config_id`, or `connection_ids` under `IN_PLACE` is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
+				MarkdownDescription: "How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config` - changing `build_id`, `compute_config_id`, `connection_ids`, or `description` under `IN_PLACE` is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(serviceRolloutStrategyRollout, serviceRolloutStrategyInPlace),
 				},
@@ -235,8 +232,8 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 			"connection_ids": schema.ListAttribute{
 				ElementType: types.StringType,
 				Optional:    true,
-				MarkdownDescription: "Connection IDs to associate with the new service version. Wire semantics matter here: leaving this null preserves whatever connections are already attached (the common case), while explicitly setting `[]` removes all of them - so this is modeled as a nullable list rather than defaulting to empty. " +
-					"For the same reason, this is never refreshed from the server on read (mirroring `ray_serve_config`'s treatment): the server's actual current connections are visible read-only via `primary_version.connection_ids`, but copying them into this null-preserving directive would silently turn a future \"don't touch connections\" apply into \"remove every connection that's actually attached.\"",
+				MarkdownDescription: "Connection IDs to associate with the new service version. Null (the default) preserves the connections already attached; `[]` removes all of them. " +
+					"Never refreshed from the server, because copying the live set in would turn a later \"leave connections alone\" apply into \"remove every connection\"; read the live set from `primary_version.connection_ids`. After `terraform import`, a configured list equal to the live set is not treated as a change. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.",
 			},
 
 			// ─── Computed outputs (reused from the anyscale_service data source's model - see
@@ -357,7 +354,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, or ` + "`compute
 				Update:            true,
 				Delete:            true,
 				CreateDescription: "Maximum time to wait for a create rollout to reach `RUNNING` (e.g. `20m`, `1h`). Defaults to `30m` - a standard `ROLLOUT` genuinely takes real time on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), but observed real rollouts run closer to ~20m, so this default carries real margin without being needlessly long. Purely local to this provider - never sent to or read from the Anyscale API.",
-				UpdateDescription: "Maximum time to wait for an update rollout to reach `RUNNING`. Same default and rationale as `create`. Only consulted when the update actually triggers a new rollout (see `ray_serve_config`/`build_id`/`compute_config_id`) - an update that only changes `tags` or this `timeouts` block itself never applies a new version, so this value is not consulted for those.",
+				UpdateDescription: "Maximum time to wait for an update rollout to reach `RUNNING`. Same default and rationale as `create`. Only consulted when the update actually triggers a new rollout (see `ray_serve_config`/`build_id`/`compute_config_id`/`connection_ids`/`description`) - an update that only changes `tags` or this `timeouts` block itself never applies a new version, so this value is not consulted for those.",
 				DeleteDescription: "Maximum time to wait for destroy to wait for termination to reach `TERMINATED` before deleting. Same default and rationale as `create`.",
 			}),
 		},
@@ -514,9 +511,11 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		return
 	}
 
-	// The frozen set for v1: every version-defining field besides ray_serve_config. Framed as
-	// the invariant (what CAN change under IN_PLACE), not as an allowlist of these three names,
-	// so it stays correct if a future version-level field is added to the schema.
+	// The frozen set: every deploy field besides ray_serve_config. The IN_PLACE backend path
+	// rejects a changed build/compute config/connection set, and silently drops a changed
+	// description (only the standard rollout path persists it), so all of them are refused here.
+	// Framed as the invariant (what CAN change under IN_PLACE), not as an allowlist, so it stays
+	// correct if a future deploy field is added to the schema.
 	var changed []string
 	if !plan.BuildID.Equal(state.BuildID) {
 		changed = append(changed, "build_id")
@@ -524,8 +523,11 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if !plan.ComputeConfigID.Equal(state.ComputeConfigID) {
 		changed = append(changed, "compute_config_id")
 	}
-	if !plan.ConnectionIDs.Equal(state.ConnectionIDs) {
+	if serviceConnectionIDsChanged(&plan, &state) {
 		changed = append(changed, "connection_ids")
+	}
+	if !plan.Description.Equal(state.Description) {
+		changed = append(changed, "description")
 	}
 
 	if len(changed) > 0 {
@@ -544,9 +546,9 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 // DB comparison with no regard for identity or permissions. Left unguarded, this surfaces only as
 // an opaque runtime failure: the service reaches UNHEALTHY with a generic, misleadingly
 // identity-flavored 403 ("user removed from organization") that is actually a catch-all for any
-// bare 403 from that check, not a real diagnosis. Traced and confirmed empirically this session
-// (a mismatched auto-discovered test project 403'd 3-for-3; the identical shape against a
-// correctly-scoped project reached RUNNING).
+// bare 403 from that check, not a real diagnosis. Confirmed against a real backend: a
+// mismatched project 403'd every time, while the identical shape against a correctly-scoped
+// project reached RUNNING.
 //
 // Can only run when BOTH ids are already known: project_id is Optional+Computed (Unknown at plan
 // when omitted, until Create resolves the backend's default project), and compute_config_id,
@@ -586,7 +588,7 @@ func (r *ServiceResource) validateProjectComputeConfigCloudMatch(ctx context.Con
 		})
 		return
 	}
-	// ParentCloudID is genuinely nullable server-side (DS-PROJ-1) - a project with no cloud
+	// ParentCloudID is genuinely nullable server-side - a project with no cloud
 	// association has nothing to compare against, so skip rather than treat nil as a mismatch.
 	if projectResp.Result.ParentCloudID == nil || *projectResp.Result.ParentCloudID == "" {
 		return
@@ -652,7 +654,7 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 			name, strings.Join(collisions, ", "),
 		)
 		if projectID == "" {
-			// F5 (contract section F): project_id was omitted, so this search could only check
+			// project_id was omitted, so this search could only check
 			// by name across every project the token can see - broader than what the backend
 			// will actually collide against once it resolves a specific default project (see
 			// findExistingServiceIDs' doc comment). Name the fix for that specific case: set
@@ -683,7 +685,7 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	// non-idiomatic, non-declarative config edit), the initial apply always requests a standard
 	// deploy regardless of what's configured; state still stores the user's real plan value
 	// (including IN_PLACE) unchanged, since rollout_strategy is never part of the server's read
-	// model (see Read's comment above) - so a config that already sets IN_PLACE from the start
+	// model (see Read) - so a config that already sets IN_PLACE from the start
 	// stays stable across create and every later update.
 	createRequestPlan := plan
 	createRequestPlan.RolloutStrategy = types.StringValue(serviceRolloutStrategyRollout)
@@ -720,7 +722,7 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	// Persist state now that the service exists remotely, before doing anything else that could
 	// fail (tags sync below, then the potentially long-running rollout wait) - without this, a
 	// later failure would leave the service orphaned in the backend with no Terraform record to
-	// destroy it (G2, contract section H). Mirrors resource_container_image_build.go's Create.
+	// destroy it. Mirrors resource_container_image_build.go's Create.
 	diags = populateServiceResourceModelComputed(ctx, &plan, &service)
 	resp.Diagnostics.Append(diags...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -792,7 +794,7 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	//     null "preserve" directive into an active "remove everything" one (connection_ids).
 	//   - rollout_strategy, max_surge_percent: not returned by this endpoint (or any endpoint) at
 	//     all, nothing to refresh from - see their schema MarkdownDescriptions.
-	//   - rollout_timeout: purely local to this provider, never sent to or read from the API.
+	//   - timeouts: purely local to this provider, never sent to or read from the API.
 	state.Name = types.StringValue(service.Name)
 	state.Description = types.StringPointerValue(service.Description)
 	// primary_version can be transiently wire-null (a service still STARTING, before any version
@@ -804,7 +806,7 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 		state.BuildID = types.StringValue(service.PrimaryVersion.BuildID)
 		state.ComputeConfigID = types.StringValue(service.PrimaryVersion.ComputeConfigID)
 	}
-	// H3 (contract section H): project_id must be refreshed here even though it is
+	// project_id must be refreshed here even though it is
 	// RequiresReplace and Create/Update already set it - ImportState seeds only id and
 	// ray_serve_config, so without this the post-import Read would leave project_id null.
 	// Writing the real project_id into config afterward would then read as null->value, which
@@ -818,8 +820,29 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// serviceConnectionIDsChanged reports whether the planned connection_ids differ from what the
+// service actually has. connection_ids is never refreshed from the API, so after an import the
+// prior state value is null even though connections are attached. A configured list is then
+// compared against the live set in primary_version.connection_ids, so importing into a config
+// that declares the attached connections is not read as a change (which would roll out a new
+// version, or be rejected under IN_PLACE). A null plan means "leave connections alone" and
+// never counts as a change against a null prior value.
+func serviceConnectionIDsChanged(plan, state *ServiceResourceModel) bool {
+	if !state.ConnectionIDs.IsNull() || plan.ConnectionIDs.IsNull() || plan.ConnectionIDs.IsUnknown() {
+		return !plan.ConnectionIDs.Equal(state.ConnectionIDs)
+	}
+	if state.PrimaryVersion.IsNull() || state.PrimaryVersion.IsUnknown() {
+		return true
+	}
+	live, ok := state.PrimaryVersion.Attributes()["connection_ids"].(types.List)
+	if !ok || live.IsNull() || live.IsUnknown() {
+		return true
+	}
+	return !plan.ConnectionIDs.Equal(live)
+}
+
 // serviceDeployFieldsChanged reports whether any field that requires a new PUT /apply + rollout
-// wait differs between plan and state (H2, contract section H). timeouts (purely local
+// wait differs between plan and state timeouts (purely local
 // to this provider) and tags (its own always-run sync via syncServiceTags, independent of
 // whether a deploy happens) are deliberately excluded: neither has a version/rollout concept,
 // so changing only one of them must not redeploy an otherwise-unchanged, healthy running
@@ -837,7 +860,7 @@ func serviceDeployFieldsChanged(plan, state *ServiceResourceModel) bool {
 	return !plan.RayServeConfig.Equal(state.RayServeConfig) ||
 		!plan.BuildID.Equal(state.BuildID) ||
 		!plan.ComputeConfigID.Equal(state.ComputeConfigID) ||
-		!plan.ConnectionIDs.Equal(state.ConnectionIDs) ||
+		serviceConnectionIDsChanged(plan, state) ||
 		!plan.Description.Equal(state.Description)
 }
 
@@ -868,16 +891,14 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	if !serviceDeployFieldsChanged(&plan, &state) {
-		// H2 (contract section H): nothing that requires a new version changed - e.g. only
+		// Nothing that requires a new version changed - e.g. only
 		// timeouts, only tags (already synced above), or only rollout_strategy/max_surge_percent
 		// (persisted from plan below, sent with the next real deploy) - so skip the PUT /apply +
 		// rollout wait against an otherwise-unchanged, healthy running service.
-		// serviceDeployFieldsChanged deliberately never compares Timeouts (same as it never
-		// compared the old flat RolloutTimeout) - a timeouts-only change must never look like
-		// a deploy-affecting one, regardless of whether that field is a flat string or a
-		// nested block.
+		// serviceDeployFieldsChanged deliberately never compares Timeouts - a
+		// timeouts-only change must never look like a deploy-affecting one.
 		//
-		// H5 (contract section H): still need a fresh GET to populate the computed outputs
+		// Still need a fresh GET to populate the computed outputs
 		// before persisting. Every Computed attribute without a UseStateForUnknown plan
 		// modifier (cloud_id, hostname, current_state, primary_version, etc. - everything
 		// except id/ray_serve_config/project_id) is Unknown in this plan, since no apply ran
@@ -971,9 +992,7 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	serviceID := state.ID.ValueString()
 
-	// The old hand-rolled fallback (parse state.RolloutTimeout, fall back to the
-	// default string on error) is now handled internally by Timeouts.Delete
-	// itself - a null/unknown/unparseable value already resolves to
+	// Timeouts.Delete resolves a null/unknown/unparseable value to
 	// defaultServiceRolloutTimeout, so no separate fallback is needed here.
 	timeout, diags := state.Timeouts.Delete(ctx, defaultServiceRolloutTimeout)
 	resp.Diagnostics.Append(diags...)
@@ -983,7 +1002,7 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	tflog.Info(ctx, "Terminating service", map[string]any{"service_id": serviceID})
 
-	// H1 (contract section H): StatusNotFound must NOT be in the accepted list here - if it
+	// StatusNotFound must NOT be in the accepted list here - if it
 	// were, a 404 would make err nil (api_helpers.go's isStatusExpected treats any listed
 	// status as success), making the errors.Is(err, ErrNotFound) guard below unreachable dead
 	// code. That would fall through to waitForServiceState against an already-gone service,
@@ -1039,7 +1058,7 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 	// ray_serve_config is Required but Read deliberately never refreshes it (see its schema
 	// MarkdownDescription) - on a fresh import there is no prior applied value to preserve at
 	// all, so it must be seeded here, once, from the server's stored version. Mirrors
-	// compute_config's CC12 exception, which special-cases its own Dynamic fields
+	// anyscale_compute_config, which special-cases its own Dynamic fields
 	// (flags/advanced_instance_config) in ImportState for the identical reason.
 	service, err := getServiceByID(ctx, r.client, req.ID)
 	if err != nil {
@@ -1083,7 +1102,7 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 // tags is deliberately NOT one of these fields even though the backend model accepts one: this
 // resource always syncs tags through the dedicated /api/v2/tags/resource endpoints instead (see
 // syncServiceTags), independent of whether a deploy happens at all - see serviceDeployFieldsChanged's
-// doc comment (H2, contract section H) for why a tags-only change must not go through apply.
+// doc comment for why a tags-only change must not go through apply.
 type applyServiceRequest struct {
 	Name            string          `json:"name"`
 	Description     *string         `json:"description,omitempty"`
@@ -1217,7 +1236,7 @@ func fetchServiceTags(ctx context.Context, client *Client, serviceID string) (ma
 }
 
 // removedTagKeys returns the keys present in oldTags but absent from newTags - a pure,
-// independently-testable predicate for computeServiceTagsToDelete's caller, mirroring
+// independently-testable predicate for reconcileServiceTags, mirroring
 // evaluateServiceState's split between predicate and effectful caller.
 func removedTagKeys(oldTags, newTags map[string]string) []string {
 	var removed []string
@@ -1293,7 +1312,7 @@ func upsertServiceTagsMap(ctx context.Context, client *Client, serviceID string,
 
 // syncServiceTags reconciles a service's tags to exactly match newTags: deletes anything
 // removed, then upserts everything desired. Called independently of whether a deploy happens
-// (H2, contract section H) - unlike ray_serve_config/build_id/compute_config_id, tags live in a
+// - unlike ray_serve_config/build_id/compute_config_id, tags live in a
 // system with no version/rollout concept at all, so a tags-only change must not trigger a
 // PUT /apply + rollout wait on an otherwise-unchanged, healthy running service.
 func syncServiceTags(ctx context.Context, client *Client, serviceID string, oldTags, newTags map[string]string) error {
@@ -1321,7 +1340,7 @@ func refreshServiceTagsIntoModel(ctx context.Context, client *Client, serviceID 
 	}
 
 	if len(tags) == 0 {
-		// H4 (contract section H): an empty *fetch* is still ambiguous (see doc comment above),
+		// An empty *fetch* is still ambiguous (see doc comment above),
 		// but *target already resolves that ambiguity for us - if it was null (never
 		// configured), leave it null; otherwise it was a real (possibly non-empty) map, so
 		// collapse it to a real empty map rather than leaving a stale non-empty value in place.
@@ -1347,6 +1366,14 @@ func refreshServiceTagsIntoModel(ctx context.Context, client *Client, serviceID 
 	*target = tagsValue
 }
 
+// existingServiceMatch identifies one Create-adoption-guard collision - both fields are named
+// in the resulting error so the fix is self-service even in the
+// broader, project_id-omitted search (see findExistingServiceIDs' own doc comment).
+type existingServiceMatch struct {
+	ID        string
+	ProjectID string
+}
+
 // findExistingServiceIDs lists services matching (name, project_id) for the Create-adoption
 // guard. Unlike ServiceDataSource.findServiceByName, this returns every matching ID rather than
 // resolving/erroring internally - Create decides that any match at all is a hard stop.
@@ -1357,14 +1384,6 @@ func refreshServiceTagsIntoModel(ctx context.Context, client *Client, serviceID 
 // against once it resolves a specific default project. This over-blocks rather than
 // under-checks: a false-positive block on an unrelated same-named service in another project is
 // judged safer than silently adopting a real collision, consistent with why this guard exists.
-// existingServiceMatch identifies one Create-adoption-guard collision - both fields are named
-// in the resulting error (F5, contract section F) so the fix is self-service even in the
-// broader, project_id-omitted search (see findExistingServiceIDs' own doc comment).
-type existingServiceMatch struct {
-	ID        string
-	ProjectID string
-}
-
 func findExistingServiceIDs(ctx context.Context, client *Client, name, projectID string) ([]existingServiceMatch, error) {
 	params := url.Values{}
 	params.Add("name", name)

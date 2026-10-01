@@ -598,7 +598,7 @@ func TestServiceDataSourceRead_HitsServicesV2Endpoint(t *testing.T) {
 // a service still STARTING, before any version has ever gone healthy or any dashboard URLs
 // have been assigned. Deliberately built from a mock, not a real-infra run: real infra cannot
 // deterministically hold a service in this exact transient window long enough to prove a fix,
-// which is exactly why this crash slipped through undetected since PR 116.
+// which is exactly why this crash slipped through undetected.
 func TestServiceDataSourceRead_TransitionalNulls(t *testing.T) {
 	const serviceID = "service2_transitional"
 

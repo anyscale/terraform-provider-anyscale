@@ -15,8 +15,8 @@ var (
 	_ ephemeral.EphemeralResourceWithConfigure = &ServiceCredentialsEphemeralResource{}
 )
 
-// NewServiceCredentialsEphemeralResource creates a new Service credentials ephemeral resource -
-// this provider's first ephemeral resource: Open-only (no Renew/Close), fetching a live secret
+// NewServiceCredentialsEphemeralResource creates a new Service credentials ephemeral resource.
+// Open-only (no Renew/Close): fetches a live secret
 // fresh on every read and never persisting it to Terraform state or plan output.
 func NewServiceCredentialsEphemeralResource() ephemeral.EphemeralResource {
 	return &ServiceCredentialsEphemeralResource{}

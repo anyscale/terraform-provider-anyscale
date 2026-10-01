@@ -23,8 +23,7 @@ func unmarshalServiceResult(t *testing.T, body string) *ServiceResult {
 
 // asServiceVersionModel decodes one of the resource model's types.Object version fields
 // (primary_version/canary_version) back into the shared ServiceVersionModel struct so tests can
-// assert on its fields directly - the resource stores these as types.Object (contract §P0: a
-// plain struct/pointer cannot hold Unknown, which a plain-Computed nested object legitimately is
+// assert on its fields directly - the resource stores these as types.Object (a plain struct/pointer cannot hold Unknown, which a plain-Computed nested object legitimately is
 // pre-apply), converted via the same serviceVersionAttrTypes map populateServiceResourceModelComputed uses.
 func asServiceVersionModel(t *testing.T, obj types.Object) ServiceVersionModel {
 	t.Helper()
@@ -35,13 +34,12 @@ func asServiceVersionModel(t *testing.T, obj types.Object) ServiceVersionModel {
 	return v
 }
 
-// TestPopulateServiceResourceModelComputed_EnumWireValues is the resource-side AC-R2 guard:
+// TestPopulateServiceResourceModelComputed_EnumWireValues guards the resource side:
 // current_state/goal_state and the nested version/checklist enum strings must land in the
 // resource model EXACTLY as the backend sent them - this exercises populateServiceResourceModelComputed
 // itself (new, resource-specific code), not just the shared sub-helpers data_source_service_test.go
-// already covers (Addendum A: those are reused verbatim, so THEIR correctness isn't re-litigated
-// here - only this function's own wiring of them into ServiceResourceModel, including the P0
-// types.Object conversion, is what's new to prove).
+// already covers (those are reused verbatim, so only this function's own wiring of them into
+// ServiceResourceModel, including the types.Object conversion, is under test).
 func TestPopulateServiceResourceModelComputed_EnumWireValues(t *testing.T) {
 	service := unmarshalServiceResult(t, fullServiceJSON("svc_enum", "enum-resource"))
 
@@ -77,7 +75,7 @@ func TestPopulateServiceResourceModelComputed_EnumWireValues(t *testing.T) {
 	}
 }
 
-// TestPopulateServiceResourceModelComputed_NullableFields is the resource-side AC-R1 guard:
+// TestPopulateServiceResourceModelComputed_NullableFields guards the resource side:
 // every nullable computed field must map to Terraform null when the API sends JSON null, never
 // to a zero value ("" for strings, a real-but-empty object for canary_version/
 // service_status_checklist). Uses a raw JSON body (not a Go struct literal) since a non-pointer Go
