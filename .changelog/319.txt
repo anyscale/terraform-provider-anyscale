@@ -1,9 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_service: Changing `description` while `rollout_strategy = "IN_PLACE"` is now rejected at plan time. The IN_PLACE backend path silently discarded the change, so the plan previously reported success and showed the same diff on every apply; set `rollout_strategy = "ROLLOUT"` to change it.
-```
-
-```
-release-note:fixed
-resource/anyscale_service: Fix `connection_ids` being treated as changed after `terraform import`, which redeployed the service (or failed the plan under `rollout_strategy = "IN_PLACE"`) even when the configured connections already matched the live service.
-```

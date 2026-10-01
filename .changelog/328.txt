@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: Correct inaccurate documentation: `anyscale_cloud` `credentials` is optional, `cloud_provider` and `region` inference rules and the `subnet_ids`/`subnet_ids_to_az` precedence are stated accurately, the `anyscale_compute_config` data source describes its archived-config fallback, `anyscale_container_image_build` `containerfile_path` documents that editing the file behind an unchanged path does not rebuild, `anyscale_service` `project_id` and `timeouts.update` describe current behavior, `anyscale_system_cluster` describes that only creation starts the cluster and that `is_enabled` is refreshed, the `anyscale_cloud_access`, `anyscale_organization_user`, `anyscale_organization_user_role` and organization user data source descriptions are shortened and corrected, import behavior for `credentials`, `registry_login_secret` and `project_id` is documented, and the Kitchen Sink and README feature lists are corrected.
-```
