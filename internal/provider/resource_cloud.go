@@ -863,6 +863,10 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 			resp.Diagnostics.AddError("Read Error", fmt.Sprintf("Failed to read existing cloud: %s", err.Error()))
 			return
 		}
+		r.resolveAdoptedDerivedFields(ctx, existingCloudID, &plan, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
@@ -1725,6 +1729,42 @@ func (r *CloudResource) addCloudResource(ctx context.Context, plan *CloudResourc
 
 	tflog.Info(ctx, "Cloud resource added successfully", map[string]any{"cloud_id": cloudID})
 	return nil
+}
+
+// resolveAdoptedDerivedFields fills the Computed slots that the backend
+// derives from another input (memorydb_cluster_arn/endpoint, memorystore_endpoint,
+// mount_targets, mount_path) for a cloud adopted by name. A fresh create gets
+// them from the add_resource response; an adopted cloud never calls
+// add_resource, so they would otherwise stay unknown and fail the apply. Values
+// come from the cloud's default resource. A slot the config set is kept, and a
+// slot the backend has no value for becomes null. If the listing cannot be
+// read, every unresolved slot becomes null, and the next refresh shows any
+// difference as drift.
+func (r *CloudResource) resolveAdoptedDerivedFields(ctx context.Context, cloudID string, plan *CloudResourceModel, diags *diag.Diagnostics) {
+	var defaultResource *CloudDeploymentResult
+	resources, err := listCloudResources(ctx, r.client, cloudID)
+	if err != nil {
+		tflog.Warn(ctx, "Failed to list the adopted cloud's resources; unset derived fields are recorded as null", map[string]any{"cloud_id": cloudID, "error": err.Error()})
+	} else {
+		defaultResource = findDefaultInCloudResources(resources)
+	}
+
+	var awsDerived *AWSConfig
+	var gcpDerived *GCPConfig
+	var fileStorageDerived *FileStorage
+	if defaultResource != nil {
+		awsDerived, gcpDerived, fileStorageDerived = defaultResource.AWSConfig, defaultResource.GCPConfig, defaultResource.FileStorage
+	}
+
+	awsConfig, d := mergeAWSDerivedFields(plan.AWSConfig, awsDerived)
+	diags.Append(d...)
+	plan.AWSConfig = awsConfig
+	gcpConfig, d := mergeGCPDerivedFields(plan.GCPConfig, gcpDerived)
+	diags.Append(d...)
+	plan.GCPConfig = gcpConfig
+	fileStorage, d := mergeFileStorageDerivedFields(plan.FileStorage, fileStorageDerived, false)
+	diags.Append(d...)
+	plan.FileStorage = fileStorage
 }
 
 // readCloudState reads the cloud from the API and updates the state model.
