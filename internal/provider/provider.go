@@ -209,6 +209,7 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewSystemClusterResource,
 		NewUserGroupResource,
 		NewUserGroupMembersResource,
+		NewRoleBindingResource,
 	}
 }
 
@@ -242,5 +243,6 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewUserDataSource,
 		NewUserGroupDataSource,
 		NewUserGroupsDataSource,
+		NewRoleDataSource,
 	}
 }

@@ -1,0 +1,9 @@
+```
+release-note:new-resource
+resource/anyscale_role_binding: (Alpha) Grant a role to a user group on an organization, cloud, or project; behind a feature flag (contact support@anyscale.com for access), and the Anyscale API and this schema may change drastically before Beta.
+```
+
+```
+release-note:new-data-source
+data-source/anyscale_role: (Alpha) Look up an Anyscale role by name; behind a feature flag (contact support@anyscale.com for access), and the Anyscale API and this schema may change drastically before Beta.
+```
