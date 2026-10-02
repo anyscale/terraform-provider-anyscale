@@ -35,8 +35,9 @@ member write path, tests create their own groups, so that failure mode no longer
    role-bindings API (cloud `write|readonly`, project `owner|write|readonly`, organization
    `owner|collaborator`). Its full-replace authority would also collide with `anyscale_cloud_access`,
    which already refuses to fight group bindings. Group grants ship instead as granular, immutable
-   `anyscale_role_binding` resources (Alpha, behind a feature flag), which can hold the newer roles
-   (`project_viewer`, `compute_config_viewer`, `workload_operator`) and never own a resource's whole
+   `anyscale_role_binding` resources (Alpha, behind a feature flag), which can grant any built-in or
+   organization role (where the newer cloud roles `project_viewer`, `compute_config_viewer`, and
+   `workload_operator` are expected to live; not yet observed) and never own a resource's whole
    binding set. If a whole-set resource is ever wanted, it must own every direct binding per
    `resource_type` + `resource_id`; the API cannot do additive writes through that route, and faking
    it means read-modify-write races.

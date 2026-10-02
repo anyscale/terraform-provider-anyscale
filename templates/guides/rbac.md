@@ -168,7 +168,8 @@ support@anyscale.com for access. Without it, every call fails with "Role binding
 
 `anyscale_role_binding` grants **one role to one user group on one scope** - exactly one of `cloud_id`,
 `project_id`, or `organization_id`. Look up the role with the [`anyscale_role`](../data-sources/role.md)
-data source, which resolves a role by its exact, case-sensitive `name`.
+data source, which resolves a role by its exact, case-sensitive `name`. Which role names exist depends on
+your organization; ask support@anyscale.com which built-in roles are enabled.
 
 ```hcl
 data "anyscale_role" "viewer" {
@@ -188,8 +189,7 @@ resource "anyscale_role_binding" "analysts_viewer" {
 
 ### Each binding is one grant, and cannot be edited
 
-Every argument forces replacement; the API has no update. To change a role, declare the new binding and
-remove the old one. Set `lifecycle { create_before_destroy = true }` when changing `role_id` so the
+The API has no update, so changing any argument replaces the binding. Set `lifecycle { create_before_destroy = true }` when changing `role_id` so the
 group is never briefly without access.
 
 Bindings are **not authoritative**: Terraform manages only the bindings you declare, never the full set
@@ -219,7 +219,8 @@ Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 |---|---|
 | "Role bindings are not enabled" | The feature flag is off for your organization; contact support@anyscale.com. During a refresh, state is kept unchanged. |
 | Conflict on create | The group already holds that role on that scope. Import the binding instead. |
-| Binding disappears from state | It was revoked outside Terraform, or its scope or group was deleted; the next plan recreates it. |
+| Binding disappears from state | It was revoked outside Terraform, or its group was deleted; the next plan recreates it. |
+| "Role Binding Not Readable" | The cloud or project was deleted outside Terraform, or access to it was lost. State is kept; run `terraform state rm` for the binding if the scope is gone. |
 
 ## The vocabulary problem
 
