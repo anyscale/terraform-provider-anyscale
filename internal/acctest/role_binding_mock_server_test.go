@@ -345,8 +345,8 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 	case path == rbBase && r.Method == http.MethodPost:
 		m.serveCreate(w, body)
 	case len(rest) == 1 && rest[0] == "managed_resources" && r.Method == http.MethodGet:
-		// The contract's 404 probe is GET /roles/?count=1, not this route.
-		m.t.Errorf("mock: provider probed managed_resources; the contract probes GET /roles/")
+		// The provider probes GET /roles/?count=1 on a 404, not this route.
+		m.t.Errorf("mock: provider probed managed_resources; it should probe GET /roles/?count=1")
 		m.reply(w, http.StatusOK, map[string]any{"results": []any{}, "metadata": map[string]any{"total": 0, "next_paging_token": nil}})
 	case len(rest) == 3 && rest[0] == "principals" && r.Method == http.MethodGet:
 		if m.listingOverride(w, rest[1], rest[2]) {

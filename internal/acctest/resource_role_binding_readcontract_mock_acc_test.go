@@ -94,8 +94,7 @@ func rbDestroyed(m *roleBindingMockServer) resource.TestCheckFunc {
 }
 
 // Flag off: every route 404s, including the probe. Read must error and keep
-// state. A provider that treats the 404 as "gone" removes the binding from
-// state, and step 3's empty-plan check fails because it plans a create.
+// state; step 3's empty plan proves the binding was not removed.
 func TestAccRoleBindingResource_FlagOffKeepsState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	m := newRBMock(t)
@@ -156,12 +155,10 @@ func TestAccRoleBindingResource_RevokedOutOfBandIsRecreated(t *testing.T) {
 	})
 }
 
-// Group deleted out of band, which cascades its bindings. Whether the listing
-// answers with an empty page or a 404 is not settled from source, so both
-// are pinned: under either, refresh removes the binding and nothing is sent
-// to DELETE. In the 404 case the roles probe answers 200, which is what tells
-// it apart from the flag being off; a provider that skips the probe and reads
-// every 404 as flag-off errors here instead.
+// Group deleted out of band, which cascades its bindings. Source does not
+// settle whether the listing then answers with an empty page or a 404, so both
+// are pinned: refresh removes the binding and sends no DELETE. In the 404 case
+// the roles probe's 200 is what rules out the flag being off.
 func TestAccRoleBindingResource_DeletedGroupIsRemoved(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	for _, tc := range []struct {
