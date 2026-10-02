@@ -14,7 +14,7 @@ import (
 // roleBindingsAlphaBanner opens the MarkdownDescription of the role binding
 // resource and the role data source. The policy it links to is written once,
 // in the RBAC guide.
-const roleBindingsAlphaBanner = "~> **Alpha.** Role bindings are an Alpha feature behind a feature flag; contact [support@anyscale.com](mailto:support@anyscale.com) for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).\n\n"
+const roleBindingsAlphaBanner = "~> **Alpha.** Role bindings are an Alpha feature behind a feature flag; contact [support@anyscale.com](mailto:support@anyscale.com) for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#role-bindings-alpha).\n\n"
 
 const (
 	roleBindingsBasePath = "/api/v2/role_bindings"

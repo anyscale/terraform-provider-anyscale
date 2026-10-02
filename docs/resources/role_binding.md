@@ -3,13 +3,13 @@
 page_title: "anyscale_role_binding Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Alpha. Role bindings are an Alpha feature behind a feature flag; contact support@anyscale.com mailto:support@anyscale.com for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
+  ~> Alpha. Role bindings are an Alpha feature behind a feature flag; contact support@anyscale.com mailto:support@anyscale.com for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#role-bindings-alpha.
   Grants one role to one user group on an organization, cloud or project. Access granted this way is not visible to anyscale_cloud_access; see the RBAC guide ../guides/rbac.md. A binding cannot be edited, so changing any argument replaces it.
 ---
 
 # anyscale_role_binding (Resource)
 
-~> **Alpha.** Role bindings are an Alpha feature behind a feature flag; contact [support@anyscale.com](mailto:support@anyscale.com) for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
+~> **Alpha.** Role bindings are an Alpha feature behind a feature flag; contact [support@anyscale.com](mailto:support@anyscale.com) for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#role-bindings-alpha).
 
 Grants one role to one user group on an organization, cloud or project. Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). A binding cannot be edited, so changing any argument replaces it.
 

@@ -3,13 +3,13 @@
 page_title: "anyscale_role Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Alpha. Role bindings are an Alpha feature behind a feature flag; contact support@anyscale.com mailto:support@anyscale.com for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
+  ~> Alpha. Role bindings are an Alpha feature behind a feature flag; contact support@anyscale.com mailto:support@anyscale.com for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#role-bindings-alpha.
   Looks up a role that can be granted with anyscale_role_binding: a built-in role or one of the organization's own. Archived roles are not found, since they cannot be newly granted. The API does not check that a role suits the resource it is granted on, so a role with only organization permissions granted on a cloud is accepted and has no effect.
 ---
 
 # anyscale_role (Data Source)
 
-~> **Alpha.** Role bindings are an Alpha feature behind a feature flag; contact [support@anyscale.com](mailto:support@anyscale.com) for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
+~> **Alpha.** Role bindings are an Alpha feature behind a feature flag; contact [support@anyscale.com](mailto:support@anyscale.com) for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#role-bindings-alpha).
 
 Looks up a role that can be granted with `anyscale_role_binding`: a built-in role or one of the organization's own. Archived roles are not found, since they cannot be newly granted. The API does not check that a role suits the resource it is granted on, so a role with only organization permissions granted on a cloud is accepted and has no effect.
 
