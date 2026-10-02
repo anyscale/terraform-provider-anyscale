@@ -18,8 +18,9 @@ import (
 
 func init() {
 	resource.AddTestSweepers("anyscale_user_group", &resource.Sweeper{
-		Name: "anyscale_user_group",
-		F:    sweepUserGroups,
+		Name:         "anyscale_user_group",
+		F:            sweepUserGroups,
+		Dependencies: []string{"anyscale_role_binding"},
 	})
 }
 
