@@ -94,7 +94,7 @@ func (d *RoleDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		// The roles listing has no 404 of its own, so a 404 is the feature
 		// being off.
 		if isRoleBindingsDisabled(err) {
-			addRoleBindingsDisabledError(&resp.Diagnostics, false)
+			addRoleBindingsDisabledError(&resp.Diagnostics, "")
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "list roles", err)

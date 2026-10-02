@@ -103,15 +103,21 @@ func isRoleBindingsDisabled(err error) bool {
 }
 
 // addRoleBindingsDisabledError reports a 404 from the role bindings or roles
-// routes. Callers return without touching state; stateKept adds that to the
-// detail, for Read.
-func addRoleBindingsDisabledError(diags *diag.Diagnostics, stateKept bool) {
+// routes. Callers return without touching state; outcome, when set, says what
+// that means for the operation and is appended to the detail.
+func addRoleBindingsDisabledError(diags *diag.Diagnostics, outcome string) {
 	detail := "This organization does not have role bindings enabled. They are in Alpha behind a feature flag; contact support@anyscale.com for access."
-	if stateKept {
-		detail += " The binding was kept in Terraform state unchanged."
+	if outcome != "" {
+		detail += " " + outcome
 	}
 	diags.AddError("Role bindings are not enabled", detail)
 }
+
+// Outcomes for addRoleBindingsDisabledError.
+const (
+	roleBindingsDisabledReadOutcome   = "The binding was kept in Terraform state unchanged."
+	roleBindingsDisabledDeleteOutcome = "The binding was not revoked and stays in Terraform state; to stop managing it, run `terraform state rm` on its address."
+)
 
 // isForbidden reports whether err is an HTTP 403.
 func isForbidden(err error) bool {

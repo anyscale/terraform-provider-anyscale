@@ -65,8 +65,19 @@ func (m *RoleBindingResourceModel) scope() (resourceType, resourceID string) {
 	}
 }
 
+// isManagedRoleBindingScope reports whether the resource type is one this
+// resource models. The API may add scopes; a binding on one must be refused,
+// never mapped onto a modeled scope it is not held on.
+func isManagedRoleBindingScope(resourceType string) bool {
+	switch resourceType {
+	case roleBindingResourceOrganization, roleBindingResourceCloud, roleBindingResourceProject:
+		return true
+	}
+	return false
+}
+
 // setFromAPI sets every attribute from a full binding, as create and import
-// return it.
+// return it. Callers check isManagedRoleBindingScope first.
 func (m *RoleBindingResourceModel) setFromAPI(b *roleBindingResult) {
 	m.ID = types.StringValue(b.ID)
 	m.UserGroupID = types.StringValue(b.PrincipalID)
@@ -75,12 +86,12 @@ func (m *RoleBindingResourceModel) setFromAPI(b *roleBindingResult) {
 	m.CloudID = types.StringNull()
 	m.ProjectID = types.StringNull()
 	switch b.ResourceType {
+	case roleBindingResourceOrganization:
+		m.OrganizationID = types.StringValue(b.ResourceID)
 	case roleBindingResourceCloud:
 		m.CloudID = types.StringValue(b.ResourceID)
 	case roleBindingResourceProject:
 		m.ProjectID = types.StringValue(b.ResourceID)
-	default:
-		m.OrganizationID = types.StringValue(b.ResourceID)
 	}
 	m.Origin = types.StringPointerValue(b.Origin)
 	m.CreatedBy = types.StringPointerValue(b.CreatedBy)
@@ -225,7 +236,7 @@ func (r *RoleBindingResource) addCreateNotFoundError(ctx context.Context, diags 
 		return
 	}
 	if !enabled {
-		addRoleBindingsDisabledError(diags, false)
+		addRoleBindingsDisabledError(diags, "")
 		return
 	}
 	AddAPIError(diags, "create role binding", createErr)
@@ -272,7 +283,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 			case probeErr != nil:
 				addRoleBindingsProbeFailedError(&resp.Diagnostics, "read role binding", err, probeErr)
 			case !enabled:
-				addRoleBindingsDisabledError(&resp.Diagnostics, true)
+				addRoleBindingsDisabledError(&resp.Diagnostics, roleBindingsDisabledReadOutcome)
 			default:
 				// The feature is on, so the 404 names the group or the
 				// resource the binding was held on, which is gone.
@@ -283,11 +294,10 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 			return
 		}
 		if isForbidden(err) {
-			AddAPIError(&resp.Diagnostics, "read role binding", err)
 			resp.Diagnostics.AddError("Role Binding Not Readable",
-				fmt.Sprintf("Reading bindings on %s %q requires managing IAM on it. "+
-					"If the %s was deleted outside Terraform, remove this binding from state with `terraform state rm`.",
-					resourceType, resourceID, resourceType))
+				fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s "+
+					"Reading them requires managing IAM on the %s. If the %s was deleted outside Terraform, remove this binding from state with `terraform state rm`.",
+					resourceType, resourceID, extractAPIErrorDetail(err), resourceType, resourceType))
 			return
 		}
 		AddAPIError(&resp.Diagnostics, "read role binding", err)
@@ -363,7 +373,7 @@ func (r *RoleBindingResource) handleDeleteNotFound(ctx context.Context, diags *d
 	case probeErr != nil:
 		addRoleBindingsProbeFailedError(diags, "delete role binding", notFoundErr, probeErr)
 	case !enabled:
-		addRoleBindingsDisabledError(diags, true)
+		addRoleBindingsDisabledError(diags, roleBindingsDisabledDeleteOutcome)
 	default:
 		tflog.Info(ctx, "Role binding already gone", map[string]any{"role_binding_id": bindingID, "detail": extractAPIErrorDetail(notFoundErr)})
 	}
@@ -380,7 +390,7 @@ func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.Impo
 			case probeErr != nil:
 				addRoleBindingsProbeFailedError(&resp.Diagnostics, "read role binding for import", err, probeErr)
 			case !enabled:
-				addRoleBindingsDisabledError(&resp.Diagnostics, false)
+				addRoleBindingsDisabledError(&resp.Diagnostics, "")
 			default:
 				AddAPIError(&resp.Diagnostics, "read role binding for import", err)
 			}
@@ -398,6 +408,12 @@ func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.Impo
 		AddConfigError(&resp.Diagnostics, "Role Binding Is Not Held by a User Group",
 			fmt.Sprintf("Role binding %q is held by a %s, not a user group. anyscale_role_binding manages only user group bindings.",
 				bindingID, binding.PrincipalType))
+		return
+	}
+	if !isManagedRoleBindingScope(binding.ResourceType) {
+		AddConfigError(&resp.Diagnostics, "Role Binding Scope Not Supported",
+			fmt.Sprintf("Role binding %q is held on a %s, which anyscale_role_binding does not manage. It manages bindings on an organization, cloud or project.",
+				bindingID, binding.ResourceType))
 		return
 	}
 
