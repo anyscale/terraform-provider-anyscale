@@ -207,6 +207,8 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewServiceResource,
 		NewSchedulerConfigResource,
 		NewSystemClusterResource,
+		NewUserGroupResource,
+		NewUserGroupMembersResource,
 	}
 }
 
@@ -238,5 +240,7 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewServicesDataSource,
 		NewSystemClusterDataSource,
 		NewUserDataSource,
+		NewUserGroupDataSource,
+		NewUserGroupsDataSource,
 	}
 }

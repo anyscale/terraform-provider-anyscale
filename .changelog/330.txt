@@ -1,0 +1,19 @@
+```
+release-note:new-resource
+resource/anyscale_user_group: (Alpha) Manage an Anyscale user group; the Anyscale API and this schema may change drastically before Beta.
+```
+
+```
+release-note:new-resource
+resource/anyscale_user_group_members: (Alpha) Manage a user group's membership by email address; the Anyscale API and this schema may change drastically before Beta.
+```
+
+```
+release-note:new-data-source
+data-source/anyscale_user_group: (Alpha) Look up an Anyscale user group by name or ID; the Anyscale API and this schema may change drastically before Beta.
+```
+
+```
+release-note:new-data-source
+data-source/anyscale_user_groups: (Alpha) List the organization's Anyscale user groups; the Anyscale API and this schema may change drastically before Beta.
+```

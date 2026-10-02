@@ -1,178 +1,77 @@
-# Deferred: `anyscale_user_group` / `anyscale_resource_policy` (groups + policy write surface)
+# User groups: what shipped (Alpha) and what is still deferred
 
-**Status: fully researched against live source and a live org, deliberately not built.**
+**Status: groups and membership ship as Alpha. Group roles, and cloud/project grants for groups, remain
+deferred.** This document records the reasoning so the deferred half is not re-researched from scratch.
+User-facing behavior is in the "User groups (Alpha)" section of `templates/guides/rbac.md`.
 
-This is not a stalled effort and there is no half-finished code to pick back up — the decision
-this time was made at the *design* stage, before any resource code was written. What exists is
-the research: a real backend/schema trace plus one live confirmation, both expensive to redo.
-This document exists so nobody has to redo them.
+## Shipped (Alpha)
 
-## Why this is deferred
+`anyscale_user_group` (create, rename, delete), `anyscale_user_group_members` (authoritative member
+list keyed by email), and the `anyscale_user_group` / `anyscale_user_groups` data sources, over
+`/api/v2/user_groups`. Both the Anyscale API and the provider schema may change before Beta.
 
-The user's original ask (2026-07-27, RBAC/organization_user redesign) included an ideal-world
-`anyscale_group` resource: users belong to groups, groups get permissions. Anyscale's API turned
-out to already have exactly that shape — `POST/GET/PATCH/DELETE /user_groups/` for the group
-object, and a uniform, declarative, full-replace policy API (`PUT /policy/{resource_type}/{id}`,
-`resource_type` ∈ `cloud | project | organization`) for granting a group permissions at all three
-levels. On paper this is the closest thing in the whole Anyscale API to a Terraform-native design.
+Two earlier blockers no longer apply:
 
-The user confirmed deferring the write surface on 2026-07-27 ("skip for now"), after reviewing the
-findings below in summary form. It is not being built this pass because five independent findings,
-taken together, mean a Terraform resource here would be either non-functional, silently unsafe, or
-both:
+- **Membership has a write path.** `POST|DELETE /user_groups/{id}/members` exist and are idempotent.
+  Membership is no longer written only by the directory-sync poller, which is what made a `members`
+  argument a state-only fiction.
+- **Synced groups are detectable.** The group model carries a `source` marker (`scim`, `user`, or
+  absent for groups created before April 2026), so the provider can refuse to manage directory-owned
+  groups instead of fighting the identity provider.
 
-1. **The group path cannot express the roles this redesign was prompted by (decisive).** The
-   policy API's role vocabulary is per resource type and narrower than the per-user APIs:
-   `policy cloud: write | readonly`, `policy project: owner | write | readonly`,
-   `policy organization: owner | collaborator`. None of the restricted cloud roles —
-   `project_viewer`, `compute_config_viewer`, `workload_operator` — are assignable to a group at
-   all. The group/policy path and the new per-user-roles path are disjoint. A group cannot be
-   granted the very roles the user asked to model. Whoever revisits this should treat "can the
-   policy API express role X" as a per-role question, not assume parity with the per-user API.
+The first attempt at this surface (`anyscale_user_group`, `anyscale_policy_binding`, removed in
+PR #85) failed because its acceptance tests silently skipped for lack of a SCIM-synced group. With a
+member write path, tests create their own groups, so that failure mode no longer applies.
 
-2. **Group membership has no write path anywhere in the backend, not just the public API.**
-   `POST /user_groups/` creates a group with a name only. The only production code path that ever
-   inserts a row into `user_group_memberships` is the WorkOS directory-sync event poller
-   (`workos_users_reconciler` → `_handle_group_user_added` → `create_user_group_membership`) — a
-   background job reacting to an external identity provider's webhook, not anything an API caller
-   can invoke. The DAO's batch member-write helpers exist in code but are dead — referenced only
-   from tests. Anyscale is not itself a SCIM service provider; WorkOS is, and Anyscale polls it.
-   There is no `/scim/v2/Groups` endpoint to reach for as an alternative. A Terraform resource with
-   a `members` argument would be a state-only fiction: it would appear to work, diverge silently
-   from the real directory on the next sync, and Anyscale would never see what Terraform thinks
-   membership is. `members` may only ever be `Computed`, sourced from
-   `GET /user_groups/memberships/list`.
+## Still deferred
 
-3. **Group destroy is provably unclean.** `delete_user_group` soft-deletes the group and its
-   memberships but never touches `resource_permissions` — the group's role bindings survive the
-   delete permanently. Worse, the binding-merge helper on every subsequent policy write carries
-   every existing principal forward except the one actually being changed, so a later role grant
-   to a *different* group silently re-writes the dead group's id back into the policy, forever.
-   The dangling binding is invisible through the API — `GET /user_groups/{group_id}` 404s once the
-   group is deleted, while its binding persists — and there is no way to clean it up after the
-   fact: an explicit policy `PUT` that still includes the dead id is rejected as referencing a
-   nonexistent principal. A create → grant → destroy → recreate cycle leaves permanent residue,
-   and the recreated group gets a new id, so the old binding never resolves to anything again. A
-   resource whose `Delete` provably leaks backend state is not shippable without either a backend
-   fix or a very loudly documented, user-accepted caveat — this pass did neither.
+1. **Group organization roles** (`PUT /user_groups/{id}/roles`). There is no "clear roles" route:
+   `base_role` is required, so removing the block from configuration could only write
+   `collaborator, []`, and whether that equals "no grant" is unverified (additional roles also carry
+   deny semantics). The first write also creates an organization-level permission row, which opens the
+   policy API for the whole organization. That side effect needs an explicit product decision.
+2. **Cloud, project, and organization grants for groups** (`PUT /policy/{resource_type}/{id}`). The
+   endpoint is gated by `enable-new-policy-api-access`, whose own docstring says the lock-down is
+   deliberate. Its role vocabulary is narrower than the per-user APIs (cloud `write|readonly`, project
+   `owner|write|readonly`, organization `owner|collaborator`): `project_viewer`,
+   `compute_config_viewer`, and `workload_operator` cannot be granted to a group. Its full-replace
+   authority would also collide with `anyscale_cloud_access`, which already refuses to fight group
+   bindings. If revisited, model one resource owning the whole binding set per `resource_type` +
+   `resource_id`; the API cannot do additive writes and faking it means read-modify-write races.
+3. **A per-member group resource.** Deliberately not shipped alongside the authoritative one: two
+   authority models over one set is the mistake that removed `anyscale_cloud_user_role`.
 
-4. **Directory-synced groups are unprotected and the provider cannot even detect them.**
-   `PATCH` (rename) and `DELETE` have no guard of any kind against operating on an IdP-synced
-   group — nothing stops Terraform from renaming or deleting a group the customer's directory
-   owns, only to have the next sync fight it. And the provider has no way to tell the two apart:
-   the `UserGroup` model returned by every `user_groups` route omits the WorkOS-origin columns
-   entirely; the one place a `created_by_type: "scim"` marker is actually exposed is a completely
-   different, unrelated endpoint (`POST /organization_user_groups_collaborators/search`). A safe
-   implementation would have to consult a second endpoint before every destructive call just to
-   know whether the destructive call is safe. For contrast: the existing org-collaborator surface
-   already guards this exact case (a 409 pointing at directory sync); the user_groups router has
-   no equivalent today.
+## Backend behavior the Alpha design works around
 
-5. **No other Anyscale client writes groups today.** The Anyscale CLI's user-group surface is
-   read-only (`list`, `get`, `membership list`); there is no CLI create/delete/rename/set-roles,
-   and the public SDK mirrors that. Under this repo's own "expose a surface only for a real
-   end-user consumption path" rule, a *managed* group resource would put this provider ahead of
-   every other Anyscale client, with no precedent anywhere else that the write shape is even
-   correct in practice.
+- **Group delete does not revoke what the group's membership derived.** It soft-deletes the group and
+  its memberships but does not touch the role bindings the group wrote, and a later policy write can
+  carry the dead group's id forward. `anyscale_user_group` therefore empties the group before deleting
+  it. That a removed member actually loses access is not yet confirmed by a real write probe.
+- **Deleting a directory-synced group is not guarded by the API** (rename is, with a 409). The provider
+  guards it by refusing to manage `scim` groups.
+- **`/memberships/list` silently drops departed users** and is unpaginated; the members resource
+  re-reads the whole organization's memberships on every refresh.
+- **Duplicate group names** return a 409 on create. The provider surfaces it with a hint to import
+  the existing group, and does not retry.
 
-**Empirical, not just theoretical — checked live, 2026-07-27:** the one real org this session's
-token could reach had **zero user groups**. That is the identical precondition that made the
-acceptance tests for this repo's *first* attempt at this surface silently skip
-(`anyscale_user_group`, `anyscale_user_groups`, `anyscale_policy_binding`, removed 2026-07-10 in
-PR #85, `38b8420` — "wrapped an Anyscale SCIM provisioning feature that has never been enabled
-behind its backend feature flag" with acceptance tests that "silently skipped for lack of a real
-SCIM-synced user group"). Building the write surface again now would very likely re-ship the same
-untestable surface for the same reason it was removed the first time. **Whoever revisits this
-should check group count in the target test org first** — if it is still zero, the answer is
-still no, regardless of how the other four findings above have changed.
+## Why membership is keyed by email
 
-Finally, and separately from all of the above: the policy-write endpoint itself
-(`PUT /policy/{resource_type}/{id}`) is gated by a flag (`enable-new-policy-api-access`) whose own
-docstring states its purpose plainly — *"we block access to the policy api to all users who have
-not already used the policy api. This effectively disables all practical uses of SCIM."* That is a
-deliberate lock-down, not an incomplete rollout in progress. A live probe against this session's
-org returned exactly the 403 that docstring predicts. Do not treat "the endpoints exist in the
-OpenAPI spec" as evidence the feature is reachable by a normal customer org.
+Member IDs on this API are `usr_...`, which is `user_id` on `anyscale_organization_user(s)` and not
+the `ide_...` `id`. The resource takes emails, the key every other RBAC resource here uses, and
+resolves them through the existing organization-user lookup.
 
-## What this does NOT block
+## Underlying model
 
-The **read-only** half of this investigation is not deferred and should not be confused with the
-parts above:
+SpiceDB's `role_binding` binds only `user_group#member`: an individual user cannot hold a role at any
+level. Every per-user permission API is a facade over a system-managed per-user group. This is why the
+policy API accepts only group principals, and why exposing real, customer-managed groups is the
+structurally natural model. The provider never talks to SpiceDB; Postgres is the system of record and
+API reads are immediate.
 
-- **`anyscale_user_group` / `anyscale_user_groups` data sources** (read-only: `list`, `get`,
-  `membership list`) are a low-risk, independent addition — the exact same read paths the Anyscale
-  CLI itself uses, so there is a demonstrated consumption path (finding 5 above is about *writes*,
-  not reads). These make `anyscale_user.user_group_ids` (an existing, previously-unresolvable
-  opaque id list) actually useful, and give anyone who loses the `user_group_ids` attribute to its
-  removal from the `anyscale_user` data source a real replacement instead of a dead end.
-- **The org/cloud/project per-user role resources** (the rest of this redesign — the
-  `organization_user` rename and `anyscale_cloud_user_role`) are unrelated to this deferral. They
-  model the existing per-user RBAC surface directly and do not depend on anything above.
+## Revisiting the deferred half
 
-## What already exists (do not redo this)
-
-No code. What exists is the research, all captured above and cited from primary sources at the
-time this was written:
-
-- The full request/response shapes for `user_groups` CRUD and `policy/{resource_type}/{id}`,
-  traced against the live OpenAPI spec.
-- The backend source trace behind findings 2–4 above (`user_groups_dao.py`, the WorkOS reconciler
-  call chain, `delete_user_group`, the policy binding-merge helper, the `UserGroup` response
-  model's omitted WorkOS columns).
-- The SpiceDB schema finding, which is the deepest thing this investigation surfaced and is not
-  written down anywhere else in this repository: `go/infra/iam/spicedb/schema.zed` defines
-  `role_binding` with `relation bound_user: user_group#member` — **groups only**. An individual
-  user cannot be bound to a role at Anyscale at all, at any level; every per-user permission API
-  (org collaborator, cloud roles, project roles) is a facade in front of a system-managed,
-  per-user `UserGroupType` bucket that the backend creates and maintains for you. This is *why*
-  the policy API accepts only group principals (finding 1's narrower vocabulary aside) — it is not
-  an arbitrary restriction, it is the one principal type the backend's authorization model has.
-  The group-shaped model the user originally asked for is, structurally, the model Anyscale
-  actually runs on internally. The entire gap discussed in this document is that the *customer-
-  facing* half of that model — who is in a group — is owned by the directory sync integration, not
-  by any API a Terraform provider can call.
-- One live, empirical result (not just source-level): the target org's user-group count (zero),
-  and a live 403 from the policy-write endpoint matching its gating flag's stated intent.
-
-## Two API asks that would change this calculus
-
-Both were drafted this session (as a single, external, one-page request; not preserved in this
-repository, since it is meant to be sent rather than kept) and both remain open asks, not
-confirmed roadmap:
-
-1. **A group add-member and remove-member endpoint.** This is the one gap that actually matters —
-   everything about groups and policy is otherwise real, first-class, and already API-manageable.
-   The argument for asking: Anyscale's own authorization model is already group-first (see the
-   SpiceDB finding above) and its policy API already accepts only group principals — so this is
-   not a request to add a new concept, it is a request for the one missing write that would let a
-   caller populate a concept the backend already has everywhere else.
-2. **Folded into the same ask, two smaller and cheaper fixes if anyone is already touching this
-   backend surface:** cascade role-binding revocation into group delete (closes finding 3, the
-   permanent dangling-binding leak), and a way for a client to tell a directory-synced group apart
-   from a manually-created one (closes finding 4's detection gap, whether or not delete/rename
-   protection is added alongside it).
-
-## Revisiting this
-
-In order, before writing any resource code:
-
-1. **Check live group count in the target org again.** If it is still zero, stop — the acceptance
-   test problem that killed this surface once (PR #85) and again in this pass has not changed, and
-   no amount of code quality on the resource side fixes an empty test fixture.
-
-2. **Check whether finding 1 (role-vocabulary parity) has changed** — i.e., whether the policy
-   API's per-resource-type role lists have grown to include the roles this redesign actually
-   wants to model. If the group path still cannot express `project_viewer` /
-   `compute_config_viewer` / `workload_operator`, groups are not a substitute for the per-user
-   resources regardless of anything else on this list.
-3. **Check whether either API ask above has landed** — an add-member endpoint in particular is a
-   precondition for a `members` argument to ever be anything other than `Computed`.
-4. **Re-verify findings 3 and 4 (destroy leak, sync-protection gap) against current source** —
-   these are backend behaviors this document did not get fixed, not backend behaviors this
-   document expects to have silently changed.
-5. Only then design the resource(s) — at that point, `PUT /policy/{resource_type}/{id}`'s
-   authoritative-full-replace shape (§5.2 of this quest's design record, if still available) is
-   still the right resource shape for the policy half: one resource owning the whole binding set
-   for a given `resource_type` + `resource_id`, never an additive per-binding variant, since the
-   API itself cannot do additive and faking it would mean read-modify-write races between
-   concurrent applies.
+1. Check whether a clear-roles route exists and whether `{collaborator, []}` is equivalent to no grant.
+2. Check whether the policy API gate has been lifted for ordinary organizations, and whether its role
+   vocabulary now covers `project_viewer`, `compute_config_viewer`, and `workload_operator`.
+3. Re-verify the delete behavior above against current source; it is a backend behavior the provider
+   works around, not one it fixed.
