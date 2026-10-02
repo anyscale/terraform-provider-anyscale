@@ -1,8 +1,8 @@
 # User groups: what shipped (Alpha) and what is still deferred
 
-**Status: groups and membership ship as Alpha. Group roles, and cloud/project grants for groups, remain
-deferred.** This document records the reasoning so the deferred half is not re-researched from scratch.
-User-facing behavior is in the "User groups (Alpha)" section of `templates/guides/rbac.md`.
+**Status: groups, membership, and per-group role bindings ship as Alpha. Group organization roles and an
+authoritative whole-set policy resource remain deferred.** This document records the reasoning so the deferred half is not re-researched from
+scratch. User-facing behavior is in the "User groups (Alpha)" and "Role bindings (Alpha)" sections of `templates/guides/rbac.md`.
 
 ## Shipped (Alpha)
 
@@ -30,14 +30,16 @@ member write path, tests create their own groups, so that failure mode no longer
    `collaborator, []`, and whether that equals "no grant" is unverified (additional roles also carry
    deny semantics). The first write also creates an organization-level permission row, which opens the
    policy API for the whole organization. That side effect needs an explicit product decision.
-2. **Cloud, project, and organization grants for groups** (`PUT /policy/{resource_type}/{id}`). The
-   endpoint is gated by `enable-new-policy-api-access`, whose own docstring says the lock-down is
-   deliberate. Its role vocabulary is narrower than the per-user APIs (cloud `write|readonly`, project
-   `owner|write|readonly`, organization `owner|collaborator`): `project_viewer`,
-   `compute_config_viewer`, and `workload_operator` cannot be granted to a group. Its full-replace
-   authority would also collide with `anyscale_cloud_access`, which already refuses to fight group
-   bindings. If revisited, model one resource owning the whole binding set per `resource_type` +
-   `resource_id`; the API cannot do additive writes and faking it means read-modify-write races.
+2. **An authoritative per-resource policy resource** (`PUT /policy/{resource_type}/{id}`). The
+   endpoint is gated by `enable-new-policy-api-access`, and its role vocabulary is narrower than the
+   role-bindings API (cloud `write|readonly`, project `owner|write|readonly`, organization
+   `owner|collaborator`). Its full-replace authority would also collide with `anyscale_cloud_access`,
+   which already refuses to fight group bindings. Group grants ship instead as granular, immutable
+   `anyscale_role_binding` resources (Alpha, behind a feature flag), which can hold the newer roles
+   (`project_viewer`, `compute_config_viewer`, `workload_operator`) and never own a resource's whole
+   binding set. If a whole-set resource is ever wanted, it must own every direct binding per
+   `resource_type` + `resource_id`; the API cannot do additive writes through that route, and faking
+   it means read-modify-write races.
 3. **A per-member group resource.** Deliberately not shipped alongside the authoritative one: two
    authority models over one set is the mistake that removed `anyscale_cloud_user_role`.
 
@@ -71,7 +73,8 @@ API reads are immediate.
 ## Revisiting the deferred half
 
 1. Check whether a clear-roles route exists and whether `{collaborator, []}` is equivalent to no grant.
-2. Check whether the policy API gate has been lifted for ordinary organizations, and whether its role
-   vocabulary now covers `project_viewer`, `compute_config_viewer`, and `workload_operator`.
+2. Check whether the `PUT /policy` gate has been lifted for ordinary organizations and whether its
+   role vocabulary now matches the role-bindings API; only then is a whole-set resource worth
+   considering.
 3. Re-verify the delete behavior above against current source; it is a backend behavior the provider
    works around, not one it fixed.
