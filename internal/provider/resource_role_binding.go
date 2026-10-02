@@ -276,8 +276,6 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 	binding, err := findRoleBindingForGroup(ctx, r.client, resourceType, resourceID, state.UserGroupID.ValueString(), bindingID)
 	if err != nil {
 		if isRoleBindingsDisabled(err) {
-			// Never RemoveResource on the 404 alone: the flag being turned
-			// off would otherwise drop every binding from state.
 			enabled, probeErr := roleBindingsEnabled(ctx, r.client)
 			switch {
 			case probeErr != nil:
@@ -285,9 +283,8 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 			case !enabled:
 				addRoleBindingsDisabledError(&resp.Diagnostics, roleBindingsDisabledReadOutcome)
 			default:
-				// The feature is on, so the 404 names the group or the
-				// resource the binding was held on, which is gone.
-				tflog.Warn(ctx, "Role binding scope or group not found, removing from state",
+				// The feature is on, so the group no longer exists.
+				tflog.Warn(ctx, "Role binding's user group not found, removing from state",
 					map[string]any{"role_binding_id": bindingID, "detail": extractAPIErrorDetail(err)})
 				resp.State.RemoveResource(ctx)
 			}
@@ -304,8 +301,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 		return
 	}
 	if binding == nil {
-		// Revoked outside Terraform, or the group was deleted: a deleted
-		// group answers with an empty listing.
+		// Revoked outside Terraform, or the group no longer exists.
 		tflog.Warn(ctx, "Role binding not found, removing from state", map[string]any{"role_binding_id": bindingID})
 		resp.State.RemoveResource(ctx)
 		return
@@ -345,9 +341,8 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 		return
 	}
 
-	// The backend checks the binding's own permission before looking it up,
-	// so a binding that is already revoked answers 403. The listing tells
-	// that apart from a real refusal.
+	// A revoked binding answers 403; the listing tells that from a real
+	// refusal.
 	resourceType, resourceID := state.scope()
 	binding, listErr := findRoleBindingForGroup(ctx, r.client, resourceType, resourceID, state.UserGroupID.ValueString(), bindingID)
 	switch {
@@ -364,9 +359,8 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 }
 
 // handleDeleteNotFound settles a 404 met while deleting. With the feature on,
-// the binding, its group or its resource is gone, so the delete has nothing
-// left to do; with it off, nothing can be revoked and the binding stays in
-// state.
+// the binding or its group is gone, so there is nothing left to revoke; with
+// it off, the binding stays in state.
 func (r *RoleBindingResource) handleDeleteNotFound(ctx context.Context, diags *diag.Diagnostics, bindingID string, notFoundErr error) {
 	enabled, probeErr := roleBindingsEnabled(ctx, r.client)
 	switch {

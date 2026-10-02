@@ -90,14 +90,10 @@ type roleListResponse struct {
 	Metadata pagedListMetadata `json:"metadata"`
 }
 
-// isRoleBindingsDisabled reports whether err is the response the roles and
-// role bindings routes give when the organization does not have the feature:
-// every route in both routers answers 404 while the flag is off. Within these
-// routes a 404 means nothing else that the provider asks about, and the
-// detail text is not a stable contract, so the status alone decides.
-//
-// A 404 here must never be read as "the binding is gone": that would empty
-// state of every binding whenever the flag is turned off.
+// isRoleBindingsDisabled reports a 404, which every roles and role_bindings
+// route returns when the feature is off. Create, Read and Delete can also get
+// a real 404, so they call roleBindingsEnabled first; never read a bare 404 as
+// gone.
 func isRoleBindingsDisabled(err error) bool {
 	return errors.Is(err, ErrNotFound)
 }
@@ -141,10 +137,8 @@ func createRoleBinding(ctx context.Context, client *Client, req createRoleBindin
 	return &resp.Result, nil
 }
 
-// getRoleBinding fetches one binding by ID. The backend checks the binding's
-// own permission before it looks the binding up, so an ID that does not exist
-// (or was revoked) answers 403, not 404. Use it only where a 403 can be
-// reported as-is: import. Read and Delete use listRoleBindingsForGroup.
+// getRoleBinding fetches one binding by ID. A revoked ID answers 403, not 404,
+// so only import uses it.
 func getRoleBinding(ctx context.Context, client *Client, roleBindingID string) (*roleBindingResult, error) {
 	resp, err := DoRequestAndParse[roleBindingResponse](ctx, client, "GET", roleBindingPath(roleBindingID), nil, http.StatusOK)
 	if err != nil {
@@ -159,9 +153,8 @@ func deleteRoleBinding(ctx context.Context, client *Client, roleBindingID string
 }
 
 // listRoleBindingsForGroup returns every binding the group holds directly on
-// one resource. A group that holds nothing there, or no longer exists,
-// answers with an empty list rather than an error, which is what lets Read
-// tell a revoked binding from a disabled feature (404).
+// one resource. The empty list lets Read tell a revoked binding from a
+// disabled feature.
 func listRoleBindingsForGroup(ctx context.Context, client *Client, resourceType, resourceID, groupID string) ([]roleBindingSummary, error) {
 	path := fmt.Sprintf("%s/%s/%s/principals/%s/%s", roleBindingsBasePath,
 		url.PathEscape(resourceType), url.PathEscape(resourceID), roleBindingPrincipalUserGroup, url.PathEscape(groupID))
@@ -231,7 +224,7 @@ func roleBindingsEnabled(ctx context.Context, client *Client) (bool, error) {
 }
 
 // addRoleBindingsProbeFailedError reports a 404 that roleBindingsEnabled could
-// not classify. It fails closed: callers keep state unchanged.
+// not classify.
 func addRoleBindingsProbeFailedError(diags *diag.Diagnostics, operation string, notFoundErr, probeErr error) {
 	diags.AddError("Could Not Classify Role Binding 404",
 		fmt.Sprintf("The Anyscale API returned 404 Not Found to %s (%s), and checking whether role bindings are enabled also failed: %s. "+
