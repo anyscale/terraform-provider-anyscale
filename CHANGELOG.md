@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] - 2026-10-02
+
+### New Resources
+
+- resource/anyscale_user_group: (Alpha) Manage an Anyscale user group; the Anyscale API and this schema may change drastically before Beta.
+- resource/anyscale_user_group_members: (Alpha) Manage a user group's membership by email address; the Anyscale API and this schema may change drastically before Beta.
+- resource/anyscale_role_binding: (Alpha) Grant a role to a user group on an organization, cloud, or project; behind a feature flag (contact support@anyscale.com for access), and the Anyscale API and this schema may change drastically before Beta.
+
+### New Data Sources
+
+- data-source/anyscale_user_group: (Alpha) Look up an Anyscale user group by name or ID; the Anyscale API and this schema may change drastically before Beta.
+- data-source/anyscale_user_groups: (Alpha) List the organization's Anyscale user groups; the Anyscale API and this schema may change drastically before Beta.
+- data-source/anyscale_role: (Alpha) Look up an Anyscale role by name; behind a feature flag (contact support@anyscale.com for access), and the Anyscale API and this schema may change drastically before Beta.
+
+### Known Limitations
+
+- Group membership (`anyscale_user_group_members`) and role bindings (`anyscale_role_binding`, `anyscale_role`) are verified by mock-based tests only; their real-API tests have not run. Role bindings also require a feature flag on your organization; contact support@anyscale.com for access.
+
 ## [0.29.0] - 2026-10-01
 
 ### Breaking Changes
@@ -1152,7 +1170,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.30.0
 [0.29.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.29.0
 [0.28.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.3
 [0.28.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.2
