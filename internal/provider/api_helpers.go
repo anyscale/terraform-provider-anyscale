@@ -190,6 +190,7 @@ func PaginatedRequest[T any](
 ) ([]T, error) {
 	allItems := []T{}
 	nextToken := ""
+	seenTokens := map[string]struct{}{}
 
 	for {
 		// Build query parameters for this page
@@ -227,6 +228,10 @@ func PaginatedRequest[T any](
 			break
 		}
 		nextToken = *nextTokenPtr
+		if _, seen := seenTokens[nextToken]; seen {
+			return nil, fmt.Errorf("pagination response repeated paging token %q", nextToken)
+		}
+		seenTokens[nextToken] = struct{}{}
 
 		tflog.Debug(ctx, "Fetching next page", map[string]any{
 			"items_so_far": len(allItems),
