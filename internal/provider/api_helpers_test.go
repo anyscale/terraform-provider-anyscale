@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDoRequestAndParse(t *testing.T) {
@@ -360,6 +361,52 @@ func TestPaginatedRequest(t *testing.T) {
 
 		if requestCount != 2 {
 			t.Errorf("expected 2 requests, got %d", requestCount)
+		}
+	})
+
+	t.Run("repeated paging token fails instead of looping forever", func(t *testing.T) {
+		requestCount := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"results": [{"id": "1"}],
+				"metadata": {"total": 1, "next_paging_token": "stuck"}
+			}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithToken(server.URL, "test-token")
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		type TestItem struct {
+			ID string `json:"id"`
+		}
+
+		_, err := PaginatedRequest(ctx, client, "/test", nil,
+			func(body []byte) ([]TestItem, *string, error) {
+				var resp struct {
+					Results  []TestItem `json:"results"`
+					Metadata struct {
+						NextPagingToken *string `json:"next_paging_token"`
+					} `json:"metadata"`
+				}
+				if err := unmarshalJSON(body, &resp); err != nil {
+					return nil, nil, err
+				}
+				return resp.Results, resp.Metadata.NextPagingToken, nil
+			},
+		)
+
+		if err == nil {
+			t.Fatal("expected repeated paging token to return an error")
+		}
+		if !strings.Contains(err.Error(), `repeated paging token "stuck"`) {
+			t.Fatalf("expected repeated-token error, got: %v", err)
+		}
+		if requestCount != 2 {
+			t.Errorf("expected pagination to stop after 2 requests, got %d", requestCount)
 		}
 	})
 

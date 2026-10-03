@@ -1,0 +1,4 @@
+```
+release-note:fixed
+provider: Stop list and data-source requests from looping indefinitely when the API repeats a pagination cursor.
+```
