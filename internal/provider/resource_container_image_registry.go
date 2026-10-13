@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -24,6 +25,7 @@ var (
 	_ resource.Resource                = &ContainerImageRegistryResource{}
 	_ resource.ResourceWithConfigure   = &ContainerImageRegistryResource{}
 	_ resource.ResourceWithImportState = &ContainerImageRegistryResource{}
+	_ resource.ResourceWithModifyPlan  = &ContainerImageRegistryResource{}
 )
 
 // defaultBYODRayVersion is sent to the BYOD create endpoints when the user omits
@@ -78,7 +80,7 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 	resp.Schema = schema.Schema{
 		Version: 1,
 
-		MarkdownDescription: `Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Every configurable attribute requires replacing the resource; there is no in-place update.
+		MarkdownDescription: `Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Changing ` + "`image_uri`" + ` registers a new build in place; changing any other argument replaces the resource.
 
 ~> **Note:** When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting ` + "`include_archived = true`" + ` on the ` + "`anyscale_container_images`" + ` data source.`,
 
@@ -115,10 +117,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		},
 		"image_uri": schema.StringAttribute{
 			Required:            true,
-			MarkdownDescription: "The full URI of the Docker image to register (e.g., `docker.io/myrepo/image:v2` or `123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest`).",
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.RequiresReplace(),
-			},
+			MarkdownDescription: "The full URI of the Docker image to register (e.g., `docker.io/myrepo/image:v2` or `123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest`). Changing it registers a new build of the same image in place, incrementing `revision`.",
 		},
 		"ray_version": schema.StringAttribute{
 			Optional:            true,
@@ -334,19 +333,28 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	}
 
 	// Call 2 of 2: create the build from the registered image.
+	if !r.createBuild(ctx, &plan, templateName, rayVersion, &resp.Diagnostics) {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// createBuild registers plan.ImageURI as a new build of the cluster environment plan.ID
+// and maps the build onto plan. Update uses it too, to register a changed image_uri.
+func (r *ContainerImageRegistryResource) createBuild(ctx context.Context, plan *ContainerImageRegistryResourceModel, templateName, rayVersion string, diags *diag.Diagnostics) bool {
 	buildReq := CreateBYODBuildRequest{
-		ApplicationTemplateID: templateID,
+		ApplicationTemplateID: plan.ID.ValueString(),
 		ConfigJSON: CreateBYODAppConfigConfigJSON{
 			DockerImage:         plan.ImageURI.ValueString(),
 			RayVersion:          rayVersion,
-			RegistryLoginSecret: configJSON.RegistryLoginSecret,
+			RegistryLoginSecret: plan.RegistryLoginSecret.ValueStringPointer(),
 		},
 	}
 
 	buildReqBody, err := MarshalRequestBody(buildReq)
 	if err != nil {
-		AddJSONError(&resp.Diagnostics, "marshal", "container image registry build request", err)
-		return
+		AddJSONError(diags, "marshal", "container image registry build request", err)
+		return false
 	}
 
 	buildResp, err := DoRequestAndParse[BuildResponse](
@@ -359,8 +367,8 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		http.StatusCreated,
 	)
 	if err != nil {
-		AddAPIError(&resp.Diagnostics, "register container image build", err)
-		return
+		AddAPIError(diags, "register container image build", err)
+		return false
 	}
 
 	result := buildResp.Result
@@ -376,7 +384,7 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	// resource reliably gets a non-null digest too.
 	settledBuild, digestSettled := waitForBuildDigest(ctx, r.client, &result)
 	if !digestSettled {
-		AddDigestNotSettledWarning(&resp.Diagnostics, settledBuild.ID)
+		AddDigestNotSettledWarning(diags, settledBuild.ID)
 	}
 	result = *settledBuild
 
@@ -415,8 +423,30 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		plan.NameVersion = types.StringNull()
 	}
 
-	// Save data into Terraform state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	return true
+}
+
+// ModifyPlan marks the build-derived attributes unknown when image_uri changes, since
+// Update then registers a new build.
+func (r *ContainerImageRegistryResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var plan, state ContainerImageRegistryResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() || plan.ImageURI.Equal(state.ImageURI) {
+		return
+	}
+
+	plan.BuildID = types.StringUnknown()
+	plan.BuildStatus = types.StringUnknown()
+	plan.CreatedAt = types.StringUnknown()
+	plan.Revision = types.Int64Unknown()
+	plan.Digest = types.StringUnknown()
+	plan.NameVersion = types.StringUnknown()
+	resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
 }
 
 // Read refreshes the Terraform state with the latest data.
@@ -550,11 +580,10 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// Update handles exactly one change: registry_login_secret being set on an
-// imported container image, which RequiresReplaceUnlessUnrecoverable plans as
-// an in-place update because import does not recover the secret. The value is
-// recorded in state and not sent - the image is not changed. Every other
-// attribute requires replacement, so any other diff reaching here is an error.
+// Update handles two in-place changes. A changed image_uri registers a new build on the
+// same cluster environment, as `anyscale image register` does for an existing name. A
+// registry_login_secret set after import (see RequiresReplaceUnlessUnrecoverable) is
+// recorded in state and only sent if image_uri also changed.
 func (r *ContainerImageRegistryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state ContainerImageRegistryResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -563,18 +592,26 @@ func (r *ContainerImageRegistryResource) Update(ctx context.Context, req resourc
 		return
 	}
 
-	adoptOnly := state.RegistryLoginSecret.IsNull() && !plan.RegistryLoginSecret.IsNull() &&
-		plan.Name.Equal(state.Name) &&
-		plan.ImageURI.Equal(state.ImageURI) &&
-		plan.RayVersion.Equal(state.RayVersion)
-	if !adoptOnly {
+	if !plan.Name.Equal(state.Name) || !plan.RayVersion.Equal(state.RayVersion) {
 		AddConfigError(&resp.Diagnostics, "Update Not Supported",
-			"Container image registry resources cannot be updated in-place. All changes require replacement.")
+			"Changing name or ray_version requires replacing the container image.")
 		return
 	}
 
-	state.RegistryLoginSecret = plan.RegistryLoginSecret
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	if plan.ImageURI.Equal(state.ImageURI) {
+		state.RegistryLoginSecret = plan.RegistryLoginSecret
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+		return
+	}
+
+	rayVersion := defaultBYODRayVersion
+	if plan.RayVersion.ValueString() != "" {
+		rayVersion = plan.RayVersion.ValueString()
+	}
+	if !r.createBuild(ctx, &plan, plan.Name.ValueString(), rayVersion, &resp.Diagnostics) {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 // Delete deletes the resource and removes the Terraform state on success.

@@ -3,13 +3,13 @@
 page_title: "anyscale_container_image_registry Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Every configurable attribute requires replacing the resource; there is no in-place update.
+  Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Changing image_uri registers a new build in place; changing any other argument replaces the resource.
   ~> Note: When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting include_archived = true on the anyscale_container_images data source.
 ---
 
 # anyscale_container_image_registry (Resource)
 
-Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Every configurable attribute requires replacing the resource; there is no in-place update.
+Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Changing `image_uri` registers a new build in place; changing any other argument replaces the resource.
 
 ~> **Note:** When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting `include_archived = true` on the `anyscale_container_images` data source.
 
@@ -49,7 +49,7 @@ output "registry_image_digest" {
 
 ### Required
 
-- `image_uri` (String) The full URI of the Docker image to register (e.g., `docker.io/myrepo/image:v2` or `123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest`).
+- `image_uri` (String) The full URI of the Docker image to register (e.g., `docker.io/myrepo/image:v2` or `123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest`). Changing it registers a new build of the same image in place, incrementing `revision`.
 
 ### Optional
 
