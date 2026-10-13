@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_container_image_registry: Changing `image_uri` now registers a new build in place instead of replacing the image, which failed with 409 "This name is already taken".
+```
