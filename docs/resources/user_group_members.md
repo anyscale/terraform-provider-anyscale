@@ -40,12 +40,12 @@ resource "anyscale_user_group_members" "ml_platform" {
 
 ### Required
 
-- `group_id` (String) The ID of the user group whose members this resource manages. Changing it forces a new resource.
 - `members` (Set of String) Email addresses of the group's members. Each must already belong to the organization; invite new users first. Emails match case-insensitively. An empty set removes every member. A member who leaves the organization drops out of this set on the next refresh.
+- `user_group_id` (String) The ID of the user group whose members this resource manages (`ug_...`). Changing it forces a new resource.
 
 ### Read-Only
 
-- `id` (String) The user group ID; the same value as `group_id`.
+- `id` (String) The user group ID; the same value as `user_group_id`.
 
 ## Import
 
