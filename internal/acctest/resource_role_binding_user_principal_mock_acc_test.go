@@ -195,12 +195,13 @@ resource "anyscale_role_binding" "test" {
   cloud_id = %q
 }
 `, rbRole, rbCloud)
-	combination := regexp.MustCompile(`Invalid Attribute Combination`)
+	// The framework's ExactlyOneOf config validator reports the two cases
+	// under different summaries (configvalidator/exactly_one_of.go).
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			{Config: both, ExpectError: combination},
-			{Config: neither, ExpectError: combination},
+			{Config: both, ExpectError: regexp.MustCompile(`Invalid Attribute Combination`)},
+			{Config: neither, ExpectError: regexp.MustCompile(`Missing Attribute Configuration`)},
 		},
 	})
 	if w := m.takeWrites(); len(w) != 0 {
