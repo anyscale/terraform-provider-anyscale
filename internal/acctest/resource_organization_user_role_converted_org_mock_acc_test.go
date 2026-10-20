@@ -167,33 +167,46 @@ func TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors(t *testing.T) 
 	}
 }
 
-// Destroy clears declared deny_roles through the roles PUT; in a converted
-// organization that refusal is the same role-bindings diagnostic.
-func TestAccOrganizationUserRoleResource_ConvertedOrgDeleteErrors(t *testing.T) {
+// Destroy clears declared deny_roles through the roles PUT. In a converted
+// organization that write is refused; destroy must warn that the role was
+// left in place and drop the resource from state, never error, or the
+// resource could not be destroyed without terraform state rm. Driven through
+// the terraform CLI because resource.Test does not surface warnings.
+func TestAccOrganizationUserRoleResource_ConvertedOrgDestroyWarnsAndDropsState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, mock := newConvOrgUserRoleServer(t)
-	cfg := orgUserRoleConfig(server.URL, mock.email, "collaborator", `["image_reader"]`)
-	check, assertCalled := convOrgConvertedCheck(t, regexp.MustCompile(`Could\s+Not\s+Clear\s+Organization`))
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		// Lift the refusal as soon as the destroy has been judged, so the
-		// framework's teardown can destroy even when the assertion fails.
-		ErrorCheck: func(err error) error {
-			mock.set(0, "", 0, "")
-			return check(err)
-		},
-		Steps: []resource.TestStep{
-			{Config: cfg},
-			{
-				PreConfig: func() { mock.set(http.StatusConflict, convOrgConvertedDetail, 0, "") },
-				Config:    cfg,
-				Destroy:   true,
-			},
-		},
-	})
-	assertCalled()
-	if roles, _ := mock.failed(); roles != 1 {
-		t.Errorf("refused roles PUTs = %d, want 1 (the destroy)", roles)
+	run := cliDevWorkspace(t, orgUserRoleConfig(server.URL, mock.email, "collaborator", `["image_reader"]`))
+
+	if lines, out, err := run("apply", "-auto-approve", "-json"); err != nil || len(cliDiagnostics(lines, "error")) > 0 {
+		t.Fatalf("setup apply (unconverted) failed: %v %v\n%s", err, cliDiagnostics(lines, "error"), out)
+	}
+
+	mock.set(http.StatusConflict, convOrgConvertedDetail, http.StatusConflict, convOrgConvertedDetail)
+	lines, out, err := run("destroy", "-auto-approve", "-json")
+	if err != nil || len(cliDiagnostics(lines, "error")) > 0 {
+		t.Fatalf("destroy in a converted org must succeed with a warning, got: %v %v\n%s", err, cliDiagnostics(lines, "error"), out)
+	}
+	leftInPlace := regexp.MustCompile(`left\s+in\s+place`)
+	found := false
+	for _, l := range lines {
+		if l.Type == "diagnostic" && l.Diagnostic.Severity == "warning" &&
+			convOrgSummary.MatchString(l.Diagnostic.Summary) && leftInPlace.MatchString(l.Diagnostic.Detail) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want a warning %q whose detail says %s; got diagnostics: %v", convOrgSummary, leftInPlace, cliDiagnostics(lines, ""))
+	}
+	if roles, legacy := mock.failed(); roles+legacy == 0 {
+		t.Errorf("destroy made no refused write; the converted-org path was not exercised")
+	}
+
+	_, stateOut, err := run("state", "list")
+	if err != nil {
+		t.Fatalf("terraform state list: %v\n%s", err, stateOut)
+	}
+	if strings.Contains(stateOut, "anyscale_organization_user_role.mock") {
+		t.Errorf("resource still in state after destroy in a converted org:\n%s", stateOut)
 	}
 }
 

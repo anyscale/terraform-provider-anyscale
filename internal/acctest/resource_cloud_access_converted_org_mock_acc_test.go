@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -272,63 +269,14 @@ func TestAccCloudAccessResource_ConvertedOrgUpdateKeepsPriorState(t *testing.T) 
 // with or without the dedicated warning.
 func TestAccCloudAccessResource_ConvertedOrgDestroyWarnsAndDropsState(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
-	binDir := buildProviderBinaryForCLICheck(t)
 	m := newCloudAccessConvertedMock(t)
-
-	workDir := t.TempDir()
-	cliConfig := fmt.Sprintf(`
-provider_installation {
-  dev_overrides {
-    "terraform-providers/anyscale" = %[1]q
-  }
-  direct {}
-}
-`, binDir)
-	cliConfigPath := filepath.Join(workDir, "dev.tfrc")
-	if err := os.WriteFile(cliConfigPath, []byte(cliConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	mainTF := fmt.Sprintf(`
-terraform {
-  required_providers {
-    anyscale = {
-      source = "terraform-providers/anyscale"
-    }
-  }
-}
-
+	run := cliDevWorkspace(t, fmt.Sprintf(`
 provider "anyscale" {
   api_url = %[1]q
   token   = "converted-org-fake-token"
 }
-%[2]s`, m.server.URL, cloudAccessConvertedHCL(false, "alice@example.com", "bob@example.com", "carol@example.com"))
-	if err := os.WriteFile(filepath.Join(workDir, "main.tf"), []byte(mainTF), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	run := func(args ...string) ([]tfApplyJSONLine, string, error) {
-		cmd := exec.Command("terraform", args...)
-		cmd.Dir = workDir
-		cmd.Env = append(os.Environ(), "TF_CLI_CONFIG_FILE="+cliConfigPath)
-		out, err := cmd.CombinedOutput()
-		var lines []tfApplyJSONLine
-		for _, raw := range strings.Split(string(out), "\n") {
-			var l tfApplyJSONLine
-			if json.Unmarshal([]byte(strings.TrimSpace(raw)), &l) == nil {
-				lines = append(lines, l)
-			}
-		}
-		return lines, string(out), err
-	}
-	errorDiags := func(lines []tfApplyJSONLine) []string {
-		var out []string
-		for _, l := range lines {
-			if l.Type == "diagnostic" && l.Diagnostic.Severity == "error" {
-				out = append(out, l.Diagnostic.Summary+": "+l.Diagnostic.Detail)
-			}
-		}
-		return out
-	}
+%[2]s`, m.server.URL, cloudAccessConvertedHCL(false, "alice@example.com", "bob@example.com", "carol@example.com")))
+	errorDiags := func(lines []tfApplyJSONLine) []string { return cliDiagnostics(lines, "error") }
 
 	if lines, out, err := run("apply", "-auto-approve", "-json"); err != nil || len(errorDiags(lines)) > 0 {
 		t.Fatalf("setup apply (unconverted) failed: %v %v\n%s", err, errorDiags(lines), out)
