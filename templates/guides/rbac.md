@@ -181,9 +181,10 @@ organizations are legacy today.
 | "Organization Not Converted to Role Bindings" | Legacy | Convert the organization in Users & IAM, or manage access with the legacy resources. |
 | "Organization Uses Role Bindings" | Converted | Stop managing that access with the legacy resource; use `anyscale_role_binding` on a user group or a user. |
 
-In a converted organization, `anyscale_cloud_access` fails the apply on the first refused grant, before
+In a converted organization, `anyscale_cloud_access` fails an apply on the first refused grant, before
 any further grant or revoke. A create leaves nothing in state and an update keeps the prior state.
-Destroying it warns that legacy grants were left in place and removes it from state.
+Destroying either legacy resource warns "Organization Uses Role Bindings" and removes it from state; nothing is
+reverted, and the legacy grant or role is left in place.
 
 Plan a conversion deliberately: the legacy resources stop working when it happens, so replace them with
 role bindings first or immediately after.
