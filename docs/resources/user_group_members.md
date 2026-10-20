@@ -4,14 +4,14 @@ page_title: "anyscale_user_group_members Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
   ~> Alpha. User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
-  Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership.
+  Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. Do not manage the "All users" group of a converted organization ../guides/rbac.md#organization-access-mode with this resource.
 ---
 
 # anyscale_user_group_members (Resource)
 
 ~> **Alpha.** User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
 
-Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership.
+Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. Do not manage the "All users" group of a [converted organization](../guides/rbac.md#organization-access-mode) with this resource.
 
 ## Example Usage
 

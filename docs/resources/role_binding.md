@@ -4,14 +4,14 @@ page_title: "anyscale_role_binding Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
   ~> Alpha. Role bindings are an Alpha feature behind a feature flag; contact support@anyscale.com mailto:support@anyscale.com for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#role-bindings-alpha.
-  Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to anyscale_cloud_access; see the RBAC guide ../guides/rbac.md. A binding cannot be edited, so changing any argument replaces it.
+  Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to anyscale_cloud_access; see the RBAC guide ../guides/rbac.md. A binding cannot be edited, so changing any argument replaces it. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
 ---
 
 # anyscale_role_binding (Resource)
 
 ~> **Alpha.** Role bindings are an Alpha feature behind a feature flag; contact [support@anyscale.com](mailto:support@anyscale.com) for access. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#role-bindings-alpha).
 
-Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). A binding cannot be edited, so changing any argument replaces it.
+Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). A binding cannot be edited, so changing any argument replaces it. Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
 
 ## Example Usage
 
@@ -57,7 +57,7 @@ resource "anyscale_role_binding" "analysts_project_viewer" {
 - `organization_id` (String) Grant the role on the organization: the token's own, as returned by the `anyscale_organization` data source. Specify exactly one of `organization_id`, `cloud_id` or `project_id`. Changing it replaces the binding.
 - `project_id` (String) Grant the role on this project. Specify exactly one of `organization_id`, `cloud_id` or `project_id`. Changing it replaces the binding.
 - `user_group_id` (String) The user group that holds the role (`ug_...`). Groups synced from an identity provider are accepted. Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.
-- `user_id` (String) The user that holds the role (`usr_...`), including service accounts; look one up with the `anyscale_organization_user` data source. Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.
+- `user_id` (String) The user that holds the role (`usr_...`); look up an organization member by email with the `anyscale_organization_user` data source. Service accounts are users too (`usr_...`). Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.
 
 ### Read-Only
 

@@ -139,7 +139,8 @@ func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaReq
 		MarkdownDescription: roleBindingsAlphaBanner +
 			"Grants one role to one user group or user on an organization, cloud or project. " +
 			"Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). " +
-			"A binding cannot be edited, so changing any argument replaces it.",
+			"A binding cannot be edited, so changing any argument replaces it. " +
+			"Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -154,7 +155,7 @@ func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaReq
 			},
 			"user_id": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The user that holds the role (`usr_...`), including service accounts; look one up with the `anyscale_organization_user` data source. Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.",
+				MarkdownDescription: "The user that holds the role (`usr_...`); look up an organization member by email with the `anyscale_organization_user` data source. Service accounts are users too (`usr_...`). Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.",
 				PlanModifiers:       replace,
 				Validators:          []validator.String{stringvalidator.LengthAtLeast(1)},
 			},
