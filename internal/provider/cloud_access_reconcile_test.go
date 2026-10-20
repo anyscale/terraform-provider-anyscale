@@ -83,6 +83,10 @@ type cloudAccessReconcileMock struct {
 	// override value (not the plan's) would show up, and the guard would fail.
 	roleReadOverrideDenyRoles map[string][]string
 
+	// orgConverted makes every legacy write answer the 409 a converted
+	// organization returns, writing nothing.
+	orgConverted bool
+
 	// calls is every mutating request, in order, as "VERB path".
 	calls []string
 	// roleWriteBodies is the RAW body of each roles PUT. Kept raw because the
@@ -332,7 +336,20 @@ func (m *cloudAccessReconcileMock) handler(t *testing.T, cloudID string) http.Ha
 		})
 	}
 
-	return mux
+	if !m.orgConverted {
+		return mux
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The member search is a POST but a read.
+		if r.Method == http.MethodGet || strings.HasSuffix(r.URL.Path, "/search") {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		m.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":{"detail":"` + testConvertedDetail + `"}}`))
+	})
 }
 
 func (m *cloudAccessReconcileMock) memberEmails() []string {
@@ -1741,5 +1758,96 @@ func TestPlanProjectRoles_TranslatedConfigPlansGrantNotRevoke(t *testing.T) {
 	}
 	if len(plan.Grants) != 1 || plan.Grants[0].ProjectID != "prj_1" || plan.Grants[0].Level != "write" {
 		t.Fatalf("expected one grant of write on prj_1, got: %+v", plan.Grants)
+	}
+}
+
+// TestReconcileCloudAccess_ConvertedOrgStopsAtFirstRefusal covers a converted
+// organization, where the API refuses every legacy write. The refusal is per
+// organization, so the reconcile must stop at the first one with nothing
+// written: one request, no ungranted or unmanaged entries, no revokes.
+func TestReconcileCloudAccess_ConvertedOrgStopsAtFirstRefusal(t *testing.T) {
+	const cloudID = "cld_converted"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		orgConverted: true,
+		members: map[string]cloudAccessMockMember{
+			"outgoing@example.com": {IdentityID: "idn_out", UserID: "usr_out", BaseRoles: []string{"owner"}},
+		},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"a@example.com":        {IdentityID: "idn_a", UserID: "usr_a"},
+			"b@example.com":        {IdentityID: "idn_b", UserID: "usr_b"},
+			"c@example.com":        {IdentityID: "idn_c", UserID: "usr_c"},
+			"outgoing@example.com": {IdentityID: "idn_out", UserID: "usr_out"},
+		},
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(
+			cloudAccessDesiredMember{Email: "a@example.com", BaseRole: "collaborator"},
+			cloudAccessDesiredMember{Email: "b@example.com", BaseRole: "collaborator"},
+			cloudAccessDesiredMember{Email: "c@example.com", BaseRole: "collaborator"},
+		), cloudAccessApplyOptions())
+
+	if !isOrgConvertedConflict(result.OrgConverted) {
+		t.Fatalf("OrgConverted = %v, want the converted-organization refusal", result.OrgConverted)
+	}
+	if diags.HasError() {
+		t.Errorf("the reconcile leaves the converted diagnostic to its caller, got: %v", diags)
+	}
+	if len(mock.calls) != 1 {
+		t.Errorf("want exactly one write request, got %d: %v", len(mock.calls), mock.calls)
+	}
+	if len(result.Ungranted) != 0 || len(result.Unmanaged) != 0 {
+		t.Errorf("a converted organization must not be recorded as per-member failures: ungranted=%+v unmanaged=%+v",
+			result.Ungranted, result.Unmanaged)
+	}
+}
+
+// TestReconcileCloudAccess_ConvertedOrgDestroyStopsAtFirstRevoke covers the
+// destroy shape, an empty desired set: the first revoke is refused and no
+// other is attempted.
+func TestReconcileCloudAccess_ConvertedOrgDestroyStopsAtFirstRevoke(t *testing.T) {
+	const cloudID = "cld_converted_destroy"
+
+	mock := &cloudAccessReconcileMock{
+		callerUserID: "usr_caller", callerEmail: "operator@example.com",
+		orgConverted: true,
+		members: map[string]cloudAccessMockMember{
+			"a@example.com": {IdentityID: "idn_a", UserID: "usr_a", BaseRoles: []string{"collaborator"}},
+			"b@example.com": {IdentityID: "idn_b", UserID: "usr_b", BaseRoles: []string{"collaborator"}},
+		},
+		orgMembers: map[string]cloudAccessMockIdentity{
+			"a@example.com": {IdentityID: "idn_a", UserID: "usr_a"},
+			"b@example.com": {IdentityID: "idn_b", UserID: "usr_b"},
+		},
+	}
+
+	result, diags := reconcileCloudAccess(context.Background(),
+		cloudAccessTestClient(t, mock.handler(t, cloudID)), cloudID,
+		cloudAccessDesired(), cloudAccessReconcileOptions{RevokeUndeclared: true})
+
+	if !isOrgConvertedConflict(result.OrgConverted) {
+		t.Fatalf("OrgConverted = %v, want the converted-organization refusal", result.OrgConverted)
+	}
+	if diags.HasError() {
+		t.Errorf("unexpected error: %v", diags)
+	}
+	if len(mock.calls) != 1 || !strings.HasPrefix(mock.calls[0], "DELETE ") {
+		t.Errorf("want exactly one DELETE, got %v", mock.calls)
+	}
+	if len(result.Unmanaged) != 0 {
+		t.Errorf("unmanaged = %+v, want none", result.Unmanaged)
+	}
+}
+
+func TestCloudAccessRevokeFailureReason_Converted(t *testing.T) {
+	reason := cloudAccessRevokeFailureReason(apiStatusError(t, http.StatusConflict, testConvertedDetail))
+	if !strings.Contains(reason, "anyscale_role_binding") {
+		t.Errorf("reason %q does not name anyscale_role_binding", reason)
+	}
+	if strings.Contains(reason, "auto_add_user") || strings.Contains(reason, "Policy API") {
+		t.Errorf("reason %q names the auto_add_user/Policy API blockers for a converted organization", reason)
 	}
 }

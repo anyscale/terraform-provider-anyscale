@@ -392,7 +392,11 @@ func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateReq
 	// project revokes. Undeclared roles on an in-scope project are not this
 	// resource's to remove - that is the authority boundary, not a create-only
 	// exception.
-	r.applyCloudAccess(ctx, &plan, types.MapNull(cloudAccessMemberType()), &resp.State, &resp.Diagnostics)
+	if converted := r.applyCloudAccess(ctx, &plan, types.MapNull(cloudAccessMemberType()), &resp.State, &resp.Diagnostics); converted {
+		// Nothing was written, so leave nothing in state: an object kept beside
+		// the error would be tainted and planned for replacement.
+		resp.State.RemoveResource(ctx)
+	}
 }
 
 // Read refreshes the whole member list from the API.
@@ -582,10 +586,17 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	r.applyCloudAccess(ctx, &plan, priorState.Member, &resp.State, &resp.Diagnostics)
+	if converted := r.applyCloudAccess(ctx, &plan, priorState.Member, &resp.State, &resp.Diagnostics); converted {
+		// Nothing was written, so state keeps the prior members rather than the
+		// plan written above.
+		resp.State.Raw = req.State.Raw
+	}
 }
 
-// applyCloudAccess is the shared body of Create and Update.
+// applyCloudAccess is the shared body of Create and Update. It reports whether
+// the organization has converted to role bindings, in which case nothing was
+// written, an error was added, and the caller must undo the state it wrote
+// before the reconcile.
 //
 // Never re-reads or writes back `member` or `projects` after applying, on any
 // path. Both are non-Computed, so Core requires the returned state to equal
@@ -600,19 +611,19 @@ func (r *CloudAccessResource) applyCloudAccess(
 	priorMember types.Map,
 	state *tfsdk.State,
 	diags *diag.Diagnostics,
-) {
+) (orgConverted bool) {
 	cloudID := plan.CloudID.ValueString()
 
 	desired, desiredDiags := cloudAccessDesiredMembers(ctx, plan.Member)
 	diags.Append(desiredDiags...)
 	if diags.HasError() {
-		return
+		return false
 	}
 
 	priorProjects, priorDiags := cloudAccessPriorProjectDeclarations(ctx, priorMember)
 	diags.Append(priorDiags...)
 	if diags.HasError() {
-		return
+		return false
 	}
 
 	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, desired, cloudAccessReconcileOptions{
@@ -622,6 +633,10 @@ func (r *CloudAccessResource) applyCloudAccess(
 		PriorProjects:                priorProjects,
 	})
 	diags.Append(reconcileDiags...)
+	if result.OrgConverted != nil {
+		addOrgConvertedError(diags, result.OrgConverted, "No changes were made.")
+		return true
+	}
 
 	// unmanaged_grants and ungranted_members are written even when the
 	// reconcile errored: a revoke or grant that failed before the error is
@@ -638,6 +653,7 @@ func (r *CloudAccessResource) applyCloudAccess(
 		plan.UngrantedMembers = ungranted
 	}
 	diags.Append(state.Set(ctx, plan)...)
+	return false
 }
 
 // Delete revokes the members this resource manages.
@@ -699,6 +715,15 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 		})
 	resp.Diagnostics.Append(reconcileDiags...)
 	if reconcileDiags.HasError() {
+		return
+	}
+
+	if result.OrgConverted != nil {
+		// Erroring would leave the resource undestroyable short of
+		// 'terraform state rm', which does the same thing less visibly.
+		resp.Diagnostics.AddWarning(orgConvertedSummary, orgConvertedDetail(result.OrgConverted)+fmt.Sprintf(
+			"\n\nOn cloud %s, legacy grants could not be revoked and were left in place; access is governed by role "+
+				"bindings. The resource was removed from Terraform state.", cloudID))
 		return
 	}
 

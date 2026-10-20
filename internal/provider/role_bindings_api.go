@@ -112,6 +112,7 @@ func addRoleBindingsDisabledError(diags *diag.Diagnostics, outcome string) {
 // Outcomes for addRoleBindingsDisabledError.
 const (
 	roleBindingsDisabledReadOutcome   = "The binding was kept in Terraform state unchanged."
+	roleBindingLockoutDeleteOutcome   = "Grant the role to another principal before revoking this one. The binding was not revoked and stays in Terraform state."
 	roleBindingsDisabledDeleteOutcome = "The binding was not revoked and stays in Terraform state; to stop managing it, run `terraform state rm` on its address."
 )
 
@@ -138,9 +139,10 @@ const roleBindingArchivedRoleSubstring = "is archived and cannot be newly assign
 const roleBindingLockoutSubstring = "without an Organization owner"
 
 // addRoleBindingLockoutError reports a write the API refused because it would
-// leave the organization without an Organization owner.
+// leave the organization without an Organization owner. outcome, when set,
+// says what that means for the operation.
 func addRoleBindingLockoutError(diags *diag.Diagnostics, err error, outcome string) {
-	detail := extractAPIErrorDetail(err) + " To proceed, keep at least one Organization owner binding: grant the role to another principal before revoking this one."
+	detail := extractAPIErrorDetail(err) + " To proceed, keep at least one Organization owner binding."
 	if outcome != "" {
 		detail += " " + outcome
 	}

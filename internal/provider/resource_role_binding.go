@@ -346,7 +346,7 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 		return
 	}
 	if isStatusWithSubstring(err, http.StatusConflict, roleBindingLockoutSubstring) {
-		addRoleBindingLockoutError(&resp.Diagnostics, err, roleBindingsDisabledDeleteOutcome)
+		addRoleBindingLockoutError(&resp.Diagnostics, err, roleBindingLockoutDeleteOutcome)
 		return
 	}
 	if !isForbidden(err) {

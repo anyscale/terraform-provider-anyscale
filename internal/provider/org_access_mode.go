@@ -65,6 +65,20 @@ func orgConvertedDetail(err error) string {
 		"Manage access with anyscale_role_binding, on a user group (user_group_id) or on a user (user_id). " + orgAccessModeGuide
 }
 
+// orgConvertedSummary is the summary of every diagnostic for a legacy write
+// refused in a converted organization, error or warning.
+const orgConvertedSummary = "Organization Uses Role Bindings"
+
+// addOrgConvertedError reports a legacy write refused in a converted
+// organization. outcome, when set, says what that means for the operation.
+func addOrgConvertedError(diags *diag.Diagnostics, err error, outcome string) {
+	detail := orgConvertedDetail(err)
+	if outcome != "" {
+		detail += "\n\n" + outcome
+	}
+	diags.AddError(orgConvertedSummary, detail)
+}
+
 // addOrgNotConvertedError reports a role binding write refused because the
 // organization still uses legacy access management. outcome, when set, says
 // what that means for the operation.
