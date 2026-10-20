@@ -194,9 +194,26 @@ Terraform **cannot detect** a conversion. After it, a refresh of `anyscale_cloud
 `anyscale_organization_user_role` still returns the legacy records from before conversion, so `plan` shows
 no changes while the access that matters now lives in role bindings. The next write is what fails.
 
-Role-binding writes are refused until the organization converts, so the move happens in this order: convert
-in Users & IAM, then run `terraform state rm` for the legacy resources (or destroy them, which only warns),
-remove them from your configuration, and declare `anyscale_role_binding` resources in their place.
+Role-binding writes are refused until the organization converts, so the move happens in this order:
+
+1. Convert in Users & IAM. Conversion writes role bindings for your existing access, so most grants you
+   would declare already exist.
+2. Run `terraform state rm` for the legacy resources (or destroy them, which only warns), and remove them
+   from your configuration.
+3. Declare an `anyscale_role_binding` for each grant you want Terraform to manage, and **import** the
+   existing binding instead of creating one. Creating a grant that already exists fails with "Role Binding
+   Already Exists", and that error prints the exact `terraform import` command, including the binding ID.
+
+```hcl
+# The binding ID (rb_...) comes from that error message.
+import {
+  to = anyscale_role_binding.analysts_viewer
+  id = "rb_abc123"
+}
+```
+
+Which bindings conversion creates depends on the option chosen in the migration wizard, so expect to
+find some grants missing and create those normally.
 
 ## Role bindings (Alpha)
 
@@ -205,6 +222,10 @@ remove them from your configuration, and declare `anyscale_role_binding` resourc
 minor release, always listed in the changelog. They are also **behind a feature flag**: contact
 support@anyscale.com for access. Without it, every call fails with "Role bindings are not enabled". The organization must also be
 [converted](#organization-access-mode).
+
+Vocabulary, if you know AWS or Google IAM: `anyscale_role_binding` is **additive** and non-authoritative, like
+`google_project_iam_member`, not like `google_project_iam_binding` (which owns a whole role). It grants only
+what you declare and never removes other grants.
 
 `anyscale_role_binding` grants **one role to one user group or one user on one scope** - exactly one of
 `user_group_id` or `user_id`, and exactly one of `cloud_id`,
@@ -228,6 +249,28 @@ resource "anyscale_role_binding" "analysts_viewer" {
 }
 ```
 
+### Granting a user, not a group
+
+Binding a user takes the user's `usr_...` ID, not their email. Look it up with the
+[`anyscale_organization_user`](../data-sources/organization_user.md) data source and use its **`user_id`**
+attribute, not `id` (that is the identity ID, a different value):
+
+```hcl
+data "anyscale_organization_user" "alice" {
+  email = "alice@example.com"
+}
+
+resource "anyscale_role_binding" "alice_viewer" {
+  user_id    = data.anyscale_organization_user.alice.user_id
+  role_id    = data.anyscale_role.viewer.id
+  project_id = var.project_id
+}
+```
+
+`user_id` can be null for a user who has no user ID yet; apply the binding once it is set.
+Resources that take an email (`anyscale_user_group_members`, `anyscale_cloud_access`) and this one that takes
+an ID cannot share a variable; keep emails and IDs in separate places.
+
 ### Each binding is one grant, and cannot be edited
 
 The API has no update, so changing any argument replaces the binding. Set `lifecycle { create_before_destroy = true }` when changing `role_id` so the
@@ -247,6 +290,13 @@ access with `anyscale_cloud_access` or `anyscale_organization_user_role`.
 
 Directory-synced (SCIM) groups can be bound; unlike membership, nothing here fights the identity
 provider.
+
+~> **Do not revoke your own way in.** Anyscale refuses a change that leaves the organization without an
+Organization owner, and refuses revoking the provider's own direct binding. It does **not** stop a
+configuration from removing a *group* binding that gives the Terraform identity its permission to manage
+access. If the identity depends on a group binding you destroy, later applies fail until someone restores
+it in the console. Keep the grant that the Terraform identity relies on out of any configuration you might
+destroy, or bind that identity directly.
 
 ### Role and scope must make sense together
 
