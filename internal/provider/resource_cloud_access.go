@@ -191,7 +191,7 @@ func (r *CloudAccessResource) Metadata(ctx context.Context, req resource.Metadat
 
 func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages the **complete** member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names.\n\n" +
+		MarkdownDescription: "Manages the **complete** member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names. Legacy organizations only: a [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.\n\n" +
 			"~> **This resource is authoritative.** Any member not declared in `member` is **revoked**, including people granted access in the Anyscale console and including on the **first** apply; those members appear nowhere in plan output. Read the [RBAC guide](../guides/rbac.md) before your first apply against a production cloud.\n\n" +
 			"A clean plan is not proof that nobody has unintended access: organization admins and your own identity are invisible to this resource, project roles are compared only for the projects you name, and a console role change between `writer` and `owner` is not detected. Only manage a given cloud from one Terraform state, and put `lifecycle { prevent_destroy = true }` on production clouds. A project role for a member with no cloud role is a plan-time error.\n\n" +
 			"The resource refuses to create or update when the cloud has `auto_add_user` enabled, or a group policy binding when the apply would revoke someone (destroy still proceeds); turning `auto_add_user` off does not remove the collaborators it already added, so the first apply after that revokes everyone you do not declare. Binding detection is best-effort: when the check is inconclusive the resource warns and proceeds. It is unavailable (`501`) in organizations without the cloud roles API; reading and writing are gated by two separate feature flags with the same response, so ask Anyscale support to enable both. See the [RBAC guide](../guides/rbac.md) for the `unmanaged_grants`/`ungranted_members` diagnostics.",
@@ -262,7 +262,7 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 				// first State.Set - a Computed list-of-objects left unknown has crashed
 				// this provider before. No UseStateForUnknown: this tracks whether a
 				// revoke failed, which genuinely changes between applies.
-				MarkdownDescription: "Grants this resource could not revoke, or skipped revoking after another grant failed in the same apply, with reasons. The apply still converges; alert on `length(...) > 0`, meaning someone has access Terraform intends them not to have. At project scope only the projects your configuration names are covered, so empty does not prove no access elsewhere.",
+				MarkdownDescription: "Grants this resource could not revoke, or skipped revoking after another grant failed in the same apply, with reasons. The apply still converges, except in a [converted organization](../guides/rbac.md#organization-access-mode), where it fails at the first refused write; alert on `length(...) > 0`, meaning someone has access Terraform intends them not to have. At project scope only the projects your configuration names are covered, so empty does not prove no access elsewhere.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"email": schema.StringAttribute{
@@ -303,7 +303,7 @@ func (r *CloudAccessResource) Schema(ctx context.Context, req resource.SchemaReq
 				// first State.Set - a Computed list-of-objects left unknown has crashed
 				// this provider before. No UseStateForUnknown: this tracks whether a
 				// grant failed, which genuinely changes between applies.
-				MarkdownDescription: "Members this apply could not grant the declared role, with a reason for each. The apply still converges; alert on `length(...) > 0`, which means someone lacks access the configuration declares. While non-empty, the apply skips all revokes (see `unmanaged_grants`) and state for the affected member shows planned rather than granted values until the next plan retries.",
+				MarkdownDescription: "Members this apply could not grant the declared role, with a reason for each. The apply still converges, except in a [converted organization](../guides/rbac.md#organization-access-mode), where it fails at the first refused write; alert on `length(...) > 0`, which means someone lacks access the configuration declares. While non-empty, the apply skips all revokes (see `unmanaged_grants`) and state for the affected member shows planned rather than granted values until the next plan retries.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"email": schema.StringAttribute{
@@ -392,7 +392,11 @@ func (r *CloudAccessResource) Create(ctx context.Context, req resource.CreateReq
 	// project revokes. Undeclared roles on an in-scope project are not this
 	// resource's to remove - that is the authority boundary, not a create-only
 	// exception.
-	r.applyCloudAccess(ctx, &plan, types.MapNull(cloudAccessMemberType()), &resp.State, &resp.Diagnostics)
+	if converted := r.applyCloudAccess(ctx, &plan, types.MapNull(cloudAccessMemberType()), &resp.State, &resp.Diagnostics); converted {
+		// Nothing was written, so leave nothing in state: an object kept beside
+		// the error would be tainted and planned for replacement.
+		resp.State.RemoveResource(ctx)
+	}
 }
 
 // Read refreshes the whole member list from the API.
@@ -582,10 +586,17 @@ func (r *CloudAccessResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	r.applyCloudAccess(ctx, &plan, priorState.Member, &resp.State, &resp.Diagnostics)
+	if converted := r.applyCloudAccess(ctx, &plan, priorState.Member, &resp.State, &resp.Diagnostics); converted {
+		// Nothing was written, so state keeps the prior members rather than the
+		// plan written above.
+		resp.State.Raw = req.State.Raw
+	}
 }
 
-// applyCloudAccess is the shared body of Create and Update.
+// applyCloudAccess is the shared body of Create and Update. It reports whether
+// the organization has converted to role bindings, in which case nothing was
+// written, an error was added, and the caller must undo the state it wrote
+// before the reconcile.
 //
 // Never re-reads or writes back `member` or `projects` after applying, on any
 // path. Both are non-Computed, so Core requires the returned state to equal
@@ -600,19 +611,19 @@ func (r *CloudAccessResource) applyCloudAccess(
 	priorMember types.Map,
 	state *tfsdk.State,
 	diags *diag.Diagnostics,
-) {
+) (orgConverted bool) {
 	cloudID := plan.CloudID.ValueString()
 
 	desired, desiredDiags := cloudAccessDesiredMembers(ctx, plan.Member)
 	diags.Append(desiredDiags...)
 	if diags.HasError() {
-		return
+		return false
 	}
 
 	priorProjects, priorDiags := cloudAccessPriorProjectDeclarations(ctx, priorMember)
 	diags.Append(priorDiags...)
 	if diags.HasError() {
-		return
+		return false
 	}
 
 	result, reconcileDiags := reconcileCloudAccess(ctx, r.client, cloudID, desired, cloudAccessReconcileOptions{
@@ -622,6 +633,10 @@ func (r *CloudAccessResource) applyCloudAccess(
 		PriorProjects:                priorProjects,
 	})
 	diags.Append(reconcileDiags...)
+	if result.OrgConverted != nil {
+		addOrgConvertedError(diags, result.OrgConverted, "No changes were made.")
+		return true
+	}
 
 	// unmanaged_grants and ungranted_members are written even when the
 	// reconcile errored: a revoke or grant that failed before the error is
@@ -638,6 +653,7 @@ func (r *CloudAccessResource) applyCloudAccess(
 		plan.UngrantedMembers = ungranted
 	}
 	diags.Append(state.Set(ctx, plan)...)
+	return false
 }
 
 // Delete revokes the members this resource manages.
@@ -699,6 +715,15 @@ func (r *CloudAccessResource) Delete(ctx context.Context, req resource.DeleteReq
 		})
 	resp.Diagnostics.Append(reconcileDiags...)
 	if reconcileDiags.HasError() {
+		return
+	}
+
+	if result.OrgConverted != nil {
+		// Erroring would leave the resource undestroyable short of
+		// 'terraform state rm', which does the same thing less visibly.
+		resp.Diagnostics.AddWarning(orgConvertedSummary, orgConvertedDetail(result.OrgConverted)+fmt.Sprintf(
+			"\n\nOn cloud %s, legacy grants could not be revoked and were left in place; access is governed by role "+
+				"bindings. The resource was removed from Terraform state.", cloudID))
 		return
 	}
 

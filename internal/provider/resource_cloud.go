@@ -223,7 +223,7 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to automatically add users to this cloud. Note: while enabled, the backend refuses to leave any user without cloud access, so revoking a specific user's access to this cloud will fail until this is disabled.",
+				MarkdownDescription: "Whether to automatically add users to this cloud. Note: while enabled, the backend refuses to leave any user without cloud access, so revoking a specific user's access to this cloud will fail until this is disabled. Refused in a [converted organization](../guides/rbac.md#organization-access-mode).",
 			},
 
 			"credentials": schema.StringAttribute{
@@ -1088,6 +1088,12 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		AggregatedLogsEnabled:  types.BoolValue(false),
 	}
 	if err := r.updateMutableFields(ctx, cloudID, plan, zeroValueState); err != nil {
+		if isOrgConvertedConflict(err) {
+			addOrgConvertedError(&resp.Diagnostics, err, fmt.Sprintf("Cloud %s was created, but Anyscale refused to set auto_add_user, "+
+				"so Terraform has marked the cloud tainted. Before the next apply, run 'terraform untaint' on this resource's address "+
+				"AND set auto_add_user = false or remove it from the configuration. Otherwise the next apply destroys and recreates the cloud.", cloudID))
+			return
+		}
 		resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
 		return
 	}
@@ -1195,6 +1201,11 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	if err := r.updateMutableFields(ctx, cloudID, plan, state); err != nil {
+		if isOrgConvertedConflict(err) {
+			addOrgConvertedError(&resp.Diagnostics, err, fmt.Sprintf("Anyscale refuses to change auto_add_user in a converted organization. "+
+				"Set auto_add_user back to its current value (%t) to stop planning the change.", state.AutoAddUser.ValueBool()))
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "update cloud", err)
 		return
 	}
