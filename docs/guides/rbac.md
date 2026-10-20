@@ -202,15 +202,34 @@ Role-binding writes are refused until the organization converts, so the move hap
    from your configuration.
 3. Declare an `anyscale_role_binding` for each grant you want Terraform to manage, and **import** the
    existing binding instead of creating one. Creating a grant that already exists fails with "Role Binding
-   Already Exists", and that error prints the exact `terraform import` command, including the binding ID.
+   Already Exists". You do not need to look up the binding ID: import by what the binding grants,
+   `<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>`, where `scope_type` is `organization`,
+   `cloud` or `project`, and `principal_type` is `user` or `user_group`. Import fails, and creates nothing,
+   if no such binding exists. An `import` block with `for_each` imports many at once and needs Terraform 1.7
+   or later.
 
 ```hcl
-# The binding ID (rb_...) comes from that error message.
+locals {
+  grants = {
+    analysts = { group = anyscale_user_group.analysts.id, role = data.anyscale_role.viewer.id }
+  }
+}
+
+resource "anyscale_role_binding" "grant" {
+  for_each      = local.grants
+  user_group_id = each.value.group
+  role_id       = each.value.role
+  project_id    = var.project_id
+}
+
 import {
-  to = anyscale_role_binding.analysts_viewer
-  id = "rb_abc123"
+  for_each = local.grants
+  to       = anyscale_role_binding.grant[each.key]
+  id       = "project/${var.project_id}/user_group/${each.value.group}/${each.value.role}"
 }
 ```
+
+The binding ID (`rb_...`) also works as the import ID.
 
 Which bindings conversion creates depends on the option chosen in the migration wizard, so expect to
 find some grants missing and create those normally.
