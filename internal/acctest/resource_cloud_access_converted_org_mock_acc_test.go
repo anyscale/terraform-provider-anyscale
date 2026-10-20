@@ -47,7 +47,10 @@ type cloudAccessConvertedMock struct {
 
 	mu        sync.Mutex
 	converted bool
-	writes    []string
+	// convertedRolesOnly refuses only the roles PUT, as if the organization
+	// converted between a member's membership POST and its role write.
+	convertedRolesOnly bool
+	writes             []string
 }
 
 func newCloudAccessConvertedMock(t *testing.T) *cloudAccessConvertedMock {
@@ -102,7 +105,8 @@ func (m *cloudAccessConvertedMock) handle(w http.ResponseWriter, r *http.Request
 	if isLegacyWrite(r) {
 		m.mu.Lock()
 		m.writes = append(m.writes, r.Method+" "+r.URL.Path)
-		converted := m.converted
+		converted := m.converted ||
+			(m.convertedRolesOnly && r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/roles"))
 		m.mu.Unlock()
 		if converted {
 			w.Header().Set("Content-Type", "application/json")
@@ -121,6 +125,12 @@ func (m *cloudAccessConvertedMock) setConverted(v bool) {
 }
 
 // takeWrites returns the writes recorded since the last call and resets the log.
+func (m *cloudAccessConvertedMock) setConvertedRolesOnly(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.convertedRolesOnly = v
+}
+
 func (m *cloudAccessConvertedMock) takeWrites() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -250,6 +260,48 @@ func TestAccCloudAccessResource_ConvertedOrgUpdateKeepsPriorState(t *testing.T) 
 				PreConfig: func() {
 					if w := m.takeWrites(); len(w) != 1 {
 						t.Errorf("converted org: want exactly 1 legacy write before aborting the update, got %d: %v", len(w), w)
+					}
+				},
+				Config:   original,
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// The organization converts between the membership POST and the roles PUT
+// for an existing member: the POST answers "already a member" and the roles
+// PUT is the first refused write. That refusal must abort the update the same
+// way: the converted-org error, no further writes, and the prior state kept.
+func TestAccCloudAccessResource_ConvertedOrgBetweenMembershipAndRoleAborts(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newCloudAccessConvertedMock(t)
+	original := testAccProviderBlock(m.server.URL) +
+		cloudAccessConvertedHCL(true, "alice@example.com", "bob@example.com")
+	readonly := strings.ReplaceAll(original, `"writer"`, `"readonly"`)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: original},
+			{
+				PreConfig: func() {
+					m.takeWrites()
+					m.setConvertedRolesOnly(true)
+				},
+				Config:      readonly,
+				ExpectError: cloudAccessConvertedSummary,
+			},
+			{
+				PreConfig: func() {
+					var roles []string
+					for _, w := range m.takeWrites() {
+						if strings.HasPrefix(w, http.MethodPut) && strings.HasSuffix(w, "/roles") {
+							roles = append(roles, w)
+						}
+					}
+					if len(roles) != 1 {
+						t.Errorf("want exactly 1 refused roles PUT before aborting, got %d: %v", len(roles), roles)
 					}
 				},
 				Config:   original,

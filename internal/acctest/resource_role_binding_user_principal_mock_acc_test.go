@@ -3,6 +3,7 @@ package acctest
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -243,6 +244,31 @@ func TestAccRoleBindingResource_PrincipalChangeReplaces(t *testing.T) {
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue("anyscale_role_binding.test", tfjsonpath.New("user_id"), knownvalue.Null()),
 				},
+			},
+		},
+	})
+}
+
+// Changing the group replaces the binding, as it did before user principals.
+func TestAccRoleBindingResource_GroupChangeReplaces(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	m := newRBMock(t)
+	const otherGroup = "ug_00000000000000000000000002"
+	m.addGroup(otherGroup)
+	other := strings.Replace(rbConfig(m, rbRole), rbGroup, otherGroup, 1)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		CheckDestroy:             rbDestroyed(m),
+		Steps: []resource.TestStep{
+			{Config: rbConfig(m, rbRole), Check: rbExpectPrincipal(m, "user_group", rbGroup)},
+			{
+				Config: other,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("anyscale_role_binding.test", plancheck.ResourceActionDestroyBeforeCreate),
+					},
+				},
+				Check: rbExpectPrincipal(m, "user_group", otherGroup),
 			},
 		},
 	})
