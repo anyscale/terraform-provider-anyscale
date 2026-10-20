@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -439,8 +440,95 @@ func (r *RoleBindingResource) handleDeleteNotFound(ctx context.Context, diags *d
 	}
 }
 
+// roleBindingNaturalKey is a binding named by what it grants rather than by
+// its ID: <scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>.
+type roleBindingNaturalKey struct {
+	ResourceType  string
+	ResourceID    string
+	PrincipalType string
+	PrincipalID   string
+	RoleID        string
+}
+
+// roleBindingImportFormats names both accepted import IDs, for diagnostics.
+const roleBindingImportFormats = "Import a role binding by its ID (`rb_...`) or by " +
+	"`<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>`, where scope_type is organization, cloud or project " +
+	"and principal_type is user or user_group."
+
+// parseRoleBindingNaturalKey parses a composite import ID. Anyscale IDs
+// contain no "/", so the split is unambiguous.
+func parseRoleBindingNaturalKey(id string) (roleBindingNaturalKey, error) {
+	parts := strings.Split(id, "/")
+	if len(parts) != 5 {
+		return roleBindingNaturalKey{}, fmt.Errorf("%q has %d slash-separated parts, want 5", id, len(parts))
+	}
+	for i, part := range parts {
+		if part == "" {
+			return roleBindingNaturalKey{}, fmt.Errorf("%q has an empty part at position %d", id, i+1)
+		}
+	}
+	key := roleBindingNaturalKey{ResourceType: parts[0], ResourceID: parts[1], PrincipalType: parts[2], PrincipalID: parts[3], RoleID: parts[4]}
+	if !isManagedRoleBindingScope(key.ResourceType) {
+		return roleBindingNaturalKey{}, fmt.Errorf("scope type %q is not organization, cloud or project", key.ResourceType)
+	}
+	if !isManagedRoleBindingPrincipal(key.PrincipalType) {
+		return roleBindingNaturalKey{}, fmt.Errorf("principal type %q is not user or user_group", key.PrincipalType)
+	}
+	return key, nil
+}
+
+// resolveRoleBindingNaturalKey finds the ID of the binding a composite import
+// ID names, through the principal listing Read uses. The API keeps at most one
+// live binding per principal, role and resource. It returns "" with
+// diagnostics when there is no such binding or the listing fails.
+func (r *RoleBindingResource) resolveRoleBindingNaturalKey(ctx context.Context, key roleBindingNaturalKey, diags *diag.Diagnostics) string {
+	bindings, err := listRoleBindingsForPrincipal(ctx, r.client, key.ResourceType, key.ResourceID, key.PrincipalType, key.PrincipalID)
+	if err != nil {
+		switch {
+		case isRoleBindingsDisabled(err):
+			enabled, probeErr := roleBindingsEnabled(ctx, r.client)
+			switch {
+			case probeErr != nil:
+				addRoleBindingsProbeFailedError(diags, "list role bindings for import", err, probeErr)
+			case !enabled:
+				addRoleBindingsDisabledError(diags, "")
+			default:
+				AddConfigError(diags, "Role Binding Principal Not Found",
+					fmt.Sprintf("The %s %q could not be found: %s", key.PrincipalType, key.PrincipalID, extractAPIErrorDetail(err)))
+			}
+		case isForbidden(err):
+			AddConfigError(diags, "Role Bindings Not Readable",
+				fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s Reading them requires managing IAM on the %s.",
+					key.ResourceType, key.ResourceID, extractAPIErrorDetail(err), key.ResourceType))
+		default:
+			AddAPIError(diags, "list role bindings for import", err)
+		}
+		return ""
+	}
+	for _, b := range bindings {
+		if b.RoleID == key.RoleID {
+			return b.ID
+		}
+	}
+	AddConfigError(diags, "Role Binding Not Found",
+		fmt.Sprintf("No role binding grants role %q to %s %q on %s %q. Import never creates a binding; to grant it, declare the resource and apply.",
+			key.RoleID, key.PrincipalType, key.PrincipalID, key.ResourceType, key.ResourceID))
+	return ""
+}
+
 func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	bindingID := req.ID
+	if !strings.HasPrefix(bindingID, "rb_") {
+		key, err := parseRoleBindingNaturalKey(bindingID)
+		if err != nil {
+			AddConfigError(&resp.Diagnostics, "Invalid Role Binding Import ID", fmt.Sprintf("%s. %s", err.Error(), roleBindingImportFormats))
+			return
+		}
+		bindingID = r.resolveRoleBindingNaturalKey(ctx, key, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
 	binding, err := getRoleBinding(ctx, r.client, bindingID)
 	if err != nil {
 		switch {
