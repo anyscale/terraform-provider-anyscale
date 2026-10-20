@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -207,10 +206,16 @@ func (r *RoleBindingResource) Create(ctx context.Context, req resource.CreateReq
 		ResourceID:    resourceID,
 	})
 	if err != nil {
-		var statusErr *UnexpectedStatusError
 		switch {
-		case errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusConflict:
+		case isStatusWithSubstring(err, http.StatusConflict, roleBindingDuplicateSubstring):
 			r.addDuplicateError(ctx, &resp.Diagnostics, &plan, err)
+		case isOrgNotConvertedConflict(err):
+			addOrgNotConvertedError(&resp.Diagnostics, err, "")
+		case isStatusWithSubstring(err, http.StatusConflict, roleBindingArchivedRoleSubstring):
+			resp.Diagnostics.AddError("Role Is Archived",
+				fmt.Sprintf("%s An archived role cannot be newly assigned; pick another role.", extractAPIErrorDetail(err)))
+		case isStatusWithSubstring(err, http.StatusConflict, roleBindingLockoutSubstring):
+			addRoleBindingLockoutError(&resp.Diagnostics, err, "")
 		case isRoleBindingsDisabled(err):
 			// Create also answers 404 for an unknown group or role, so ask
 			// whether the feature is on before calling it off.
@@ -334,6 +339,14 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 	if isRoleBindingsDisabled(err) {
 		r.handleDeleteNotFound(ctx, &resp.Diagnostics, bindingID, err)
+		return
+	}
+	if isOrgNotConvertedConflict(err) {
+		addOrgNotConvertedError(&resp.Diagnostics, err, roleBindingsDisabledDeleteOutcome)
+		return
+	}
+	if isStatusWithSubstring(err, http.StatusConflict, roleBindingLockoutSubstring) {
+		addRoleBindingLockoutError(&resp.Diagnostics, err, roleBindingsDisabledDeleteOutcome)
 		return
 	}
 	if !isForbidden(err) {

@@ -115,6 +115,38 @@ const (
 	roleBindingsDisabledDeleteOutcome = "The binding was not revoked and stays in Terraform state; to stop managing it, run `terraform state rm` on its address."
 )
 
+// roleBindingDuplicateSubstring is the detail substring of create's 409 when
+// the principal already holds the role on the resource. The full detail is
+// "The principal already holds this role on this resource."
+// (backend/server/api/product/services/role_bindings_service.py:891-895 at
+// product 3b1f86a). It is the only 409 that means the binding exists; create
+// also answers 409 for an unconverted organization, an archived role, a
+// lockout and a concurrent revoke.
+const roleBindingDuplicateSubstring = "already holds this role"
+
+// roleBindingArchivedRoleSubstring is the detail substring of create's 409 for
+// an archived role. The full detail is "This role is archived and cannot be
+// newly assigned." (role_bindings_service.py:1166-1170 at product 3b1f86a).
+const roleBindingArchivedRoleSubstring = "is archived and cannot be newly assigned"
+
+// roleBindingLockoutSubstring is the detail substring of the 409 a binding
+// write answers when it would leave the organization with no Organization
+// owner of its own. The full detail is "This change would leave the
+// organization without an Organization owner."
+// (backend/server/api/base/resources/converted_organizations.py:314 at
+// product 3b1f86a).
+const roleBindingLockoutSubstring = "without an Organization owner"
+
+// addRoleBindingLockoutError reports a write the API refused because it would
+// leave the organization without an Organization owner.
+func addRoleBindingLockoutError(diags *diag.Diagnostics, err error, outcome string) {
+	detail := extractAPIErrorDetail(err) + " To proceed, keep at least one Organization owner binding: grant the role to another principal before revoking this one."
+	if outcome != "" {
+		detail += " " + outcome
+	}
+	diags.AddError("Change Would Leave Organization Without an Owner", detail)
+}
+
 // isForbidden reports whether err is an HTTP 403.
 func isForbidden(err error) bool {
 	var statusErr *UnexpectedStatusError
