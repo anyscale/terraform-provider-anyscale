@@ -17,7 +17,7 @@ Grants one role to one user group or user on an organization, cloud or project. 
 
 ```terraform
 # Alpha, behind a feature flag (contact support@anyscale.com for access). The schema may change before Beta.
-# Grants one role to one user group on exactly one of a cloud, a project, or the organization.
+# Grants one role to one user group or one user on exactly one of a cloud, a project, or the organization.
 # A binding cannot be edited: changing any argument replaces it.
 variable "project_id" {
   description = "ID of an existing Anyscale project (prj_...)"
@@ -41,6 +41,17 @@ resource "anyscale_role_binding" "analysts_project_viewer" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# Grant the same role to one user instead. Use the data source's user_id, not its id.
+data "anyscale_organization_user" "alice" {
+  email = "alice@example.com"
+}
+
+resource "anyscale_role_binding" "alice_project_viewer" {
+  user_id    = data.anyscale_organization_user.alice.user_id
+  role_id    = data.anyscale_role.project_viewer.id
+  project_id = var.project_id
 }
 ```
 
@@ -73,6 +84,7 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the role binding ID. Only bindings held by a user group can be imported.
+# Import using the role binding ID (rb_...), for a binding held by a user group or by a user.
+# Creating a binding that already exists fails and prints this command with the ID filled in.
 terraform import anyscale_role_binding.analysts_project_viewer rb_abc123
 ```
