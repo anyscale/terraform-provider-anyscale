@@ -57,6 +57,9 @@ type roleBindingMockServer struct {
 	// unconverted makes every write answer 409, as in an organization that
 	// has not converted to role bindings.
 	unconverted bool
+	// allowSelf lifts the refusals to grant a role to, or revoke a binding
+	// of, the caller's own user, so a test can clean up after asserting them.
+	allowSelf bool
 	// createConflict, when set, is the detail of a 409 every create answers
 	// with: a refusal the provider does not recognize.
 	createConflict string
@@ -100,10 +103,14 @@ type roleBindingMockRole struct {
 const roleBindingMockCaller = "usr_mockcaller0000000000000000"
 
 // Refusal details, verbatim from the backend: converted_organizations.py
-// ROLE_BINDING_WRITE_REFUSED and refuse_organization_lockout.
+// ROLE_BINDING_WRITE_REFUSED and refuse_organization_lockout, and the
+// self-grant and self-revoke refusals.
 const (
 	roleBindingMockNotConvertedDetail = "Switch this organization to role bindings to change role bindings."
 	roleBindingMockLockoutDetail      = "This change would leave the organization without an Organization owner."
+	// role_bindings_service.py check_bindings and check_revocation.
+	roleBindingMockSelfGrantDetail  = "You cannot assign a role to yourself directly. Assign it to a user group you belong to."
+	roleBindingMockSelfRevokeDetail = "You cannot revoke your own role binding."
 )
 
 func newRoleBindingMockServer(t *testing.T) *roleBindingMockServer {
@@ -194,6 +201,12 @@ func (m *roleBindingMockServer) setUnconverted(on bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.unconverted = on
+}
+
+func (m *roleBindingMockServer) setAllowSelf(on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.allowSelf = on
 }
 
 func (m *roleBindingMockServer) setCreateConflict(detail string) {
@@ -423,6 +436,10 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 			m.fail(w, http.StatusForbidden, fmt.Sprintf("You may not revoke role binding '%s'.", rest[0]))
 			return
 		}
+		if b.PrincipalType == "user" && b.PrincipalID == roleBindingMockCaller && !m.allowSelf {
+			m.fail(w, http.StatusForbidden, roleBindingMockSelfRevokeDetail)
+			return
+		}
 		if m.deleteMode == "lockout" {
 			m.fail(w, http.StatusConflict, roleBindingMockLockoutDetail)
 			return
@@ -473,6 +490,10 @@ func (m *roleBindingMockServer) serveCreate(w http.ResponseWriter, body []byte) 
 	}
 	if req.PrincipalType == "user_group" && !m.groups[req.PrincipalID] {
 		m.fail(w, http.StatusNotFound, fmt.Sprintf("User group '%s' not found.", req.PrincipalID))
+		return
+	}
+	if req.PrincipalType == "user" && req.PrincipalID == roleBindingMockCaller && !m.allowSelf {
+		m.fail(w, http.StatusForbidden, roleBindingMockSelfGrantDetail)
 		return
 	}
 	role, ok := m.roles[req.RoleID]
