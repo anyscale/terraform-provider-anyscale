@@ -496,6 +496,9 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 			switch {
 			case err == nil:
 				return diags
+			case isOrgConvertedConflict(err):
+				addOrgConvertedError(&diags, err, "")
+				return diags
 			case orgRolesFeatureDisabled(err):
 				// Roles API not enabled in this organization: the legacy endpoint is the
 				// only write path, and in such an organization it is also what the
@@ -509,6 +512,10 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 			}
 		}
 		if err := setOrganizationPermissionLevel(ctx, r.client, identityID, model.BaseRole.ValueString()); err != nil {
+			if isOrgConvertedConflict(err) {
+				addOrgConvertedError(&diags, err, "")
+				return diags
+			}
 			if orgSelfModification(err) {
 				diags.AddError("Cannot Modify Your Own Organization Role", orgSelfModificationDetail)
 				return diags
@@ -528,6 +535,10 @@ func (r *OrganizationUserRoleResource) writeOrganizationRole(
 	}
 
 	if err := setOrganizationRoles(ctx, r.client, userID, model.BaseRole.ValueString(), additionalRoles); err != nil {
+		if isOrgConvertedConflict(err) {
+			addOrgConvertedError(&diags, err, "")
+			return diags
+		}
 		if orgRolesFeatureDisabled(err) {
 			diags.AddAttributeError(
 				path.Root("deny_roles"),
@@ -882,6 +893,12 @@ func (r *OrganizationUserRoleResource) deleteOrganizationRole(
 	// deny roles does not also rewrite the base role.
 	if err := setOrganizationRoles(ctx, r.client, userID, state.BaseRole.ValueString(), []string{}); err != nil {
 		switch {
+		case isOrgConvertedConflict(err):
+			// Erroring would leave the resource undestroyable short of
+			// 'terraform state rm', which does the same thing less visibly.
+			diags.AddWarning(orgConvertedSummary, orgConvertedDetail(err)+fmt.Sprintf(
+				"\n\nFor %s, legacy deny roles could not be cleared and were left in place; access is governed by role "+
+					"bindings. The resource was removed from Terraform state.", email))
 		case orgRolesFeatureDisabled(err):
 			diags.AddError("Organization Roles API Not Enabled", orgRolesDisabledDetail)
 		case orgSelfModification(err):

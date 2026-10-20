@@ -1088,6 +1088,12 @@ func (r *CloudResource) Create(ctx context.Context, req resource.CreateRequest, 
 		AggregatedLogsEnabled:  types.BoolValue(false),
 	}
 	if err := r.updateMutableFields(ctx, cloudID, plan, zeroValueState); err != nil {
+		if isOrgConvertedConflict(err) {
+			addOrgConvertedError(&resp.Diagnostics, err, fmt.Sprintf("Cloud %s was created, but Anyscale refused to set auto_add_user, "+
+				"so Terraform has marked the cloud tainted. Before the next apply, run 'terraform untaint' on this resource's address "+
+				"AND set auto_add_user = false or remove it from the configuration. Otherwise the next apply destroys and recreates the cloud.", cloudID))
+			return
+		}
 		resp.Diagnostics.AddError("Failed to Apply Cloud Settings", fmt.Sprintf("Cloud %s was created, but applying its configured settings failed: %s", cloudID, err.Error()))
 		return
 	}
@@ -1195,6 +1201,11 @@ func (r *CloudResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	if err := r.updateMutableFields(ctx, cloudID, plan, state); err != nil {
+		if isOrgConvertedConflict(err) {
+			addOrgConvertedError(&resp.Diagnostics, err, fmt.Sprintf("Anyscale refuses to change auto_add_user in a converted organization. "+
+				"Set auto_add_user back to its current value (%t) to stop planning the change.", state.AutoAddUser.ValueBool()))
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "update cloud", err)
 		return
 	}
