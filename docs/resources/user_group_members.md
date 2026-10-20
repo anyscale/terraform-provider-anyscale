@@ -24,7 +24,7 @@ resource "anyscale_user_group" "ml_platform" {
 }
 
 resource "anyscale_user_group_members" "ml_platform" {
-  group_id = anyscale_user_group.ml_platform.id
+  user_group_id = anyscale_user_group.ml_platform.id
 
   # Each email must already belong to your organization; invite people first with
   # anyscale_organization_invitation and wait for them to accept. Matching is case-insensitive.
@@ -54,6 +54,6 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the group ID (the same value as the resource's group_id).
+# Import using the group ID (the same value as the resource's user_group_id).
 terraform import anyscale_user_group_members.ml_platform ug_abc123
 ```

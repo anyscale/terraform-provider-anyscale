@@ -118,8 +118,8 @@ resource "anyscale_user_group" "ml_platform" {
 }
 
 resource "anyscale_user_group_members" "ml_platform" {
-  group_id = anyscale_user_group.ml_platform.id
-  members  = ["dev1@example.com", "dev2@example.com"] # must already be organization members
+  user_group_id = anyscale_user_group.ml_platform.id
+  members       = ["dev1@example.com", "dev2@example.com"] # must already be organization members
 }
 ```
 
