@@ -186,8 +186,13 @@ any further grant or revoke. A create leaves nothing in state and an update keep
 Destroying either legacy resource warns "Organization Uses Role Bindings" and removes it from state; nothing is
 reverted, and the legacy grant or role is left in place.
 
-Plan a conversion deliberately: the legacy resources stop working when it happens, so replace them with
-role bindings first or immediately after.
+Terraform **cannot detect** a conversion. After it, a refresh of `anyscale_cloud_access` or
+`anyscale_organization_user_role` still returns the legacy records from before conversion, so `plan` shows
+no changes while the access that matters now lives in role bindings. The next write is what fails.
+
+Role-binding writes are refused until the organization converts, so the move happens in this order: convert
+in Users & IAM, then run `terraform state rm` for the legacy resources (or destroy them, which only warns),
+remove them from your configuration, and declare `anyscale_role_binding` resources in their place.
 
 ## Role bindings (Alpha)
 
