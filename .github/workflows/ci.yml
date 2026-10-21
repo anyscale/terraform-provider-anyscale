@@ -187,54 +187,67 @@ jobs:
           export TF_CLI_CONFIG_FILE="$cli_config"
           make validate-examples
 
+      - name: Detect withheld credentials
+        # GitHub withholds Actions secrets from fork PRs and Dependabot runs, so
+        # ANYSCALE_CLI_TOKEN is empty there. On those runs the acctest steps
+        # below set ANYSCALE_TEST_CREDENTIALS_WITHHELD=1: hermetic tests still
+        # run, and every test that needs credentials reports
+        # SKIP(no-credentials) instead of failing. Never set on push, schedule,
+        # or a same-repo PR. A missing head repo (deleted fork) counts as a fork.
+        # A maintainer runs the skipped tests on a fork PR with the 'Fork PR
+        # credentialed acctests' workflow (acctest-fork-pr.yml).
+        id: creds
+        if: matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          withheld=false
+          reason=none
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            withheld=true
+            reason=fork
+          elif [ "$ACTOR" = "dependabot[bot]" ]; then
+            withheld=true
+            reason=dependabot
+          fi
+          echo "credentials-withheld=${withheld}, reason=${reason}"
+          echo "withheld=${withheld}" >> "$GITHUB_OUTPUT"
+
       - name: Acceptance Tests - Data Sources
-        # Skipped on Dependabot PRs: GitHub withholds Actions secrets from
-        # Dependabot-triggered runs, so ANYSCALE_CLI_TOKEN is empty and these
-        # real-infra tests can't authenticate. Also skipped when the diff is
-        # docs-only (see "Detect docs-only diff" above). See the two notice
-        # steps below, either of which keeps this required check green and
-        # explains which reason applied.
-        if: matrix.shard == 'acctest-data' && github.actor != 'dependabot[bot]' && steps.diff-scope.outputs.requiresFullAcctest == 'true'
+        # Skipped when the diff is docs-only (see "Detect docs-only diff"
+        # above and the notice step below). On fork and Dependabot runs it
+        # runs in hermetic mode (see "Detect withheld credentials").
+        if: matrix.shard == 'acctest-data' && steps.diff-scope.outputs.requiresFullAcctest == 'true'
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
+          CREDENTIALS_WITHHELD: ${{ steps.creds.outputs.withheld }}
         run: |
           set -o pipefail
+          if [ "$CREDENTIALS_WITHHELD" = "true" ]; then export ANYSCALE_TEST_CREDENTIALS_WITHHELD=1; fi
           TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run '^TestAcc[A-Za-z]+DataSource' 2>&1 | tee /tmp/acctest.log
           .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Data Sources"
 
       - name: Acceptance Tests - Resources
-        # Same two skip reasons as "Acceptance Tests - Data Sources" above
-        # (Dependabot secrets withheld, or a docs-only diff) - see that
-        # step's comment.
-        if: matrix.shard == 'acctest-resource' && github.actor != 'dependabot[bot]' && steps.diff-scope.outputs.requiresFullAcctest == 'true'
+        # Same docs-only skip and hermetic mode as "Acceptance Tests - Data
+        # Sources" above - see that step's comment.
+        if: matrix.shard == 'acctest-resource' && steps.diff-scope.outputs.requiresFullAcctest == 'true'
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
+          CREDENTIALS_WITHHELD: ${{ steps.creds.outputs.withheld }}
         run: |
           set -o pipefail
+          if [ "$CREDENTIALS_WITHHELD" = "true" ]; then export ANYSCALE_TEST_CREDENTIALS_WITHHELD=1; fi
           TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' 2>&1 | tee /tmp/acctest.log
           .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Resources"
           .github/scripts/summarize-compute-config-coverage.sh /tmp/acctest.log "Acceptance Tests - Resources"
 
-      - name: Acceptance Tests skipped (Dependabot PR)
-        # Dependabot-triggered runs get no access to Actions secrets, so the
-        # acctest steps above are skipped (their `github.actor` guard). This
-        # step keeps the acctest-data / acctest-resource required checks green
-        # and records WHY, so the skip is explicit rather than silent. Dep
-        # bumps are still gated by lint-and-unit (build + unit tests against the
-        # updated deps) and release-preflight. To force real acctests on a
-        # specific bump, push a commit to its branch so the run is
-        # human-triggered (secrets are then available).
-        if: (matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource') && github.actor == 'dependabot[bot]'  # zizmor: ignore[bot-conditions] notice-only step; the actor only chooses whether to print a message, and the acctest steps use the inverse check so real secrets are never exposed to a Dependabot run
-        run: echo "::notice::Acceptance tests skipped for Dependabot PR (Actions secrets are unavailable to Dependabot runs); this PR is gated by lint-and-unit + release-preflight instead."
-
       - name: Acceptance Tests skipped (docs-only diff)
-        # Mirrors the Dependabot notice step above, for the other reason
-        # these required checks can legitimately skip the expensive run. A
-        # separate step (rather than folded into the Dependabot one) so each
-        # skip reason has its own unambiguous, greppable notice; the actor
-        # guard here means it can never fire in the same run as the
-        # Dependabot notice.
-        if: (matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource') && github.actor != 'dependabot[bot]' && steps.diff-scope.outputs.requiresFullAcctest == 'false'
+        # Keeps the acctest-data / acctest-resource required checks green when
+        # the acctest steps above skip a docs-only diff, and records why.
+        if: (matrix.shard == 'acctest-data' || matrix.shard == 'acctest-resource') && steps.diff-scope.outputs.requiresFullAcctest == 'false'
         run: echo "::notice::Acceptance tests skipped -- every changed file in this diff falls under the docs-only path list (docs/**, examples/**, **/*.md, .changelog/**, templates/**; see this workflow's 'Detect docs-only diff' step). Required check still reports success. Full real-infra acctest coverage resumes on the next PR touching internal/**, main.go, go.mod/go.sum, tools/**, Makefile, or this file -- and also runs unconditionally every day via .github/workflows/scheduled-acctest.yml."
