@@ -8,6 +8,11 @@ variable "project_id" {
   type        = string
 }
 
+variable "org_role_name" {
+  description = "Exact, case-sensitive name of a role valid at organization scope; ask support@anyscale.com which roles your organization has"
+  type        = string
+}
+
 data "anyscale_role" "project_viewer" {
   name = "project_viewer" # exact, case-sensitive
 }
@@ -38,17 +43,6 @@ resource "anyscale_role_binding" "analysts_project_viewer" {
   }
 }
 
-# Alternative: grant a role to a single user. Use the data source's user_id, not its id.
-data "anyscale_organization_user" "carol" {
-  email = "carol@example.com"
-}
-
-resource "anyscale_role_binding" "carol_project_viewer" {
-  user_id    = data.anyscale_organization_user.carol.user_id
-  role_id    = data.anyscale_role.project_viewer.id
-  project_id = var.project_id
-}
-
 # Directory-synced (SCIM) groups can't be managed by Terraform, but they can hold a role binding.
 # Here every member of the group gets the role across the whole organization.
 data "anyscale_user_group" "okta_admins" {
@@ -56,11 +50,6 @@ data "anyscale_user_group" "okta_admins" {
 }
 
 data "anyscale_organization" "current" {}
-
-variable "org_role_name" {
-  description = "Exact, case-sensitive name of a role valid at organization scope; ask support@anyscale.com which roles your organization has"
-  type        = string
-}
 
 data "anyscale_role" "org_role" {
   name = var.org_role_name
@@ -70,4 +59,16 @@ resource "anyscale_role_binding" "okta_admins_org" {
   user_group_id   = data.anyscale_user_group.okta_admins.id
   role_id         = data.anyscale_role.org_role.id
   organization_id = data.anyscale_organization.current.id
+}
+
+# Alternative: bind a single user or service account (usr_...) with user_id instead of user_group_id.
+# Use the data source's user_id, not its id.
+data "anyscale_organization_user" "carol" {
+  email = "carol@example.com"
+}
+
+resource "anyscale_role_binding" "carol_project_viewer" {
+  user_id    = data.anyscale_organization_user.carol.user_id
+  role_id    = data.anyscale_role.project_viewer.id
+  project_id = var.project_id
 }
