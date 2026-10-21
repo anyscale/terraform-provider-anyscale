@@ -188,6 +188,24 @@ func PaginatedRequest[T any](
 	queryParams url.Values,
 	parseFunc func(body []byte) (items []T, nextToken *string, err error),
 ) ([]T, error) {
+	return PaginatedRequestWithBody(ctx, client, "GET", basePath, queryParams, nil, parseFunc)
+}
+
+// PaginatedRequestWithBody is PaginatedRequest for endpoints that page with a
+// request body, such as the POST search endpoints. body, when non-nil, is sent
+// unchanged with every page; count and paging_token still travel in the query
+// string, because these endpoints read pagination there and ignore it in the
+// body. A paging token the API has already returned is an error, not another
+// request, so a server that never advances cannot hang the caller.
+func PaginatedRequestWithBody[T any](
+	ctx context.Context,
+	client *Client,
+	method string,
+	basePath string,
+	queryParams url.Values,
+	body []byte,
+	parseFunc func(body []byte) (items []T, nextToken *string, err error),
+) ([]T, error) {
 	allItems := []T{}
 	nextToken := ""
 	seenTokens := map[string]struct{}{}
@@ -208,8 +226,13 @@ func PaginatedRequest[T any](
 			path = fmt.Sprintf("%s?%s", basePath, pageParams.Encode())
 		}
 
-		// Make the request
-		bodyBytes, err := DoRequestRaw(ctx, client, "GET", path, nil, http.StatusOK)
+		// Make the request. A reader is consumed by the first request, so the
+		// body is wrapped afresh for every page.
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(body)
+		}
+		bodyBytes, err := DoRequestRaw(ctx, client, method, path, reqBody, http.StatusOK)
 		if err != nil {
 			return nil, fmt.Errorf("pagination request failed: %w", err)
 		}

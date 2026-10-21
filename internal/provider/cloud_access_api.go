@@ -93,46 +93,25 @@ type cloudAccessRemoteMember struct {
 // everyone past the page boundary. The empty JSON body matches every
 // collaborator (the query model's only field is optional).
 //
-// This mirrors searchComputeTemplatesPaged rather than using PaginatedRequest,
-// which only issues GETs.
+// PaginatedRequestWithBody keeps that split: the body is sent unchanged with
+// every page and the pagination goes in the query.
 func searchCloudCollaborators(ctx context.Context, client *Client, cloudID string) ([]cloudCollaboratorSearchResult, error) {
-	var all []cloudCollaboratorSearchResult
-	pagingToken := ""
-
-	for {
-		body, err := MarshalRequestBody(map[string]interface{}{})
-		if err != nil {
-			return nil, err
-		}
-
-		query := url.Values{}
-		// 50 is the real endpoint's enforced maximum: a higher count 422s
-		// outright ("query.count: ensure this value is less than or equal to
-		// 50") on the very first request. A mock that echoes the count instead
-		// of enforcing the cap won't catch a regression here. Must match
-		// listCloudRoles's count=50 below.
-		query.Set("count", "50")
-		if pagingToken != "" {
-			query.Set("paging_token", pagingToken)
-		}
-		path := fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/search?%s", cloudID, query.Encode())
-
-		respBody, err := DoRequestRaw(ctx, client, "POST", path, body, http.StatusOK)
-		if err != nil {
-			return nil, err
-		}
-
-		var page cloudCollaboratorSearchResponse
-		if err := json.Unmarshal(respBody, &page); err != nil {
-			return nil, fmt.Errorf("failed to parse cloud collaborator search response: %w", err)
-		}
-		all = append(all, page.Results...)
-
-		if page.Metadata.NextPagingToken == nil || *page.Metadata.NextPagingToken == "" {
-			return all, nil
-		}
-		pagingToken = *page.Metadata.NextPagingToken
-	}
+	// 50 is the real endpoint's enforced maximum: a higher count 422s outright
+	// ("query.count: ensure this value is less than or equal to 50") on the
+	// very first request. A mock that echoes the count instead of enforcing
+	// the cap won't catch a regression here. Must match listCloudRoles's
+	// count=50 below.
+	return PaginatedRequestWithBody(
+		ctx, client, "POST", fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/search", cloudID),
+		url.Values{"count": []string{"50"}}, []byte("{}"),
+		func(body []byte) ([]cloudCollaboratorSearchResult, *string, error) {
+			var page cloudCollaboratorSearchResponse
+			if err := json.Unmarshal(body, &page); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse cloud collaborator search response: %w", err)
+			}
+			return page.Results, page.Metadata.NextPagingToken, nil
+		},
+	)
 }
 
 // listCloudRoles pages through GET /clouds/{cloud_id}/collaborators/roles.

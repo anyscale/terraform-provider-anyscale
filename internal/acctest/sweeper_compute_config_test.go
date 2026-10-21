@@ -1,7 +1,6 @@
 package acctest
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -117,92 +116,65 @@ func sweepComputeConfigs(_ string) error {
 }
 
 func searchComputeConfigsByContains(ctx context.Context, client *provider.Client, contains string) ([]sweepComputeConfigResult, error) {
-	var all []sweepComputeConfigResult
-	var pagingToken string
-
-	for {
-		// Uses /api/v2/compute_templates/search (not the older
-		// /ext/v0/cluster_computes/search), mirroring the pattern proven by the
-		// data source's searchComputeTemplatesPaged (data_source_compute_config.go).
-		// Two landmines here, both traced against the backend source:
-		//
-		// 1. Pagination moves from the request BODY to the URL QUERY STRING.
-		// api/v2's search endpoint reads count/paging_token via
-		// Depends(required_pagination_large), which are plain FastAPI
-		// function params sourced from the query string, not the
-		// ComputeTemplateQuery body model. The old ext/v0 shape nested them
-		// under a "paging" body key; api/v2 simply never reads that key, so
-		// leaving it in the body would compile, get a 200 back, and silently
-		// paginate wrong (always page 1) -- a silent-truncation failure mode
-		// that could miss leaked test clouds/configs.
-		//
-		// 2. ComputeTemplateQuery.version defaults to latest-version-only
-		// (its own docstring: "Setting version to None is equivalent to
-		// setting version to -1"), the opposite of the old ext/v0 default
-		// this sweeper relied on returning every version of a name as a
-		// distinct row. More precisely, the real risk isn't just
-		// which row gates the sweep timer -- a leaked config whose NEWEST
-		// version was created recently would be judged too-young and KEPT
-		// even when older versions are well past the cutoff, so a config
-		// with recent churn could evade the sweeper entirely. version: -2 is
-		// the documented "do not filter by version" sentinel (same one
-		// fetchComputeConfigVersions already uses) and restores the current,
-		// safer, enumerate-every-version behavior.
-		//
-		// archive_status: "NOT_ARCHIVED" asks only for rows still needing
-		// cleanup. Archived is the terminal state for a compute config (there
-		// is no delete), so searching ALL returned every config ever archived
-		// and re-archived it each run: the API accepts that as success, so
-		// swept=N counted thousands of no-ops, took ~30 minutes, and could not
-		// show a real leak. The backend applies the filter per row on
-		// archived_at, independently of version (compute_templates_dao.py
-		// _apply_filters_to_list_compute_template_query), so -2 still yields
-		// every unarchived version of a partly-archived name.
-		payload := map[string]interface{}{
-			"name":              map[string]string{"contains": contains},
-			"include_anonymous": false,
-			"archive_status":    "NOT_ARCHIVED",
-			"version":           -2,
-		}
-
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("marshal compute config search payload: %w", err)
-		}
-
-		query := url.Values{}
-		query.Set("count", "100")
-		if pagingToken != "" {
-			query.Set("paging_token", pagingToken)
-		}
-		path := fmt.Sprintf("/api/v2/compute_templates/search?%s", query.Encode())
-
-		resp, err := client.DoRequest(ctx, "POST", path, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("search compute configs: %w", err)
-		}
-		respBody, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("read compute config search response: %w", readErr)
-		}
-		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("search compute configs: status %d: %s", resp.StatusCode, truncateBody(string(respBody), 256))
-		}
-
-		var page sweepComputeConfigListResponse
-		if err := json.Unmarshal(respBody, &page); err != nil {
-			return nil, fmt.Errorf("parse compute config search response: %w", err)
-		}
-		all = append(all, page.Results...)
-
-		if page.Metadata.NextPagingToken == nil || *page.Metadata.NextPagingToken == "" {
-			break
-		}
-		pagingToken = *page.Metadata.NextPagingToken
+	// Uses /api/v2/compute_templates/search (not the older
+	// /ext/v0/cluster_computes/search), mirroring the pattern proven by the
+	// data source's searchComputeTemplatesPaged (data_source_compute_config.go).
+	// Two landmines here, both traced against the backend source:
+	//
+	// 1. Pagination moves from the request BODY to the URL QUERY STRING.
+	// api/v2's search endpoint reads count/paging_token via
+	// Depends(required_pagination_large), which are plain FastAPI
+	// function params sourced from the query string, not the
+	// ComputeTemplateQuery body model. The old ext/v0 shape nested them
+	// under a "paging" body key; api/v2 simply never reads that key, so
+	// leaving it in the body would compile, get a 200 back, and silently
+	// paginate wrong (always page 1) -- a silent-truncation failure mode
+	// that could miss leaked test clouds/configs.
+	//
+	// 2. ComputeTemplateQuery.version defaults to latest-version-only
+	// (its own docstring: "Setting version to None is equivalent to
+	// setting version to -1"), the opposite of the old ext/v0 default
+	// this sweeper relied on returning every version of a name as a
+	// distinct row. More precisely, the real risk isn't just
+	// which row gates the sweep timer -- a leaked config whose NEWEST
+	// version was created recently would be judged too-young and KEPT
+	// even when older versions are well past the cutoff, so a config
+	// with recent churn could evade the sweeper entirely. version: -2 is
+	// the documented "do not filter by version" sentinel (same one
+	// fetchComputeConfigVersions already uses) and restores the current,
+	// safer, enumerate-every-version behavior.
+	//
+	// archive_status: "NOT_ARCHIVED" asks only for rows still needing
+	// cleanup. Archived is the terminal state for a compute config (there
+	// is no delete), so searching ALL returned every config ever archived
+	// and re-archived it each run: the API accepts that as success, so
+	// swept=N counted thousands of no-ops, took ~30 minutes, and could not
+	// show a real leak. The backend applies the filter per row on
+	// archived_at, independently of version (compute_templates_dao.py
+	// _apply_filters_to_list_compute_template_query), so -2 still yields
+	// every unarchived version of a partly-archived name.
+	payload := map[string]interface{}{
+		"name":              map[string]string{"contains": contains},
+		"include_anonymous": false,
+		"archive_status":    "NOT_ARCHIVED",
+		"version":           -2,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal compute config search payload: %w", err)
 	}
 
-	return all, nil
+	return provider.PaginatedRequestWithBody(
+		ctx, client, "POST", "/api/v2/compute_templates/search",
+		url.Values{"count": []string{"100"}}, body,
+		func(respBody []byte) ([]sweepComputeConfigResult, *string, error) {
+			var page sweepComputeConfigListResponse
+			if err := json.Unmarshal(respBody, &page); err != nil {
+				return nil, nil, fmt.Errorf("parse compute config search response: %w", err)
+			}
+			return page.Results, page.Metadata.NextPagingToken, nil
+		},
+	)
 }
 
 func sweepArchiveComputeConfig(ctx context.Context, client *provider.Client, c sweepComputeConfigResult) error {
