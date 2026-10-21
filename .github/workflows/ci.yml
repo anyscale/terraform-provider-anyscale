@@ -147,6 +147,28 @@ jobs:
         # a new govulncheck release cannot change the result of an unchanged PR.
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
+      - name: tools/docsgen go directive not below root
+        if: matrix.shard == 'lint-and-unit'
+        # A Go bump in the root go.mod must also raise tools/docsgen, or the
+        # docs tool is left on an older Go. docsgen ahead of root is fine (a
+        # dependency there can require a newer Go on its own).
+        run: |
+          set -euo pipefail
+          root=$(go mod edit -json go.mod | jq -r .Go)
+          docsgen=$(go mod edit -json tools/docsgen/go.mod | jq -r .Go)
+          lowest=$(printf '%s\n' "$root" "$docsgen" | sort -V | head -n1)
+          if [ "$lowest" != "$root" ]; then
+            echo "tools/docsgen/go.mod go $docsgen is below go.mod go $root; raise it with: go -C tools/docsgen mod edit -go=$root" >&2
+            exit 1
+          fi
+
+      - name: Vulnerability check (tools/docsgen)
+        if: matrix.shard == 'lint-and-unit'
+        # tools/docsgen is a separate module (it pins tfplugindocs for `make
+        # docs`), so `./...` above never scans it. Scanned against the tool
+        # package because the module has no packages of its own.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 -C tools/docsgen github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
+
       - name: Validate Examples
         if: matrix.shard == 'lint-and-unit'
         # The actual fmt / tflint / init+validate work lives in `make
