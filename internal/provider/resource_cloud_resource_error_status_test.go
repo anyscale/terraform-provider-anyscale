@@ -102,13 +102,15 @@ func TestCloudResourceDelete_Other400Errors(t *testing.T) {
 // A 429 while polling must back off and retry, never be parsed as a cloud.
 // The 429 body here is plain text, as rate limiters commonly send; before the
 // fix 429 was an accepted status, so this body reached json.Unmarshal and the
-// wait failed with "failed to parse cloud response". Takes one initial backoff
-// interval (5s) to run.
+// wait failed with "failed to parse cloud response". DoRequest retries a 429
+// itself, so the mock returns 429 for all of DoRequest's attempts: only then
+// does the 429 reach waitForCloudReady's own backoff. Takes one initial
+// backoff interval (5s) to run; DoRequest's waits are skipped.
 func TestWaitForCloudReady_RetriesOn429(t *testing.T) {
 	const cloudID = "cld_ratelimited"
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if calls.Add(1) == 1 {
+		if calls.Add(1) <= maxReadAttempts {
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = fmt.Fprint(w, "Too Many Requests")
 			return
@@ -119,10 +121,11 @@ func TestWaitForCloudReady_RetriesOn429(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := NewClientWithToken(server.URL, "test-token")
+	client.sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 	if err := waitForCloudReady(context.Background(), client, cloudID, time.Minute); err != nil {
-		t.Fatalf("waitForCloudReady returned %v, want nil after one 429 then ready", err)
+		t.Fatalf("waitForCloudReady returned %v, want nil after a rate-limited poll then ready", err)
 	}
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("GET calls = %d, want 2 (one 429, one ready)", got)
+	if got, want := calls.Load(), int32(maxReadAttempts+1); got != want {
+		t.Fatalf("GET calls = %d, want %d (%d attempts answered 429, then ready)", got, want, maxReadAttempts)
 	}
 }
