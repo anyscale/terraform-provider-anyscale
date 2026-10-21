@@ -230,6 +230,34 @@ func TestDoRequest_StopsWhenCallerCancelsDuringBackoff(t *testing.T) {
 	}
 }
 
+// The real backoff timer (no injected sleep) must end early when the caller cancels.
+func TestDoRequest_RealBackoffStopsWhenCallerCancels(t *testing.T) {
+	srv := newRetryTestServer(t, retryStep{status: http.StatusServiceUnavailable})
+	c := &Client{
+		BaseURL:        srv.URL,
+		Token:          "test-token",
+		HTTPClient:     &http.Client{},
+		attemptTimeout: 200 * time.Millisecond,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	start := time.Now()
+	_, err := DoRequestAndParse[emptyResult](ctx, c, http.MethodGet, "/api/v2/clouds/", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(start); elapsed > 600*time.Millisecond {
+		t.Errorf("returned after %v; the ~1s backoff did not stop when the caller cancelled at 100ms", elapsed)
+	}
+	if got := srv.attempts.Load(); got != 1 {
+		t.Fatalf("attempts = %d, want 1", got)
+	}
+}
+
+// A caller deadline closer than the next backoff ends retrying at once, and the caller
+// gets the API's own failure rather than a context error from waiting out the deadline.
 func TestDoRequest_NoAttemptStartsAfterCallerDeadline(t *testing.T) {
 	srv := newRetryTestServer(t, retryStep{status: http.StatusServiceUnavailable})
 	// A real sleep here: the deadline must interact with actual time.
@@ -244,11 +272,13 @@ func TestDoRequest_NoAttemptStartsAfterCallerDeadline(t *testing.T) {
 	deadline, _ := ctx.Deadline()
 
 	start := time.Now()
-	if _, err := DoRequestAndParse[emptyResult](ctx, c, http.MethodGet, "/api/v2/clouds/", nil); err == nil {
-		t.Fatal("got success against a persistent 503")
+	_, err := DoRequestAndParse[emptyResult](ctx, c, http.MethodGet, "/api/v2/clouds/", nil)
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Errorf("returned after %v; with 300ms left and a ~1s backoff next, retrying should stop at once", elapsed)
 	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Errorf("returned after %v; a 300ms caller deadline must not be outlived by the retry budget", elapsed)
+	var statusErr *UnexpectedStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("err = %v, want the API's 503, not a context error", err)
 	}
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
