@@ -17,8 +17,9 @@ import (
 // Changing image_uri against the real API: the new build lands on the same cluster
 // environment, revision increments by one, the previous build is still served, and a
 // refresh plans clean. Revisions are asserted relative to the one Create leaves, so the
-// test does not depend on how many builds Create registers. The mock-server test proves what the provider sends; this proves the
-// backend accepts it and Read round-trips the result.
+// test does not depend on how many builds Create registers. The mock-server test proves
+// what the provider sends; this proves the backend accepts it and Read round-trips the
+// result.
 func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
