@@ -261,12 +261,20 @@ resource "anyscale_user_group" "analysts" {
   name = "analysts"
 }
 
+resource "anyscale_user_group_members" "analysts" {
+  user_group_id = anyscale_user_group.analysts.id
+  members       = ["alice@example.com", "bob@example.com"] # must already be organization members
+}
+
 resource "anyscale_role_binding" "analysts_viewer" {
   user_group_id = anyscale_user_group.analysts.id
   role_id       = data.anyscale_role.viewer.id
   project_id    = var.project_id # exactly one of cloud_id / project_id / organization_id
 }
 ```
+
+Prefer groups: bind the role to the group once, then add or remove people by editing `members`; every
+member gets the role.
 
 ### Granting a user, not a group
 
