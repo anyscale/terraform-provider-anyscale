@@ -1,6 +1,6 @@
 module github.com/anyscale/terraform-provider-anyscale
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/hashicorp/terraform-json v0.28.0
