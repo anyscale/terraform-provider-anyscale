@@ -6,7 +6,7 @@ resource "anyscale_user_group" "ml_platform" {
 }
 
 resource "anyscale_user_group_members" "ml_platform" {
-  group_id = anyscale_user_group.ml_platform.id
+  user_group_id = anyscale_user_group.ml_platform.id
 
   # Each email must already belong to your organization; invite people first with
   # anyscale_organization_invitation and wait for them to accept. Matching is case-insensitive.

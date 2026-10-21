@@ -2,9 +2,9 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -31,8 +31,8 @@ func NewRoleBindingResource() resource.Resource {
 	return &RoleBindingResource{}
 }
 
-// RoleBindingResource grants one role to one user group on one organization,
-// cloud or project. The API never edits a binding, so every argument forces
+// RoleBindingResource grants one role to one user group or user on one
+// organization, cloud or project. The API never edits a binding, so every argument forces
 // replacement.
 type RoleBindingResource struct {
 	client *Client
@@ -42,6 +42,7 @@ type RoleBindingResource struct {
 type RoleBindingResourceModel struct {
 	ID             types.String `tfsdk:"id"`
 	UserGroupID    types.String `tfsdk:"user_group_id"`
+	UserID         types.String `tfsdk:"user_id"`
 	RoleID         types.String `tfsdk:"role_id"`
 	OrganizationID types.String `tfsdk:"organization_id"`
 	CloudID        types.String `tfsdk:"cloud_id"`
@@ -65,6 +66,26 @@ func (m *RoleBindingResourceModel) scope() (resourceType, resourceID string) {
 	}
 }
 
+// principal returns the principal type and ID that holds the binding:
+// whichever of user_group_id and user_id is set. The config validator
+// guarantees exactly one is.
+func (m *RoleBindingResourceModel) principal() (principalType, principalID string) {
+	if !m.UserID.IsNull() {
+		return roleBindingPrincipalUser, m.UserID.ValueString()
+	}
+	return roleBindingPrincipalUserGroup, m.UserGroupID.ValueString()
+}
+
+// isManagedRoleBindingPrincipal reports whether the principal type is one
+// this resource models, for the same reason as isManagedRoleBindingScope.
+func isManagedRoleBindingPrincipal(principalType string) bool {
+	switch principalType {
+	case roleBindingPrincipalUser, roleBindingPrincipalUserGroup:
+		return true
+	}
+	return false
+}
+
 // isManagedRoleBindingScope reports whether the resource type is one this
 // resource models. The API may add scopes; a binding on one must be refused,
 // never mapped onto a modeled scope it is not held on.
@@ -77,10 +98,18 @@ func isManagedRoleBindingScope(resourceType string) bool {
 }
 
 // setFromAPI sets every attribute from a full binding, as create and import
-// return it. Callers check isManagedRoleBindingScope first.
+// return it. Callers check isManagedRoleBindingPrincipal and
+// isManagedRoleBindingScope first.
 func (m *RoleBindingResourceModel) setFromAPI(b *roleBindingResult) {
 	m.ID = types.StringValue(b.ID)
-	m.UserGroupID = types.StringValue(b.PrincipalID)
+	m.UserGroupID = types.StringNull()
+	m.UserID = types.StringNull()
+	switch b.PrincipalType {
+	case roleBindingPrincipalUserGroup:
+		m.UserGroupID = types.StringValue(b.PrincipalID)
+	case roleBindingPrincipalUser:
+		m.UserID = types.StringValue(b.PrincipalID)
+	}
 	m.RoleID = types.StringValue(b.RoleID)
 	m.OrganizationID = types.StringNull()
 	m.CloudID = types.StringNull()
@@ -109,9 +138,10 @@ func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaReq
 
 	resp.Schema = schema.Schema{
 		MarkdownDescription: roleBindingsAlphaBanner +
-			"Grants one role to one user group on an organization, cloud or project. " +
+			"Grants one role to one user group or user on an organization, cloud or project. " +
 			"Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). " +
-			"A binding cannot be edited, so changing any argument replaces it.",
+			"A binding cannot be edited, so changing any argument replaces it. " +
+			"Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -119,15 +149,21 @@ func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaReq
 				PlanModifiers:       keep,
 			},
 			"user_group_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The user group that holds the role (`ug_...`). Groups synced from an identity provider are accepted.",
+				Optional:            true,
+				MarkdownDescription: "The user group that holds the role (`ug_...`). Groups synced from an identity provider are accepted. Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.",
+				PlanModifiers:       replace,
+				Validators:          []validator.String{stringvalidator.LengthAtLeast(1)},
+			},
+			"user_id": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "The user that holds the role (`usr_...`); look up an organization member by email with the `anyscale_organization_user` data source. Service accounts are users too (`usr_...`). Specify exactly one of `user_group_id` or `user_id`. Changing it replaces the binding.",
 				PlanModifiers:       replace,
 				Validators:          []validator.String{stringvalidator.LengthAtLeast(1)},
 			},
 			"role_id": schema.StringAttribute{
 				Required: true,
 				MarkdownDescription: "The role to grant (`rol_...`); look one up by name with the `anyscale_role` data source. " +
-					"Changing it replaces the binding, leaving the group without the role in between unless the resource sets `lifecycle { create_before_destroy = true }`.",
+					"Changing it replaces the binding, leaving the principal without the role in between unless the resource sets `lifecycle { create_before_destroy = true }`.",
 				PlanModifiers: replace,
 				Validators:    []validator.String{stringvalidator.LengthAtLeast(1)},
 			},
@@ -171,6 +207,10 @@ func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaReq
 func (r *RoleBindingResource) ConfigValidators(ctx context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{
 		resourcevalidator.ExactlyOneOf(
+			path.MatchRoot("user_group_id"),
+			path.MatchRoot("user_id"),
+		),
+		resourcevalidator.ExactlyOneOf(
 			path.MatchRoot("organization_id"),
 			path.MatchRoot("cloud_id"),
 			path.MatchRoot("project_id"),
@@ -199,20 +239,30 @@ func (r *RoleBindingResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	resourceType, resourceID := plan.scope()
+	principalType, principalID := plan.principal()
 	binding, err := createRoleBinding(ctx, r.client, createRoleBindingRequest{
-		PrincipalType: roleBindingPrincipalUserGroup,
-		PrincipalID:   plan.UserGroupID.ValueString(),
+		PrincipalType: principalType,
+		PrincipalID:   principalID,
 		RoleID:        plan.RoleID.ValueString(),
 		ResourceType:  resourceType,
 		ResourceID:    resourceID,
 	})
 	if err != nil {
-		var statusErr *UnexpectedStatusError
 		switch {
-		case errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusConflict:
+		case isStatusWithSubstring(err, http.StatusConflict, roleBindingDuplicateSubstring):
 			r.addDuplicateError(ctx, &resp.Diagnostics, &plan, err)
+		case isOrgNotConvertedConflict(err):
+			addOrgNotConvertedError(&resp.Diagnostics, err, "")
+		case isStatusWithSubstring(err, http.StatusConflict, roleBindingArchivedRoleSubstring):
+			resp.Diagnostics.AddError("Role Is Archived",
+				fmt.Sprintf("%s An archived role cannot be newly assigned; pick another role.", extractAPIErrorDetail(err)))
+		case isStatusWithSubstring(err, http.StatusConflict, roleBindingLockoutSubstring):
+			addRoleBindingLockoutError(&resp.Diagnostics, err, "")
+		case isStatusWithSubstring(err, http.StatusForbidden, roleBindingSelfGrantSubstring):
+			resp.Diagnostics.AddError("Cannot Grant a Role to the Provider's Own Identity",
+				fmt.Sprintf("%s Bind a user group that this identity belongs to, or apply with a different identity.", extractAPIErrorDetail(err)))
 		case isRoleBindingsDisabled(err):
-			// Create also answers 404 for an unknown group or role, so ask
+			// Create also answers 404 for an unknown principal or role, so ask
 			// whether the feature is on before calling it off.
 			r.addCreateNotFoundError(ctx, &resp.Diagnostics, err)
 		default:
@@ -227,7 +277,7 @@ func (r *RoleBindingResource) Create(ctx context.Context, req resource.CreateReq
 }
 
 // addCreateNotFoundError reports a 404 from create: the feature is off, or
-// the group or role does not exist, in which case the API's own detail says
+// the principal or role does not exist, in which case the API's own detail says
 // which.
 func (r *RoleBindingResource) addCreateNotFoundError(ctx context.Context, diags *diag.Diagnostics, createErr error) {
 	enabled, err := roleBindingsEnabled(ctx, r.client)
@@ -242,14 +292,15 @@ func (r *RoleBindingResource) addCreateNotFoundError(ctx context.Context, diags 
 	AddAPIError(diags, "create role binding", createErr)
 }
 
-// addDuplicateError reports a 409 from create: the group already holds this
+// addDuplicateError reports a 409 from create: the principal already holds this
 // role on this resource. The existing binding is looked up so the import
 // command can be copied as-is; if that lookup fails the command keeps a
 // placeholder. The existing binding is never adopted.
 func (r *RoleBindingResource) addDuplicateError(ctx context.Context, diags *diag.Diagnostics, plan *RoleBindingResourceModel, createErr error) {
 	importID := "<role_binding_id>"
 	resourceType, resourceID := plan.scope()
-	bindings, err := listRoleBindingsForGroup(ctx, r.client, resourceType, resourceID, plan.UserGroupID.ValueString())
+	principalType, principalID := plan.principal()
+	bindings, err := listRoleBindingsForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID)
 	if err != nil {
 		tflog.Warn(ctx, "Could not look up the existing role binding for the import hint", map[string]any{"error": err.Error()})
 	}
@@ -273,7 +324,8 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 
 	bindingID := state.ID.ValueString()
 	resourceType, resourceID := state.scope()
-	binding, err := findRoleBindingForGroup(ctx, r.client, resourceType, resourceID, state.UserGroupID.ValueString(), bindingID)
+	principalType, principalID := state.principal()
+	binding, err := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
 	if err != nil {
 		if isRoleBindingsDisabled(err) {
 			enabled, probeErr := roleBindingsEnabled(ctx, r.client)
@@ -283,8 +335,8 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 			case !enabled:
 				addRoleBindingsDisabledError(&resp.Diagnostics, roleBindingsDisabledReadOutcome)
 			default:
-				// The feature is on, so the group no longer exists.
-				tflog.Warn(ctx, "Role binding's user group not found, removing from state",
+				// The feature is on, so the principal no longer exists.
+				tflog.Warn(ctx, "Role binding's principal not found, removing from state",
 					map[string]any{"role_binding_id": bindingID, "detail": extractAPIErrorDetail(err)})
 				resp.State.RemoveResource(ctx)
 			}
@@ -301,7 +353,7 @@ func (r *RoleBindingResource) Read(ctx context.Context, req resource.ReadRequest
 		return
 	}
 	if binding == nil {
-		// Revoked outside Terraform, or the group no longer exists.
+		// Revoked outside Terraform, or the principal no longer exists.
 		tflog.Warn(ctx, "Role binding not found, removing from state", map[string]any{"role_binding_id": bindingID})
 		resp.State.RemoveResource(ctx)
 		return
@@ -336,6 +388,20 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 		r.handleDeleteNotFound(ctx, &resp.Diagnostics, bindingID, err)
 		return
 	}
+	if isOrgNotConvertedConflict(err) {
+		addOrgNotConvertedError(&resp.Diagnostics, err, roleBindingsDisabledDeleteOutcome)
+		return
+	}
+	if isStatusWithSubstring(err, http.StatusForbidden, roleBindingSelfRevokeSubstring) {
+		resp.Diagnostics.AddError("Cannot Revoke the Provider's Own Role Binding",
+			fmt.Sprintf("%s Revoke it in the Anyscale console or with a different identity, or run `terraform state rm` on this resource's address to stop managing it.",
+				extractAPIErrorDetail(err)))
+		return
+	}
+	if isStatusWithSubstring(err, http.StatusConflict, roleBindingLockoutSubstring) {
+		addRoleBindingLockoutError(&resp.Diagnostics, err, roleBindingLockoutDeleteOutcome)
+		return
+	}
 	if !isForbidden(err) {
 		AddAPIError(&resp.Diagnostics, "delete role binding", err)
 		return
@@ -344,7 +410,8 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 	// A revoked binding answers 403; the listing tells that from a real
 	// refusal.
 	resourceType, resourceID := state.scope()
-	binding, listErr := findRoleBindingForGroup(ctx, r.client, resourceType, resourceID, state.UserGroupID.ValueString(), bindingID)
+	principalType, principalID := state.principal()
+	binding, listErr := findRoleBindingForPrincipal(ctx, r.client, resourceType, resourceID, principalType, principalID, bindingID)
 	switch {
 	case listErr != nil && isRoleBindingsDisabled(listErr):
 		r.handleDeleteNotFound(ctx, &resp.Diagnostics, bindingID, listErr)
@@ -359,7 +426,7 @@ func (r *RoleBindingResource) Delete(ctx context.Context, req resource.DeleteReq
 }
 
 // handleDeleteNotFound settles a 404 met while deleting. With the feature on,
-// the binding or its group is gone, so there is nothing left to revoke; with
+// the binding or its principal is gone, so there is nothing left to revoke; with
 // it off, the binding stays in state.
 func (r *RoleBindingResource) handleDeleteNotFound(ctx context.Context, diags *diag.Diagnostics, bindingID string, notFoundErr error) {
 	enabled, probeErr := roleBindingsEnabled(ctx, r.client)
@@ -373,8 +440,95 @@ func (r *RoleBindingResource) handleDeleteNotFound(ctx context.Context, diags *d
 	}
 }
 
+// roleBindingNaturalKey is a binding named by what it grants rather than by
+// its ID: <scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>.
+type roleBindingNaturalKey struct {
+	ResourceType  string
+	ResourceID    string
+	PrincipalType string
+	PrincipalID   string
+	RoleID        string
+}
+
+// roleBindingImportFormats names both accepted import IDs, for diagnostics.
+const roleBindingImportFormats = "Import a role binding by its ID (`rb_...`) or by " +
+	"`<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>`, where scope_type is organization, cloud or project " +
+	"and principal_type is user or user_group."
+
+// parseRoleBindingNaturalKey parses a composite import ID. Anyscale IDs
+// contain no "/", so the split is unambiguous.
+func parseRoleBindingNaturalKey(id string) (roleBindingNaturalKey, error) {
+	parts := strings.Split(id, "/")
+	if len(parts) != 5 {
+		return roleBindingNaturalKey{}, fmt.Errorf("%q has %d slash-separated parts, want 5", id, len(parts))
+	}
+	for i, part := range parts {
+		if part == "" {
+			return roleBindingNaturalKey{}, fmt.Errorf("%q has an empty part at position %d", id, i+1)
+		}
+	}
+	key := roleBindingNaturalKey{ResourceType: parts[0], ResourceID: parts[1], PrincipalType: parts[2], PrincipalID: parts[3], RoleID: parts[4]}
+	if !isManagedRoleBindingScope(key.ResourceType) {
+		return roleBindingNaturalKey{}, fmt.Errorf("scope type %q is not organization, cloud or project", key.ResourceType)
+	}
+	if !isManagedRoleBindingPrincipal(key.PrincipalType) {
+		return roleBindingNaturalKey{}, fmt.Errorf("principal type %q is not user or user_group", key.PrincipalType)
+	}
+	return key, nil
+}
+
+// resolveRoleBindingNaturalKey finds the ID of the binding a composite import
+// ID names, through the principal listing Read uses. The API keeps at most one
+// live binding per principal, role and resource. It returns "" with
+// diagnostics when there is no such binding or the listing fails.
+func (r *RoleBindingResource) resolveRoleBindingNaturalKey(ctx context.Context, key roleBindingNaturalKey, diags *diag.Diagnostics) string {
+	bindings, err := listRoleBindingsForPrincipal(ctx, r.client, key.ResourceType, key.ResourceID, key.PrincipalType, key.PrincipalID)
+	if err != nil {
+		switch {
+		case isRoleBindingsDisabled(err):
+			enabled, probeErr := roleBindingsEnabled(ctx, r.client)
+			switch {
+			case probeErr != nil:
+				addRoleBindingsProbeFailedError(diags, "list role bindings for import", err, probeErr)
+			case !enabled:
+				addRoleBindingsDisabledError(diags, "")
+			default:
+				AddConfigError(diags, "Role Binding Principal Not Found",
+					fmt.Sprintf("The %s %q could not be found: %s", key.PrincipalType, key.PrincipalID, extractAPIErrorDetail(err)))
+			}
+		case isForbidden(err):
+			AddConfigError(diags, "Role Bindings Not Readable",
+				fmt.Sprintf("The Anyscale API refused to list bindings on %s %q (HTTP 403): %s Reading them requires managing IAM on the %s.",
+					key.ResourceType, key.ResourceID, extractAPIErrorDetail(err), key.ResourceType))
+		default:
+			AddAPIError(diags, "list role bindings for import", err)
+		}
+		return ""
+	}
+	for _, b := range bindings {
+		if b.RoleID == key.RoleID {
+			return b.ID
+		}
+	}
+	AddConfigError(diags, "Role Binding Not Found",
+		fmt.Sprintf("No role binding grants role %q to %s %q on %s %q. Import never creates a binding; to grant it, declare the resource and apply.",
+			key.RoleID, key.PrincipalType, key.PrincipalID, key.ResourceType, key.ResourceID))
+	return ""
+}
+
 func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	bindingID := req.ID
+	if !strings.HasPrefix(bindingID, "rb_") {
+		key, err := parseRoleBindingNaturalKey(bindingID)
+		if err != nil {
+			AddConfigError(&resp.Diagnostics, "Invalid Role Binding Import ID", fmt.Sprintf("%s. %s", err.Error(), roleBindingImportFormats))
+			return
+		}
+		bindingID = r.resolveRoleBindingNaturalKey(ctx, key, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
 	binding, err := getRoleBinding(ctx, r.client, bindingID)
 	if err != nil {
 		switch {
@@ -398,9 +552,9 @@ func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.Impo
 		}
 		return
 	}
-	if binding.PrincipalType != roleBindingPrincipalUserGroup {
-		AddConfigError(&resp.Diagnostics, "Role Binding Is Not Held by a User Group",
-			fmt.Sprintf("Role binding %q is held by a %s, not a user group. anyscale_role_binding manages only user group bindings.",
+	if !isManagedRoleBindingPrincipal(binding.PrincipalType) {
+		AddConfigError(&resp.Diagnostics, "Role Binding Principal Not Supported",
+			fmt.Sprintf("Role binding %q is held by a %s, which anyscale_role_binding does not manage. It manages bindings held by a user group or a user.",
 				bindingID, binding.PrincipalType))
 		return
 	}

@@ -112,8 +112,55 @@ func addRoleBindingsDisabledError(diags *diag.Diagnostics, outcome string) {
 // Outcomes for addRoleBindingsDisabledError.
 const (
 	roleBindingsDisabledReadOutcome   = "The binding was kept in Terraform state unchanged."
+	roleBindingLockoutDeleteOutcome   = "Grant the role to another principal before revoking this one. The binding was not revoked and stays in Terraform state."
 	roleBindingsDisabledDeleteOutcome = "The binding was not revoked and stays in Terraform state; to stop managing it, run `terraform state rm` on its address."
 )
+
+// roleBindingDuplicateSubstring is the detail substring of create's 409 when
+// the principal already holds the role on the resource. The full detail is
+// "The principal already holds this role on this resource."
+// (backend/server/api/product/services/role_bindings_service.py:891-895 at
+// product 3b1f86a). It is the only 409 that means the binding exists; create
+// also answers 409 for an unconverted organization, an archived role, a
+// lockout and a concurrent revoke.
+const roleBindingDuplicateSubstring = "already holds this role"
+
+// roleBindingArchivedRoleSubstring is the detail substring of create's 409 for
+// an archived role. The full detail is "This role is archived and cannot be
+// newly assigned." (role_bindings_service.py:1166-1170 at product 3b1f86a).
+const roleBindingArchivedRoleSubstring = "is archived and cannot be newly assigned"
+
+// roleBindingLockoutSubstring is the detail substring of the 409 a binding
+// write answers when it would leave the organization with no Organization
+// owner of its own. The full detail is "This change would leave the
+// organization without an Organization owner."
+// (backend/server/api/base/resources/converted_organizations.py:314 at
+// product 3b1f86a).
+const roleBindingLockoutSubstring = "without an Organization owner"
+
+// roleBindingSelfGrantSubstring is the detail substring of create's 403 when
+// the caller names itself as the user principal. The full detail is "You
+// cannot assign a role to yourself directly. Assign it to a user group you
+// belong to." (backend/server/api/product/services/role_bindings_service.py:1129-1135
+// at product 3b1f86a).
+const roleBindingSelfGrantSubstring = "cannot assign a role to yourself directly"
+
+// roleBindingSelfRevokeSubstring is the detail substring of delete's 403 when
+// the caller revokes its own direct binding. The full detail is "You cannot
+// revoke your own role binding." (role_bindings_service.py:1151-1157 at
+// product 3b1f86a).
+const roleBindingSelfRevokeSubstring = "cannot revoke your own role binding"
+
+// addRoleBindingLockoutError reports a write the API refused because it would
+// leave the organization without an Organization owner. outcome, when set,
+// says what that means for the operation.
+func addRoleBindingLockoutError(diags *diag.Diagnostics, err error, outcome string) {
+	detail := extractAPIErrorDetail(err) + " To proceed, keep at least one Organization owner binding."
+	if outcome != "" {
+		detail += " " + outcome
+	}
+	diags.AddError("Change Would Leave Organization Without an Owner", detail)
+}
 
 // isForbidden reports whether err is an HTTP 403.
 func isForbidden(err error) bool {
@@ -152,12 +199,12 @@ func deleteRoleBinding(ctx context.Context, client *Client, roleBindingID string
 	return err
 }
 
-// listRoleBindingsForGroup returns every binding the group holds directly on
-// one resource. The empty list lets Read tell a revoked binding from a
-// disabled feature.
-func listRoleBindingsForGroup(ctx context.Context, client *Client, resourceType, resourceID, groupID string) ([]roleBindingSummary, error) {
+// listRoleBindingsForPrincipal returns every binding the principal holds
+// directly on one resource. The empty list lets Read tell a revoked binding
+// from a disabled feature.
+func listRoleBindingsForPrincipal(ctx context.Context, client *Client, resourceType, resourceID, principalType, principalID string) ([]roleBindingSummary, error) {
 	path := fmt.Sprintf("%s/%s/%s/principals/%s/%s", roleBindingsBasePath,
-		url.PathEscape(resourceType), url.PathEscape(resourceID), roleBindingPrincipalUserGroup, url.PathEscape(groupID))
+		url.PathEscape(resourceType), url.PathEscape(resourceID), url.PathEscape(principalType), url.PathEscape(principalID))
 	return PaginatedRequest(
 		ctx, client, path, url.Values{"count": []string{"50"}},
 		func(body []byte) ([]roleBindingSummary, *string, error) {
@@ -170,10 +217,10 @@ func listRoleBindingsForGroup(ctx context.Context, client *Client, resourceType,
 	)
 }
 
-// findRoleBindingForGroup returns the group's binding with this ID on the
-// resource, or nil when the group no longer holds it.
-func findRoleBindingForGroup(ctx context.Context, client *Client, resourceType, resourceID, groupID, roleBindingID string) (*roleBindingSummary, error) {
-	bindings, err := listRoleBindingsForGroup(ctx, client, resourceType, resourceID, groupID)
+// findRoleBindingForPrincipal returns the principal's binding with this ID on
+// the resource, or nil when the principal no longer holds it.
+func findRoleBindingForPrincipal(ctx context.Context, client *Client, resourceType, resourceID, principalType, principalID, roleBindingID string) (*roleBindingSummary, error) {
+	bindings, err := listRoleBindingsForPrincipal(ctx, client, resourceType, resourceID, principalType, principalID)
 	if err != nil {
 		return nil, err
 	}

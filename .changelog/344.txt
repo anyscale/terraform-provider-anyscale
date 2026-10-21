@@ -1,0 +1,4 @@
+```
+release-note:security
+provider: Build with Go 1.26.10, picking up the fix for a published vulnerability in the Go standard library's `crypto/x509`.
+```
