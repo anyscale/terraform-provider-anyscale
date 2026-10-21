@@ -1,4 +1,0 @@
-```
-release-note:security
-provider: Build with Go 1.26.10, picking up fixes for published vulnerabilities in the Go standard library, including net/http and crypto/x509.
-```

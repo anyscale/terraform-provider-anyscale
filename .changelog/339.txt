@@ -1,4 +1,0 @@
-```
-release-note:changed
-resource/anyscale_container_image_registry: Changing `image_uri` now registers a new build on the same cluster environment in place (`id` and `name` are kept, `revision` increments, earlier revisions are not archived) instead of replacing the resource. Previously the replace failed with 409 "This name is already taken" when `name` was set, and created a new auto-named environment when it was omitted.
-```

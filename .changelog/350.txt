@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: Read requests (GET) to the Anyscale API now retry up to 3 attempts on timeouts, connection errors, and HTTP 429/502/503/504, with backoff. Write requests are not retried.
-```
