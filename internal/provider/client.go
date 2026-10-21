@@ -221,6 +221,12 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body io.Rea
 	}
 }
 
+// SetRetrySleep replaces the wait between read retries; nil restores the
+// default timer. Tests in other packages use it to skip real backoff.
+func (c *Client) SetRetrySleep(sleep func(ctx context.Context, d time.Duration) error) {
+	c.sleep = sleep
+}
+
 // finalAttempt returns the last attempt's outcome. A transport error after a
 // retry says how many attempts were made; a status response is returned as is.
 func finalAttempt(method, path string, attempt int, resp *http.Response, err error) (*http.Response, error) {

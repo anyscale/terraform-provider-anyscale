@@ -128,8 +128,17 @@ func GetTestClient() (*provider.Client, error) {
 		return nil, fmt.Errorf("no authentication token available")
 	}
 
-	return provider.NewClientWithToken(apiURL, token), nil
+	client := provider.NewClientWithToken(apiURL, token)
+	if testClientRetrySleep != nil {
+		client.SetRetrySleep(testClientRetrySleep)
+	}
+	return client, nil
 }
+
+// testClientRetrySleep, when set, replaces the wait between read retries on
+// every client GetTestClient returns. Only this package's unit tests set it
+// (see skipRetryBackoff), so they don't sit through real backoff.
+var testClientRetrySleep func(ctx context.Context, d time.Duration) error
 
 // PreCheck validates that required environment variables are set
 // This is a common precheck function that can be used across all acceptance tests

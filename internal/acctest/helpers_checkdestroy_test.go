@@ -276,6 +276,7 @@ func TestCheckDestroy_UnverifiableResponsesFail(t *testing.T) {
 		{name: "persistent 503", status: http.StatusServiceUnavailable, wantErr: "returned 503 until the poll deadline"},
 		{name: "persistent transport error", closed: true, wantErr: "request error until the poll deadline"},
 	}
+	skipRetryBackoff(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

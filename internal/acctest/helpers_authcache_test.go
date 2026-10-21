@@ -1,11 +1,13 @@
 package acctest
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // resetAuthProbeCache clears ValidateAuth's package-level cache and restores
@@ -127,6 +129,7 @@ func TestValidateAuth_AcceptedTokenPasses(t *testing.T) {
 
 func TestValidateAuth_DoesNotCacheARequestError(t *testing.T) {
 	resetAuthProbeCache(t)
+	skipRetryBackoff(t)
 
 	// Point at a server that immediately closes the connection, so every
 	// request fails at the transport level (a stand-in for a transient
@@ -276,4 +279,12 @@ func TestGetAllConfiguredClouds_ConfirmedUnhealthyCloudIsCached(t *testing.T) {
 	if got := atomic.LoadInt64(&resourcesCalls); got != 1 {
 		t.Errorf("resources-check request count = %d, want exactly 1 - a confirmed definitive answer must still be cached, not re-probed every call", got)
 	}
+}
+
+// skipRetryBackoff makes GetTestClient's clients retry reads without waiting,
+// for the rest of the test. Not safe for parallel tests.
+func skipRetryBackoff(t *testing.T) {
+	t.Helper()
+	testClientRetrySleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+	t.Cleanup(func() { testClientRetrySleep = nil })
 }
