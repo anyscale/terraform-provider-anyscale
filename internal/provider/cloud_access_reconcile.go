@@ -324,6 +324,13 @@ type cloudAccessReconcileResult struct {
 	// grant) - opposite problems that would make length(unmanaged_grants) > 0
 	// ambiguous between them if merged into one attribute.
 	Ungranted []CloudAccessUnmanagedGrantModel
+
+	// OrgConverted is the refusal the API answers every legacy write with once
+	// the organization has converted to role bindings. The refusal is per
+	// organization, so the first one means every later write would be refused
+	// too: the reconcile stops there, with nothing written, and leaves the
+	// diagnostic to the caller (an apply errors, a destroy warns).
+	OrgConverted error
 }
 
 // unmanagedGrantsList converts the result into the Computed attribute's value.
@@ -556,7 +563,12 @@ func reconcileCloudAccess(
 	// additive half.
 	for _, folded := range cloudAccessSortedMemberKeys(desired) {
 		m := desired[folded]
-		if grantDiags := grantCloudAccessMember(ctx, client, cloudID, m); grantDiags.HasError() {
+		grantDiags, convertedErr := grantCloudAccessMember(ctx, client, cloudID, m)
+		if convertedErr != nil {
+			result.OrgConverted = convertedErr
+			return result, diags
+		}
+		if grantDiags.HasError() {
 			result.Ungranted = append(result.Ungranted, CloudAccessUnmanagedGrantModel{
 				Email:     types.StringValue(m.Email),
 				ProjectID: types.StringNull(),
@@ -618,6 +630,10 @@ func reconcileCloudAccess(
 	} else {
 		for _, m := range toRevoke {
 			if err := revokeCloudAccessMember(ctx, client, cloudID, m.IdentityID); err != nil {
+				if isOrgConvertedConflict(err) {
+					result.OrgConverted = err
+					return result, diags
+				}
 				// Recorded, not fatal. One unrevokable member must not block the whole
 				// set forever - see property 2 on this file.
 				result.Unmanaged = append(result.Unmanaged, CloudAccessUnmanagedGrantModel{
@@ -661,6 +677,9 @@ func reconcileCloudAccess(
 }
 
 // grantCloudAccessMember establishes membership and then writes the role.
+// A refusal because the organization has converted to role bindings is
+// returned as the error, with no diagnostic, so the reconcile can stop
+// before any other write.
 //
 // The bootstrap POST runs UNCONDITIONALLY and first, and both halves of that
 // matter. Unconditionally, because a conditional skip is what produces an
@@ -684,7 +703,7 @@ func reconcileCloudAccess(
 // should come out; if it 404s, membership visibility is a red herring and the
 // bootstrap stays exactly as it is. Until then, running one extra call and
 // swallowing an expected 409 is the cheap side of the trade.
-func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string, m cloudAccessDesiredMember) diag.Diagnostics {
+func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string, m cloudAccessDesiredMember) (diag.Diagnostics, error) {
 	var diags diag.Diagnostics
 
 	identityID, userID, err := resolveIdentityForEmail(ctx, client, m.Email)
@@ -695,7 +714,7 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 				"someone who is already a member of the organization. Add them first - anyscale_organization_user manages "+
 				"membership, and anyscale_organization_invitation invites someone who has no account yet.", m.Email, err.Error()),
 		)
-		return diags
+		return diags, nil
 	}
 
 	weCreatedMembership := false
@@ -705,19 +724,22 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 	})
 	if err != nil {
 		diags.AddError("Error Marshaling Request", err.Error())
-		return diags
+		return diags, nil
 	}
 	if _, err := cloudAccessDoWriteRetry(
 		ctx, client, "POST", fmt.Sprintf("/api/v2/clouds/%s/collaborators/users", cloudID), reqBody,
 		http.StatusOK, http.StatusNoContent,
 	); err != nil {
+		if isOrgConvertedConflict(err) {
+			return diags, err
+		}
 		detail := extractAPIErrorDetail(err)
 		if !strings.Contains(detail, cloudAccessAlreadyHasPermissionsSubstring) {
 			diags.AddError(
 				"Could Not Establish Cloud Membership",
 				fmt.Sprintf("Adding %s to cloud %s failed: %s", m.Email, cloudID, detail),
 			)
-			return diags
+			return diags, nil
 		}
 		// They were already a member. Nothing was written, so nothing needs rolling
 		// back if the role write below fails.
@@ -728,7 +750,12 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 
 	roleErr := setCloudAccessRole(ctx, client, cloudID, userID, m.BaseRole, m.DenyRoles)
 	if roleErr == nil {
-		return diags
+		return diags, nil
+	}
+	if isOrgConvertedConflict(roleErr) && !weCreatedMembership {
+		// Nothing was written; a membership this call created is rolled back
+		// below like any other failed role write.
+		return diags, roleErr
 	}
 
 	{
@@ -746,14 +773,14 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 				diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+fmt.Sprintf(
 					"\n\nThey were already a collaborator on cloud %s before this apply, and that pre-existing access was "+
 						"NOT modified or removed.", cloudID))
-				return diags
+				return diags, nil
 			}
 			diags.AddError(
 				"Could Not Set Cloud Role",
 				fmt.Sprintf("Setting %s's role on cloud %s failed: %s\n\nThey were already a collaborator on this cloud "+
 					"before this apply, and that pre-existing access was NOT modified or removed.", m.Email, cloudID, detail),
 			)
-			return diags
+			return diags, nil
 		}
 
 		// Membership was created moments ago by this very call and the role write
@@ -773,7 +800,7 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 						"Terraform did not manage to remove. Remove it manually (for example DELETE "+
 						"/api/v2/clouds/%s/collaborators/%s, or the equivalent console action) and retry.",
 					extractAPIErrorDetail(delErr), m.Email, cloudAccessBridgePermissionLevel, cloudID, cloudID, identityID))
-				return diags
+				return diags, nil
 			}
 			diags.AddError(
 				"Could Not Set Cloud Role, And Rollback Also Failed",
@@ -784,21 +811,21 @@ func grantCloudAccessMember(ctx context.Context, client *Client, cloudID string,
 					m.Email, cloudID, detail, extractAPIErrorDetail(delErr), m.Email,
 					cloudAccessBridgePermissionLevel, cloudID, cloudID, identityID),
 			)
-			return diags
+			return diags, nil
 		}
 
 		if featureGated {
 			diags.AddError(cloudRolesDisabledSummary, cloudRolesDisabledDetail+
 				"\n\nThe cloud membership this resource had just created was rolled back successfully - no unintended "+
 				"access was left behind.")
-			return diags
+			return diags, nil
 		}
 		diags.AddError(
 			"Could Not Set Cloud Role",
 			fmt.Sprintf("Setting %s's role on cloud %s failed: %s\n\nThe cloud membership this resource had just created "+
 				"was rolled back successfully - no unintended access was left behind.", m.Email, cloudID, detail),
 		)
-		return diags
+		return diags, nil
 	}
 }
 
@@ -860,6 +887,9 @@ func cloudAccessDiagsReason(diags diag.Diagnostics) string {
 func cloudAccessRevokeFailureReason(err error) string {
 	detail := extractAPIErrorDetail(err)
 	switch {
+	case isOrgConvertedConflict(err):
+		return fmt.Sprintf("%s (this organization has converted to role bindings, so Anyscale refuses legacy access writes; "+
+			"manage access with anyscale_role_binding)", detail)
 	case strings.Contains(detail, cloudAccessAutoAddUserSubstring):
 		return fmt.Sprintf("%s (this cloud's auto_add_user setting blocks removing collaborators; it must be turned off "+
 			"before Terraform can be authoritative over this cloud's members)", detail)

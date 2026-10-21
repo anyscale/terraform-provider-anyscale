@@ -4,14 +4,14 @@ page_title: "anyscale_user_group_members Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
   ~> Alpha. User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
-  Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership.
+  Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. Do not manage the "All users" group of a converted organization ../guides/rbac.md#organization-access-mode with this resource.
 ---
 
 # anyscale_user_group_members (Resource)
 
 ~> **Alpha.** User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
 
-Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership.
+Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. Do not manage the "All users" group of a [converted organization](../guides/rbac.md#organization-access-mode) with this resource.
 
 ## Example Usage
 
@@ -24,7 +24,7 @@ resource "anyscale_user_group" "ml_platform" {
 }
 
 resource "anyscale_user_group_members" "ml_platform" {
-  group_id = anyscale_user_group.ml_platform.id
+  user_group_id = anyscale_user_group.ml_platform.id
 
   # Each email must already belong to your organization; invite people first with
   # anyscale_organization_invitation and wait for them to accept. Matching is case-insensitive.
@@ -40,12 +40,12 @@ resource "anyscale_user_group_members" "ml_platform" {
 
 ### Required
 
-- `group_id` (String) The ID of the user group whose members this resource manages. Changing it forces a new resource.
 - `members` (Set of String) Email addresses of the group's members. Each must already belong to the organization; invite new users first. Emails match case-insensitively. An empty set removes every member. A member who leaves the organization drops out of this set on the next refresh.
+- `user_group_id` (String) The ID of the user group whose members this resource manages (`ug_...`). Changing it forces a new resource.
 
 ### Read-Only
 
-- `id` (String) The user group ID; the same value as `group_id`.
+- `id` (String) The user group ID; the same value as `user_group_id`.
 
 ## Import
 
@@ -54,6 +54,6 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the group ID (the same value as the resource's group_id).
+# Import using the group ID (the same value as the resource's user_group_id).
 terraform import anyscale_user_group_members.ml_platform ug_abc123
 ```

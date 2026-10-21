@@ -23,7 +23,7 @@ Read this before writing configuration that spans more than one scope.
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | Cloud membership, cloud role, and project role | [`anyscale_cloud_access`](../resources/cloud_access.md) | One cloud's **entire** member list, each member's `base_role`/`deny_roles` on that cloud, and their per-project roles under it. Authoritative from the first `apply` - see [`anyscale_cloud_access`: authoritative over one cloud's whole member list](#anyscale_cloud_access-authoritative-over-one-clouds-whole-member-list), below, before writing configuration against it. |
 | User groups (Alpha) | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Alpha)](#user-groups-alpha). |
-| Group access (Alpha) | [`anyscale_role_binding`](../resources/role_binding.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group on one cloud, project, or the organization. See [Role bindings (Alpha)](#role-bindings-alpha). |
+| Role grants (Alpha) | [`anyscale_role_binding`](../resources/role_binding.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group or one user on one cloud, project, or the organization. **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Alpha)](#role-bindings-alpha). |
 
 The two role resources above use the word "authoritative" to mean: authoritative over the one row
 each manages, never over a whole population - see
@@ -83,6 +83,10 @@ group remove each other's members on every apply, and nothing can detect that fr
 person who leaves the organization drops out of the group; the next plan proposes re-adding them and
 the apply fails, because they are no longer an organization member.
 
+In a [converted organization](#organization-access-mode), the "All users" group adds every joining member
+automatically and refuses removals, so do not manage it with `anyscale_user_group_members`: it would show a
+perpetual diff, then fail with a 409.
+
 ### Directory-synced groups are read-only here
 
 Groups created by directory sync (SCIM) are owned by your identity provider. The resources refuse to
@@ -114,8 +118,8 @@ resource "anyscale_user_group" "ml_platform" {
 }
 
 resource "anyscale_user_group_members" "ml_platform" {
-  group_id = anyscale_user_group.ml_platform.id
-  members  = ["dev1@example.com", "dev2@example.com"] # must already be organization members
+  user_group_id = anyscale_user_group.ml_platform.id
+  members       = ["dev1@example.com", "dev2@example.com"] # must already be organization members
 }
 ```
 
@@ -159,14 +163,91 @@ then role, once the invitation is accepted - in
 cannot apply in the same run as the invitation loop for someone who has not yet accepted - stage
 it as a second `apply` once invitations are accepted, not a sign anything here is incomplete.
 
+## Organization access mode
+
+An Anyscale organization manages access in one of two modes, and the mode decides which resources can
+write. You cannot choose the mode from Terraform; an organization admin converts it in **Users & IAM**,
+and conversion is one-way.
+
+| | Legacy organization | Converted organization |
+|---|---|---|
+| Access is held by | Collaborator and policy records | Role bindings |
+| Writes that work | [`anyscale_cloud_access`](../resources/cloud_access.md), [`anyscale_organization_user_role`](../resources/organization_user_role.md), `anyscale_cloud.auto_add_user` | [`anyscale_role_binding`](../resources/role_binding.md) |
+| Writes the API refuses (HTTP 409) | `anyscale_role_binding` | The three legacy resources in the previous row |
+| Not affected by mode | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md), [`anyscale_organization_user`](../resources/organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
+
+The provider does not detect the mode in advance; the API refuses the write and the provider reports it.
+Role bindings are also behind a feature flag (see [Role bindings (Alpha)](#role-bindings-alpha)). An
+organization is legacy until an admin converts it.
+
+| Error | Mode it means | What to do |
+|---|---|---|
+| "Organization Not Converted to Role Bindings" | Legacy | Convert the organization in Users & IAM, or manage access with the legacy resources. |
+| "Organization Uses Role Bindings" | Converted | Stop managing that access with the legacy resource; use `anyscale_role_binding` on a user group or a user. |
+
+In a converted organization, `anyscale_cloud_access` fails an apply on the first refused grant, before
+any further grant or revoke. A create leaves nothing in state and an update keeps the prior state.
+Destroying either legacy resource warns "Organization Uses Role Bindings" and removes it from state; nothing is
+reverted, and the legacy grant or role is left in place.
+
+Terraform **cannot detect** a conversion. After it, a refresh of `anyscale_cloud_access` or
+`anyscale_organization_user_role` still returns the legacy records from before conversion, so `plan` shows
+no changes while the access that matters now lives in role bindings. The next write is what fails.
+
+Role-binding writes are refused until the organization converts, so the move happens in this order:
+
+1. Convert in Users & IAM. Conversion writes role bindings for your existing access, so most grants you
+   would declare already exist.
+2. Run `terraform state rm` for the legacy resources (or destroy them, which only warns), and remove them
+   from your configuration.
+3. Declare an `anyscale_role_binding` for each grant you want Terraform to manage, and **import** the
+   existing binding instead of creating one. Creating a grant that already exists fails with "Role Binding
+   Already Exists". You do not need to look up the binding ID: import by what the binding grants,
+   `<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>`, where `scope_type` is `organization`,
+   `cloud` or `project`, and `principal_type` is `user` or `user_group`. Import fails, and creates nothing,
+   if no such binding exists. An `import` block with `for_each` imports many at once and needs Terraform 1.7
+   or later.
+
+```hcl
+locals {
+  grants = {
+    analysts = { group = anyscale_user_group.analysts.id, role = data.anyscale_role.viewer.id }
+  }
+}
+
+resource "anyscale_role_binding" "grant" {
+  for_each      = local.grants
+  user_group_id = each.value.group
+  role_id       = each.value.role
+  project_id    = var.project_id
+}
+
+import {
+  for_each = local.grants
+  to       = anyscale_role_binding.grant[each.key]
+  id       = "project/${var.project_id}/user_group/${each.value.group}/${each.value.role}"
+}
+```
+
+The binding ID (`rb_...`) also works as the import ID.
+
+Which bindings conversion creates depends on the option chosen in the migration wizard, so expect to
+find some grants missing and create those normally.
+
 ## Role bindings (Alpha)
 
 ~> **Alpha, behind a feature flag.** Role bindings are an Alpha feature, under the same terms as
 [user groups](#user-groups-alpha): the API and schema may change, including breaking changes in a
 minor release, always listed in the changelog. They are also **behind a feature flag**: contact
-support@anyscale.com for access. Without it, every call fails with "Role bindings are not enabled".
+support@anyscale.com for access. Without it, every call fails with "Role bindings are not enabled". The organization must also be
+[converted](#organization-access-mode).
 
-`anyscale_role_binding` grants **one role to one user group on one scope** - exactly one of `cloud_id`,
+Vocabulary, if you know AWS or Google IAM: `anyscale_role_binding` is **additive** and non-authoritative, like
+`google_project_iam_member`, not like `google_project_iam_binding` (which owns a whole role). It grants only
+what you declare and never removes other grants.
+
+`anyscale_role_binding` grants **one role to one user group or one user on one scope** - exactly one of
+`user_group_id` or `user_id`, and exactly one of `cloud_id`,
 `project_id`, or `organization_id`. Look up the role with the [`anyscale_role`](../data-sources/role.md)
 data source, which resolves a role by its exact, case-sensitive `name`. Which role names exist depends on
 your organization; ask support@anyscale.com which built-in roles are enabled.
@@ -187,6 +268,28 @@ resource "anyscale_role_binding" "analysts_viewer" {
 }
 ```
 
+### Granting a user, not a group
+
+Binding a user takes the user's `usr_...` ID, not their email. Look it up with the
+[`anyscale_organization_user`](../data-sources/organization_user.md) data source and use its **`user_id`**
+attribute, not `id` (that is the identity ID, a different value):
+
+```hcl
+data "anyscale_organization_user" "alice" {
+  email = "alice@example.com"
+}
+
+resource "anyscale_role_binding" "alice_viewer" {
+  user_id    = data.anyscale_organization_user.alice.user_id
+  role_id    = data.anyscale_role.viewer.id
+  project_id = var.project_id
+}
+```
+
+`user_id` can be null for a user who has no user ID yet; apply the binding once it is set.
+Resources that take an email (`anyscale_user_group_members`, `anyscale_cloud_access`) and this one that takes
+an ID cannot share a variable; keep emails and IDs in separate places.
+
 ### Each binding is one grant, and cannot be edited
 
 The API has no update, so changing any argument replaces the binding. Set `lifecycle { create_before_destroy = true }` when changing `role_id` so the
@@ -200,12 +303,19 @@ on a cloud, project, or organization. Declaring a binding that already exists fa
 
 Access a group gets through a role binding is invisible to
 [`anyscale_cloud_access`](#anyscale_cloud_access-authoritative-over-one-clouds-whole-member-list), and
-removing a person from that resource does not remove access they hold through a group. Only
-user groups are supported; grant individual people access with `anyscale_cloud_access` or
-`anyscale_organization_user_role`.
+removing a person from that resource does not remove access they hold through a group. A
+binding on a `user_id` is equally invisible to it. In a legacy organization, grant individual people
+access with `anyscale_cloud_access` or `anyscale_organization_user_role`.
 
 Directory-synced (SCIM) groups can be bound; unlike membership, nothing here fights the identity
 provider.
+
+~> **Do not revoke your own way in.** Anyscale refuses a change that leaves the organization without an
+Organization owner, and refuses revoking the provider's own direct binding. It does **not** stop a
+configuration from removing a *group* binding that gives the Terraform identity its permission to manage
+access. If the identity depends on a group binding you destroy, later applies fail until someone restores
+it in the console. Keep the grant that the Terraform identity relies on out of any configuration you might
+destroy, or bind that identity directly.
 
 ### Role and scope must make sense together
 
@@ -218,7 +328,12 @@ Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 | Message | Meaning |
 |---|---|
 | "Role bindings are not enabled" | The feature flag is off for your organization; contact support@anyscale.com. During a refresh, state is kept unchanged. |
-| Conflict on create | The group already holds that role on that scope. Import the binding instead. |
+| "Role Binding Already Exists" | The principal already holds that role on that scope. Import the binding instead. |
+| "Organization Not Converted to Role Bindings" | The organization is still legacy. See [Organization access mode](#organization-access-mode). |
+| "Role Is Archived" | The role cannot be newly assigned; pick another role. |
+| "Change Would Leave Organization Without an Owner" | Keep at least one Organization owner binding. |
+| "Cannot Grant a Role to the Provider's Own Identity" | Bind a user group the identity belongs to, or apply with a different identity. |
+| "Cannot Revoke the Provider's Own Role Binding" | Revoke it in the console or with a different identity, or run `terraform state rm`. |
 | Binding disappears from state | It was revoked outside Terraform, or its group was deleted; the next plan recreates it. |
 | "Role Binding Not Readable" | The cloud or project was deleted outside Terraform, or access to it was lost. State is kept; run `terraform state rm` for the binding if the scope is gone. |
 
@@ -401,7 +516,7 @@ do not treat a nonzero length on either as interchangeable with the other:
   finish granting. Someone lacks access they should have.
 
 Either failure is recorded with a reason and a loud warning, and the apply still succeeds rather
-than erroring - erroring after a partial write would mark the resource tainted and schedule a full
+than erroring (the exception is a [converted organization](#organization-access-mode), where the apply fails at the first refused write) - erroring after a partial write would mark the resource tainted and schedule a full
 destroy-and-recreate on the next apply, which would revoke every member this one **did** manage to
 grant. When a grant fails partway through an apply, this resource also skips the revokes that apply
 would otherwise have attempted (recorded in `unmanaged_grants` with a reason naming the skip) rather

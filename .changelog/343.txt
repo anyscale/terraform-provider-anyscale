@@ -1,0 +1,4 @@
+```
+release-note:security
+provider: Build with Go 1.26.9 and golang.org/x/net v0.60.0, picking up fixes for published vulnerabilities in the Go standard library's `net/http` and in `golang.org/x/net`.
+```
