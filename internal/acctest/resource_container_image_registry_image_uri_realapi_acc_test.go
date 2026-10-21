@@ -16,8 +16,8 @@ import (
 
 // Changing image_uri against the real API: the new build lands on the same cluster
 // environment, revision increments by one, the previous build is still served, and a
-// refresh plans clean. Revisions are asserted relative to the one Create leaves, so the
-// test does not depend on how many builds Create registers. The mock-server test proves
+// refresh plans clean. Create must leave exactly one build (revision 1): the template call
+// creates it, and Create must not register a second. The mock-server test proves
 // what the provider sends; this proves the backend accepts it and Read round-trips the
 // result.
 func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) {
@@ -47,11 +47,11 @@ func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) 
 						firstID = rs.Primary.ID
 						firstBuildID = rs.Primary.Attributes["build_id"]
 						rev, err := strconv.Atoi(rs.Primary.Attributes["revision"])
-						if err != nil || rev < 1 {
-							return fmt.Errorf("revision after create = %q, want a positive integer", rs.Primary.Attributes["revision"])
+						if err != nil || rev != 1 {
+							return fmt.Errorf("revision after create = %q, want 1 (one build)", rs.Primary.Attributes["revision"])
 						}
 						firstRevision = rev
-						return nil
+						return testAccCheckRegistryLatestBuildInAPI(firstID, firstBuildID, 1)
 					},
 				),
 			},
@@ -91,40 +91,8 @@ func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) 
 // the environment is live with the new build as latest, and the first build is still
 // served with its original image.
 func testAccCheckRegistryBuildsInAPI(envID, oldBuildID, oldImage, newBuildID, newImage string, newRevision int) error {
-	client, err := GetTestClient()
-	if err != nil {
-		return fmt.Errorf("failed to get test client: %w", err)
-	}
-	get := func(path string, out any) error {
-		resp, err := client.DoRequest(context.Background(), http.MethodGet, path, nil)
-		if err != nil {
-			return fmt.Errorf("GET %s: %w", path, err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		body, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-			return fmt.Errorf("GET %s: status %d: %s", path, resp.StatusCode, body)
-		}
-		return json.Unmarshal(body, out)
-	}
-
-	var env struct {
-		Result struct {
-			ArchivedAt  *string `json:"archived_at"`
-			LatestBuild *struct {
-				ID       string `json:"id"`
-				Revision int    `json:"revision"`
-			} `json:"latest_build"`
-		} `json:"result"`
-	}
-	if err := get("/api/v2/application_templates/"+envID, &env); err != nil {
+	if err := testAccCheckRegistryLatestBuildInAPI(envID, newBuildID, newRevision); err != nil {
 		return err
-	}
-	if env.Result.ArchivedAt != nil {
-		return fmt.Errorf("environment %s is archived after an in-place update", envID)
-	}
-	if env.Result.LatestBuild == nil || env.Result.LatestBuild.ID != newBuildID || env.Result.LatestBuild.Revision != newRevision {
-		return fmt.Errorf("environment %s latest_build = %+v, want id %s revision %d", envID, env.Result.LatestBuild, newBuildID, newRevision)
 	}
 
 	for _, b := range []struct{ id, image string }{{oldBuildID, oldImage}, {newBuildID, newImage}} {
@@ -134,7 +102,7 @@ func testAccCheckRegistryBuildsInAPI(envID, oldBuildID, oldImage, newBuildID, ne
 				DockerImageName       *string `json:"docker_image_name"`
 			} `json:"result"`
 		}
-		if err := get("/api/v2/builds/"+b.id, &build); err != nil {
+		if err := registryAPIGet("/api/v2/builds/"+b.id, &build); err != nil {
 			return err
 		}
 		if build.Result.ApplicationTemplateID != envID {
@@ -145,4 +113,46 @@ func testAccCheckRegistryBuildsInAPI(envID, oldBuildID, oldImage, newBuildID, ne
 		}
 	}
 	return nil
+}
+
+// testAccCheckRegistryLatestBuildInAPI checks that environment envID is live and its
+// latest build is buildID at the given revision.
+func testAccCheckRegistryLatestBuildInAPI(envID, buildID string, revision int) error {
+	var env struct {
+		Result struct {
+			ArchivedAt  *string `json:"archived_at"`
+			LatestBuild *struct {
+				ID       string `json:"id"`
+				Revision int    `json:"revision"`
+			} `json:"latest_build"`
+		} `json:"result"`
+	}
+	if err := registryAPIGet("/api/v2/application_templates/"+envID, &env); err != nil {
+		return err
+	}
+	if env.Result.ArchivedAt != nil {
+		return fmt.Errorf("environment %s is archived", envID)
+	}
+	if env.Result.LatestBuild == nil || env.Result.LatestBuild.ID != buildID || env.Result.LatestBuild.Revision != revision {
+		return fmt.Errorf("environment %s latest_build = %+v, want id %s revision %d", envID, env.Result.LatestBuild, buildID, revision)
+	}
+	return nil
+}
+
+// registryAPIGet GETs path with the test client and decodes the JSON body into out.
+func registryAPIGet(path string, out any) error {
+	client, err := GetTestClient()
+	if err != nil {
+		return fmt.Errorf("failed to get test client: %w", err)
+	}
+	resp, err := client.DoRequest(context.Background(), http.MethodGet, path, nil)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("GET %s: status %d: %s", path, resp.StatusCode, body)
+	}
+	return json.Unmarshal(body, out)
 }
