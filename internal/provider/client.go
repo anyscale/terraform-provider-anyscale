@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/rand/v2"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -21,6 +25,13 @@ type Client struct {
 	BaseURL    string
 	Token      string
 	HTTPClient *http.Client
+
+	// attemptTimeout overrides defaultRequestTimeout per attempt; 0 means
+	// defaultRequestTimeout. sleep overrides the backoff wait; nil means a
+	// timer that returns early with ctx.Err() if ctx is done. Both exist so
+	// retry tests run in milliseconds.
+	attemptTimeout time.Duration
+	sleep          func(ctx context.Context, d time.Duration) error
 }
 
 // defaultRequestTimeout bounds an API call when the caller's context carries
@@ -29,6 +40,16 @@ type Client struct {
 // their own longer deadline on ctx before calling DoRequest, which then
 // leaves it untouched instead of overriding it with this default.
 const defaultRequestTimeout = 60 * time.Second
+
+// Read retry budget: DoRequest makes at most maxReadAttempts attempts of a
+// GET or HEAD, waiting retryBaseBackoff, then twice that (each +/-20%
+// jitter), before the next one. A Retry-After header on 429/503 replaces the
+// computed wait. No wait exceeds maxRetryBackoff.
+const (
+	maxReadAttempts  = 3
+	retryBaseBackoff = 1 * time.Second
+	maxRetryBackoff  = 8 * time.Second
+)
 
 // addResourceRequestTimeout is the deadline for the add_resource call
 // (POST/PUT .../add_resource), which registers real cloud infrastructure
@@ -150,15 +171,79 @@ func resolveAuthToken(ctx context.Context) (token, source string, err error) {
 
 // DoRequest performs an authenticated HTTP request to the Anyscale API.
 // The context is used for cancellation and timeouts: if ctx has no deadline
-// of its own, defaultRequestTimeout is applied; if it already has one (set by
-// a caller that knows a particular call runs long), that deadline is left as-is.
+// of its own, each attempt gets defaultRequestTimeout; if it already has one
+// (set by a caller that knows a particular call runs long), every attempt
+// shares that deadline.
+//
+// GET and HEAD requests without a body are retried, up to maxReadAttempts in
+// total, on transport timeouts and connection errors and on HTTP 429, 502,
+// 503 and 504. Writes are never retried here: they are not idempotent, and
+// the resources that need a write retry run their own. A non-2xx status is
+// still returned as a response, not an error, once retries are exhausted; the
+// attempt count rides on that response's request context (see
+// requestAttempts). Retrying stops early when the caller's context is done
+// or its deadline is too close for the next wait.
 func (c *Client) DoRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	maxAttempts := 1
+	if body == nil && (method == http.MethodGet || method == http.MethodHead) {
+		maxAttempts = maxReadAttempts
+	}
+
+	for attempt := 1; ; attempt++ {
+		resp, err := c.doAttempt(ctx, method, path, body, attempt)
+		reason := retryReason(ctx, resp, err)
+		if reason == "" || attempt == maxAttempts {
+			return finalAttempt(method, path, attempt, resp, err)
+		}
+		wait := retryWait(resp, attempt)
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
+			return finalAttempt(method, path, attempt, resp, err)
+		}
+
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+			_ = resp.Body.Close()
+		}
+		tflog.Warn(ctx, "Retrying Anyscale API read request", map[string]any{
+			"method":  method,
+			"path":    path,
+			"attempt": attempt,
+			"reason":  reason,
+			"wait":    wait.String(),
+		})
+		sleep := c.sleep
+		if sleep == nil {
+			sleep = sleepCtx
+		}
+		if err := sleep(ctx, wait); err != nil {
+			return nil, fmt.Errorf("%s %s: stopped retrying after %d attempts: %w", method, path, attempt, err)
+		}
+	}
+}
+
+// finalAttempt returns the last attempt's outcome. A transport error after a
+// retry says how many attempts were made; a status response is returned as is.
+func finalAttempt(method, path string, attempt int, resp *http.Response, err error) (*http.Response, error) {
+	if err != nil && attempt > 1 {
+		return nil, fmt.Errorf("%s %s failed after %d attempts (last error: %w). This is usually a transient Anyscale API or network problem; re-run the command", method, path, attempt, err)
+	}
+	return resp, err
+}
+
+// doAttempt sends one request. When ctx has no deadline the attempt gets its
+// own timeout, released when the response body is closed.
+func (c *Client) doAttempt(ctx context.Context, method, path string, body io.Reader, attempt int) (*http.Response, error) {
 	url := c.BaseURL + path
 
 	var cancel context.CancelFunc
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		ctx, cancel = context.WithTimeout(ctx, defaultRequestTimeout)
+		timeout := c.attemptTimeout
+		if timeout == 0 {
+			timeout = defaultRequestTimeout
+		}
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
+	ctx = context.WithValue(ctx, attemptsKey{}, attempt)
 
 	// Use NewRequestWithContext to support context cancellation
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
@@ -189,6 +274,77 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body io.Rea
 	}
 
 	return resp, nil
+}
+
+// attemptsKey carries the attempt number on each request's context, so
+// DoRequestRaw can report how many attempts a final status took.
+type attemptsKey struct{}
+
+// requestAttempts returns the attempt number DoRequest recorded on resp's
+// request, or 1 if there is none.
+func requestAttempts(resp *http.Response) int {
+	if resp == nil || resp.Request == nil {
+		return 1
+	}
+	if n, ok := resp.Request.Context().Value(attemptsKey{}).(int); ok {
+		return n
+	}
+	return 1
+}
+
+// retryReason returns why a read attempt is worth retrying, or "" if it is
+// not. The caller's own cancellation or deadline is never retried.
+func retryReason(ctx context.Context, resp *http.Response, err error) string {
+	if ctx.Err() != nil {
+		return ""
+	}
+	if err != nil {
+		var netErr net.Error
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			return "attempt timed out"
+		case errors.As(err, &netErr) && netErr.Timeout():
+			return "network timeout"
+		case errors.Is(err, syscall.ECONNRESET):
+			return "connection reset"
+		case errors.Is(err, syscall.ECONNREFUSED):
+			return "connection refused"
+		case errors.Is(err, io.ErrUnexpectedEOF):
+			return "unexpected EOF"
+		}
+		return ""
+	}
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return "HTTP " + strconv.Itoa(resp.StatusCode)
+	}
+	return ""
+}
+
+// retryWait is the wait before the attempt after this one: a Retry-After in
+// seconds on 429/503, else retryBaseBackoff doubled per attempt with +/-20%
+// jitter. Either is capped at maxRetryBackoff.
+func retryWait(resp *http.Response, attempt int) time.Duration {
+	if resp != nil && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable) {
+		if secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && secs >= 0 {
+			return min(time.Duration(secs)*time.Second, maxRetryBackoff)
+		}
+	}
+	backoff := retryBaseBackoff << (attempt - 1)
+	jitter := 0.8 + 0.4*rand.Float64()
+	return min(time.Duration(float64(backoff)*jitter), maxRetryBackoff)
+}
+
+// sleepCtx waits d, returning ctx.Err() early if ctx is done first.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // cancelOnCloseBody releases a DoRequest-created context timeout when the

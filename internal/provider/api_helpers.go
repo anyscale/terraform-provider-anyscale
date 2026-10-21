@@ -47,9 +47,15 @@ var ErrNotFound = errors.New("resource not found")
 type UnexpectedStatusError struct {
 	StatusCode int
 	Body       string
+	// Attempts is how many attempts DoRequest made before this status (more
+	// than 1 only for a retried read). Error() appends it when it is above 1.
+	Attempts int
 }
 
 func (e *UnexpectedStatusError) Error() string {
+	if e.Attempts > 1 {
+		return fmt.Sprintf("unexpected status %d: %s after %d attempts", e.StatusCode, e.Body, e.Attempts)
+	}
 	return fmt.Sprintf("unexpected status %d: %s", e.StatusCode, e.Body)
 }
 
@@ -119,7 +125,7 @@ func DoRequestRaw(
 
 	// Check status code
 	if !isStatusExpected(httpResp.StatusCode, expectedStatuses) {
-		statusErr := &UnexpectedStatusError{StatusCode: httpResp.StatusCode, Body: string(bodyBytes)}
+		statusErr := &UnexpectedStatusError{StatusCode: httpResp.StatusCode, Body: string(bodyBytes), Attempts: requestAttempts(httpResp)}
 		if httpResp.StatusCode == http.StatusNotFound {
 			// Reuse the exact pre-sentinel phrasing ("unexpected status 404: ...")
 			// verbatim, not just a bare "404" digit. No production code depends on
