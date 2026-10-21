@@ -27,7 +27,7 @@ variable "project_id" {
 }
 
 variable "org_role_name" {
-  description = "Exact, case-sensitive name of a role valid at organization scope; ask support@anyscale.com which roles your organization has"
+  description = "Exact, case-sensitive name of a role that can be granted on the organization"
   type        = string
 }
 
