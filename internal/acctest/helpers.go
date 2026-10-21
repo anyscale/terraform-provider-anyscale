@@ -131,9 +131,52 @@ func GetTestClient() (*provider.Client, error) {
 	return provider.NewClientWithToken(apiURL, token), nil
 }
 
+// credentialsWithheldEnv marks a run that is known to have no credentials: CI
+// sets it on fork and Dependabot PRs, where GitHub withholds Actions secrets.
+const credentialsWithheldEnv = "ANYSCALE_TEST_CREDENTIALS_WITHHELD"
+
+// skipT is the subset of *testing.T that skipIfCredentialsWithheld uses, so
+// its decision can be unit tested without skipping the calling test.
+type skipT interface {
+	Helper()
+	Skipf(format string, args ...any)
+}
+
+// credentialsAvailable reports whether a token resolves from
+// ANYSCALE_CLI_TOKEN or ~/.anyscale/credentials.json.
+func credentialsAvailable() bool {
+	if os.Getenv("ANYSCALE_CLI_TOKEN") != "" {
+		return true
+	}
+	token, err := provider.GetAuthToken()
+	return err == nil && token != ""
+}
+
+// skipIfCredentialsWithheld skips the test when no token resolves and the run
+// is marked ANYSCALE_TEST_CREDENTIALS_WITHHELD=1. Otherwise it returns and the
+// caller proceeds exactly as before: a run with a token runs everything (the
+// flag is ignored), and a run with neither still fails at the caller's own
+// credential check. Call it before any client or cloud lookup.
+func skipIfCredentialsWithheld(t *testing.T) {
+	t.Helper()
+	skipIfCredentialsWithheldWith(t, credentialsAvailable)
+}
+
+func skipIfCredentialsWithheldWith(t skipT, available func() bool) {
+	t.Helper()
+	if available() || os.Getenv(credentialsWithheldEnv) != "1" {
+		return
+	}
+	t.Skipf("SKIP(no-credentials): this test needs Anyscale credentials, which are withheld from " +
+		"fork and Dependabot PR runs. Before merging a fork PR, a maintainer runs it with the " +
+		"'Fork PR credentialed acctests' workflow.")
+}
+
 // PreCheck validates that required environment variables are set
 // This is a common precheck function that can be used across all acceptance tests
 func PreCheck(t *testing.T) {
+	skipIfCredentialsWithheld(t)
+
 	// Check for authentication
 	token := os.Getenv("ANYSCALE_CLI_TOKEN")
 	if token == "" {

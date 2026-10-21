@@ -82,6 +82,23 @@ are the exception: they feed `tfplugindocs` and are pulled into registry-publish
 example." If you're contributing from a fork and can't apply labels yourself, say so in the PR
 description and a maintainer will apply it during review.
 
+## Fork and Dependabot PRs
+
+Fork and Dependabot PRs get no repository secrets, so CI runs them in **hermetic mode**: every acceptance test that needs an Anyscale token reports `SKIP(no-credentials)` instead of failing, and the job prints how many were skipped. Tests that need no token, including all mock-server tests, still run. A green run therefore does not prove the credentialed tests pass.
+
+- **Same-repo PRs** run everything and are never in hermetic mode; `credentialed-acctests` mirrors the CI result.
+- **Dependabot PRs** stay hermetic by policy; `credentialed-acctests` is posted as passing with that description.
+- **Fork PRs** show `credentialed-acctests` as *Expected* until a maintainer runs the credentialed workflow below.
+
+### Maintainer: run credentialed tests on a fork PR
+
+1. Review the exact commit you will run. Code from the fork executes with `ANYSCALE_CLI_TOKEN`, so read the diff for anything that runs at test time, not just the feature: `go.mod`/`go.sum`, `Makefile`, `internal/acctest/` helpers and sweepers, `.github/`, and any other file that is executed during `make testacc`.
+2. Actions → **Fork PR credentialed acctests** → *Run workflow* from `main`, with `pr_number` and `sha` (the full 40-character head SHA you reviewed).
+3. The workflow refuses to run if the PR is closed, the fork is gone, it is not from a fork, or its head is no longer `sha`. It records pass or fail as `credentialed-acctests` on that commit.
+4. **Re-run after every new push** to the PR; the status belongs to one SHA, and a moved head gets no status.
+
+`ANYSCALE_TEST_CREDENTIALS_WITHHELD=1` is what CI sets for hermetic runs. It is ignored when a token is present, so setting it locally never hides a real run.
+
 ## Schema breaking-change gate
 
 The `Schema Gate` check compares the provider schema at the PR's merge-base with the schema at the PR head and fails on changes that would break existing configurations or state. It runs on every PR, including docs-only ones, and writes its report to the job summary (Actions run page → **Summary**), not as a PR comment.
