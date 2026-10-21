@@ -36,9 +36,9 @@ lifecycles, and they aren't interchangeable:
   edits to rebuild.
 - **`anyscale_container_image_registry`** registers an image that already exists in a container
   registry you control (`image_uri`), skipping the build step entirely. Anyscale validates the image
-  and makes it available immediately. Because there's no build to revise, this resource is fully
-  immutable: changing any optional attribute (`name`, `ray_version`, `registry_login_secret`)
-  replaces the resource (`RequiresReplace`) rather than updating it in place.
+  and makes it available immediately. Changing `image_uri` registers a new build revision on the same
+  cluster environment, in place; earlier revisions are kept. Changing `name`, `ray_version`, or
+  `registry_login_secret` replaces the resource (`RequiresReplace`).
 
 Pick `..._build` when you want Anyscale to build the image for you from source. Pick `..._registry`
 when your image already exists elsewhere and you just need Anyscale to know about it.
@@ -87,13 +87,12 @@ inconsistency:
   `containerfile_path` (the value, not the file's contents) triggers a new build revision, updating in place rather than replacing — so `digest`
   legitimately changes on a rebuild. It has no plan modifiers: Terraform shows it as "known after apply"
   on any plan that changes the Containerfile, the same way `image_uri` and `build_id` do.
-- **`anyscale_container_image_registry`** doesn't rebuild in place, but that immutability doesn't pin
-  `digest` — it's a latest-build-derived value, exactly like `build_id`, `revision`, and `name_version`
-  (see [below](#id-and-build_id)): it reflects whichever build is currently latest for the underlying
-  cluster environment, and moves if that build is superseded from outside this resource's own `apply`.
-  It carries `UseStateForUnknown` like the other three, which only keeps a plan from showing a spurious
-  "known after apply" on an unrelated change — refresh still picks up a new value when the latest build
-  advances, the same as described below.
+- **`anyscale_container_image_registry`** registers a new build in place when `image_uri` changes, so
+  `digest` changes with it (shown as "known after apply" on that plan). `digest` is a latest-build-derived
+  value, exactly like `build_id`, `revision`, and `name_version` (see [below](#id-and-build_id)): it
+  reflects whichever build is currently latest for the underlying cluster environment, and also moves if
+  that build is superseded from outside this resource's own `apply`. Plans that don't change `image_uri`
+  show `digest` unchanged; refresh still picks up a newer build.
 - **The data source** has no plan-modifier concept at all — every `Read` is a fresh lookup, so `digest`
   is a plain Computed value that simply reflects whatever the latest successful build's digest is right
   now.
@@ -119,11 +118,11 @@ migrating from a version that still has it.)
 
 `build_id` is a different kind of handle: the ID of the *latest* build for this image. Unlike `id`, it
 can change without the resource itself being replaced. On `anyscale_container_image_build`, it changes
-every time `Update` creates a new revision. On `anyscale_container_image_registry`, it can also advance
-between refreshes even though the resource is immutable — a registry's underlying build can be
-superseded by a newer one without the Terraform resource changing, which is exactly why `id` had to mean
-the cluster environment rather than "whichever build happened to be latest when the resource was
-created."
+every time `Update` creates a new revision. On `anyscale_container_image_registry`, it changes when a
+changed `image_uri` registers a new build, and can also advance between refreshes: a registry's
+underlying build can be superseded by a newer one without the Terraform resource changing, which is
+exactly why `id` had to mean the cluster environment rather than "whichever build happened to be latest
+when the resource was created."
 
 **On `anyscale_container_image_registry` specifically, `build_id`, `revision`, `name_version`, and
 `digest` can all change during the refresh that precedes a plain `terraform plan`, with no config
@@ -131,11 +130,11 @@ edits.** `Read` always resolves whichever build is currently latest for the unde
 environment, and `revision`/`name_version`/`digest` are all read from that same latest build — so if
 something outside this resource's own `apply` registers a new build against the same cluster
 environment, your state picks up all four the next time Terraform refreshes. This is expected, not a
-bug — and it's quieter than it sounds: none of the four carry `RequiresReplace`, and none of them show
-up as an in-place update either. Terraform folds the refreshed value into state during the refresh step,
-before the plan-vs-config comparison runs, so there's nothing left to diff by the time `plan` renders.
-You'll see `No changes` (a NoOp plan), not an "updating in place" line — state silently catches up to the
-new values, and nothing gets destroyed, recreated, or shown as changed.
+bug: none of the four carry `RequiresReplace` or show up as an in-place update. Terraform folds the
+refreshed values into state before comparing plan with config, so you see `No changes`. The exception is
+`image_uri`, which `Read` also takes from that latest build: if the outside build registered a different
+image, `plan` shows an in-place update that registers your configured `image_uri` again as a new build.
+Review that plan before applying.
 `anyscale_container_image_build` doesn't share this exposure: its `Read` prefers the build ID already in
 its own state over the cluster environment's latest, so only its own `Update` — triggered by your own
 `containerfile` / `containerfile_path` change — advances these attributes.
@@ -166,7 +165,7 @@ now takes a cluster environment ID, not a build ID. See this resource's own
 
 ## Importing an existing container image
 
-Both resources import by cluster environment ID. `anyscale_container_image_build` recovers `project_id`, so set it in your configuration if the image was built in a project and omit it otherwise; a mismatch plans a replacement. `anyscale_container_image_registry` does not recover `registry_login_secret`: if your configuration sets it, the first plan after import shows an in-place update with a "Value Recorded Without Replacement" warning, and applying records the value in state without sending it or changing the image. Use `-replace` to recreate the image with a secret. An image created by this provider version or later still replaces when `registry_login_secret` is added or changed. If you imported a build image with an older provider version, `project_id` stays null in state; run `terraform state rm` on it and import again to recover it.
+Both resources import by cluster environment ID. `anyscale_container_image_build` recovers `project_id`, so set it in your configuration if the image was built in a project and omit it otherwise; a mismatch plans a replacement. `anyscale_container_image_registry` does not recover `registry_login_secret`: if your configuration sets it, the first plan after import shows an in-place update with a "Value Recorded Without Replacement" warning, and applying records the value in state without sending it or changing the image (unless `image_uri` changes in the same apply, in which case the secret is sent with the new build). Use `-replace` to recreate the image with a secret. An image created by this provider version or later still replaces when `registry_login_secret` is added or changed. If you imported a build image with an older provider version, `project_id` stays null in state; run `terraform state rm` on it and import again to recover it.
 
 ## The default Ray version, if you don't set one
 

@@ -117,7 +117,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		},
 		"image_uri": schema.StringAttribute{
 			Required:            true,
-			MarkdownDescription: "The full URI of the Docker image to register (e.g., `docker.io/myrepo/image:v2` or `123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest`). Changing it registers a new build of the same image in place, incrementing `revision`.",
+			MarkdownDescription: "The full URI of the Docker image to register (e.g., `docker.io/myrepo/image:v2` or `123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest`). Changing it registers a new build on the same cluster environment in place, incrementing `revision`.",
 		},
 		"ray_version": schema.StringAttribute{
 			Optional:            true,
@@ -131,7 +131,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		"registry_login_secret": schema.StringAttribute{
 			Optional:            true,
 			Sensitive:           true,
-			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it replaces the image, except the first value set after `terraform import`, which is recorded in state without being sent (see [Importing an existing image](../guides/container-images.md#importing-an-existing-container-image)).",
+			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it replaces the image, except the first value set after `terraform import`, which updates in place (see [Importing an existing image](../guides/container-images.md#importing-an-existing-container-image)).",
 			PlanModifiers: []planmodifier.String{
 				RequiresReplaceUnlessUnrecoverable("registry_login_secret", "container image"),
 			},
