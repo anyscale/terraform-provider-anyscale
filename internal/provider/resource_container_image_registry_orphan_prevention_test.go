@@ -149,8 +149,8 @@ func TestContainerImageRegistryCreate_BuildReadFailure_WarnsAndStateHoldsTemplat
 					t.Errorf("state.%s = %v, want null until Read finds the build", attr, v)
 				}
 			}
-			if state.Revision.IsNull() || state.Revision.ValueInt64() != 0 {
-				t.Errorf("state.Revision = %v, want 0", state.Revision)
+			if !state.Revision.IsNull() {
+				t.Errorf("state.Revision = %v, want null until Read finds the build", state.Revision)
 			}
 
 			// Delete must archive the template from exactly this state: no orphan.

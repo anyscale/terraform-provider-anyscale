@@ -320,7 +320,7 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	partial.BuildStatus = types.StringNull()
 	partial.CreatedAt = types.StringNull()
 	partial.IsBYOD = types.BoolValue(true)
-	partial.Revision = types.Int64Value(0)
+	partial.Revision = types.Int64Null()
 	partial.NameVersion = types.StringNull()
 	partial.Digest = types.StringNull()
 	if partial.RayVersion.IsUnknown() {
