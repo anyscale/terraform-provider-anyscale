@@ -39,8 +39,8 @@ resource "anyscale_user_group" "test" {
 		}
 		cfg += fmt.Sprintf(`
 resource "anyscale_user_group_members" "test" {
-  group_id = anyscale_user_group.test.id
-  members  = [%s]
+  user_group_id = anyscale_user_group.test.id
+  members       = [%s]
 }
 `, strings.Join(quoted, ", "))
 	}
@@ -287,8 +287,8 @@ func TestAccUserGroupMembersResource_MockImport(t *testing.T) {
 						return fmt.Errorf("expected 1 imported instance, got %d", len(states))
 					}
 					a := states[0].Attributes
-					if a["group_id"] != a["id"] || !strings.HasPrefix(a["id"], "ug_") {
-						return fmt.Errorf("imported id=%q group_id=%q, want equal ug_ IDs", a["id"], a["group_id"])
+					if a["user_group_id"] != a["id"] || !strings.HasPrefix(a["id"], "ug_") {
+						return fmt.Errorf("imported id=%q user_group_id=%q, want equal ug_ IDs", a["id"], a["user_group_id"])
 					}
 					if a["members.#"] != "2" {
 						return fmt.Errorf("imported members.# = %q, want 2", a["members.#"])
@@ -465,7 +465,7 @@ resource "anyscale_user_group" "test" {
 			{
 				Config: m.providerBlock() + fmt.Sprintf(`
 resource "anyscale_user_group_members" "test" {
-  group_id = %q
+  user_group_id = %q
   members  = ["alice@example.com"]
 }
 `, scimID),

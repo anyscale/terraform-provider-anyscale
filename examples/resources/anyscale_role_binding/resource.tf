@@ -1,5 +1,5 @@
 # Alpha, behind a feature flag (contact support@anyscale.com for access). The schema may change before Beta.
-# Grants one role to one user group on exactly one of a cloud, a project, or the organization.
+# Grants one role to one user group or one user on exactly one of a cloud, a project, or the organization.
 # A binding cannot be edited: changing any argument replaces it.
 variable "project_id" {
   description = "ID of an existing Anyscale project (prj_...)"
@@ -23,4 +23,15 @@ resource "anyscale_role_binding" "analysts_project_viewer" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# Grant the same role to one user instead. Use the data source's user_id, not its id.
+data "anyscale_organization_user" "alice" {
+  email = "alice@example.com"
+}
+
+resource "anyscale_role_binding" "alice_project_viewer" {
+  user_id    = data.anyscale_organization_user.alice.user_id
+  role_id    = data.anyscale_role.project_viewer.id
+  project_id = var.project_id
 }

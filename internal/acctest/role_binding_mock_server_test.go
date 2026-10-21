@@ -26,7 +26,13 @@ import (
 //   - The resource-scoped principal listing checks manage_iam on the scope
 //     first, so a deleted cloud or project answers 403 (deleteScope). A group
 //     that holds nothing there, or does not exist, gets an empty page.
-//   - A duplicate grant (same principal, role and resource) is 409.
+//   - A duplicate grant (same principal, role and resource) is 409, and so
+//     is assigning an archived role.
+//   - Every write answers 409 "Switch this organization to role bindings..."
+//     until the organization converts (unconverted models that); reads are
+//     not gated.
+//   - A revoke that would leave the organization without an Organization
+//     owner answers 409 (deleteMode "lockout").
 //   - Deleting a group cascades its bindings.
 //   - Listings page by offset: paging_token is the next offset, count is
 //     capped at 50.
@@ -45,8 +51,18 @@ type roleBindingMockServer struct {
 	goneScopes map[string]bool
 	// deleteMode simulates DELETE races: "revoked" revokes the binding and
 	// answers 403, as a concurrent revoke between refresh and delete would;
-	// "denied" answers 403 and keeps it, as a lost permission would.
+	// "denied" answers 403 and keeps it, as a lost permission would;
+	// "lockout" answers 409 and keeps it, as the owner-lockout refusal would.
 	deleteMode string
+	// unconverted makes every write answer 409, as in an organization that
+	// has not converted to role bindings.
+	unconverted bool
+	// allowSelf lifts the refusals to grant a role to, or revoke a binding
+	// of, the caller's own user, so a test can clean up after asserting them.
+	allowSelf bool
+	// createConflict, when set, is the detail of a 409 every create answers
+	// with: a refusal the provider does not recognize.
+	createConflict string
 	// groupGone404 makes the principal listings answer 404 for a group that
 	// does not exist, instead of the empty page the service documents. Both
 	// readings of the source are plausible, so the provider must remove state
@@ -85,6 +101,17 @@ type roleBindingMockRole struct {
 }
 
 const roleBindingMockCaller = "usr_mockcaller0000000000000000"
+
+// Refusal details, verbatim from the backend: converted_organizations.py
+// ROLE_BINDING_WRITE_REFUSED and refuse_organization_lockout, and the
+// self-grant and self-revoke refusals.
+const (
+	roleBindingMockNotConvertedDetail = "Switch this organization to role bindings to change role bindings."
+	roleBindingMockLockoutDetail      = "This change would leave the organization without an Organization owner."
+	// role_bindings_service.py check_bindings and check_revocation.
+	roleBindingMockSelfGrantDetail  = "You cannot assign a role to yourself directly. Assign it to a user group you belong to."
+	roleBindingMockSelfRevokeDetail = "You cannot revoke your own role binding."
+)
 
 func newRoleBindingMockServer(t *testing.T) *roleBindingMockServer {
 	t.Helper()
@@ -168,6 +195,24 @@ func (m *roleBindingMockServer) setDeleteMode(mode string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deleteMode = mode
+}
+
+func (m *roleBindingMockServer) setUnconverted(on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.unconverted = on
+}
+
+func (m *roleBindingMockServer) setAllowSelf(on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.allowSelf = on
+}
+
+func (m *roleBindingMockServer) setCreateConflict(detail string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.createConflict = detail
 }
 
 func (m *roleBindingMockServer) addRole(r roleBindingMockRole) {
@@ -340,6 +385,13 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The conversion refusal is a router dependency on every role_bindings
+	// write, so it answers before the handler looks at the body.
+	if m.unconverted && strings.HasPrefix(path, rbBase) && r.Method != http.MethodGet {
+		m.fail(w, http.StatusConflict, roleBindingMockNotConvertedDetail)
+		return
+	}
+
 	rest := strings.Split(strings.TrimPrefix(strings.TrimPrefix(path, rbBase), "/"), "/")
 	switch {
 	case path == rbBase && r.Method == http.MethodPost:
@@ -382,6 +434,14 @@ func (m *roleBindingMockServer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		if denied {
 			m.fail(w, http.StatusForbidden, fmt.Sprintf("You may not revoke role binding '%s'.", rest[0]))
+			return
+		}
+		if b.PrincipalType == "user" && b.PrincipalID == roleBindingMockCaller && !m.allowSelf {
+			m.fail(w, http.StatusForbidden, roleBindingMockSelfRevokeDetail)
+			return
+		}
+		if m.deleteMode == "lockout" {
+			m.fail(w, http.StatusConflict, roleBindingMockLockoutDetail)
 			return
 		}
 		delete(m.bindings, rest[0])
@@ -432,13 +492,21 @@ func (m *roleBindingMockServer) serveCreate(w http.ResponseWriter, body []byte) 
 		m.fail(w, http.StatusNotFound, fmt.Sprintf("User group '%s' not found.", req.PrincipalID))
 		return
 	}
+	if req.PrincipalType == "user" && req.PrincipalID == roleBindingMockCaller && !m.allowSelf {
+		m.fail(w, http.StatusForbidden, roleBindingMockSelfGrantDetail)
+		return
+	}
 	role, ok := m.roles[req.RoleID]
 	if !ok {
 		m.fail(w, http.StatusNotFound, "Role not found.")
 		return
 	}
 	if role.Archived {
-		m.fail(w, http.StatusBadRequest, "This role is archived and cannot be newly assigned.")
+		m.fail(w, http.StatusConflict, "This role is archived and cannot be newly assigned.")
+		return
+	}
+	if m.createConflict != "" {
+		m.fail(w, http.StatusConflict, m.createConflict)
 		return
 	}
 	for _, b := range m.bindings {
