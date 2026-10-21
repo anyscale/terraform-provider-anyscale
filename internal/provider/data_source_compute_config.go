@@ -646,63 +646,26 @@ func (d *ComputeConfigDataSource) Read(ctx context.Context, req datasource.ReadR
 }
 
 // searchComputeTemplatesPaged pages through POST /api/v2/compute_templates/search until every
-// page is exhausted, decoding each page's body with decode. This endpoint's pagination is split
-// across two transports - the filter fields in basePayload are a JSON POST body
-// (ComputeTemplateQuery), but count/paging_token are a FastAPI
-// Depends(required_pagination_large) that reads them from the URL QUERY STRING, not the body.
-// Traced against product backend/server/api/product/routers/compute_templates_router.py
-// (search_compute_templates) and backend/server/common/models/common_parameters.py
-// (required_pagination_large). Sending paging/paging_token nested in the body here (the old
-// shape) would compile, hit the endpoint, get HTTP 200 back, and silently paginate wrong -
-// always page 1 - since api/v2 simply never reads those two fields out of the body. Kept as a
-// local loop rather than folded into the shared PaginatedRequest helper (GET+query only, and a
-// single POST-body-plus-query-pagination caller doesn't justify generalizing its shape), matching
-// this file's existing precedent for the endpoint it replaces. Not generic over the decoded type:
-// every caller in this file searches compute_templates and decodes via decodeComputeConfigSearchPage,
-// so a type parameter here would only ever be instantiated one way.
+// page is exhausted. This endpoint's pagination is split across two transports - the filter
+// fields in basePayload are a JSON POST body (ComputeTemplateQuery), but count/paging_token are a
+// FastAPI Depends(required_pagination_large) that reads them from the URL QUERY STRING, not the
+// body (product compute_templates_router.py search_compute_templates and
+// common_parameters.py required_pagination_large). Sending paging/paging_token in the body would
+// get HTTP 200 back and silently paginate wrong (always page 1). PaginatedRequestWithBody keeps
+// the split.
 func searchComputeTemplatesPaged(
 	ctx context.Context,
 	client *Client,
 	basePayload map[string]interface{},
 ) ([]computeConfigSearchResult, error) {
-	var allItems []computeConfigSearchResult
-	var pagingToken string
-	guard := NewPageTokenGuard("POST", "/api/v2/compute_templates/search")
-
-	for {
-		body, err := MarshalRequestBody(basePayload)
-		if err != nil {
-			return nil, err
-		}
-
-		query := url.Values{}
-		query.Set("count", "100")
-		if pagingToken != "" {
-			query.Set("paging_token", pagingToken)
-		}
-		path := fmt.Sprintf("/api/v2/compute_templates/search?%s", query.Encode())
-
-		respBody, err := DoRequestRaw(ctx, client, "POST", path, body, http.StatusOK)
-		if err != nil {
-			return nil, fmt.Errorf("search request failed: %w", err)
-		}
-
-		items, nextToken, err := decodeComputeConfigSearchPage(respBody)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse search response: %w", err)
-		}
-		allItems = append(allItems, items...)
-
-		if nextToken == nil || *nextToken == "" {
-			break
-		}
-		pagingToken = *nextToken
-		if err := guard.Next(pagingToken); err != nil {
-			return nil, err
-		}
+	body, err := json.Marshal(basePayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
-
-	return allItems, nil
+	return PaginatedRequestWithBody(
+		ctx, client, "POST", "/api/v2/compute_templates/search",
+		url.Values{"count": []string{"100"}}, body, decodeComputeConfigSearchPage,
+	)
 }
 
 // computeConfigSearchResult is the shape shared by both search call sites below.

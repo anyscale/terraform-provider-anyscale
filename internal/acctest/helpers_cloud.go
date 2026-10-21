@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -327,67 +326,40 @@ func resolveCloudNameToIDCore(cloudName string) (string, int, error) {
 		return "", 0, fmt.Errorf("failed to get test client: %w", err)
 	}
 
+	type cloudSummary struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		CreatedAt string `json:"created_at"`
+	}
+	clouds, err := provider.PaginatedRequest(context.Background(), client, "/api/v2/clouds", nil,
+		func(body []byte) ([]cloudSummary, *string, error) {
+			var page struct {
+				Results  []cloudSummary `json:"results"`
+				Metadata struct {
+					NextPagingToken *string `json:"next_paging_token"`
+				} `json:"metadata"`
+			}
+			if err := json.Unmarshal(body, &page); err != nil {
+				return nil, nil, fmt.Errorf("failed to parse clouds response: %w", err)
+			}
+			return page.Results, page.Metadata.NextPagingToken, nil
+		},
+	)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to list clouds: %w", err)
+	}
+
 	// Find matching cloud(s) across every page - if multiple exist, use the most recent
 	var matchedCloudID string
 	var latestCreatedAt string
 	matchCount := 0
-
-	pagingToken := ""
-	guard := provider.NewPageTokenGuard("GET", "/api/v2/clouds")
-	for {
-		path := "/api/v2/clouds"
-		if pagingToken != "" {
-			path = fmt.Sprintf("%s?paging_token=%s", path, url.QueryEscape(pagingToken))
-		}
-
-		resp, err := client.DoRequest(context.Background(), "GET", path, nil)
-		if err != nil {
-			return "", 0, fmt.Errorf("failed to list clouds: %w", err)
-		}
-
-		if resp.StatusCode != 200 {
-			body, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			return "", 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if err != nil {
-			return "", 0, fmt.Errorf("failed to read response: %w", err)
-		}
-
-		var cloudsResp struct {
-			Results []struct {
-				ID        string `json:"id"`
-				Name      string `json:"name"`
-				CreatedAt string `json:"created_at"`
-			} `json:"results"`
-			Metadata struct {
-				NextPagingToken *string `json:"next_paging_token"`
-			} `json:"metadata"`
-		}
-
-		if err := json.Unmarshal(body, &cloudsResp); err != nil {
-			return "", 0, fmt.Errorf("failed to parse clouds response: %w", err)
-		}
-
-		for _, cloud := range cloudsResp.Results {
-			if cloud.Name == cloudName {
-				matchCount++
-				if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
-					matchedCloudID = cloud.ID
-					latestCreatedAt = cloud.CreatedAt
-				}
+	for _, cloud := range clouds {
+		if cloud.Name == cloudName {
+			matchCount++
+			if matchedCloudID == "" || cloud.CreatedAt > latestCreatedAt {
+				matchedCloudID = cloud.ID
+				latestCreatedAt = cloud.CreatedAt
 			}
-		}
-
-		if cloudsResp.Metadata.NextPagingToken == nil || *cloudsResp.Metadata.NextPagingToken == "" {
-			break
-		}
-		pagingToken = *cloudsResp.Metadata.NextPagingToken
-		if err := guard.Next(pagingToken); err != nil {
-			return "", 0, err
 		}
 	}
 
