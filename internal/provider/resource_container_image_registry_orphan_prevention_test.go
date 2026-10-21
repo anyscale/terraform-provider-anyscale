@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -12,134 +13,164 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestContainerImageRegistryCreate_Call2Failure_StateHoldsTemplateForCleanup
-// is the GATE proof for the registry resource's 2-call BYOD orphan-prevention
-// design (see the comment above the early resp.State.Set call in Create(),
-// resource_container_image_registry.go). Unlike the old atomic
-// /ext/v0/cluster_environments/byod endpoint, api/v2 splits BYOD registration
-// into two calls -- POST /api/v2/application_templates/byod (creates the
-// template) followed by POST /api/v2/builds/byod (creates the build) -- which
-// opens a partial-failure window the old single call never had: if call 2
-// fails, the template already exists remotely. Without the defensive early
-// State.Set before call 2, Terraform would have no record of that template
-// and it would orphan in the backend forever.
+// TestContainerImageRegistryCreate_BuildReadFailure_WarnsAndStateHoldsTemplate covers
+// the window between Create's template POST (which creates the cluster environment and
+// its first build) and the GETs that read that build back. If a GET fails or finds no
+// build, Create must warn rather than error: an error taints the resource, and the
+// replace the next apply plans would archive the environment and then fail to recreate
+// it under the same name. State must still hold the template id, so Delete can archive
+// it, with the build attributes null for Read to fill. Create must never POST a build.
 //
-// This drives the resource's real Create() and Delete() methods directly as
-// plain Go calls (not through resource.Test/terraform apply) because
-// ContainerImageRegistryResource.client is unexported, so a test that
-// constructs the resource directly against a mock server must live in
-// package provider rather than internal/acctest.
-func TestContainerImageRegistryCreate_Call2Failure_StateHoldsTemplateForCleanup(t *testing.T) {
+// This drives the resource's real Create() and Delete() methods directly as plain Go
+// calls because ContainerImageRegistryResource.client is unexported, so the test lives
+// in package provider rather than internal/acctest.
+func TestContainerImageRegistryCreate_BuildReadFailure_WarnsAndStateHoldsTemplate(t *testing.T) {
 	const templateID = "apptemp_orphan_risk"
+	const buildID = "bld_orphan_risk"
 	const imageURI = "docker.io/example/orphan-test:v1"
 	const name = "tfacc-orphan-prevention-test"
 
-	var archiveCalls int
-	var archivedPath string
+	cases := []struct {
+		name          string
+		templateGET   func(w http.ResponseWriter)
+		buildGET      func(w http.ResponseWriter)
+		wantLastError bool
+	}{
+		{
+			name: "template GET fails",
+			templateGET: func(w http.ResponseWriter) {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error": {"detail": "simulated template read failure"}}`))
+			},
+			wantLastError: true,
+		},
+		{
+			name:        "build GET fails",
+			templateGET: templateWithLatestBuild(templateID, name, buildID),
+			buildGET: func(w http.ResponseWriter) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error": {"detail": "simulated build read failure"}}`))
+			},
+			wantLastError: true,
+		},
+		{
+			name: "template has no build",
+			templateGET: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(ApplicationTemplateResponse{
+					Result: ApplicationTemplateResult{ID: templateID, Name: name, CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
+				})
+			},
+			wantLastError: false,
+		},
+	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/byod":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(ApplicationTemplateResponse{
-				Result: ApplicationTemplateResult{ID: templateID, Name: name, CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var archiveCalls, buildPOSTs int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/byod":
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(ApplicationTemplateResponse{
+						Result: ApplicationTemplateResult{ID: templateID, Name: name, CreatorID: "user_1", CreatedAt: "2024-01-01T00:00:00Z"},
+					})
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/application_templates/"+templateID:
+					tc.templateGET(w)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/builds/"+buildID && tc.buildGET != nil:
+					tc.buildGET(w)
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v2/builds/byod":
+					buildPOSTs++
+					w.WriteHeader(http.StatusInternalServerError)
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/"+templateID+"/archive":
+					archiveCalls++
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"archived_at": "2024-01-01T00:00:01Z"}})
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+
+			r := &ContainerImageRegistryResource{client: NewClientWithToken(server.URL, "fake-token-orphan-test")}
+			ctx := context.Background()
+
+			var schemaResp resource.SchemaResponse
+			r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+			if schemaResp.Diagnostics.HasError() {
+				t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
+			}
+
+			plan := tfsdk.Plan{Schema: schemaResp.Schema}
+			planDiags := plan.Set(ctx, &ContainerImageRegistryResourceModel{
+				Name:     types.StringValue(name),
+				ImageURI: types.StringValue(imageURI),
 			})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/builds/byod":
-			// Call 2 fails: simulates e.g. a quota or validation error on the
-			// build side, after the template already exists remotely.
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "simulated build failure"}})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/application_templates/"+templateID+"/archive":
-			archiveCalls++
-			archivedPath = r.URL.Path
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"archived_at": "2024-01-01T00:00:01Z"}})
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
+			if planDiags.HasError() {
+				t.Fatalf("failed to build plan: %v", planDiags)
+			}
 
-	r := &ContainerImageRegistryResource{client: NewClientWithToken(server.URL, "fake-token-orphan-test")}
-	ctx := context.Background()
+			// The real runtime pre-populates CreateResponse.State from CreateRequest.Plan.
+			createResp := &resource.CreateResponse{State: tfsdk.State(plan)}
+			r.Create(ctx, resource.CreateRequest{Plan: plan}, createResp)
 
-	var schemaResp resource.SchemaResponse
-	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
-	if schemaResp.Diagnostics.HasError() {
-		t.Fatalf("failed to build schema: %v", schemaResp.Diagnostics)
-	}
+			if createResp.Diagnostics.HasError() {
+				t.Fatalf("Create reported an error, want only a warning (an error taints the resource): %v", createResp.Diagnostics)
+			}
+			warnings := createResp.Diagnostics.Warnings()
+			if len(warnings) != 1 || warnings[0].Summary() != "Container Image Build Not Found Yet" {
+				t.Fatalf("warnings = %v, want one 'Container Image Build Not Found Yet'", warnings)
+			}
+			if got := strings.Contains(warnings[0].Detail(), "Last error: "); got != tc.wantLastError {
+				t.Errorf("warning detail carries 'Last error: ' = %v, want %v: %q", got, tc.wantLastError, warnings[0].Detail())
+			}
+			if buildPOSTs != 0 {
+				t.Errorf("Create POSTed %d builds, want 0: the template POST already created the build", buildPOSTs)
+			}
 
-	plan := tfsdk.Plan{Schema: schemaResp.Schema}
-	planDiags := plan.Set(ctx, &ContainerImageRegistryResourceModel{
-		Name:     types.StringValue(name),
-		ImageURI: types.StringValue(imageURI),
-	})
-	if planDiags.HasError() {
-		t.Fatalf("failed to build plan: %v", planDiags)
-	}
+			var state ContainerImageRegistryResourceModel
+			if diags := createResp.State.Get(ctx, &state); diags.HasError() {
+				t.Fatalf("failed to decode post-create state: %v", diags)
+			}
+			if state.ID.ValueString() != templateID {
+				t.Errorf("state.ID = %q, want template id %q -- Delete() keys on it", state.ID.ValueString(), templateID)
+			}
+			for attr, v := range map[string]types.String{
+				"build_id":     state.BuildID,
+				"build_status": state.BuildStatus,
+				"created_at":   state.CreatedAt,
+				"name_version": state.NameVersion,
+				"digest":       state.Digest,
+				"ray_version":  state.RayVersion,
+			} {
+				if !v.IsNull() {
+					t.Errorf("state.%s = %v, want null until Read finds the build", attr, v)
+				}
+			}
+			if state.Revision.IsNull() || state.Revision.ValueInt64() != 0 {
+				t.Errorf("state.Revision = %v, want 0", state.Revision)
+			}
 
-	createResp := &resource.CreateResponse{
-		// The real runtime pre-populates CreateResponse.State from CreateRequest.Plan.
-		State: tfsdk.State(plan),
+			// Delete must archive the template from exactly this state: no orphan.
+			deleteResp := &resource.DeleteResponse{State: createResp.State}
+			r.Delete(ctx, resource.DeleteRequest{State: createResp.State}, deleteResp)
+			if deleteResp.Diagnostics.HasError() {
+				t.Fatalf("Delete reported an error cleaning up the template: %v", deleteResp.Diagnostics)
+			}
+			if archiveCalls != 1 {
+				t.Fatalf("archive calls = %d, want 1 -- the template may be left orphaned", archiveCalls)
+			}
+		})
 	}
-	r.Create(ctx, resource.CreateRequest{Plan: plan}, createResp)
+}
 
-	if !createResp.Diagnostics.HasError() {
-		t.Fatal("expected Create to report a diagnostic error for the failed call 2, got none")
-	}
-
-	// The defensive early State.Set before call 2 must have survived: state
-	// holds the template's own id under id (Delete keys directly on ID since
-	// V1(c) removed the separate cluster_environment_id attribute; ID carries
-	// the same value ID always did), with every field that only the build
-	// call would have populated left null.
-	var stateAfterFailure ContainerImageRegistryResourceModel
-	getDiags := createResp.State.Get(ctx, &stateAfterFailure)
-	if getDiags.HasError() {
-		t.Fatalf("failed to decode post-failure state: %v", getDiags)
-	}
-
-	if stateAfterFailure.ID.ValueString() != templateID {
-		t.Errorf("state.ID = %q, want template id %q -- Delete() keys on this field directly; a wrong value here means Delete() can't clean up", stateAfterFailure.ID.ValueString(), templateID)
-	}
-	if !stateAfterFailure.BuildID.IsNull() {
-		t.Errorf("state.BuildID = %q, want null -- call 2 never succeeded, there is no build", stateAfterFailure.BuildID.ValueString())
-	}
-	if !stateAfterFailure.BuildStatus.IsNull() {
-		t.Errorf("state.BuildStatus = %q, want null", stateAfterFailure.BuildStatus.ValueString())
-	}
-	if !stateAfterFailure.CreatedAt.IsNull() {
-		t.Errorf("state.CreatedAt = %q, want null", stateAfterFailure.CreatedAt.ValueString())
-	}
-	if !stateAfterFailure.NameVersion.IsNull() {
-		t.Errorf("state.NameVersion = %q, want null", stateAfterFailure.NameVersion.ValueString())
-	}
-	if stateAfterFailure.IsBYOD.IsNull() || !stateAfterFailure.IsBYOD.ValueBool() {
-		t.Errorf("state.IsBYOD = %v, want true", stateAfterFailure.IsBYOD)
-	}
-	if stateAfterFailure.Revision.IsNull() || stateAfterFailure.Revision.ValueInt64() != 0 {
-		t.Errorf("state.Revision = %v, want 0", stateAfterFailure.Revision)
-	}
-
-	// Now prove Delete() uses exactly this state to clean up the template --
-	// no orphan. Thread createResp.State straight into Delete()'s request,
-	// the same tfsdk.State a real Terraform Core run would carry forward into
-	// a subsequent destroy of a tainted resource.
-	deleteResp := &resource.DeleteResponse{State: createResp.State}
-	r.Delete(ctx, resource.DeleteRequest{State: createResp.State}, deleteResp)
-
-	if deleteResp.Diagnostics.HasError() {
-		t.Fatalf("Delete reported an unexpected error cleaning up the partially-created template: %v", deleteResp.Diagnostics)
-	}
-	if archiveCalls != 1 {
-		t.Fatalf("expected exactly 1 archive call, got %d -- template may be left orphaned", archiveCalls)
-	}
-	wantPath := "/api/v2/application_templates/" + templateID + "/archive"
-	if archivedPath != wantPath {
-		t.Errorf("archived path = %q, want %q", archivedPath, wantPath)
+// templateWithLatestBuild answers a template GET with latest_build set to buildID.
+func templateWithLatestBuild(templateID, name, buildID string) func(w http.ResponseWriter) {
+	return func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result": {"id": "` + templateID + `", "name": "` + name + `", "creator_id": "user_1",
+			"created_at": "2024-01-01T00:00:00Z", "latest_build": {"id": "` + buildID + `", "revision": 1, "status": "succeeded"}}}`))
 	}
 }

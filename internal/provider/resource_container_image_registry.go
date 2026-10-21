@@ -216,13 +216,13 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	// ray_version is a required field on both BYOD create calls below - the backend
+	// ray_version is a required field on the BYOD create call below - the backend
 	// looks it up against a fixed table of supported base images and returns HTTP 500
 	// if nothing matches (it never inspects the docker image itself), so some concrete,
 	// currently-supported value must always be sent even when the user omits the
 	// attribute. defaultBYODRayVersion is that fallback; it is not necessarily what ends
 	// up in state, since state is populated from what the API echoes back (see the
-	// ResolvedRayVersion call after call 2 below).
+	// ResolvedRayVersion call in applyRegistryBuild).
 	rayVersion := defaultBYODRayVersion
 	if !plan.RayVersion.IsNull() && !plan.RayVersion.IsUnknown() && plan.RayVersion.ValueString() != "" {
 		rayVersion = plan.RayVersion.ValueString()
@@ -273,11 +273,9 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		"name":      name,
 	})
 
-	// Call 1 of 2: create the application template. Unlike the old atomic
-	// /ext/v0/cluster_environments/byod endpoint (a single DB transaction), api/v2
-	// has no combined template+build BYOD endpoint - the build is created
-	// separately below, which opens a partial-failure window that call 1 alone
-	// never had.
+	// Create the application template. The backend creates the cluster environment
+	// and its first build from config_json in one transaction, so no separate build
+	// request follows; the build is read back below.
 	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
 		ctx,
 		r.client,
@@ -302,45 +300,107 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 
 	// name is Optional+Computed and RequiresReplace (immutable): only fill it from the API's
 	// response when the practitioner omitted it from config (plan.Name is Unknown here, not Null,
-	// same as ray_version's guard below). The name is finalized by call 1 alone - call 2 (build
-	// creation) cannot change it - so this can fill immediately rather than waiting on call 2.
+	// same as ray_version's guard below). The template response finalizes the name, so this can
+	// fill immediately rather than waiting for the build.
 	if plan.Name.IsUnknown() {
 		plan.Name = types.StringValue(templateName)
 	}
 
-	// Persist state now that the template exists remotely, before the build-create
-	// call below that can still fail. Delete() acts on ID (the cluster environment id),
-	// so it must be recorded here. Without this, a call-2 failure would leave
-	// the template orphaned in the backend with no Terraform record to archive it -
-	// the 2-call split widens the window the old atomic call never had, so this early
-	// write (already used below for the build wait) is now essential rather than
-	// optional. id is the cluster environment id permanently (see the identity
-	// comment on ContainerImageRegistryResourceModel.ID) - it is never reassigned
-	// once the build completes below. Read() below tolerates a null BuildID so a
-	// resource left in this partial state survives a refresh instead of being
-	// mistaken for deleted, and a later Delete archives the template - no orphan.
+	// Persist state now that the template exists remotely, before reading back its
+	// build. Delete() acts on ID (the cluster environment id), so it must be recorded
+	// here: if anything below fails, the resource stays in state and a later Delete
+	// archives the template - no orphan. id is the cluster environment id permanently
+	// (see the identity comment on ContainerImageRegistryResourceModel.ID). The build
+	// attributes are null until the build is read; Read() tolerates that and fills
+	// them on the next refresh. ray_version and digest are null here too: an unknown
+	// value may not be saved after apply.
 	plan.ID = types.StringValue(templateID)
-	plan.BuildID = types.StringNull()
-	plan.BuildStatus = types.StringNull()
-	plan.CreatedAt = types.StringNull()
-	plan.IsBYOD = types.BoolValue(true)
-	plan.Revision = types.Int64Value(0)
-	plan.NameVersion = types.StringNull()
+	partial := plan
+	partial.BuildID = types.StringNull()
+	partial.BuildStatus = types.StringNull()
+	partial.CreatedAt = types.StringNull()
+	partial.IsBYOD = types.BoolValue(true)
+	partial.Revision = types.Int64Value(0)
+	partial.NameVersion = types.StringNull()
+	partial.Digest = types.StringNull()
+	if partial.RayVersion.IsUnknown() {
+		partial.RayVersion = types.StringNull()
+	}
 	MarkCreatedByTerraform(ctx, resp)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &partial)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Call 2 of 2: create the build from the registered image.
-	if !r.createBuild(ctx, &plan, templateName, rayVersion, &resp.Diagnostics) {
+	// Read back the build the template call created. Every failure from here on is a
+	// warning, not an error: an error would taint the resource, and the replace the next
+	// apply plans would archive the environment and then fail to recreate it under the
+	// same name (archived names stay taken). The partial state above is kept instead.
+	build, err := r.getTemplateLatestBuild(ctx, templateID)
+	if err != nil || build == nil {
+		addBuildNotFoundYetWarning(&resp.Diagnostics, err)
 		return
 	}
+	settledBuild, digestSettled := waitForBuildDigest(ctx, r.client, build)
+	if !digestSettled {
+		AddDigestNotSettledWarning(&resp.Diagnostics, settledBuild.ID)
+	}
+	applyRegistryBuild(&plan, settledBuild, templateName)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
+// getTemplateLatestBuild returns the latest build of cluster environment templateID:
+// GET the template, then GET its latest_build. It returns (nil, nil) when the template
+// has no build. Read resolves the build the same way, through getBuild.
+func (r *ContainerImageRegistryResource) getTemplateLatestBuild(ctx context.Context, templateID string) (*BuildResult, error) {
+	templateResp, err := DoRequestAndParse[ApplicationTemplateResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/api/v2/application_templates/%s", templateID),
+		nil,
+		http.StatusOK,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if templateResp.Result.LatestBuild == nil {
+		return nil, nil
+	}
+	return r.getBuild(ctx, templateResp.Result.LatestBuild.ID)
+}
+
+// getBuild fetches one build. The Anyscale API returns 201 for GET build endpoints.
+func (r *ContainerImageRegistryResource) getBuild(ctx context.Context, buildID string) (*BuildResult, error) {
+	buildResp, err := DoRequestAndParse[BuildResponse](
+		ctx,
+		r.client,
+		"GET",
+		fmt.Sprintf("/api/v2/builds/%s", buildID),
+		nil,
+		http.StatusOK,
+		http.StatusCreated,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &buildResp.Result, nil
+}
+
+// addBuildNotFoundYetWarning reports a registered image whose build Create could not
+// read back. err is nil when the template has no build yet.
+func addBuildNotFoundYetWarning(diags *diag.Diagnostics, err error) {
+	detail := "Container image registered, but its build was not found yet. Its build attributes " +
+		"will be filled on the next refresh; run terraform apply -refresh-only, or a later plan, " +
+		"to update them."
+	if err != nil {
+		detail += " Last error: " + err.Error()
+	}
+	diags.AddWarning("Container Image Build Not Found Yet", detail)
+}
+
 // createBuild registers plan.ImageURI as a new build of the cluster environment plan.ID
-// and maps the build onto plan. Update uses it too, to register a changed image_uri.
+// and maps the build onto plan. Update uses it to register a changed image_uri.
 func (r *ContainerImageRegistryResource) createBuild(ctx context.Context, plan *ContainerImageRegistryResourceModel, templateName, rayVersion string, diags *diag.Diagnostics) bool {
 	buildReq := CreateBYODBuildRequest{
 		ApplicationTemplateID: plan.ID.ValueString(),
@@ -386,11 +446,14 @@ func (r *ContainerImageRegistryResource) createBuild(ctx context.Context, plan *
 	if !digestSettled {
 		AddDigestNotSettledWarning(diags, settledBuild.ID)
 	}
-	result = *settledBuild
+	applyRegistryBuild(plan, settledBuild, templateName)
+	return true
+}
 
-	// Map response to model. id is not touched here - it was already set to
-	// templateID above and stays the cluster environment id for the resource's entire
-	// lifetime (see the identity comment on ContainerImageRegistryResourceModel.ID).
+// applyRegistryBuild maps a build onto plan, for Create and Update. id is not touched
+// here - it stays the cluster environment id for the resource's entire lifetime (see
+// the identity comment on ContainerImageRegistryResourceModel.ID).
+func applyRegistryBuild(plan *ContainerImageRegistryResourceModel, result *BuildResult, templateName string) {
 	plan.BuildID = types.StringValue(result.ID)
 	plan.BuildStatus = types.StringValue(result.Status)
 	plan.CreatedAt = types.StringValue(result.CreatedAt)
@@ -422,8 +485,6 @@ func (r *ContainerImageRegistryResource) createBuild(ctx context.Context, plan *
 	} else {
 		plan.NameVersion = types.StringNull()
 	}
-
-	return true
 }
 
 // ModifyPlan marks the build-derived attributes unknown when image_uri changes, since
@@ -490,9 +551,10 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 		return
 	}
 
-	// A Create() that failed between the two BYOD calls (see the defensive State.Set
-	// there) leaves a template with no build yet - template.LatestBuild is nil in
-	// that case. Leave the build-derived attributes as they already are (null, from
+	// A Create() that could not read back its build (see the partial State.Set there),
+	// or a resource from a provider version that created the build separately and
+	// failed in between, can leave a template with no build - template.LatestBuild is
+	// nil in that case. Leave the build-derived attributes as they already are (null, from
 	// that same defensive write) rather than treating the missing build as evidence
 	// the whole resource was deleted, which would silently re-orphan the template on
 	// the very next refresh.
@@ -503,16 +565,7 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	}
 
 	// Get build details
-	// Note: The Anyscale API returns 201 for GET build endpoints
-	buildResp, err := DoRequestAndParse[BuildResponse](
-		ctx,
-		r.client,
-		"GET",
-		fmt.Sprintf("/api/v2/builds/%s", template.LatestBuild.ID),
-		nil,
-		http.StatusOK,
-		http.StatusCreated,
-	)
+	result, err := r.getBuild(ctx, template.LatestBuild.ID)
 	if err != nil {
 		// The template itself is confirmed live above; a failure fetching its latest
 		// build is soft-warned rather than treated as resource deletion, matching
@@ -524,8 +577,6 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 		return
 	}
-
-	result := buildResp.Result
 
 	state.BuildID = types.StringValue(result.ID)
 	state.BuildStatus = types.StringValue(result.Status)

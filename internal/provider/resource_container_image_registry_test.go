@@ -68,12 +68,12 @@ func TestContainerImageRegistryCreate_MapsFieldsAndKeysIDOnTemplate(t *testing.T
 				imageURI     = "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ray-image:latest"
 				rayVersion   = "2.9.0"
 				digest       = "sha256:createtestdigest00000000000000000000000000000000000000000000"
-				revision     = 3
+				revision     = 1
 				createdAt    = "2024-06-01T00:00:00Z"
 			)
 
 			var templateReq CreateBYODApplicationTemplateRequest
-			var buildReq CreateBYODBuildRequest
+			var buildPOSTs int
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, err := io.ReadAll(r.Body)
@@ -96,10 +96,13 @@ func TestContainerImageRegistryCreate_MapsFieldsAndKeysIDOnTemplate(t *testing.T
 							CreatedAt: createdAt,
 						},
 					})
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/application_templates/"+templateID:
+					// The template POST created build #1; Create reads it back from here.
+					templateWithLatestBuild(templateID, resourceName, buildID)(w)
 				case r.Method == http.MethodPost && r.URL.Path == "/api/v2/builds/byod":
-					if err := json.Unmarshal(body, &buildReq); err != nil {
-						t.Fatalf("failed to decode build request: %v", err)
-					}
+					buildPOSTs++
+					w.WriteHeader(http.StatusInternalServerError)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/builds/"+buildID:
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusCreated)
 					_ = json.NewEncoder(w).Encode(BuildResponse{
@@ -153,44 +156,35 @@ func TestContainerImageRegistryCreate_MapsFieldsAndKeysIDOnTemplate(t *testing.T
 			if createResp.Diagnostics.HasError() {
 				t.Fatalf("Create reported an unexpected error: %v", createResp.Diagnostics)
 			}
+			if len(createResp.Diagnostics.Warnings()) != 0 {
+				t.Errorf("Create reported warnings, want none: %v", createResp.Diagnostics.Warnings())
+			}
+			if buildPOSTs != 0 {
+				t.Errorf("Create POSTed %d builds, want 0: the template POST already created the build", buildPOSTs)
+			}
 
 			// Real request-body assertions against what Create() actually sent.
 			if templateReq.Name != resourceName {
-				t.Errorf("call 1 request Name = %q, want %q", templateReq.Name, resourceName)
+				t.Errorf("template request Name = %q, want %q", templateReq.Name, resourceName)
 			}
 			if templateReq.Anonymous {
-				t.Error("call 1 request Anonymous = true, want false")
+				t.Error("template request Anonymous = true, want false")
 			}
 			if templateReq.ConfigJSON.DockerImage != imageURI {
-				t.Errorf("call 1 request ConfigJSON.DockerImage = %q, want %q", templateReq.ConfigJSON.DockerImage, imageURI)
+				t.Errorf("template request ConfigJSON.DockerImage = %q, want %q", templateReq.ConfigJSON.DockerImage, imageURI)
 			}
 			if templateReq.ConfigJSON.RayVersion != rayVersion {
-				t.Errorf("call 1 request ConfigJSON.RayVersion = %q, want %q", templateReq.ConfigJSON.RayVersion, rayVersion)
-			}
-			if buildReq.ApplicationTemplateID != templateID {
-				t.Errorf("call 2 request ApplicationTemplateID = %q, want %q -- Create() must chain call 1's response id into call 2", buildReq.ApplicationTemplateID, templateID)
-			}
-			if buildReq.ConfigJSON.DockerImage != imageURI {
-				t.Errorf("call 2 request ConfigJSON.DockerImage = %q, want %q", buildReq.ConfigJSON.DockerImage, imageURI)
-			}
-			if buildReq.ConfigJSON.RayVersion != rayVersion {
-				t.Errorf("call 2 request ConfigJSON.RayVersion = %q, want %q", buildReq.ConfigJSON.RayVersion, rayVersion)
+				t.Errorf("template request ConfigJSON.RayVersion = %q, want %q", templateReq.ConfigJSON.RayVersion, rayVersion)
 			}
 
 			if tt.loginSecret.IsNull() {
 				if templateReq.ConfigJSON.RegistryLoginSecret != nil {
-					t.Errorf("call 1 request RegistryLoginSecret = %v, want nil", *templateReq.ConfigJSON.RegistryLoginSecret)
-				}
-				if buildReq.ConfigJSON.RegistryLoginSecret != nil {
-					t.Errorf("call 2 request RegistryLoginSecret = %v, want nil", *buildReq.ConfigJSON.RegistryLoginSecret)
+					t.Errorf("template request RegistryLoginSecret = %v, want nil", *templateReq.ConfigJSON.RegistryLoginSecret)
 				}
 			} else {
 				want := tt.loginSecret.ValueString()
 				if templateReq.ConfigJSON.RegistryLoginSecret == nil || *templateReq.ConfigJSON.RegistryLoginSecret != want {
-					t.Errorf("call 1 request RegistryLoginSecret = %v, want %q", templateReq.ConfigJSON.RegistryLoginSecret, want)
-				}
-				if buildReq.ConfigJSON.RegistryLoginSecret == nil || *buildReq.ConfigJSON.RegistryLoginSecret != want {
-					t.Errorf("call 2 request RegistryLoginSecret = %v, want %q", buildReq.ConfigJSON.RegistryLoginSecret, want)
+					t.Errorf("template request RegistryLoginSecret = %v, want %q", templateReq.ConfigJSON.RegistryLoginSecret, want)
 				}
 			}
 
@@ -274,7 +268,9 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 				// the generated name embedding a live timestamp.
 				Result: ApplicationTemplateResult{ID: templateID, Name: templateReq.Name, CreatorID: "user_1", CreatedAt: "2024-06-01T00:00:00Z"},
 			})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/builds/byod":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/application_templates/"+templateID:
+			templateWithLatestBuild(templateID, templateReq.Name, buildID)(w)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/builds/"+buildID:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(BuildResponse{
@@ -331,7 +327,7 @@ func TestContainerImageRegistryCreate_GeneratesNameWhenOmitted(t *testing.T) {
 	}
 	suffix := strings.TrimPrefix(templateReq.Name, wantPrefix)
 	if _, err := strconv.ParseInt(suffix, 10, 64); err != nil {
-		t.Errorf("call 1 request Name = %q, want a numeric timestamp suffix after %q, got %q (%v)", templateReq.Name, wantPrefix, suffix, err)
+		t.Errorf("template request Name = %q, want a numeric timestamp suffix after %q, got %q (%v)", templateReq.Name, wantPrefix, suffix, err)
 	}
 
 	var state ContainerImageRegistryResourceModel
