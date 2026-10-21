@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -14,8 +15,9 @@ import (
 )
 
 // Changing image_uri against the real API: the new build lands on the same cluster
-// environment, revision increments, the previous build is still served, and a refresh
-// plans clean. The mock-server test proves what the provider sends; this proves the
+// environment, revision increments by one, the previous build is still served, and a
+// refresh plans clean. Revisions are asserted relative to the one Create leaves, so the
+// test does not depend on how many builds Create registers. The mock-server test proves what the provider sends; this proves the
 // backend accepts it and Read round-trips the result.
 func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) {
 	t.Parallel()
@@ -28,6 +30,7 @@ func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) 
 	imageV2 := "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-ray-image:v2"
 
 	var firstID, firstBuildID string
+	var firstRevision int
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
@@ -37,12 +40,16 @@ func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) 
 			{
 				Config: testAccContainerImageRegistryResourceBYODConfig(name, imageV1),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(addr, "revision", "1"),
 					resource.TestCheckResourceAttr(addr, "image_uri", imageV1),
 					func(s *terraform.State) error {
 						rs := s.RootModule().Resources[addr]
 						firstID = rs.Primary.ID
 						firstBuildID = rs.Primary.Attributes["build_id"]
+						rev, err := strconv.Atoi(rs.Primary.Attributes["revision"])
+						if err != nil || rev < 1 {
+							return fmt.Errorf("revision after create = %q, want a positive integer", rs.Primary.Attributes["revision"])
+						}
+						firstRevision = rev
 						return nil
 					},
 				),
@@ -56,17 +63,22 @@ func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) 
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "name", name),
 					resource.TestCheckResourceAttr(addr, "image_uri", imageV2),
-					resource.TestCheckResourceAttr(addr, "revision", "2"),
-					resource.TestCheckResourceAttr(addr, "name_version", name+":2"),
 					func(s *terraform.State) error {
 						rs := s.RootModule().Resources[addr]
+						want := firstRevision + 1
+						if got := rs.Primary.Attributes["revision"]; got != strconv.Itoa(want) {
+							return fmt.Errorf("revision = %s, want %d (one more than after create)", got, want)
+						}
+						if got, wantNV := rs.Primary.Attributes["name_version"], name+":"+strconv.Itoa(want); got != wantNV {
+							return fmt.Errorf("name_version = %q, want %q", got, wantNV)
+						}
 						if rs.Primary.ID != firstID {
 							return fmt.Errorf("id changed from %q to %q: the environment was replaced", firstID, rs.Primary.ID)
 						}
 						if rs.Primary.Attributes["build_id"] == firstBuildID {
 							return fmt.Errorf("build_id is still %q: no new build was registered", firstBuildID)
 						}
-						return testAccCheckRegistryBuildsInAPI(firstID, firstBuildID, imageV1, rs.Primary.Attributes["build_id"], imageV2)
+						return testAccCheckRegistryBuildsInAPI(firstID, firstBuildID, imageV1, rs.Primary.Attributes["build_id"], imageV2, want)
 					},
 				),
 			},
@@ -77,7 +89,7 @@ func TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI(t *testing.T) 
 // testAccCheckRegistryBuildsInAPI checks the backend's view after an image_uri change:
 // the environment is live with the new build as latest, and the first build is still
 // served with its original image.
-func testAccCheckRegistryBuildsInAPI(envID, oldBuildID, oldImage, newBuildID, newImage string) error {
+func testAccCheckRegistryBuildsInAPI(envID, oldBuildID, oldImage, newBuildID, newImage string, newRevision int) error {
 	client, err := GetTestClient()
 	if err != nil {
 		return fmt.Errorf("failed to get test client: %w", err)
@@ -110,8 +122,8 @@ func testAccCheckRegistryBuildsInAPI(envID, oldBuildID, oldImage, newBuildID, ne
 	if env.Result.ArchivedAt != nil {
 		return fmt.Errorf("environment %s is archived after an in-place update", envID)
 	}
-	if env.Result.LatestBuild == nil || env.Result.LatestBuild.ID != newBuildID || env.Result.LatestBuild.Revision != 2 {
-		return fmt.Errorf("environment %s latest_build = %+v, want id %s revision 2", envID, env.Result.LatestBuild, newBuildID)
+	if env.Result.LatestBuild == nil || env.Result.LatestBuild.ID != newBuildID || env.Result.LatestBuild.Revision != newRevision {
+		return fmt.Errorf("environment %s latest_build = %+v, want id %s revision %d", envID, env.Result.LatestBuild, newBuildID, newRevision)
 	}
 
 	for _, b := range []struct{ id, image string }{{oldBuildID, oldImage}, {newBuildID, newImage}} {
