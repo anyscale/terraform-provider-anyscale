@@ -34,6 +34,7 @@ resource "anyscale_user_group" "test" {
 // returns the status and body.
 func userGroupAPI(t *testing.T, method, path string, payload any) (int, []byte) {
 	t.Helper()
+	skipIfCredentialsWithheld(t)
 	client, err := GetTestClient()
 	if err != nil {
 		t.Fatalf("test client: %v", err)
