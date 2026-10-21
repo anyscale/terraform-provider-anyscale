@@ -61,9 +61,10 @@ type registryBuildSnapshot struct {
 // resource_compute_config_lifecycle_acc_test.go's mockComputeConfigServer, sized down to the
 // single field this test needs to flip.
 type digestMockRegistryServer struct {
-	mu        sync.Mutex
-	current   registryBuildSnapshot
-	serverURL string
+	mu         sync.Mutex
+	current    registryBuildSnapshot
+	buildPosts int // POST builds/byod calls
+	serverURL  string
 }
 
 func (s *digestMockRegistryServer) snapshot() registryBuildSnapshot {
@@ -94,12 +95,17 @@ func newDigestMockRegistryServer(t *testing.T, templateID, name, imageURI, rayVe
 
 	s := &digestMockRegistryServer{current: initial}
 
+	// Like the real API, creating the template also registers its first build: initial is
+	// that build. The response is the template only.
 	mux.HandleFunc("/api/v2/application_templates/byod", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected method %s on application_templates/byod", r.Method)
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		s.mu.Lock()
+		s.current = initial
+		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"result": {
@@ -108,19 +114,23 @@ func newDigestMockRegistryServer(t *testing.T, templateID, name, imageURI, rayVe
 		}}`, templateID, name, createdAt)
 	})
 
-	// Bare create response (Call 2 of Create()): response_model=Response[Build] on the real
-	// API, so this always reports whatever the FIRST snapshot was - Create() only ever runs
-	// once, before any advanceLatestBuild call, so there is no ambiguity about which snapshot
-	// this should serve. Field shape matches BuildResult (models.go): id,
-	// application_template_id, docker_image_name, revision, status, created_at,
-	// last_modified_at, is_byod, digest.
+	// POST builds/byod registers the NEXT revision on the template (new id, revision+1) and
+	// makes it the latest build, as the real API does. Bare create response:
+	// response_model=Response[Build] on the real API. Field shape matches BuildResult
+	// (models.go): id, application_template_id, docker_image_name, revision, status,
+	// created_at, last_modified_at, is_byod, digest.
 	mux.HandleFunc("/api/v2/builds/byod", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected method %s on builds/byod", r.Method)
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		snap := s.snapshot()
+		s.mu.Lock()
+		s.buildPosts++
+		s.current.revision++
+		s.current.buildID = fmt.Sprintf("%s_rev%d", initial.buildID, s.current.revision)
+		snap := s.current
+		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"result": {

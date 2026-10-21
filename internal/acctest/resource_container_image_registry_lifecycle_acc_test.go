@@ -20,24 +20,51 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// newRegistryLifecycleMockServer serves a fixed BYOD registry lifecycle: the two
-// Create() calls, the two Read() calls (decorated template + build), and
-// Delete()'s archive call, all keyed off the same templateID/buildID no
-// matter how many times each is hit (create, post-apply refresh, import
-// refresh, destroy).
+// newRegistryLifecycleMockServer serves a BYOD registry lifecycle: the template
+// create (which, like the real API, also registers build revision 1 as buildID),
+// the two Read() calls (decorated template + build), and Delete()'s archive
+// call, all keyed off the same templateID no matter how many times each is hit
+// (create, post-apply refresh, import refresh, destroy). POST builds/byod
+// registers the next revision under a different id, so a Create that registers
+// a second build shows up as revision 2 and a build_id other than buildID.
 func newRegistryLifecycleMockServer(t *testing.T, templateID, buildID, name, imageURI, rayVersion, digest string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
-	const revision = 1
 	const createdAt = "2024-01-01T00:00:00Z"
 	const buildStatus = "succeeded"
+
+	var mu sync.Mutex
+	// Latest build revision. Starts at 1 so the template is also servable as a
+	// pre-existing object for cold-import tests that never Create
+	// (resource_create_only_input_import_acc_test.go); the template create
+	// resets it to 1.
+	revision := 1
+	buildIDFor := func(rev int) string {
+		if rev == 1 {
+			return buildID
+		}
+		return fmt.Sprintf("%s_rev%d", buildID, rev)
+	}
+	writeBuild := func(w http.ResponseWriter, rev int) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"result": {
+			"id": %[1]q, "application_template_id": %[2]q,
+			"docker_image_name": %[3]q, "ray_version": %[4]q,
+			"revision": %[5]d, "creator_id": "user_mock", "status": %[6]q,
+			"created_at": %[7]q, "last_modified_at": %[7]q, "is_byod": true,
+			"digest": %[8]q
+		}}`, buildIDFor(rev), templateID, imageURI, rayVersion, rev, buildStatus, createdAt, digest)
+	}
 
 	mux.HandleFunc("/api/v2/application_templates/byod", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -45,6 +72,9 @@ func newRegistryLifecycleMockServer(t *testing.T, templateID, buildID, name, ima
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		mu.Lock()
+		revision = 1
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"result": {
@@ -59,15 +89,11 @@ func newRegistryLifecycleMockServer(t *testing.T, templateID, buildID, name, ima
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = fmt.Fprintf(w, `{"result": {
-			"id": %[1]q, "application_template_id": %[2]q,
-			"docker_image_name": %[3]q, "ray_version": %[4]q,
-			"revision": %[5]d, "creator_id": "user_mock", "status": %[6]q,
-			"created_at": %[7]q, "last_modified_at": %[7]q, "is_byod": true,
-			"digest": %[8]q
-		}}`, buildID, templateID, imageURI, rayVersion, revision, buildStatus, createdAt, digest)
+		mu.Lock()
+		revision++
+		rev := revision
+		mu.Unlock()
+		writeBuild(w, rev)
 	})
 
 	// GET by id: this is the headline gate. Read() calls
@@ -80,34 +106,41 @@ func newRegistryLifecycleMockServer(t *testing.T, templateID, buildID, name, ima
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		mu.Lock()
+		rev := revision
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, `{"result": {
 			"id": %[1]q, "name": %[2]q, "creator_id": "user_mock",
 			"created_at": %[3]q, "anonymous": false, "is_default": false,
 			"latest_build": {"id": %[4]q, "revision": %[5]d, "status": %[6]q}
-		}}`, templateID, name, createdAt, buildID, revision, buildStatus)
+		}}`, templateID, name, createdAt, buildIDFor(rev), rev, buildStatus)
 	})
 
-	mux.HandleFunc("/api/v2/builds/"+buildID, func(w http.ResponseWriter, r *http.Request) {
+	// Every registered revision stays fetchable by its own id. Read()'s build
+	// fetch allows both 200 and 201 specifically because the real API returns
+	// 201 here - writeBuild answers 201 deliberately rather than the more
+	// obvious 200, so this test would catch a regression that narrowed the
+	// accepted status list back down to just 200.
+	mux.HandleFunc("/api/v2/builds/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("unexpected method %s on builds/%s", r.Method, buildID)
+			t.Errorf("unexpected method %s on %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		// Read()'s build fetch allows both 200 and 201 specifically because
-		// the real API returns 201 here - exercised deliberately rather than
-		// the more obvious 200, so this test would catch a regression that
-		// narrowed the accepted status list back down to just 200.
-		w.WriteHeader(http.StatusCreated)
-		_, _ = fmt.Fprintf(w, `{"result": {
-			"id": %[1]q, "application_template_id": %[2]q,
-			"docker_image_name": %[3]q, "ray_version": %[4]q,
-			"revision": %[5]d, "creator_id": "user_mock", "status": %[6]q,
-			"created_at": %[7]q, "last_modified_at": %[7]q, "is_byod": true,
-			"digest": %[8]q
-		}}`, buildID, templateID, imageURI, rayVersion, revision, buildStatus, createdAt, digest)
+		id := strings.TrimPrefix(r.URL.Path, "/api/v2/builds/")
+		mu.Lock()
+		latest := revision
+		mu.Unlock()
+		for rev := 1; rev <= latest; rev++ {
+			if buildIDFor(rev) == id {
+				writeBuild(w, rev)
+				return
+			}
+		}
+		t.Errorf("GET of unknown build %q", id)
+		w.WriteHeader(http.StatusNotFound)
 	})
 
 	mux.HandleFunc("/api/v2/application_templates/"+templateID+"/archive", func(w http.ResponseWriter, r *http.Request) {

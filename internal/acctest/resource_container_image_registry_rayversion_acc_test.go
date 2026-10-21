@@ -29,6 +29,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -44,13 +46,24 @@ import (
 // registry.go's Create() comment); it stays parameterized here rather than hardcoded so a
 // future regression that starts *reading* the create response's ray_version some other way
 // still has a test able to catch it.
+//
+// Like the real API, the template create also registers build revision 1 (as buildID); POST
+// builds/byod registers the next revision under its own id.
 func newRegistryRayVersionMockServer(t *testing.T, templateID, buildID, name, imageURI, createRayVersion, readByodRayVersion, readPlainRayVersion, digest string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
-	const revision = 1
 	const createdAt = "2024-01-01T00:00:00Z"
 	const buildStatus = "succeeded"
+
+	var mu sync.Mutex
+	revision := 0 // latest build revision; 0 until the template is created
+	buildIDFor := func(rev int) string {
+		if rev == 1 {
+			return buildID
+		}
+		return fmt.Sprintf("%s_rev%d", buildID, rev)
+	}
 
 	mux.HandleFunc("/api/v2/application_templates/byod", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -58,6 +71,9 @@ func newRegistryRayVersionMockServer(t *testing.T, templateID, buildID, name, im
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		mu.Lock()
+		revision = 1
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"result": {
@@ -75,6 +91,10 @@ func newRegistryRayVersionMockServer(t *testing.T, templateID, buildID, name, im
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		mu.Lock()
+		revision++
+		rev := revision
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		// Real Build model: no ray_version key at all when there's nothing to report - not
@@ -92,7 +112,7 @@ func newRegistryRayVersionMockServer(t *testing.T, templateID, buildID, name, im
 			"revision": %[4]d, "creator_id": "user_mock", "status": %[5]q,
 			"created_at": %[6]q, "last_modified_at": %[6]q, "is_byod": true,
 			"digest": %[7]q%[8]s
-		}}`, buildID, templateID, imageURI, revision, buildStatus, createdAt, digest, rayVersionField)
+		}}`, buildIDFor(rev), templateID, imageURI, rev, buildStatus, createdAt, digest, rayVersionField)
 	})
 
 	mux.HandleFunc("/api/v2/application_templates/"+templateID, func(w http.ResponseWriter, r *http.Request) {
@@ -101,13 +121,20 @@ func newRegistryRayVersionMockServer(t *testing.T, templateID, buildID, name, im
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		mu.Lock()
+		rev := revision
+		mu.Unlock()
+		latestBuild := "null"
+		if rev > 0 {
+			latestBuild = fmt.Sprintf(`{"id": %q, "revision": %d, "status": %q}`, buildIDFor(rev), rev, buildStatus)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, `{"result": {
 			"id": %[1]q, "name": %[2]q, "creator_id": "user_mock",
 			"created_at": %[3]q, "anonymous": false, "is_default": false,
-			"latest_build": {"id": %[4]q, "revision": %[5]d, "status": %[6]q}
-		}}`, templateID, name, createdAt, buildID, revision, buildStatus)
+			"latest_build": %[4]s
+		}}`, templateID, name, createdAt, latestBuild)
 	})
 
 	// Decorated GET response: this is builds_resolver.resolve_build()'s output on the real
@@ -123,10 +150,25 @@ func newRegistryRayVersionMockServer(t *testing.T, templateID, buildID, name, im
 	// fixture that sends both at once, a regression that swapped ResolvedRayVersion()'s
 	// preference order would be unobservable: if only one of the two fields is ever non-nil,
 	// checking them in either order yields the same result.
-	mux.HandleFunc("/api/v2/builds/"+buildID, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v2/builds/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("unexpected method %s on builds/%s", r.Method, buildID)
+			t.Errorf("unexpected method %s on %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/api/v2/builds/")
+		mu.Lock()
+		latest := revision
+		mu.Unlock()
+		rev := 0
+		for n := 1; n <= latest; n++ {
+			if buildIDFor(n) == id {
+				rev = n
+			}
+		}
+		if rev == 0 {
+			t.Errorf("GET of unknown build %q", id)
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -145,7 +187,7 @@ func newRegistryRayVersionMockServer(t *testing.T, templateID, buildID, name, im
 			"revision": %[4]d, "creator_id": "user_mock", "status": %[5]q,
 			"created_at": %[6]q, "last_modified_at": %[6]q, "is_byod": true,
 			"digest": %[7]q%[8]s%[9]s
-		}}`, buildID, templateID, imageURI, revision, buildStatus, createdAt, digest, byodField, plainField)
+		}}`, id, templateID, imageURI, rev, buildStatus, createdAt, digest, byodField, plainField)
 	})
 
 	mux.HandleFunc("/api/v2/application_templates/"+templateID+"/archive", func(w http.ResponseWriter, r *http.Request) {
