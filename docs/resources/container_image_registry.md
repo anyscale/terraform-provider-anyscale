@@ -3,13 +3,13 @@
 page_title: "anyscale_container_image_registry Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Every configurable attribute requires replacing the resource; there is no in-place update.
+  Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Changing image_uri registers a new build in place; changing any other argument replaces the resource.
   ~> Note: When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting include_archived = true on the anyscale_container_images data source.
 ---
 
 # anyscale_container_image_registry (Resource)
 
-Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Every configurable attribute requires replacing the resource; there is no in-place update.
+Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Changing `image_uri` registers a new build in place; changing any other argument replaces the resource.
 
 ~> **Note:** When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting `include_archived = true` on the `anyscale_container_images` data source.
 
@@ -49,13 +49,13 @@ output "registry_image_digest" {
 
 ### Required
 
-- `image_uri` (String) The full URI of the Docker image to register (e.g., `docker.io/myrepo/image:v2` or `123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest`).
+- `image_uri` (String) The full URI of the Docker image to register (e.g., `docker.io/myrepo/image:v2` or `123456789.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest`). Changing it registers a new build on the same cluster environment in place, incrementing `revision`.
 
 ### Optional
 
 - `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated and recorded here after create/import - the generated value is not derivable from config (it embeds a timestamp), so it lives only in state.
 - `ray_version` (String) The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; the API rejects unsupported values at creation time. If not specified, a supported default is used automatically.
-- `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it replaces the image, except the first value set after `terraform import`, which is recorded in state without being sent (see [Importing an existing image](../guides/container-images.md#importing-an-existing-container-image)).
+- `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it replaces the image, except the first value set after `terraform import`, which updates in place (see [Importing an existing image](../guides/container-images.md#importing-an-existing-container-image)).
 
 ### Read-Only
 
