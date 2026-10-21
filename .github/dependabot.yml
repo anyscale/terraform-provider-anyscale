@@ -22,6 +22,11 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      # init, analyze and upload-sarif must run the same major version (a
+      # mismatch fails the analyze step), so they always move as one PR.
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
       actions-minor-patch:
         update-types:
           - "minor"
