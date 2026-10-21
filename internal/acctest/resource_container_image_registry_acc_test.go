@@ -58,9 +58,8 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 					},
 				},
 			},
-			// Create leaves ray_version null when the create response carries
-			// none; the first refresh fills it from the build. Persist that
-			// refresh so import is compared against it.
+			// Create and Read resolve ray_version from the same build. Persist a
+			// refresh so import is compared against Read's own output.
 			{
 				RefreshState: true,
 			},
@@ -81,13 +80,13 @@ func TestAccContainerImageRegistryResource_Basic(t *testing.T) {
 }
 
 // TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer
-// proves an omitted ray_version imports to the same value a refreshed state
-// holds. Import is a passthrough, so Read fills ray_version from the build's
-// resolved value. Create leaves it null when the create response carries none
-// (the real contract), and the next refresh fills it - so the comparison is
-// against refreshed state, as in the Basic test. The mock's decorated GET
-// carries a byod_ray_version that disagrees with the stored plain field, so a
-// Create that records the request-side default instead diverges from import.
+// proves an omitted ray_version imports to the same value Create recorded.
+// Import is a passthrough, so Read fills ray_version from the build's resolved
+// value, and Create resolves it from the same build the same way; the
+// comparison is against refreshed state, as in the Basic test. The mock's
+// decorated GET carries a byod_ray_version that disagrees with the stored plain
+// field, so a Create that records the request-side default instead diverges
+// from import.
 func TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
