@@ -209,7 +209,7 @@ jobs:
           if [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$BASE_REPO" ]; then
             withheld=true
             reason=fork
-          elif [ "$ACTOR" = "dependabot[bot]" ]; then
+          elif [ "$EVENT_NAME" = "pull_request" ] && [ "$ACTOR" = "dependabot[bot]" ]; then
             withheld=true
             reason=dependabot
           fi
