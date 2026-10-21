@@ -1,0 +1,4 @@
+```
+release-note:fixed
+provider: Paging through API results now stops with an error naming the repeated paging token, instead of looping forever when the API returns a pagination cursor it already returned.
+```
