@@ -128,8 +128,17 @@ func GetTestClient() (*provider.Client, error) {
 		return nil, fmt.Errorf("no authentication token available")
 	}
 
-	return provider.NewClientWithToken(apiURL, token), nil
+	client := provider.NewClientWithToken(apiURL, token)
+	if testClientRetrySleep != nil {
+		client.SetRetrySleep(testClientRetrySleep)
+	}
+	return client, nil
 }
+
+// testClientRetrySleep, when set, replaces the wait between read retries on
+// every client GetTestClient returns. Only this package's unit tests set it
+// (see skipRetryBackoff), so they don't sit through real backoff.
+var testClientRetrySleep func(ctx context.Context, d time.Duration) error
 
 // credentialsWithheldEnv marks a run that is known to have no credentials: CI
 // sets it on fork and Dependabot PRs, where GitHub withholds Actions secrets.

@@ -53,6 +53,10 @@ cloud.
 Replace `my-anyscale-cloud` with the name of that cloud. To scale out, add a `worker_nodes`
 block - see the [Compute Config resource page](resources/compute_config.md) for examples.
 
+## Request retries
+
+Read requests (`GET`) to the Anyscale API retry up to 3 attempts on timeouts, connection errors, and HTTP 429/502/503/504, with backoff. Writes are never retried. A persistently failing read can therefore take about 3 minutes to report an error.
+
 ## Guides
 
 Getting Started:
