@@ -1,4 +1,0 @@
-```
-release-note:changed
-resource/anyscale_role_binding: The example now shows creating a user group, adding members, and binding a role to it, plus an organization-scope binding for a directory-synced group.
-```
