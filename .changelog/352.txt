@@ -1,0 +1,4 @@
+```
+release-note:fixed
+resource/anyscale_container_image_registry: Creating an image no longer registers a duplicate first build, so a new image starts at `revision` 1 (`name_version` `name:1`) instead of 2. Existing resources are unchanged.
+```
