@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.1] - 2026-10-21
+
+### Changed
+
+- resource/anyscale_role_binding: The example now shows creating a user group, adding members, and binding a role to it, plus an organization-scope binding for a directory-synced group.
+
 ## [0.31.0] - 2026-10-21
 
 ### Breaking Changes
@@ -1201,7 +1207,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.31.1...HEAD
+[0.31.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.1
 [0.31.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.0
 [0.30.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.30.0
 [0.29.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.29.0
