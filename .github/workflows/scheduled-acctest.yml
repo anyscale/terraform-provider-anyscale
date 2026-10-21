@@ -78,8 +78,9 @@ jobs:
 
       # Both steps below are intentional duplicates of ci.yml's "Acceptance
       # Tests - Data Sources" / "Acceptance Tests - Resources" steps (minus
-      # the matrix/Dependabot conditionals, which don't apply to a scheduled
-      # run). Deliberately NOT factored into a shared reusable (workflow_call)
+      # the matrix, docs-only and withheld-credentials conditionals, which
+      # don't apply to a scheduled run; acctest-fork-pr.yml mirrors them too).
+      # Deliberately NOT factored into a shared reusable (workflow_call)
       # workflow: the required-status-check context strings
       # "ci (acctest-data)"/"ci (acctest-resource)" only exist because ci.yml
       # runs these as one matrixed job named `ci` -- splitting that job to

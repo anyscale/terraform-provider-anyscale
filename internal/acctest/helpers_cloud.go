@@ -76,6 +76,7 @@ var (
 // the name does not exist in the current org; any other error fails the test.
 // The ID is deliberately not hardcoded in the repo.
 func resolveDefaultKnownGoodCloudID(t *testing.T) string {
+	skipIfCredentialsWithheld(t)
 	id, err := resolveCloudNameToID(t, defaultKnownGoodCloudName)
 	if errors.Is(err, errCloudNameNotFound) {
 		return ""
@@ -110,6 +111,7 @@ func GetTestCloudID(t *testing.T) string {
 // resolveTestCloudID is the resolution behind GetTestCloudID, before the
 // wake gate.
 func resolveTestCloudID(t *testing.T) string {
+	skipIfCredentialsWithheld(t)
 	cloudIDMutex.Lock()
 	defer cloudIDMutex.Unlock()
 
@@ -188,6 +190,7 @@ func resolveTestCloudID(t *testing.T) string {
 // after checking the cloud still exists. ANYSCALE_TEST_CLOUD_ID is not
 // consulted here.
 func GetTestCloudName(t *testing.T) string {
+	skipIfCredentialsWithheld(t)
 	cloudIDMutex.Lock()
 	defer cloudIDMutex.Unlock()
 
@@ -265,6 +268,7 @@ func validateCloudExists(cloudID string) bool {
 // skipping, so an API outage cannot turn the suite green.
 func requireTestCloudExists(t *testing.T, cloudID string) {
 	t.Helper()
+	skipIfCredentialsWithheld(t)
 	client, err := GetTestClient()
 	if err != nil {
 		t.Fatalf("ANYSCALE_TEST_CLOUD_ID: failed to get test client: %v", err)
@@ -644,6 +648,7 @@ func autoDiscoverTestCloud(t *testing.T) (cloudID string, cloudName string, err 
 // This is useful for data source tests that just need a valid cloud to query.
 // The result is cached after the first successful call.
 func GetAnyCloudID(t *testing.T) string {
+	skipIfCredentialsWithheld(t)
 	anyCloudIDMutex.Lock()
 	defer anyCloudIDMutex.Unlock()
 
@@ -744,6 +749,7 @@ func isKnownProvider(provider, computeStack string) bool {
 // ephemeral clouds), since this does a full list-clouds call plus one
 // per-cloud resources check for every candidate.
 func GetAllConfiguredClouds(t *testing.T) []CloudInfo {
+	skipIfCredentialsWithheld(t)
 	allConfiguredCloudsMutex.Lock()
 	defer allConfiguredCloudsMutex.Unlock()
 

@@ -557,6 +557,7 @@ func testAccDeleteComputeConfigViaAPI(resourceName string) resource.TestCheckFun
 func TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI(t *testing.T) {
 	t.Parallel()
 	SkipIfNotAcceptanceTest(t)
+	skipIfCredentialsWithheld(t)
 
 	client, err := GetTestClient()
 	if err != nil {
