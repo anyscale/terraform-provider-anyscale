@@ -1,9 +1,0 @@
-```
-release-note:fixed
-resource/anyscale_cloud_access: Reading or planning now fails with an error naming the repeated paging token, instead of hanging, when the API returns the same pagination cursor twice while listing a cloud's members.
-```
-
-```
-release-note:fixed
-data-source/anyscale_compute_config: A search now fails with an error naming the repeated paging token, instead of hanging, when the API returns the same pagination cursor twice.
-```
