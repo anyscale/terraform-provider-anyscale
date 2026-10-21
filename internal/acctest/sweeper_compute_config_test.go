@@ -119,6 +119,7 @@ func sweepComputeConfigs(_ string) error {
 func searchComputeConfigsByContains(ctx context.Context, client *provider.Client, contains string) ([]sweepComputeConfigResult, error) {
 	var all []sweepComputeConfigResult
 	var pagingToken string
+	guard := provider.NewPageTokenGuard("POST", "/api/v2/compute_templates/search")
 
 	for {
 		// Uses /api/v2/compute_templates/search (not the older
@@ -200,6 +201,9 @@ func searchComputeConfigsByContains(ctx context.Context, client *provider.Client
 			break
 		}
 		pagingToken = *page.Metadata.NextPagingToken
+		if err := guard.Next(pagingToken); err != nil {
+			return nil, err
+		}
 	}
 
 	return all, nil

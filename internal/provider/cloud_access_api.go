@@ -98,6 +98,7 @@ type cloudAccessRemoteMember struct {
 func searchCloudCollaborators(ctx context.Context, client *Client, cloudID string) ([]cloudCollaboratorSearchResult, error) {
 	var all []cloudCollaboratorSearchResult
 	pagingToken := ""
+	guard := NewPageTokenGuard("POST", fmt.Sprintf("/api/v2/clouds/%s/collaborators/users/search", cloudID))
 
 	for {
 		body, err := MarshalRequestBody(map[string]interface{}{})
@@ -132,6 +133,9 @@ func searchCloudCollaborators(ctx context.Context, client *Client, cloudID strin
 			return all, nil
 		}
 		pagingToken = *page.Metadata.NextPagingToken
+		if err := guard.Next(pagingToken); err != nil {
+			return nil, err
+		}
 	}
 }
 

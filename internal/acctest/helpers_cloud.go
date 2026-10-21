@@ -333,6 +333,7 @@ func resolveCloudNameToIDCore(cloudName string) (string, int, error) {
 	matchCount := 0
 
 	pagingToken := ""
+	guard := provider.NewPageTokenGuard("GET", "/api/v2/clouds")
 	for {
 		path := "/api/v2/clouds"
 		if pagingToken != "" {
@@ -385,6 +386,9 @@ func resolveCloudNameToIDCore(cloudName string) (string, int, error) {
 			break
 		}
 		pagingToken = *cloudsResp.Metadata.NextPagingToken
+		if err := guard.Next(pagingToken); err != nil {
+			return "", 0, err
+		}
 	}
 
 	if matchedCloudID == "" {

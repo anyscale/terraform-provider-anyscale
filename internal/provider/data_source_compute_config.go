@@ -667,6 +667,7 @@ func searchComputeTemplatesPaged(
 ) ([]computeConfigSearchResult, error) {
 	var allItems []computeConfigSearchResult
 	var pagingToken string
+	guard := NewPageTokenGuard("POST", "/api/v2/compute_templates/search")
 
 	for {
 		body, err := MarshalRequestBody(basePayload)
@@ -696,6 +697,9 @@ func searchComputeTemplatesPaged(
 			break
 		}
 		pagingToken = *nextToken
+		if err := guard.Next(pagingToken); err != nil {
+			return nil, err
+		}
 	}
 
 	return allItems, nil
