@@ -3,7 +3,7 @@
 page_title: "anyscale_cloud_access Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages the complete member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names.
+  Manages the complete member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names. Legacy organizations only: a converted organization ../guides/rbac.md#organization-access-mode refuses these writes.
   ~> This resource is authoritative. Any member not declared in member is revoked, including people granted access in the Anyscale console and including on the first apply; those members appear nowhere in plan output. Read the RBAC guide ../guides/rbac.md before your first apply against a production cloud.
   A clean plan is not proof that nobody has unintended access: organization admins and your own identity are invisible to this resource, project roles are compared only for the projects you name, and a console role change between writer and owner is not detected. Only manage a given cloud from one Terraform state, and put lifecycle { prevent_destroy = true } on production clouds. A project role for a member with no cloud role is a plan-time error.
   The resource refuses to create or update when the cloud has auto_add_user enabled, or a group policy binding when the apply would revoke someone (destroy still proceeds); turning auto_add_user off does not remove the collaborators it already added, so the first apply after that revokes everyone you do not declare. Binding detection is best-effort: when the check is inconclusive the resource warns and proceeds. It is unavailable (501) in organizations without the cloud roles API; reading and writing are gated by two separate feature flags with the same response, so ask Anyscale support to enable both. See the RBAC guide ../guides/rbac.md for the unmanaged_grants/ungranted_members diagnostics.
@@ -11,7 +11,7 @@ description: |-
 
 # anyscale_cloud_access (Resource)
 
-Manages the **complete** member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names.
+Manages the **complete** member list of one Anyscale cloud: cloud roles, deny roles, and each member's project roles on the projects your configuration names. Legacy organizations only: a [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.
 
 ~> **This resource is authoritative.** Any member not declared in `member` is **revoked**, including people granted access in the Anyscale console and including on the **first** apply; those members appear nowhere in plan output. Read the [RBAC guide](../guides/rbac.md) before your first apply against a production cloud.
 
@@ -100,8 +100,8 @@ output "production_ungranted_members" {
 ### Read-Only
 
 - `id` (String) The ID of the cloud whose access this resource manages. Same value as `cloud_id`.
-- `ungranted_members` (Attributes List) Members this apply could not grant the declared role, with a reason for each. The apply still converges; alert on `length(...) > 0`, which means someone lacks access the configuration declares. While non-empty, the apply skips all revokes (see `unmanaged_grants`) and state for the affected member shows planned rather than granted values until the next plan retries. (see [below for nested schema](#nestedatt--ungranted_members))
-- `unmanaged_grants` (Attributes List) Grants this resource could not revoke, or skipped revoking after another grant failed in the same apply, with reasons. The apply still converges; alert on `length(...) > 0`, meaning someone has access Terraform intends them not to have. At project scope only the projects your configuration names are covered, so empty does not prove no access elsewhere. (see [below for nested schema](#nestedatt--unmanaged_grants))
+- `ungranted_members` (Attributes List) Members this apply could not grant the declared role, with a reason for each. The apply still converges, except in a [converted organization](../guides/rbac.md#organization-access-mode), where it fails at the first refused write; alert on `length(...) > 0`, which means someone lacks access the configuration declares. While non-empty, the apply skips all revokes (see `unmanaged_grants`) and state for the affected member shows planned rather than granted values until the next plan retries. (see [below for nested schema](#nestedatt--ungranted_members))
+- `unmanaged_grants` (Attributes List) Grants this resource could not revoke, or skipped revoking after another grant failed in the same apply, with reasons. The apply still converges, except in a [converted organization](../guides/rbac.md#organization-access-mode), where it fails at the first refused write; alert on `length(...) > 0`, meaning someone has access Terraform intends them not to have. At project scope only the projects your configuration names are covered, so empty does not prove no access elsewhere. (see [below for nested schema](#nestedatt--unmanaged_grants))
 
 <a id="nestedatt--member"></a>
 ### Nested Schema for `member`

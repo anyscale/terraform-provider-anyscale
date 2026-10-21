@@ -40,9 +40,9 @@ type UserGroupMembersResource struct {
 
 // UserGroupMembersResourceModel describes the resource data model.
 type UserGroupMembersResourceModel struct {
-	ID      types.String `tfsdk:"id"`
-	GroupID types.String `tfsdk:"group_id"`
-	Members types.Set    `tfsdk:"members"`
+	ID          types.String `tfsdk:"id"`
+	UserGroupID types.String `tfsdk:"user_group_id"`
+	Members     types.Set    `tfsdk:"members"`
 }
 
 func (r *UserGroupMembersResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -51,20 +51,23 @@ func (r *UserGroupMembersResource) Metadata(ctx context.Context, req resource.Me
 
 func (r *UserGroupMembersResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// Version 1 renamed group_id to user_group_id; see UpgradeState.
+		Version: 1,
 		MarkdownDescription: userGroupsAlphaBanner +
 			"Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. " +
-			"Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership.",
+			"Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. " +
+			"Do not manage the \"All users\" group of a [converted organization](../guides/rbac.md#organization-access-mode) with this resource.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The user group ID; the same value as `group_id`.",
+				MarkdownDescription: "The user group ID; the same value as `user_group_id`.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"group_id": schema.StringAttribute{
+			"user_group_id": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The ID of the user group whose members this resource manages. Changing it forces a new resource.",
+				MarkdownDescription: "The ID of the user group whose members this resource manages (`ug_...`). Changing it forces a new resource.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -110,7 +113,7 @@ func (r *UserGroupMembersResource) Create(ctx context.Context, req resource.Crea
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	plan.ID = plan.GroupID
+	plan.ID = plan.UserGroupID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -121,7 +124,7 @@ func (r *UserGroupMembersResource) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 
-	groupID := state.GroupID.ValueString()
+	groupID := state.UserGroupID.ValueString()
 	group, err := getUserGroup(ctx, r.client, groupID)
 	if err != nil {
 		if isUserGroupNotFound(err) {
@@ -155,7 +158,7 @@ func (r *UserGroupMembersResource) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 	state.Members = set
-	state.ID = state.GroupID
+	state.ID = state.UserGroupID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -173,7 +176,7 @@ func (r *UserGroupMembersResource) Update(ctx context.Context, req resource.Upda
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	plan.ID = plan.GroupID
+	plan.ID = plan.UserGroupID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -184,7 +187,7 @@ func (r *UserGroupMembersResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
-	groupID := state.GroupID.ValueString()
+	groupID := state.UserGroupID.ValueString()
 	if err := removeAllUserGroupMembers(ctx, r.client, groupID); err != nil {
 		if isUserGroupNotFound(err) {
 			return
@@ -222,9 +225,9 @@ func (r *UserGroupMembersResource) ImportState(ctx context.Context, req resource
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &UserGroupMembersResourceModel{
-		ID:      types.StringValue(group.ID),
-		GroupID: types.StringValue(group.ID),
-		Members: set,
+		ID:          types.StringValue(group.ID),
+		UserGroupID: types.StringValue(group.ID),
+		Members:     set,
 	})...)
 }
 
@@ -233,7 +236,7 @@ func (r *UserGroupMembersResource) ImportState(ctx context.Context, req resource
 // add and remove deltas against current membership. Both member routes are
 // idempotent, so re-applying after a partial failure converges.
 func (r *UserGroupMembersResource) applyMembers(ctx context.Context, plan *UserGroupMembersResourceModel, diags *diag.Diagnostics) {
-	groupID := plan.GroupID.ValueString()
+	groupID := plan.UserGroupID.ValueString()
 
 	group, err := getUserGroup(ctx, r.client, groupID)
 	if err != nil {

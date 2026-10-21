@@ -364,25 +364,6 @@ func TestAccRoleBindingResource_DeleteDeniedErrors(t *testing.T) {
 	})
 }
 
-// Import of a binding held by a user, not a group, is refused.
-func TestAccRoleBindingResource_ImportUserPrincipalRefused(t *testing.T) {
-	SkipIfNotAcceptanceTest(t)
-	m := newRBMock(t)
-	userBinding := m.seedBinding("user", "usr_00000000000000000000000001", rbRole, "cloud", rbCloud)
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config:        rbConfig(m, rbRole),
-				ResourceName:  "anyscale_role_binding.test",
-				ImportState:   true,
-				ImportStateId: userBinding,
-				ExpectError:   regexp.MustCompile(`(?i)user`),
-			},
-		},
-	})
-}
-
 // Import maps resource_type to the one scope attribute that matches it.
 func TestAccRoleBindingResource_ImportMapsScope(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)

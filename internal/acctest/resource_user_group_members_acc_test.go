@@ -107,7 +107,7 @@ resource "anyscale_user_group" "test" {
 }
 
 resource "anyscale_user_group_members" "test" {
-  group_id = anyscale_user_group.test.id
+  user_group_id = anyscale_user_group.test.id
   members  = [%s]
 }
 `, name, strings.Join(quoted, ", "))
