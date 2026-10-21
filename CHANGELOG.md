@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-10-21
+
+### Breaking Changes
+
+- resource/anyscale_user_group_members: (Alpha) Rename `group_id` to `user_group_id` in your configuration, matching `anyscale_role_binding`; existing state upgrades automatically, so no re-import is needed.
+
+### Added
+
+- resource/anyscale_role_binding: (Alpha) Add `user_id` to grant a role directly to a user or service account; set exactly one of `user_group_id` or `user_id`, and importing a binding held by a user now works.
+- resource/anyscale_role_binding: (Alpha) Import an existing binding without looking up its ID, using `<scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>`, for example `project/prj_.../user_group/ug_.../rol_...`; importing by `rb_...` ID still works.
+
+### Changed
+
+- resource/anyscale_container_image_registry: Changing `image_uri` now registers a new build on the same cluster environment in place (`id` and `name` are kept, `revision` increments, earlier revisions are not archived) instead of replacing the resource. Previously the replace failed with 409 "This name is already taken" when `name` was set, and created a new auto-named environment when it was omitted.
+- resource/anyscale_cloud_access: In an organization converted to role bindings, apply now fails with an error instead of exiting successfully without granting anything; destroy warns that legacy grants were left in place and removes the resource from state, and access there is managed with `anyscale_role_binding`.
+- provider: Read requests (GET) to the Anyscale API now retry up to 3 attempts on timeouts, connection errors, and HTTP 429/502/503/504, with backoff. Write requests are not retried.
+
+### Fixed
+
+- provider: Paging through API results now stops with an error naming the repeated paging token, instead of looping forever when the API returns a pagination cursor it already returned.
+- resource/anyscale_role_binding: (Alpha) Creating or deleting a binding in an organization that has not converted to role bindings now reports that, instead of "Role Binding Already Exists" on create; archived roles and changes that would leave the organization without an owner are also reported specifically.
+- resource/anyscale_organization_user_role: In an organization converted to role bindings, apply errors now say so and point to `anyscale_role_binding`; destroy warns that legacy grants were left in place and removes the resource from state.
+- resource/anyscale_cloud: In an organization converted to role bindings, setting `auto_add_user` now reports that the organization uses role bindings instead of a raw API error.
+- resource/anyscale_cloud_access: Reading or planning now fails with an error naming the repeated paging token, instead of hanging, when the API returns the same pagination cursor twice while listing a cloud's members.
+- data-source/anyscale_compute_config: A search now fails with an error naming the repeated paging token, instead of hanging, when the API returns the same pagination cursor twice.
+
+### Security
+
+- provider: Build with Go 1.26.10, picking up fixes for published vulnerabilities in the Go standard library, including net/http and crypto/x509.
+
 ## [0.30.0] - 2026-10-02
 
 ### New Resources
@@ -1170,7 +1200,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.0
 [0.30.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.30.0
 [0.29.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.29.0
 [0.28.3]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.28.3
