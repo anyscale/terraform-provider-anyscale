@@ -15,7 +15,7 @@ The Container Image surface of the provider spans
 what you need to use them correctly: choosing build vs. register for how you obtain an image, reading
 the `name_version`, `digest`, `id`, and `build_id` identifiers each exposes (and what `build_status`
 means), and the lifecycle behavior that doesn't match a typical Terraform resource — in-place updates
-vs. full replacement, a default Ray version when none is set, and a `destroy` that archives rather than
+vs. full replacement, what happens when no Ray version is set, and a `destroy` that archives rather than
 removes.
 
 For both resources wired into a complete configuration, see the [Kitchen Sink
@@ -170,14 +170,15 @@ Both resources import by cluster environment ID. `anyscale_container_image_build
 ## If you don't set `ray_version`
 
 `anyscale_container_image_registry`'s `ray_version` is Optional and Computed. If you don't set it, no
-Ray version is sent and none is recorded on the build, so it reads back as null. Setting or changing it
+Ray version is sent and none is recorded on the build, so it reads back as null. Anyscale treats the
+version as unknown, so features that depend on it, such as Ray resource isolation and service
+validation, are off. Set it to the image's Ray version. Setting or changing it
 registers a new build revision in place. Removing it from your configuration keeps the value already in
 state and registers nothing.
 
 Images created without `ray_version` by earlier provider versions hold `2.44.0`, the default those
 versions sent. It stays in state until another change registers a new build; that build sends no Ray
-version, and the plan shows `ray_version` as known after apply. If your workload needs a specific Ray
-version, set `ray_version` explicitly.
+version, and the plan shows `ray_version` as known after apply.
 
 ## Deleting a container image archives it — and defaults can't be archived
 
