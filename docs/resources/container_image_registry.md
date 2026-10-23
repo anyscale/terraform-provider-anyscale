@@ -31,6 +31,9 @@ resource "anyscale_container_image_registry" "private_ecr" {
   name                  = "internal-training-image"
   image_uri             = "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest"
   registry_login_secret = "ecr-pull-secret"
+
+  # Set to the Ray version the image contains.
+  ray_version = "2.9.0"
 }
 
 # Outputs
@@ -55,7 +58,7 @@ output "registry_image_digest" {
 ### Optional
 
 - `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated and recorded here after create/import - the generated value is not derivable from config (it embeds a timestamp), so it lives only in state.
-- `ray_version` (String) The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; an unsupported value fails with a server error. If omitted, no Ray version is recorded on the build. Changing it registers a new build in place, incrementing `revision`; removing it from configuration keeps the current value.
+- `ray_version` (String) The Ray version the image contains (e.g. `2.9.0`); it must be one Anyscale supports, or the API returns an error. Anyscale uses it for cluster configuration, such as Ray resource isolation, and for service validation. If omitted, the build records no Ray version, which Anyscale treats as unknown, so those features are off. Changing it registers a new build in place, incrementing `revision`; removing it keeps the current value until another change registers a build, which then sends none.
 - `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it registers a new build in place, incrementing `revision`; removing it registers a new build without registry credentials. Not recovered by `terraform import`.
 
 ### Read-Only

@@ -116,7 +116,7 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		"ray_version": schema.StringAttribute{
 			Optional:            true,
 			Computed:            true,
-			MarkdownDescription: "The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; an unsupported value fails with a server error. If omitted, no Ray version is recorded on the build. Changing it registers a new build in place, incrementing `revision`; removing it from configuration keeps the current value.",
+			MarkdownDescription: "The Ray version the image contains (e.g. `2.9.0`); it must be one Anyscale supports, or the API returns an error. Anyscale uses it for cluster configuration, such as Ray resource isolation, and for service validation. If omitted, the build records no Ray version, which Anyscale treats as unknown, so those features are off. Changing it registers a new build in place, incrementing `revision`; removing it keeps the current value until another change registers a build, which then sends none.",
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
 			},

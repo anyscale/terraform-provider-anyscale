@@ -13,6 +13,9 @@ resource "anyscale_container_image_registry" "private_ecr" {
   name                  = "internal-training-image"
   image_uri             = "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest"
   registry_login_secret = "ecr-pull-secret"
+
+  # Set to the Ray version the image contains.
+  ray_version = "2.9.0"
 }
 
 # Outputs
