@@ -482,3 +482,49 @@ func TestAccContainerImageRegistryResource_ImportAfterInPlaceUpdate_MockServer(t
 		},
 	})
 }
+
+// registry_login_secret from another resource's computed output is unknown at plan time.
+// Like an unknown image_uri, that counts as a build.
+func TestAccContainerImageRegistryResource_UnknownSecretPlansBuild_MockServer(t *testing.T) {
+	SkipIfNotAcceptanceTest(t)
+	const templateID, name = "apptemp_unknown_secret_mock", "tfacc-unknown-secret-mock"
+	m, server := newInplaceRegistryMock(t, templateID, name)
+	cfg := func(secret string) string {
+		return testAccProviderBlock(server.URL) + fmt.Sprintf(`
+resource "terraform_data" "secret" {
+  input = %q
+}
+
+resource "anyscale_container_image_registry" "test" {
+  name                  = %q
+  image_uri             = "docker.io/example/image:v1"
+  registry_login_secret = terraform_data.secret.output
+}
+`, secret, name)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg("secret-1"),
+			},
+			{
+				Config: cfg("secret-2"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(inplaceRegistryAddr, plancheck.ResourceActionUpdate),
+						plancheck.ExpectUnknownValue(inplaceRegistryAddr, tfjsonpath.New("registry_login_secret")),
+						plancheck.ExpectUnknownValue(inplaceRegistryAddr, tfjsonpath.New("revision")),
+						plancheck.ExpectUnknownValue(inplaceRegistryAddr, tfjsonpath.New("ray_version")),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(inplaceRegistryAddr, "revision", "2"),
+					m.expectRegistrations(1, 1, map[string]any{"registry_login_secret": "secret-2", "ray_version": nil}),
+				),
+			},
+		},
+	})
+}
