@@ -1,0 +1,3 @@
+```release-note:changed
+RBAC resource, data source, and guide wording tightened; no behavior change.
+```
