@@ -2,7 +2,7 @@
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
 subcategory: "Concepts & Reference"
 description: |-
-  How access control is split across anyscale_organization_user and anyscale_organization_user_role - the vocabulary differences between scopes, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
+  How access control is split across anyscale_organization_user and anyscale_organization_user_role - which resource manages what, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
 ---
 
 # RBAC: Roles Across Organizations, Clouds, and Projects
@@ -10,8 +10,7 @@ description: |-
 Anyscale access control spans three scopes - organization, cloud, and project - and this provider
 manages them through more than one resource because the backend itself treats them as genuinely
 different concepts, not just different levels of the same one. This guide is the one place that
-explains the whole picture: which resource manages what, and why the same word means different things
-depending on which resource you're reading.
+explains the whole picture: which resource manages what, and what "authoritative" means for each.
 
 Read this before writing configuration that spans more than one scope.
 
@@ -373,44 +372,6 @@ Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 | "Cannot Revoke the Provider's Own Role Binding" | Revoke it in the console or with a different identity, or run `terraform state rm`. |
 | Binding disappears from state | It was revoked outside Terraform, or its group was deleted; the next plan recreates it. |
 | "Role Binding Not Readable" | The cloud or project was deleted outside Terraform, or access to it was lost. State is kept; run `terraform state rm` for the binding if the scope is gone. |
-
-## The vocabulary problem
-
-The organization, cloud, and project scopes don't just use different words for access levels - they
-reuse the **same** words to mean **different** things. Four instances of this, and only the first is
-explained anywhere else in this provider's documentation today:
-
-1. **`collaborator` means three different things.** It's the non-owner organization role. It's also
-   one of six possible cloud `base_role` values, a distinct concept from the organization one. And
-   the Anyscale console itself uses "Cloud collaborator" as the display name for the unrelated
-   legacy `write` permission level. Seeing "collaborator" tells you nothing about which of the three
-   you're looking at without checking which resource's schema you're reading.
-2. **Project `write` and cloud `writer` are not the same role**, despite being near-homographs. This
-   is easy to typo in exactly one direction: the backend's own internal name for the cloud role is
-   `writer`, but a project's valid value is the string `write` - sending `writer` to a project 422s.
-3. **Project `readonly` and cloud `cloud_read_only` are not the same kind of thing**, not just
-   different spellings of the same idea. Project `readonly` is a whole permission tier - one of
-   three, on equal footing with `owner` and `write`. Cloud `cloud_read_only` is a **deny role**: a
-   restriction layered on top of a separate `base_role`, never a tier by itself. A user with
-   `base_role = "owner"` and `deny_roles = ["cloud_read_only"]` is not "read-only" the way a project
-   collaborator with `permission_level = "readonly"` is - the cloud user still holds the underlying
-   `owner` role, just with reads enforced on top of it.
-4. **Organization `deny_roles` and cloud `deny_roles` are the same mechanism, and share the name
-   deliberately.** Both are a restriction layered on top of a separate base role, never a tier by
-   themselves - an organization member with `base_role = "collaborator"` and
-   `deny_roles = ["image_reader_no_base_images"]` still holds the underlying `collaborator` role, just
-   with container-image capability subtracted from it, the same shape as the cloud example above.
-   Where the two genuinely differ is blast radius, not mechanism: an organization deny role overrides
-   even an organization owner's implicit permissions, while a cloud deny role explicitly does **not**
-   restrict organization or project owners. Same name, same restriction-on-a-base-role mechanism,
-   different reach - check which scope you're granting at before assuming an owner is unaffected.
-
-None of these are hypothetical. The first real hand-written configuration for the nested cloud/project
-shape in this guide got two of them wrong on the first attempt - `permission_level = "read"` (not a
-valid value; the project enum is `owner`, `write`, `readonly`) and a singular `deny_role` where the
-schema expects the plural `deny_roles`, a list. If you remember one thing from this section, make it
-this: **never assume a role, permission level, or deny role name from one scope is valid, or means
-the same thing, on another.** Check the specific resource's schema every time.
 
 ## Authority: what "Terraform manages here" actually means
 
