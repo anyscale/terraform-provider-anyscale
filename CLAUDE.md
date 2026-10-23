@@ -142,6 +142,19 @@ cd examples/aws-vm-basic/ && terraform plan && terraform apply   # no init neede
 - **`docs/` is output, not source.** Doc edits belong in the schema's `MarkdownDescription`, in
   `templates/index.md.tmpl` (landing page), or in `templates/guides/*.md` — then `make docs`. Editing
   `docs/` directly gets overwritten on the next regeneration.
+- **Registry example width: keep lines to 72 columns or fewer.** Files under `examples/resources`,
+  `examples/data-sources`, `examples/provider` and `examples/ephemeral-resources` render in a
+  fixed-width Registry code box. It clips at about column 77 with no visible scroll cue, so readers
+  miss the rest of the line.
+  - Wrap comments.
+  - Move a trailing `# ...` comment onto its own line above the code.
+  - Break long expressions: parenthesize the value, put a `for` expression on several lines, put one
+    object attribute per line.
+  - Keep `output`/`variable` descriptions short.
+  - Allowed exceptions: `import` commands, URLs and ARNs, and long literal values that cannot be
+    split.
+  - Not enforced by tooling. Check before committing:
+    `find examples/{resources,data-sources,provider,ephemeral-resources} -type f | xargs awk 'length > 72 { print FILENAME ":" FNR ": " length }'`
 
 ### Authentication
 
