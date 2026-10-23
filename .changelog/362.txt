@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: Role bindings and user groups are now Beta; breaking schema changes get a deprecation first. No change to what any resource configures.
-```

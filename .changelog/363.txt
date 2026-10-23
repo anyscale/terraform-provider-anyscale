@@ -1,9 +1,0 @@
-```
-release-note:changed
-resource/anyscale_container_image_registry: Changing `ray_version` or `registry_login_secret` now registers a new build in place instead of replacing the image, which failed with a 409 for named images. The first `registry_login_secret` set after import also registers a build.
-```
-
-```
-release-note:fixed
-resource/anyscale_container_image_registry: An omitted `ray_version` is no longer sent as `2.44.0`; the build records no Ray version. Images that hold the old `2.44.0` keep it until another change registers a build, and that plan shows `ray_version` as known after apply. Because Anyscale treats an omitted Ray version as unknown, Ray-version-dependent features such as resource isolation are off; set `ray_version` to the image's Ray version.
-```

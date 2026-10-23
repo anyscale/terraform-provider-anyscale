@@ -1,4 +1,0 @@
-```
-release-note:changed
-provider: Service credentials ephemeral resource example comments rewrapped to 72 columns.
-```

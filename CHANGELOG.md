@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-10-23
+
+### Changed
+
+- provider: Role bindings and user groups are now Beta; breaking schema changes get a deprecation first. No change to what any resource configures.
+- resource/anyscale_container_image_registry: Changing `ray_version` or `registry_login_secret` now registers a new build in place instead of replacing the image, which failed with a 409 for named images. The first `registry_login_secret` set after import also registers a build.
+- provider: On an Azure control plane, Anyscale RBAC resources, the `anyscale_role`, `anyscale_user_group` and `anyscale_user_groups` data sources, and `anyscale_cloud.auto_add_user` now fail at plan with "RBAC Is Managed in Azure", because Azure access is managed in the Azure portal. Destroy, and plans with no changes, still work.
+- provider: Service credentials ephemeral resource example comments rewrapped to 72 columns.
+
+### Deprecated
+
+- resource/anyscale_cloud_access: Deprecated for organizations converted to role bindings; use `anyscale_role_binding` there. Unconverted organizations keep using it.
+- resource/anyscale_organization_user_role: Deprecated for organizations converted to role bindings; use `anyscale_role_binding` there. Unconverted organizations keep using it.
+- resource/anyscale_cloud: `auto_add_user` is deprecated; in an organization converted to role bindings, bind a role to the All users group on the cloud with `anyscale_role_binding`.
+- provider: Legacy access attributes on data sources are deprecated, because a converted organization reports them only as a snapshot from before conversion: `auto_add_user` on `anyscale_cloud` and `anyscale_clouds`, `collaborators` on `anyscale_project`, `permission_level`, `base_role` and `additional_roles` on `anyscale_organization_user` and `anyscale_organization_users`, and `organization_permission_level` on `anyscale_user`. Referencing one warns at plan.
+
+### Fixed
+
+- resource/anyscale_container_image_registry: An omitted `ray_version` is no longer sent as `2.44.0`; the build records no Ray version. Images that hold the old `2.44.0` keep it until another change registers a build, and that plan shows `ray_version` as known after apply. Because Anyscale treats an omitted Ray version as unknown, Ray-version-dependent features such as resource isolation are off; set `ray_version` to the image's Ray version.
+
 ## [0.31.2] - 2026-10-23
 
 ### Changed
@@ -1214,7 +1234,8 @@ This version used Terraform Plugin SDK v2 and required `jsonencode()` for comple
 
 ---
 
-[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.31.2...HEAD
+[Unreleased]: https://github.com/anyscale/terraform-provider-anyscale/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.32.0
 [0.31.2]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.2
 [0.31.1]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.1
 [0.31.0]: https://github.com/anyscale/terraform-provider-anyscale/releases/tag/v0.31.0
