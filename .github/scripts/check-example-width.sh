@@ -12,6 +12,9 @@
 #   - an attribute assignment whose value is one string literal, which cannot
 #     be split without changing the value.
 #
+# Widths are awk length(), which counts bytes under some awk/locale pairs, so
+# keep examples ASCII (a multibyte character such as an em dash over-counts).
+#
 # Usage: check-example-width.sh [limit]   (default: EXAMPLE_WIDTH or 72)
 set -euo pipefail
 
