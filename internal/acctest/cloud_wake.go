@@ -24,11 +24,12 @@ import (
 // Waking is a harness concern: retrying a 599 inside the provider is unsafe
 // until each path's write-before-raise ordering is verified.
 //
-// An awake verdict goes stale. The cloud hibernates once it has been idle
-// past the backend threshold, measured from its last completed wake, so it can
-// fall asleep minutes after the gate saw it awake (the nightly runs of
-// 2026-10-15 and 2026-10-22 failed this way, 8-10 minutes after a passing
-// probe). A cached awake result is therefore reused only for wakeRecheckAfter.
+// An awake verdict goes stale. The cloud hibernates once it has had no clusters
+// or builds for longer than the backend threshold, measured from its last
+// completed wake, so it can fall asleep minutes after the gate saw it awake
+// (the nightly runs of 2026-10-15 and 2026-10-22 failed this way, 8-10 minutes
+// after a passing probe). A cached awake result is therefore reused only for
+// wakeRecheckAfter.
 // That shrinks the window without closing it - the API also caches the cloud's
 // state for a few minutes - so scheduled-acctest.yml re-runs tests that failed
 // only on hibernation once.
@@ -219,8 +220,8 @@ func cloudLabelFor(name string) string {
 }
 
 // probeCloudWithComputeConfigCreate creates a throwaway compute config, which
-// reaches the admin zone with wake enabled, and archives it on success. It
-// changes nothing on the cloud itself.
+// reaches the admin zone with wake enabled, and archives it on success. On a
+// hibernated cloud the probe itself starts the wake.
 func probeCloudWithComputeConfigCreate(ctx context.Context, t *testing.T, cloudID string) (int, string, error) {
 	client, err := GetTestClient()
 	if err != nil {

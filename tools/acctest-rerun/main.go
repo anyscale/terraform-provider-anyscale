@@ -2,9 +2,10 @@
 // .github/workflows/scheduled-acctest.yml (see
 // .github/scripts/acctest-with-hibernation-rerun.sh).
 //
-// The static test cloud hibernates after a week idle, and can do so between
-// the wake gate's probe and a test's first create (internal/acctest/cloud_wake.go).
-// Such a test fails with HTTP 599 "hibernated due to inactivity". This tool
+// The static test cloud hibernates after sitting idle past a backend
+// threshold, and can do so between the wake gate's probe and a test's
+// first create (internal/acctest/cloud_wake.go). Such a test fails with
+// HTTP 599 "hibernated due to inactivity". This tool
 // decides, from a `go test -json` stream, whether a failed run failed only
 // that way, so the workflow can re-run exactly those tests once.
 //

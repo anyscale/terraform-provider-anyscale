@@ -2,10 +2,12 @@
 # Run one acceptance-test suite for scheduled-acctest.yml, re-running once
 # the tests that failed only because the test cloud was hibernated.
 #
-# The static test cloud hibernates after a week idle and can do so mid-run,
-# after the wake gate saw it awake (internal/acctest/cloud_wake.go). A test
-# whose first create lands then fails with HTTP 599 "hibernated due to
-# inactivity", and that 599 itself starts the wake. So:
+# The static test cloud hibernates once it has had no clusters or builds for
+# longer than a backend threshold (7 days in prod), counted from its last
+# completed wake, so it can hibernate mid-run, after the wake gate saw it
+# awake (internal/acctest/cloud_wake.go). A test whose first create lands
+# then fails with HTTP 599 "hibernated due to inactivity", and that 599
+# itself starts the wake. So:
 #
 #   1. Run the suite with `go test -json`. The JSON goes to <log>.jsonl; the
 #      human-readable log is rendered from it to stdout and <log>.
