@@ -1,3 +1,4 @@
+# Deprecated: see the RBAC guide, "Legacy RBAC deprecation".
 # anyscale_cloud_access is AUTHORITATIVE over this cloud's entire member
 # list. Anyone with access to the cloud who is not declared in `member`
 # below is REVOKED, including on the very first apply -- including

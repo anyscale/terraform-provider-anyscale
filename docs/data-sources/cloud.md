@@ -70,7 +70,7 @@ output "cloud_external_id" {
 ### Read-Only
 
 - `aggregated_logs_enabled` (Boolean) Whether aggregated log ingestion is enabled for this cloud. Uniform `<noun>_enabled` naming with its sibling `lineage_tracking_enabled` - a previous provider version called this `enable_log_ingestion` on this data source and the `anyscale_cloud` resource, then briefly `is_aggregated_logs_enabled` (matching the backend's own field name and the plural `anyscale_clouds` data source at the time) before settling here. See CHANGELOG.md and the guide's [Naming differences between resources and data sources](../guides/cloud-resources.md#naming-differences-between-resources-and-data-sources) section for the migration note.
-- `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
+- `auto_add_user` (Boolean, Deprecated) See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation). Whether users are automatically added to this cloud.
 - `availability_zones` (List of String) The availability zones considered for this cloud.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
 - `cloud_resource_id` (String) The unique cloud resource ID assigned by Anyscale for this cloud's default resource. This is what you pass to the Anyscale operator during installation for a K8S cloud. Null for a genuinely empty cloud (no resources attached yet).

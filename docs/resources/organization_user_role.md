@@ -3,7 +3,8 @@
 page_title: "anyscale_organization_user_role Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  Manages one organization member's organization-scope role. Legacy organizations only: a converted organization ../guides/rbac.md#organization-access-mode refuses these writes.
+  ~> Deprecated for organizations converted to role bindings; use anyscale_role_binding there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
+  Manages one organization member's organization-scope role. A converted organization ../guides/rbac.md#organization-access-mode refuses these writes.
   This resource manages the role of a user who is already a member of the organization; it does not add or remove members. Membership is managed by anyscale_organization_user.
   Destroying this resource does not revert base_role
   Destroy leaves the member at whatever base_role they currently have, and emits a warning naming them and that role. It does not demote them, because an organization member always has some base role - there is no "no role" state to return them to - and demoting an organization owner removes their implicit permissions across every cloud in the organization. If deny_roles was declared, destroy does clear it to empty, since an empty deny set is a real, reachable state this resource took authority over.
@@ -14,7 +15,9 @@ description: |-
 
 # anyscale_organization_user_role (Resource)
 
-Manages one organization member's organization-scope role. Legacy organizations only: a [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.
+~> **Deprecated** for organizations converted to role bindings; use anyscale_role_binding there. Unconverted organizations keep using this resource. Not available on Azure, where access is managed in the Azure portal. See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation).
+
+Manages one organization member's organization-scope role. A [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.
 
 This resource manages the role of a user who is **already** a member of the organization; it does not add or remove members. Membership is managed by `anyscale_organization_user`.
 
@@ -31,6 +34,7 @@ A consequence worth stating plainly: because `email` forces replacement, **corre
 ## Example Usage
 
 ```terraform
+# Deprecated: see the RBAC guide, "Legacy RBAC deprecation".
 # Manage an existing organization member's role. This resource does not
 # add or remove members -- the person must already be in the
 # organization (see anyscale_organization_user for membership) -- it

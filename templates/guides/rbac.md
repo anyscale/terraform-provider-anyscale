@@ -264,6 +264,26 @@ The binding ID (`rb_...`) also works as the import ID.
 Which bindings conversion creates depends on the option chosen in the migration wizard, so expect to
 find some grants missing and create those normally.
 
+## Legacy RBAC deprecation
+
+The resources and attributes that manage or report access through collaborator and policy records
+are deprecated. They keep working in an unconverted organization, a converted organization refuses
+or ignores them, and they will be removed in a future release once every organization can convert.
+None is available on an Azure control plane (see [Organization access mode](#organization-access-mode)).
+
+| Deprecated | In a converted organization | Use instead |
+|---|---|---|
+| `anyscale_cloud_access`, `anyscale_organization_user_role` | Writes fail with "Organization Uses Role Bindings" | `anyscale_role_binding` |
+| `anyscale_cloud.auto_add_user` | Setting it fails | An `anyscale_role_binding` on the cloud for the All users group |
+| `auto_add_user` on the `anyscale_cloud` and `anyscale_clouds` data sources | No longer applies | Same |
+| `collaborators` on the `anyscale_project` data source; `permission_level`, `base_role` and `additional_roles` on the `anyscale_organization_user(s)` data sources; `organization_permission_level` on the `anyscale_user` data source | A snapshot from before conversion | No replacement yet |
+
+Terraform warns when a configuration uses one: setting a deprecated resource or attribute, or
+referencing a deprecated read-only attribute, for example in an output. For a referenced read-only
+attribute, Terraform 1.15 prints the provider's message and Terraform 1.10 a generic "The attribute
+... is deprecated". To move a converted organization off them, follow the steps in
+[Organization access mode](#organization-access-mode).
+
 ## Role bindings (Beta)
 
 ~> **Beta, behind a feature flag.** Role bindings are a Beta feature, under the same terms as

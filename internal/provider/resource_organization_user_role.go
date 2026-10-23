@@ -228,7 +228,9 @@ func (r *OrganizationUserRoleResource) Metadata(ctx context.Context, req resourc
 
 func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages one organization member's organization-scope role. Legacy organizations only: a [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.\n\n" +
+		DeprecationMessage: legacyRBACResourceDeprecation,
+		MarkdownDescription: legacyRBACResourceCallout() + "\n\n" +
+			"Manages one organization member's organization-scope role. A [converted organization](../guides/rbac.md#organization-access-mode) refuses these writes.\n\n" +
 			"This resource manages the role of a user who is **already** a member of the organization; it does " +
 			"not add or remove members. Membership is managed by `anyscale_organization_user`.\n\n" +
 			"### Destroying this resource does not revert `base_role`\n\n" +

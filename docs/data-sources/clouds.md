@@ -90,7 +90,7 @@ output "cloud_versions_and_external_ids" {
 Read-Only:
 
 - `aggregated_logs_enabled` (Boolean) Whether aggregated log ingestion is enabled for this cloud. Renamed from is_aggregated_logs_enabled in this release for uniform <noun>_enabled naming with lineage_tracking_enabled - see CHANGELOG.md for the migration note.
-- `auto_add_user` (Boolean) Whether users are automatically added to this cloud.
+- `auto_add_user` (Boolean, Deprecated) See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation). Whether users are automatically added to this cloud.
 - `availability_zones` (List of String) The availability zones considered for this cloud.
 - `cloud_provider` (String) The cloud provider (AWS, GCP, AZURE, or GENERIC).
 - `compute_stack` (String) The compute stack (VM or K8S).

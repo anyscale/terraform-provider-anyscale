@@ -29,6 +29,8 @@ output "project_directory_name" {
   description = "The storage directory name used by this project"
 }
 
+# collaborators is deprecated: see the RBAC guide,
+# "Legacy RBAC deprecation".
 output "project_collaborators" {
   value       = data.anyscale_project.by_name.collaborators
   description = "Current collaborators on the project"
@@ -52,7 +54,7 @@ output "project_description_by_id" {
 
 ### Read-Only
 
-- `collaborators` (Attributes List) List of collaborators with access to this project. (see [below for nested schema](#nestedatt--collaborators))
+- `collaborators` (Attributes List, Deprecated) See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation). List of collaborators with access to this project. (see [below for nested schema](#nestedatt--collaborators))
 - `created_at` (String) Timestamp when the project was created.
 - `creator_id` (String) The ID of the user who created the project.
 - `description` (String) Description of the project.

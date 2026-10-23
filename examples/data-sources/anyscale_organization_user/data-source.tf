@@ -19,9 +19,11 @@ output "user_email_by_user_id" {
   description = "The user's email when looking up by user_id"
 }
 
+# base_role and additional_roles are deprecated: see the RBAC guide,
+# "Legacy RBAC deprecation".
 output "user_base_role" {
   value       = data.anyscale_organization_user.by_email.base_role
-  description = "Base role; prefer over permission_level"
+  description = "Base role"
 }
 
 output "user_additional_roles" {

@@ -35,6 +35,8 @@ output "service_account_emails" {
   description = "Emails of every service account in the organization"
 }
 
+# base_role and additional_roles are deprecated: see the RBAC guide,
+# "Legacy RBAC deprecation".
 output "users_by_base_role" {
   value = {
     for u in data.anyscale_organization_users.humans.users :
