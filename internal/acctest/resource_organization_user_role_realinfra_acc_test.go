@@ -437,6 +437,7 @@ func restoreCollaboratorIfOwner(t *testing.T, email, identityID string) {
 func TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	email := requireRealInfraTestUser(t)
+	skipUnlessTestOrgMode(t, testOrgModeLegacy, "anyscale_organization_user_role writes answer 409 in a converted organization")
 
 	const addr = "anyscale_organization_user_role.realinfra"
 	const denyRole = "image_reader"
@@ -496,6 +497,7 @@ resource "anyscale_organization_user_role" "realinfra" {
 	}
 
 	resource.Test(t, resource.TestCase{
+		ErrorCheck:               orgModeErrorCheck(t),
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -532,6 +534,7 @@ resource "anyscale_organization_user_role" "realinfra" {
 func TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	email := requireRealInfraTestUser(t)
+	skipUnlessTestOrgMode(t, testOrgModeLegacy, "anyscale_organization_user_role writes answer 409 in a converted organization")
 
 	const addr = "anyscale_organization_user_role.realinfra"
 	const firstDeny = "image_reader"
@@ -556,6 +559,7 @@ resource "anyscale_organization_user_role" "realinfra" {
 	}
 
 	resource.Test(t, resource.TestCase{
+		ErrorCheck:               orgModeErrorCheck(t),
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		// Destroy writes the role back rather than removing the member. Assert
 		// the member is STILL THERE afterwards - this resource must never evict.

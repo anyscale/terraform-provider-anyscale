@@ -111,6 +111,7 @@ resource "anyscale_role_binding" "test" {
 // observed through the provider's own Delete rather than a group cascade.
 func TestAccRoleBindingResource_RealAPI(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
+	skipUnlessTestOrgMode(t, testOrgModeConverted, "role binding writes answer 409 until the organization converts")
 	PreCheck(t)
 	skipIfRoleBindingsDisabled(t)
 
@@ -150,6 +151,7 @@ func TestAccRoleBindingResource_RealAPI(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { PreCheck(t) },
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
+		ErrorCheck:               orgModeErrorCheck(t),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRoleBindingConfig(groupName, roleName, cloudID, true),

@@ -49,6 +49,13 @@ concurrency:
   # behind the running one instead of killing it.
   cancel-in-progress: false
 
+# Declared access mode of the shared test organization: legacy or converted
+# (see internal/acctest/org_mode_test.go). When the organization converts to
+# role bindings, set the ANYSCALE_TEST_ORG_MODE repository variable to
+# "converted"; tests that need the other mode then skip with a reason.
+env:
+  ANYSCALE_TEST_ORG_MODE: ${{ vars.ANYSCALE_TEST_ORG_MODE || 'legacy' }}
+
 jobs:
   scheduled-acctest:
     runs-on: ubuntu-latest

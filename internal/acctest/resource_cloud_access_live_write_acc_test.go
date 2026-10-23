@@ -51,6 +51,7 @@ func cloudAccessLiveOOBMember(t *testing.T, client *provider.Client, cloudID, em
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent {
 		raw, _ := io.ReadAll(resp.Body)
+		failOnOrgModeMismatch(t, string(raw))
 		t.Fatalf("out-of-band add of %s to cloud %s: status %d: %s", email, cloudID, resp.StatusCode, raw)
 	}
 
@@ -141,6 +142,7 @@ func cloudAccessLiveSetRole(t *testing.T, client *provider.Client, cloudID, user
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent {
 		raw, _ := io.ReadAll(resp.Body)
+		failOnOrgModeMismatch(t, string(raw))
 		t.Fatalf("out-of-band roles PUT for user %s on cloud %s: status %d: %s", userID, cloudID, resp.StatusCode, raw)
 	}
 }
@@ -220,6 +222,7 @@ resource "anyscale_cloud_access" "live" {
 // Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccCloudAccessResource_LiveColdImportAndDelete$' -v -count=1
 func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 	email := requireRealInfraTestUser(t)
+	skipUnlessTestOrgMode(t, testOrgModeLegacy, "anyscale_cloud_access writes answer 409 in a converted organization")
 	PreCheck(t)
 
 	client, err := GetTestClient()
@@ -240,6 +243,7 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 	config := cloudAccessLiveConfig(cloudID, fmt.Sprintf(`    %[1]q = { base_role = "writer" }`, email), false)
 
 	resource.Test(t, resource.TestCase{
+		ErrorCheck:               orgModeErrorCheck(t),
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		// AC-17: the test's own automatic destroy at the end of this test IS
 		// the revoke under test. Assert against the real backend, not state.
@@ -326,6 +330,7 @@ func TestAccCloudAccessResource_LiveColdImportAndDelete(t *testing.T) {
 // Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers$' -v -count=1
 func TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers(t *testing.T) {
 	email := requireRealInfraTestUser(t)
+	skipUnlessTestOrgMode(t, testOrgModeLegacy, "anyscale_cloud_access writes answer 409 in a converted organization")
 	PreCheck(t)
 
 	client, err := GetTestClient()
@@ -353,6 +358,7 @@ func TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers(t *testing.T)
 	config := cloudAccessLiveConfig(cloudID, "", true)
 
 	resource.Test(t, resource.TestCase{
+		ErrorCheck:               orgModeErrorCheck(t),
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -434,6 +440,7 @@ func waitForProjectGrantable(t *testing.T, client *provider.Client, projectID st
 // real backend.
 func TestAccCloudAccessResource_LiveProjectRoleDropRevokes(t *testing.T) {
 	email := requireRealInfraTestUser(t)
+	skipUnlessTestOrgMode(t, testOrgModeLegacy, "anyscale_cloud_access writes answer 409 in a converted organization")
 	PreCheck(t)
 
 	client, err := GetTestClient()
@@ -460,6 +467,7 @@ func TestAccCloudAccessResource_LiveProjectRoleDropRevokes(t *testing.T) {
 	withoutProjectRole := cloudAccessLiveConfig(cloudID, fmt.Sprintf(`    %[1]q = { base_role = "writer" }`, email), false)
 
 	resource.Test(t, resource.TestCase{
+		ErrorCheck:               orgModeErrorCheck(t),
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -515,6 +523,7 @@ func TestAccCloudAccessResource_LiveProjectRoleDropRevokes(t *testing.T) {
 // Run: TF_ACC=1 ANYSCALE_TEST_USER_EMAIL=<disposable member> ANYSCALE_TEST_ORG_NAME=<org> go test ./internal/acctest -run '^TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected$' -v -count=1
 func TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected(t *testing.T) {
 	email := requireRealInfraTestUser(t)
+	skipUnlessTestOrgMode(t, testOrgModeLegacy, "anyscale_cloud_access writes answer 409 in a converted organization")
 	PreCheck(t)
 
 	client, err := GetTestClient()
@@ -531,6 +540,7 @@ func TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected(t *t
 	config := cloudAccessLiveConfig(cloudID, fmt.Sprintf(`    %[1]q = { base_role = "writer" }`, email), false)
 
 	resource.Test(t, resource.TestCase{
+		ErrorCheck:               orgModeErrorCheck(t),
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
