@@ -23,9 +23,10 @@ resource "anyscale_container_image_registry" "public" {
   ray_version = "2.9.0"
 }
 
-# Register a private image from Amazon ECR. The registry_login_secret must
-# reference credentials already configured for your cloud (e.g. via IAM
-# roles/instance profiles or a secret Anyscale can use to pull the image).
+# Register a private image from Amazon ECR. The registry_login_secret
+# must reference credentials already configured for your cloud (e.g. via
+# IAM roles/instance profiles or a secret Anyscale can use to pull the
+# image).
 resource "anyscale_container_image_registry" "private_ecr" {
   name                  = "internal-training-image"
   image_uri             = "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-repo:latest"
@@ -35,12 +36,12 @@ resource "anyscale_container_image_registry" "private_ecr" {
 # Outputs
 output "registry_id" {
   value       = anyscale_container_image_registry.public.id
-  description = "The durable ID of the cluster environment (app config) created to hold this image"
+  description = "Durable ID of the cluster environment for the image"
 }
 
 output "registry_image_digest" {
   value       = anyscale_container_image_registry.public.digest
-  description = "The content digest of this image's current latest successful build (e.g. sha256:...); like build_id, revision, and name_version, it can change on a later refresh if a new build supersedes this one"
+  description = "Digest of the latest build; can change on refresh"
 }
 ```
 
@@ -78,6 +79,7 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 # Import using the cluster environment ID
 terraform import anyscale_container_image_registry.example cenv_abc123
 
-# Import does not recover `registry_login_secret`. If your config sets it, the first plan after
-# import records it in state with a warning and does not replace the image.
+# Import does not recover `registry_login_secret`. If your config sets
+# it, the first plan after import records it in state with a warning and
+# does not replace the image.
 ```

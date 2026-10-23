@@ -1,9 +1,10 @@
-# The current authenticated user (based on the provider's token) - takes no arguments
+# The current authenticated user (based on the provider's token) - takes
+# no arguments
 data "anyscale_user" "current" {}
 
 output "current_user_email" {
   value       = data.anyscale_user.current.email
-  description = "Email of the user the provider is currently authenticated as"
+  description = "Email of the currently authenticated user"
 }
 
 output "current_user_cloud_ids" {

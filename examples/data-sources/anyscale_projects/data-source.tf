@@ -10,11 +10,15 @@ data "anyscale_projects" "research" {
 }
 
 output "project_ids" {
-  value       = [for p in data.anyscale_projects.cloud_projects.projects : p.id]
+  value = [
+    for p in data.anyscale_projects.cloud_projects.projects : p.id
+  ]
   description = "IDs of every non-default project in the cloud"
 }
 
 output "research_project_ids" {
-  value       = [for p in data.anyscale_projects.research.projects : p.id]
+  value = [
+    for p in data.anyscale_projects.research.projects : p.id
+  ]
   description = "IDs of projects whose name contains \"research\""
 }

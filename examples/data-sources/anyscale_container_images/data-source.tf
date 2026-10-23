@@ -16,33 +16,47 @@ data "anyscale_container_images" "pytorch_images" {
 }
 
 output "container_image_names" {
-  value       = [for img in data.anyscale_container_images.project_images.container_images : img.name]
+  value = [
+    for img in
+    data.anyscale_container_images.project_images.container_images :
+    img.name
+  ]
   description = "Names of every container image in the project"
 }
 
 output "training_image_ids" {
-  value       = [for img in data.anyscale_container_images.training.container_images : img.id]
-  description = "IDs of container images whose name contains \"training\""
+  value = [
+    for img in
+    data.anyscale_container_images.training.container_images :
+    img.id
+  ]
+  description = "IDs of images whose name contains \"training\""
 }
 
 output "pytorch_image_uris" {
   value = [
-    for img in data.anyscale_container_images.pytorch_images.container_images : img.image_uri
+    for img in
+    data.anyscale_container_images.pytorch_images.container_images :
+    img.image_uri
   ]
-  description = "Registry image URIs for pytorch-named images in the given cloud; null for images with no successful build"
+  description = "Image URIs for pytorch images; null if never built"
 }
 
 output "default_images" {
   value = [
-    for img in data.anyscale_container_images.project_images.container_images : img.name
+    for img in
+    data.anyscale_container_images.project_images.container_images :
+    img.name
     if img.is_default
   ]
-  description = "Anyscale-provided base images among this project's images, as opposed to user-created ones"
+  description = "Anyscale-provided base images in this project"
 }
 
 output "container_image_last_modified" {
   value = {
-    for img in data.anyscale_container_images.project_images.container_images : img.name => img.last_modified_at
+    for img in
+    data.anyscale_container_images.project_images.container_images :
+    img.name => img.last_modified_at
   }
-  description = "Last-modified timestamp for every image in the project, keyed by name"
+  description = "Last-modified timestamp per image, keyed by name"
 }

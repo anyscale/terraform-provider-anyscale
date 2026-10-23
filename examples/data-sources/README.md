@@ -1,6 +1,7 @@
 # Data Sources Examples
 
-This directory contains examples demonstrating how to use Anyscale data sources to look up existing resources.
+This directory contains examples demonstrating how to use Anyscale data
+sources to look up existing resources.
 
 ## Available Data Sources
 
@@ -44,7 +45,9 @@ data "anyscale_clouds" "aws_clouds" {
 }
 
 output "aws_cloud_names" {
-  value = [for cloud in data.anyscale_clouds.aws_clouds.clouds : cloud.name]
+  value = [
+    for cloud in data.anyscale_clouds.aws_clouds.clouds : cloud.name
+  ]
 }
 
 # Filter by name pattern
@@ -56,7 +59,10 @@ data "anyscale_clouds" "production" {
 data "anyscale_clouds" "all" {}
 
 locals {
-  default_cloud = [for cloud in data.anyscale_clouds.all.clouds : cloud if cloud.is_default][0]
+  default_cloud = [
+    for cloud in data.anyscale_clouds.all.clouds :
+    cloud if cloud.is_default
+  ][0]
 }
 ```
 
@@ -66,7 +72,8 @@ Look up an existing Anyscale Project by ID or name.
 
 **Use cases:**
 - Reference an existing project when creating project-scoped resources
-- Get project details (directory name, collaborators) for outputs or validation
+- Get project details (directory name, collaborators) for outputs or
+  validation
 - Look up a project without hardcoding its ID
 
 **Example:**
@@ -99,7 +106,9 @@ data "anyscale_projects" "cloud_projects" {
 }
 
 output "cloud_project_ids" {
-  value = [for p in data.anyscale_projects.cloud_projects.projects : p.id]
+  value = [
+    for p in data.anyscale_projects.cloud_projects.projects : p.id
+  ]
 }
 ```
 
@@ -133,11 +142,14 @@ resource "anyscale_compute_config" "custom" {
 Look up an existing container image by ID or name.
 
 **Use cases:**
-- Get the `name_version` handle to pass to job/service submission tooling
-- Check an image's current `build_status` before submitting a workload against it
-- Reference `image_uri` for inspection outside Anyscale tooling (e.g. `docker pull`)
-- Pin to an exact image `digest` when `name_version` (a named revision) isn't a strong
-  enough guarantee
+- Get the `name_version` handle to pass to job/service submission
+  tooling
+- Check an image's current `build_status` before submitting a workload
+  against it
+- Reference `image_uri` for inspection outside Anyscale tooling (e.g.
+  `docker pull`)
+- Pin to an exact image `digest` when `name_version` (a named revision)
+  isn't a strong enough guarantee
 
 **Example:**
 ```terraform
@@ -161,7 +173,8 @@ List and filter container images.
 **Use cases:**
 - List all container images in a project
 - Filter by name pattern, creator, or archived status
-- Get the latest build status across many images at once, without fetching each one individually
+- Get the latest build status across many images at once, without
+  fetching each one individually
 
 **Example:**
 ```terraform
@@ -172,7 +185,8 @@ data "anyscale_container_images" "recent" {
 
 output "recent_container_images" {
   value = [
-    for img in data.anyscale_container_images.recent.container_images : {
+    for img in
+    data.anyscale_container_images.recent.container_images : {
       name         = img.name
       name_version = img.name_version
     }
@@ -182,10 +196,12 @@ output "recent_container_images" {
 
 ### `anyscale_user`
 
-Get the current authenticated user - the identity behind the provider's token. Takes no arguments.
+Get the current authenticated user - the identity behind the provider's
+token. Takes no arguments.
 
 **Use cases:**
-- Look up your own user ID, email, or permission level without hardcoding it
+- Look up your own user ID, email, or permission level without
+  hardcoding it
 - List the clouds and organizations your token can access
 
 **Example:**
@@ -199,8 +215,9 @@ output "current_user_email" {
 
 ### `anyscale_organization`
 
-Get the organization the provider's token is connected to. Takes no arguments - an Anyscale API
-token is always scoped to exactly one organization, so there is never a set to select from.
+Get the organization the provider's token is connected to. Takes no
+arguments - an Anyscale API token is always scoped to exactly one
+organization, so there is never a set to select from.
 
 **Use cases:**
 - Reference the organization's default cloud without hardcoding its ID
@@ -217,11 +234,14 @@ output "organization_default_cloud_id" {
 
 ### `anyscale_organization_user`
 
-Look up a specific user in the organization by identity ID, user ID, or email.
+Look up a specific user in the organization by identity ID, user ID, or
+email.
 
 **Use cases:**
-- Confirm a user exists in the organization before granting project/cloud access
-- Read a user's current `base_role` and `additional_roles` without managing them
+- Confirm a user exists in the organization before granting
+  project/cloud access
+- Read a user's current `base_role` and `additional_roles` without
+  managing them
 
 **Example:**
 ```terraform
@@ -239,7 +259,8 @@ output "user_base_role" {
 List and filter users in the organization.
 
 **Use cases:**
-- List every human user in the organization (service accounts excluded by default)
+- List every human user in the organization (service accounts excluded
+  by default)
 - Filter by a partial email match
 - Include service accounts when needed
 
@@ -248,20 +269,25 @@ List and filter users in the organization.
 data "anyscale_organization_users" "humans" {}
 
 output "organization_user_emails" {
-  value = [for u in data.anyscale_organization_users.humans.users : u.email]
+  value = [
+    for u in data.anyscale_organization_users.humans.users : u.email
+  ]
 }
 ```
 
 ### `anyscale_service`
 
-Look up an existing Anyscale Service by ID or name - one deployed by the `anyscale_service`
-resource (see `examples/resources/anyscale_service/`), or by some other means (e.g. the Anyscale
-CLI or console). To create a service or roll out new versions from Terraform, use the
-`anyscale_service` resource instead; this data source stays read-only, for lookups that shouldn't
-take over a service's lifecycle.
+Look up an existing Anyscale Service by ID or name - one deployed by the
+`anyscale_service` resource (see
+`examples/resources/anyscale_service/`), or by some other means (e.g.
+the Anyscale CLI or console). To create a service or roll out new
+versions from Terraform, use the `anyscale_service` resource instead;
+this data source stays read-only, for lookups that shouldn't take over a
+service's lifecycle.
 
 **Use cases:**
-- Get a running service's `current_state`, `base_url`, or rollout status for outputs or validation
+- Get a running service's `current_state`, `base_url`, or rollout status
+  for outputs or validation
 - Read the primary version's Ray Serve config back with `jsondecode()`
 - Look up a service without hardcoding its ID
 
@@ -269,7 +295,8 @@ take over a service's lifecycle.
 ```terraform
 data "anyscale_service" "production" {
   name       = "my-service"
-  project_id = "prj_abc123" # only required if the name isn't unique org-wide
+  # only required if the name isn't unique org-wide
+  project_id = "prj_abc123"
 }
 
 output "service_state" {
@@ -284,8 +311,8 @@ List and filter Anyscale Services.
 **Use cases:**
 - List every service in a project
 - Filter by a partial name match, optionally narrowed to a cloud by name
-- Spot every non-running, non-terminated service across a project in one pass, without looking
-  each one up individually
+- Spot every non-running, non-terminated service across a project in one
+  pass, without looking each one up individually
 
 **Example:**
 ```terraform
@@ -326,16 +353,22 @@ output "unhealthy_service_names" {
 
 ## Important Notes
 
-- **Data sources are read-only** - They query existing infrastructure but don't create or modify anything
+- **Data sources are read-only** - They query existing infrastructure
+  but don't create or modify anything
 - **Authentication required** - You need valid Anyscale credentials
-- **Name lookups** - If multiple resources have the same name, the most recently created one is returned
-- **Anonymous configs** - Compute configs created without a name can only be looked up by ID
-- **Container image name lookups** - Same rule as clouds: if multiple non-archived images share a
-  name, the most recently created one is returned, and Terraform logs a warning when this happens
-- **Service name lookups are the one exception** - `anyscale_service` names are unique only within
-  a project, not organization-wide. An ambiguous name lookup fails with an error asking you to set
-  `project_id` (and/or `cloud_id`) to disambiguate, instead of silently returning the most recently
-  created match the way every other by-name lookup above does
+- **Name lookups** - If multiple resources have the same name, the most
+  recently created one is returned
+- **Anonymous configs** - Compute configs created without a name can
+  only be looked up by ID
+- **Container image name lookups** - Same rule as clouds: if multiple
+  non-archived images share a name, the most recently created one is
+  returned, and Terraform logs a warning when this happens
+- **Service name lookups are the one exception** - `anyscale_service`
+  names are unique only within a project, not organization-wide. An
+  ambiguous name lookup fails with an error asking you to set
+  `project_id` (and/or `cloud_id`) to disambiguate, instead of silently
+  returning the most recently created match the way every other by-name
+  lookup above does
 
 ## Common Patterns
 
@@ -354,7 +387,11 @@ data "anyscale_cloud" "prod" {
 
 # Use appropriate cloud based on workspace
 locals {
-  cloud_id = terraform.workspace == "prod" ? data.anyscale_cloud.prod.id : data.anyscale_cloud.dev.id
+  cloud_id = (
+    terraform.workspace == "prod"
+    ? data.anyscale_cloud.prod.id
+    : data.anyscale_cloud.dev.id
+  )
 }
 ```
 
@@ -368,9 +405,11 @@ data "anyscale_compute_config" "standard" {
 
 # Create team-specific configs based on the standard
 resource "anyscale_compute_config" "team_a" {
-  name                     = "team-a-config"
-  cloud_id                 = data.anyscale_compute_config.standard.cloud_id
-  idle_termination_minutes = data.anyscale_compute_config.standard.idle_termination_minutes
+  name     = "team-a-config"
+  cloud_id = data.anyscale_compute_config.standard.cloud_id
+  idle_termination_minutes = (
+    data.anyscale_compute_config.standard.idle_termination_minutes
+  )
   # Customize as needed
 }
 ```
@@ -416,9 +455,11 @@ resource "anyscale_compute_config" "west_config" {
 - Check spelling and casing of the name
 
 **"No service found" / "found N services named ..."**
-- Verify the service name or ID is correct, and that it's running in an org your token can reach
-- If the error asks you to disambiguate, set `project_id` (and/or `cloud_id`) - unlike the other
-  by-name lookups above, this one errors on a duplicate name instead of guessing the most recent
+- Verify the service name or ID is correct, and that it's running in an
+  org your token can reach
+- If the error asks you to disambiguate, set `project_id` (and/or
+  `cloud_id`) - unlike the other by-name lookups above, this one errors
+  on a duplicate name instead of guessing the most recent
 
 ## See Also
 

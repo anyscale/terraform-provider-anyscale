@@ -13,7 +13,8 @@ Use this data source to retrieve identity information about the organization the
 ## Example Usage
 
 ```terraform
-# The organization the provider's token is connected to - takes no arguments
+# The organization the provider's token is connected to - takes no
+# arguments
 data "anyscale_organization" "current" {}
 
 output "organization_id" {
@@ -23,7 +24,7 @@ output "organization_id" {
 
 output "organization_default_cloud_id" {
   value       = data.anyscale_organization.current.default_cloud_id
-  description = "Default cloud ID for the organization, if one is configured"
+  description = "Default cloud ID, if one is configured"
 }
 ```
 

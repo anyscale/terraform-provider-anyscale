@@ -16,10 +16,12 @@ Manages an Anyscale user group in the token's organization; manage its members w
 ## Example Usage
 
 ```terraform
-# Alpha: the schema may change before Beta.
-# Creates an empty user group. Manage who belongs to it with anyscale_user_group_members.
+# Alpha: the schema may change before Beta. Creates an empty user group.
+# Manage who belongs to it with anyscale_user_group_members.
 resource "anyscale_user_group" "ml_platform" {
-  name = "ml-platform" # no leading or trailing whitespace; unique among the organization's groups
+  # no leading or trailing whitespace; unique among the organization's
+  # groups
+  name = "ml-platform"
 }
 ```
 
@@ -41,7 +43,8 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the group ID (ug...). Directory-synced (SCIM) groups cannot be imported;
-# read them with the anyscale_user_group data source instead.
+# Import using the group ID (ug...). Directory-synced (SCIM) groups
+# cannot be imported; read them with the anyscale_user_group data source
+# instead.
 terraform import anyscale_user_group.ml_platform ug_abc123
 ```

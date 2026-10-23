@@ -1,4 +1,5 @@
-# Compute config with native HCL syntax for flags and advanced instance config
+# Compute config with native HCL syntax for flags and advanced instance
+# config
 resource "anyscale_compute_config" "example" {
   name     = "my-compute-config"
   cloud_id = "cld_abc123"
@@ -15,7 +16,8 @@ resource "anyscale_compute_config" "example" {
     }
   ]
 
-  # Terminate idle clusters after 30 minutes, and cap total uptime at 8 hours
+  # Terminate idle clusters after 30 minutes, and cap total uptime at 8
+  # hours
   idle_termination_minutes = 30
   maximum_uptime_minutes   = 480
 
@@ -25,7 +27,8 @@ resource "anyscale_compute_config" "example" {
     "ray-cluster-autoscaler-enabled" = "true"
   }
 
-  # Native HCL for advanced configurations passed through to the cloud provider
+  # Native HCL for advanced configurations passed through to the cloud
+  # provider
   advanced_instance_config = {
     BlockDeviceMappings = [
       {

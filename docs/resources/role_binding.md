@@ -16,18 +16,21 @@ Grants one role to one user group or user on an organization, cloud or project. 
 ## Example Usage
 
 ```terraform
-# Alpha, behind a feature flag (contact support@anyscale.com for access). The schema may change before Beta.
-# Grants one role to one user group or one user on exactly one of a cloud, a project, or the organization.
-# A binding cannot be edited: changing any argument replaces it.
+# Alpha, behind a feature flag (contact support@anyscale.com for
+# access). The schema may change before Beta. Grants one role to one
+# user group or one user on exactly one of a cloud, a project, or the
+# organization. A binding cannot be edited: changing any argument
+# replaces it.
 #
-# Prefer groups: grant a role to a group once, then change who has access by editing the group's members.
+# Prefer groups: grant a role to a group once, then change who has
+# access by editing the group's members.
 variable "project_id" {
   description = "ID of an existing Anyscale project (prj_...)"
   type        = string
 }
 
 variable "org_role_name" {
-  description = "Exact, case-sensitive name of a role that can be granted on the organization"
+  description = "Exact, case-sensitive name of a grantable role"
   type        = string
 }
 
@@ -39,8 +42,8 @@ resource "anyscale_user_group" "analysts" {
   name = "analysts"
 }
 
-# Who is in the group. AUTHORITATIVE: anyone not listed is removed from the group.
-# Each email must already belong to your organization.
+# Who is in the group. AUTHORITATIVE: anyone not listed is removed from
+# the group. Each email must already belong to your organization.
 resource "anyscale_user_group_members" "analysts" {
   user_group_id = anyscale_user_group.analysts.id
   members = [
@@ -49,11 +52,13 @@ resource "anyscale_user_group_members" "analysts" {
   ]
 }
 
-# What the group may do: every member gets project_viewer on this project.
+# What the group may do: every member gets project_viewer on this
+# project.
 resource "anyscale_role_binding" "analysts_project_viewer" {
   user_group_id = anyscale_user_group.analysts.id
   role_id       = data.anyscale_role.project_viewer.id
-  project_id    = var.project_id # exactly one of cloud_id, project_id, organization_id
+  # exactly one of cloud_id, project_id, organization_id
+  project_id = var.project_id
 
   # Avoid a window with no access when role_id changes.
   lifecycle {
@@ -61,8 +66,9 @@ resource "anyscale_role_binding" "analysts_project_viewer" {
   }
 }
 
-# Directory-synced (SCIM) groups can't be managed by Terraform, but they can hold a role binding.
-# Here every member of the group gets the role across the whole organization.
+# Directory-synced (SCIM) groups can't be managed by Terraform, but they
+# can hold a role binding. Here every member of the group gets the role
+# across the whole organization.
 data "anyscale_user_group" "okta_admins" {
   name = "okta-admins"
 }
@@ -79,8 +85,9 @@ resource "anyscale_role_binding" "okta_admins_org" {
   organization_id = data.anyscale_organization.current.id
 }
 
-# Alternative: bind a single user or service account (usr_...) with user_id instead of user_group_id.
-# Use the data source's user_id, not its id.
+# Alternative: bind a single user or service account (usr_...) with
+# user_id instead of user_group_id. Use the data source's user_id, not
+# its id.
 data "anyscale_organization_user" "carol" {
   email = "carol@example.com"
 }
@@ -123,10 +130,12 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 ```shell
 # Import by what the binding grants:
 #   <scope_type>/<scope_id>/<principal_type>/<principal_id>/<role_id>
-# scope_type is organization, cloud or project; principal_type is user or user_group.
-# Fails, and creates nothing, if no such binding exists.
+#   scope_type is organization, cloud or project; principal_type is user
+#   or user_group. Fails, and creates nothing, if no such binding
+#   exists.
 terraform import anyscale_role_binding.analysts_project_viewer project/prj_abc123/user_group/ug_abc123/rol_abc123
 
-# Or by the role binding ID (rb_...), for a binding held by a user group or by a user.
+# Or by the role binding ID (rb_...), for a binding held by a user group
+# or by a user.
 terraform import anyscale_role_binding.analysts_project_viewer rb_abc123
 ```

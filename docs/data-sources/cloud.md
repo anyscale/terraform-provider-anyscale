@@ -30,12 +30,12 @@ output "cloud_region" {
 
 output "cloud_status" {
   value       = data.anyscale_cloud.by_name.status
-  description = "Operational status of the cloud (ready, pending, failed)"
+  description = "Operational status (ready, pending, failed)"
 }
 
 output "cloud_provider_by_id" {
   value       = data.anyscale_cloud.by_id.cloud_provider
-  description = "Cloud provider (AWS, GCP, AZURE, GENERIC) when looking up by id"
+  description = "Cloud provider (AWS, GCP, AZURE, GENERIC)"
 }
 
 output "cloud_is_k8s" {
@@ -55,7 +55,7 @@ output "cloud_version" {
 
 output "cloud_external_id" {
   value       = data.anyscale_cloud.by_name.external_id
-  description = "External ID for cross-account trust relationships; null if not set"
+  description = "External ID for cross-account trust; null if not set"
 }
 ```
 
