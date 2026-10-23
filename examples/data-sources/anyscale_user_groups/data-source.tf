@@ -1,4 +1,4 @@
-# Alpha: the schema may change before Beta.
+# Beta.
 # List every user group in the organization.
 data "anyscale_user_groups" "all" {}
 

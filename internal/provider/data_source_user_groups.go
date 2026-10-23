@@ -45,7 +45,7 @@ func (d *UserGroupsDataSource) Metadata(ctx context.Context, req datasource.Meta
 
 func (d *UserGroupsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: userGroupsAlphaBanner +
+		MarkdownDescription: userGroupsBetaBanner +
 			"Lists the user groups in the token's organization. Use `anyscale_user_group` for a group's members and organization role.",
 		Attributes: map[string]schema.Attribute{
 			"source": schema.StringAttribute{

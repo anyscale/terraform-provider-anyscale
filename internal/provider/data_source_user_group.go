@@ -56,7 +56,7 @@ func (d *UserGroupDataSource) Metadata(ctx context.Context, req datasource.Metad
 
 func (d *UserGroupDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: userGroupsAlphaBanner +
+		MarkdownDescription: userGroupsBetaBanner +
 			"Reads one user group by ID or name, including groups synced from an identity provider (SCIM), which the user group resources cannot manage.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

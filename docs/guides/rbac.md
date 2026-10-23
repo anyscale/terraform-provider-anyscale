@@ -21,8 +21,8 @@ Read this before writing configuration that spans more than one scope.
 | Organization membership | [`anyscale_organization_user`](../resources/organization_user.md) | Whether the user is under Terraform management. It cannot create a member - people join by invitation - but declaring it adopts an existing member with no API call. Destroying it removes nobody: it cancels only a still-pending invitation this resource itself sent. |
 | Organization role | [`anyscale_organization_user_role`](../resources/organization_user_role.md) | One user's `base_role` and `deny_roles` in the organization. Authoritative over that one user's role - not over who is a member. |
 | Cloud membership, cloud role, and project role | [`anyscale_cloud_access`](../resources/cloud_access.md) | One cloud's **entire** member list, each member's `base_role`/`deny_roles` on that cloud, and their per-project roles under it. Authoritative from the first `apply` - see [`anyscale_cloud_access`: authoritative over one cloud's whole member list](#anyscale_cloud_access-authoritative-over-one-clouds-whole-member-list), below, before writing configuration against it. |
-| User groups (Alpha) | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Alpha)](#user-groups-alpha). |
-| Role grants (Alpha) | [`anyscale_role_binding`](../resources/role_binding.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group or one user on one cloud, project, or the organization. **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Alpha)](#role-bindings-alpha). |
+| User groups (Beta) | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md) | A group's name, and its **entire** member list. Not what the group may access - see role bindings, next row. See [User groups (Beta)](#user-groups-beta). |
+| Role grants (Beta) | [`anyscale_role_binding`](../resources/role_binding.md), [`anyscale_role`](../data-sources/role.md) data source | One role held by one user group or one user on one cloud, project, or the organization. **Converted organizations only** - see [Organization access mode](#organization-access-mode). See [Role bindings (Beta)](#role-bindings-beta). |
 
 The two role resources above use the word "authoritative" to mean: authoritative over the one row
 each manages, never over a whole population - see
@@ -58,12 +58,11 @@ are subject to the same constraints.
   `anyscale_organization_invitation` revokes a pending invitation and has no effect on an accepted
   one. Removing someone's access is a deliberate act neither resource can do.
 
-## User groups (Alpha)
+## User groups (Beta)
 
-~> **Alpha.** User groups are an Alpha feature. The Anyscale API and this provider's schema for them
-may change drastically before Beta, including breaking changes in a minor release. Every breaking
-change is still listed in the changelog; Alpha relaxes the deprecation period, not disclosure. Pin the
-provider version if you depend on these resources, and read the changelog before upgrading.
+~> **Beta.** User groups are a Beta feature. Breaking changes to their schema are deprecated first
+and listed in the changelog. Pin the provider version if you depend on these resources, and read the
+changelog before upgrading.
 
 An Anyscale **user group** is a named set of organization members. This provider manages groups in
 four types:
@@ -81,7 +80,7 @@ Managing groups needs the organization-level permission to manage IAM (an organi
 
 In scope: creating and renaming groups, and managing who belongs to them. **Not managed here:** what a
 group may access. Grant a group a role on a cloud, project, or the organization with
-[`anyscale_role_binding`](#role-bindings-alpha). A group may also already hold grants set in the
+[`anyscale_role_binding`](#role-bindings-beta). A group may also already hold grants set in the
 Anyscale console or API, so adding or removing members can grant or revoke real access. A group's
 organization roles (`base_role`) are not managed by this provider.
 
@@ -199,7 +198,7 @@ and conversion is one-way.
 | Not affected by mode | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md), [`anyscale_organization_user`](../resources/organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
 
 The provider does not detect the mode in advance; the API refuses the write and the provider reports it.
-Role bindings are also behind a feature flag (see [Role bindings (Alpha)](#role-bindings-alpha)). An
+Role bindings are also behind a feature flag (see [Role bindings (Beta)](#role-bindings-beta)). An
 organization is unconverted until an admin converts it.
 
 | Error | Mode it means | What to do |
@@ -256,11 +255,11 @@ The binding ID (`rb_...`) also works as the import ID.
 Which bindings conversion creates depends on the option chosen in the migration wizard, so expect to
 find some grants missing and create those normally.
 
-## Role bindings (Alpha)
+## Role bindings (Beta)
 
-~> **Alpha, behind a feature flag.** Role bindings are an Alpha feature, under the same terms as
-[user groups](#user-groups-alpha): the API and schema may change, including breaking changes in a
-minor release, always listed in the changelog. They are also **behind a feature flag**: contact
+~> **Beta, behind a feature flag.** Role bindings are a Beta feature, under the same terms as
+[user groups](#user-groups-beta): breaking schema changes get a deprecation first and a changelog
+entry. Anyscale enables them per organization while customers migrate: contact
 support@anyscale.com for access. Without it, every call fails with "Role bindings are not enabled". The organization must also be
 [converted](#organization-access-mode).
 

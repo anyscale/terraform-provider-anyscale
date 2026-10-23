@@ -3,24 +3,24 @@
 page_title: "anyscale_role_binding Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Alpha. Role bindings are an Alpha feature behind a feature flag (contact support@anyscale.com mailto:support@anyscale.com for access) and may change in breaking ways before Beta, even in a minor release. See the RBAC guide ../guides/rbac.md#role-bindings-alpha.
+  ~> Beta. Role bindings are enabled per organization by Anyscale while customers migrate; contact support@anyscale.com mailto:support@anyscale.com to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the RBAC guide ../guides/rbac.md#role-bindings-beta.
   Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to anyscale_cloud_access; see the RBAC guide ../guides/rbac.md. A binding cannot be edited, so changing any argument replaces it. Requires an organization converted to role bindings ../guides/rbac.md#organization-access-mode.
 ---
 
 # anyscale_role_binding (Resource)
 
-~> **Alpha.** Role bindings are an Alpha feature behind a feature flag (contact [support@anyscale.com](mailto:support@anyscale.com) for access) and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#role-bindings-alpha).
+~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).
 
 Grants one role to one user group or user on an organization, cloud or project. Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). A binding cannot be edited, so changing any argument replaces it. Requires an organization [converted to role bindings](../guides/rbac.md#organization-access-mode).
 
 ## Example Usage
 
 ```terraform
-# Alpha, behind a feature flag (contact support@anyscale.com for
-# access). The schema may change before Beta. Grants one role to one
-# user group or one user on exactly one of a cloud, a project, or the
-# organization. A binding cannot be edited: changing any argument
-# replaces it.
+# Beta; Anyscale enables it per organization (contact
+# support@anyscale.com). Breaking schema changes get a deprecation
+# first. Grants one role to one user group or one user on exactly one
+# of a cloud, a project, or the organization. A binding cannot be
+# edited: changing any argument replaces it.
 #
 # Prefer groups: grant a role to a group once, then change who has
 # access by editing the group's members.

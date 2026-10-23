@@ -3,20 +3,20 @@
 page_title: "anyscale_user_group Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Alpha. User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
+  ~> Beta. User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the RBAC guide ../guides/rbac.md#user-groups-beta.
   Reads one user group by ID or name, including groups synced from an identity provider (SCIM), which the user group resources cannot manage.
 ---
 
 # anyscale_user_group (Data Source)
 
-~> **Alpha.** User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
+~> **Beta.** User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
 
 Reads one user group by ID or name, including groups synced from an identity provider (SCIM), which the user group resources cannot manage.
 
 ## Example Usage
 
 ```terraform
-# Alpha: the schema may change before Beta. Look up one group by name
+# Beta. Look up one group by name
 # (or by id). Includes directory-synced (SCIM) groups, which Terraform
 # cannot manage but can reference.
 data "anyscale_user_group" "okta_admins" {

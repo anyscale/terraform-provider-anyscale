@@ -47,7 +47,7 @@ func (r *UserGroupResource) Metadata(ctx context.Context, req resource.MetadataR
 
 func (r *UserGroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: userGroupsAlphaBanner +
+		MarkdownDescription: userGroupsBetaBanner +
 			"Manages an Anyscale user group in the token's organization; manage its members with `anyscale_user_group_members`. " +
 			"Destroying the group first removes every member, including members added outside Terraform. " +
 			"Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the `anyscale_user_group` data source.",

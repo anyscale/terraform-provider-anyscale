@@ -11,10 +11,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 )
 
-// roleBindingsAlphaBanner opens the MarkdownDescription of the role binding
+// roleBindingsBetaBanner opens the MarkdownDescription of the role binding
 // resource and the role data source. The policy it links to is written once,
 // in the RBAC guide.
-const roleBindingsAlphaBanner = "~> **Alpha.** Role bindings are an Alpha feature behind a feature flag (contact [support@anyscale.com](mailto:support@anyscale.com) for access) and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#role-bindings-alpha).\n\n"
+const roleBindingsBetaBanner = "~> **Beta.** Role bindings are enabled per organization by Anyscale while customers migrate; contact [support@anyscale.com](mailto:support@anyscale.com) to enable them. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#role-bindings-beta).\n\n"
 
 const (
 	roleBindingsBasePath = "/api/v2/role_bindings"
@@ -102,7 +102,7 @@ func isRoleBindingsDisabled(err error) bool {
 // routes. Callers return without touching state; outcome, when set, says what
 // that means for the operation and is appended to the detail.
 func addRoleBindingsDisabledError(diags *diag.Diagnostics, outcome string) {
-	detail := "This organization does not have role bindings enabled. They are in Alpha behind a feature flag; contact support@anyscale.com for access."
+	detail := "This organization does not have role bindings enabled. They are in Beta and enabled per organization; contact support@anyscale.com for access."
 	if outcome != "" {
 		detail += " " + outcome
 	}
