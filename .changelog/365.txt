@@ -1,0 +1,4 @@
+```
+release-note:changed
+provider: On an Azure control plane, Anyscale RBAC resources, the `anyscale_role`, `anyscale_user_group` and `anyscale_user_groups` data sources, and `anyscale_cloud.auto_add_user` now fail at plan with "RBAC Is Managed in Azure", because Azure access is managed in the Azure portal. Destroy, and plans with no changes, still work.
+```
