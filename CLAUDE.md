@@ -151,10 +151,10 @@ cd examples/aws-vm-basic/ && terraform plan && terraform apply   # no init neede
   - Break long expressions: parenthesize the value, put a `for` expression on several lines, put one
     object attribute per line.
   - Keep `output`/`variable` descriptions short.
-  - Allowed exceptions: `import` commands, URLs and ARNs, and long literal values that cannot be
-    split.
-  - Not enforced by tooling. Check before committing:
-    `find examples/{resources,data-sources,provider,ephemeral-resources} -type f | xargs awk 'length > 72 { print FILENAME ":" FNR ": " length }'`
+  - Enforced by `make docs-validate` (`.github/scripts/check-example-width.sh`, limit
+    `EXAMPLE_WIDTH`, README files excluded). A line over the limit passes only if it contains
+    `terraform import`, contains a URL, or is an attribute assigned a single string literal.
+    Anything else, including ARNs inside longer expressions, must be wrapped.
 
 ### Authentication
 
