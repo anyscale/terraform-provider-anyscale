@@ -1,5 +1,6 @@
-# Alpha, behind a feature flag (contact support@anyscale.com for access).
-# Look up a role by exact, case-sensitive name; archived roles are not found.
+# Alpha, behind a feature flag (contact support@anyscale.com for
+# access). Look up a role by exact, case-sensitive name; archived roles
+# are not found.
 data "anyscale_role" "project_viewer" {
   name = "project_viewer"
 }

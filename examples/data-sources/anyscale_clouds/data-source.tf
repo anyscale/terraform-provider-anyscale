@@ -18,7 +18,9 @@ output "all_cloud_names" {
 }
 
 output "aws_us_east_cloud_ids" {
-  value       = [for c in data.anyscale_clouds.aws_us_east.clouds : c.id]
+  value = [
+    for c in data.anyscale_clouds.aws_us_east.clouds : c.id
+  ]
   description = "IDs of AWS clouds in us-east-2"
 }
 
@@ -28,15 +30,18 @@ output "staging_cloud_ids" {
 }
 
 output "kubernetes_clouds" {
-  value       = [for c in data.anyscale_clouds.all.clouds : c.name if c.is_k8s]
+  value = [
+    for c in data.anyscale_clouds.all.clouds : c.name if c.is_k8s
+  ]
   description = "Names of clouds that use Kubernetes"
 }
 
 output "cloud_availability_zones_by_name" {
   value = {
-    for c in data.anyscale_clouds.all.clouds : c.name => c.availability_zones
+    for c in data.anyscale_clouds.all.clouds :
+    c.name => c.availability_zones
   }
-  description = "Availability zones for every visible cloud, keyed by name"
+  description = "Availability zones per visible cloud, keyed by name"
 }
 
 output "cloud_versions_and_external_ids" {
@@ -47,5 +52,5 @@ output "cloud_versions_and_external_ids" {
       external_id = c.external_id
     }
   ]
-  description = "Cluster management stack version and external ID (null if not set) for every visible cloud"
+  description = "Stack version and external ID (may be null) per cloud"
 }

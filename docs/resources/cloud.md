@@ -42,7 +42,8 @@ resource "anyscale_cloud" "aws_example" {
 
   # Object storage configuration
   object_storage {
-    bucket_name = "my-anyscale-bucket" # s3:// prefix added automatically
+    # s3:// prefix added automatically
+    bucket_name = "my-anyscale-bucket"
     region      = "us-east-2"
   }
 }
@@ -64,8 +65,9 @@ resource "anyscale_cloud" "gcp_example" {
   }
 
   object_storage {
-    # Include the gs:// prefix explicitly for GCP (unlike AWS, where a bare
-    # bucket name is fine either way) - see the "Cloud Resources" guide for why.
+    # Include the gs:// prefix explicitly for GCP (unlike AWS, where a
+    # bare bucket name is fine either way) - see the "Cloud Resources"
+    # guide for why.
     bucket_name = "gs://my-gcs-bucket"
   }
 }
@@ -80,8 +82,9 @@ resource "anyscale_cloud" "eks_example" {
   kubernetes_config {
     anyscale_operator_iam_identity = "arn:aws:iam::xxx:role/anyscale-eks-operator-role"
     zones                          = ["us-west-2a", "us-west-2b"]
-    # Optional: a Redis endpoint reachable from the data plane, used for Ray
-    # GCS fault tolerance. Available on any K8S cloud, not AWS-specific.
+    # Optional: a Redis endpoint reachable from the data plane, used for
+    # Ray GCS fault tolerance. Available on any K8S cloud, not
+    # AWS-specific.
     redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
   }
 
@@ -90,10 +93,11 @@ resource "anyscale_cloud" "eks_example" {
     region      = "us-west-2"
   }
 
-  # Optional: shared file storage for the Ray cluster. mount_targets (EFS)
-  # below is one option; persistent_volume_claim and csi_ephemeral_volume_driver
-  # are alternatives to it, not additions - set only one (see the GKE example
-  # below for the persistent_volume_claim form).
+  # Optional: shared file storage for the Ray cluster. mount_targets
+  # (EFS) below is one option; persistent_volume_claim and
+  # csi_ephemeral_volume_driver are alternatives to it, not additions -
+  # set only one (see the GKE example below for the
+  # persistent_volume_claim form).
   file_storage {
     file_storage_id = "fs-0abc123def456789"
 
@@ -117,19 +121,20 @@ resource "anyscale_cloud" "gke_example" {
   kubernetes_config {
     anyscale_operator_iam_identity = "gke-nodes@my-project.iam.gserviceaccount.com"
     zones                          = ["us-central1-a", "us-central1-b"]
-    redis_endpoint                 = "redis.ray-system.svc.cluster.local:6379"
+
+    redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
   }
 
   object_storage {
-    # Include the gs:// prefix explicitly for GCP, same as the GCP VM example
-    # above.
+    # Include the gs:// prefix explicitly for GCP, same as the GCP VM
+    # example above.
     bucket_name = "gs://my-gke-bucket"
   }
 
-  # Optional: a pre-existing PersistentVolumeClaim for shared storage, as an
-  # alternative to EFS/Filestore-style mount_targets (see the EKS example
-  # above) - set only one of persistent_volume_claim, csi_ephemeral_volume_driver,
-  # or mount_targets.
+  # Optional: a pre-existing PersistentVolumeClaim for shared storage,
+  # as an alternative to EFS/Filestore-style mount_targets (see the EKS
+  # example above) - set only one of persistent_volume_claim,
+  # csi_ephemeral_volume_driver, or mount_targets.
   file_storage {
     persistent_volume_claim = "my-shared-storage-pvc"
   }
@@ -137,16 +142,16 @@ resource "anyscale_cloud" "gke_example" {
 
 # Azure AKS (Kubernetes)
 #
-# Azure is Kubernetes-only: Anyscale does not support Azure VM clouds, so
-# compute_stack must be "K8S" - anything else (including the default when
-# omitted) is a plan-time error. Unlike aws_config/gcp_config, azure_config
-# takes only tenant_id: AKS setup creates no VNet/subnet resources of its own,
-# and authentication is operator workload-identity federation, not network or
-# IAM-role wiring.
+# Azure is Kubernetes-only: Anyscale does not support Azure VM clouds,
+# so compute_stack must be "K8S" - anything else (including the default
+# when omitted) is a plan-time error. Unlike aws_config/gcp_config,
+# azure_config takes only tenant_id: AKS setup creates no VNet/subnet
+# resources of its own, and authentication is operator workload-identity
+# federation, not network or IAM-role wiring.
 #
-# This example is schema- and mock-validated, not validated against a real AKS
-# cluster the way the EKS and GKE examples above are - validate it against
-# your own Azure subscription before relying on it.
+# This example is schema- and mock-validated, not validated against a
+# real AKS cluster the way the EKS and GKE examples above are - validate
+# it against your own Azure subscription before relying on it.
 resource "anyscale_cloud" "aks_example" {
   name           = "my-aks-cloud"
   cloud_provider = "AZURE"
@@ -158,19 +163,21 @@ resource "anyscale_cloud" "aks_example" {
   }
 
   kubernetes_config {
-    # The managed identity's PRINCIPAL ID, not its client ID - the reference
-    # AKS setup flow uses principal ID here and client ID only in the
-    # operator's own values.yaml.
+    # The managed identity's PRINCIPAL ID, not its client ID - the
+    # reference AKS setup flow uses principal ID here and client ID only
+    # in the operator's own values.yaml.
     anyscale_operator_iam_identity = "11111111-2222-3333-4444-555555555555"
-    # Azure availability zones are plain digits, unlike AWS/GCP's region-suffixed names.
+    # Azure availability zones are plain digits, unlike AWS/GCP's
+    # region-suffixed names.
     zones          = ["1", "2"]
     redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
   }
 
   object_storage {
-    # Azure uses its own abfss:// URI, never s3:// or gs:// - passed through
-    # verbatim with no prefix rewriting. Must include the full
-    # container@account.dfs.core.windows.net form, not just a bucket name.
+    # Azure uses its own abfss:// URI, never s3:// or gs:// - passed
+    # through verbatim with no prefix rewriting. Must include the full
+    # container@account.dfs.core.windows.net form, not just a bucket
+    # name.
     bucket_name = "abfss://ray-storage@anyscalestorageacct.dfs.core.windows.net"
   }
 }
@@ -334,6 +341,7 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 # Import using the cloud ID
 terraform import anyscale_cloud.example cld_abc123
 
-# Import does not recover `credentials`. If your config sets it, the first plan after import
-# records it in state with a warning and does not replace the cloud.
+# Import does not recover `credentials`. If your config sets it, the
+# first plan after import records it in state with a warning and does
+# not replace the cloud.
 ```

@@ -1,8 +1,8 @@
-# scheduling_rules is evaluated top to bottom and the first match wins, so -
-# like flavors.tf and unlike queues.tf - it stays a plain ordered list built
-# with concat(), never values() or any other map iteration that would reorder
-# it. Once any rule exists, a workload matching none of them is rejected, so
-# the last rule below is a deliberate catch-all.
+# scheduling_rules is evaluated top to bottom and the first match wins,
+# so - like flavors.tf and unlike queues.tf - it stays a plain ordered
+# list built with concat(), never values() or any other map iteration
+# that would reorder it. Once any rule exists, a workload matching none
+# of them is rejected, so the last rule below is a deliberate catch-all.
 locals {
   interactive_rules = [
     {

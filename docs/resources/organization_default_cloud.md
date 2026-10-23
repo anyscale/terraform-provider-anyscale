@@ -13,20 +13,22 @@ Manages which cloud is the calling organization's default cloud - the same org-w
 ## Example Usage
 
 ```terraform
-# Ensure a specific cloud is the organization's default. Creating this resource sets the org
-# default to cloud_id, and every plan re-asserts it if something else moves the default away
-# out of band. Requires an organization-owner-scoped token - a lower-privileged token fails
+# Ensure a specific cloud is the organization's default. Creating this
+# resource sets the org default to cloud_id, and every plan re-asserts
+# it if something else moves the default away out of band. Requires an
+# organization-owner-scoped token - a lower-privileged token fails
 # cleanly with a 403 at apply, not a silent no-op.
 resource "anyscale_organization_default_cloud" "this" {
   cloud_id = "cld_abc123"
 }
 
-# Destroying this resource only stops Terraform from managing the pointer - the underlying API
-# has no way to unset the org default, so destroy does not change which cloud is currently set.
+# Destroying this resource only stops Terraform from managing the
+# pointer - the underlying API has no way to unset the org default, so
+# destroy does not change which cloud is currently set.
 
 output "organization_default_cloud_org_id" {
   value       = anyscale_organization_default_cloud.this.id
-  description = "The ID of the organization whose default cloud this resource manages"
+  description = "ID of the organization whose default cloud is managed"
 }
 ```
 
@@ -48,8 +50,9 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the cloud ID you assert is currently the org default - the API has no separate
-# identifier for "the org default pointer" itself, so the asserted cloud_id doubles as the
-# import key. Import fails cleanly if that cloud is not actually the current org default.
+# Import using the cloud ID you assert is currently the org default -
+# the API has no separate identifier for "the org default pointer"
+# itself, so the asserted cloud_id doubles as the import key. Import
+# fails cleanly if that cloud is not actually the current org default.
 terraform import anyscale_organization_default_cloud.this cld_abc123
 ```

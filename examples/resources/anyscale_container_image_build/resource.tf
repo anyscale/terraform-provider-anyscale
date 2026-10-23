@@ -14,8 +14,9 @@ resource "anyscale_container_image_build" "inline" {
 }
 
 # Build from a Containerfile checked into the repo, scoped to a project.
-# Editing the file's contents does not rebuild; changing the path does. To rebuild on
-# content changes, use `containerfile = file("${path.module}/Containerfile")` instead.
+# Editing the file's contents does not rebuild; changing the path does.
+# To rebuild on content changes, use `containerfile =
+# file("${path.module}/Containerfile")` instead.
 resource "anyscale_container_image_build" "from_file" {
   name               = "training-image"
   containerfile_path = "${path.module}/Containerfile"
@@ -25,15 +26,15 @@ resource "anyscale_container_image_build" "from_file" {
 # Outputs
 output "build_image_uri" {
   value       = anyscale_container_image_build.inline.image_uri
-  description = "The URI of the built container image, for use in compute configs or job submissions"
+  description = "URI of the built image, for compute configs or jobs"
 }
 
 output "build_status" {
   value       = anyscale_container_image_build.inline.build_status
-  description = "The current status of the build (pending, in_progress, succeeded, failed, pending_cancellation, canceled)"
+  description = "Current build status (e.g. pending, succeeded)"
 }
 
 output "build_image_digest" {
   value       = anyscale_container_image_build.inline.digest
-  description = "The content digest of the built image (e.g. sha256:...); changes when a new build revision is created"
+  description = "Digest of the built image; changes on a new revision"
 }

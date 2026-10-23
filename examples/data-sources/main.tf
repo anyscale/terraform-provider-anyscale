@@ -7,8 +7,8 @@ terraform {
 }
 
 provider "anyscale" {
-  # Configuration options
-  # token can be set via ANYSCALE_CLI_TOKEN or ~/.anyscale/credentials.json
+  # Configuration options token can be set via ANYSCALE_CLI_TOKEN or
+  # ~/.anyscale/credentials.json
 }
 
 # Example 1: Look up an existing cloud by name
@@ -67,10 +67,12 @@ data "anyscale_compute_config" "standard" {
 
 output "standard_config_details" {
   value = {
-    id                       = data.anyscale_compute_config.standard.id
-    cloud_id                 = data.anyscale_compute_config.standard.cloud_id
-    region                   = data.anyscale_compute_config.standard.region
-    idle_termination_minutes = data.anyscale_compute_config.standard.idle_termination_minutes
+    id       = data.anyscale_compute_config.standard.id
+    cloud_id = data.anyscale_compute_config.standard.cloud_id
+    region   = data.anyscale_compute_config.standard.region
+    idle_termination_minutes = (
+      data.anyscale_compute_config.standard.idle_termination_minutes
+    )
   }
   description = "Details of the standard compute config"
 }
@@ -100,7 +102,10 @@ data "anyscale_compute_config" "dev_config" {
 
 # Verify the compute config is using the expected cloud
 output "config_uses_correct_cloud" {
-  value       = data.anyscale_compute_config.dev_config.cloud_id == data.anyscale_cloud.dev.id
+  value = (
+    data.anyscale_compute_config.dev_config.cloud_id ==
+    data.anyscale_cloud.dev.id
+  )
   description = "Verify the compute config is using the dev cloud"
 }
 
@@ -114,7 +119,9 @@ output "all_clouds_count" {
 }
 
 output "all_cloud_names" {
-  value       = [for cloud in data.anyscale_clouds.all.clouds : cloud.name]
+  value = [
+    for cloud in data.anyscale_clouds.all.clouds : cloud.name
+  ]
   description = "List of all cloud names"
 }
 
@@ -134,7 +141,9 @@ data "anyscale_clouds" "us_east_clouds" {
 }
 
 output "us_east_cloud_names" {
-  value       = [for cloud in data.anyscale_clouds.us_east_clouds.clouds : cloud.name]
+  value = [
+    for cloud in data.anyscale_clouds.us_east_clouds.clouds : cloud.name
+  ]
   description = "Clouds in us-east-2"
 }
 
@@ -180,7 +189,7 @@ output "project_directory_name" {
 
 output "project_collaborators" {
   value       = data.anyscale_project.team_project.collaborators
-  description = "Current collaborators on the project (email + permission_level each)"
+  description = "Project collaborators (email + permission_level)"
 }
 
 # Example 13: Look up an existing project by ID
@@ -200,7 +209,9 @@ data "anyscale_projects" "cloud_projects" {
 }
 
 output "cloud_project_ids" {
-  value       = [for p in data.anyscale_projects.cloud_projects.projects : p.id]
+  value = [
+    for p in data.anyscale_projects.cloud_projects.projects : p.id
+  ]
   description = "IDs of every non-default project in the cloud"
 }
 
@@ -210,7 +221,9 @@ data "anyscale_projects" "research" {
 }
 
 output "research_project_names" {
-  value       = [for p in data.anyscale_projects.research.projects : p.name]
+  value = [
+    for p in data.anyscale_projects.research.projects : p.name
+  ]
   description = "Names of projects whose name contains \"research\""
 }
 
@@ -254,13 +267,14 @@ output "current_user_cloud_count" {
   description = "Number of clouds the current user has access to"
 }
 
-# Example 17: Get the connected organization's identity - takes no arguments,
-# since an API token is always scoped to exactly one organization. Distinct
-# from anyscale_user.organizations above: that list exists because the
-# underlying API models organization membership as a list, but in practice it
-# always holds exactly one entry (the token's own org). anyscale_organization
-# is the direct, self-documenting way to reach that one organization without
-# indexing into someone else's list.
+# Example 17: Get the connected organization's identity - takes no
+# arguments, since an API token is always scoped to exactly one
+# organization. Distinct from anyscale_user.organizations above: that
+# list exists because the underlying API models organization membership
+# as a list, but in practice it always holds exactly one entry (the
+# token's own org). anyscale_organization is the direct,
+# self-documenting way to reach that one organization without indexing
+# into someone else's list.
 data "anyscale_organization" "current" {
 }
 
@@ -271,11 +285,12 @@ output "organization_name" {
 
 output "organization_default_cloud_id" {
   value       = data.anyscale_organization.current.default_cloud_id
-  description = "Default cloud ID for the organization; null if none is configured"
+  description = "Default cloud ID; null if none is configured"
 }
 
-# Example 18: List all users in the organization. Not related to SCIM (this provider has no SCIM
-# integration) - this simply lists organization membership via the API.
+# Example 18: List all users in the organization. Not related to SCIM
+# (this provider has no SCIM integration) - this simply lists
+# organization membership via the API.
 data "anyscale_organization_users" "all" {
 }
 
@@ -288,8 +303,9 @@ output "organization_users_list" {
   value = [for u in data.anyscale_organization_users.all.users : {
     name  = u.name
     email = u.email
-    # base_role is the current source of role information; permission_level is
-    # still available but the backend is moving away from it.
+    # base_role is the current source of role information;
+    # permission_level is still available but the backend is moving away
+    # from it.
     base_role = u.base_role
   }]
   description = "List of all organization users"
@@ -341,7 +357,9 @@ data "anyscale_organization_users" "service_accounts" {
 }
 
 output "service_accounts_count" {
-  value       = length(data.anyscale_organization_users.service_accounts.users)
+  value = length(
+    data.anyscale_organization_users.service_accounts.users
+  )
   description = "Number of service accounts in the organization"
 }
 
@@ -352,17 +370,17 @@ data "anyscale_container_image" "training" {
 
 output "training_image_name_version" {
   value       = data.anyscale_container_image.training.name_version
-  description = "The name:revision handle for the training image, for use in job/service submission"
+  description = "name:revision handle for job/service submission"
 }
 
 output "training_image_build_status" {
   value       = data.anyscale_container_image.training.build_status
-  description = "The current build status of the image (pending, in_progress, succeeded, failed, pending_cancellation, canceled)"
+  description = "Current build status of the image"
 }
 
 output "training_image_digest" {
   value       = data.anyscale_container_image.training.digest
-  description = "The content digest of the latest build (e.g. sha256:...); null until a build succeeds"
+  description = "Digest of the latest build; null until one succeeds"
 }
 
 # Example 25: List and filter container images
@@ -373,11 +391,12 @@ data "anyscale_container_images" "recent" {
 
 output "recent_container_images" {
   value = [
-    for img in data.anyscale_container_images.recent.container_images : {
+    for img in data.anyscale_container_images.recent.container_images :
+    {
       name                = img.name
       name_version        = img.name_version
       latest_build_status = img.latest_build_status
     }
   ]
-  description = "Non-archived container images with 'training' in the name"
+  description = "Non-archived images with 'training' in the name"
 }

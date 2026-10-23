@@ -11,7 +11,7 @@ data "anyscale_organization_user" "by_user_id" {
 
 output "user_identity_id" {
   value       = data.anyscale_organization_user.by_email.id
-  description = "The identity_id - a read-only identifier for reference/debugging, NOT what anyscale_organization_user is imported or keyed by (that resource uses email; see its own example)"
+  description = "Read-only identity_id; not the import key (email is)"
 }
 
 output "user_email_by_user_id" {
@@ -21,10 +21,12 @@ output "user_email_by_user_id" {
 
 output "user_base_role" {
   value       = data.anyscale_organization_user.by_email.base_role
-  description = "The user's base role - prefer this over permission_level, which the backend is moving away from"
+  description = "Base role; prefer over permission_level"
 }
 
 output "user_additional_roles" {
-  value       = data.anyscale_organization_user.by_email.additional_roles
-  description = "Additional restriction roles beyond the base role (e.g. image_reader), if any; empty if none, null only if the provider could not determine it (a user with no user_id)"
+  value = (
+    data.anyscale_organization_user.by_email.additional_roles
+  )
+  description = "Extra restriction roles; empty if none"
 }

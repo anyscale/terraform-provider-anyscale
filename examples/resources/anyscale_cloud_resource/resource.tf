@@ -16,8 +16,10 @@ resource "anyscale_cloud_resource" "aws_vm" {
 
     # Optional: only needed if your IAM tooling names the cluster node's
     # instance profile differently from its role (dataplane_iam_role_arn
-    # above). Defaults to the same name as dataplane_iam_role_arn when unset.
-    # cluster_instance_profile_id = "arn:aws:iam::xxx:instance-profile/cluster-node"
+    # above). Defaults to the same name as dataplane_iam_role_arn when
+    # unset.
+    # cluster_instance_profile_id =
+    #   "arn:aws:iam::xxx:instance-profile/cluster-node"
   }
 
   object_storage {
@@ -42,24 +44,27 @@ resource "anyscale_cloud_resource" "gcp_vm" {
   }
 
   object_storage {
-    # Include the gs:// prefix explicitly for GCP (unlike AWS, where a bare
-    # bucket name is fine either way) - see the "Cloud Resources" guide for why.
+    # Include the gs:// prefix explicitly for GCP (unlike AWS, where a
+    # bare bucket name is fine either way) - see the "Cloud Resources"
+    # guide for why.
     bucket_name = "gs://my-gcs-bucket"
   }
 }
 
 # AWS K8S Cloud Resource with File Storage
 resource "anyscale_cloud_resource" "eks_with_efs" {
-  cloud_id       = "cld_k8s123"
-  name           = "k8s-aws-us-west-2"
-  cloud_provider = "AWS" # required here: no aws_config block below to infer it from
+  cloud_id = "cld_k8s123"
+  name     = "k8s-aws-us-west-2"
+  # required here: no aws_config block below to infer it from
+  cloud_provider = "AWS"
   compute_stack  = "K8S"
 
   kubernetes_config {
     anyscale_operator_iam_identity = "arn:aws:iam::xxx:role/anyscale-eks-operator"
     zones                          = ["us-west-2a", "us-west-2b"]
-    # Optional: a Redis endpoint reachable from the data plane, used for Ray
-    # GCS fault tolerance. Available on any K8S cloud, not AWS-specific.
+    # Optional: a Redis endpoint reachable from the data plane, used for
+    # Ray GCS fault tolerance. Available on any K8S cloud, not
+    # AWS-specific.
     redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
   }
 
@@ -76,9 +81,10 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
       zone    = "us-west-2a"
     }]
 
-    # Alternatives to EFS mount targets above, for a pre-existing Kubernetes
-    # volume instead: a PersistentVolumeClaim by name, or a CSI ephemeral
-    # inline volume driver. Both are Kubernetes-only, like this whole block.
+    # Alternatives to EFS mount targets above, for a pre-existing
+    # Kubernetes volume instead: a PersistentVolumeClaim by name, or a
+    # CSI ephemeral inline volume driver. Both are Kubernetes-only, like
+    # this whole block.
     # persistent_volume_claim     = "my-shared-storage-pvc"
     # csi_ephemeral_volume_driver = "csi.example.com"
   }
@@ -86,26 +92,29 @@ resource "anyscale_cloud_resource" "eks_with_efs" {
 
 # GCP K8S Cloud Resource with a CSI ephemeral inline volume
 resource "anyscale_cloud_resource" "gke_with_csi" {
-  cloud_id       = "cld_k8s456"
-  name           = "k8s-gcp-us-central1"
-  cloud_provider = "GCP" # required here: no gcp_config block below to infer it from
+  cloud_id = "cld_k8s456"
+  name     = "k8s-gcp-us-central1"
+  # required here: no gcp_config block below to infer it from
+  cloud_provider = "GCP"
   compute_stack  = "K8S"
 
   kubernetes_config {
     anyscale_operator_iam_identity = "gke-nodes@my-project.iam.gserviceaccount.com"
     zones                          = ["us-central1-a", "us-central1-b"]
-    redis_endpoint                 = "redis.ray-system.svc.cluster.local:6379"
+
+    redis_endpoint = "redis.ray-system.svc.cluster.local:6379"
   }
 
   object_storage {
-    # Include the gs:// prefix explicitly for GCP - see the "Cloud Resources"
-    # guide for why.
+    # Include the gs:// prefix explicitly for GCP - see the "Cloud
+    # Resources" guide for why.
     bucket_name = "gs://my-gke-bucket"
   }
 
-  # A CSI ephemeral inline volume driver, as an alternative to the EFS-style
-  # mount_targets shown on the AWS example above - set only one of
-  # persistent_volume_claim, csi_ephemeral_volume_driver, or mount_targets.
+  # A CSI ephemeral inline volume driver, as an alternative to the
+  # EFS-style mount_targets shown on the AWS example above - set only
+  # one of persistent_volume_claim, csi_ephemeral_volume_driver, or
+  # mount_targets.
   file_storage {
     csi_ephemeral_volume_driver = "csi.example.com"
 
@@ -113,19 +122,19 @@ resource "anyscale_cloud_resource" "gke_with_csi" {
   }
 }
 
-# Kubernetes Anyscale Operator health, once it has reported in (null for VM,
-# and null for a K8S resource whose operator hasn't reported yet)
+# Kubernetes Anyscale Operator health, once it has reported in (null for
+# VM, and null for a K8S resource whose operator hasn't reported yet)
 output "eks_operator_status" {
   value       = anyscale_cloud_resource.eks_with_efs.operator_status
-  description = "Health status reported by the Anyscale Operator running in the cluster"
+  description = "Health status reported by the Anyscale Operator"
 }
 
 output "eks_operator_version" {
   value       = anyscale_cloud_resource.eks_with_efs.operator_version
-  description = "Version of the Anyscale Operator that last reported status"
+  description = "Operator version that last reported status"
 }
 
 output "eks_operator_reported_at" {
   value       = anyscale_cloud_resource.eks_with_efs.reported_at
-  description = "Timestamp when the Anyscale Operator last reported status"
+  description = "When the Operator last reported status"
 }

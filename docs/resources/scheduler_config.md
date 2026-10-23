@@ -28,9 +28,10 @@ Requires the Anyscale Scheduler to be enabled for your organization; if it is di
 ## Example Usage
 
 ```terraform
-# The Anyscale Scheduler configuration is a single document per organization.
-# Declare it in exactly one Terraform configuration: this resource owns the
-# whole document, so a second configuration managing it would revert the first.
+# The Anyscale Scheduler configuration is a single document per
+# organization. Declare it in exactly one Terraform configuration: this
+# resource owns the whole document, so a second configuration managing
+# it would revert the first.
 
 resource "anyscale_scheduler_config" "this" {
   # Named hardware profiles that queues allocate quota against.
@@ -57,8 +58,8 @@ resource "anyscale_scheduler_config" "this" {
     },
   ]
 
-  # Queues that workloads are admitted into. Both queues share a cohort, so
-  # unused quota in one is available to the other.
+  # Queues that workloads are admitted into. Both queues share a cohort,
+  # so unused quota in one is available to the other.
   resource_queues = [
     {
       name        = "batch"
@@ -88,8 +89,9 @@ resource "anyscale_scheduler_config" "this" {
           flavors = [
             {
               name = "gpu-a10"
-              # Omitting nominal_quota means unlimited. An explicit 0 would
-              # block GPUs for this queue entirely - the two are not the same.
+              # Omitting nominal_quota means unlimited. An explicit 0
+              # would block GPUs for this queue entirely - the two are
+              # not the same.
               resources = [
                 { name = "gpu", borrowing_limit = 8 },
               ]
@@ -109,7 +111,11 @@ resource "anyscale_scheduler_config" "this" {
             {
               name = "cpu-standard"
               resources = [
-                { name = "cpu", nominal_quota = 64, lending_limit = 32 },
+                {
+                  name          = "cpu"
+                  nominal_quota = 64
+                  lending_limit = 32
+                },
                 { name = "memory_gb", nominal_quota = 256 },
               ]
             },
@@ -119,9 +125,9 @@ resource "anyscale_scheduler_config" "this" {
     },
   ]
 
-  # Rules are evaluated top to bottom and the first match wins. Once any rule
-  # exists, a workload matching none of them is rejected, so the last rule here
-  # is a deliberate catch-all.
+  # Rules are evaluated top to bottom and the first match wins. Once any
+  # rule exists, a workload matching none of them is rejected, so the
+  # last rule here is a deliberate catch-all.
   scheduling_rules = [
     {
       selector = [
@@ -145,7 +151,8 @@ resource "anyscale_scheduler_config" "this" {
     },
   ]
 
-  # Stored and returned by the API, but the scheduler does not act on it yet.
+  # Stored and returned by the API, but the scheduler does not act on it
+  # yet.
   recycle_policy = {
     rotation_interval = "24h"
     max_idle_duration = "10m"
@@ -306,8 +313,9 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# The scheduler config is a singleton per organization, so it is imported by
-# organization ID. The ID must match the organization the provider's token
-# authenticates to - the anyscale_organization data source reports it.
+# The scheduler config is a singleton per organization, so it is
+# imported by organization ID. The ID must match the organization the
+# provider's token authenticates to - the anyscale_organization data
+# source reports it.
 terraform import anyscale_scheduler_config.this org_abcdefghijklmnopqrstuvwxyz
 ```

@@ -13,7 +13,8 @@ Manages an Anyscale compute configuration for Ray clusters. See the [Compute Con
 ## Example Usage
 
 ```terraform
-# Compute config with native HCL syntax for flags and advanced instance config
+# Compute config with native HCL syntax for flags and advanced instance
+# config
 resource "anyscale_compute_config" "example" {
   name     = "my-compute-config"
   cloud_id = "cld_abc123"
@@ -30,7 +31,8 @@ resource "anyscale_compute_config" "example" {
     }
   ]
 
-  # Terminate idle clusters after 30 minutes, and cap total uptime at 8 hours
+  # Terminate idle clusters after 30 minutes, and cap total uptime at 8
+  # hours
   idle_termination_minutes = 30
   maximum_uptime_minutes   = 480
 
@@ -40,7 +42,8 @@ resource "anyscale_compute_config" "example" {
     "ray-cluster-autoscaler-enabled" = "true"
   }
 
-  # Native HCL for advanced configurations passed through to the cloud provider
+  # Native HCL for advanced configurations passed through to the cloud
+  # provider
   advanced_instance_config = {
     BlockDeviceMappings = [
       {
@@ -334,14 +337,14 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# Import using the version-specific config ID (not the name).
-# Find it via `anyscale compute-config get <name>` or the anyscale_compute_config
-# data source's `config_id` attribute.
+# Import using the version-specific config ID (not the name). Find it
+# via `anyscale compute-config get <name>` or the
+# anyscale_compute_config data source's `config_id` attribute.
 terraform import anyscale_compute_config.example cpt_abc123
 
-# Or import using name:version - resolved to the matching config_id at import
-# time, then behaves identically to importing by config_id. The name must not
-# contain a colon. If it matches more than one cloud, import by config_id
-# instead and specify which cloud you mean.
+# Or import using name:version - resolved to the matching config_id at
+# import time, then behaves identically to importing by config_id. The
+# name must not contain a colon. If it matches more than one cloud,
+# import by config_id instead and specify which cloud you mean.
 terraform import anyscale_compute_config.example my-compute-config:3
 ```

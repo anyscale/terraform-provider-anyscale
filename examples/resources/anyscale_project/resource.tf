@@ -1,5 +1,5 @@
-# Look up an existing cloud by name, then create a project scoped to it -
-# for a cloud you don't also manage in this configuration
+# Look up an existing cloud by name, then create a project scoped to it
+# - for a cloud you don't also manage in this configuration
 data "anyscale_cloud" "by_name" {
   name = "my-terraform-cloud"
 }
@@ -17,9 +17,10 @@ resource "anyscale_project" "shared_research" {
   description = "Shared research workspaces"
 }
 
-# Project access is not managed here. Use anyscale_cloud_access to manage a cloud's members
-# and their project roles (see the RBAC guide). The anyscale_project data source reads a
-# project's current collaborators without managing them.
+# Project access is not managed here. Use anyscale_cloud_access to
+# manage a cloud's members and their project roles (see the RBAC guide).
+# The anyscale_project data source reads a project's current
+# collaborators without managing them.
 
 # Outputs
 output "project_id" {
