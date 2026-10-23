@@ -1,16 +1,18 @@
 package acctest
 
-// Create-only inputs that import does not recover (registry_login_secret,
-// cloud credentials) are null after `terraform import`. A config that declares
-// one must then plan an in-place update that records the value without sending
-// it, not a replacement of the live object. These tests drive
-// RequiresReplaceUnlessUnrecoverable through real plans against mock servers:
+// Inputs that import does not recover (registry_login_secret, cloud
+// credentials) are null after `terraform import`. A config that declares one
+// must then plan an in-place update, not a replacement of the live object.
+//
+// anyscale_container_image_registry's registry_login_secret is an ordinary
+// in-place input: every change, including the first value after import,
+// registers one new build. anyscale_cloud's credentials is create-only and
+// goes through RequiresReplaceUnlessUnrecoverable:
 //
 //   - cold import, then declare the value: Update, nothing written, empty plan
 //     afterwards; changing it again: Replace
 //   - created without the value, then add it: Replace (the Create marker in
 //     private state is what tells the two cases apart)
-//   - change a non-null value: Replace
 
 import (
 	"fmt"
@@ -84,7 +86,10 @@ func newLoginSecretServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
 	return newWriteCountingProxy(t, inner)
 }
 
-func TestAccContainerImageRegistryResource_LoginSecretAdoptedAfterColdImport_MockServer(t *testing.T) {
+// After a cold import the secret is null in state. Declaring one registers a
+// new build carrying it, since the live build's secret is unknown; changing it
+// again registers another.
+func TestAccContainerImageRegistryResource_LoginSecretAfterColdImportRegistersBuild_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 	server, writes := newLoginSecretServer(t)
 
@@ -108,23 +113,29 @@ func TestAccContainerImageRegistryResource_LoginSecretAdoptedAfterColdImport_Moc
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(loginSecretAddr, "registry_login_secret", "my-registry-secret"),
 					resource.TestCheckResourceAttr(loginSecretAddr, "id", loginSecretTemplateID),
-					expectWrites(writes, 0),
+					resource.TestCheckResourceAttr(loginSecretAddr, "revision", "2"),
+					expectWrites(writes, 1),
 				),
 			},
 			{
-				// Now the value is in state, so a real change replaces as before.
 				Config: loginSecretConfig(server.URL, "other-registry-secret"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(loginSecretAddr, plancheck.ResourceActionReplace)},
+					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction(loginSecretAddr, plancheck.ResourceActionUpdate)},
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(loginSecretAddr, "id", loginSecretTemplateID),
+					resource.TestCheckResourceAttr(loginSecretAddr, "revision", "3"),
+					expectWrites(writes, 2),
+				),
 			},
 		},
 	})
 }
 
-func TestAccContainerImageRegistryResource_LoginSecretAddedAfterCreateReplaces_MockServer(t *testing.T) {
+func TestAccContainerImageRegistryResource_LoginSecretAddedAfterCreateUpdatesInPlace_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
-	server, _ := newLoginSecretServer(t)
+	server, writes := newLoginSecretServer(t)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -136,18 +147,25 @@ func TestAccContainerImageRegistryResource_LoginSecretAddedAfterCreateReplaces_M
 				},
 			},
 			{
+				// Create registered the environment and its first build in one write.
 				Config: loginSecretConfig(server.URL, "my-registry-secret"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(loginSecretAddr, plancheck.ResourceActionReplace)},
+					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction(loginSecretAddr, plancheck.ResourceActionUpdate)},
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(loginSecretAddr, "id", loginSecretTemplateID),
+					resource.TestCheckResourceAttr(loginSecretAddr, "revision", "2"),
+					expectWrites(writes, 2),
+				),
 			},
 		},
 	})
 }
 
-func TestAccContainerImageRegistryResource_LoginSecretChangeReplaces_MockServer(t *testing.T) {
+func TestAccContainerImageRegistryResource_LoginSecretChangeUpdatesInPlace_MockServer(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
-	server, _ := newLoginSecretServer(t)
+	server, writes := newLoginSecretServer(t)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: ProtoV6ProviderFactories,
@@ -162,8 +180,14 @@ func TestAccContainerImageRegistryResource_LoginSecretChangeReplaces_MockServer(
 			{
 				Config: loginSecretConfig(server.URL, "other-registry-secret"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(loginSecretAddr, plancheck.ResourceActionReplace)},
+					PreApply:             []plancheck.PlanCheck{plancheck.ExpectResourceAction(loginSecretAddr, plancheck.ResourceActionUpdate)},
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(loginSecretAddr, "id", loginSecretTemplateID),
+					resource.TestCheckResourceAttr(loginSecretAddr, "revision", "2"),
+					expectWrites(writes, 2),
+				),
 			},
 		},
 	})

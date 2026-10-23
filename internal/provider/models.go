@@ -488,7 +488,7 @@ type CreateBYODApplicationTemplateRequest struct {
 // CreateBYODApplicationTemplateConfigJSON is the config_json for BYOD application template creation
 type CreateBYODApplicationTemplateConfigJSON struct {
 	DockerImage         string            `json:"docker_image"`
-	RayVersion          string            `json:"ray_version"`
+	RayVersion          *string           `json:"ray_version,omitempty"`
 	EnvVars             map[string]string `json:"env_vars,omitempty"`
 	RegistryLoginSecret *string           `json:"registry_login_secret,omitempty"`
 }
@@ -503,7 +503,7 @@ type CreateBYODBuildRequest struct {
 // CreateBYODAppConfigConfigJSON is the config_json for BYOD build creation
 type CreateBYODAppConfigConfigJSON struct {
 	DockerImage         string            `json:"docker_image"`
-	RayVersion          string            `json:"ray_version"`
+	RayVersion          *string           `json:"ray_version,omitempty"`
 	EnvVars             map[string]string `json:"env_vars,omitempty"`
 	RegistryLoginSecret *string           `json:"registry_login_secret,omitempty"`
 }

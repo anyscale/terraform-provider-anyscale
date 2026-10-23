@@ -28,12 +28,6 @@ var (
 	_ resource.ResourceWithModifyPlan  = &ContainerImageRegistryResource{}
 )
 
-// defaultBYODRayVersion is sent to the BYOD create endpoints when the user omits
-// ray_version. Both endpoints require it as a non-empty string, matched exactly against a
-// fixed table of supported base images server-side - they never inspect the docker image
-// itself - so some concrete, currently-supported value must always be sent.
-const defaultBYODRayVersion = "2.44.0"
-
 // NewContainerImageRegistryResource creates a new container image registry resource.
 func NewContainerImageRegistryResource() resource.Resource {
 	return &ContainerImageRegistryResource{}
@@ -80,7 +74,7 @@ func (r *ContainerImageRegistryResource) Schema(ctx context.Context, req resourc
 	resp.Schema = schema.Schema{
 		Version: 1,
 
-		MarkdownDescription: `Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Changing ` + "`image_uri`" + ` registers a new build in place; changing any other argument replaces the resource.
+		MarkdownDescription: `Registers an existing Docker container image with Anyscale. Use this resource to make external container images (from ECR, Docker Hub, or other registries) available for use in Anyscale workloads. Changing ` + "`image_uri`" + `, ` + "`ray_version`" + `, or ` + "`registry_login_secret`" + ` registers a new build in place; changing ` + "`name`" + ` replaces the resource.
 
 ~> **Note:** When this resource is destroyed, it archives the underlying cluster environment. However, the Anyscale API does not currently support permanent deletion of container images. Archived images can be viewed by setting ` + "`include_archived = true`" + ` on the ` + "`anyscale_container_images`" + ` data source.`,
 
@@ -122,19 +116,15 @@ func containerImageRegistryAttributes() map[string]schema.Attribute {
 		"ray_version": schema.StringAttribute{
 			Optional:            true,
 			Computed:            true,
-			MarkdownDescription: "The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; the API rejects unsupported values at creation time. If not specified, a supported default is used automatically.",
+			MarkdownDescription: "The Ray version to associate with this image (e.g., `2.9.0`). Must be a Ray version Anyscale has a build image for; an unsupported value fails with a server error. If omitted, no Ray version is recorded on the build. Changing it registers a new build in place, incrementing `revision`; removing it from configuration keeps the current value.",
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
-				stringplanmodifier.RequiresReplace(),
 			},
 		},
 		"registry_login_secret": schema.StringAttribute{
 			Optional:            true,
 			Sensitive:           true,
-			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it replaces the image, except the first value set after `terraform import`, which updates in place (see [Importing an existing image](../guides/container-images.md#importing-an-existing-container-image)).",
-			PlanModifiers: []planmodifier.String{
-				RequiresReplaceUnlessUnrecoverable("registry_login_secret", "container image"),
-			},
+			MarkdownDescription: "The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it registers a new build in place, incrementing `revision`; removing it registers a new build without registry credentials. Not recovered by `terraform import`.",
 		},
 
 		// Computed attributes
@@ -216,21 +206,9 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 		return
 	}
 
-	// ray_version is a required field on the BYOD create call below - the backend
-	// looks it up against a fixed table of supported base images and returns HTTP 500
-	// if nothing matches (it never inspects the docker image itself), so some concrete,
-	// currently-supported value must always be sent even when the user omits the
-	// attribute. defaultBYODRayVersion is that fallback; it is not necessarily what ends
-	// up in state, since state is populated from what the API echoes back (see the
-	// ResolvedRayVersion call in applyRegistryBuild).
-	rayVersion := defaultBYODRayVersion
-	if !plan.RayVersion.IsNull() && !plan.RayVersion.IsUnknown() && plan.RayVersion.ValueString() != "" {
-		rayVersion = plan.RayVersion.ValueString()
-	}
-
 	configJSON := CreateBYODApplicationTemplateConfigJSON{
 		DockerImage: plan.ImageURI.ValueString(),
-		RayVersion:  rayVersion,
+		RayVersion:  requestRayVersion(plan.RayVersion),
 	}
 
 	configJSON.RegistryLoginSecret = plan.RegistryLoginSecret.ValueStringPointer()
@@ -326,7 +304,6 @@ func (r *ContainerImageRegistryResource) Create(ctx context.Context, req resourc
 	if partial.RayVersion.IsUnknown() {
 		partial.RayVersion = types.StringNull()
 	}
-	MarkCreatedByTerraform(ctx, resp)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &partial)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -399,14 +376,26 @@ func addBuildNotFoundYetWarning(diags *diag.Diagnostics, err error) {
 	diags.AddWarning("Container Image Build Not Found Yet", detail)
 }
 
-// createBuild registers plan.ImageURI as a new build of the cluster environment plan.ID
-// and maps the build onto plan. Update uses it to register a changed image_uri.
-func (r *ContainerImageRegistryResource) createBuild(ctx context.Context, plan *ContainerImageRegistryResourceModel, templateName, rayVersion string, diags *diag.Diagnostics) bool {
+// requestRayVersion returns the ray_version to send: the configured value, or nil -
+// omitting the key - when it is unset or Unknown (ModifyPlan marks it Unknown when a
+// build is registered without one in config). The backend then records no Ray version
+// on the build rather than guessing one.
+func requestRayVersion(v types.String) *string {
+	if v.IsNull() || v.IsUnknown() || v.ValueString() == "" {
+		return nil
+	}
+	return v.ValueStringPointer()
+}
+
+// createBuild registers plan's image_uri, ray_version and registry_login_secret as a new
+// build of the cluster environment plan.ID and maps the build onto plan. Update uses it
+// for any change to those three.
+func (r *ContainerImageRegistryResource) createBuild(ctx context.Context, plan *ContainerImageRegistryResourceModel, templateName string, diags *diag.Diagnostics) bool {
 	buildReq := CreateBYODBuildRequest{
 		ApplicationTemplateID: plan.ID.ValueString(),
 		ConfigJSON: CreateBYODAppConfigConfigJSON{
 			DockerImage:         plan.ImageURI.ValueString(),
-			RayVersion:          rayVersion,
+			RayVersion:          requestRayVersion(plan.RayVersion),
 			RegistryLoginSecret: plan.RegistryLoginSecret.ValueStringPointer(),
 		},
 	}
@@ -462,15 +451,13 @@ func applyRegistryBuild(plan *ContainerImageRegistryResourceModel, result *Build
 
 	plan.Digest = types.StringPointerValue(result.Digest)
 
-	// ray_version is Optional+Computed and RequiresReplace (immutable): only fill it
-	// from the API's resolved value when the user omitted it from config (plan.RayVersion
-	// is Unknown here, not Null, since a Computed attribute plans Unknown absent a prior
-	// state value). A user-set value must be preserved verbatim rather than reconciled
-	// with what the API echoes back: byod_ray_version is parsed from the docker image
-	// tag itself, not derived from this field, so it can resolve to something entirely
-	// unrelated to what the user typed (see ResolvedRayVersion's doc comment) -
-	// overwriting here would leave config permanently mismatched against state, and
-	// RequiresReplace turns every such mismatch into a replace loop.
+	// ray_version is Optional+Computed: only fill it from the API's resolved value when
+	// the user omitted it from config (plan.RayVersion is Unknown here, not Null: a
+	// Computed attribute plans Unknown absent a prior state value, and ModifyPlan marks it
+	// Unknown when a build is registered without one). A null API value stays null. A
+	// user-set value must be preserved verbatim rather than reconciled with what the API
+	// echoes back (see ResolvedRayVersion's doc comment): overwriting it would leave config
+	// permanently mismatched against state, and every apply would register another build.
 	if plan.RayVersion.IsUnknown() {
 		if resolvedRayVersion := result.ResolvedRayVersion(); resolvedRayVersion != nil {
 			plan.RayVersion = types.StringValue(*resolvedRayVersion)
@@ -487,20 +474,40 @@ func applyRegistryBuild(plan *ContainerImageRegistryResourceModel, result *Build
 	}
 }
 
-// ModifyPlan marks the build-derived attributes unknown when image_uri changes, since
-// Update then registers a new build.
+// registersBuild reports whether an update from state to plan registers a new build:
+// image_uri, registry_login_secret or ray_version differs. An Unknown planned value (for
+// example another resource's computed output) differs from any state value, so it counts
+// as a build. ray_version only counts when config sets it: an omitted ray_version keeps
+// the state value (UseStateForUnknown) and never triggers a build on its own.
+func registersBuild(plan, state ContainerImageRegistryResourceModel, configRayVersion types.String) bool {
+	return !plan.ImageURI.Equal(state.ImageURI) ||
+		!plan.RegistryLoginSecret.Equal(state.RegistryLoginSecret) ||
+		(!configRayVersion.IsNull() && !plan.RayVersion.Equal(state.RayVersion))
+}
+
+// ModifyPlan marks the build-derived attributes Unknown when Update will register a new
+// build. When that build is registered without ray_version in config, it also marks
+// ray_version Unknown: no ray_version is sent, and state takes the API's value (null)
+// rather than carrying forward a value an older provider version stamped as a default.
+// Without that, Core would reject the null written over a planned known value.
 func (r *ContainerImageRegistryResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Create (no state) and destroy (no plan) register no build here.
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
 		return
 	}
 
 	var plan, state ContainerImageRegistryResourceModel
+	var configRayVersion types.String
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() || plan.ImageURI.Equal(state.ImageURI) {
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("ray_version"), &configRayVersion)...)
+	if resp.Diagnostics.HasError() || !registersBuild(plan, state, configRayVersion) {
 		return
 	}
 
+	if configRayVersion.IsNull() {
+		plan.RayVersion = types.StringUnknown()
+	}
 	plan.BuildID = types.StringUnknown()
 	plan.BuildStatus = types.StringUnknown()
 	plan.CreatedAt = types.StringUnknown()
@@ -593,12 +600,12 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 		state.ImageURI = types.StringValue(*result.DockerImageName)
 	}
 
-	// ray_version is Optional+Computed and RequiresReplace (immutable): only fill it
-	// when state does not already carry a value (unset at Create time, e.g. a
-	// resource from a provider version that left ray_version null, or - defensively - a still-null value somehow left over
-	// from Create). A previously-set value, whether user-typed or filled on an earlier
-	// refresh, is preserved untouched; see the matching comment in Create for why the
-	// API's echoed value cannot safely overwrite it.
+	// ray_version is Optional+Computed: only fill it when state does not already carry a
+	// value (unset at Create time, e.g. a resource from a provider version that left it
+	// null, or a still-null value left over from Create). A null API value stays null. A
+	// previously-set value, whether user-typed or filled on an earlier refresh, is
+	// preserved untouched; see applyRegistryBuild for why the API's echoed value cannot
+	// safely overwrite it.
 	if state.RayVersion.IsNull() {
 		if resolvedRayVersion := result.ResolvedRayVersion(); resolvedRayVersion != nil {
 			state.RayVersion = types.StringValue(*resolvedRayVersion)
@@ -631,35 +638,35 @@ func (r *ContainerImageRegistryResource) Read(ctx context.Context, req resource.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// Update handles two in-place changes. A changed image_uri registers a new build on the
-// same cluster environment, as `anyscale image register` does for an existing name. A
-// registry_login_secret set after import (see RequiresReplaceUnlessUnrecoverable) is
-// recorded in state and only sent if image_uri also changed.
+// Update registers one new build on the same cluster environment when image_uri,
+// ray_version or registry_login_secret changes (see registersBuild), as `anyscale image
+// register` does for an existing name. Several changes in one apply are still one build.
+// The build endpoint never deduplicates: every request is a new revision. If the build
+// request fails, state is left as it was, so the next plan proposes the same update.
 func (r *ContainerImageRegistryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state ContainerImageRegistryResourceModel
+	var configRayVersion types.String
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("ray_version"), &configRayVersion)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if !plan.Name.Equal(state.Name) || !plan.RayVersion.Equal(state.RayVersion) {
+	// Unreachable behind name's RequiresReplace; kept so a schema change cannot turn a
+	// rename into a silent no-op.
+	if !plan.Name.Equal(state.Name) {
 		AddConfigError(&resp.Diagnostics, "Update Not Supported",
-			"Changing name or ray_version requires replacing the container image.")
+			"Changing name requires replacing the container image.")
 		return
 	}
 
-	if plan.ImageURI.Equal(state.ImageURI) {
-		state.RegistryLoginSecret = plan.RegistryLoginSecret
-		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	if !registersBuild(plan, state, configRayVersion) {
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
 
-	rayVersion := defaultBYODRayVersion
-	if plan.RayVersion.ValueString() != "" {
-		rayVersion = plan.RayVersion.ValueString()
-	}
-	if !r.createBuild(ctx, &plan, plan.Name.ValueString(), rayVersion, &resp.Diagnostics) {
+	if !r.createBuild(ctx, &plan, plan.Name.ValueString(), &resp.Diagnostics) {
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
