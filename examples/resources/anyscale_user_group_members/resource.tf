@@ -1,4 +1,4 @@
-# Alpha: the schema may change before Beta.
+# Beta.
 # AUTHORITATIVE: anyone in the group who is not listed in `members` is
 # removed, including people added in the Anyscale console. Declare
 # exactly one anyscale_user_group_members per group.

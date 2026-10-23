@@ -3,20 +3,20 @@
 page_title: "anyscale_user_group Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Alpha. User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
+  ~> Beta. User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the RBAC guide ../guides/rbac.md#user-groups-beta.
   Manages an Anyscale user group in the token's organization; manage its members with anyscale_user_group_members. Destroying the group first removes every member, including members added outside Terraform. Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the anyscale_user_group data source.
 ---
 
 # anyscale_user_group (Resource)
 
-~> **Alpha.** User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
+~> **Beta.** User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
 
 Manages an Anyscale user group in the token's organization; manage its members with `anyscale_user_group_members`. Destroying the group first removes every member, including members added outside Terraform. Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the `anyscale_user_group` data source.
 
 ## Example Usage
 
 ```terraform
-# Alpha: the schema may change before Beta. Creates an empty user group.
+# Beta. Creates an empty user group.
 # Manage who belongs to it with anyscale_user_group_members.
 resource "anyscale_user_group" "ml_platform" {
   # no leading or trailing whitespace; unique among the organization's

@@ -94,9 +94,9 @@ output "invitation_expires_at" {
 
 # Managing a team's organization roles: one locals map as the single
 # source of truth for both the invitation loop below and the role loop
-# further down. Anyscale user groups (Alpha) are a separate concept --
+# further down. Anyscale user groups are a separate concept --
 # they manage who belongs to a named set, not each person's organization
-# role; see the RBAC guide's "User groups (Alpha)" section. Adding a
+# role; see the RBAC guide's "User groups (Beta)" section. Adding a
 # teammate is one line, in one place, and every resource that reads this
 # map follows.
 locals {

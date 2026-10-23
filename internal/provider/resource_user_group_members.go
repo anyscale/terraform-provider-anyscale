@@ -54,7 +54,7 @@ func (r *UserGroupMembersResource) Schema(ctx context.Context, req resource.Sche
 	resp.Schema = schema.Schema{
 		// Version 1 renamed group_id to user_group_id; see UpgradeState.
 		Version: 1,
-		MarkdownDescription: userGroupsAlphaBanner +
+		MarkdownDescription: userGroupsBetaBanner +
 			"Manages the complete member list of an Anyscale user group. This resource is authoritative: members added outside Terraform are removed on the next apply, and destroying it empties the group without deleting it. " +
 			"Use at most one per group. Directory-synced (SCIM) groups are rejected, because their identity provider owns membership. " +
 			"Do not manage the \"All users\" group of a [converted organization](../guides/rbac.md#organization-access-mode) with this resource.",

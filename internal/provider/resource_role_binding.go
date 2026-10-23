@@ -138,7 +138,7 @@ func (r *RoleBindingResource) Schema(ctx context.Context, req resource.SchemaReq
 	scopeDescription := "Specify exactly one of `organization_id`, `cloud_id` or `project_id`. Changing it replaces the binding."
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: roleBindingsAlphaBanner +
+		MarkdownDescription: roleBindingsBetaBanner +
 			"Grants one role to one user group or user on an organization, cloud or project. " +
 			"Access granted this way is not visible to `anyscale_cloud_access`; see the [RBAC guide](../guides/rbac.md). " +
 			"A binding cannot be edited, so changing any argument replaces it. " +

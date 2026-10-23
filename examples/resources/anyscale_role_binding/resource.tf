@@ -1,8 +1,8 @@
-# Alpha, behind a feature flag (contact support@anyscale.com for
-# access). The schema may change before Beta. Grants one role to one
-# user group or one user on exactly one of a cloud, a project, or the
-# organization. A binding cannot be edited: changing any argument
-# replaces it.
+# Beta; Anyscale enables it per organization (contact
+# support@anyscale.com). Breaking schema changes get a deprecation
+# first. Grants one role to one user group or one user on exactly one
+# of a cloud, a project, or the organization. A binding cannot be
+# edited: changing any argument replaces it.
 #
 # Prefer groups: grant a role to a group once, then change who has
 # access by editing the group's members.

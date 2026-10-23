@@ -12,10 +12,10 @@ import (
 	"unicode"
 )
 
-// userGroupsAlphaBanner opens the MarkdownDescription of every user group
+// userGroupsBetaBanner opens the MarkdownDescription of every user group
 // resource and data source. The policy it links to is written once, in the
 // RBAC guide, rather than repeated per attribute.
-const userGroupsAlphaBanner = "~> **Alpha.** User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).\n\n"
+const userGroupsBetaBanner = "~> **Beta.** User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#user-groups-beta).\n\n"
 
 const userGroupsBasePath = "/api/v2/user_groups"
 

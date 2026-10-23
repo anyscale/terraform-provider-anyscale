@@ -3,20 +3,20 @@
 page_title: "anyscale_user_groups Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Alpha. User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
+  ~> Beta. User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the RBAC guide ../guides/rbac.md#user-groups-beta.
   Lists the user groups in the token's organization. Use anyscale_user_group for a group's members and organization role.
 ---
 
 # anyscale_user_groups (Data Source)
 
-~> **Alpha.** User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
+~> **Beta.** User groups are a Beta feature. Breaking schema changes get a deprecation first and a changelog entry. See the [RBAC guide](../guides/rbac.md#user-groups-beta).
 
 Lists the user groups in the token's organization. Use `anyscale_user_group` for a group's members and organization role.
 
 ## Example Usage
 
 ```terraform
-# Alpha: the schema may change before Beta.
+# Beta.
 # List every user group in the organization.
 data "anyscale_user_groups" "all" {}
 
