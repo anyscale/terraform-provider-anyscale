@@ -3,13 +3,13 @@
 page_title: "anyscale_user_group Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Alpha. User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
+  ~> Alpha. User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
   Manages an Anyscale user group in the token's organization; manage its members with anyscale_user_group_members. Destroying the group first removes every member, including members added outside Terraform. Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the anyscale_user_group data source.
 ---
 
 # anyscale_user_group (Resource)
 
-~> **Alpha.** User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
+~> **Alpha.** User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
 
 Manages an Anyscale user group in the token's organization; manage its members with `anyscale_user_group_members`. Destroying the group first removes every member, including members added outside Terraform. Groups synced from an identity provider (SCIM) cannot be managed or imported; read them with the `anyscale_user_group` data source.
 

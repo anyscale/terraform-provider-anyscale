@@ -15,7 +15,7 @@ import (
 // userGroupsAlphaBanner opens the MarkdownDescription of every user group
 // resource and data source. The policy it links to is written once, in the
 // RBAC guide, rather than repeated per attribute.
-const userGroupsAlphaBanner = "~> **Alpha.** User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).\n\n"
+const userGroupsAlphaBanner = "~> **Alpha.** User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).\n\n"
 
 const userGroupsBasePath = "/api/v2/user_groups"
 

@@ -36,6 +36,35 @@ under incompatible authority models (one row vs. the whole set), and running bot
 cloud would mean `anyscale_cloud_access` silently revoking members `anyscale_cloud_user_role` thinks
 it still manages. There was never a version where declaring both was safe.
 
+## Inviting people: limits, single sign-on, directory sync
+
+`anyscale_organization_user` and `anyscale_organization_invitation` both send invitations, and both
+are subject to the same constraints.
+
+- **Apply success is not access.** A person who is not yet a member has only been *invited*; they
+  have access once they accept the emailed link. Read the `anyscale_organization_user` data source
+  to see where they are.
+- **Rate limits are per organization**, shared with the Anyscale console and not per configuration:
+  by default at most 20 pending invitations at once and 20 sent per 24 hours. Anyscale can change
+  both per organization. A `for_each` that invites more people than the limit fails partway
+  through the apply, leaving earlier invitations sent. Invite in batches, or ask Anyscale to raise
+  the limit.
+- **Single sign-on `required`:** creating an invitation is refused, because the emailed link would be
+  rejected on use while still spending one of the 20 daily invitations. Bring the person in through
+  your identity provider; once they have logged in, `anyscale_organization_user` adopts them. If the
+  provider cannot read the organization's SSO mode, it sends the invitation and attaches a warning.
+- **Directory sync (SCIM) with the Policy API:** if the organization has both enabled, the backend
+  refuses to create invitations. Both must be true; SCIM alone does not trigger it. Existing members
+  can still be adopted and read. Manage membership through your identity provider and
+  [`anyscale policy set`](https://docs.anyscale.com/reference/cli/policy#policy-cli).
+- **Re-inviting a pending address** silently invalidates the earlier invitation and creates a new one
+  with a new `id`; letter case does not matter. A tracked earlier invitation then reads `expired`
+  on its next refresh.
+- **Destroying never removes a member.** Destroying `anyscale_organization_user` cancels only a
+  still-pending invitation it sent, and never evicts anyone who had joined or was adopted. Destroying
+  `anyscale_organization_invitation` revokes a pending invitation and has no effect on an accepted
+  one. Removing someone's access is a deliberate act neither resource can do.
+
 ## User groups (Alpha)
 
 ~> **Alpha.** User groups are an Alpha feature. The Anyscale API and this provider's schema for them
