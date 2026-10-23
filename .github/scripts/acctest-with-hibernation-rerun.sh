@@ -72,6 +72,13 @@ if ! ANYSCALE_TEST_WAKE_GATE=1 run_suite "${LOG}.gate.jsonl" "${LOG}.gate" -time
   echo "**Failed:** the wake gate failed (see TestAccWakeGate above), so the tests were not re-run." >>"$SUMMARY"
   exit "$rc"
 fi
+# go test also exits 0 when the gate skipped (no credentials) or the pattern
+# matched nothing; either way the cloud was never checked.
+if ! "$TOOL" passed "${LOG}.gate.jsonl" TestAccWakeGate; then
+  echo "" >>"$SUMMARY"
+  echo "**Failed:** the wake gate did not run (skipped or not found), so the tests were not re-run." >>"$SUMMARY"
+  exit "$rc"
+fi
 
 ANYSCALE_TEST_RERUN=1 run_suite "${LOG}.rerun.jsonl" "${LOG}.rerun" -timeout "$TIMEOUT" -parallel 4 -run "$pattern"
 rerun_rc=$?

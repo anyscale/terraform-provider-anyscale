@@ -12,6 +12,7 @@
 //
 //	acctest-rerun render < events.jsonl
 //	acctest-rerun classify events.jsonl
+//	acctest-rerun passed events.jsonl TestName
 //
 // render prints the human-readable test log carried in the stream's output
 // events, with -v's indentation of subtest results restored; lines that are
@@ -21,6 +22,10 @@
 // classify works from per-test events, never from scraped -v text: with
 // -parallel, output interleaves and a line under one test's header can belong
 // to another.
+//
+// passed exits 0 only if the stream has a pass event for TestName: a skip,
+// a failure, or a test that never ran (a -run pattern matching nothing still
+// exits 0 from go test) exits 1.
 //
 // Exit codes for classify:
 //
@@ -58,7 +63,7 @@ func main() {
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: acctest-rerun render < events.jsonl | acctest-rerun classify events.jsonl")
+		fmt.Fprintln(stderr, "usage: acctest-rerun render < events.jsonl | classify events.jsonl | passed events.jsonl TestName")
 		return exitInput
 	}
 	switch args[0] {
@@ -90,6 +95,27 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stdout, runPattern(v.Rerun))
 		return exitRerun
+	case "passed":
+		if len(args) != 3 {
+			fmt.Fprintln(stderr, "usage: acctest-rerun passed events.jsonl TestName")
+			return exitInput
+		}
+		f, err := os.Open(args[1])
+		if err != nil {
+			fmt.Fprintf(stderr, "acctest-rerun: %v\n", err)
+			return exitInput
+		}
+		defer func() { _ = f.Close() }()
+		ok, err := passed(f, args[2])
+		if err != nil {
+			fmt.Fprintf(stderr, "acctest-rerun: passed: %v\n", err)
+			return exitInput
+		}
+		if !ok {
+			fmt.Fprintf(stderr, "%s did not pass (skipped, failed, or did not run)\n", args[2])
+			return 1
+		}
+		return 0
 	default:
 		fmt.Fprintf(stderr, "acctest-rerun: unknown command %q\n", args[0])
 		return exitInput
@@ -142,6 +168,18 @@ func resultIndent(e event) string {
 		return ""
 	}
 	return strings.Repeat("    ", strings.Count(e.Test, "/"))
+}
+
+// passed reports whether the stream has a pass event for the named test.
+func passed(r io.Reader, test string) (bool, error) {
+	s := newScanner(r)
+	for s.Scan() {
+		var e event
+		if json.Unmarshal(s.Bytes(), &e) == nil && e.Action == "pass" && e.Test == test {
+			return true, nil
+		}
+	}
+	return false, s.Err()
 }
 
 // verdict is classify's result: either the top-level tests to rerun, or the

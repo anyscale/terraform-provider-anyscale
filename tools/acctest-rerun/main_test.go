@@ -342,3 +342,26 @@ func TestClassify_DetailWrappedAcrossLines(t *testing.T) {
 	))
 	wantRerun(t, v, "TestA")
 }
+
+// The wake gate counts only if it actually ran and passed: a skip (no
+// credentials) or a -run pattern that matches nothing both exit 0 from go test.
+func TestPassed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in   []byte
+		want bool
+	}{
+		"pass":       {stream(t, [3]string{"run", "TestG", ""}, [3]string{"pass", "TestG", ""}), true},
+		"skip":       {stream(t, [3]string{"run", "TestG", ""}, [3]string{"skip", "TestG", ""}), false},
+		"fail":       {stream(t, [3]string{"run", "TestG", ""}, [3]string{"fail", "TestG", ""}), false},
+		"not run":    {stream(t, [3]string{"output", "", "testing: warning: no tests to run\n"}, [3]string{"pass", "", ""}), false},
+		"other test": {stream(t, [3]string{"run", "TestG2", ""}, [3]string{"pass", "TestG2", ""}), false},
+		"subtest":    {stream(t, [3]string{"run", "TestG/x", ""}, [3]string{"pass", "TestG/x", ""}), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := passed(bytes.NewReader(tc.in), "TestG")
+			if err != nil || got != tc.want {
+				t.Fatalf("passed = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}
