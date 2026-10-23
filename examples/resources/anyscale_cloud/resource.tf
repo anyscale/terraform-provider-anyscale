@@ -6,7 +6,6 @@ resource "anyscale_cloud" "aws_example" {
   compute_stack  = "VM"
 
   # Cloud-level settings
-  auto_add_user            = false
   lineage_tracking_enabled = false
   aggregated_logs_enabled  = false
   is_private_cloud         = false

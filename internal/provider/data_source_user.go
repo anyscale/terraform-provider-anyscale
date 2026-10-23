@@ -81,7 +81,8 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			},
 			"organization_permission_level": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The current user's permission level within their organization (`owner` or `collaborator`). This mirrors the same deprecated `permission_level` concept exposed on `anyscale_organization_user`/`anyscale_organization_users`; `/api/v2/userinfo` has no equivalent to those data sources' `base_role`/`additional_roles`. For the full role picture (including any additional roles) of an arbitrary user, look them up with `anyscale_organization_user` instead.",
+				DeprecationMessage:  legacyRBACReadDeprecation,
+				MarkdownDescription: legacyRBACAttributeNote + "The current user's permission level within their organization (`owner` or `collaborator`).",
 			},
 			"organization_ids": schema.ListAttribute{
 				ElementType:         types.StringType,

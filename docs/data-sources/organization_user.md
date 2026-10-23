@@ -4,14 +4,14 @@ page_title: "anyscale_organization_user Data Source - terraform-provider-anyscal
 subcategory: ""
 description: |-
   Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.
-  The organization role model is migrating from a single permission_level to base_role plus additional_roles - see those attributes below, and the RBAC guide ../guides/rbac.md for the fuller picture across scopes.
+  The role attributes (permission_level, base_role, additional_roles) are deprecated: in an organization converted to role bindings they report access from before conversion. See Legacy RBAC deprecation ../guides/rbac.md#legacy-rbac-deprecation.
 ---
 
 # anyscale_organization_user (Data Source)
 
 Use this data source to retrieve information about a specific user in your organization. You can look up a user by their identity ID, user ID, or email address.
 
-The organization role model is migrating from a single `permission_level` to `base_role` plus `additional_roles` - see those attributes below, and the [RBAC guide](../guides/rbac.md) for the fuller picture across scopes.
+The role attributes (`permission_level`, `base_role`, `additional_roles`) are deprecated: in an organization converted to role bindings they report access from before conversion. See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation).
 
 ## Example Usage
 
@@ -37,9 +37,11 @@ output "user_email_by_user_id" {
   description = "The user's email when looking up by user_id"
 }
 
+# base_role and additional_roles are deprecated: see the RBAC guide,
+# "Legacy RBAC deprecation".
 output "user_base_role" {
   value       = data.anyscale_organization_user.by_email.base_role
-  description = "Base role; prefer over permission_level"
+  description = "Base role"
 }
 
 output "user_additional_roles" {
@@ -61,8 +63,8 @@ output "user_additional_roles" {
 
 ### Read-Only
 
-- `additional_roles` (List of String) Deny roles applied on top of `base_role` (for example `image_reader`), never extra capability. `[]` means none, including in an organization where the roles feature is off. `null` only for a user with no `user_id`; a failed lookup is an error, not null. Use `coalesce(additional_roles, [])` before `length()`.
-- `base_role` (String) The user's base role in the organization (`owner` or `collaborator`). `permission_level` is deprecated in favor of this attribute plus `additional_roles`; prefer these for new configurations.
+- `additional_roles` (List of String, Deprecated) See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation). Deny roles applied on top of `base_role` (for example `image_reader`), never extra capability. `[]` means none, including in an organization where the roles feature is off. `null` only for a user with no `user_id`; a failed lookup is an error, not null. Use `coalesce(additional_roles, [])` before `length()`.
+- `base_role` (String, Deprecated) See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation). The user's base role in the organization (`owner` or `collaborator`).
 - `created_at` (String) The timestamp when the user was added to the organization.
 - `name` (String) The name of the user. Null if the user has no name set.
-- `permission_level` (String) The organization permission level (`owner` or `collaborator`), deprecated in favor of `base_role` plus `additional_roles`; prefer those for new configurations.
+- `permission_level` (String, Deprecated) See [Legacy RBAC deprecation](../guides/rbac.md#legacy-rbac-deprecation). The organization permission level (`owner` or `collaborator`); `base_role` carries the same value.

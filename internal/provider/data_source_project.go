@@ -87,7 +87,8 @@ func (d *ProjectDataSource) Schema(ctx context.Context, req datasource.SchemaReq
 	}
 	attributes["collaborators"] = schema.ListNestedAttribute{
 		Computed:            true,
-		MarkdownDescription: "List of collaborators with access to this project.",
+		DeprecationMessage:  legacyRBACReadDeprecation,
+		MarkdownDescription: legacyRBACAttributeNote + "List of collaborators with access to this project.",
 		NestedObject: schema.NestedAttributeObject{
 			Attributes: map[string]schema.Attribute{
 				"email": schema.StringAttribute{

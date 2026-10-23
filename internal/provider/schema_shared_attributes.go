@@ -64,7 +64,8 @@ func cloudSharedAttributes() map[string]schema.Attribute {
 		},
 		"auto_add_user": schema.BoolAttribute{
 			Computed:            true,
-			MarkdownDescription: "Whether users are automatically added to this cloud.",
+			DeprecationMessage:  legacyAutoAddUserReadDeprecation,
+			MarkdownDescription: legacyRBACAttributeNote + "Whether users are automatically added to this cloud.",
 		},
 		// Cheap additive parity fields, present on the backend Cloud model and stable.
 		"availability_zones": schema.ListAttribute{
@@ -155,17 +156,19 @@ func organizationUserSharedAttributes() map[string]schema.Attribute {
 		},
 		"permission_level": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The organization permission level (`owner` or `collaborator`), deprecated in favor of `base_role` plus `additional_roles`; prefer those for new configurations.",
+			DeprecationMessage:  legacyRBACReadDeprecation,
+			MarkdownDescription: legacyRBACAttributeNote + "The organization permission level (`owner` or `collaborator`); `base_role` carries the same value.",
 		},
-		// permission_level above is deprecated backend-side in favor of these two.
 		"base_role": schema.StringAttribute{
 			Computed:            true,
-			MarkdownDescription: "The user's base role in the organization (`owner` or `collaborator`). `permission_level` is deprecated in favor of this attribute plus `additional_roles`; prefer these for new configurations.",
+			DeprecationMessage:  legacyRBACReadDeprecation,
+			MarkdownDescription: legacyRBACAttributeNote + "The user's base role in the organization (`owner` or `collaborator`).",
 		},
 		"additional_roles": schema.ListAttribute{
 			ElementType:         types.StringType,
 			Computed:            true,
-			MarkdownDescription: "Deny roles applied on top of `base_role` (for example `image_reader`), never extra capability. `[]` means none, including in an organization where the roles feature is off. `null` only for a user with no `user_id`; a failed lookup is an error, not null. Use `coalesce(additional_roles, [])` before `length()`.",
+			DeprecationMessage:  legacyRBACReadDeprecation,
+			MarkdownDescription: legacyRBACAttributeNote + "Deny roles applied on top of `base_role` (for example `image_reader`), never extra capability. `[]` means none, including in an organization where the roles feature is off. `null` only for a user with no `user_id`; a failed lookup is an error, not null. Use `coalesce(additional_roles, [])` before `length()`.",
 		},
 		"created_at": schema.StringAttribute{
 			Computed:            true,

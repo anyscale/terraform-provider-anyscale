@@ -14,6 +14,8 @@ output "project_directory_name" {
   description = "The storage directory name used by this project"
 }
 
+# collaborators is deprecated: see the RBAC guide,
+# "Legacy RBAC deprecation".
 output "project_collaborators" {
   value       = data.anyscale_project.by_name.collaborators
   description = "Current collaborators on the project"

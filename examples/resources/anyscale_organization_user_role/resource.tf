@@ -1,3 +1,4 @@
+# Deprecated: see the RBAC guide, "Legacy RBAC deprecation".
 # Manage an existing organization member's role. This resource does not
 # add or remove members -- the person must already be in the
 # organization (see anyscale_organization_user for membership) -- it

@@ -223,7 +223,8 @@ func (r *CloudResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Whether to automatically add users to this cloud. Note: while enabled, the backend refuses to leave any user without cloud access, so revoking a specific user's access to this cloud will fail until this is disabled. Refused in a [converted organization](../guides/rbac.md#organization-access-mode).",
+				DeprecationMessage:  legacyAutoAddUserDeprecation,
+				MarkdownDescription: legacyRBACAttributeNote + "Whether to automatically add users to this cloud. While enabled, the backend refuses to leave any user without cloud access, so revoking a specific user's access to this cloud fails until it is disabled.",
 			},
 
 			"credentials": schema.StringAttribute{
