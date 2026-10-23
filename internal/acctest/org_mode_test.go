@@ -59,7 +59,11 @@ func skipUnlessTestOrgMode(t *testing.T, mode, reason string) {
 
 // orgModeMismatch returns an actionable message when text carries the 409
 // detail of the mode the test organization is not declared to be in, or "".
+// Whitespace is normalized first: in the ErrorCheck path text is Terraform's
+// rendered diagnostic, which wraps long details across indented lines, so a
+// detail phrase can span a line break.
 func orgModeMismatch(declared, text string) string {
+	text = strings.Join(strings.Fields(text), " ")
 	switch {
 	case declared == testOrgModeLegacy && strings.Contains(text, testOrgConvertedDetail):
 		return fmt.Sprintf("test organization mode appears to be %s (the API answered %q); set %s=%s",
@@ -119,6 +123,8 @@ func TestOrgModeMismatch(t *testing.T) {
 		{"converted, its own refusal", testOrgModeConverted, testOrgConvertedDetail, ""},
 		{"legacy, unrelated 409", testOrgModeLegacy, "409: name already exists", ""},
 		{"converted, unrelated error", testOrgModeConverted, "500: internal error", ""},
+		{"legacy, refusal wrapped by Terraform", testOrgModeLegacy, "Error: API Request Failed\n\n  with anyscale_cloud_access.live,\n\nHTTP 409: This organization uses\n        role bindings. Manage access in Users & IAM", "ANYSCALE_TEST_ORG_MODE=converted"},
+		{"converted, refusal wrapped by Terraform", testOrgModeConverted, "HTTP 409: Switch this organization to role\n        bindings to change role bindings.", "ANYSCALE_TEST_ORG_MODE=legacy"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
