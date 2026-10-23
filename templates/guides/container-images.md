@@ -174,7 +174,7 @@ Ray version is sent and none is recorded on the build, so it reads back as null.
 version as unknown, so features that depend on it, such as Ray resource isolation and service
 validation, are off. Set it to the image's Ray version. Setting or changing it
 registers a new build revision in place. Removing it from your configuration keeps the value already in
-state and registers nothing.
+state and registers nothing, until another change registers a build, which then sends no version.
 
 Images created without `ray_version` by earlier provider versions hold `2.44.0`, the default those
 versions sent. It stays in state until another change registers a new build; that build sends no Ray

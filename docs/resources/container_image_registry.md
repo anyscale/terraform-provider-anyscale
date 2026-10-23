@@ -58,7 +58,7 @@ output "registry_image_digest" {
 ### Optional
 
 - `name` (String) The name for the cluster environment that will be created to hold this image. If not specified, a name will be auto-generated and recorded here after create/import - the generated value is not derivable from config (it embeds a timestamp), so it lives only in state.
-- `ray_version` (String) The Ray version the image contains (e.g. `2.9.0`); it must be one Anyscale supports, or the API returns an error. Anyscale uses it for cluster configuration, such as Ray resource isolation, and for service validation. If omitted, the build records no Ray version, which Anyscale treats as unknown, so those features are off. Changing it registers a new build in place, incrementing `revision`; removing it from configuration keeps the current value.
+- `ray_version` (String) The Ray version the image contains (e.g. `2.9.0`); it must be one Anyscale supports, or the API returns an error. Anyscale uses it for cluster configuration, such as Ray resource isolation, and for service validation. If omitted, the build records no Ray version, which Anyscale treats as unknown, so those features are off. Changing it registers a new build in place, incrementing `revision`; removing it keeps the current value until another change registers a build, which then sends none.
 - `registry_login_secret` (String, Sensitive) The name or identifier of a secret containing credentials to authenticate to the Docker registry hosting the image. Required for private registries. Changing it registers a new build in place, incrementing `revision`; removing it registers a new build without registry credentials. Not recovered by `terraform import`.
 
 ### Read-Only
