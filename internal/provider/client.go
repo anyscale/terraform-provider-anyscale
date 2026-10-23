@@ -32,6 +32,11 @@ type Client struct {
 	// retry tests run in milliseconds.
 	attemptTimeout time.Duration
 	sleep          func(ctx context.Context, d time.Duration) error
+
+	// azureControlPlaneHost is the API host when it is an Azure control plane, else "".
+	// Set by the provider's Configure; RBAC resources and data sources refuse to run
+	// against it (see azure_control_plane.go).
+	azureControlPlaneHost string
 }
 
 // defaultRequestTimeout bounds an API call when the caller's context carries

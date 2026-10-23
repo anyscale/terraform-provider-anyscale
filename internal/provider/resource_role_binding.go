@@ -22,6 +22,7 @@ import (
 var (
 	_ resource.Resource                     = &RoleBindingResource{}
 	_ resource.ResourceWithConfigure        = &RoleBindingResource{}
+	_ resource.ResourceWithModifyPlan       = &RoleBindingResource{}
 	_ resource.ResourceWithImportState      = &RoleBindingResource{}
 	_ resource.ResourceWithConfigValidators = &RoleBindingResource{}
 )
@@ -516,7 +517,15 @@ func (r *RoleBindingResource) resolveRoleBindingNaturalKey(ctx context.Context, 
 	return ""
 }
 
+// ModifyPlan refuses to create or change this resource on an Azure control plane.
+func (r *RoleBindingResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	refuseRBACPlanOnAzure(r.client, "anyscale_role_binding", req, resp)
+}
+
 func (r *RoleBindingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, "anyscale_role_binding", &resp.Diagnostics) {
+		return
+	}
 	bindingID := req.ID
 	if !strings.HasPrefix(bindingID, "rb_") {
 		key, err := parseRoleBindingNaturalKey(bindingID)

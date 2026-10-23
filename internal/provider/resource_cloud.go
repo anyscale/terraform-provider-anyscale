@@ -1132,6 +1132,28 @@ func (r *CloudResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// refuseAutoAddUserOnAzure blocks auto_add_user, an Anyscale RBAC setting, on an Azure
+// control plane: when config sets it on a create, or changes it on an update. A null value
+// (the Default) and an unchanged one are fine, so existing state still plans clean.
+func (r *CloudResource) refuseAutoAddUserOnAzure(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if r.client == nil || r.client.azureControlPlaneHost == "" {
+		return
+	}
+	var configured, planned, prior types.Bool
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("auto_add_user"), &configured)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("auto_add_user"), &planned)...)
+	if !req.State.Raw.IsNull() {
+		resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("auto_add_user"), &prior)...)
+	}
+	if resp.Diagnostics.HasError() || configured.IsNull() {
+		return
+	}
+	if req.State.Raw.IsNull() || !planned.Equal(prior) {
+		resp.Diagnostics.AddAttributeError(path.Root("auto_add_user"), azureRBACBlockedSummary,
+			azureRBACBlockedDetail(r.client.azureControlPlaneHost, "auto_add_user")+" Remove auto_add_user from the configuration.")
+	}
+}
+
 // ModifyPlan runs the create-time checks of an all-in-one cloud, and on an update surfaces the
 // Anyscale-managed file_storage refusal at plan time rather than letting the apply discover it - see
 // docs/decisions/cloud-file-storage-lifecycle/README.md.
@@ -1140,6 +1162,8 @@ func (r *CloudResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 	if req.Plan.Raw.IsNull() {
 		return
 	}
+
+	r.refuseAutoAddUserOnAzure(ctx, req, resp)
 
 	// A null state is a create. The embedded-config requirements are enforced here rather than in
 	// ValidateConfig because ValidateConfig also runs for an imported or existing cloud, whose

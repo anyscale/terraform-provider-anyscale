@@ -27,6 +27,10 @@ type AnyscaleProvider struct {
 	// version is set to the provider version on release, "dev" when the
 	// provider is built and ran locally, and "test" when running acceptance testing.
 	version string
+
+	// azureOverride, when non-nil, replaces the Azure control-plane classification of
+	// the API URL. Tests only: mock servers listen on 127.0.0.1.
+	azureOverride *bool
 }
 
 // AnyscaleProviderModel describes the provider data model.
@@ -41,6 +45,15 @@ func NewFramework(version string) func() provider.Provider {
 		return &AnyscaleProvider{
 			version: version,
 		}
+	}
+}
+
+// NewFrameworkWithAzureClassification returns a provider instance that treats its API URL
+// as an Azure control plane (azure = true) or not, whatever the URL. For acceptance tests
+// against mock servers; production code uses NewFramework.
+func NewFrameworkWithAzureClassification(version string, azure bool) func() provider.Provider {
+	return func() provider.Provider {
+		return &AnyscaleProvider{version: version, azureOverride: &azure}
 	}
 }
 
@@ -129,24 +142,7 @@ func (p *AnyscaleProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	// Get API URL from config or environment.
-	// Env var fallbacks are checked in priority order; the first non-empty wins.
-	// ANYSCALE_HOST is the variable the Anyscale CLI reads; ANYSCALE_API_URL and
-	// ANYSCALE_API_HOST are provider-specific aliases.
-	apiURL := "https://console.anyscale.com"
-	apiURLSource := "default"
-	if config.ApiUrl.ValueString() != "" {
-		apiURL = config.ApiUrl.ValueString()
-		apiURLSource = "provider configuration"
-	} else {
-		for _, envVar := range []string{"ANYSCALE_API_URL", "ANYSCALE_API_HOST", "ANYSCALE_HOST"} {
-			if envURL := os.Getenv(envVar); envURL != "" {
-				apiURL = envURL
-				apiURLSource = envVar
-				break
-			}
-		}
-	}
+	apiURL, apiURLSource := resolveAPIURL(config.ApiUrl.ValueString())
 
 	// Get token from config, environment, or credentials file. An empty
 	// `token = ""` counts as unset, like api_url, so a module that passes
@@ -177,6 +173,13 @@ func (p *AnyscaleProvider) Configure(ctx context.Context, req provider.Configure
 	// applies a default per-call deadline via context instead) has one
 	// definition, not three.
 	client := NewClientWithToken(apiURL, token)
+	client.azureControlPlaneHost = azureControlPlaneHost(apiURL)
+	if p.azureOverride != nil {
+		client.azureControlPlaneHost = ""
+		if *p.azureOverride {
+			client.azureControlPlaneHost = "test-azure-override"
+		}
+	}
 
 	// Make the client available to resources, data sources, and ephemeral resources
 	resp.DataSourceData = client
@@ -245,4 +248,20 @@ func (p *AnyscaleProvider) DataSources(ctx context.Context) []func() datasource.
 		NewUserGroupsDataSource,
 		NewRoleDataSource,
 	}
+}
+
+// resolveAPIURL returns the API URL and where it came from: the provider's api_url
+// argument, else the first non-empty of ANYSCALE_API_URL, ANYSCALE_API_HOST and
+// ANYSCALE_HOST, else the default. ANYSCALE_HOST is the variable the Anyscale CLI reads;
+// the other two are provider-specific aliases.
+func resolveAPIURL(configured string) (apiURL, source string) {
+	if configured != "" {
+		return configured, "provider configuration"
+	}
+	for _, envVar := range []string{"ANYSCALE_API_URL", "ANYSCALE_API_HOST", "ANYSCALE_HOST"} {
+		if envURL := os.Getenv(envVar); envURL != "" {
+			return envURL, envVar
+		}
+	}
+	return "https://console.anyscale.com", "default"
 }
