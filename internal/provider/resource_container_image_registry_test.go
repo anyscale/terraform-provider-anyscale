@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -173,8 +174,8 @@ func TestContainerImageRegistryCreate_MapsFieldsAndKeysIDOnTemplate(t *testing.T
 			if templateReq.ConfigJSON.DockerImage != imageURI {
 				t.Errorf("template request ConfigJSON.DockerImage = %q, want %q", templateReq.ConfigJSON.DockerImage, imageURI)
 			}
-			if templateReq.ConfigJSON.RayVersion != rayVersion {
-				t.Errorf("template request ConfigJSON.RayVersion = %q, want %q", templateReq.ConfigJSON.RayVersion, rayVersion)
+			if templateReq.ConfigJSON.RayVersion == nil || *templateReq.ConfigJSON.RayVersion != rayVersion {
+				t.Errorf("template request ConfigJSON.RayVersion = %v, want %q", templateReq.ConfigJSON.RayVersion, rayVersion)
 			}
 
 			if tt.loginSecret.IsNull() {
@@ -526,5 +527,33 @@ func TestContainerImageRegistryRead_UnrelatedErrorTextNotTreatedAsNotFound(t *te
 	}
 	if !readResp.Diagnostics.HasError() {
 		t.Error("Read produced no diagnostics for a genuine 500 - the error should have surfaced, not been silently swallowed")
+	}
+}
+
+// ray_version and registry_login_secret update in place (a new build); no modifier on
+// either may force replacement. name stays RequiresReplace.
+func TestContainerImageRegistrySchema_OnlyNameForcesReplacement(t *testing.T) {
+	var resp resource.SchemaResponse
+	NewContainerImageRegistryResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
+	forcesReplace := func(attr string) bool {
+		a, ok := resp.Schema.Attributes[attr].(schema.StringAttribute)
+		if !ok {
+			t.Fatalf("%s is not a string attribute", attr)
+		}
+		for _, m := range a.PlanModifiers {
+			d := strings.ToLower(m.Description(context.Background()))
+			if strings.Contains(d, "replace") || strings.Contains(d, "recreate") {
+				return true
+			}
+		}
+		return false
+	}
+	for _, attr := range []string{"ray_version", "registry_login_secret", "image_uri"} {
+		if forcesReplace(attr) {
+			t.Errorf("%s has a plan modifier that forces replacement; it must update in place", attr)
+		}
+	}
+	if !forcesReplace("name") {
+		t.Error("name must still force replacement")
 	}
 }

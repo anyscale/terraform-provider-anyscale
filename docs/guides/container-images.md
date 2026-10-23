@@ -36,9 +36,9 @@ lifecycles, and they aren't interchangeable:
   edits to rebuild.
 - **`anyscale_container_image_registry`** registers an image that already exists in a container
   registry you control (`image_uri`), skipping the build step entirely. Anyscale validates the image
-  and makes it available immediately. Changing `image_uri` registers a new build revision on the same
-  cluster environment, in place; earlier revisions are kept. Changing `name`, `ray_version`, or
-  `registry_login_secret` replaces the resource (`RequiresReplace`).
+  and makes it available immediately. Changing `image_uri`, `ray_version`, or `registry_login_secret`
+  registers a new build revision on the same cluster environment, in place; earlier revisions are
+  kept. Changing `name` replaces the resource (`RequiresReplace`).
 
 Pick `..._build` when you want Anyscale to build the image for you from source. Pick `..._registry`
 when your image already exists elsewhere and you just need Anyscale to know about it.
@@ -165,19 +165,19 @@ now takes a cluster environment ID, not a build ID. See this resource's own
 
 ## Importing an existing container image
 
-Both resources import by cluster environment ID. `anyscale_container_image_build` recovers `project_id`, so set it in your configuration if the image was built in a project and omit it otherwise; a mismatch plans a replacement. `anyscale_container_image_registry` does not recover `registry_login_secret`: if your configuration sets it, the first plan after import shows an in-place update with a "Value Recorded Without Replacement" warning, and applying records the value in state without sending it or changing the image (unless `image_uri` changes in the same apply, in which case the secret is sent with the new build). Use `-replace` to recreate the image with a secret. An image created by this provider version or later still replaces when `registry_login_secret` is added or changed. If you imported a build image with an older provider version, `project_id` stays null in state; run `terraform state rm` on it and import again to recover it.
+Both resources import by cluster environment ID. `anyscale_container_image_build` recovers `project_id`, so set it in your configuration if the image was built in a project and omit it otherwise; a mismatch plans a replacement. `anyscale_container_image_registry` does not recover `registry_login_secret`: if your configuration sets it, the first plan after import shows an in-place update, and applying registers a new build revision carrying the secret. If you imported a build image with an older provider version, `project_id` stays null in state; run `terraform state rm` on it and import again to recover it.
 
-## The default Ray version, if you don't set one
+## If you don't set `ray_version`
 
-`anyscale_container_image_registry`'s `ray_version` is Optional and Computed. If you don't set it, the
-provider still sends a concrete default value when registering the image — not "the latest available
-Ray version." Whichever value ends up in state, whether it's the one you typed or the provider's
-fallback, is resolved once, at creation, and left alone on every later refresh: it won't get silently
-rewritten out from under you, and changing it yourself still replaces the resource (`ray_version` is
-`RequiresReplace`, like every other optional attribute on this resource) rather than updating in place.
+`anyscale_container_image_registry`'s `ray_version` is Optional and Computed. If you don't set it, no
+Ray version is sent and none is recorded on the build, so it reads back as null. Setting or changing it
+registers a new build revision in place. Removing it from your configuration keeps the value already in
+state and registers nothing.
 
-Don't rely on the fallback staying at any particular value across provider releases: if your workload
-needs a specific Ray version, set `ray_version` explicitly rather than omitting it.
+Images created without `ray_version` by earlier provider versions hold `2.44.0`, the default those
+versions sent. It stays in state until another change registers a new build; that build sends no Ray
+version, and the plan shows `ray_version` as known after apply. If your workload needs a specific Ray
+version, set `ray_version` explicitly.
 
 ## Deleting a container image archives it — and defaults can't be archived
 
