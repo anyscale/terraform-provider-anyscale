@@ -1,0 +1,3 @@
+```release-note:changed
+Registry example lines wrapped to 72 columns; no change to what the examples configure.
+```
