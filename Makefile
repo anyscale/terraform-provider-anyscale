@@ -215,9 +215,14 @@ vet: ## Run go vet
 	$(GO) vet ./...
 
 .PHONY: validate-examples
-# validate-examples depends on `build` so the named provider binary exists for dev_overrides to
-# load; the terraform validate stage needs dev_overrides active (see CLAUDE.md local dev workflow).
-validate-examples: build ## Validate every examples/ dir: terraform fmt, tflint, and terraform validate where runnable
+# Example dirs exempt from terraform init+validate, as `<dir>|<one-line reason>;` entries, e.g.
+#   VALIDATE_EXAMPLES_SKIP += examples/resources/anyscale_foo|needs a file generated at apply time;
+# Expected empty: every example should type-check against the provider schema.
+VALIDATE_EXAMPLES_SKIP :=
+
+# validate-examples depends on `build` and pins that binary itself (via its own TF_CLI_CONFIG_FILE
+# dev_overrides, ignoring the caller's), so validate always checks this tree's provider schema.
+validate-examples: build ## Validate every examples/ dir: terraform fmt, tflint, and terraform init+validate
 	@echo "==> Checking terraform fmt across examples/..."
 	@terraform fmt -check -recursive -diff examples/
 	@echo "==> Running tflint (repo config) across every examples/ subdirectory with .tf files..."
@@ -226,19 +231,8 @@ validate-examples: build ## Validate every examples/ dir: terraform fmt, tflint,
 		out=$$(cd "$$d" && tflint --config="$(CURDIR)/.tflint.hcl" 2>&1); \
 		if [ -n "$$out" ]; then echo "--- tflint: $$d ---"; echo "$$out"; fail=1; fi; \
 	done; \
-	echo "==> Running terraform init + validate on complete runnable examples (no credentials needed, no apply)..."; \
-	for d in $$(find examples -maxdepth 1 -mindepth 1 -type d); do \
-		if grep -lq required_providers "$$d"/*.tf 2>/dev/null; then \
-			out=$$( (cd "$$d" && rm -rf .terraform .terraform.lock.hcl && terraform init -backend=false && terraform validate -no-color) 2>&1 ); \
-			rc=$$?; \
-			(cd "$$d" && rm -rf .terraform .terraform.lock.hcl); \
-			if [ $$rc -ne 0 ]; then \
-				echo "--- FAILED: $$d ---"; echo "$$out" | tail -20; fail=1; \
-			else \
-				echo "OK: $$d"; \
-			fi; \
-		fi; \
-	done; \
+	echo "==> Running terraform init + validate on every examples/ subdirectory with .tf files (mirrored to a temp dir; no credentials needed, no apply)..."; \
+	VALIDATE_EXAMPLES_SKIP='$(VALIDATE_EXAMPLES_SKIP)' ./.github/scripts/validate-examples.sh "$(CURDIR)/$(BINARY_NAME)" || fail=1; \
 	if [ $$fail -ne 0 ]; then echo "==> validate-examples FAILED - see output above"; exit 1; fi; \
 	echo "==> validate-examples: all checks passed"
 
