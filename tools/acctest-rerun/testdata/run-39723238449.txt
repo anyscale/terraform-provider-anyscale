@@ -1,0 +1,935 @@
+=== RUN   TestAccCloudAccessFatalPathGateResource
+--- PASS: TestAccCloudAccessFatalPathGateResource (0.95s)
+=== RUN   TestAccCloudAccessReadBackDivergenceGateResource
+--- PASS: TestAccCloudAccessReadBackDivergenceGateResource (0.23s)
+=== RUN   TestAccServiceCredentialsEphemeralResource
+=== RUN   TestAccServiceCredentialsEphemeralResource/BearerEnabled
+=== RUN   TestAccServiceCredentialsEphemeralResource/BearerDisabled
+=== RUN   TestAccServiceCredentialsEphemeralResource/RotationInProgress
+=== RUN   TestAccServiceCredentialsEphemeralResource/UnknownServiceIDErrors
+--- PASS: TestAccServiceCredentialsEphemeralResource (1.58s)
+    --- PASS: TestAccServiceCredentialsEphemeralResource/BearerEnabled (0.48s)
+    --- PASS: TestAccServiceCredentialsEphemeralResource/BearerDisabled (0.48s)
+    --- PASS: TestAccServiceCredentialsEphemeralResource/RotationInProgress (0.49s)
+    --- PASS: TestAccServiceCredentialsEphemeralResource/UnknownServiceIDErrors (0.14s)
+=== RUN   TestAccFrameworkCoreGateErroredCreateStatePersistsResource
+--- PASS: TestAccFrameworkCoreGateErroredCreateStatePersistsResource (0.54s)
+=== RUN   TestAccFrameworkCoreGateErroredDeleteStatePersistsResource
+--- PASS: TestAccFrameworkCoreGateErroredDeleteStatePersistsResource (0.57s)
+=== RUN   TestAccCloudResource_AWS_EmptyCloud
+--- PASS: TestAccCloudResource_AWS_EmptyCloud (4.90s)
+=== RUN   TestAccCloudResource_GCP_K8S
+    resource_cloud_acc_test.go:57: SKIP(no-real-infra): requires real cloud infra; not runnable in the placeholder acctest lane (fake creds -> STS 403 / add_resource 500 / timeout). Real coverage via make test-primary / buildkite e2e; set ANYSCALE_TEST_REAL_INFRA=1 to run.
+--- SKIP: TestAccCloudResource_GCP_K8S (0.00s)
+=== RUN   TestAccCloudResource_Disappears
+--- PASS: TestAccCloudResource_Disappears (7.06s)
+=== RUN   TestAccCloudAccessResource_ConvertedOrgCreateAbortsAfterOneWrite
+--- PASS: TestAccCloudAccessResource_ConvertedOrgCreateAbortsAfterOneWrite (0.46s)
+=== RUN   TestAccCloudAccessResource_ConvertedOrgUpdateKeepsPriorState
+--- PASS: TestAccCloudAccessResource_ConvertedOrgUpdateKeepsPriorState (0.70s)
+=== RUN   TestAccCloudAccessResource_ConvertedOrgBetweenMembershipAndRoleAborts
+--- PASS: TestAccCloudAccessResource_ConvertedOrgBetweenMembershipAndRoleAborts (0.81s)
+=== RUN   TestAccCloudAccessResource_ConvertedOrgDestroyWarnsAndDropsState
+--- PASS: TestAccCloudAccessResource_ConvertedOrgDestroyWarnsAndDropsState (1.40s)
+=== RUN   TestAccCloudAccessResource_ConvertedOrgFrozenReadPlansNoop
+--- PASS: TestAccCloudAccessResource_ConvertedOrgFrozenReadPlansNoop (0.76s)
+=== RUN   TestAccCloudAccessResource_MixedCaseMemberKeyPlansClean
+--- PASS: TestAccCloudAccessResource_MixedCaseMemberKeyPlansClean (0.76s)
+=== RUN   TestAccCloudAccessResource_FirstApplyDisclosureNamesRevokedMembers
+--- PASS: TestAccCloudAccessResource_FirstApplyDisclosureNamesRevokedMembers (1.02s)
+=== RUN   TestAccCloudAccessResource_FirstApplyDisclosureFailsLoudlyOnReadError
+--- PASS: TestAccCloudAccessResource_FirstApplyDisclosureFailsLoudlyOnReadError (1.03s)
+=== RUN   TestAccCloudAccessResourceImportRoundTrip
+--- PASS: TestAccCloudAccessResourceImportRoundTrip (1.05s)
+=== RUN   TestAccCloudAccessResource_LiveColdImportAndDelete
+    resource_cloud_access_live_write_acc_test.go:222: ANYSCALE_TEST_USER_EMAIL not set - skipping real-infra organization role test. Point it at a DISPOSABLE org member (an accepted invitation to a throwaway address you control), never a colleague: these tests change that person's real organization role.
+--- SKIP: TestAccCloudAccessResource_LiveColdImportAndDelete (0.00s)
+=== RUN   TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers
+    resource_cloud_access_live_write_acc_test.go:328: ANYSCALE_TEST_USER_EMAIL not set - skipping real-infra organization role test. Point it at a DISPOSABLE org member (an accepted invitation to a throwaway address you control), never a colleague: these tests change that person's real organization role.
+--- SKIP: TestAccCloudAccessResource_LiveCreateRevokesUndeclaredMembers (0.00s)
+=== RUN   TestAccCloudAccessResource_LiveProjectRoleDropRevokes
+    resource_cloud_access_live_write_acc_test.go:436: ANYSCALE_TEST_USER_EMAIL not set - skipping real-infra organization role test. Point it at a DISPOSABLE org member (an accepted invitation to a throwaway address you control), never a colleague: these tests change that person's real organization role.
+--- SKIP: TestAccCloudAccessResource_LiveProjectRoleDropRevokes (0.00s)
+=== RUN   TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected
+    resource_cloud_access_live_write_acc_test.go:517: ANYSCALE_TEST_USER_EMAIL not set - skipping real-infra organization role test. Point it at a DISPOSABLE org member (an accepted invitation to a throwaway address you control), never a colleague: these tests change that person's real organization role.
+--- SKIP: TestAccCloudAccessResource_LiveOutOfBandRoleChangeDetectedAndCorrected (0.00s)
+=== RUN   TestAccCloudAccessResource_ProjectRolesGrantedAndKept_MockServer
+--- PASS: TestAccCloudAccessResource_ProjectRolesGrantedAndKept_MockServer (1.02s)
+=== RUN   TestAccCloudResource_AdoptByName_OmittedComputeStackApplies
+--- PASS: TestAccCloudResource_AdoptByName_OmittedComputeStackApplies (0.47s)
+=== RUN   TestAccCloudResource_AdoptByName_NotFoundKeepsRequirementError
+--- PASS: TestAccCloudResource_AdoptByName_NotFoundKeepsRequirementError (0.14s)
+=== RUN   TestAccCloudResource_AdoptByName_LookupFailureFailsPlan
+--- PASS: TestAccCloudResource_AdoptByName_LookupFailureFailsPlan (0.14s)
+=== RUN   TestAccCloudResource_AdoptByName_AmbiguousNameFailsPlan
+--- PASS: TestAccCloudResource_AdoptByName_AmbiguousNameFailsPlan (0.14s)
+=== RUN   TestAccCloudResource_AdoptByNameResolvesDerivedFields
+--- PASS: TestAccCloudResource_AdoptByNameResolvesDerivedFields (0.53s)
+=== RUN   TestAccCloudResource_AdoptByNameWithoutDerivedFieldsResolvesNull
+--- PASS: TestAccCloudResource_AdoptByNameWithoutDerivedFieldsResolvesNull (0.47s)
+=== RUN   TestAccCloudResource_AdoptByNameFailsWhenResourcesCannotBeListed
+--- PASS: TestAccCloudResource_AdoptByNameFailsWhenResourcesCannotBeListed (0.22s)
+=== RUN   TestAccCloudResource_Lifecycle_AzureK8S_MockServer
+--- PASS: TestAccCloudResource_Lifecycle_AzureK8S_MockServer (0.91s)
+=== RUN   TestAccCloudResource_ImportedGCSBucketPrefix_BareConfigPlansNoReplace
+--- PASS: TestAccCloudResource_ImportedGCSBucketPrefix_BareConfigPlansNoReplace (0.41s)
+=== RUN   TestAccCloudResource_ImportedGCSBucketPrefix_DifferentBucketPlansReplace
+--- PASS: TestAccCloudResource_ImportedGCSBucketPrefix_DifferentBucketPlansReplace (0.49s)
+=== RUN   TestAccCloudResourceResource_ImportedGCSBucketPrefix_BareConfigPlansNoReplace
+--- PASS: TestAccCloudResourceResource_ImportedGCSBucketPrefix_BareConfigPlansNoReplace (0.41s)
+=== RUN   TestAccCloudResource_Lifecycle_AWS_MockServer
+--- PASS: TestAccCloudResource_Lifecycle_AWS_MockServer (0.65s)
+=== RUN   TestAccCloudResource_Lifecycle_GCP_MockServer
+--- PASS: TestAccCloudResource_Lifecycle_GCP_MockServer (0.85s)
+=== RUN   TestAccCloudResource_K8S_NoRegion_ClearError
+--- PASS: TestAccCloudResource_K8S_NoRegion_ClearError (0.14s)
+=== RUN   TestAccCloudResource_Lifecycle_K8S_MockServer
+--- PASS: TestAccCloudResource_Lifecycle_K8S_MockServer (0.73s)
+=== RUN   TestAccCloudResource_Lifecycle_GCP_K8S_MockServer
+--- PASS: TestAccCloudResource_Lifecycle_GCP_K8S_MockServer (0.74s)
+=== RUN   TestAccCloudResource_ColdImport_ComputeStack_IsDefaultTrue
+--- PASS: TestAccCloudResource_ColdImport_ComputeStack_IsDefaultTrue (0.24s)
+=== RUN   TestAccCloudResource_ColdImport_ComputeStack_IsDefaultFalse
+--- PASS: TestAccCloudResource_ColdImport_ComputeStack_IsDefaultFalse (0.24s)
+=== RUN   TestAccCloudResource_CloudResourceIDPopulated_MockServer
+--- PASS: TestAccCloudResource_CloudResourceIDPopulated_MockServer (0.94s)
+=== RUN   TestAccCloudResource_ConvertedOrgAutoAddUserUpdateErrors
+--- PASS: TestAccCloudResource_ConvertedOrgAutoAddUserUpdateErrors (0.71s)
+=== RUN   TestAccCloudResource_ConvertedOrgAutoAddUserCreateErrors
+--- PASS: TestAccCloudResource_ConvertedOrgAutoAddUserCreateErrors (0.28s)
+=== RUN   TestAccCloudResource_ConvertedOrgUnrecognizedConflictPassesThrough
+--- PASS: TestAccCloudResource_ConvertedOrgUnrecognizedConflictPassesThrough (0.69s)
+=== RUN   TestAccCloudResource_AggregatedLogsEnabled_AppliesAtCreate
+--- PASS: TestAccCloudResource_AggregatedLogsEnabled_AppliesAtCreate (0.55s)
+=== RUN   TestAccCloudResource_FileStorageAddIsUpdatable
+--- PASS: TestAccCloudResource_FileStorageAddIsUpdatable (1.09s)
+=== RUN   TestAccCloudResource_FileStorageUpdateDoesNotWipeSiblings
+--- PASS: TestAccCloudResource_FileStorageUpdateDoesNotWipeSiblings (0.98s)
+=== RUN   TestAccCloudResource_FileStorageClearingWorks
+--- PASS: TestAccCloudResource_FileStorageClearingWorks (1.00s)
+=== RUN   TestAccCloudResource_FileStorageImportRecoversValue
+--- PASS: TestAccCloudResource_FileStorageImportRecoversValue (0.24s)
+=== RUN   TestAccCloudResource_FileStorageUpdateRunningClustersError
+=== RUN   TestAccCloudResource_FileStorageUpdateRunningClustersError/active_clusters_substring_fires_designed_diagnostic
+=== RUN   TestAccCloudResource_FileStorageUpdateRunningClustersError/unrelated_400_falls_through_to_generic_error
+--- PASS: TestAccCloudResource_FileStorageUpdateRunningClustersError (1.28s)
+    --- PASS: TestAccCloudResource_FileStorageUpdateRunningClustersError/active_clusters_substring_fires_designed_diagnostic (0.67s)
+    --- PASS: TestAccCloudResource_FileStorageUpdateRunningClustersError/unrelated_400_falls_through_to_generic_error (0.60s)
+=== RUN   TestAccCloudResource_FileStorageManagedCloudRefusal
+=== RUN   TestAccCloudResource_FileStorageManagedCloudRefusal/plan_time_aws_cloudformation_id
+=== RUN   TestAccCloudResource_FileStorageManagedCloudRefusal/plan_time_gcp_deployment_manager_id
+=== RUN   TestAccCloudResource_FileStorageManagedCloudRefusal/plan_time_gcp_infrastructure_manager_id
+=== RUN   TestAccCloudResource_FileStorageManagedCloudRefusal/plan_time_not_managed_no_refusal
+=== RUN   TestAccCloudResource_FileStorageManagedCloudRefusal/apply_time_anyscale_managed_substring_backstop
+--- PASS: TestAccCloudResource_FileStorageManagedCloudRefusal (3.13s)
+    --- PASS: TestAccCloudResource_FileStorageManagedCloudRefusal/plan_time_aws_cloudformation_id (0.55s)
+    --- PASS: TestAccCloudResource_FileStorageManagedCloudRefusal/plan_time_gcp_deployment_manager_id (0.53s)
+    --- PASS: TestAccCloudResource_FileStorageManagedCloudRefusal/plan_time_gcp_infrastructure_manager_id (0.58s)
+    --- PASS: TestAccCloudResource_FileStorageManagedCloudRefusal/plan_time_not_managed_no_refusal (0.82s)
+    --- PASS: TestAccCloudResource_FileStorageManagedCloudRefusal/apply_time_anyscale_managed_substring_backstop (0.65s)
+=== RUN   TestAccCloudResource_MountPathOmittedDoesNotForceReplace
+--- PASS: TestAccCloudResource_MountPathOmittedDoesNotForceReplace (0.79s)
+=== RUN   TestAccCloudResource_FileStorageUpdateKeepsNullMountTargets
+--- PASS: TestAccCloudResource_FileStorageUpdateKeepsNullMountTargets (0.85s)
+=== RUN   TestAccCloudResourceResource_FileStorageUpdateKeepsNullMountTargets
+--- PASS: TestAccCloudResourceResource_FileStorageUpdateKeepsNullMountTargets (0.83s)
+=== RUN   TestAccCloudResource_FileStorageIDChangeRederivesMountFields
+--- PASS: TestAccCloudResource_FileStorageIDChangeRederivesMountFields (1.25s)
+=== RUN   TestAccCloudResourceResource_FileStorageIDChangeRederivesMountFields
+--- PASS: TestAccCloudResourceResource_FileStorageIDChangeRederivesMountFields (1.46s)
+=== RUN   TestAccCloudResource_FileStorageBlockAddedResolvesMountFields
+--- PASS: TestAccCloudResource_FileStorageBlockAddedResolvesMountFields (0.92s)
+=== RUN   TestAccCloudResourceResource_FileStorageBlockAddedResolvesMountFields
+--- PASS: TestAccCloudResourceResource_FileStorageBlockAddedResolvesMountFields (0.87s)
+=== RUN   TestAccCloudResource_ImportFailsClosedWhenResourcesListFails
+--- PASS: TestAccCloudResource_ImportFailsClosedWhenResourcesListFails (0.36s)
+=== RUN   TestAccCloudResource_ImportToleratesHostedCloudResourcesList
+--- PASS: TestAccCloudResource_ImportToleratesHostedCloudResourcesList (0.31s)
+=== RUN   TestAccCloudResource_CreateLocalChecksPrecedePost
+--- PASS: TestAccCloudResource_CreateLocalChecksPrecedePost (0.83s)
+=== RUN   TestAccCloudIAMMappingResource_ExplicitEmptyRulesRejectedAtPlanTime
+--- PASS: TestAccCloudIAMMappingResource_ExplicitEmptyRulesRejectedAtPlanTime (0.13s)
+=== RUN   TestAccCloudIAMMappingResource_OmittedRulesConverges
+--- PASS: TestAccCloudIAMMappingResource_OmittedRulesConverges (0.68s)
+=== RUN   TestAccCloudIAMMappingResource_RealCloud_ColdImport_BareCloudID
+    resource_cloud_iam_mapping_real_infra_acc_test.go:242: SKIP(no-real-infra): requires real cloud infra; not runnable in the placeholder acctest lane (fake creds -> STS 403 / add_resource 500 / timeout). Real coverage via make test-primary / buildkite e2e; set ANYSCALE_TEST_REAL_INFRA=1 to run.
+--- SKIP: TestAccCloudIAMMappingResource_RealCloud_ColdImport_BareCloudID (0.00s)
+=== RUN   TestAccCloudIAMMappingResource_RealCloud_Lifecycle
+    resource_cloud_iam_mapping_real_infra_acc_test.go:285: SKIP(no-real-infra): requires real cloud infra; not runnable in the placeholder acctest lane (fake creds -> STS 403 / add_resource 500 / timeout). Real coverage via make test-primary / buildkite e2e; set ANYSCALE_TEST_REAL_INFRA=1 to run.
+--- SKIP: TestAccCloudIAMMappingResource_RealCloud_Lifecycle (0.00s)
+=== RUN   TestAccCloudIAMMappingResource_UpdateInPlace_MockServer
+--- PASS: TestAccCloudIAMMappingResource_UpdateInPlace_MockServer (0.77s)
+=== RUN   TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM
+--- PASS: TestAccCloudResource_MemoryDBFieldsRecoverOnImport_AWSVM (0.95s)
+=== RUN   TestAccCloudResource_ObjectStorageRegionSemanticEqualOnImport_AWSVM
+--- PASS: TestAccCloudResource_ObjectStorageRegionSemanticEqualOnImport_AWSVM (0.68s)
+=== RUN   TestAccCloudResource_ObjectStorageRegionSelfHealsFromNullState_AWSVM
+--- PASS: TestAccCloudResource_ObjectStorageRegionSelfHealsFromNullState_AWSVM (1.02s)
+=== RUN   TestAccCloudResourceResource_ObjectStorageRegionSemanticEqualOnImport_AWSVM
+--- PASS: TestAccCloudResourceResource_ObjectStorageRegionSemanticEqualOnImport_AWSVM (0.63s)
+=== RUN   TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM
+--- PASS: TestAccCloudResource_ImportRecoversStorageBlocks_AWSVM (0.63s)
+=== RUN   TestAccCloudResource_ImportRecoversMountTargets_AWSVM
+--- PASS: TestAccCloudResource_ImportRecoversMountTargets_AWSVM (0.66s)
+=== RUN   TestAccCloudResource_MountTargetsRecoveredShapeIsPlanStable_AWSVM
+--- PASS: TestAccCloudResource_MountTargetsRecoveredShapeIsPlanStable_AWSVM (0.81s)
+=== RUN   TestAccCloudResource_ImportRecoversStorageBlocks_K8S
+--- PASS: TestAccCloudResource_ImportRecoversStorageBlocks_K8S (0.63s)
+=== RUN   TestAccCloudResource_IsDefaultRemovalNoSpuriousDiff
+--- PASS: TestAccCloudResource_IsDefaultRemovalNoSpuriousDiff (0.93s)
+=== RUN   TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer
+=== RUN   TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer/true
+=== RUN   TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer/false
+--- PASS: TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer (0.93s)
+    --- PASS: TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer/true (0.47s)
+    --- PASS: TestAccCloudResource_IsPrivateCloudRoundTrip_MockServer/false (0.47s)
+=== RUN   TestAccCloudResourceResource_IsPrivateRoundTrip_MockServer
+--- PASS: TestAccCloudResourceResource_IsPrivateRoundTrip_MockServer (0.58s)
+=== RUN   TestAccCloudResource_IsPrivateServiceCloudPerProviderGuard_MockServer
+=== RUN   TestAccCloudResource_IsPrivateServiceCloudPerProviderGuard_MockServer/gcp_sends_the_key
+=== RUN   TestAccCloudResource_IsPrivateServiceCloudPerProviderGuard_MockServer/aws_omits_the_key
+--- PASS: TestAccCloudResource_IsPrivateServiceCloudPerProviderGuard_MockServer (0.93s)
+    --- PASS: TestAccCloudResource_IsPrivateServiceCloudPerProviderGuard_MockServer/gcp_sends_the_key (0.47s)
+    --- PASS: TestAccCloudResource_IsPrivateServiceCloudPerProviderGuard_MockServer/aws_omits_the_key (0.46s)
+=== RUN   TestAccCloudResourceResource_AzureVM_NotSupported
+--- PASS: TestAccCloudResourceResource_AzureVM_NotSupported (0.13s)
+=== RUN   TestAccCloudResourceResource_Generic_NotSupported
+--- PASS: TestAccCloudResourceResource_Generic_NotSupported (0.13s)
+=== RUN   TestAccCloudResourceResource_BothNullCloudSelectorRejected
+--- PASS: TestAccCloudResourceResource_BothNullCloudSelectorRejected (0.13s)
+=== RUN   TestAccCloudResourceResource_FileStorageInPlaceUpdate_MockServer
+--- PASS: TestAccCloudResourceResource_FileStorageInPlaceUpdate_MockServer (1.56s)
+=== RUN   TestAccCloudResourceResource_ImportStateVerify_MockServer
+--- PASS: TestAccCloudResourceResource_ImportStateVerify_MockServer (0.63s)
+=== RUN   TestAccCloudResourceMulti_DistinctExplicitNames
+--- PASS: TestAccCloudResourceMulti_DistinctExplicitNames (0.56s)
+=== RUN   TestAccCloudResourceMulti_BothOmitName_RequiredArgumentError
+--- PASS: TestAccCloudResourceMulti_BothOmitName_RequiredArgumentError (0.13s)
+=== RUN   TestAccCloudResourceMulti_EmptyName_PlanError
+--- PASS: TestAccCloudResourceMulti_EmptyName_PlanError (0.13s)
+=== RUN   TestAccCloudResourceMulti_DuplicateExplicitName_ReturnsConflict
+--- PASS: TestAccCloudResourceMulti_DuplicateExplicitName_ReturnsConflict (0.32s)
+=== RUN   TestAccCloudResource_ImportedSubnetListFormUpdatesInPlace
+=== RUN   TestAccCloudResource_ImportedSubnetListFormUpdatesInPlace/map_form_plans_clean
+=== RUN   TestAccCloudResource_ImportedSubnetListFormUpdatesInPlace/list_form_for_the_same_subnets_updates_in_place
+=== RUN   TestAccCloudResource_ImportedSubnetListFormUpdatesInPlace/list_form_for_different_subnets_still_replaces
+--- PASS: TestAccCloudResource_ImportedSubnetListFormUpdatesInPlace (1.69s)
+    --- PASS: TestAccCloudResource_ImportedSubnetListFormUpdatesInPlace/map_form_plans_clean (0.42s)
+    --- PASS: TestAccCloudResource_ImportedSubnetListFormUpdatesInPlace/list_form_for_the_same_subnets_updates_in_place (0.61s)
+    --- PASS: TestAccCloudResource_ImportedSubnetListFormUpdatesInPlace/list_form_for_different_subnets_still_replaces (0.66s)
+=== RUN   TestAccCloudResourceResource_ImportedSubnetListFormUpdatesInPlace
+=== RUN   TestAccCloudResourceResource_ImportedSubnetListFormUpdatesInPlace/map_form_plans_clean
+=== RUN   TestAccCloudResourceResource_ImportedSubnetListFormUpdatesInPlace/list_form_for_the_same_subnets_updates_in_place
+=== RUN   TestAccCloudResourceResource_ImportedSubnetListFormUpdatesInPlace/list_form_for_different_subnets_still_replaces
+--- PASS: TestAccCloudResourceResource_ImportedSubnetListFormUpdatesInPlace (1.73s)
+    --- PASS: TestAccCloudResourceResource_ImportedSubnetListFormUpdatesInPlace/map_form_plans_clean (0.48s)
+    --- PASS: TestAccCloudResourceResource_ImportedSubnetListFormUpdatesInPlace/list_form_for_the_same_subnets_updates_in_place (0.61s)
+    --- PASS: TestAccCloudResourceResource_ImportedSubnetListFormUpdatesInPlace/list_form_for_different_subnets_still_replaces (0.63s)
+=== RUN   TestAccCloudResource_AzureVM_NotSupported
+--- PASS: TestAccCloudResource_AzureVM_NotSupported (0.13s)
+=== RUN   TestAccCloudResource_PVCCSIConflict
+--- PASS: TestAccCloudResource_PVCCSIConflict (0.13s)
+=== RUN   TestAccCloudResource_RedisMemoryDBConflict
+--- PASS: TestAccCloudResource_RedisMemoryDBConflict (0.13s)
+=== RUN   TestAccCloudResource_InvalidComputeStack
+--- PASS: TestAccCloudResource_InvalidComputeStack (0.13s)
+=== RUN   TestAccCloudResource_MountPathAWSRejected
+--- PASS: TestAccCloudResource_MountPathAWSRejected (0.13s)
+=== RUN   TestAccCloudResource_MountPathAWSInferredRejected
+--- PASS: TestAccCloudResource_MountPathAWSInferredRejected (0.13s)
+=== RUN   TestAccCloudResource_MountPathPVCConflict
+--- PASS: TestAccCloudResource_MountPathPVCConflict (0.13s)
+=== RUN   TestAccCloudResource_MountPathPVCDefaultNoMisfire
+--- PASS: TestAccCloudResource_MountPathPVCDefaultNoMisfire (0.48s)
+=== RUN   TestAccCloudResource_SubnetNamesK8SRejected
+--- PASS: TestAccCloudResource_SubnetNamesK8SRejected (0.13s)
+=== RUN   TestAccCloudResource_SubnetNamesVMMultipleAllowed
+--- PASS: TestAccCloudResource_SubnetNamesVMMultipleAllowed (0.48s)
+=== RUN   TestAccCloudResource_SubnetIDsK8SRejected
+--- PASS: TestAccCloudResource_SubnetIDsK8SRejected (0.13s)
+=== RUN   TestAccCloudResource_SubnetIDsToAZK8SRejected
+--- PASS: TestAccCloudResource_SubnetIDsToAZK8SRejected (0.13s)
+=== RUN   TestAccComputeConfigResource_Basic
+=== PAUSE TestAccComputeConfigResource_Basic
+=== RUN   TestAccComputeConfigResource_WithWorkers
+=== PAUSE TestAccComputeConfigResource_WithWorkers
+=== RUN   TestAccComputeConfigResource_InconsistentResultRegressions
+=== PAUSE TestAccComputeConfigResource_InconsistentResultRegressions
+=== RUN   TestAccComputeConfigResource_Update
+=== PAUSE TestAccComputeConfigResource_Update
+=== RUN   TestAccComputeConfigResource_Disappears
+=== PAUSE TestAccComputeConfigResource_Disappears
+=== RUN   TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI
+=== PAUSE TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI
+=== RUN   TestAccComputeConfigResource_K8S
+=== PAUSE TestAccComputeConfigResource_K8S
+=== RUN   TestAccComputeConfigResource_RenameForcesReplace
+=== PAUSE TestAccComputeConfigResource_RenameForcesReplace
+=== RUN   TestAccComputeConfigResource_AdditionalResourcesPrimaryMatchedByName_MockServer
+--- PASS: TestAccComputeConfigResource_AdditionalResourcesPrimaryMatchedByName_MockServer (0.72s)
+=== RUN   TestAccComputeConfigResource_RemovedAdditionalEntryDoesNotLendResources_MockServer
+--- PASS: TestAccComputeConfigResource_RemovedAdditionalEntryDoesNotLendResources_MockServer (0.91s)
+=== RUN   TestAccComputeConfigResource_ArchiveAzureControlPlane400_MockServer
+--- PASS: TestAccComputeConfigResource_ArchiveAzureControlPlane400_MockServer (0.66s)
+=== RUN   TestAccComputeConfigResource_ArchiveOther400FailsDestroy_MockServer
+--- PASS: TestAccComputeConfigResource_ArchiveOther400FailsDestroy_MockServer (0.81s)
+=== RUN   TestAccComputeConfigResource_CloudDeploymentNestsInFlags_MockServer
+--- PASS: TestAccComputeConfigResource_CloudDeploymentNestsInFlags_MockServer (0.65s)
+=== RUN   TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer
+--- PASS: TestAccComputeConfigResource_CloudImmutable_ErrorGuard_MockServer (0.80s)
+=== RUN   TestAccComputeConfigResource_ImportRecoversMaskedFieldsWhenSet
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_compute_config.go:89: Using default known-good cloud for compute config: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+    resource_compute_config_import_masked_fields_acc_test.go:97: cleanup: archive id=cpt_REDACTED -> err=<nil> body=
+--- PASS: TestAccComputeConfigResource_ImportRecoversMaskedFieldsWhenSet (3.01s)
+=== RUN   TestAccComputeConfigResource_ImportNonLatestVersionRetainsOwnValues
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_compute_config.go:89: Using default known-good cloud for compute config: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+    resource_compute_config_import_nonlatest_version_acc_test.go:29: Creating ephemeral out-of-band compute config: tfacc-computeconfig-6vva0of0 (cloud: cld_REDACTED)
+    resource_compute_config_import_nonlatest_version_acc_test.go:29: Created ephemeral compute config: tfacc-computeconfig-6vva0of0 (config_id: cpt_REDACTED, version: 1)
+    resource_compute_config_import_nonlatest_version_acc_test.go:37: Minted new out-of-band compute config version: tfacc-computeconfig-6vva0of0 (config_id: cpt_REDACTED, version: 2)
+--- PASS: TestAccComputeConfigResource_ImportNonLatestVersionRetainsOwnValues (2.54s)
+=== RUN   TestAccComputeConfigResource_ImportPreExistingOutOfBandFixture
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_compute_config.go:89: Using default known-good cloud for compute config: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+    resource_compute_config_import_preexisting_acc_test.go:24: Creating ephemeral out-of-band compute config: tfacc-computeconfig-ptbalfyn (cloud: cld_REDACTED)
+    resource_compute_config_import_preexisting_acc_test.go:24: Created ephemeral compute config: tfacc-computeconfig-ptbalfyn (config_id: cpt_REDACTED, version: 1)
+--- PASS: TestAccComputeConfigResource_ImportPreExistingOutOfBandFixture (2.23s)
+=== RUN   TestAccComputeConfigResource_Lifecycle_MockServer
+--- PASS: TestAccComputeConfigResource_Lifecycle_MockServer (1.63s)
+=== RUN   TestAccComputeConfigResource_ImportRecoversWriteOnlyFields
+--- PASS: TestAccComputeConfigResource_ImportRecoversWriteOnlyFields (0.70s)
+=== RUN   TestAccComputeConfigResource_ImportRecoversPerNodeAdvancedInstanceConfig
+--- PASS: TestAccComputeConfigResource_ImportRecoversPerNodeAdvancedInstanceConfig (1.02s)
+=== RUN   TestAccComputeConfigResource_UnrecognizedMarketTypeRejectedAtPlan_MockServer
+--- PASS: TestAccComputeConfigResource_UnrecognizedMarketTypeRejectedAtPlan_MockServer (0.39s)
+=== RUN   TestAccComputeConfigResource_RecognizedMarketTypeApplies_MockServer
+--- PASS: TestAccComputeConfigResource_RecognizedMarketTypeApplies_MockServer (0.60s)
+=== RUN   TestAccComputeConfigResource_MemoryUnitStringParsesToBytes_MockServer
+--- PASS: TestAccComputeConfigResource_MemoryUnitStringParsesToBytes_MockServer (0.60s)
+=== RUN   TestAccComputeConfigResource_NodeJSONComparedSemantically_MockServer
+--- PASS: TestAccComputeConfigResource_NodeJSONComparedSemantically_MockServer (0.56s)
+=== RUN   TestAccComputeConfigResource_NodeInvalidJSONRejectedAtPlan_MockServer
+--- PASS: TestAccComputeConfigResource_NodeInvalidJSONRejectedAtPlan_MockServer (0.37s)
+=== RUN   TestAccComputeConfigResource_NodeJSONEncodedApplies_MockServer
+--- PASS: TestAccComputeConfigResource_NodeJSONEncodedApplies_MockServer (0.48s)
+=== RUN   TestAccComputeConfigResource_RemovingOptionalOnlyFieldsClearsThem_MockServer
+--- PASS: TestAccComputeConfigResource_RemovingOptionalOnlyFieldsClearsThem_MockServer (0.85s)
+=== RUN   TestAccComputeConfigResource_OptionalOnlyFieldsNeverSetPlanEmpty_MockServer
+--- PASS: TestAccComputeConfigResource_OptionalOnlyFieldsNeverSetPlanEmpty_MockServer (0.80s)
+=== RUN   TestAccComputeConfigResource_ReadRemovesOnGenuine404_MockServer
+--- PASS: TestAccComputeConfigResource_ReadRemovesOnGenuine404_MockServer (0.80s)
+=== RUN   TestAccComputeConfigResource_ReadSurfacesTransientErrorWithoutRemoving_MockServer
+--- PASS: TestAccComputeConfigResource_ReadSurfacesTransientErrorWithoutRemoving_MockServer (0.63s)
+=== RUN   TestAccComputeConfigResource_ImportBogusIDProducesClearDiagnostic_MockServer
+--- PASS: TestAccComputeConfigResource_ImportBogusIDProducesClearDiagnostic_MockServer (0.20s)
+=== RUN   TestAccComputeConfigResource_SingleResourceRequestSnapshot_MockServer
+--- PASS: TestAccComputeConfigResource_SingleResourceRequestSnapshot_MockServer (0.48s)
+=== RUN   TestAccComputeConfigResource_MaxNodesLessThanMinNodesRejected
+--- PASS: TestAccComputeConfigResource_MaxNodesLessThanMinNodesRejected (0.99s)
+=== RUN   TestAccComputeConfigResource_InstanceTypeAndRequiredResourcesWarns
+--- PASS: TestAccComputeConfigResource_InstanceTypeAndRequiredResourcesWarns (1.02s)
+=== RUN   TestAccComputeConfigResource_UnknownMarketTypeRejected
+--- PASS: TestAccComputeConfigResource_UnknownMarketTypeRejected (0.98s)
+=== RUN   TestAccComputeConfigResource_FractionalCustomResourceRejected
+--- PASS: TestAccComputeConfigResource_FractionalCustomResourceRejected (0.98s)
+=== RUN   TestAccComputeConfigResource_WholeNumberCustomResourceAllowed
+--- PASS: TestAccComputeConfigResource_WholeNumberCustomResourceAllowed (0.99s)
+=== RUN   TestAccComputeConfigResource_DuplicateDerivedWorkerNamesDisambiguated_MockServer
+--- PASS: TestAccComputeConfigResource_DuplicateDerivedWorkerNamesDisambiguated_MockServer (1.00s)
+=== RUN   TestAccComputeConfigResource_DuplicateDerivedWorkerNamesGetUniqueSuffix_MockServer
+--- PASS: TestAccComputeConfigResource_DuplicateDerivedWorkerNamesGetUniqueSuffix_MockServer (0.50s)
+=== RUN   TestAccComputeConfigResource_AdditionalResourcesDuplicateDerivedWorkerNamesGetUniqueSuffix_MockServer
+--- PASS: TestAccComputeConfigResource_AdditionalResourcesDuplicateDerivedWorkerNamesGetUniqueSuffix_MockServer (0.54s)
+=== RUN   TestAccComputeConfigResource_WorkerOrderMatchesConfiguredOrder_MockServer
+--- PASS: TestAccComputeConfigResource_WorkerOrderMatchesConfiguredOrder_MockServer (0.69s)
+=== RUN   TestAccComputeConfigResource_RemovedWorkerDoesNotLendNameToShiftedWorker_MockServer
+--- PASS: TestAccComputeConfigResource_RemovedWorkerDoesNotLendNameToShiftedWorker_MockServer (0.84s)
+=== RUN   TestAccComputeConfigResource_RemovedWorkerDoesNotLendResourcesToShiftedWorker_MockServer
+--- PASS: TestAccComputeConfigResource_RemovedWorkerDoesNotLendResourcesToShiftedWorker_MockServer (0.86s)
+=== RUN   TestAccComputeConfigResource_RemovingLastWorkerKeepsOthersStable_MockServer
+--- PASS: TestAccComputeConfigResource_RemovingLastWorkerKeepsOthersStable_MockServer (0.85s)
+=== RUN   TestAccComputeConfigResource_RemovedNamedWorkerDoesNotLendNameToUnnamedSameType_MockServer
+--- PASS: TestAccComputeConfigResource_RemovedNamedWorkerDoesNotLendNameToUnnamedSameType_MockServer (0.84s)
+=== RUN   TestAccContainerImageBuildResource_Basic
+=== PAUSE TestAccContainerImageBuildResource_Basic
+=== RUN   TestAccContainerImageBuildResource_Update
+=== PAUSE TestAccContainerImageBuildResource_Update
+=== RUN   TestAccContainerImageBuildResource_WithProjectID
+=== PAUSE TestAccContainerImageBuildResource_WithProjectID
+=== RUN   TestAccContainerImageBuildResource_DigestUpdatesOnRebuild_MockServer
+--- PASS: TestAccContainerImageBuildResource_DigestUpdatesOnRebuild_MockServer (0.81s)
+=== RUN   TestAccContainerImageBuildResource_Disappears_MockServer
+--- PASS: TestAccContainerImageBuildResource_Disappears_MockServer (0.79s)
+=== RUN   TestAccContainerImageBuildResource_DisappearsNotFound_MockServer
+--- PASS: TestAccContainerImageBuildResource_DisappearsNotFound_MockServer (0.95s)
+=== RUN   TestAccContainerImageBuildResource_UpdateSkipsBuildWhenOnlyTimeoutChanges
+--- PASS: TestAccContainerImageBuildResource_UpdateSkipsBuildWhenOnlyTimeoutChanges (0.93s)
+=== RUN   TestAccContainerImageRegistryResource_Basic
+=== PAUSE TestAccContainerImageRegistryResource_Basic
+=== RUN   TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer
+--- PASS: TestAccContainerImageRegistryResource_RayVersionImportRoundTrip_MockServer (0.76s)
+=== RUN   TestAccContainerImageRegistryResource_BYOD
+=== PAUSE TestAccContainerImageRegistryResource_BYOD
+=== RUN   TestAccContainerImageRegistryResource_ArchiveDefaultEnvironment400_MockServer
+--- PASS: TestAccContainerImageRegistryResource_ArchiveDefaultEnvironment400_MockServer (0.63s)
+=== RUN   TestAccContainerImageRegistryResource_ArchiveAzureControlPlane400_MockServer
+--- PASS: TestAccContainerImageRegistryResource_ArchiveAzureControlPlane400_MockServer (0.63s)
+=== RUN   TestAccContainerImageRegistryResource_ArchiveOther400FailsDestroy_MockServer
+--- PASS: TestAccContainerImageRegistryResource_ArchiveOther400FailsDestroy_MockServer (0.77s)
+=== RUN   TestAccContainerImageRegistryResource_DigestStableAcrossRefresh_MockServer
+--- PASS: TestAccContainerImageRegistryResource_DigestStableAcrossRefresh_MockServer (0.73s)
+=== RUN   TestAccContainerImageRegistryResource_LatestBuildAdvance_UpdatesNoReplace_MockServer
+--- PASS: TestAccContainerImageRegistryResource_LatestBuildAdvance_UpdatesNoReplace_MockServer (0.77s)
+=== RUN   TestAccContainerImageRegistryResource_Disappears_MockServer
+--- PASS: TestAccContainerImageRegistryResource_Disappears_MockServer (0.80s)
+=== RUN   TestAccContainerImageRegistryResource_DisappearsNotFound_MockServer
+--- PASS: TestAccContainerImageRegistryResource_DisappearsNotFound_MockServer (0.81s)
+=== RUN   TestAccContainerImageRegistryResource_ImageURIUpdateInPlace_MockServer
+--- PASS: TestAccContainerImageRegistryResource_ImageURIUpdateInPlace_MockServer (1.18s)
+=== RUN   TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI
+=== PAUSE TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI
+=== RUN   TestAccContainerImageRegistryResource_Lifecycle_MockServer
+--- PASS: TestAccContainerImageRegistryResource_Lifecycle_MockServer (0.87s)
+=== RUN   TestAccContainerImageRegistryResource_NameColdImportRecoversRealBackendValue
+--- PASS: TestAccContainerImageRegistryResource_NameColdImportRecoversRealBackendValue (0.24s)
+=== RUN   TestAccContainerImageRegistryResource_NamePlanStableOnceRecovered
+--- PASS: TestAccContainerImageRegistryResource_NamePlanStableOnceRecovered (0.75s)
+=== RUN   TestAccContainerImageRegistryResource_RayVersionUnset_PopulatesOnRefresh_MockServer
+--- PASS: TestAccContainerImageRegistryResource_RayVersionUnset_PopulatesOnRefresh_MockServer (0.71s)
+=== RUN   TestAccContainerImageRegistryResource_RayVersionSet_PreservedDespiteBackendMismatch_MockServer
+--- PASS: TestAccContainerImageRegistryResource_RayVersionSet_PreservedDespiteBackendMismatch_MockServer (0.76s)
+=== RUN   TestAccContainerImageRegistryResource_RayVersionUnset_NonVersionTagResolvesStably_MockServer
+--- PASS: TestAccContainerImageRegistryResource_RayVersionUnset_NonVersionTagResolvesStably_MockServer (0.74s)
+=== RUN   TestAccContainerImageRegistryResource_CreateRegistersOneBuild_MockServer
+--- PASS: TestAccContainerImageRegistryResource_CreateRegistersOneBuild_MockServer (0.46s)
+=== RUN   TestAccContainerImageRegistryResource_CreateBuildNotFoundYetWarns_MockServer
+--- PASS: TestAccContainerImageRegistryResource_CreateBuildNotFoundYetWarns_MockServer (0.76s)
+=== RUN   TestAccContainerImageRegistryResource_LoginSecretAdoptedAfterColdImport_MockServer
+--- PASS: TestAccContainerImageRegistryResource_LoginSecretAdoptedAfterColdImport_MockServer (0.94s)
+=== RUN   TestAccContainerImageRegistryResource_LoginSecretAddedAfterCreateReplaces_MockServer
+--- PASS: TestAccContainerImageRegistryResource_LoginSecretAddedAfterCreateReplaces_MockServer (0.77s)
+=== RUN   TestAccContainerImageRegistryResource_LoginSecretChangeReplaces_MockServer
+--- PASS: TestAccContainerImageRegistryResource_LoginSecretChangeReplaces_MockServer (0.78s)
+=== RUN   TestAccCloudResource_CredentialsAdoptedAfterColdImport_MockServer
+--- PASS: TestAccCloudResource_CredentialsAdoptedAfterColdImport_MockServer (0.63s)
+=== RUN   TestAccCloudResource_CredentialsAddedAfterCreateReplaces_MockServer
+--- PASS: TestAccCloudResource_CredentialsAddedAfterCreateReplaces_MockServer (0.83s)
+=== RUN   TestAccContainerImageBuildResource_ImportRecoversProjectID_MockServer
+--- PASS: TestAccContainerImageBuildResource_ImportRecoversProjectID_MockServer (0.25s)
+=== RUN   TestAccContainerImageBuildResource_ImportLeavesUnsetProjectIDNull_MockServer
+--- PASS: TestAccContainerImageBuildResource_ImportLeavesUnsetProjectIDNull_MockServer (0.25s)
+=== RUN   TestAccOrganizationDefaultCloudResource_Lifecycle_MockServer
+--- PASS: TestAccOrganizationDefaultCloudResource_Lifecycle_MockServer (1.11s)
+=== RUN   TestAccOrganizationDefaultCloudResource_BogusCloudID_MockServer
+--- PASS: TestAccOrganizationDefaultCloudResource_BogusCloudID_MockServer (0.22s)
+=== RUN   TestAccOrganizationDefaultCloudResource_ImportNotCurrentDefault_MockServer
+--- PASS: TestAccOrganizationDefaultCloudResource_ImportNotCurrentDefault_MockServer (0.20s)
+=== RUN   TestAccOrganizationDefaultCloudResource_Drift_MockServer
+--- PASS: TestAccOrganizationDefaultCloudResource_Drift_MockServer (0.59s)
+=== RUN   TestAccOrganizationDefaultCloudResource_ReadErrorStatusKeepsState_MockServer
+--- PASS: TestAccOrganizationDefaultCloudResource_ReadErrorStatusKeepsState_MockServer (0.79s)
+=== RUN   TestAccOrganizationDefaultCloudResource_ImportErrorStatus_MockServer
+--- PASS: TestAccOrganizationDefaultCloudResource_ImportErrorStatus_MockServer (0.20s)
+=== RUN   TestAccOrganizationDefaultCloudResource_ImportNonexistentCloud_MockServer
+--- PASS: TestAccOrganizationDefaultCloudResource_ImportNonexistentCloud_MockServer (0.20s)
+=== RUN   TestAccOrganizationDefaultCloudResource_ImportWithNoOrgDefault_MockServer
+=== RUN   TestAccOrganizationDefaultCloudResource_ImportWithNoOrgDefault_MockServer/explains_the_per-user_fallback
+=== RUN   TestAccOrganizationDefaultCloudResource_ImportWithNoOrgDefault_MockServer/falls_back_when_userinfo_fails
+--- PASS: TestAccOrganizationDefaultCloudResource_ImportWithNoOrgDefault_MockServer (0.41s)
+    --- PASS: TestAccOrganizationDefaultCloudResource_ImportWithNoOrgDefault_MockServer/explains_the_per-user_fallback (0.20s)
+    --- PASS: TestAccOrganizationDefaultCloudResource_ImportWithNoOrgDefault_MockServer/falls_back_when_userinfo_fails (0.21s)
+=== RUN   TestAccOrganizationDefaultCloudResource_UpdateCloudID_MockServer
+--- PASS: TestAccOrganizationDefaultCloudResource_UpdateCloudID_MockServer (0.80s)
+=== RUN   TestAccOrganizationInvitationResource_Lifecycle_MockServer
+--- PASS: TestAccOrganizationInvitationResource_Lifecycle_MockServer (1.34s)
+=== RUN   TestAccOrganizationInvitationResource_MixedCaseEmail_MockServer
+--- PASS: TestAccOrganizationInvitationResource_MixedCaseEmail_MockServer (0.56s)
+=== RUN   TestAccOrganizationInvitationResourceCaseOnlyEmailChange
+--- PASS: TestAccOrganizationInvitationResourceCaseOnlyEmailChange (0.88s)
+=== RUN   TestAccOrganizationUserResource_Lifecycle_MockServer
+--- PASS: TestAccOrganizationUserResource_Lifecycle_MockServer (0.55s)
+=== RUN   TestAccOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted
+--- PASS: TestAccOrganizationUserResourceDestroyAdoptedMemberIsNotEvicted (0.44s)
+=== RUN   TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation
+--- PASS: TestAccOrganizationUserResourceDestroyInvitedCancelsInvitation (0.45s)
+=== RUN   TestAccOrganizationUserResourceImportRoundTripPreservesCasing
+--- PASS: TestAccOrganizationUserResourceImportRoundTripPreservesCasing (0.95s)
+=== RUN   TestAccOrganizationUserRoleResource_DenyRolesOmittedPlanStability
+--- PASS: TestAccOrganizationUserRoleResource_DenyRolesOmittedPlanStability (1.00s)
+=== RUN   TestAccOrganizationUserRoleResource_DenyRolesExplicitEmptyPlanStability
+--- PASS: TestAccOrganizationUserRoleResource_DenyRolesExplicitEmptyPlanStability (0.70s)
+=== RUN   TestAccOrganizationUserRoleResource_DestroyClearsDeclaredDenyRolesLeavesBaseRole
+    resource_organization_user_role_acc_test.go:302: post-destroy backend state: base_role=owner additional_roles=[]
+--- PASS: TestAccOrganizationUserRoleResource_DestroyClearsDeclaredDenyRolesLeavesBaseRole (0.44s)
+=== RUN   TestAccOrganizationUserRoleResource_DestroyLeavesOmittedDenyRolesUntouched
+    resource_organization_user_role_acc_test.go:354: post-destroy backend state: base_role=owner additional_roles=[image_reader] total_write_calls=1
+--- PASS: TestAccOrganizationUserRoleResource_DestroyLeavesOmittedDenyRolesUntouched (0.44s)
+=== RUN   TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesKeepsThemViaRolesAPI
+    resource_organization_user_role_acc_test.go:429: legacy path writes=0 roles path writes=2
+--- PASS: TestAccOrganizationUserRoleResource_UpdateOmittedDenyRolesKeepsThemViaRolesAPI (0.79s)
+=== RUN   TestAccOrganizationUserRoleResource_DestroyClearAuthoritySurvivesRefresh
+    resource_organization_user_role_acc_test.go:480: post-refresh-then-destroy backend state: base_role=owner additional_roles=[]
+--- PASS: TestAccOrganizationUserRoleResource_DestroyClearAuthoritySurvivesRefresh (0.63s)
+=== RUN   TestAccOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState
+--- PASS: TestAccOrganizationUserRoleResource_NonNotFoundReadErrorLeavesResourceInState (0.68s)
+=== RUN   TestAccOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles
+--- PASS: TestAccOrganizationUserRoleResource_ImportRecoversBaseRoleAndDenyRoles (0.60s)
+=== RUN   TestAccOrganizationUserRoleResource_ColdImportThenDestroyLeavesDenyRolesUntouched
+    resource_organization_user_role_acc_test.go:706: post-cold-import-destroy backend state: base_role=owner additional_roles=[image_reader]
+--- PASS: TestAccOrganizationUserRoleResource_ColdImportThenDestroyLeavesDenyRolesUntouched (0.25s)
+=== RUN   TestAccOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift
+--- PASS: TestAccOrganizationUserRoleResource_RefreshDetectsBaseRoleDrift (0.68s)
+=== RUN   TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors
+=== RUN   TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors/roles_path_deny_roles_declared
+=== RUN   TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors/roles_path_base_role_only
+=== RUN   TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors/legacy_path_after_roles_501
+--- PASS: TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors (0.66s)
+    --- PASS: TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors/roles_path_deny_roles_declared (0.22s)
+    --- PASS: TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors/roles_path_base_role_only (0.22s)
+    --- PASS: TestAccOrganizationUserRoleResource_ConvertedOrgCreateErrors/legacy_path_after_roles_501 (0.22s)
+=== RUN   TestAccOrganizationUserRoleResource_ConvertedOrgDestroyWarnsAndDropsState
+--- PASS: TestAccOrganizationUserRoleResource_ConvertedOrgDestroyWarnsAndDropsState (1.36s)
+=== RUN   TestAccOrganizationUserRoleResource_ConvertedOrgUnrecognizedConflictPassesThrough
+=== RUN   TestAccOrganizationUserRoleResource_ConvertedOrgUnrecognizedConflictPassesThrough/roles_path
+=== RUN   TestAccOrganizationUserRoleResource_ConvertedOrgUnrecognizedConflictPassesThrough/legacy_path_after_roles_501
+--- PASS: TestAccOrganizationUserRoleResource_ConvertedOrgUnrecognizedConflictPassesThrough (0.46s)
+    --- PASS: TestAccOrganizationUserRoleResource_ConvertedOrgUnrecognizedConflictPassesThrough/roles_path (0.22s)
+    --- PASS: TestAccOrganizationUserRoleResource_ConvertedOrgUnrecognizedConflictPassesThrough/legacy_path_after_roles_501 (0.24s)
+=== RUN   TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles
+    resource_organization_user_role_realinfra_acc_test.go:439: ANYSCALE_TEST_USER_EMAIL not set - skipping real-infra organization role test. Point it at a DISPOSABLE org member (an accepted invitation to a throwaway address you control), never a colleague: these tests change that person's real organization role.
+--- SKIP: TestAccOrganizationUserRoleResourceR5LegacyPutPreservesDenyRoles (0.00s)
+=== RUN   TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists
+    resource_organization_user_role_realinfra_acc_test.go:534: ANYSCALE_TEST_USER_EMAIL not set - skipping real-infra organization role test. Point it at a DISPOSABLE org member (an accepted invitation to a throwaway address you control), never a colleague: these tests change that person's real organization role.
+--- SKIP: TestAccOrganizationUserRoleResourceChangingDenyRoleWritePersists (0.00s)
+=== RUN   TestAccOrganizationUserRoleResource_MixedCaseEmailPlansClean
+--- PASS: TestAccOrganizationUserRoleResource_MixedCaseEmailPlansClean (0.71s)
+=== RUN   TestAccOrganizationUserRoleResource_DenyRolesOrderPlansClean
+=== RUN   TestAccOrganizationUserRoleResource_DenyRolesOrderPlansClean/canonical_order_control
+=== RUN   TestAccOrganizationUserRoleResource_DenyRolesOrderPlansClean/reversed_order
+--- PASS: TestAccOrganizationUserRoleResource_DenyRolesOrderPlansClean (1.44s)
+    --- PASS: TestAccOrganizationUserRoleResource_DenyRolesOrderPlansClean/canonical_order_control (0.76s)
+    --- PASS: TestAccOrganizationUserRoleResource_DenyRolesOrderPlansClean/reversed_order (0.68s)
+=== RUN   TestAccOrganizationUserRoleResource_DenyRolesRealDriftStillShows
+--- PASS: TestAccOrganizationUserRoleResource_DenyRolesRealDriftStillShows (0.71s)
+=== RUN   TestAccOrganizationUserRoleResource_DenyRolesDuplicateRejectedAtPlan
+--- PASS: TestAccOrganizationUserRoleResource_DenyRolesDuplicateRejectedAtPlan (0.13s)
+=== RUN   TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan
+=== RUN   TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan/valid_control
+=== RUN   TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan/image_reader_as_base_role
+=== RUN   TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan/unknown_base_role
+=== RUN   TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan/unknown_deny_role
+--- PASS: TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan (0.80s)
+    --- PASS: TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan/valid_control (0.41s)
+    --- PASS: TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan/image_reader_as_base_role (0.13s)
+    --- PASS: TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan/unknown_base_role (0.13s)
+    --- PASS: TestAccOrganizationUserRoleResource_InvalidRolesRejectedAtPlan/unknown_deny_role (0.13s)
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/resource_anyscale_organization_user_role
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/resource_anyscale_organization_user_role/lookup_works
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/resource_anyscale_organization_user_role/lookup_fails
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_user
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_user/lookup_works
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_user/lookup_fails
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_users
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_users/lookup_works
+=== RUN   TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_users/lookup_fails
+--- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError (1.64s)
+    --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/resource_anyscale_organization_user_role (0.62s)
+        --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/resource_anyscale_organization_user_role/lookup_works (0.41s)
+        --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/resource_anyscale_organization_user_role/lookup_fails (0.22s)
+    --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_user (0.51s)
+        --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_user/lookup_works (0.37s)
+        --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_user/lookup_fails (0.14s)
+    --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_users (0.51s)
+        --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_users/lookup_works (0.38s)
+        --- PASS: TestAccOrganizationUserRoleResource_PerUserLookupFailureIsAnError/data_source_anyscale_organization_users/lookup_fails (0.13s)
+=== RUN   TestAccOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp
+=== RUN   TestAccOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp/mixed_case
+=== RUN   TestAccOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp/lowercase_control
+--- PASS: TestAccOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp (0.80s)
+    --- PASS: TestAccOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp/mixed_case (0.40s)
+    --- PASS: TestAccOrganizationUserRoleResource_ColdImportMixedCaseEmailPlansNoOp/lowercase_control (0.40s)
+=== RUN   TestAccOrganizationUserRoleResource_CaseOnlyEmailEditUpdatesInPlace
+--- PASS: TestAccOrganizationUserRoleResource_CaseOnlyEmailEditUpdatesInPlace (1.06s)
+=== RUN   TestAccProjectResource_Basic
+=== PAUSE TestAccProjectResource_Basic
+=== RUN   TestAccProjectResource_WithDescription
+=== PAUSE TestAccProjectResource_WithDescription
+=== RUN   TestAccProjectResource_Disappears
+=== PAUSE TestAccProjectResource_Disappears
+=== RUN   TestAccProjectResourceDisappearsRetryExtension
+    resource_project_acc_test.go:225: testAccDeleteProjectViaAPI: initial retry schedule exhausted for project prj_disappears_engagement (unexpected status 403: {"error":{"detail":"Permission denied"}}); extending with a slower test-only round (interval=8s, max_wait=16s)
+    resource_project_acc_test.go:225: testAccDeleteProjectViaAPI: extended attempt 1 succeeded for project prj_disappears_engagement
+--- PASS: TestAccProjectResourceDisappearsRetryExtension (103.07s)
+=== RUN   TestAccProjectResource_Lifecycle_MockServer
+--- PASS: TestAccProjectResource_Lifecycle_MockServer (0.96s)
+=== RUN   TestAccRoleBindingResource_RealAPI
+    resource_role_binding_acc_test.go:115: role bindings are not enabled for the test organization (GET /api/v2/roles/ answered 404)
+--- SKIP: TestAccRoleBindingResource_RealAPI (0.32s)
+=== RUN   TestAccRoleBindingResource_CompositeImportRecoversBinding
+=== RUN   TestAccRoleBindingResource_CompositeImportRecoversBinding/group_cloud
+=== RUN   TestAccRoleBindingResource_CompositeImportRecoversBinding/user_project
+=== RUN   TestAccRoleBindingResource_CompositeImportRecoversBinding/group_organization
+--- PASS: TestAccRoleBindingResource_CompositeImportRecoversBinding (0.78s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportRecoversBinding/group_cloud (0.24s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportRecoversBinding/user_project (0.30s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportRecoversBinding/group_organization (0.24s)
+=== RUN   TestAccRoleBindingResource_CompositeImportBlock
+--- PASS: TestAccRoleBindingResource_CompositeImportBlock (0.28s)
+=== RUN   TestAccRoleBindingResource_CompositeImportNoMatch
+--- PASS: TestAccRoleBindingResource_CompositeImportNoMatch (0.20s)
+=== RUN   TestAccRoleBindingResource_CompositeImportWalksEveryPage
+--- PASS: TestAccRoleBindingResource_CompositeImportWalksEveryPage (0.24s)
+=== RUN   TestAccRoleBindingResource_CompositeImportFlagOff
+--- PASS: TestAccRoleBindingResource_CompositeImportFlagOff (0.21s)
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/bad_scope_type
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/bad_principal
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/plural_scope
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/not_an_id
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/four_parts
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/six_parts
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/empty_part
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/trailing_slash
+=== RUN   TestAccRoleBindingResource_CompositeImportMalformed/principal_users
+--- PASS: TestAccRoleBindingResource_CompositeImportMalformed (1.93s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/bad_scope_type (0.21s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/bad_principal (0.20s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/plural_scope (0.21s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/not_an_id (0.20s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/four_parts (0.21s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/six_parts (0.20s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/empty_part (0.28s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/trailing_slash (0.20s)
+    --- PASS: TestAccRoleBindingResource_CompositeImportMalformed/principal_users (0.21s)
+=== RUN   TestAccRoleBindingResource_MockLifecycle
+--- PASS: TestAccRoleBindingResource_MockLifecycle (2.01s)
+=== RUN   TestAccRoleBindingResource_MockScopeValidation
+--- PASS: TestAccRoleBindingResource_MockScopeValidation (0.17s)
+=== RUN   TestAccRoleBindingResource_MockImportUnsupportedScope
+--- PASS: TestAccRoleBindingResource_MockImportUnsupportedScope (0.20s)
+=== RUN   TestAccRoleBindingResource_ModesDuplicateKeepsImportHint
+--- PASS: TestAccRoleBindingResource_ModesDuplicateKeepsImportHint (0.22s)
+=== RUN   TestAccRoleBindingResource_NotConvertedCreate
+--- PASS: TestAccRoleBindingResource_NotConvertedCreate (0.22s)
+=== RUN   TestAccRoleBindingResource_NotConvertedDelete
+--- PASS: TestAccRoleBindingResource_NotConvertedDelete (0.76s)
+=== RUN   TestAccRoleBindingResource_ArchivedRoleCreate
+--- PASS: TestAccRoleBindingResource_ArchivedRoleCreate (0.28s)
+=== RUN   TestAccRoleBindingResource_LockoutDelete
+--- PASS: TestAccRoleBindingResource_LockoutDelete (0.91s)
+=== RUN   TestAccRoleBindingResource_UnrecognizedConflictPassesThrough
+--- PASS: TestAccRoleBindingResource_UnrecognizedConflictPassesThrough (0.22s)
+=== RUN   TestAccRoleBindingResource_FlagOffKeepsState
+--- PASS: TestAccRoleBindingResource_FlagOffKeepsState (0.98s)
+=== RUN   TestAccRoleBindingResource_RevokedOutOfBandIsRecreated
+--- PASS: TestAccRoleBindingResource_RevokedOutOfBandIsRecreated (0.82s)
+=== RUN   TestAccRoleBindingResource_DeletedGroupIsRemoved
+=== RUN   TestAccRoleBindingResource_DeletedGroupIsRemoved/empty_page
+=== RUN   TestAccRoleBindingResource_DeletedGroupIsRemoved/404_with_roles_probe_200
+--- PASS: TestAccRoleBindingResource_DeletedGroupIsRemoved (1.49s)
+    --- PASS: TestAccRoleBindingResource_DeletedGroupIsRemoved/empty_page (0.65s)
+    --- PASS: TestAccRoleBindingResource_DeletedGroupIsRemoved/404_with_roles_probe_200 (0.84s)
+=== RUN   TestAccRoleBindingResource_ProbeFailureFailsClosed
+--- PASS: TestAccRoleBindingResource_ProbeFailureFailsClosed (0.76s)
+=== RUN   TestAccRoleBindingResource_DeletedScopeKeepsStateWithHint
+--- PASS: TestAccRoleBindingResource_DeletedScopeKeepsStateWithHint (0.79s)
+=== RUN   TestAccRoleBindingResource_ReadWalksEveryPage
+--- PASS: TestAccRoleBindingResource_ReadWalksEveryPage (0.78s)
+=== RUN   TestAccRoleBindingResource_Duplicate409NamesExistingID
+--- PASS: TestAccRoleBindingResource_Duplicate409NamesExistingID (0.28s)
+=== RUN   TestAccRoleBindingResource_Duplicate409GenericHintWhenListingFails
+--- PASS: TestAccRoleBindingResource_Duplicate409GenericHintWhenListingFails (0.22s)
+=== RUN   TestAccRoleBindingResource_FlagOffOnCreate
+--- PASS: TestAccRoleBindingResource_FlagOffOnCreate (0.22s)
+=== RUN   TestAccRoleBindingResource_DeleteRevokedConcurrentlySucceeds
+--- PASS: TestAccRoleBindingResource_DeleteRevokedConcurrentlySucceeds (0.65s)
+=== RUN   TestAccRoleBindingResource_DeleteDeniedErrors
+--- PASS: TestAccRoleBindingResource_DeleteDeniedErrors (0.79s)
+=== RUN   TestAccRoleBindingResource_ImportMapsScope
+=== RUN   TestAccRoleBindingResource_ImportMapsScope/organization
+=== RUN   TestAccRoleBindingResource_ImportMapsScope/cloud
+=== RUN   TestAccRoleBindingResource_ImportMapsScope/project
+--- PASS: TestAccRoleBindingResource_ImportMapsScope (0.73s)
+    --- PASS: TestAccRoleBindingResource_ImportMapsScope/organization (0.24s)
+    --- PASS: TestAccRoleBindingResource_ImportMapsScope/cloud (0.24s)
+    --- PASS: TestAccRoleBindingResource_ImportMapsScope/project (0.24s)
+=== RUN   TestAccRoleBindingResource_ScopeExactlyOne
+=== RUN   TestAccRoleBindingResource_ScopeExactlyOne/none
+=== RUN   TestAccRoleBindingResource_ScopeExactlyOne/two
+--- PASS: TestAccRoleBindingResource_ScopeExactlyOne (0.27s)
+    --- PASS: TestAccRoleBindingResource_ScopeExactlyOne/none (0.13s)
+    --- PASS: TestAccRoleBindingResource_ScopeExactlyOne/two (0.14s)
+=== RUN   TestAccRoleBindingResource_UserPrincipalLifecycle
+--- PASS: TestAccRoleBindingResource_UserPrincipalLifecycle (0.90s)
+=== RUN   TestAccRoleBindingResource_UserPrincipalRevokedOutOfBandIsRecreated
+--- PASS: TestAccRoleBindingResource_UserPrincipalRevokedOutOfBandIsRecreated (0.87s)
+=== RUN   TestAccRoleBindingResource_UserPrincipalColdImport
+--- PASS: TestAccRoleBindingResource_UserPrincipalColdImport (0.24s)
+=== RUN   TestAccRoleBindingResource_GroupPrincipalColdImportLeavesUserNull
+--- PASS: TestAccRoleBindingResource_GroupPrincipalColdImportLeavesUserNull (0.25s)
+=== RUN   TestAccRoleBindingResource_PrincipalExactlyOne
+--- PASS: TestAccRoleBindingResource_PrincipalExactlyOne (0.16s)
+=== RUN   TestAccRoleBindingResource_PrincipalChangeReplaces
+--- PASS: TestAccRoleBindingResource_PrincipalChangeReplaces (1.58s)
+=== RUN   TestAccRoleBindingResource_GroupChangeReplaces
+--- PASS: TestAccRoleBindingResource_GroupChangeReplaces (0.79s)
+=== RUN   TestAccRoleBindingResource_SelfGrantRefused
+--- PASS: TestAccRoleBindingResource_SelfGrantRefused (0.25s)
+=== RUN   TestAccRoleBindingResource_SelfRevokeRefused
+--- PASS: TestAccRoleBindingResource_SelfRevokeRefused (0.76s)
+=== RUN   TestAccRoleBindingResource_UpgradeFromV030GroupBindingPlansNoop
+--- PASS: TestAccRoleBindingResource_UpgradeFromV030GroupBindingPlansNoop (1.99s)
+=== RUN   TestAccSchedulerConfigResourceAdvancedInstanceConfigSemanticEquality
+--- PASS: TestAccSchedulerConfigResourceAdvancedInstanceConfigSemanticEquality (0.74s)
+=== RUN   TestAccSchedulerConfigResourceAdvancedInstanceConfigNumericFormDiffers
+--- PASS: TestAccSchedulerConfigResourceAdvancedInstanceConfigNumericFormDiffers (0.45s)
+=== RUN   TestAccSchedulerConfigResource_DestroyIsStateOnly_MockServer
+--- PASS: TestAccSchedulerConfigResource_DestroyIsStateOnly_MockServer (0.45s)
+=== RUN   TestAccSchedulerConfigResourceOutOfBandDrift_MockServer
+--- PASS: TestAccSchedulerConfigResourceOutOfBandDrift_MockServer (1.03s)
+=== RUN   TestAccSchedulerConfigResourceValidationUnreachableDoesNotBlockPlan
+--- PASS: TestAccSchedulerConfigResourceValidationUnreachableDoesNotBlockPlan (0.47s)
+=== RUN   TestAccSchedulerConfigResourceAdmissionFlag403DoesNotBlockPlan
+--- PASS: TestAccSchedulerConfigResourceAdmissionFlag403DoesNotBlockPlan (0.49s)
+=== RUN   TestAccSchedulerConfigResourceRefreshForbiddenRetainsState
+--- PASS: TestAccSchedulerConfigResourceRefreshForbiddenRetainsState (0.84s)
+=== RUN   TestAccSchedulerConfigResourceLifecycleCreateAndNoOpReplan
+--- PASS: TestAccSchedulerConfigResourceLifecycleCreateAndNoOpReplan (0.89s)
+=== RUN   TestAccSchedulerConfigResourceLifecycleUpdateInPlace
+--- PASS: TestAccSchedulerConfigResourceLifecycleUpdateInPlace (0.96s)
+=== RUN   TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections
+--- PASS: TestAccSchedulerConfigResourceLifecycleRawBodyOmitsAbsentSections (0.54s)
+=== RUN   TestAccSchedulerConfigResourceLifecycleOmittedSectionsReadAsNull
+--- PASS: TestAccSchedulerConfigResourceLifecycleOmittedSectionsReadAsNull (0.46s)
+=== RUN   TestAccSchedulerConfigResourceRejectsInvalidEnumAtPlan
+=== RUN   TestAccSchedulerConfigResourceRejectsInvalidEnumAtPlan/match_expression_operator
+=== RUN   TestAccSchedulerConfigResourceRejectsInvalidEnumAtPlan/priority_policy_on_violation
+=== RUN   TestAccSchedulerConfigResourceRejectsInvalidEnumAtPlan/queue_preemption_reclaim_within_cohort
+--- PASS: TestAccSchedulerConfigResourceRejectsInvalidEnumAtPlan (0.46s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsInvalidEnumAtPlan/match_expression_operator (0.20s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsInvalidEnumAtPlan/priority_policy_on_violation (0.13s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsInvalidEnumAtPlan/queue_preemption_reclaim_within_cohort (0.13s)
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan/resource_flavors
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan/resource_queues
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan/scheduling_rules
+--- PASS: TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan (0.44s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan/resource_flavors (0.16s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan/resource_queues (0.13s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptySectionAtPlan/scheduling_rules (0.15s)
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/flavor_selector
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/match_expression_values
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/rule_selector
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/queue_resource_groups
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/flavor_quota_resources
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/advanced_instance_config_empty_object
+=== RUN   TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/advanced_instance_config_null
+--- PASS: TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan (2.74s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/flavor_selector (0.39s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/match_expression_values (0.35s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/rule_selector (0.36s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/queue_resource_groups (0.36s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/flavor_quota_resources (0.56s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/advanced_instance_config_empty_object (0.36s)
+    --- PASS: TestAccSchedulerConfigResourceRejectsEmptyNestedValueAtPlan/advanced_instance_config_null (0.36s)
+=== RUN   TestAccSchedulerConfigResourceCrossReferenceValidationRunsOnCreate
+--- PASS: TestAccSchedulerConfigResourceCrossReferenceValidationRunsOnCreate (0.15s)
+=== RUN   TestAccSchedulerConfigResourcePreservesDeclaredOrder
+--- PASS: TestAccSchedulerConfigResourcePreservesDeclaredOrder (1.52s)
+=== RUN   TestAccSchedulerConfigResourceProceedsWhenValidateUnavailableAtCreate
+--- PASS: TestAccSchedulerConfigResourceProceedsWhenValidateUnavailableAtCreate (0.58s)
+=== RUN   TestAccSchedulerConfigResource_ReadRemovesOnGenuine404_MockServer
+--- PASS: TestAccSchedulerConfigResource_ReadRemovesOnGenuine404_MockServer (0.66s)
+=== RUN   TestAccSchedulerConfigResource_ImportAdoptsActiveConfig_MockServer
+--- PASS: TestAccSchedulerConfigResource_ImportAdoptsActiveConfig_MockServer (0.41s)
+=== RUN   TestAccSchedulerConfigResource_ImportOrgIDMismatch_MockServer
+--- PASS: TestAccSchedulerConfigResource_ImportOrgIDMismatch_MockServer (0.21s)
+=== RUN   TestAccSchedulerConfigResource_ImportNoActiveConfig_MockServer
+--- PASS: TestAccSchedulerConfigResource_ImportNoActiveConfig_MockServer (0.21s)
+=== RUN   TestAccSchedulerConfigResource_ImportSchedulerNotEnabled_MockServer
+--- PASS: TestAccSchedulerConfigResource_ImportSchedulerNotEnabled_MockServer (0.21s)
+=== RUN   TestAccServiceResource_CloudMatchRejectsMismatch
+--- PASS: TestAccServiceResource_CloudMatchRejectsMismatch (0.15s)
+=== RUN   TestAccServiceResource_CloudMatchAllowsMatch
+--- PASS: TestAccServiceResource_CloudMatchAllowsMatch (0.79s)
+=== RUN   TestAccServiceResource_CloudMatchSkipsOnOmittedProjectID
+--- PASS: TestAccServiceResource_CloudMatchSkipsOnOmittedProjectID (0.51s)
+=== RUN   TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID
+--- PASS: TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID (0.55s)
+=== RUN   TestAccServiceResource_ImportUnchangedDefaultStrategyNoRedeploy
+--- PASS: TestAccServiceResource_ImportUnchangedDefaultStrategyNoRedeploy (0.66s)
+=== RUN   TestAccServiceResource_ImportUnchangedMaxSurgeNoRedeploy
+--- PASS: TestAccServiceResource_ImportUnchangedMaxSurgeNoRedeploy (0.66s)
+=== RUN   TestAccServiceResource_RolloutStrategyOnlyChangeNoRedeploy
+--- PASS: TestAccServiceResource_RolloutStrategyOnlyChangeNoRedeploy (1.02s)
+=== RUN   TestAccServiceResource_RolloutStrategyWithDeployChangeSendsPlanned
+--- PASS: TestAccServiceResource_RolloutStrategyWithDeployChangeSendsPlanned (0.90s)
+=== RUN   TestAccServiceResource_MaxSurgeOnlyChangeNoRedeploy
+--- PASS: TestAccServiceResource_MaxSurgeOnlyChangeNoRedeploy (0.94s)
+=== RUN   TestAccServiceResource_MaxSurgeWithDeployChangeSendsPlanned
+--- PASS: TestAccServiceResource_MaxSurgeWithDeployChangeSendsPlanned (0.87s)
+=== RUN   TestAccServiceResource_DescriptionOnlyChangeRedeploys
+--- PASS: TestAccServiceResource_DescriptionOnlyChangeRedeploys (0.88s)
+=== RUN   TestAccServiceResource_ImportStateVerify_MockServer
+--- PASS: TestAccServiceResource_ImportStateVerify_MockServer (0.67s)
+=== RUN   TestAccServiceResource_PlainCreateSucceeds
+--- PASS: TestAccServiceResource_PlainCreateSucceeds (0.54s)
+=== RUN   TestAccServiceResource_DeleteAlreadyGone
+--- PASS: TestAccServiceResource_DeleteAlreadyGone (0.69s)
+=== RUN   TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges
+--- PASS: TestAccServiceResource_UpdateSkipsApplyWhenOnlyTimeoutChanges (0.88s)
+=== RUN   TestAccServiceResource_ImportPopulatesProjectID
+--- PASS: TestAccServiceResource_ImportPopulatesProjectID (0.67s)
+=== RUN   TestAccServiceResource_TagsFullRemovalDetected
+--- PASS: TestAccServiceResource_TagsFullRemovalDetected (0.78s)
+=== RUN   TestAccServiceResource_CreateWaitTimeoutPreservesID
+--- PASS: TestAccServiceResource_CreateWaitTimeoutPreservesID (10.52s)
+=== RUN   TestAccServiceResource_RealInfra
+    resource_service_realinfra_acc_test.go:37: SKIP(no-real-infra): requires real cloud infra; not runnable in the placeholder acctest lane (fake creds -> STS 403 / add_resource 500 / timeout). Real coverage via make test-primary / buildkite e2e; set ANYSCALE_TEST_REAL_INFRA=1 to run.
+--- SKIP: TestAccServiceResource_RealInfra (0.00s)
+=== RUN   TestAccServiceResource_RealInfra_InPlaceRollout
+    resource_service_realinfra_acc_test.go:228: SKIP(no-real-infra): requires real cloud infra; not runnable in the placeholder acctest lane (fake creds -> STS 403 / add_resource 500 / timeout). Real coverage via make test-primary / buildkite e2e; set ANYSCALE_TEST_REAL_INFRA=1 to run.
+--- SKIP: TestAccServiceResource_RealInfra_InPlaceRollout (0.00s)
+=== RUN   TestAccServiceResource_UpdateRedeploysAndConverges
+--- PASS: TestAccServiceResource_UpdateRedeploysAndConverges (20.86s)
+=== RUN   TestAccServiceResource_InPlaceUpdateConverges
+--- PASS: TestAccServiceResource_InPlaceUpdateConverges (20.94s)
+=== RUN   TestAccServiceResource_InPlaceRejectsBuildIDChange
+--- PASS: TestAccServiceResource_InPlaceRejectsBuildIDChange (0.52s)
+=== RUN   TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout
+--- PASS: TestAccServiceResource_CreateWithInPlaceSendsTransparentRollout (0.47s)
+=== RUN   TestAccServiceResource_InPlaceRejectsDescriptionChange
+--- PASS: TestAccServiceResource_InPlaceRejectsDescriptionChange (0.91s)
+=== RUN   TestAccServiceResource_RolloutAcceptsDescriptionChange
+--- PASS: TestAccServiceResource_RolloutAcceptsDescriptionChange (0.84s)
+=== RUN   TestAccServiceResource_ConnectionIDsDeclaredAfterOmittedNoRedeploy
+--- PASS: TestAccServiceResource_ConnectionIDsDeclaredAfterOmittedNoRedeploy (1.26s)
+=== RUN   TestAccServiceResource_ConnectionIDsDeclaredAfterOmittedInPlace
+--- PASS: TestAccServiceResource_ConnectionIDsDeclaredAfterOmittedInPlace (0.92s)
+=== RUN   TestAccServiceResource_ImportConnectionIDsNoRedeploy
+--- PASS: TestAccServiceResource_ImportConnectionIDsNoRedeploy (0.66s)
+=== RUN   TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning
+--- PASS: TestAccSystemClusterResource_CreateEnablesStartsAndPollsToRunning (11.18s)
+=== RUN   TestAccSystemClusterResource_DeleteIsStateOnly
+--- PASS: TestAccSystemClusterResource_DeleteIsStateOnly (10.61s)
+=== RUN   TestAccSystemClusterResource_ImportByCloudID
+--- PASS: TestAccSystemClusterResource_ImportByCloudID (10.91s)
+=== RUN   TestAccUserGroupResource_basic
+=== PAUSE TestAccUserGroupResource_basic
+=== RUN   TestAccUserGroupResource_disappears
+=== PAUSE TestAccUserGroupResource_disappears
+=== RUN   TestAccUserGroupResource_DuplicateNameError
+=== PAUSE TestAccUserGroupResource_DuplicateNameError
+=== RUN   TestAccUserGroupMembersResource_RealAPI
+    resource_user_group_members_acc_test.go:120: ANYSCALE_TEST_USER_EMAIL not set - skipping real-infra organization role test. Point it at a DISPOSABLE org member (an accepted invitation to a throwaway address you control), never a colleague: these tests change that person's real organization role.
+--- SKIP: TestAccUserGroupMembersResource_RealAPI (0.00s)
+=== RUN   TestAccUserGroupMembersResource_UpgradeFromV030RenamesGroupID
+--- PASS: TestAccUserGroupMembersResource_UpgradeFromV030RenamesGroupID (1.98s)
+=== RUN   TestAccUserGroupMembersResource_MockLifecycle
+--- PASS: TestAccUserGroupMembersResource_MockLifecycle (2.91s)
+=== RUN   TestAccUserGroupResource_MockDestroyRemovesMembersFirst
+--- PASS: TestAccUserGroupResource_MockDestroyRemovesMembersFirst (0.44s)
+=== RUN   TestAccUserGroupMembersResource_MockEmptySet
+--- PASS: TestAccUserGroupMembersResource_MockEmptySet (0.52s)
+=== RUN   TestAccUserGroupMembersResource_MockImport
+--- PASS: TestAccUserGroupMembersResource_MockImport (0.73s)
+=== RUN   TestAccUserGroupMembersResource_MockImportedShapePlansClean
+--- PASS: TestAccUserGroupMembersResource_MockImportedShapePlansClean (0.90s)
+=== RUN   TestAccUserGroupMembersResource_MockGroupDeletedOutOfBand
+--- PASS: TestAccUserGroupMembersResource_MockGroupDeletedOutOfBand (0.98s)
+=== RUN   TestAccUserGroupMembersResource_MockUnresolvableEmails
+--- PASS: TestAccUserGroupMembersResource_MockUnresolvableEmails (0.31s)
+=== RUN   TestAccUserGroupMembersResource_MockDepartedMember
+--- PASS: TestAccUserGroupMembersResource_MockDepartedMember (1.05s)
+=== RUN   TestAccUserGroupMembersResource_MockDuplicateCaseRejected
+--- PASS: TestAccUserGroupMembersResource_MockDuplicateCaseRejected (0.13s)
+=== RUN   TestAccUserGroupResource_MockSCIMRejected
+--- PASS: TestAccUserGroupResource_MockSCIMRejected (0.32s)
+=== RUN   TestAccUserGroupResource_MockDuplicateName
+--- PASS: TestAccUserGroupResource_MockDuplicateName (0.21s)
+=== RUN   TestAccUserGroupResource_MockNameValidation
+--- PASS: TestAccUserGroupResource_MockNameValidation (0.95s)
+=== RUN   TestAccUserGroupResource_MockRenameInPlace
+--- PASS: TestAccUserGroupResource_MockRenameInPlace (0.73s)
+=== RUN   TestAccCloudResource_KubernetesConfigRemovedFieldsRejected
+--- PASS: TestAccCloudResource_KubernetesConfigRemovedFieldsRejected (1.01s)
+=== RUN   TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires
+--- PASS: TestAccCloudResource_CredentialPlaceholder_WarningActuallyFires (1.09s)
+=== CONT  TestAccComputeConfigResource_Basic
+=== CONT  TestAccContainerImageRegistryResource_BYOD
+=== CONT  TestAccProjectResource_Disappears
+=== CONT  TestAccProjectResource_Basic
+=== NAME  TestAccProjectResource_Disappears
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_cloud.go:160: Using default known-good test cloud: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+=== NAME  TestAccComputeConfigResource_Basic
+    helpers_cloud.go:839: Found 1 configured clouds for testing
+    helpers_cloud.go:841:   - tfp-test-aws-useast1-STATIC (ID: cld_REDACTED, provider: AWS, compute_stack: VM)
+    helpers_cloud.go:910: Selected AWS VM cloud for testing: tfp-test-aws-useast1-STATIC (ID: cld_REDACTED)
+    helpers_cloud.go:918: Found 1 unique VM cloud providers for testing
+=== RUN   TestAccComputeConfigResource_Basic/AWS_VM
+    resource_compute_config_acc_test.go:39: Step 1/2 error: Error running apply: exit status 1
+        
+        Error: API Request Failed
+        
+          with anyscale_compute_config.test,
+          on terraform_plugin_test.tf line 12, in resource "anyscale_compute_config" "test":
+          12: resource "anyscale_compute_config" "test" {
+        
+        Failed to create compute config (HTTP 599): Cloud
+        cld_REDACTED has been hibernated due to inactivity. The
+        cloud is being started and should be available in 5-10 minutes.
+--- FAIL: TestAccComputeConfigResource_Basic (1.44s)
+    --- FAIL: TestAccComputeConfigResource_Basic/AWS_VM (0.53s)
+=== CONT  TestAccProjectResource_WithDescription
+--- PASS: TestAccProjectResource_Basic (11.03s)
+=== CONT  TestAccUserGroupResource_disappears
+--- PASS: TestAccUserGroupResource_disappears (2.59s)
+=== CONT  TestAccUserGroupResource_DuplicateNameError
+--- PASS: TestAccUserGroupResource_DuplicateNameError (1.08s)
+=== CONT  TestAccUserGroupResource_basic
+--- PASS: TestAccUserGroupResource_basic (2.84s)
+=== CONT  TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI
+--- PASS: TestAccProjectResource_Disappears (18.52s)
+=== CONT  TestAccComputeConfigResource_K8S
+    helpers_cloud.go:940: No K8S clouds available for testing
+    resource_compute_config_acc_test.go:731: No K8S clouds configured in this org - compute-config K8S coverage cannot run here. Not a code gap: ResolveK8sInstanceType and this test are ready, they need a K8S cloud fixture.
+--- SKIP: TestAccComputeConfigResource_K8S (0.00s)
+=== CONT  TestAccContainerImageRegistryResource_Basic
+--- PASS: TestAccProjectResource_WithDescription (27.01s)
+=== CONT  TestAccContainerImageBuildResource_WithProjectID
+--- PASS: TestAccContainerImageRegistryResource_BYOD (32.58s)
+=== CONT  TestAccContainerImageBuildResource_Update
+--- PASS: TestAccContainerImageRegistryResource_Basic (35.04s)
+=== CONT  TestAccContainerImageBuildResource_Basic
+--- PASS: TestAccContainerImageRegistryResource_ImageURIUpdate_RealAPI (65.58s)
+=== CONT  TestAccComputeConfigResource_RenameForcesReplace
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_compute_config.go:89: Using default known-good cloud for compute config: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+--- PASS: TestAccComputeConfigResource_RenameForcesReplace (3.76s)
+=== CONT  TestAccComputeConfigResource_Update
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_compute_config.go:89: Using default known-good cloud for compute config: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+--- PASS: TestAccComputeConfigResource_Update (3.47s)
+=== CONT  TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_compute_config.go:89: Using default known-good cloud for compute config: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+--- PASS: TestAccComputeConfigResource_ImportRecoversWriteOnlyFields_RealAPI (2.58s)
+=== CONT  TestAccComputeConfigResource_Disappears
+--- PASS: TestAccComputeConfigResource_Disappears (1.82s)
+=== CONT  TestAccComputeConfigResource_InconsistentResultRegressions
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_compute_config.go:89: Using default known-good cloud for compute config: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+--- PASS: TestAccComputeConfigResource_InconsistentResultRegressions (3.85s)
+=== CONT  TestAccComputeConfigResource_WithWorkers
+    helpers_cloud.go:315: Resolved cloud name 'tfp-test-aws-useast1-STATIC' to ID: cld_REDACTED
+    helpers_compute_config.go:89: Using default known-good cloud for compute config: tfp-test-aws-useast1-STATIC (cld_REDACTED)
+--- PASS: TestAccComputeConfigResource_WithWorkers (2.05s)
+--- PASS: TestAccContainerImageBuildResource_WithProjectID (80.75s)
+--- PASS: TestAccContainerImageBuildResource_Basic (84.22s)
+--- PASS: TestAccContainerImageBuildResource_Update (155.75s)
+FAIL
+FAIL	github.com/anyscale/terraform-provider-anyscale/internal/acctest	601.761s

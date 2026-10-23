@@ -893,6 +893,7 @@ func cloudHasResources(client *provider.Client, cloudID string) (hasResources bo
 // GetAllVMClouds returns one VM cloud per provider (AWS, GCP).
 // This deduplicates clouds so tests run once per provider type, not once per cloud.
 // This is useful for tests that require VM-specific instance types.
+// Each returned cloud has passed the wake gate (see cloud_wake.go).
 func GetAllVMClouds(t *testing.T) []CloudInfo {
 	allClouds := GetAllConfiguredClouds(t)
 
@@ -908,6 +909,7 @@ func GetAllVMClouds(t *testing.T) []CloudInfo {
 				seen[key] = true
 				vmClouds = append(vmClouds, cloud)
 				t.Logf("Selected %s VM cloud for testing: %s (ID: %s)", cloud.Provider, cloud.Name, cloud.ID)
+				ensureCloudAwake(t, cloud.ID, cloudLabelFor(cloud.Name))
 			}
 		}
 	}

@@ -32,6 +32,11 @@ on:
         description: "Fail immediately, to exercise the failure notification (creates or updates the tracking issue)."
         type: boolean
         default: false
+      force_rerun_control:
+        description: "Force TestAccHibernationRerunControlResource to fail: 'hibernation' must be re-run and recover; 'other' and 'mixed' (interleaved parallel failures) must not be re-run."
+        type: choice
+        options: [none, hibernation, other, mixed]
+        default: none
 
 permissions:
   contents: read
@@ -47,7 +52,11 @@ concurrency:
 jobs:
   scheduled-acctest:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 90, not 60: a hibernation rerun adds up to the wake gate's 12m bound
+    # plus the re-run tests to a step (see acctest-with-hibernation-rerun.sh).
+    timeout-minutes: 90
+    outputs:
+      recovered: ${{ steps.data-sources.outputs.recovered || steps.resources.outputs.recovered }}
     steps:
       - name: Simulate a failure
         if: ${{ inputs.simulate_failure }}
@@ -88,32 +97,48 @@ jobs:
       # protection until manually reconfigured. If the go test invocation
       # (flags, timeout, filter regex) changes in one file, mirror it in the
       # other by hand.
+      #
+      # Unlike ci.yml, each suite runs through acctest-with-hibernation-rerun.sh:
+      # it runs `go test -json` (rendering the usual -v log from it), and re-runs
+      # once only the tests that failed solely because the test cloud hibernated
+      # mid-run. The go test flags, timeout and filter regex are its arguments.
       - name: Acceptance Tests - Data Sources
+        id: data-sources
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
         run: |
-          set -o pipefail
-          TF_ACC=1 go test ./internal/acctest/ -v -timeout 20m -parallel 4 -run '^TestAcc[A-Za-z]+DataSource' 2>&1 | tee /tmp/acctest.log
-          .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Data Sources"
+          .github/scripts/acctest-with-hibernation-rerun.sh "Acceptance Tests - Data Sources" 20m '^TestAcc[A-Za-z]+DataSource' /tmp/acctest-data.log
+          .github/scripts/summarize-acctest-skips.sh /tmp/acctest-data.log "Acceptance Tests - Data Sources"
 
       - name: Acceptance Tests - Resources
+        id: resources
         env:
           ANYSCALE_CLI_TOKEN: ${{ secrets.ANYSCALE_CLI_TOKEN }}
           ANYSCALE_TEST_CREATE_CLOUD: 1
+          ANYSCALE_TEST_FORCE_RERUN_CONTROL: ${{ inputs.force_rerun_control != 'none' && inputs.force_rerun_control || '' }}
         run: |
-          set -o pipefail
-          TF_ACC=1 go test ./internal/acctest/ -v -timeout 30m -parallel 4 -run '^TestAcc[A-Za-z]+Resource' 2>&1 | tee /tmp/acctest.log
-          .github/scripts/summarize-acctest-skips.sh /tmp/acctest.log "Acceptance Tests - Resources"
-          .github/scripts/summarize-compute-config-coverage.sh /tmp/acctest.log "Acceptance Tests - Resources"
+          .github/scripts/acctest-with-hibernation-rerun.sh "Acceptance Tests - Resources" 30m '^TestAcc[A-Za-z]+Resource' /tmp/acctest-resources.log
+          .github/scripts/summarize-acctest-skips.sh /tmp/acctest-resources.log "Acceptance Tests - Resources"
+          .github/scripts/summarize-compute-config-coverage.sh /tmp/acctest-resources.log "Acceptance Tests - Resources"
+
+      - name: Upload test event streams
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: acctest-json
+          path: /tmp/acctest-*.jsonl
+          if-no-files-found: ignore
 
   # Opens (or comments on) one tracking issue when the run fails, so a red
-  # nightly run is not only an email. The issues: write grant is scoped to this
-  # job; the job above keeps read-only permissions.
+  # nightly run is not only an email. A run that passed only after a
+  # hibernation rerun comments on an open issue too, but never opens one. The
+  # issues: write grant is scoped to this job; the job above keeps read-only
+  # permissions.
   notify-failure:
     name: Notify on failure
     needs: scheduled-acctest
-    if: ${{ failure() }}
+    if: ${{ failure() || needs.scheduled-acctest.outputs.recovered == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -128,11 +153,22 @@ jobs:
           EVENT: ${{ github.event_name }}
           SHA: ${{ github.sha }}
           ISSUE_TITLE: "Scheduled acceptance tests are failing"
+          RESULT: ${{ needs.scheduled-acctest.result }}
         run: |
           set -euo pipefail
-          body="Run failed: ${RUN_URL} (trigger: ${EVENT}, commit ${SHA})"
           existing="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" --json number,title \
             --jq "[.[] | select(.title == \"${ISSUE_TITLE}\")][0].number // empty")"
+          if [ "$RESULT" = "success" ]; then
+            body="Run recovered after hibernation rerun: ${RUN_URL} (trigger: ${EVENT}, commit ${SHA})"
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --body "$body"
+              echo "Commented on #$existing"
+            else
+              echo "$body (no open tracking issue; not opening one)"
+            fi
+            exit 0
+          fi
+          body="Run failed: ${RUN_URL} (trigger: ${EVENT}, commit ${SHA})"
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$body"
             echo "Commented on #$existing"

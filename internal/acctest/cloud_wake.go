@@ -23,11 +23,22 @@ import (
 //
 // Waking is a harness concern: retrying a 599 inside the provider is unsafe
 // until each path's write-before-raise ordering is verified.
+//
+// An awake verdict goes stale. The cloud hibernates once it has had no clusters
+// or builds for longer than the backend threshold, measured from its last
+// completed wake, so it can fall asleep minutes after the gate saw it awake
+// (the nightly runs of 2026-10-15 and 2026-10-22 failed this way, 8-10 minutes
+// after a passing probe). A cached awake result is therefore reused only for
+// wakeRecheckAfter.
+// That shrinks the window without closing it - the API also caches the cloud's
+// state for a few minutes - so scheduled-acctest.yml re-runs tests that failed
+// only on hibernation once.
 
 const (
-	wakeBound          = 12 * time.Minute // under the 60m data-source job timeout
+	wakeBound          = 12 * time.Minute // under the data-source suite's 20m go test timeout
 	wakeInitialBackoff = 5 * time.Second
 	wakeMaxBackoff     = 60 * time.Second
+	wakeRecheckAfter   = 2 * time.Minute // how long an awake verdict is reused
 
 	hibernationStatus = 599
 )
@@ -40,6 +51,7 @@ type wakeOpts struct {
 	bound          time.Duration
 	initialBackoff time.Duration
 	maxBackoff     time.Duration
+	recheckAfter   time.Duration
 	sleep          func(time.Duration)
 	now            func() time.Time
 }
@@ -49,6 +61,7 @@ func defaultWakeOpts() wakeOpts {
 		bound:          wakeBound,
 		initialBackoff: wakeInitialBackoff,
 		maxBackoff:     wakeMaxBackoff,
+		recheckAfter:   wakeRecheckAfter,
 		sleep:          time.Sleep,
 		now:            time.Now,
 	}
@@ -106,7 +119,9 @@ func awaitCloudAwake(ctx context.Context, cloudLabel string, probe wakeProbe, op
 	for {
 		status, body, err := probe(ctx)
 		probes++
+		elapsed := opts.now().Sub(start)
 		if err != nil {
+			logf("Wake probe %d for cloud %s: transport error after %s: %v", probes, cloudLabel, elapsed.Round(time.Second), err)
 			if transportRetried {
 				return fmt.Errorf("%w: %v", errWakeInconclusive, err)
 			}
@@ -114,15 +129,13 @@ func awaitCloudAwake(ctx context.Context, cloudLabel string, probe wakeProbe, op
 			opts.sleep(opts.initialBackoff)
 			continue
 		}
-		if !isHibernationResponse(status, body) {
-			if probes > 1 {
-				logf("Cloud %s is awake after %s (%d probes)", cloudLabel, opts.now().Sub(start).Round(time.Second), probes)
-			}
+		hibernated := isHibernationResponse(status, body)
+		logf("Wake probe %d for cloud %s: HTTP %d after %s (hibernation response: %t)", probes, cloudLabel, status, elapsed.Round(time.Second), hibernated)
+		if !hibernated {
 			return nil
 		}
 
 		lastDetail = hibernationDetail(body)
-		elapsed := opts.now().Sub(start)
 		if elapsed >= opts.bound {
 			return fmt.Errorf("cloud %s still hibernated after %s (%d probes); last detail: %s. "+
 				"This is an environment wait, not a code failure: the cloud is likely still starting, so re-run once it is awake",
@@ -138,12 +151,14 @@ func awaitCloudAwake(ctx context.Context, cloudLabel string, probe wakeProbe, op
 	}
 }
 
-// wakeGate holds the once-per-binary outcome for one cloud. Concurrent callers
-// serialize on mu, so a single probe sequence runs and the rest reuse its result.
+// wakeGate holds the latest conclusive outcome for one cloud and when it was
+// reached. Concurrent callers serialize on mu, so a single probe sequence runs
+// and the rest reuse its result.
 type wakeGate struct {
 	mu   sync.Mutex
 	done bool
 	err  error
+	at   time.Time
 }
 
 var (
@@ -151,11 +166,12 @@ var (
 	wakeGatesMutex sync.Mutex
 )
 
-// ensureCloudAwakeWith runs the gate for cloudID at most once per binary. A
-// conclusive result (awake, or hibernation timeout) is cached, so parallel
-// tests fail fast rather than each waiting out the bound. An inconclusive one
-// is not cached: it returns nil so a transient network error never blocks the
-// suite, and the next caller tries again.
+// ensureCloudAwakeWith runs the gate for cloudID. A hibernation timeout is
+// cached for the rest of the binary, so parallel tests fail fast rather than
+// each waiting out the bound. An awake result is reused for opts.recheckAfter,
+// then the next caller probes again. An inconclusive result is not cached: it
+// returns nil so a transient network error never blocks the suite, and the
+// next caller tries again.
 func ensureCloudAwakeWith(ctx context.Context, cloudID, cloudLabel string, probe wakeProbe, opts wakeOpts, logf func(string, ...any)) error {
 	wakeGatesMutex.Lock()
 	g, ok := wakeGates[cloudID]
@@ -167,7 +183,7 @@ func ensureCloudAwakeWith(ctx context.Context, cloudID, cloudLabel string, probe
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.done {
+	if g.done && (g.err != nil || opts.now().Sub(g.at) < opts.recheckAfter) {
 		return g.err
 	}
 	err := awaitCloudAwake(ctx, cloudLabel, probe, opts, logf)
@@ -175,7 +191,7 @@ func ensureCloudAwakeWith(ctx context.Context, cloudID, cloudLabel string, probe
 		logf("Warning: %v; continuing without confirming the cloud is awake", err)
 		return nil
 	}
-	g.done, g.err = true, err
+	g.done, g.err, g.at = true, err, opts.now()
 	return err
 }
 
@@ -204,8 +220,8 @@ func cloudLabelFor(name string) string {
 }
 
 // probeCloudWithComputeConfigCreate creates a throwaway compute config, which
-// reaches the admin zone with wake enabled, and archives it on success. It
-// changes nothing on the cloud itself.
+// reaches the admin zone with wake enabled, and archives it on success. On a
+// hibernated cloud the probe itself starts the wake.
 func probeCloudWithComputeConfigCreate(ctx context.Context, t *testing.T, cloudID string) (int, string, error) {
 	client, err := GetTestClient()
 	if err != nil {
