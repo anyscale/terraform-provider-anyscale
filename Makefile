@@ -11,6 +11,10 @@ GOLANGCI_LINT := golangci-lint
 # never enter the provider's go.mod. -modfile points the go tool at that module.
 TFPLUGINDOCS := go tool -modfile=tools/docsgen/go.mod tfplugindocs
 
+# Column limit for Registry-rendered examples; enforced by docs-validate.
+# See "Registry example width" in CLAUDE.md.
+EXAMPLE_WIDTH ?= 72
+
 # Per-run suffix used by example apply/destroy targets to isolate state and
 # cloud names across parallel runs. Defaults to a timestamp.
 # Override with: make apply-aws-vm-basic SUFFIX=mytest
@@ -272,6 +276,8 @@ docs: ## Generate provider documentation
 docs-validate: ## Validate provider documentation
 	@echo "==> Validating documentation..."
 	$(TFPLUGINDOCS) validate --provider-name $(BINARY_NAME)
+	@echo "==> Checking example width..."
+	@.github/scripts/check-example-width.sh $(EXAMPLE_WIDTH)
 
 # ============================================================================
 # CLEAN
