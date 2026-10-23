@@ -3,13 +3,13 @@
 page_title: "anyscale_user_group Data Source - terraform-provider-anyscale"
 subcategory: ""
 description: |-
-  ~> Alpha. User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
+  ~> Alpha. User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the RBAC guide ../guides/rbac.md#user-groups-alpha.
   Reads one user group by ID or name, including groups synced from an identity provider (SCIM), which the user group resources cannot manage.
 ---
 
 # anyscale_user_group (Data Source)
 
-~> **Alpha.** User groups are an Alpha feature. The Anyscale API and this provider's schema for them may change drastically before Beta, including breaking changes in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
+~> **Alpha.** User groups are an Alpha feature and may change in breaking ways before Beta, even in a minor release. See the [RBAC guide](../guides/rbac.md#user-groups-alpha).
 
 Reads one user group by ID or name, including groups synced from an identity provider (SCIM), which the user group resources cannot manage.
 

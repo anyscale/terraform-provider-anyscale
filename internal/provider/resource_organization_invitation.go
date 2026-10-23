@@ -60,12 +60,12 @@ func (r *OrganizationInvitationResource) Metadata(ctx context.Context, req resou
 // Schema defines the schema for the resource.
 func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages an Anyscale Organization Invitation. This resource sends an email invitation to join an organization.\n\n" +
-			"**Note:** Invitations have an expiration time and must be accepted by the recipient. Once accepted, the user will have default collaborator permissions. Use the `anyscale_organization_user` resource to manage their permissions, and `anyscale_organization_user_role` to manage their organization role - see the [RBAC guide](../guides/rbac.md) for how access control is split across scopes. There is no need to remove this resource once accepted - an accepted invitation is a harmless historical record, its `status` simply reads as `accepted` from then on, and leaving it in your configuration has no side effects.\n\n" +
-			"~> **Warning:** What `terraform destroy` actually does here depends on whether the invitation was accepted. Destroying a **pending** invitation genuinely revokes it - it is invalidated immediately, and the recipient can no longer accept it. Destroying an **already-accepted** invitation has no effect on the resulting member: acceptance created a separate, independent `anyscale_organization_user` identity, and invalidating the (already-consumed) invitation record does not touch it. To remove an existing member's access, destroy their `anyscale_organization_user` resource instead - destroying this resource never does that.\n\n" +
-			"**Duplicate invitations:** Inviting an email address that is already an organization member fails with a clear error directing you to the `anyscale_organization_user` resource instead. Inviting an email address that already has a *pending* invitation does not fail - it silently invalidates the previous invitation (expiring it immediately) and creates a new one with a new `id`; a different letter-casing of the same address counts as the same recipient for this purpose. If that previous invitation is tracked elsewhere (a separate resource block, a different Terraform configuration, or state left over from a prior apply), its `status` will simply read as `expired` on the next refresh rather than surfacing an error.\n\n" +
-			"**Directory-synced organizations:** Creating an invitation through this resource fails in an organization that has *both* enabled SCIM directory sync *and* opted into the Policy API (at least one role binding for the org, a cloud, or a project) - SCIM alone does not trigger this, so a SCIM-enabled organization with no Policy API bindings can still invite normally through this resource. Use `anyscale policy set` for an organization that meets both conditions instead. See the [Anyscale policy CLI documentation](https://docs.anyscale.com/reference/cli/policy#policy-cli) for that command.\n\n" +
-			"**Organizations with single sign-on required:** If your organization's SSO mode is `required`, Create refuses outright instead of sending an invitation that could never be accepted - the emailed link is rejected on use, and sending it anyway would still consume one of the organization's 20 invitations per 24 hours for nothing. Bring the person in through your identity provider instead, then track them with the `anyscale_organization_user` resource once they have logged in. When this organization's SSO mode cannot be determined at apply time, Create fails open and sends the invitation anyway, attaching a warning that names what could not run - a failed lookup is not evidence that SSO is required, and refusing on it would turn a transient error into a failed apply.",
+		MarkdownDescription: "Sends an email invitation to join the organization. " +
+			"Once the recipient accepts, they are a member with default collaborator permissions; manage them with `anyscale_organization_user` and their role with `anyscale_organization_user_role`. " +
+			"An accepted invitation is a harmless record whose `status` reads `accepted`, so there is no need to remove it from your configuration.\n\n" +
+			"~> **Destroying a pending invitation revokes it; destroying an accepted one does nothing to the member.** To remove a member's access, destroy their `anyscale_organization_user` resource instead. " +
+			"Inviting an existing member fails and points you to `anyscale_organization_user`.\n\n" +
+			"Re-invitation, rate limits, single sign-on, and directory-sync restrictions are in the [RBAC guide](../guides/rbac.md#inviting-people-limits-single-sign-on-directory-sync).",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -78,7 +78,7 @@ func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resourc
 
 			"email": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The email address to send the invitation to. State reflects whichever casing this resource was created or imported with, not necessarily your most-recently-applied config: the Anyscale API treats two addresses differing only in letter case as the same invitation, so a later apply that changes only casing produces no plan diff and leaves the original casing in state. Changing to a genuinely different email address does replace the invitation.",
+				MarkdownDescription: "The email address to invite. Addresses that differ only in letter case are the same invitation, so a casing-only change plans no diff and state keeps the original casing. A different address replaces the invitation.",
 				PlanModifiers: []planmodifier.String{
 					caseInsensitiveEmailPlanModifier{},
 				},
@@ -118,7 +118,7 @@ func (r *OrganizationInvitationResource) Schema(ctx context.Context, req resourc
 
 			"status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The current status of the invitation. Can be `pending`, `accepted`, or `expired`. Computed from `accepted_at` and `expires_at` - note that sending a new invitation to the same email address invalidates this one immediately, which surfaces here as `expired` on the next refresh rather than as an error.",
+				MarkdownDescription: "One of `pending`, `accepted`, or `expired`, derived from `accepted_at` and `expires_at`. Re-inviting the same address expires this invitation immediately, so it reads `expired` on the next refresh rather than erroring.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},

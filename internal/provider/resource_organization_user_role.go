@@ -347,7 +347,7 @@ func (r *OrganizationUserRoleResource) Schema(ctx context.Context, req resource.
 					listvalidator.UniqueValues(),
 					listvalidator.ValueStringsAre(stringvalidator.OneOf("image_reader", "image_reader_no_base_images")),
 				},
-				MarkdownDescription: "Container image deny roles, layered on `base_role` and never extra capability. Allowed values: `image_reader` (cannot create or register images) and `image_reader_no_base_images` (the same, and cannot deploy base images); order is not significant and duplicates are rejected. Also restricts organization owners. Omit to leave existing deny roles untouched; set it, including `[]` to clear all, to manage the set authoritatively. Setting it at all requires the organization roles API, which not every organization has.",
+				MarkdownDescription: "Container image deny roles, which only subtract from `base_role` (they also restrict owners): `image_reader` (cannot create or register images) and `image_reader_no_base_images` (also cannot deploy base images). Order is ignored and duplicates are rejected. Omit to leave existing deny roles untouched; set it, with `[]` clearing all, to manage the set authoritatively. Setting it requires the organization roles API, which not every organization has.",
 			},
 		},
 	}

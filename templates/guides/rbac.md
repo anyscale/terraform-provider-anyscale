@@ -2,7 +2,7 @@
 page_title: "RBAC: Roles Across Organizations, Clouds, and Projects"
 subcategory: "Concepts & Reference"
 description: |-
-  How access control is split across anyscale_organization_user and anyscale_organization_user_role - the vocabulary differences between scopes, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
+  How access control is split across anyscale_organization_user and anyscale_organization_user_role - which resource manages what, what "authoritative" means for a role resource, and why destroying anyscale_organization_user_role does not revert a person's role.
 ---
 
 # RBAC: Roles Across Organizations, Clouds, and Projects
@@ -10,8 +10,7 @@ description: |-
 Anyscale access control spans three scopes - organization, cloud, and project - and this provider
 manages them through more than one resource because the backend itself treats them as genuinely
 different concepts, not just different levels of the same one. This guide is the one place that
-explains the whole picture: which resource manages what, and why the same word means different things
-depending on which resource you're reading.
+explains the whole picture: which resource manages what, and what "authoritative" means for each.
 
 Read this before writing configuration that spans more than one scope.
 
@@ -30,11 +29,34 @@ each manages, never over a whole population - see
 [Authority](#authority-what-terraform-manages-here-actually-means), below. `anyscale_cloud_access`
 means something categorically larger by the same word - see its own section below.
 
-`anyscale_cloud_user_role`, which used to fill the single-user cloud-role gap, has been **removed**
-with no coexistence period: it and `anyscale_cloud_access` manage the same collaborator surface
-under incompatible authority models (one row vs. the whole set), and running both against the same
-cloud would mean `anyscale_cloud_access` silently revoking members `anyscale_cloud_user_role` thinks
-it still manages. There was never a version where declaring both was safe.
+## Inviting people: limits, single sign-on, directory sync
+
+`anyscale_organization_user` and `anyscale_organization_invitation` both send invitations, and both
+are subject to the same constraints.
+
+- **Apply success is not access.** A person who is not yet a member has only been *invited*; they
+  have access once they accept the emailed link. Read the `anyscale_organization_user` data source
+  to see where they are.
+- **Rate limits are per organization**, shared with the Anyscale console and not per configuration:
+  by default at most 20 pending invitations at once and 20 sent per 24 hours. Anyscale can change
+  both per organization. A `for_each` that invites more people than the limit fails partway
+  through the apply, leaving earlier invitations sent. Invite in batches, or ask Anyscale to raise
+  the limit.
+- **Single sign-on `required`:** creating an invitation is refused, because the emailed link would be
+  rejected on use while still spending one of the 20 daily invitations. Bring the person in through
+  your identity provider; once they have logged in, `anyscale_organization_user` adopts them. If the
+  provider cannot read the organization's SSO mode, it sends the invitation and attaches a warning.
+- **Directory sync (SCIM) with the Policy API:** if the organization has both enabled, the backend
+  refuses to create invitations. Both must be true; SCIM alone does not trigger it. Existing members
+  can still be adopted and read. Manage membership through your identity provider and
+  [`anyscale policy set`](https://docs.anyscale.com/reference/cli/policy#policy-cli).
+- **Re-inviting a pending address** silently invalidates the earlier invitation and creates a new one
+  with a new `id`; letter case does not matter. A tracked earlier invitation then reads `expired`
+  on its next refresh.
+- **Destroying never removes a member.** Destroying `anyscale_organization_user` cancels only a
+  still-pending invitation it sent, and never evicts anyone who had joined or was adopted. Destroying
+  `anyscale_organization_invitation` revokes a pending invitation and has no effect on an accepted
+  one. Removing someone's access is a deliberate act neither resource can do.
 
 ## User groups (Alpha)
 
@@ -169,36 +191,36 @@ An Anyscale organization manages access in one of two modes, and the mode decide
 write. You cannot choose the mode from Terraform; an organization admin converts it in **Users & IAM**,
 and conversion is one-way.
 
-| | Legacy organization | Converted organization |
+| | Unconverted organization | Converted organization |
 |---|---|---|
 | Access is held by | Collaborator and policy records | Role bindings |
 | Writes that work | [`anyscale_cloud_access`](../resources/cloud_access.md), [`anyscale_organization_user_role`](../resources/organization_user_role.md), `anyscale_cloud.auto_add_user` | [`anyscale_role_binding`](../resources/role_binding.md) |
-| Writes the API refuses (HTTP 409) | `anyscale_role_binding` | The three legacy resources in the previous row |
+| Writes the API refuses (HTTP 409) | `anyscale_role_binding` | The three resources in the previous row |
 | Not affected by mode | [`anyscale_user_group`](../resources/user_group.md), [`anyscale_user_group_members`](../resources/user_group_members.md), [`anyscale_organization_user`](../resources/organization_user.md), [`anyscale_project`](../resources/project.md), [`anyscale_cloud`](../resources/cloud.md) (except `auto_add_user`) | same |
 
 The provider does not detect the mode in advance; the API refuses the write and the provider reports it.
 Role bindings are also behind a feature flag (see [Role bindings (Alpha)](#role-bindings-alpha)). An
-organization is legacy until an admin converts it.
+organization is unconverted until an admin converts it.
 
 | Error | Mode it means | What to do |
 |---|---|---|
-| "Organization Not Converted to Role Bindings" | Legacy | Convert the organization in Users & IAM, or manage access with the legacy resources. |
-| "Organization Uses Role Bindings" | Converted | Stop managing that access with the legacy resource; use `anyscale_role_binding` on a user group or a user. |
+| "Organization Not Converted to Role Bindings" | Unconverted | Convert the organization in Users & IAM, or manage access with `anyscale_cloud_access` and `anyscale_organization_user_role`. |
+| "Organization Uses Role Bindings" | Converted | Stop managing that access with this resource; use `anyscale_role_binding` on a user group or a user. |
 
 In a converted organization, `anyscale_cloud_access` fails an apply on the first refused grant, before
 any further grant or revoke. A create leaves nothing in state and an update keeps the prior state.
-Destroying either legacy resource warns "Organization Uses Role Bindings" and removes it from state; nothing is
-reverted, and the legacy grant or role is left in place.
+Destroying either resource warns "Organization Uses Role Bindings" and removes it from state; nothing is
+reverted, and the existing grant or role is left in place.
 
 Terraform **cannot detect** a conversion. After it, a refresh of `anyscale_cloud_access` or
-`anyscale_organization_user_role` still returns the legacy records from before conversion, so `plan` shows
+`anyscale_organization_user_role` still returns the records from before conversion, so `plan` shows
 no changes while the access that matters now lives in role bindings. The next write is what fails.
 
 Role-binding writes are refused until the organization converts, so the move happens in this order:
 
 1. Convert in Users & IAM. Conversion writes role bindings for your existing access, so most grants you
    would declare already exist.
-2. Run `terraform state rm` for the legacy resources (or destroy them, which only warns), and remove them
+2. Run `terraform state rm` for `anyscale_cloud_access` and `anyscale_organization_user_role` (or destroy them, which only warns), and remove them
    from your configuration.
 3. Declare an `anyscale_role_binding` for each grant you want Terraform to manage, and **import** the
    existing binding instead of creating one. Creating a grant that already exists fails with "Role Binding
@@ -312,7 +334,7 @@ on a cloud, project, or organization. Declaring a binding that already exists fa
 Access a group gets through a role binding is invisible to
 [`anyscale_cloud_access`](#anyscale_cloud_access-authoritative-over-one-clouds-whole-member-list), and
 removing a person from that resource does not remove access they hold through a group. A
-binding on a `user_id` is equally invisible to it. In a legacy organization, grant individual people
+binding on a `user_id` is equally invisible to it. In an unconverted organization, grant individual people
 access with `anyscale_cloud_access` or `anyscale_organization_user_role`.
 
 Directory-synced (SCIM) groups can be bound; unlike membership, nothing here fights the identity
@@ -337,51 +359,13 @@ Whether the roles you bind are enforced depends on Anyscale's rollout of them.
 |---|---|
 | "Role bindings are not enabled" | The feature flag is off for your organization; contact support@anyscale.com. During a refresh, state is kept unchanged. |
 | "Role Binding Already Exists" | The principal already holds that role on that scope. Import the binding instead. |
-| "Organization Not Converted to Role Bindings" | The organization is still legacy. See [Organization access mode](#organization-access-mode). |
+| "Organization Not Converted to Role Bindings" | The organization is not converted. See [Organization access mode](#organization-access-mode). |
 | "Role Is Archived" | The role cannot be newly assigned; pick another role. |
 | "Change Would Leave Organization Without an Owner" | Keep at least one Organization owner binding. |
 | "Cannot Grant a Role to the Provider's Own Identity" | Bind a user group the identity belongs to, or apply with a different identity. |
 | "Cannot Revoke the Provider's Own Role Binding" | Revoke it in the console or with a different identity, or run `terraform state rm`. |
 | Binding disappears from state | It was revoked outside Terraform, or its group was deleted; the next plan recreates it. |
 | "Role Binding Not Readable" | The cloud or project was deleted outside Terraform, or access to it was lost. State is kept; run `terraform state rm` for the binding if the scope is gone. |
-
-## The vocabulary problem
-
-The organization, cloud, and project scopes don't just use different words for access levels - they
-reuse the **same** words to mean **different** things. Four instances of this, and only the first is
-explained anywhere else in this provider's documentation today:
-
-1. **`collaborator` means three different things.** It's the non-owner organization role. It's also
-   one of six possible cloud `base_role` values, a distinct concept from the organization one. And
-   the Anyscale console itself uses "Cloud collaborator" as the display name for the unrelated
-   legacy `write` permission level. Seeing "collaborator" tells you nothing about which of the three
-   you're looking at without checking which resource's schema you're reading.
-2. **Project `write` and cloud `writer` are not the same role**, despite being near-homographs. This
-   is easy to typo in exactly one direction: the backend's own internal name for the cloud role is
-   `writer`, but a project's valid value is the string `write` - sending `writer` to a project 422s.
-3. **Project `readonly` and cloud `cloud_read_only` are not the same kind of thing**, not just
-   different spellings of the same idea. Project `readonly` is a whole permission tier - one of
-   three, on equal footing with `owner` and `write`. Cloud `cloud_read_only` is a **deny role**: a
-   restriction layered on top of a separate `base_role`, never a tier by itself. A user with
-   `base_role = "owner"` and `deny_roles = ["cloud_read_only"]` is not "read-only" the way a project
-   collaborator with `permission_level = "readonly"` is - the cloud user still holds the underlying
-   `owner` role, just with reads enforced on top of it.
-4. **Organization `deny_roles` and cloud `deny_roles` are the same mechanism, and share the name
-   deliberately.** Both are a restriction layered on top of a separate base role, never a tier by
-   themselves - an organization member with `base_role = "collaborator"` and
-   `deny_roles = ["image_reader_no_base_images"]` still holds the underlying `collaborator` role, just
-   with container-image capability subtracted from it, the same shape as the cloud example above.
-   Where the two genuinely differ is blast radius, not mechanism: an organization deny role overrides
-   even an organization owner's implicit permissions, while a cloud deny role explicitly does **not**
-   restrict organization or project owners. Same name, same restriction-on-a-base-role mechanism,
-   different reach - check which scope you're granting at before assuming an owner is unaffected.
-
-None of these are hypothetical. The first real hand-written configuration for the nested cloud/project
-shape in this guide got two of them wrong on the first attempt - `permission_level = "read"` (not a
-valid value; the project enum is `owner`, `write`, `readonly`) and a singular `deny_role` where the
-schema expects the plural `deny_roles`, a list. If you remember one thing from this section, make it
-this: **never assume a role, permission level, or deny role name from one scope is valid, or means
-the same thing, on another.** Check the specific resource's schema every time.
 
 ## Authority: what "Terraform manages here" actually means
 

@@ -90,46 +90,13 @@ func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.Sche
 		// required rather than cosmetic.
 		Version: 1,
 
-		MarkdownDescription: "Declares that a person **should have access** to the Anyscale organization, keyed by email.\n\n" +
-			"~> **A successful apply means access has been REQUESTED, not granted.** If the person is not already a " +
-			"member, this sends them an invitation, and **a human must still click the link in that email** before " +
-			"they actually have access. `terraform apply` reporting success does not mean the person can log in. " +
-			"Read this resource's `anyscale_organization_user` data source counterpart to see where they actually " +
-			"are. See below for the two cases - SSO required, and directory sync with the Policy API - where this " +
-			"resource cannot create the invitation at all.\n\n" +
-			"If the person is **already** a member, this resource adopts them: no API call, no email, no error. That " +
-			"makes it safe to declare people who joined before Terraform, and safe to re-apply.\n\n" +
-			"### Destroying this resource never removes a human\n\n" +
-			"Destroy cancels **only an invitation this resource sent** and which is still pending. It never evicts " +
-			"someone who had already joined, and never evicts someone this resource adopted. Removing a person's " +
-			"access is a deliberate act that this resource deliberately cannot do.\n\n" +
-			"### Organization-wide limits you will hit before you expect to\n\n" +
-			"Inviting is rate-limited by the Anyscale backend, and the limits are **per organization and shared with " +
-			"the Anyscale console** - not per configuration:\n\n" +
-			"- at most **20 pending invitations** at once (default)\n" +
-			"- at most **20 invitations sent per 24 hours** (default)\n\n" +
-			"Both are backend defaults that Anyscale can change per organization. A `for_each` onboarding 25 people " +
-			"**will fail partway through the apply** once one of them is reached, leaving the earlier invitations " +
-			"sent. Onboard in batches under the limit, or ask Anyscale to raise it.\n\n" +
-			"### Organizations with single sign-on required\n\n" +
-			"If your organization's SSO mode is `required`, this resource refuses to create the invitation at " +
-			"all rather than send one that could never be accepted - the emailed link would be rejected on use, " +
-			"and sending it anyway would still consume one of the organization's 20 invitations per 24 hours for " +
-			"nothing. Bring the person in through your identity provider instead; once they have logged in, " +
-			"re-applying this resource adopts them like any other existing member. When this organization's SSO " +
-			"mode cannot be determined at apply time, Create fails open and sends the invitation anyway, " +
-			"attaching a warning that names what could not run - a failed lookup is not evidence that SSO is " +
-			"required, and refusing on it would turn a transient error into a failed apply.\n\n" +
-			"### Directory-synced (SCIM) organizations\n\n" +
-			"If your organization has directory sync enabled **and** has opted into the Policy API, the Anyscale " +
-			"backend refuses to create invitations at all - this resource can still adopt and read existing members, " +
-			"but cannot add anyone, because your identity provider owns membership.\n\n" +
-			"Both conditions are required. A SCIM-enabled organization that has no Policy API bindings still uses the " +
-			"per-user path and can be invited through normally.\n\n" +
-			"-> **Roles are managed separately** by `anyscale_organization_user_role`, which owns `base_role` and the " +
-			"organization's deny roles. The two resources are deliberately split so only one of them ever writes a " +
-			"member's role. See the [RBAC guide](../guides/rbac.md) for how access control is split across " +
-			"organizations, clouds, and projects.",
+		MarkdownDescription: "Declares that a person **should have access** to the Anyscale organization, keyed by email. " +
+			"If they are already a member, this adopts them with no API call or email, so it is safe to declare people who joined before Terraform. " +
+			"Otherwise it sends an invitation.\n\n" +
+			"~> **A successful apply means access was requested, not granted.** The person must accept the emailed link before they have access; read the `anyscale_organization_user` data source to see where they are.\n\n" +
+			"Destroying this resource cancels only a still-pending invitation it sent; it never removes a member. " +
+			"Invitation rate limits, single sign-on, and directory-sync restrictions are in the [RBAC guide](../guides/rbac.md#inviting-people-limits-single-sign-on-directory-sync). " +
+			"Roles are managed separately by `anyscale_organization_user_role`; see the [RBAC guide](../guides/rbac.md) for how access control is split across organizations, clouds, and projects.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
