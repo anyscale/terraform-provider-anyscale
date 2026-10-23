@@ -202,6 +202,15 @@ The provider does not detect the mode in advance; the API refuses the write and 
 Role bindings are also behind a feature flag (see [Role bindings (Alpha)](#role-bindings-alpha)). An
 organization is unconverted until an admin converts it.
 
+**Azure control planes.** On an Anyscale control plane in Azure (`console.azure.anyscale.com`), access
+is managed with Azure role-based access control in the Azure portal, in either mode. When the
+provider's API URL is one of these hosts, creating, changing or importing `anyscale_role_binding`,
+`anyscale_user_group`, `anyscale_user_group_members`, `anyscale_cloud_access` or
+`anyscale_organization_user_role`, reading the `anyscale_role`, `anyscale_user_group` or
+`anyscale_user_groups` data sources, and setting `anyscale_cloud.auto_add_user` fail at plan with "RBAC
+Is Managed in Azure". Destroying one, or a plan with no changes, still works. A custom or proxied URL in
+front of an Azure control plane is not detected.
+
 | Error | Mode it means | What to do |
 |---|---|---|
 | "Organization Not Converted to Role Bindings" | Unconverted | Convert the organization in Users & IAM, or manage access with `anyscale_cloud_access` and `anyscale_organization_user_role`. |

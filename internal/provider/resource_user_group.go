@@ -21,6 +21,7 @@ import (
 var (
 	_ resource.Resource                = &UserGroupResource{}
 	_ resource.ResourceWithConfigure   = &UserGroupResource{}
+	_ resource.ResourceWithModifyPlan  = &UserGroupResource{}
 	_ resource.ResourceWithImportState = &UserGroupResource{}
 )
 
@@ -205,7 +206,15 @@ func (r *UserGroupResource) Delete(ctx context.Context, req resource.DeleteReque
 	tflog.Info(ctx, "User group deleted", map[string]any{"user_group_id": groupID})
 }
 
+// ModifyPlan refuses to create or change this resource on an Azure control plane.
+func (r *UserGroupResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	refuseRBACPlanOnAzure(r.client, "anyscale_user_group", req, resp)
+}
+
 func (r *UserGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, "anyscale_user_group", &resp.Diagnostics) {
+		return
+	}
 	groupID := req.ID
 	group, err := getUserGroup(ctx, r.client, groupID)
 	if err != nil {

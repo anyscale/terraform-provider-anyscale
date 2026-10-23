@@ -536,6 +536,9 @@ func (r *CloudAccessResource) Read(ctx context.Context, req resource.ReadRequest
 // false -> true diff on its first plan), and unmanaged_grants / ungranted_members
 // both empty (nothing has been attempted yet, so nothing has failed).
 func (r *CloudAccessResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, "anyscale_cloud_access", &resp.Diagnostics) {
+		return
+	}
 	cloudID := strings.TrimSpace(req.ID)
 	if cloudID == "" {
 		resp.Diagnostics.AddError(
@@ -1158,6 +1161,11 @@ func resolvedStringListValues(l types.List) []string {
 // omitted map from an empty one, since the accident produces exactly the empty
 // one - the opt-in has to live outside the data path it protects.
 func (r *CloudAccessResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Before the guards below, which call the API.
+	if refuseRBACPlanOnAzure(r.client, "anyscale_cloud_access", req, resp) {
+		return
+	}
+
 	// Resolved once and threaded through both guards below that use it, rather
 	// than each independently calling GET /api/v2/userinfo - the caller check
 	// and the disclosure warning both run on the same create plan, and this is

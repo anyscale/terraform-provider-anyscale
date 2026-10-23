@@ -22,6 +22,7 @@ import (
 var (
 	_ resource.Resource                = &UserGroupMembersResource{}
 	_ resource.ResourceWithConfigure   = &UserGroupMembersResource{}
+	_ resource.ResourceWithModifyPlan  = &UserGroupMembersResource{}
 	_ resource.ResourceWithImportState = &UserGroupMembersResource{}
 )
 
@@ -196,7 +197,15 @@ func (r *UserGroupMembersResource) Delete(ctx context.Context, req resource.Dele
 	}
 }
 
+// ModifyPlan refuses to create or change this resource on an Azure control plane.
+func (r *UserGroupMembersResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	refuseRBACPlanOnAzure(r.client, "anyscale_user_group_members", req, resp)
+}
+
 func (r *UserGroupMembersResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, "anyscale_user_group_members", &resp.Diagnostics) {
+		return
+	}
 	groupID := req.ID
 	group, err := getUserGroup(ctx, r.client, groupID)
 	if err != nil {

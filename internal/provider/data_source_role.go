@@ -82,6 +82,9 @@ func (d *RoleDataSource) Configure(ctx context.Context, req datasource.Configure
 }
 
 func (d *RoleDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if refuseRBACOnAzure(d.client, "anyscale_role", &resp.Diagnostics) {
+		return
+	}
 	var config RoleDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {

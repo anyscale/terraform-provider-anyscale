@@ -191,6 +191,7 @@ const orgRolesDisabledDetail = "The organization roles API is not enabled for th
 var (
 	_ resource.Resource                = &OrganizationUserRoleResource{}
 	_ resource.ResourceWithConfigure   = &OrganizationUserRoleResource{}
+	_ resource.ResourceWithModifyPlan  = &OrganizationUserRoleResource{}
 	_ resource.ResourceWithImportState = &OrganizationUserRoleResource{}
 )
 
@@ -918,8 +919,16 @@ func (r *OrganizationUserRoleResource) deleteOrganizationRole(
 	return diags
 }
 
+// ModifyPlan refuses to create or change this resource on an Azure control plane.
+func (r *OrganizationUserRoleResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	refuseRBACPlanOnAzure(r.client, "anyscale_organization_user_role", req, resp)
+}
+
 // ImportState imports by email, matching the resource's key.
 func (r *OrganizationUserRoleResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	if refuseRBACOnAzure(r.client, "anyscale_organization_user_role", &resp.Diagnostics) {
+		return
+	}
 	email := strings.TrimSpace(req.ID)
 	if email == "" {
 		resp.Diagnostics.AddError(

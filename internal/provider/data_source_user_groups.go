@@ -93,6 +93,9 @@ func (d *UserGroupsDataSource) Configure(ctx context.Context, req datasource.Con
 }
 
 func (d *UserGroupsDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if refuseRBACOnAzure(d.client, "anyscale_user_groups", &resp.Diagnostics) {
+		return
+	}
 	var config UserGroupsDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
