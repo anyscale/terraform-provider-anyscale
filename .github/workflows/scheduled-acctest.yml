@@ -33,9 +33,9 @@ on:
         type: boolean
         default: false
       force_rerun_control:
-        description: "Force TestAccHibernationRerunControlResource to fail: 'hibernation' must be re-run and recover, 'other' must not be re-run."
+        description: "Force TestAccHibernationRerunControlResource to fail: 'hibernation' must be re-run and recover; 'other' and 'mixed' (interleaved parallel failures) must not be re-run."
         type: choice
-        options: [none, hibernation, other]
+        options: [none, hibernation, other, mixed]
         default: none
 
 permissions:

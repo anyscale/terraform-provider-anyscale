@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -220,6 +223,78 @@ func TestRender(t *testing.T) {
 	if out.String() != want {
 		t.Fatalf("render = %q, want %q", out.String(), want)
 	}
+}
+
+// The rendered log must count tests the way the -v log does:
+// summarize-acctest-skips.sh counts lines starting with "--- ", so subtest
+// results must keep -v's indentation. Line order may differ (-json prints a
+// subtest's result when it finishes), so result lines are compared as sets.
+func TestRender_MatchesVerboseResultLines(t *testing.T) {
+	goTest := func(flag string) []byte {
+		t.Helper()
+		cmd := exec.Command("go", "test", flag, "-count=1", ".")
+		cmd.Dir = filepath.Join("testdata", "renderpkg")
+		out, err := cmd.Output()
+		var exitErr *exec.ExitError
+		if err != nil && !errors.As(err, &exitErr) {
+			t.Fatalf("go test %s: %v", flag, err)
+		}
+		return out
+	}
+	var rendered bytes.Buffer
+	if err := render(bytes.NewReader(goTest("-json")), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	want, got := resultLines(goTest("-v")), resultLines(rendered.Bytes())
+	if len(want) == 0 {
+		t.Fatal("the -v run produced no result lines")
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rendered result lines differ from -v:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+var resultLine = regexp.MustCompile(`^(\s*--- (?:PASS|FAIL|SKIP): \S+) \(`)
+
+// resultLines returns the sorted test result lines, durations dropped.
+func resultLines(log []byte) []string {
+	var lines []string
+	for _, l := range strings.Split(string(log), "\n") {
+		if m := resultLine.FindStringSubmatch(l); m != nil {
+			lines = append(lines, m[1])
+		}
+	}
+	sort.Strings(lines)
+	return lines
+}
+
+// A parent's subtests failed for different reasons: the hibernation detail
+// in one subtest must not cover the other.
+func TestClassify_SubtestsWithDifferentFailuresNoRerun(t *testing.T) {
+	v := mustClassify(t, stream(t,
+		[3]string{"run", "TestX", ""},
+		[3]string{"run", "TestX/AWS_VM", ""},
+		[3]string{"run", "TestX/GCP_VM", ""},
+		[3]string{"output", "TestX/AWS_VM", hibernated},
+		[3]string{"output", "TestX/GCP_VM", "expected 3 workers, got 2\n"},
+		[3]string{"fail", "TestX/AWS_VM", ""},
+		[3]string{"fail", "TestX/GCP_VM", ""},
+		[3]string{"fail", "TestX", ""},
+	))
+	wantNoRerun(t, v, "TestX/GCP_VM failed for a reason other than hibernation")
+}
+
+// A parent that hit hibernation in its own body, with no failed subtest, is
+// itself the failing leaf.
+func TestClassify_ParentOwnHibernationFailureReruns(t *testing.T) {
+	v := mustClassify(t, stream(t,
+		[3]string{"run", "TestX", ""},
+		[3]string{"run", "TestX/AWS_VM", ""},
+		[3]string{"pass", "TestX/AWS_VM", ""},
+		[3]string{"output", "TestX", hibernated},
+		[3]string{"fail", "TestX", ""},
+	))
+	wantRerun(t, v, "TestX")
 }
 
 func TestRunExitCodes(t *testing.T) {

@@ -14,7 +14,9 @@
 //	acctest-rerun classify events.jsonl
 //
 // render prints the human-readable test log carried in the stream's output
-// events; lines that are not JSON (a build error on stderr) pass through.
+// events, with -v's indentation of subtest results restored; lines that are
+// not JSON (a build error on stderr) pass through. Line order can differ
+// from -v: a subtest's result prints when it finishes, not under its parent's.
 //
 // classify works from per-test events, never from scraped -v text: with
 // -parallel, output interleaves and a line under one test's header can belong
@@ -118,6 +120,7 @@ func render(r io.Reader, w io.Writer) error {
 		line := s.Bytes()
 		var e event
 		if json.Unmarshal(line, &e) == nil && e.Action != "" {
+			_, _ = bw.WriteString(resultIndent(e))
 			_, _ = bw.WriteString(e.Output)
 		} else {
 			_, _ = bw.Write(line)
@@ -130,6 +133,17 @@ func render(r io.Reader, w io.Writer) error {
 	return s.Err()
 }
 
+// resultIndent returns the indentation -v gives a subtest's result line
+// ("--- PASS: TestX/sub"), four spaces per level, which -json output omits.
+// Without it the rendered log counts subtest results as top-level tests
+// (summarize-acctest-skips.sh counts lines starting with "--- ").
+func resultIndent(e event) string {
+	if !strings.HasPrefix(e.Output, "--- ") {
+		return ""
+	}
+	return strings.Repeat("    ", strings.Count(e.Test, "/"))
+}
+
 // verdict is classify's result: either the top-level tests to rerun, or the
 // reason not to rerun anything.
 type verdict struct {
@@ -139,13 +153,15 @@ type verdict struct {
 
 // classify reads a `go test -json` stream. It returns a rerun set only when
 // the run completed (every started test reported a result), at least one
-// test failed, and every failed top-level test's own output - subtests
-// included - contains the hibernation detail.
+// test failed, and every failed test with no failed subtest - the test where
+// the failure actually happened - carries the hibernation detail in its own
+// output. A parent whose subtests failed for different reasons is therefore
+// not rerun. The rerun set is the failed tests' top-level parents.
 func classify(r io.Reader) (verdict, error) {
-	output := map[string]*strings.Builder{} // top-level test -> its output
-	started := map[string]bool{}            // every test and subtest that ran
+	output := map[string]*strings.Builder{} // test or subtest -> its own output
+	started := map[string]bool{}
 	finished := map[string]bool{}
-	failed := map[string]bool{} // top-level tests
+	failed := map[string]bool{}
 	sawEvent := false
 
 	s := newScanner(r)
@@ -160,7 +176,6 @@ func classify(r io.Reader) (verdict, error) {
 		if e.Test == "" {
 			continue
 		}
-		top, _, _ := strings.Cut(e.Test, "/")
 		switch e.Action {
 		case "run":
 			started[e.Test] = true
@@ -168,12 +183,12 @@ func classify(r io.Reader) (verdict, error) {
 			finished[e.Test] = true
 		case "fail":
 			finished[e.Test] = true
-			failed[top] = true
+			failed[e.Test] = true
 		case "output":
-			b := output[top]
+			b := output[e.Test]
 			if b == nil {
 				b = &strings.Builder{}
-				output[top] = b
+				output[e.Test] = b
 			}
 			b.WriteString(e.Output)
 		}
@@ -203,18 +218,31 @@ func classify(r io.Reader) (verdict, error) {
 		return verdict{Reason: "no test failed; the failure came from the build or the harness"}, nil
 	}
 
-	var names, other []string
+	hasFailedSubtest := map[string]bool{}
 	for name := range failed {
-		names = append(names, name)
-		if !containsHibernation(output[name]) {
+		for parent := name; strings.Contains(parent, "/"); {
+			parent = parent[:strings.LastIndex(parent, "/")]
+			hasFailedSubtest[parent] = true
+		}
+	}
+	tops := map[string]bool{}
+	var other []string
+	for name := range failed {
+		top, _, _ := strings.Cut(name, "/")
+		tops[top] = true
+		if !hasFailedSubtest[name] && !containsHibernation(output[name]) {
 			other = append(other, name)
 		}
 	}
-	sort.Strings(names)
 	if len(other) > 0 {
 		sort.Strings(other)
 		return verdict{Reason: fmt.Sprintf("%s failed for a reason other than hibernation", strings.Join(other, ", "))}, nil
 	}
+	names := make([]string, 0, len(tops))
+	for name := range tops {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	return verdict{Rerun: names}, nil
 }
 
