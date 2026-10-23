@@ -36,10 +36,17 @@ func (c *fakeClock) sleep(d time.Duration) {
 }
 
 func testWakeOpts() wakeOpts {
+	o, _ := testWakeOptsWithClock()
+	return o
+}
+
+// testWakeOptsWithClock also returns the clock, for tests that advance time
+// between gate calls.
+func testWakeOptsWithClock() (wakeOpts, *fakeClock) {
 	c := &fakeClock{cur: time.Unix(0, 0)}
 	o := defaultWakeOpts()
 	o.sleep, o.now = c.sleep, c.now
-	return o
+	return o, c
 }
 
 func resetWakeGates(t *testing.T) {
@@ -179,6 +186,123 @@ func TestEnsureCloudAwake_OnceUnderConcurrency(t *testing.T) {
 	wg.Wait()
 	if got := calls.Load(); got != n+1 {
 		t.Fatalf("probe count = %d, want one sequence of %d", got, n+1)
+	}
+}
+
+// An awake verdict is reused only for 2 minutes: the cloud can hibernate
+// minutes after the gate saw it awake. The TTL is a literal here, not
+// opts.recheckAfter, so lengthening the default fails this test.
+func TestEnsureCloudAwake_AwakeReprobedAfterTTL(t *testing.T) {
+	resetWakeGates(t)
+	var calls atomic.Int32
+	srv := sleepyServer(t, 0, &calls)
+	opts, clock := testWakeOptsWithClock()
+	gate := func() {
+		t.Helper()
+		if err := ensureCloudAwakeWith(context.Background(), "cld_f", `"c"`, httpProbe(srv), opts, t.Logf); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	gate()
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("first call: probe count = %d, want 1", got)
+	}
+	clock.sleep(2*time.Minute - time.Second)
+	gate()
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("within the TTL: probe count = %d, want 1 (cached)", got)
+	}
+	clock.sleep(time.Second)
+	gate()
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("at the TTL: probe count = %d, want 2 (re-probed)", got)
+	}
+}
+
+// A cloud that went back to sleep after a cached awake verdict is waited on
+// again, not reported awake.
+func TestEnsureCloudAwake_ReprobeWaitsWhenCloudFellAsleep(t *testing.T) {
+	resetWakeGates(t)
+	var calls atomic.Int32
+	asleep := atomic.Bool{}
+	var remaining atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		if asleep.Load() && remaining.Add(-1) >= 0 {
+			w.WriteHeader(599)
+			_, _ = io.WriteString(w, hibernatedBody)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(srv.Close)
+	opts, clock := testWakeOptsWithClock()
+
+	if err := ensureCloudAwakeWith(context.Background(), "cld_g", `"c"`, httpProbe(srv), opts, t.Logf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	asleep.Store(true)
+	remaining.Store(2)
+	clock.sleep(2 * time.Minute)
+	if err := ensureCloudAwakeWith(context.Background(), "cld_g", `"c"`, httpProbe(srv), opts, t.Logf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := calls.Load(); got != 4 {
+		t.Fatalf("probe count = %d, want 4 (1 awake, then 2 hibernated + 1 awake)", got)
+	}
+}
+
+// A hibernation timeout stays cached past the TTL: parallel tests must fail
+// fast, not each wait out the bound again.
+func TestEnsureCloudAwake_TimeoutCachedPastTTL(t *testing.T) {
+	resetWakeGates(t)
+	var calls atomic.Int32
+	srv := sleepyServer(t, 1<<30, &calls)
+	opts, clock := testWakeOptsWithClock()
+
+	if err := ensureCloudAwakeWith(context.Background(), "cld_h", `"c"`, httpProbe(srv), opts, t.Logf); err == nil {
+		t.Fatal("expected a bounded failure")
+	}
+	before := calls.Load()
+	clock.sleep(10 * opts.recheckAfter)
+	if err := ensureCloudAwakeWith(context.Background(), "cld_h", `"c"`, httpProbe(srv), opts, t.Logf); err == nil {
+		t.Fatal("expected the cached failure")
+	}
+	if calls.Load() != before {
+		t.Fatal("cached timeout must not probe again, even past the TTL")
+	}
+}
+
+// Every probe is logged, including a first-probe pass, so a later failure
+// shows what the gate saw.
+func TestEnsureCloudAwake_LogsEveryProbe(t *testing.T) {
+	resetWakeGates(t)
+	var calls atomic.Int32
+	srv := sleepyServer(t, 1, &calls)
+	var logs []string
+	logf := func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+
+	if err := ensureCloudAwakeWith(context.Background(), "cld_i", `"c"`, httpProbe(srv), testWakeOpts(), logf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	joined := strings.Join(logs, "\n")
+	for _, want := range []string{
+		"Wake probe 1 for cloud \"c\": HTTP 599 after 0s (hibernation response: true)",
+		"Wake probe 2 for cloud \"c\": HTTP 200 after 5s (hibernation response: false)",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("logs missing %q; got:\n%s", want, joined)
+		}
+	}
+
+	resetWakeGates(t)
+	logs = nil
+	if err := ensureCloudAwakeWith(context.Background(), "cld_j", `"c"`, httpProbe(srv), testWakeOpts(), logf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "Wake probe 1 for cloud \"c\": HTTP 200 after 0s (hibernation response: false)"; len(logs) != 1 || logs[0] != want {
+		t.Errorf("first-probe pass: logs = %q, want exactly %q", logs, want)
 	}
 }
 
