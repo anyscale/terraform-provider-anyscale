@@ -100,6 +100,13 @@ func TestAccCloudDataSource_WithComputeConfig(t *testing.T) {
 // does. Routing through Update keeps this test scoped to the data source's
 // read mapping.
 //
+// auto_add_user is not configured, so it stays at its false default in both
+// steps. Its write is a legacy permission write that answers 409 once the test
+// organization converts to role bindings, which would make this test depend on
+// the org's access mode. Its true-value read mapping is covered by
+// TestReadCloudIntoModel_MapsFromResponseNotConstant (data_source_cloud_test.go), and the
+// converted-org refusal by resource_cloud_converted_org_auto_add_user_mock_acc_test.go.
+//
 // lineage_tracking_enabled is deliberately left at its false default and
 // excluded from the true-value assertions: this test org's Anyscale
 // organization does not have lineage tracking enabled as a feature, so
@@ -135,7 +142,7 @@ func TestAccCloudDataSource_MatchesResourceState(t *testing.T) {
 				Config: testAccCloudDataSourceConfig_matchesResourceState(cloudName, true),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Resource itself has the non-default values we configured.
-					resource.TestCheckResourceAttr("anyscale_cloud.test", "auto_add_user", "true"),
+					resource.TestCheckResourceAttr("anyscale_cloud.test", "auto_add_user", "false"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "lineage_tracking_enabled", "false"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "aggregated_logs_enabled", "true"),
 					resource.TestCheckResourceAttr("anyscale_cloud.test", "is_empty_cloud", "true"),
@@ -283,7 +290,6 @@ resource "anyscale_cloud" "test" {
   name                       = "%s"
   cloud_provider             = "AWS"
   region                     = "us-east-2"
-  auto_add_user              = %t
   lineage_tracking_enabled   = false
   aggregated_logs_enabled = %t
 }
@@ -295,7 +301,7 @@ data "anyscale_cloud" "by_id" {
 data "anyscale_cloud" "by_name" {
   name = anyscale_cloud.test.name
 }
-`, cloudName, enabled, enabled)
+`, cloudName, enabled)
 }
 
 func testAccCloudDataSourceConfig_c2Parity(cloudName string) string {

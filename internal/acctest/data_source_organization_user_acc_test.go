@@ -176,6 +176,12 @@ data "anyscale_organization_user" "test" {
 `
 }
 
+// The ByID and ByUserID configs read whichever member sorts first, and their
+// tests assert permission_level is set. That field comes from the legacy
+// permission system, which stops updating when the organization converts to
+// role bindings: a member who joins after conversion may have no value. If
+// these tests start failing on a converted test org, pick a member that joined
+// before conversion (or the token's own identity) instead of users[0].
 func testAccOrganizationUserDataSourceByIDConfig() string {
 	return `
 data "anyscale_organization_users" "all" {

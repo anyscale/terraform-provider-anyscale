@@ -447,6 +447,10 @@ comment gives the exact command). They skip cleanly when unset.
   cloud_access real-infra tests, which change that member's real org and cloud roles.
 - `ANYSCALE_TEST_ORG_NAME` — mandatory whenever `ANYSCALE_TEST_USER_EMAIL` is set: the org the token
   must authenticate against, so a role-changing test never runs in an inherited org.
+- `ANYSCALE_TEST_ORG_MODE` — the test org's declared access mode, `legacy` (default when unset) or
+  `converted`. Tests that need one mode skip in the other; a test that hits the other mode's 409
+  fails with the value to set. CI reads the repository variable of the same name. Set it to match
+  the org you run against, or real-API runs fail loudly by design.
 
 Same reasoning as `ANYSCALE_TEST_CLOUD_NAME`: the literal address is never committed. Use a real
 disposable plus-alias in an inbox you control (`you+tfprovidertest@yourdomain.com`). Never a
