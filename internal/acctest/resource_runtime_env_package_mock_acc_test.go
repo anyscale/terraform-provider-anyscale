@@ -466,6 +466,9 @@ type pkgMockService struct {
 
 const pkgMockServiceID = "svc_pkgmock"
 
+// serviceJSON carries an auth_token, as a real service with query auth enabled (the default)
+// does: Read derives query_auth_token_enabled from its presence, so a service without one plans a
+// change to it, which IN_PLACE then rejects.
 func (s *pkgMockService) serviceJSON() string {
 	s.mu.Lock()
 	state := "RUNNING"
@@ -479,6 +482,7 @@ func (s *pkgMockService) serviceJSON() string {
 		"current_state": %[3]q, "goal_state": "RUNNING",
 		"creator_id": "usr_pkg", "created_at": "2026-01-01T00:00:00Z",
 		"is_multi_version": false, "auto_rollout_enabled": true,
+		"auth_token": "tok_pkg",
 		"service_observability_urls": {},
 		"primary_version": {
 			"id": "svcver_pkg", "created_at": "2026-01-01T00:00:00Z", "version": "v1",
