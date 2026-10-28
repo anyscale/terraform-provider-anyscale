@@ -70,11 +70,22 @@ type outcomeMock struct {
 	script      []outcomeSnapshot
 	scriptPos   int
 	terminated  bool
+
+	// Bearer auth, as the backend tracks it on the service: a ROLLOUT apply issues a new token
+	// when config.access.use_bearer_token turns it on (or is absent) and clears it when it turns
+	// it off (services_dao.update_bearer_token); IN_PLACE never touches it. noTokens simulates the
+	// feature flag that forces tokens off for a cloud or project.
+	token    *string
+	tokenSeq int
+	noTokens bool
 }
 
 func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, body map[string]any) outcomeApplyResult) (*outcomeMock, *httptest.Server) {
 	t.Helper()
 	m := &outcomeMock{t: t, serviceID: serviceID, name: name, projectID: "prj_outcome", onApply: onApply}
+	// A service that exists before any apply (the import tests) has bearer auth on, the default.
+	initialToken := "mock-service-token-0"
+	m.token = &initialToken
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v2/services-v2/apply", func(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +98,7 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 		m.applyBodies = append(m.applyBodies, body)
 		n := len(m.applyBodies)
 		m.mu.Unlock()
+		m.applyAuth(body)
 
 		res := m.onApply(n, body)
 		if res.Status != 0 && res.Status != http.StatusAccepted {
@@ -120,6 +132,36 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return m, server
+}
+
+// applyAuth updates the service's bearer token the way an apply with body does.
+func (m *outcomeMock) applyAuth(body map[string]any) {
+	if body["rollout_strategy"] == "IN_PLACE" {
+		return
+	}
+	enabled := true
+	if cfg, ok := body["config"].(map[string]any); ok {
+		if access, ok := cfg["access"].(map[string]any); ok && access["use_bearer_token"] == false {
+			enabled = false
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch {
+	case !enabled || m.noTokens:
+		m.token = nil
+	case m.token == nil:
+		m.tokenSeq++
+		tok := fmt.Sprintf("mock-service-token-%d", m.tokenSeq)
+		m.token = &tok
+	}
+}
+
+// setToken replaces the service's bearer token out of band (nil disables auth).
+func (m *outcomeMock) setToken(tok *string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.token = tok
 }
 
 // setScript replaces the GET script; the first GET afterwards returns snapshots[0].
@@ -194,15 +236,22 @@ func (m *outcomeMock) render(s outcomeSnapshot) string {
 	if s.CurrentState == "TERMINATED" {
 		endedAt = `"2026-01-02T00:00:00Z"`
 	}
+	m.mu.Lock()
+	token := "null"
+	if m.token != nil {
+		token = fmt.Sprintf("%q", *m.token)
+	}
+	m.mu.Unlock()
 	return fmt.Sprintf(`{
 		"id": %q, "name": %q, "project_id": %q, "cloud_id": "cld_outcome",
 		"hostname": "outcome.example.com", "base_url": "https://outcome.example.com",
+		"auth_token": %s, "secondary_auth_token": null,
 		"current_state": %q, "goal_state": %q, "ended_at": %s,
 		"creator_id": "usr_outcome", "created_at": "2026-01-01T00:00:00Z",
 		"is_multi_version": false, "auto_rollout_enabled": true,
 		"service_observability_urls": {},
 		"primary_version": %s, "canary_version": %s, "service_status_checklist": null
-	}`, m.serviceID, m.name, m.projectID, s.CurrentState, goal, endedAt,
+	}`, m.serviceID, m.name, m.projectID, token, s.CurrentState, goal, endedAt,
 		outcomeVersionJSON(s.Primary, primaryState), canary)
 }
 

@@ -43,7 +43,7 @@ func (e *ServiceCredentialsEphemeralResource) Schema(ctx context.Context, req ep
 	resp.Schema = schema.Schema{
 		MarkdownDescription: `Fetches live authentication credentials for an ` + "`anyscale_service`" + ` without ever writing them to Terraform state or plan output - the defining property of an ephemeral resource. This is different from a ` + "`Sensitive`" + ` attribute on a regular resource or data source, which is still persisted to state in plaintext regardless of the ` + "`Sensitive`" + ` marking; use this ephemeral resource instead whenever the value must never land in state at all. Requires Terraform 1.10 or later - ephemeral resources are a Terraform Core / Plugin Framework primitive with no earlier-version fallback.
 
-Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). ` + "`auth_token`" + ` and ` + "`secondary_auth_token`" + ` are ` + "`null`" + ` whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. This resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.`,
+Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). ` + "`auth_token`" + ` and ` + "`secondary_auth_token`" + ` are ` + "`null`" + ` when the service's ` + "`query_auth_token_enabled`" + ` is ` + "`false`" + `. Changing that setting issues a new token or clears it during the apply.`,
 		Attributes: map[string]schema.Attribute{
 			"service_id": schema.StringAttribute{
 				Required:            true,
@@ -52,7 +52,7 @@ Every read re-fetches fresh: there is no caching, renewal, or automatic refresh 
 			"auth_token": schema.StringAttribute{
 				Computed:            true,
 				Sensitive:           true,
-				MarkdownDescription: "The primary bearer token for authenticating to this service - send it as an `Authorization: Bearer <token>` header. Never written to Terraform state or plan output - fetch it fresh via this ephemeral resource immediately before use rather than storing it anywhere yourself. `null` if the service does not have bearer authentication enabled.",
+				MarkdownDescription: "The primary bearer token for authenticating to this service - send it as an `Authorization: Bearer <token>` header. Never written to Terraform state or plan output - fetch it fresh via this ephemeral resource immediately before use rather than storing it anywhere yourself. `null` when the service's `query_auth_token_enabled` is `false`.",
 			},
 			"secondary_auth_token": schema.StringAttribute{
 				Computed:            true,

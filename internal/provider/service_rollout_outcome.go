@@ -271,5 +271,6 @@ func withPriorServiceDeployFields(m, prior ServiceResourceModel) ServiceResource
 	m.ComputeConfigID = prior.ComputeConfigID
 	m.ConnectionIDs = prior.ConnectionIDs
 	m.Description = prior.Description
+	m.QueryAuthTokenEnabled = prior.QueryAuthTokenEnabled
 	return m
 }

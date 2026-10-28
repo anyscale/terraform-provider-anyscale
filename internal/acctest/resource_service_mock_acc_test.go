@@ -23,6 +23,7 @@ func serviceFindingsJSON(id, name, projectID, currentState string) string {
 	return fmt.Sprintf(`{
 		"id": %[1]q, "name": %[2]q, "project_id": %[3]q, "cloud_id": "cld_findings",
 		"hostname": "findings.example.com", "base_url": "https://findings.example.com",
+		"auth_token": "mock-service-token", "secondary_auth_token": null,
 		"current_state": %[4]q, "goal_state": "RUNNING",
 		"creator_id": "usr_findings", "created_at": "2026-01-01T00:00:00Z",
 		"is_multi_version": false, "auto_rollout_enabled": true,

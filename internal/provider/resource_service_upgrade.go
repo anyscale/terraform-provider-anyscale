@@ -336,6 +336,8 @@ func upgradeServiceResourceStateV0toV1(ctx context.Context, req resource.Upgrade
 		PrimaryVersion:           priorState.PrimaryVersion,
 		CanaryVersion:            priorState.CanaryVersion,
 		ServiceStatusChecklist:   priorState.ServiceStatusChecklist,
+		// Attributes added after v1 have no v0 source; the first refresh fills them.
+		QueryAuthTokenEnabled: types.BoolNull(),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
