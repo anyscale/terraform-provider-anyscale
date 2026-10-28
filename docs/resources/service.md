@@ -38,12 +38,8 @@ resource "anyscale_service" "example" {
   # from anyscale_container_image_build, or an existing build
   build_id = "cenv_abc123"
 
-  # from anyscale_compute_config - use its config_id output, NOT id. id
-  # is the stable name (unchanged across versions); config_id is the
-  # version-specific API id this field actually needs. Easy to get
-  # backwards since it is not obvious from the name alone -
-  # anyscale_compute_config.example.config_id, not .example.id.
-  compute_config_id = "cpt_abc123" # also determines the cloud
+  # anyscale_compute_config's config_id (not id); sets the cloud
+  compute_config_id = "cpt_abc123"
 
   ray_serve_config = {
     applications = [
@@ -67,21 +63,13 @@ resource "anyscale_service" "example" {
     ]
   }
 
-  # Rollout pacing - both optional. rollout_strategy defaults to ROLLOUT
-  # (new cluster, shift traffic, converge to 100%). IN_PLACE upgrades
-  # the existing cluster instead (faster), but the backend then only
-  # permits ray_serve_config to change - a plan changing build_id,
-  # compute_config_id, or connection_ids together with rollout_strategy
-  # = "IN_PLACE" is rejected at plan time rather than left to fail
-  # during apply. Safe to set IN_PLACE here from the very first apply if
-  # that is your steady state - the initial create always performs a
-  # standard deploy regardless of this value (the backend has no
-  # existing version to upgrade in place yet), so the config stays
-  # stable across create and every later update.
+  # Optional; defaults to ROLLOUT (new cluster, shift traffic, converge
+  # to 100%). IN_PLACE upgrades the existing cluster instead (faster),
+  # but then only ray_serve_config may change: a plan that also changes
+  # build_id, compute_config_id, or connection_ids is rejected. IN_PLACE
+  # is safe to set from the first apply - create always performs a
+  # standard deploy, since there is no version to upgrade yet.
   rollout_strategy = "ROLLOUT"
-  # paces the rollout only - it still converges to 100%, never holds at
-  # a canary percent
-  max_surge_percent = 25
   # Defaults to 30m, already sized for a real standard ROLLOUT (a full
   # second cluster spins up before the gradual canary traffic-shift even
   # starts). Raise it further for a heavier image, more replicas, or
@@ -106,8 +94,6 @@ resource "anyscale_service" "example" {
 resource "anyscale_service" "minimal" {
   name     = "minimal-service"
   build_id = "cenv_def456"
-  # anyscale_compute_config's config_id output, not its id output - see
-  # the note above.
   compute_config_id = "cpt_def456"
 
   ray_serve_config = {
@@ -161,7 +147,7 @@ output "service_live_ray_serve_config" {
 ### Required
 
 - `build_id` (String) The ID of the container image build (cluster environment build) this service runs, e.g. from `anyscale_container_image_build`. Changing this rolls out a new service version; it is not a replace.
-- `compute_config_id` (String) The ID of the compute config this service uses, e.g. from `anyscale_compute_config`. Pins the cloud the service runs in - there is no separate top-level `cloud_id` argument because it is fully determined by this value. Changing this rolls out a new service version; it is not a replace. See `project_id` for the plan-time check that catches a mismatch between this value's cloud and the project's cloud.
+- `compute_config_id` (String) The ID of the compute config this service uses: `anyscale_compute_config`'s `config_id` output, not its `id` (the name). A value without the `cpt_` prefix is rejected before the service deploys. Determines the cloud, so there is no `cloud_id` argument. Changing it rolls out a new service version, not a replace. See `project_id` for the cloud-mismatch check.
 - `name` (String) The name of the service. Unique only within `project_id`, not organization-wide. Immutable: the backend has no rename endpoint, so changing this replaces the resource.
 - `ray_serve_config` (Dynamic) The Ray Serve application config, as a native HCL object (supports nested objects and mixed types) - the same `types.Dynamic` convention `anyscale_compute_config`'s `advanced_instance_config`/`flags` use for similarly open-ended, schemaless config. This value is never refreshed from the server on a normal read: the backend may enrich or reorder the stored copy, and echoing that back would produce a spurious diff against your own config on every plan even with no real change. What you last applied is what stays authoritative in state; the live server-side copy (potentially normalized) is visible read-only via `primary_version.ray_serve_config`, so you can compare if you suspect drift. After `terraform import`, this field is seeded once from the server's stored version - the first `terraform plan` afterward may show a normalization diff that you resolve by reconciling your HCL with the imported value (a known limitation of importing any open/schemaless config).
 
@@ -169,7 +155,7 @@ output "service_live_ray_serve_config" {
 
 - `connection_ids` (List of String) Connection IDs to associate with the new service version. Null (the default) preserves the connections already attached; `[]` removes all of them. Never refreshed from the server, because copying the live set in would turn a later "leave connections alone" apply into "remove every connection"; read the live set from `primary_version.connection_ids`. After `terraform import`, a configured list equal to the live set is not treated as a change. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
 - `description` (String) Description of the service. Null if not set. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
-- `max_surge_percent` (Number) Rollout pacing (0-100): how much excess capacity to allocate during a deploy. The rollout still converges to 100%; this never holds it at a partial percent. Null lets the backend choose. Like `rollout_strategy`, it is not readable from the API and a change to it alone takes effect on the next deploy.
+- `max_surge_percent` (Number) Rollout pacing (0-100): how much excess capacity to allocate during a deploy; the rollout still converges to 100%. Off by default: unless Anyscale support has enabled resource-constrained upgrades for your cloud, create succeeds but every later deploy fails with a 400. Null lets the backend choose. Not readable from the API; a change to it alone takes effect on the next deploy.
 - `project_id` (String) The ID of the project this service starts clusters in. If omitted, the backend resolves your organization's default project for the compute config's cloud - that resolved value is written back here, so leaving this unset does not produce a diff on later plans. Immutable: changing it replaces the resource. Its cloud must match `compute_config_id`'s cloud, and a plan-time check rejects a mismatch (naming both cloud IDs; skipped when either ID is unknown or a lookup fails). To move to a compute config on a different cloud, change `project_id` in the same apply; leaving it unset keeps the project in state, so the check fails.
 - `rollout_strategy` (String) How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config` - changing `build_id`, `compute_config_id`, `connection_ids`, or `description` under `IN_PLACE` is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.
 - `tags` (Map of String) Tags to associate with the service. The backend stores tags through a separate system from the service record itself (`/api/v2/tags/resource`, not the service GET/apply endpoints), so this resource makes its own extra calls to keep it a true round trip: read back on refresh, and - since that system's write endpoint only upserts (adds/updates) rather than replaces - any key removed from this map is explicitly deleted so it does not linger on the backend forever.
