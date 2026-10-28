@@ -273,7 +273,7 @@ resource "anyscale_service" "test" {
 }
 
 // TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID: compute_config_id is
-// Required but references another resource's own computed output (anyscale_compute_config.x.id),
+// Required but references another resource's own computed output (anyscale_compute_config.x.config_id),
 // making it Unknown at plan time - the more realistic real-world skip case than an omitted
 // project_id, since compute_config_id can never itself be omitted. Proves Required-but-Unknown
 // does not error.
@@ -376,7 +376,7 @@ func TestAccServiceResource_CloudMatchSkipsOnUnknownComputeConfigID(t *testing.T
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	// compute_config_id references anyscale_compute_config.test.id - Unknown at plan time until
+	// compute_config_id references anyscale_compute_config.test.config_id - Unknown at plan time until
 	// that resource is actually created, which is exactly the shape this test proves is safe.
 	config := testAccProviderBlock(server.URL) + `
 resource "anyscale_compute_config" "test" {

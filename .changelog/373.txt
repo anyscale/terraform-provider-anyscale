@@ -1,0 +1,9 @@
+```
+release-note:changed
+resource/anyscale_service: `compute_config_id` now rejects a value without the `cpt_` prefix before the service deploys, catching `anyscale_compute_config.<name>.id` (the config's name) passed where its `config_id` output belongs.
+```
+
+```
+release-note:changed
+resource/anyscale_service: Documentation for `max_surge_percent` now explains that it is off by default: unless Anyscale has enabled resource-constrained upgrades for your cloud, the service is created but every later deploy fails with a 400. The registry example no longer sets it.
+```

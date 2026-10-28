@@ -17,12 +17,8 @@ resource "anyscale_service" "example" {
   # from anyscale_container_image_build, or an existing build
   build_id = "cenv_abc123"
 
-  # from anyscale_compute_config - use its config_id output, NOT id. id
-  # is the stable name (unchanged across versions); config_id is the
-  # version-specific API id this field actually needs. Easy to get
-  # backwards since it is not obvious from the name alone -
-  # anyscale_compute_config.example.config_id, not .example.id.
-  compute_config_id = "cpt_abc123" # also determines the cloud
+  # anyscale_compute_config's config_id (not id); sets the cloud
+  compute_config_id = "cpt_abc123"
 
   ray_serve_config = {
     applications = [
@@ -46,21 +42,13 @@ resource "anyscale_service" "example" {
     ]
   }
 
-  # Rollout pacing - both optional. rollout_strategy defaults to ROLLOUT
-  # (new cluster, shift traffic, converge to 100%). IN_PLACE upgrades
-  # the existing cluster instead (faster), but the backend then only
-  # permits ray_serve_config to change - a plan changing build_id,
-  # compute_config_id, or connection_ids together with rollout_strategy
-  # = "IN_PLACE" is rejected at plan time rather than left to fail
-  # during apply. Safe to set IN_PLACE here from the very first apply if
-  # that is your steady state - the initial create always performs a
-  # standard deploy regardless of this value (the backend has no
-  # existing version to upgrade in place yet), so the config stays
-  # stable across create and every later update.
+  # Optional; defaults to ROLLOUT (new cluster, shift traffic, converge
+  # to 100%). IN_PLACE upgrades the existing cluster instead (faster),
+  # but then only ray_serve_config may change: a plan that also changes
+  # build_id, compute_config_id, or connection_ids is rejected. IN_PLACE
+  # is safe to set from the first apply - create always performs a
+  # standard deploy, since there is no version to upgrade yet.
   rollout_strategy = "ROLLOUT"
-  # paces the rollout only - it still converges to 100%, never holds at
-  # a canary percent
-  max_surge_percent = 25
   # Defaults to 30m, already sized for a real standard ROLLOUT (a full
   # second cluster spins up before the gradual canary traffic-shift even
   # starts). Raise it further for a heavier image, more replicas, or
@@ -83,10 +71,8 @@ resource "anyscale_service" "example" {
 # defaults to ROLLOUT; an omitted timeouts block defaults to 30m for
 # create/update/delete alike).
 resource "anyscale_service" "minimal" {
-  name     = "minimal-service"
-  build_id = "cenv_def456"
-  # anyscale_compute_config's config_id output, not its id output - see
-  # the note above.
+  name              = "minimal-service"
+  build_id          = "cenv_def456"
   compute_config_id = "cpt_def456"
 
   ray_serve_config = {

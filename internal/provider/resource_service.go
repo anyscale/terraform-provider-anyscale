@@ -186,8 +186,11 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 			},
 			"compute_config_id": schema.StringAttribute{
 				Required: true,
-				MarkdownDescription: "The ID of the compute config this service uses, e.g. from `anyscale_compute_config`. Pins the cloud the service runs in - there is no separate top-level `cloud_id` argument because it is fully determined by this value. Changing this rolls out a new service version; it is not a replace. " +
-					"See `project_id` for the plan-time check that catches a mismatch between this value's cloud and the project's cloud.",
+				MarkdownDescription: "The ID of the compute config this service uses: `anyscale_compute_config`'s `config_id` output, not its `id` (the name). A value without the `cpt_` prefix is rejected before the service deploys. " +
+					"Determines the cloud, so there is no `cloud_id` argument. Changing it rolls out a new service version, not a replace. See `project_id` for the cloud-mismatch check.",
+				Validators: []validator.String{
+					computeConfigIDValidator{},
+				},
 			},
 
 			// ─── Optional service-level inputs ───
@@ -223,7 +226,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 			},
 			"max_surge_percent": schema.Int64Attribute{
 				Optional:            true,
-				MarkdownDescription: "Rollout pacing (0-100): how much excess capacity to allocate during a deploy. The rollout still converges to 100%; this never holds it at a partial percent. Null lets the backend choose. Like `rollout_strategy`, it is not readable from the API and a change to it alone takes effect on the next deploy.",
+				MarkdownDescription: "Rollout pacing (0-100): how much excess capacity to allocate during a deploy; the rollout still converges to 100%. Off by default: unless Anyscale support has enabled resource-constrained upgrades for your cloud, create succeeds but every later deploy fails with a 400. Null lets the backend choose. Not readable from the API; a change to it alone takes effect on the next deploy.",
 				Validators: []validator.Int64{
 					int64validator.Between(0, 100),
 				},

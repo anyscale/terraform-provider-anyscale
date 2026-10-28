@@ -371,7 +371,7 @@ func classifyComputeConfigImportID(id string) (kind computeConfigImportIDKind, n
 		}
 		return importIDKindNameVersion, m[1], v
 	}
-	if strings.HasPrefix(id, "cpt_") {
+	if strings.HasPrefix(id, computeConfigIDPrefix) {
 		return importIDKindCptID, "", 0
 	}
 	return importIDKindMalformed, "", 0
