@@ -104,6 +104,47 @@ func TestServiceDeployFieldsAreFrozenUnderInPlace(t *testing.T) {
 	}
 }
 
+// TestServiceDeployFieldsAreFrozenWhileStopped: a plan that stops the service or keeps it stopped
+// deploys nothing, so every deploy field must be rejected there, ray_serve_config included.
+func TestServiceDeployFieldsAreFrozenWhileStopped(t *testing.T) {
+	for name, pair := range serviceDeployFieldModels(t) {
+		plan, state := pair[0], pair[1]
+		if len(serviceDeployFieldChanges(&plan, &state)) == 0 {
+			t.Errorf("deploy field %s changes while stopped without being rejected", name)
+		}
+	}
+}
+
+// TestServiceStopAndRestartRequired: the stop and restart predicates key on the live goal_state
+// and the planned stopped value; an unknown stopped is treated as running, so a terminated
+// service plans its restart.
+func TestServiceStopAndRestartRequired(t *testing.T) {
+	cases := []struct {
+		name          string
+		goal          string
+		stopped       types.Bool
+		stop, restart bool
+	}{
+		{"running, stays running", "RUNNING", types.BoolValue(false), false, false},
+		{"running, stop", "RUNNING", types.BoolValue(true), true, false},
+		{"terminated, restart", "TERMINATED", types.BoolValue(false), false, true},
+		{"terminated, stays stopped", "TERMINATED", types.BoolValue(true), false, false},
+		{"terminated, stopped unknown", "TERMINATED", types.BoolUnknown(), false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := ServiceResourceModel{Stopped: tc.stopped}
+			state := ServiceResourceModel{GoalState: types.StringValue(tc.goal)}
+			if got := serviceStopRequired(&plan, &state); got != tc.stop {
+				t.Errorf("serviceStopRequired = %t, want %t", got, tc.stop)
+			}
+			if got := serviceRestartRequired(&plan, &state); got != tc.restart {
+				t.Errorf("serviceRestartRequired = %t, want %t", got, tc.restart)
+			}
+		})
+	}
+}
+
 // TestServiceAuthChangedIgnoresUnrefreshedState: state written before query_auth_token_enabled
 // existed holds null until the first refresh; planning against it (terraform plan
 // -refresh=false) must not roll out a new version.

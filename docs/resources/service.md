@@ -6,7 +6,7 @@ description: |-
   Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only anyscale_service/anyscale_services data sources, which share this resource's computed field shapes.
   A change to an input that defines the deployed version (ray_serve_config, build_id or image_uri, compute_config_id, connection_ids, description, version_name, query_auth_token_enabled, grpc_service_names, env_vars) rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so terraform apply converges to a steady RUNNING state rather than holding at a partial canary). max_surge_percent only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
   ~> Note: Every rollout sends the service's whole config object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as max_uptime_timeout_sec, gRPC routing without grpc_service_names, or cluster-level environment variables without env_vars, on its first rollout from Terraform.
-  ~> Note: terraform destroy terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.
+  ~> Note: terraform destroy terminates the service, waits for termination, and deletes the record for good. To turn a service off but keep its id, hostname and record, set stopped = true instead.
 ---
 
 # anyscale_service (Resource)
@@ -17,7 +17,7 @@ A change to an input that defines the deployed version (`ray_serve_config`, `bui
 
 ~> **Note:** Every rollout sends the service's whole `config` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as `max_uptime_timeout_sec`, gRPC routing without `grpc_service_names`, or cluster-level environment variables without `env_vars`, on its first rollout from Terraform.
 
-~> **Note:** `terraform destroy` terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.
+~> **Note:** `terraform destroy` terminates the service, waits for termination, and deletes the record for good. To turn a service off but keep its id, hostname and record, set `stopped = true` instead.
 
 ## Example Usage
 
@@ -54,6 +54,10 @@ resource "anyscale_service" "example" {
   # IN_PLACE upgrades the running cluster but permits changing only
   # ray_serve_config.
   rollout_strategy = "ROLLOUT"
+
+  # true turns the service off but keeps its id and hostname; false
+  # (the default) restarts it.
+  stopped = false
 
   tags = {
     team = "ml-platform"
@@ -103,6 +107,7 @@ output "service_base_url" {
 - `query_auth_token_enabled` (Boolean) Whether requests to the service must carry a bearer token. Defaults to `true`. Changing it rolls out a new version that issues a new token or clears it; read the token with the `anyscale_service_credentials` ephemeral resource.
 - `registry_login_secret` (String, Sensitive) Name of the secret holding credentials for the private registry in `image_uri`. Requires `image_uri`.
 - `rollout_strategy` (String) How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config`: any other change that would roll out a new version is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.
+- `stopped` (Boolean) Set `true` to terminate the service but keep its id and hostname; `false` (the default) restarts it under the same id as a new version. Refreshed from `goal_state`, so a service terminated outside Terraform, or by Anyscale after its cluster failed, plans a restart. Cannot be `true` on create. While `true`, inputs that define the deployed version cannot change.
 - `tags` (Map of String) Tags to associate with the service. The backend stores tags through a separate system from the service record itself (`/api/v2/tags/resource`, not the service GET/apply endpoints), so this resource makes its own extra calls to keep it a true round trip: read back on refresh, and - since that system's write endpoint only upserts (adds/updates) rather than replaces - any key removed from this map is explicitly deleted so it does not linger on the backend forever.
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 - `version_name` (String) Name of the version a rollout creates. If unset, Anyscale generates one and it is recorded here. Changing it rolls out a new version. A name can be used once per service, including by failed or rolled-back versions, so a value set here must change with every rollout.
@@ -118,7 +123,7 @@ output "service_base_url" {
 - `current_state` (String) The current state of this service (e.g. `RUNNING`, `UNHEALTHY`, `TERMINATED`). Ships as a plain string with no client-side enum validation, matching this provider's convention of not hand-maintaining a copy of the backend's enum list.
 - `ended_at` (String) Timestamp when the service was terminated. Null while the service is active.
 - `error_message` (String) Error message from processing the most recent API request against this service, if any. Null otherwise.
-- `goal_state` (String) The goal state of this service (`RUNNING` or `TERMINATED`). A service found `TERMINATED` (terminated outside Terraform, or by Anyscale after its cluster failed) plans an in-place update, and apply restarts it with the same id and hostname.
+- `goal_state` (String) The goal state of this service: `RUNNING`, or `TERMINATED` while it is stopped (see `stopped`).
 - `hostname` (String) The hostname of the service.
 - `id` (String) The unique identifier of the service.
 - `is_multi_version` (Boolean) Whether this service is a multi-version service (multiple active versions with no single canary). Always false for services managed by this resource in this version - multi-version is out of scope (see this resource's top-level description).
@@ -133,7 +138,7 @@ Optional:
 
 - `create` (String) Maximum time to wait for the create rollout to reach `RUNNING` (e.g. `45m`, `2h`). Defaults to `60m`. Anyscale sets no deadline on a rollout, so this is the only limit. Local to this provider; never sent to the API.
 - `delete` (String) Maximum time to wait for termination before deleting. Defaults to `60m`.
-- `update` (String) Same as `create`, for an update that rolls out a new version or restarts a terminated service. An update that rolls nothing out does not wait. A rollout still running at the timeout continues and is settled on the next refresh.
+- `update` (String) Same as `create`, for an update that rolls out a new version, restarts the service, or stops it (waiting for `TERMINATED`). Any other update does not wait. A rollout still running at the timeout continues and is settled on the next refresh.
 
 
 <a id="nestedatt--canary_version"></a>

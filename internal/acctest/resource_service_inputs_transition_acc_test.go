@@ -17,10 +17,12 @@ var serviceInputsAddedForParity = []string{
 	"image_uri", "registry_login_secret", "version_name",
 }
 
-// preParityServer simulates a provider version that predates serviceInputsAddedForParity: every
-// planned, applied and refreshed anyscale_service state carries them as null.
+// preParityServer simulates a provider version that predates attrs (default
+// serviceInputsAddedForParity): every planned, applied and refreshed anyscale_service state
+// carries them as null.
 type preParityServer struct {
 	tfprotov6.ProviderServer
+	attrs []string
 }
 
 func (s preParityServer) strip(ctx context.Context, dv *tfprotov6.DynamicValue) *tfprotov6.DynamicValue {
@@ -41,7 +43,11 @@ func (s preParityServer) strip(ctx context.Context, dv *tfprotov6.DynamicValue) 
 		return dv
 	}
 	objType := typ.(tftypes.Object)
-	for _, name := range serviceInputsAddedForParity {
+	names := s.attrs
+	if names == nil {
+		names = serviceInputsAddedForParity
+	}
+	for _, name := range names {
 		attrs[name] = tftypes.NewValue(objType.AttributeTypes[name], nil)
 	}
 	out, err := tfprotov6.NewDynamicValue(typ, tftypes.NewValue(typ, attrs))
@@ -86,7 +92,7 @@ func TestAccServiceResource_PreParityStateRefreshesClean_MockServer(t *testing.T
 	old := map[string]func() (tfprotov6.ProviderServer, error){
 		"anyscale": func() (tfprotov6.ProviderServer, error) {
 			s, err := ProtoV6ProviderFactories["anyscale"]()
-			return preParityServer{s}, err
+			return preParityServer{ProviderServer: s}, err
 		},
 	}
 

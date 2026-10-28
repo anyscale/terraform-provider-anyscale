@@ -87,6 +87,9 @@ type ServiceResourceModel struct {
 	VersionName     types.String   `tfsdk:"version_name"`
 	Timeouts        timeouts.Value `tfsdk:"timeouts"`
 
+	// Stopped asks for the service to be terminated but kept (service_stopped.go).
+	Stopped types.Bool `tfsdk:"stopped"`
+
 	// Service config inputs, sent together as the apply body's `config` (serviceConfigFromModel).
 	QueryAuthTokenEnabled types.Bool `tfsdk:"query_auth_token_enabled"`
 	GRPCServiceNames      types.List `tfsdk:"grpc_service_names"`
@@ -167,7 +170,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 
 ~> **Note:** Every rollout sends the service's whole ` + "`config`" + ` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as ` + "`max_uptime_timeout_sec`" + `, gRPC routing without ` + "`grpc_service_names`" + `, or cluster-level environment variables without ` + "`env_vars`" + `, on its first rollout from Terraform.
 
-~> **Note:** ` + "`terraform destroy`" + ` terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.`,
+~> **Note:** ` + "`terraform destroy`" + ` terminates the service, waits for termination, and deletes the record for good. To turn a service off but keep its id, hostname and record, set ` + "`stopped = true`" + ` instead.`,
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -274,6 +277,12 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 					stringvalidator.LengthAtLeast(1),
 				},
 			},
+			"stopped": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				MarkdownDescription: "Set `true` to terminate the service but keep its id and hostname; `false` (the default) restarts it under the same id as a new version. Refreshed from `goal_state`, so a service terminated outside Terraform, or by Anyscale after its cluster failed, plans a restart. Cannot be `true` on create. While `true`, inputs that define the deployed version cannot change.",
+			},
 			"query_auth_token_enabled": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
@@ -316,7 +325,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 			},
 			"goal_state": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The goal state of this service (`RUNNING` or `TERMINATED`). A service found `TERMINATED` (terminated outside Terraform, or by Anyscale after its cluster failed) plans an in-place update, and apply restarts it with the same id and hostname.",
+				MarkdownDescription: "The goal state of this service: `RUNNING`, or `TERMINATED` while it is stopped (see `stopped`).",
 			},
 			"creator_id": schema.StringAttribute{
 				Computed:            true,
@@ -414,7 +423,7 @@ A change to an input that defines the deployed version (` + "`ray_serve_config`"
 				Update:            true,
 				Delete:            true,
 				CreateDescription: "Maximum time to wait for the create rollout to reach `RUNNING` (e.g. `45m`, `2h`). Defaults to `60m`. Anyscale sets no deadline on a rollout, so this is the only limit. Local to this provider; never sent to the API.",
-				UpdateDescription: "Same as `create`, for an update that rolls out a new version or restarts a terminated service. An update that rolls nothing out does not wait. A rollout still running at the timeout continues and is settled on the next refresh.",
+				UpdateDescription: "Same as `create`, for an update that rolls out a new version, restarts the service, or stops it (waiting for `TERMINATED`). Any other update does not wait. A rollout still running at the timeout continues and is settled on the next refresh.",
 				DeleteDescription: "Maximum time to wait for termination before deleting. Defaults to `60m`.",
 			}),
 		},
@@ -577,6 +586,10 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if req.State.Raw.IsNull() {
 		// Create: nothing to diff against, so always attempt the cloud-match check (the
 		// IN_PLACE invariant below is inherently update-only and simply doesn't apply here).
+		if plan.Stopped.ValueBool() {
+			addServiceCreateStoppedError(&resp.Diagnostics)
+			return
+		}
 		r.validateProjectComputeConfigCloudMatch(ctx, &plan, &resp.Diagnostics)
 		return
 	}
@@ -608,8 +621,17 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 
 	if restart {
 		// The restart is always a standard deploy (see Update), so the IN_PLACE invariant below
-		// does not apply to it.
-		planServiceRestart(ctx, &state, resp)
+		// does not apply to it. stopped differs from state (Read refreshes it from goal_state),
+		// so the framework has already marked the service-state attributes unknown.
+		return
+	}
+
+	if plan.Stopped.ValueBool() {
+		// Stopping or staying stopped deploys nothing, so it covers every deploy field and
+		// subsumes the IN_PLACE check below.
+		if changed := serviceDeployFieldChanges(&plan, &state); len(changed) > 0 {
+			addServiceStoppedFieldsError(&resp.Diagnostics, changed, serviceIsTerminated(state.GoalState))
+		}
 		return
 	}
 
@@ -723,20 +745,6 @@ func markServiceRolloutAttributesUnknown(ctx context.Context, resp *resource.Mod
 	}
 }
 
-// planServiceRestart turns a terminated service that config still wants running into a planned
-// in-place update. With no config change the plan would otherwise equal state and Update would
-// never run, so the service-state attributes the restart changes are marked unknown (they are
-// Computed, so the provider may plan any value for them).
-func planServiceRestart(ctx context.Context, state *ServiceResourceModel, resp *resource.ModifyPlanResponse) {
-	markServiceRolloutAttributesUnknown(ctx, resp)
-
-	resp.Diagnostics.AddWarning("Terminated Service Will Be Restarted",
-		fmt.Sprintf("Service %s is terminated (current_state %s). Applying restarts it under the same id and hostname "+
-			"with a new version of the configured settings, and waits for RUNNING. To stop managing it without "+
-			"restarting it, use terraform state rm.",
-			state.ID.ValueString(), state.CurrentState.ValueString()))
-}
-
 // validateProjectComputeConfigCloudMatch guards a real, confirmed footgun: the backend's
 // cluster-creation check (check_cloud_id_of_project_and_cluster_match) flatly rejects a service's
 // cluster whenever project_id's own home cloud doesn't match compute_config_id's cloud - a plain
@@ -815,6 +823,12 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	var plan ServiceResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// ModifyPlan rejects this unless stopped was unknown at plan time.
+	if plan.Stopped.ValueBool() {
+		addServiceCreateStoppedError(&resp.Diagnostics)
 		return
 	}
 
@@ -1039,6 +1053,9 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	// GET returns no `config`; token presence is the only readable signal of bearer auth (the CLI
 	// derives it the same way).
 	state.QueryAuthTokenEnabled = types.BoolValue(service.AuthToken != nil)
+	// A terminated service, whoever terminated it, is stopped: a config that wants it running
+	// then plans stopped true -> false, which restarts it.
+	state.Stopped = types.BoolValue(service.GoalState == serviceStateTerminated)
 	// primary_version can be transiently wire-null (a service still STARTING, before any version
 	// has ever gone healthy - see populateServiceResourceModelComputed). build_id/compute_config_id
 	// are Required, so there is no null to fall back to here - leave the prior state value alone
@@ -1213,6 +1230,22 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
+	restart := serviceRestartRequired(&plan, &state)
+	// An unknown version_name only says "generate one if this deploys"; it is not itself a change.
+	deployCheck := plan
+	if deployCheck.VersionName.IsUnknown() {
+		deployCheck.VersionName = state.VersionName
+	}
+	// ModifyPlan rejects this unless a value was unknown at plan time; checked before anything
+	// changes remotely.
+	if plan.Stopped.ValueBool() {
+		if changed := serviceDeployFieldChanges(&deployCheck, &state); len(changed) > 0 {
+			addServiceStoppedFieldsError(&resp.Diagnostics, changed, serviceIsTerminated(state.GoalState))
+			return
+		}
+		plan.VersionName = state.VersionName
+	}
+
 	oldTags, oldDiags := tagsMapFromModel(ctx, state.Tags)
 	resp.Diagnostics.Append(oldDiags...)
 	newTags, newDiags := tagsMapFromModel(ctx, plan.Tags)
@@ -1225,12 +1258,15 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	restart := serviceRestartRequired(&plan, &state)
-	// An unknown version_name only says "generate one if this deploys"; it is not itself a change.
-	deployCheck := plan
-	if deployCheck.VersionName.IsUnknown() {
-		deployCheck.VersionName = state.VersionName
+	if serviceStopRequired(&plan, &state) {
+		timeout, diags := plan.Timeouts.Update(ctx, defaultServiceRolloutTimeout)
+		resp.Diagnostics.Append(diags...)
+		if !resp.Diagnostics.HasError() {
+			r.stopService(ctx, &plan, timeout, resp)
+		}
+		return
 	}
+
 	if !restart && !serviceDeployFieldsChanged(&deployCheck, &state) {
 		plan.VersionName = state.VersionName
 		// Nothing that requires a new version changed - e.g. only

@@ -25,8 +25,10 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 // outcomeVersion is one service version as the mock reports it.
@@ -74,6 +76,13 @@ type outcomeMock struct {
 	scriptPos   int
 	terminated  bool
 
+	// Termination, as the backend runs it: POST /terminate sets goal_state TERMINATED, the next
+	// terminatingPolls GETs report TERMINATING, and an apply during that window gets the 409 the
+	// backend returns before a restart (services_dao.py:944-959). An apply after it restarts.
+	terminatingPolls int
+	terminatingLeft  int
+	terminateCalls   int
+
 	// Bearer auth, as the backend tracks it on the service: a ROLLOUT apply issues a new token
 	// when config.access.use_bearer_token turns it on (or is absent) and clears it when it turns
 	// it off (services_dao.update_bearer_token); IN_PLACE never touches it. noTokens simulates the
@@ -113,7 +122,17 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 		m.mu.Lock()
 		m.applyBodies = append(m.applyBodies, body)
 		n := len(m.applyBodies)
+		stillTerminating := m.terminated && m.terminatingLeft > 0
+		if !stillTerminating {
+			m.terminated = false
+		}
 		m.mu.Unlock()
+		if stillTerminating {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = fmt.Fprint(w, `{"error": {"detail": "Only a terminated Service can be restarted. `+
+				`Please wait until the Service has terminated before restarting."}}`)
+			return
+		}
 		m.applyAuth(body)
 
 		res := m.onApply(n, body)
@@ -135,7 +154,11 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 	})
 	mux.HandleFunc("/api/v2/services-v2/"+serviceID+"/terminate", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
+		if !m.terminated {
+			m.terminatingLeft = m.terminatingPolls
+		}
 		m.terminated = true
+		m.terminateCalls++
 		m.mu.Unlock()
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": {}}`)
@@ -286,10 +309,30 @@ func (m *outcomeMock) next() outcomeSnapshot {
 		m.scriptPos++
 	}
 	if m.terminated {
-		// The end-of-test destroy: report the termination it is waiting for.
-		s.CurrentState, s.GoalState, s.Canary = "TERMINATED", "TERMINATED", nil
+		// A stop, or the end-of-test destroy: report the termination it is waiting for, keeping
+		// the last version as primary.
+		s.CurrentState, s.GoalState, s.Canary, s.PrimaryState = "TERMINATED", "TERMINATED", nil, ""
+		if m.terminatingLeft > 0 {
+			m.terminatingLeft--
+			s.CurrentState = "TERMINATING"
+		}
 	}
 	return s
+}
+
+// restartOutOfBand simulates `anyscale service deploy` restarting a terminated service: the
+// service runs again with the given snapshot.
+func (m *outcomeMock) restartOutOfBand(s outcomeSnapshot) {
+	m.mu.Lock()
+	m.terminated = false
+	m.mu.Unlock()
+	m.setScript(s)
+}
+
+func (m *outcomeMock) terminateCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.terminateCalls
 }
 
 func (m *outcomeMock) applyCount() int {
@@ -804,8 +847,9 @@ func TestAccServiceResource_ImportSeedsTrackingResource(t *testing.T) {
 }
 
 // TestAccServiceResource_TerminatedServiceRestartsResource (B6): a service found terminated
-// while still in config plans an in-place update; apply restarts the same id through PUT /apply
-// (standard rollout, live connections carried explicitly) and waits for RUNNING on a new version.
+// while still in config plans an in-place update, through the refreshed stopped (true -> false)
+// rather than a forced one; apply restarts the same id through PUT /apply (standard rollout, live
+// connections carried explicitly) and waits for RUNNING on a new version.
 func TestAccServiceResource_TerminatedServiceRestartsResource(t *testing.T) {
 	SkipIfNotAcceptanceTest(t)
 
@@ -847,11 +891,15 @@ func TestAccServiceResource_TerminatedServiceRestartsResource(t *testing.T) {
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("anyscale_service.test", plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue("anyscale_service.test", tfjsonpath.New("stopped"), knownvalue.Bool(false)),
+						plancheck.ExpectUnknownValue("anyscale_service.test", tfjsonpath.New("current_state")),
+						plancheck.ExpectUnknownValue("anyscale_service.test", tfjsonpath.New("primary_version")),
 					},
 					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					expectOutcomeApplyCount(m, 2),
+					resource.TestCheckResourceAttr("anyscale_service.test", "stopped", "false"),
 					resource.TestCheckResourceAttr("anyscale_service.test", "id", "svc_outcome_restart"),
 					resource.TestCheckResourceAttr("anyscale_service.test", "current_state", "RUNNING"),
 					resource.TestCheckResourceAttr("anyscale_service.test", "goal_state", "RUNNING"),
