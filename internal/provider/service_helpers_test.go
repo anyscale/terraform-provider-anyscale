@@ -155,11 +155,16 @@ func TestEvaluateServiceState_ChecklistFallback(t *testing.T) {
 			wantErrContains: "service entered UNHEALTHY state",
 		},
 		{
+			// The message-less UNHEALTHY item confirms the error (serviceErrorConfirmed) without
+			// qualifying for the detail.
 			name: "checklist with no qualifying items falls back to the bare state message",
 			checklist: &ServiceStatusChecklistResult{
 				Shared: []StatusChecklistItemResult{
 					{Kind: "DNS", State: "RUNNING", Message: "DNS is ready"},
 				},
+				PerVersion: []VersionChecklistResult{{VersionID: "v1", Items: []StatusChecklistItemResult{
+					{Kind: "APPLICATION", State: "UNHEALTHY", Message: ""},
+				}}},
 			},
 			wantErrContains: "service entered UNHEALTHY state",
 		},

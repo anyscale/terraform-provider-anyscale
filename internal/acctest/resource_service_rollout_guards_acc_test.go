@@ -32,6 +32,7 @@ const rolloutGuardsProject = "prj_rollout_guards"
 type rolloutGuardsMock struct {
 	applies     int32
 	terminated  int32
+	versions    int32        // versions created: every apply except an IN_PLACE upgrade, as the backend does
 	description atomic.Value // string; the stored description, as the real backend persists it
 }
 
@@ -57,12 +58,12 @@ func newRolloutGuardsServer(t *testing.T, serviceID, name string, liveConnIDs []
 		"is_multi_version": false, "auto_rollout_enabled": true,
 		"service_observability_urls": {},
 		"primary_version": {
-			"id": "svcver_findings", "created_at": "2026-01-01T00:00:00Z", "version": "v1",
+			"id": "svcver_findings_%[7]d", "created_at": "2026-01-01T00:00:00Z", "version": "v1",
 			"current_state": %[4]q, "weight": 100, "build_id": "bld_findings",
 			"compute_config_id": "cpt_findings", "production_job_ids": [], "connection_ids": %[5]s,
 			"ray_serve_config": {"applications": [{"import_path": "main:app"}]}
 		}
-	}`, serviceID, name, rolloutGuardsProject, state, conns, descJSON)
+	}`, serviceID, name, rolloutGuardsProject, state, conns, descJSON, atomic.LoadInt32(&m.versions))
 	}
 	state := func() string {
 		if atomic.LoadInt32(&m.terminated) == 1 {
@@ -84,6 +85,9 @@ func newRolloutGuardsServer(t *testing.T, serviceID, name string, liveConnIDs []
 		// Create always takes the standard path.
 		if req.Description != nil && (req.Strategy != "IN_PLACE" || atomic.LoadInt32(&m.applies) == 1) {
 			m.description.Store(*req.Description)
+		}
+		if req.Strategy != "IN_PLACE" {
+			atomic.AddInt32(&m.versions, 1)
 		}
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": `+body("RUNNING")+`}`)
