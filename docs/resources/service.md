@@ -92,8 +92,8 @@ resource "anyscale_service" "example" {
 # defaults to ROLLOUT; an omitted timeouts block defaults to 30m for
 # create/update/delete alike).
 resource "anyscale_service" "minimal" {
-  name     = "minimal-service"
-  build_id = "cenv_def456"
+  name              = "minimal-service"
+  build_id          = "cenv_def456"
   compute_config_id = "cpt_def456"
 
   ray_serve_config = {
