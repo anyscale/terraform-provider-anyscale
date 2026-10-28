@@ -84,6 +84,7 @@ type ServiceResourceModel struct {
 	RolloutStrategy types.String   `tfsdk:"rollout_strategy"`
 	MaxSurgePercent types.Int64    `tfsdk:"max_surge_percent"`
 	ConnectionIDs   types.List     `tfsdk:"connection_ids"`
+	VersionName     types.String   `tfsdk:"version_name"`
 	Timeouts        timeouts.Value `tfsdk:"timeouts"`
 
 	// Service config inputs, sent together as the apply body's `config` (serviceConfigFromModel).
@@ -162,7 +163,7 @@ func (r *ServiceResource) Schema(ctx context.Context, req resource.SchemaRequest
 		Version: 1,
 		MarkdownDescription: `Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only ` + "`anyscale_service`" + `/` + "`anyscale_services`" + ` data sources, which share this resource's computed field shapes.
 
-A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, ` + "`description`" + `, ` + "`query_auth_token_enabled`" + `, ` + "`grpc_service_names`" + `, or ` + "`env_vars`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+A change to an input that defines the deployed version (` + "`ray_serve_config`" + `, ` + "`build_id`" + ` or ` + "`image_uri`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, ` + "`description`" + `, ` + "`version_name`" + `, ` + "`query_auth_token_enabled`" + `, ` + "`grpc_service_names`" + `, ` + "`env_vars`" + `) rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
 
 ~> **Note:** Every rollout sends the service's whole ` + "`config`" + ` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as ` + "`max_uptime_timeout_sec`" + `, gRPC routing without ` + "`grpc_service_names`" + `, or cluster-level environment variables without ` + "`env_vars`" + `, on its first rollout from Terraform.
 
@@ -265,6 +266,14 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 					"Never refreshed from the server, because copying the live set in would turn a later \"leave connections alone\" apply into \"remove every connection\"; read the live set from `primary_version.connection_ids`. After `terraform import`, a configured list equal to the live set is not treated as a change. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.",
 			},
 
+			"version_name": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Name of the version a rollout creates. If unset, Anyscale generates one and it is recorded here. Changing it rolls out a new version. A name can be used once per service, including by failed or rolled-back versions, so a value set here must change with every rollout.",
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+			},
 			"query_auth_token_enabled": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
@@ -594,7 +603,10 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		}
 	}
 
-	if serviceRestartRequired(&plan, &state) {
+	restart := serviceRestartRequired(&plan, &state)
+	planServiceVersionName(ctx, req.Config, &plan, &state, restart, resp)
+
+	if restart {
 		// The restart is always a standard deploy (see Update), so the IN_PLACE invariant below
 		// does not apply to it.
 		planServiceRestart(ctx, &state, resp)
@@ -643,6 +655,33 @@ func (r *ServiceResource) planServiceBuildID(ctx context.Context, config tfsdk.C
 		plan.BuildID = types.StringUnknown()
 	}
 	return true
+}
+
+// planServiceVersionName plans version_name, which must be settled after build_id because it
+// depends on whether the plan deploys. Unset in config, it keeps the current name unless a version
+// is rolled out, when the backend generates one (unknown). The framework marks it unknown on any
+// change, so a tags-only plan must restore it here. Set in config, it must differ from the
+// current name whenever a version is rolled out: the backend rejects a name the service has used.
+// IN_PLACE keeps the primary's name, so there it changes only through the frozen-set check.
+func planServiceVersionName(ctx context.Context, config tfsdk.Config, plan, state *ServiceResourceModel, restart bool, resp *resource.ModifyPlanResponse) {
+	var configured types.String
+	if diags := config.GetAttribute(ctx, path.Root("version_name"), &configured); diags.HasError() || configured.IsUnknown() {
+		return
+	}
+	inPlace := !restart && plan.RolloutStrategy.ValueString() == serviceRolloutStrategyInPlace
+	if configured.IsNull() {
+		plan.VersionName = state.VersionName
+		if !inPlace && (restart || serviceDeployFieldsChanged(plan, state)) {
+			plan.VersionName = types.StringUnknown()
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("version_name"), plan.VersionName)...)
+		return
+	}
+	if !inPlace && configured.Equal(state.VersionName) && (restart || serviceDeployFieldsChanged(plan, state)) {
+		resp.Diagnostics.AddAttributeError(path.Root("version_name"), "Version Name Must Change",
+			fmt.Sprintf("version_name %q is already the current version, and this plan rolls out a new one. A rollout "+
+				"needs a new name: change version_name, or remove it to let Anyscale generate one.", configured.ValueString()))
+	}
 }
 
 // resolvePlannedServiceBuild resolves image_uri into plan.BuildID when the plan left it unknown.
@@ -876,6 +915,7 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 
 	service := applyResp.Result
 	plan.ID = types.StringValue(service.ID)
+	setGeneratedServiceVersionName(&plan, &service, serviceAppliedVersionID(&service, "", false))
 	// project_id is Optional+Computed: when the user omits it, the plan value is unknown until
 	// resolved here from the backend's default-project pick (traced: check_and_get_resources /
 	// get_default_project). Must be set to a known value before any State.Set below.
@@ -1010,6 +1050,7 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	if service.PrimaryVersion != nil && service.CanaryVersion == nil {
 		state.BuildID = types.StringValue(service.PrimaryVersion.BuildID)
 		state.ComputeConfigID = types.StringValue(service.PrimaryVersion.ComputeConfigID)
+		state.VersionName = types.StringValue(service.PrimaryVersion.Version)
 	}
 	// project_id must be refreshed here even though it is
 	// RequiresReplace and Create/Update already set it - ImportState seeds only id and
@@ -1069,7 +1110,30 @@ func serviceDeployFieldsChanged(plan, state *ServiceResourceModel) bool {
 		!plan.Description.Equal(state.Description) ||
 		serviceAuthChanged(plan, state) ||
 		serviceStringCollectionChanged(plan.GRPCServiceNames, state.GRPCServiceNames) ||
-		serviceStringCollectionChanged(plan.EnvVars, state.EnvVars)
+		serviceStringCollectionChanged(plan.EnvVars, state.EnvVars) ||
+		!plan.VersionName.Equal(state.VersionName)
+}
+
+// setGeneratedServiceVersionName records the name of the version an apply created when the plan
+// left version_name to the backend.
+func setGeneratedServiceVersionName(plan *ServiceResourceModel, applied *ServiceResult, versionID string) {
+	if !plan.VersionName.IsUnknown() {
+		return
+	}
+	plan.VersionName = types.StringNull()
+	for _, v := range []*ServiceVersionResult{applied.CanaryVersion, applied.PrimaryVersion} {
+		if v != nil && versionID != "" && v.ID == versionID {
+			plan.VersionName = types.StringValue(v.Version)
+		}
+	}
+}
+
+// serviceVersionNameInUse reports the backend's 409 for a version name the service already used
+// (services_dao._duplicate_version_name_detail). Its text names the CLI flag, so it is replaced.
+func serviceVersionNameInUse(err error) bool {
+	var statusErr *UnexpectedStatusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusConflict &&
+		strings.Contains(statusErr.Body, "already exists for service")
 }
 
 // serviceStringCollectionChanged compares a list or map input whose null and empty values send
@@ -1124,6 +1188,9 @@ func serviceInPlaceFrozenChanges(plan, state *ServiceResourceModel) []string {
 	if serviceStringCollectionChanged(plan.EnvVars, state.EnvVars) {
 		changed = append(changed, "env_vars")
 	}
+	if !plan.VersionName.Equal(state.VersionName) {
+		changed = append(changed, "version_name")
+	}
 	return changed
 }
 
@@ -1159,7 +1226,13 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	restart := serviceRestartRequired(&plan, &state)
-	if !restart && !serviceDeployFieldsChanged(&plan, &state) {
+	// An unknown version_name only says "generate one if this deploys"; it is not itself a change.
+	deployCheck := plan
+	if deployCheck.VersionName.IsUnknown() {
+		deployCheck.VersionName = state.VersionName
+	}
+	if !restart && !serviceDeployFieldsChanged(&deployCheck, &state) {
+		plan.VersionName = state.VersionName
 		// Nothing that requires a new version changed - e.g. only
 		// timeouts, only tags (already synced above), or only rollout_strategy/max_surge_percent
 		// (persisted from plan below, sent with the next real deploy) - so skip the PUT /apply +
@@ -1235,6 +1308,13 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		ctx, r.client, "PUT", "/api/v2/services-v2/apply", reqBody, http.StatusAccepted,
 	)
 	if err != nil {
+		if serviceVersionNameInUse(err) {
+			resp.Diagnostics.AddAttributeError(path.Root("version_name"), "Version Name Already Used",
+				fmt.Sprintf("version_name %q was already used by this service (names of failed or rolled-back versions "+
+					"cannot be reused). Choose a new name, or remove version_name to let Anyscale generate one.",
+					requestPlan.VersionName.ValueString()))
+			return
+		}
 		AddAPIError(&resp.Diagnostics, "apply service update", err)
 		return
 	}
@@ -1248,6 +1328,7 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 	preApplyPrimaryID := serviceVersionIDFromObject(state.PrimaryVersion)
 	inPlace := !restart && requestPlan.RolloutStrategy.ValueString() == serviceRolloutStrategyInPlace
 	newVersionID := serviceAppliedVersionID(&service, preApplyPrimaryID, inPlace)
+	setGeneratedServiceVersionName(&plan, &service, newVersionID)
 	tflog.Debug(ctx, "Service apply response versions", serviceApplyVersionFields(&service, preApplyPrimaryID, newVersionID))
 	priorTracking, trackDiags := getServiceVersionTracking(ctx, req.Private)
 	resp.Diagnostics.Append(trackDiags...)
@@ -1454,7 +1535,7 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 
 // applyServiceRequest mirrors the wire fields of the backend's ApplyProductionServiceV2Model
 // this resource actually sends. Fields deliberately not modeled (ray_gcs_external_storage_config,
-// tracing_config, canary_percent, auto_complete_rollout, traffic_percent, version) are omitted
+// tracing_config, canary_percent, auto_complete_rollout, traffic_percent) are omitted
 // from the request entirely - matching Go's zero-value/omitempty behavior - so the backend
 // applies its own defaults, rather than this provider re-deriving or freezing them.
 //
@@ -1474,8 +1555,10 @@ type applyServiceRequest struct {
 	// *[]string (not []string): wire semantics are null=preserve existing connections,
 	// []=explicitly remove all - a plain slice cannot represent that distinction once
 	// marshaled, and omitempty on a non-nil pointer to an empty slice still emits "[]".
-	ConnectionIDs *[]string             `json:"connection_ids,omitempty"`
-	Config        *serviceConfigRequest `json:"config"`
+	ConnectionIDs *[]string `json:"connection_ids,omitempty"`
+	// Version is the new version's name; omitted, the backend generates one.
+	Version *string               `json:"version,omitempty"`
+	Config  *serviceConfigRequest `json:"config"`
 }
 
 // serviceConfigRequest is the apply body's `config` (the backend's ServiceConfig). The backend
@@ -1587,6 +1670,11 @@ func buildApplyServiceRequest(ctx context.Context, plan *ServiceResourceModel) (
 		return nil, fmt.Errorf("invalid connection_ids: %v", diags)
 	}
 	body.ConnectionIDs = connIDs
+
+	// IN_PLACE keeps the primary version's name and ignores this one.
+	if !plan.VersionName.IsNull() && !plan.VersionName.IsUnknown() && body.RolloutStrategy != serviceRolloutStrategyInPlace {
+		body.Version = plan.VersionName.ValueStringPointer()
+	}
 
 	body.Config, err = serviceConfigFromModel(ctx, plan)
 	if err != nil {
