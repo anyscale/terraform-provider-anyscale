@@ -213,6 +213,7 @@ func (p *AnyscaleProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewUserGroupResource,
 		NewUserGroupMembersResource,
 		NewRoleBindingResource,
+		NewRuntimeEnvPackageResource,
 	}
 }
 
