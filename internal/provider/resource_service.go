@@ -35,11 +35,10 @@ const (
 	serviceRolloutStrategyInPlace = "IN_PLACE"
 )
 
-// defaultServiceRolloutTimeout governs create/update/delete alike (one value
-// for all three, per timeouts.Opts{Create,Update,Delete: true} below).
-// A standard ROLLOUT takes tens of minutes on real infra; observed rollouts run
-// closer to ~20m, so 30m keeps real margin without being needlessly long.
-const defaultServiceRolloutTimeout = 30 * time.Minute
+// defaultServiceRolloutTimeout governs create, update and delete alike. Anyscale sets no
+// deadline on an unconstrained rollout (services_v2_rollout_duration_threshold_sec is defined but
+// never read), so this is the only limit; 60m matches the backend's in-place update bound.
+const defaultServiceRolloutTimeout = 60 * time.Minute
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
@@ -355,9 +354,9 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				Create:            true,
 				Update:            true,
 				Delete:            true,
-				CreateDescription: "Maximum time to wait for a create rollout to reach `RUNNING` (e.g. `20m`, `1h`). Defaults to `30m` - a standard `ROLLOUT` genuinely takes real time on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), but observed real rollouts run closer to ~20m, so this default carries real margin without being needlessly long. Purely local to this provider - never sent to or read from the Anyscale API.",
-				UpdateDescription: "Maximum time to wait for an update rollout, or the restart of a terminated service, to reach `RUNNING`. Same default as `create`. An update that changes only `tags`, `rollout_strategy`, `max_surge_percent`, or this block does not wait. A rollout still running at the timeout continues server-side and is settled on the next refresh.",
-				DeleteDescription: "Maximum time to wait for destroy to wait for termination to reach `TERMINATED` before deleting. Same default and rationale as `create`.",
+				CreateDescription: "Maximum time to wait for the create rollout to reach `RUNNING` (e.g. `45m`, `2h`). Defaults to `60m`. Anyscale sets no deadline on a rollout, so this is the only limit. Local to this provider; never sent to the API.",
+				UpdateDescription: "Same as `create`, for an update that rolls out a new version or restarts a terminated service. An update that rolls nothing out does not wait. A rollout still running at the timeout continues and is settled on the next refresh.",
+				DeleteDescription: "Maximum time to wait for termination before deleting. Defaults to `60m`.",
 			}),
 		},
 	}

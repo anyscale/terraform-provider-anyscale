@@ -100,7 +100,7 @@ func TestAccServiceResource_UpdateRedeploysAndConverges(t *testing.T) {
 
 		// Once terminate has fired (the automatic end-of-test destroy), report TERMINATED so
 		// that wait loop resolves - otherwise it polls a state (RUNNING) that can never satisfy
-		// its target (TERMINATED) and hangs for the real delete timeout default (30m). Checked
+		// its target (TERMINATED) and hangs for the real delete timeout default (60m). Checked
 		// BEFORE the transitional-window logic since destroy always happens after both applies.
 		state := "RUNNING"
 		switch {

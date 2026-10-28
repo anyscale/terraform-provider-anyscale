@@ -27,7 +27,7 @@ func TestPR2TimeoutDefaults_MatchLockedSpec(t *testing.T) {
 		got  time.Duration
 		want time.Duration
 	}{
-		{"service create/update/delete (defaultServiceRolloutTimeout)", defaultServiceRolloutTimeout, 30 * time.Minute},
+		{"service create/update/delete (defaultServiceRolloutTimeout)", defaultServiceRolloutTimeout, 60 * time.Minute},
 		{"system_cluster create (defaultSystemClusterCreateTimeout)", defaultSystemClusterCreateTimeout, 20 * time.Minute},
 		{"container_image_build create/update (defaultBuildTimeout)", defaultBuildTimeout, 30 * time.Minute},
 	}
