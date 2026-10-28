@@ -1,0 +1,4 @@
+```
+release-note:added
+resource/anyscale_service: Add `version_name` to name the version a rollout creates; changing it rolls out a new version, and a name already used by any earlier version, including a failed one, is rejected.
+```
