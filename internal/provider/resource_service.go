@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -25,6 +26,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -44,12 +46,13 @@ const defaultServiceRolloutTimeout = 60 * time.Minute
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                   = &ServiceResource{}
-	_ resource.ResourceWithConfigure      = &ServiceResource{}
-	_ resource.ResourceWithImportState    = &ServiceResource{}
-	_ resource.ResourceWithModifyPlan     = &ServiceResource{}
-	_ resource.ResourceWithUpgradeState   = &ServiceResource{}
-	_ resource.ResourceWithValidateConfig = &ServiceResource{}
+	_ resource.Resource                     = &ServiceResource{}
+	_ resource.ResourceWithConfigure        = &ServiceResource{}
+	_ resource.ResourceWithImportState      = &ServiceResource{}
+	_ resource.ResourceWithModifyPlan       = &ServiceResource{}
+	_ resource.ResourceWithUpgradeState     = &ServiceResource{}
+	_ resource.ResourceWithValidateConfig   = &ServiceResource{}
+	_ resource.ResourceWithConfigValidators = &ServiceResource{}
 )
 
 // NewServiceResource creates a new service resource.
@@ -64,11 +67,13 @@ type ServiceResource struct {
 
 // ServiceResourceModel describes the resource data model.
 type ServiceResourceModel struct {
-	// Required inputs
-	Name            types.String  `tfsdk:"name"`
-	RayServeConfig  types.Dynamic `tfsdk:"ray_serve_config"`
-	BuildID         types.String  `tfsdk:"build_id"`
-	ComputeConfigID types.String  `tfsdk:"compute_config_id"`
+	// Required inputs (build_id or image_uri, exactly one)
+	Name                types.String  `tfsdk:"name"`
+	RayServeConfig      types.Dynamic `tfsdk:"ray_serve_config"`
+	BuildID             types.String  `tfsdk:"build_id"`
+	ImageURI            types.String  `tfsdk:"image_uri"`
+	RegistryLoginSecret types.String  `tfsdk:"registry_login_secret"`
+	ComputeConfigID     types.String  `tfsdk:"compute_config_id"`
 
 	// Optional service-level inputs
 	Description types.String `tfsdk:"description"`
@@ -190,8 +195,21 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				},
 			},
 			"build_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The ID of the container image build (cluster environment build) this service runs, e.g. from `anyscale_container_image_build`. Changing this rolls out a new service version; it is not a replace.",
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "The ID of the container image build this service runs, e.g. from `anyscale_container_image_build` or `anyscale_container_image_registry`. Set this or `image_uri`; with `image_uri`, it is the build that URI resolved to. Changing it rolls out a new version; it is not a replace.",
+			},
+			"image_uri": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Container image to run: `anyscale/ray:<tag>`, `anyscale/image/<name>:<revision>`, or a registry URI. Set this or `build_id`. Resolved to a build at apply time and recorded in `build_id`; each plan checks that the build still matches. Needs permission to create images, even for Anyscale's base images. For an image managed by `anyscale_container_image_registry`, pass its `build_id` instead: a registry URI here registers a separate copy.",
+			},
+			"registry_login_secret": schema.StringAttribute{
+				Optional:            true,
+				Sensitive:           true,
+				MarkdownDescription: "Name of the secret holding credentials for the private registry in `image_uri`. Requires `image_uri`.",
+				Validators: []validator.String{
+					stringvalidator.AlsoRequires(path.MatchRoot("image_uri")),
+				},
 			},
 			"compute_config_id": schema.StringAttribute{
 				Required: true,
@@ -505,6 +523,14 @@ func (r *ServiceResource) Configure(ctx context.Context, req resource.ConfigureR
 	r.client = client
 }
 
+// ConfigValidators requires exactly one image source. Config-level, so a build_id that state
+// recorded from image_uri does not count.
+func (r *ServiceResource) ConfigValidators(context.Context) []resource.ConfigValidator {
+	return []resource.ConfigValidator{
+		resourcevalidator.ExactlyOneOf(path.MatchRoot("build_id"), path.MatchRoot("image_uri")),
+	}
+}
+
 // ValidateConfig rejects more gRPC service names than the backend accepts for the configured
 // bearer-auth setting, which it would otherwise reject only at apply.
 func (r *ServiceResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -559,6 +585,15 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		r.validateProjectComputeConfigCloudMatch(ctx, &plan, &resp.Diagnostics)
 	}
 
+	if r.planServiceBuildID(ctx, req.Config, &plan, &state) {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("build_id"), plan.BuildID)...)
+		if plan.BuildID.IsUnknown() {
+			// When build_id is the only difference (image drift), the framework has not marked
+			// anything else unknown, and the rollout changes the service's state attributes.
+			markServiceRolloutAttributesUnknown(ctx, resp)
+		}
+	}
+
 	if serviceRestartRequired(&plan, &state) {
 		// The restart is always a standard deploy (see Update), so the IN_PLACE invariant below
 		// does not apply to it.
@@ -581,11 +616,55 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	}
 }
 
-// planServiceRestart turns a terminated service that config still wants running into a planned
-// in-place update. With no config change the plan would otherwise equal state and Update would
-// never run, so the service-state attributes the restart changes are marked unknown (they are
-// Computed, so the provider may plan any value for them).
-func planServiceRestart(ctx context.Context, state *ServiceResourceModel, resp *resource.ModifyPlanResponse) {
+// planServiceBuildID plans build_id when image_uri sources it, and reports whether it set
+// plan.BuildID. A plain modifier cannot: Read refreshes build_id from the live primary version, so
+// an out-of-band deploy moves build_id while image_uri stays put. The planned value is the current
+// build when that build still is the image (no resolve, no rollout), and unknown otherwise, which
+// makes apply resolve image_uri and roll out only if the result differs.
+func (r *ServiceResource) planServiceBuildID(ctx context.Context, config tfsdk.Config, plan, state *ServiceResourceModel) bool {
+	var configBuildID types.String
+	if diags := config.GetAttribute(ctx, path.Root("build_id"), &configBuildID); diags.HasError() ||
+		!configBuildID.IsNull() || plan.ImageURI.IsNull() {
+		return false
+	}
+	if plan.ImageURI.IsUnknown() || plan.RegistryLoginSecret.IsUnknown() || state.BuildID.ValueString() == "" {
+		plan.BuildID = types.StringUnknown()
+		return true
+	}
+	satisfied, ok := serviceBuildSatisfiesImage(ctx, r.client, state.BuildID.ValueString(),
+		plan.ImageURI.ValueString(), plan.RegistryLoginSecret)
+	if !ok {
+		// Best effort: an unreadable build keeps the current one unless the image inputs changed.
+		satisfied = plan.ImageURI.Equal(state.ImageURI) && plan.RegistryLoginSecret.Equal(state.RegistryLoginSecret)
+	}
+	if satisfied {
+		plan.BuildID = state.BuildID
+	} else {
+		plan.BuildID = types.StringUnknown()
+	}
+	return true
+}
+
+// resolvePlannedServiceBuild resolves image_uri into plan.BuildID when the plan left it unknown.
+func (r *ServiceResource) resolvePlannedServiceBuild(ctx context.Context, plan *ServiceResourceModel, diags *diag.Diagnostics) bool {
+	if !plan.BuildID.IsUnknown() {
+		return true
+	}
+	buildID, err := resolveServiceImageBuild(ctx, r.client, plan.ImageURI.ValueString(), plan.RegistryLoginSecret,
+		plan.ComputeConfigID.ValueString())
+	if err != nil {
+		diags.AddAttributeError(path.Root("image_uri"), "Failed to Resolve image_uri", err.Error())
+		return false
+	}
+	plan.BuildID = types.StringValue(buildID)
+	return true
+}
+
+// markServiceRolloutAttributesUnknown marks unknown the Computed service-state attributes a
+// rollout or restart changes. The framework does so itself only when config differs from state;
+// a deploy that ModifyPlan forces on an otherwise unchanged plan must do it here, or apply fails
+// with "produced an unexpected new value".
+func markServiceRolloutAttributesUnknown(ctx context.Context, resp *resource.ModifyPlanResponse) {
 	unknowns := map[string]attr.Value{
 		"current_state":            types.StringUnknown(),
 		"goal_state":               types.StringUnknown(),
@@ -598,6 +677,14 @@ func planServiceRestart(ctx context.Context, state *ServiceResourceModel, resp *
 	for name, v := range unknowns {
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root(name), v)...)
 	}
+}
+
+// planServiceRestart turns a terminated service that config still wants running into a planned
+// in-place update. With no config change the plan would otherwise equal state and Update would
+// never run, so the service-state attributes the restart changes are marked unknown (they are
+// Computed, so the provider may plan any value for them).
+func planServiceRestart(ctx context.Context, state *ServiceResourceModel, resp *resource.ModifyPlanResponse) {
+	markServiceRolloutAttributesUnknown(ctx, resp)
 
 	resp.Diagnostics.AddWarning("Terminated Service Will Be Restarted",
 		fmt.Sprintf("Service %s is terminated (current_state %s). Applying restarts it under the same id and hostname "+
@@ -753,6 +840,10 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 	// (including IN_PLACE) unchanged, since rollout_strategy is never part of the server's read
 	// model (see Read) - so a config that already sets IN_PLACE from the start
 	// stays stable across create and every later update.
+	if !r.resolvePlannedServiceBuild(ctx, &plan, &resp.Diagnostics) {
+		return
+	}
+
 	createRequestPlan := plan
 	createRequestPlan.RolloutStrategy = types.StringValue(serviceRolloutStrategyRollout)
 
@@ -908,7 +999,9 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	// are Required, so there is no null to fall back to here - leave the prior state value alone
 	// rather than overwrite it with a wrong placeholder; the next Read once primary_version is
 	// populated will refresh it for real. While a canary is rolling out the primary is still the
-	// old version, so refreshing from it would report the in-flight change as drift.
+	// old version, so refreshing from it would report the in-flight change as drift. image_uri and
+	// registry_login_secret are never refreshed (the service GET has no image URI); ModifyPlan
+	// compares the refreshed build_id against them.
 	if service.PrimaryVersion != nil && service.CanaryVersion == nil {
 		state.BuildID = types.StringValue(service.PrimaryVersion.BuildID)
 		state.ComputeConfigID = types.StringValue(service.PrimaryVersion.ComputeConfigID)
@@ -1002,7 +1095,11 @@ func serviceAuthChanged(plan, state *ServiceResourceModel) bool {
 func serviceInPlaceFrozenChanges(plan, state *ServiceResourceModel) []string {
 	var changed []string
 	if !plan.BuildID.Equal(state.BuildID) {
-		changed = append(changed, "build_id")
+		if plan.BuildID.IsUnknown() && !plan.ImageURI.IsNull() {
+			changed = append(changed, "image_uri (resolves to a new build)")
+		} else {
+			changed = append(changed, "build_id")
+		}
 	}
 	if !plan.ComputeConfigID.Equal(state.ComputeConfigID) {
 		changed = append(changed, "compute_config_id")
@@ -1038,6 +1135,11 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	serviceID := state.ID.ValueString()
 	plan.ID = state.ID
+
+	// Resolve first: whether anything deploys depends on the build image_uri resolves to.
+	if !r.resolvePlannedServiceBuild(ctx, &plan, &resp.Diagnostics) {
+		return
+	}
 
 	oldTags, oldDiags := tagsMapFromModel(ctx, state.Tags)
 	resp.Diagnostics.Append(oldDiags...)

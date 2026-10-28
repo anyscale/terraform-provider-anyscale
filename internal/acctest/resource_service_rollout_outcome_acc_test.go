@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -32,6 +33,8 @@ import (
 type outcomeVersion struct {
 	ID, Name, ImportPath string
 	ConnectionIDs        []string
+	// BuildID is the version's build; "" means bld_outcome.
+	BuildID string
 	// RoutePrefix, when set, is added to the stored application the way the backend may enrich
 	// a stored ray_serve_config, so the live copy no longer equals the authored one.
 	RoutePrefix string
@@ -78,6 +81,16 @@ type outcomeMock struct {
 	token    *string
 	tokenSeq int
 	noTokens bool
+
+	// Builds known to GET /builds/{id} and get_or_create_build_from_image_uri, by ID.
+	builds         map[string]outcomeBuild
+	getOrCreateLog []map[string]any
+}
+
+// outcomeBuild is one build as GET /builds/{id} reports it.
+type outcomeBuild struct {
+	DockerImage, Secret, TemplateName string
+	Revision                          int
 }
 
 func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, body map[string]any) outcomeApplyResult) (*outcomeMock, *httptest.Server) {
@@ -124,6 +137,12 @@ func newOutcomeMock(t *testing.T, serviceID, name string, onApply func(n int, bo
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": {}}`)
 	})
+	mux.HandleFunc("/api/v2/workos/deployment_infra", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"result": {"deployment_infra": "aws"}}`)
+	})
+	mux.HandleFunc("/api/v2/builds/get_or_create_build_from_image_uri", m.serveGetOrCreateBuild)
+	mux.HandleFunc("/api/v2/builds/", m.serveGetBuild)
 	mux.HandleFunc("/api/v2/tags/resource", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, emptyTagsBody)
@@ -155,6 +174,80 @@ func (m *outcomeMock) applyAuth(body map[string]any) {
 		tok := fmt.Sprintf("mock-service-token-%d", m.tokenSeq)
 		m.token = &tok
 	}
+}
+
+// addBuild registers a build the mock reports.
+func (m *outcomeMock) addBuild(id string, b outcomeBuild) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.builds == nil {
+		m.builds = map[string]outcomeBuild{}
+	}
+	m.builds[id] = b
+}
+
+// serveGetOrCreateBuild resolves image_uri the way the backend's BYOD branch does: the newest
+// build with the same image and registry secret, else a new build whose ID is not derivable from
+// the URI.
+func (m *outcomeMock) serveGetOrCreateBuild(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	var body map[string]any
+	_ = json.Unmarshal(raw, &body)
+	uri, _ := body["image_uri"].(string)
+	secret, _ := body["registry_login_secret"].(string)
+
+	m.mu.Lock()
+	m.getOrCreateLog = append(m.getOrCreateLog, body)
+	if m.builds == nil {
+		m.builds = map[string]outcomeBuild{}
+	}
+	id := ""
+	for bid, b := range m.builds {
+		if b.DockerImage == uri && b.Secret == secret {
+			id = bid
+		}
+	}
+	if id == "" {
+		id = fmt.Sprintf("bld_resolved_%d", len(m.getOrCreateLog))
+		m.builds[id] = outcomeBuild{DockerImage: uri, Secret: secret, TemplateName: "anon", Revision: 1}
+	}
+	m.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprint(w, `{"result": `+m.buildJSON(id)+`}`)
+}
+
+func (m *outcomeMock) serveGetBuild(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v2/builds/")
+	m.mu.Lock()
+	_, ok := m.builds[id]
+	m.mu.Unlock()
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = fmt.Fprint(w, `{"error": {"detail": "build not found"}}`)
+		return
+	}
+	// The real GET answers 201.
+	w.WriteHeader(http.StatusCreated)
+	_, _ = fmt.Fprint(w, `{"result": `+m.buildJSON(id)+`}`)
+}
+
+func (m *outcomeMock) buildJSON(id string) string {
+	m.mu.Lock()
+	b := m.builds[id]
+	m.mu.Unlock()
+	secret := "null"
+	if b.Secret != "" {
+		secret = fmt.Sprintf("%q", b.Secret)
+	}
+	return fmt.Sprintf(`{"id": %q, "status": "succeeded", "error_message": null, "docker_image_name": %q,
+		"registry_login_secret": %s, "revision": %d, "application_template": {"name": %q}}`,
+		id, b.DockerImage, secret, b.Revision, b.TemplateName)
+}
+
+func (m *outcomeMock) getOrCreateCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.getOrCreateLog)
 }
 
 // setToken replaces the service's bearer token out of band (nil disables auth).
@@ -207,16 +300,20 @@ func outcomeVersionJSON(v outcomeVersion, state string) string {
 	if v.ConnectionIDs == nil {
 		conns = []byte("[]")
 	}
+	buildID := v.BuildID
+	if buildID == "" {
+		buildID = "bld_outcome"
+	}
 	routePrefix := ""
 	if v.RoutePrefix != "" {
 		routePrefix = fmt.Sprintf(`, "route_prefix": %q`, v.RoutePrefix)
 	}
 	return fmt.Sprintf(`{
 		"id": %q, "created_at": "2026-01-01T00:00:00Z", "version": %q,
-		"current_state": %q, "weight": 100, "build_id": "bld_outcome",
+		"current_state": %q, "weight": 100, "build_id": %q,
 		"compute_config_id": "cpt_outcome", "production_job_ids": [], "connection_ids": %s,
 		"ray_serve_config": {"applications": [{"import_path": %q%s}]}
-	}`, v.ID, v.Name, state, conns, v.ImportPath, routePrefix)
+	}`, v.ID, v.Name, state, buildID, conns, v.ImportPath, routePrefix)
 }
 
 func (m *outcomeMock) render(s outcomeSnapshot) string {
