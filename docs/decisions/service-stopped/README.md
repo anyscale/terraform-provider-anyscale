@@ -1,7 +1,7 @@
 # Design: `anyscale_service` `stopped`
 
-**Status: implemented. Gate 2 closed (mock `resource.Test`, Terraform 1.17.0). Gate 1 open: the
-real-infra test is written but has not been run.**
+**Status: implemented. Gate 2 closed (mock `resource.Test`, Terraform 1.17.0). Gate 1 closed
+(real API, 2026-10-28).**
 Builds on `docs/decisions/service-rollout-outcome` (version tracking, rolled-back handling, restart
 through `serviceRestartRequired`) and `docs/decisions/service-inputs-parity`. Product monorepo
 read-only.
@@ -120,7 +120,13 @@ byte-identical):
 `TestAccServiceResource_RealInfra_StopAndRestart` (the command is in its header): create, then
 `stopped = true`, then `stopped = false`, on `tfp-test-aws-useast1-STATIC`.
 
-**Not yet run.** It is the only evidence for: terminate reaching TERMINATED with the same id and
-hostname, the post-stop plan being empty against a real GET, and a restart from a
-Terraform-initiated stop. A restart after an out-of-band terminate was confirmed by
-service-rollout-outcome's Gate 1 (step 5), and that GET shape is the one `stopped` reads.
+**Passed** (2026-10-28, 437s), torn down: service and project GET 404, `make sweep-dry-run` clean.
+
+| After | `current_state` / `goal_state` | id, hostname | `primary_version` | canary |
+|---|---|---|---|---|
+| `stopped = true` | TERMINATED / TERMINATED | unchanged | the create's version, TERMINATED | null |
+| `stopped = false` | RUNNING / RUNNING | unchanged | a new version, RUNNING | null |
+
+The post-apply plan was empty after each step, so Read's `stopped = (goal_state == TERMINATED)`
+round-trips against a real GET. A restart after an out-of-band terminate was confirmed separately
+by service-rollout-outcome's Gate 1 (step 5).
