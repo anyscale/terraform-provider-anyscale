@@ -1,0 +1,29 @@
+```
+release-note:added
+resource/anyscale_service: Add `query_auth_token_enabled` to turn bearer-token authentication on or off; changing it rolls out a new version that issues a new token or clears it.
+```
+
+```
+release-note:added
+resource/anyscale_service: Add `grpc_service_names` to route gRPC services through the service's load balancer.
+```
+
+```
+release-note:added
+resource/anyscale_service: Add `env_vars` to set environment variables on the service's cluster.
+```
+
+```
+release-note:changed
+resource/anyscale_service: Each rollout now sends the service's whole `config` object, so a service deployed with the Anyscale CLI loses `max_uptime_timeout_sec`, and any gRPC routing or cluster-level environment variables not set here, on its first rollout from Terraform.
+```
+
+```
+release-note:changed
+resource/anyscale_service: The default `create`, `update`, and `delete` timeout is now `60m` (was `30m`), because Anyscale sets no deadline on a rollout.
+```
+
+```
+release-note:fixed
+resource/anyscale_service: A rollout no longer silently re-enables bearer authentication on a service that had it disabled.
+```
