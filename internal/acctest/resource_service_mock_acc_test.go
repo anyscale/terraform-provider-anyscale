@@ -23,6 +23,7 @@ func serviceFindingsJSON(id, name, projectID, currentState string) string {
 	return fmt.Sprintf(`{
 		"id": %[1]q, "name": %[2]q, "project_id": %[3]q, "cloud_id": "cld_findings",
 		"hostname": "findings.example.com", "base_url": "https://findings.example.com",
+		"auth_token": "mock-service-token", "secondary_auth_token": null,
 		"current_state": %[4]q, "goal_state": "RUNNING",
 		"creator_id": "usr_findings", "created_at": "2026-01-01T00:00:00Z",
 		"is_multi_version": false, "auto_rollout_enabled": true,
@@ -134,7 +135,7 @@ func TestAccServiceResource_PlainCreateSucceeds(t *testing.T) {
 		// Every test's TestCase issues a REAL destroy automatically at the end, which waits for
 		// current_state==TERMINATED before the DELETE call - so GET must reflect termination
 		// once this fires, or that wait polls a state that can never arrive and hangs for the
-		// real delete timeout default (30m), blowing well past this test's own timeout.
+		// real delete timeout default (60m), blowing well past this test's own timeout.
 		atomic.StoreInt32(&terminated, 1)
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = fmt.Fprint(w, `{"result": {}}`)
@@ -203,7 +204,7 @@ func TestAccServiceResource_DeleteAlreadyGone(t *testing.T) {
 				// GET's point of view too - consistent with the already-gone scenario, and
 				// critically, this makes a regression (falling through to the wait) fail FAST
 				// (getServiceByID errors on the first poll, since GET only accepts 200) rather
-				// than hang for the real delete timeout default (30m) waiting on a state that can
+				// than hang for the real delete timeout default (60m) waiting on a state that can
 				// never arrive, which would blow well past this test's own timeout instead of
 				// failing informatively.
 				atomic.AddInt32(&getsAfterTerminate, 1)

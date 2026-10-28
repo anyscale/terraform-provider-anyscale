@@ -124,7 +124,7 @@ func TestServiceResourceStateUpgradeV0toV1_DropsRolloutTimeout(t *testing.T) {
 		t.Errorf("Timeouts = %v, want null after upgrade (rollout_timeout=90m has no successor value, by design)", v1.Timeouts)
 	}
 
-	// Confirm the null value resolves to the NEW default (30m), not the old
+	// Confirm the null value resolves to the current default (60m), not the old
 	// 45m default and not the dropped 90m customization - proves the whole
 	// "drops customization, adopts new default" chain end to end, not just
 	// the drop half.
@@ -132,7 +132,7 @@ func TestServiceResourceStateUpgradeV0toV1_DropsRolloutTimeout(t *testing.T) {
 	if diags.HasError() {
 		t.Fatalf("Timeouts.Update() diagnostics: %v", diags)
 	}
-	if resolved != 30*time.Minute {
-		t.Errorf("Timeouts.Update(ctx, defaultServiceRolloutTimeout) = %v, want 30m", resolved)
+	if resolved != 60*time.Minute {
+		t.Errorf("Timeouts.Update(ctx, defaultServiceRolloutTimeout) = %v, want 60m", resolved)
 	}
 }

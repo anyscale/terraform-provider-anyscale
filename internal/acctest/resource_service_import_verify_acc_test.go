@@ -52,6 +52,7 @@ func (m *serviceImportVerifyMock) serviceJSON(id string) string {
 		"id": %[1]q, "name": %[2]s, "project_id": %[3]s, "cloud_id": "cld_svc_import",
 		"description": %[4]s,
 		"hostname": "svc-import.example.com", "base_url": "https://svc-import.example.com",
+		"auth_token": "mock-service-token", "secondary_auth_token": null,
 		"current_state": %[5]q, "goal_state": "RUNNING",
 		"creator_id": "usr_svc_import", "created_at": "2026-01-01T00:00:00Z",
 		"is_multi_version": false, "auto_rollout_enabled": true,

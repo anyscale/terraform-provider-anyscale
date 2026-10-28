@@ -4,14 +4,14 @@ page_title: "anyscale_service_credentials Ephemeral Resource - terraform-provide
 subcategory: ""
 description: |-
   Fetches live authentication credentials for an anyscale_service without ever writing them to Terraform state or plan output - the defining property of an ephemeral resource. This is different from a Sensitive attribute on a regular resource or data source, which is still persisted to state in plaintext regardless of the Sensitive marking; use this ephemeral resource instead whenever the value must never land in state at all. Requires Terraform 1.10 or later - ephemeral resources are a Terraform Core / Plugin Framework primitive with no earlier-version fallback.
-  Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). auth_token and secondary_auth_token are null whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. This resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.
+  Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). auth_token and secondary_auth_token are null when the service's query_auth_token_enabled is false. Changing that setting issues a new token or clears it during the apply.
 ---
 
 # anyscale_service_credentials (Ephemeral Resource)
 
 Fetches live authentication credentials for an `anyscale_service` without ever writing them to Terraform state or plan output - the defining property of an ephemeral resource. This is different from a `Sensitive` attribute on a regular resource or data source, which is still persisted to state in plaintext regardless of the `Sensitive` marking; use this ephemeral resource instead whenever the value must never land in state at all. Requires Terraform 1.10 or later - ephemeral resources are a Terraform Core / Plugin Framework primitive with no earlier-version fallback.
 
-Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). `auth_token` and `secondary_auth_token` are `null` whenever the service does not have bearer authentication enabled - a service-level configuration choice, not a lifecycle state. This resource does not gate on or independently track any state of its own; a null value here simply reflects what the API itself returns.
+Every read re-fetches fresh: there is no caching, renewal, or automatic refresh between separate reads (this resource implements Open only, with no Renew or Close). `auth_token` and `secondary_auth_token` are `null` when the service's `query_auth_token_enabled` is `false`. Changing that setting issues a new token or clears it during the apply.
 
 ## Example Usage
 
@@ -42,6 +42,6 @@ ephemeral "anyscale_service_credentials" "example" {
 
 ### Read-Only
 
-- `auth_token` (String, Sensitive) The primary bearer token for authenticating to this service - send it as an `Authorization: Bearer <token>` header. Never written to Terraform state or plan output - fetch it fresh via this ephemeral resource immediately before use rather than storing it anywhere yourself. `null` if the service does not have bearer authentication enabled.
+- `auth_token` (String, Sensitive) The primary bearer token for authenticating to this service - send it as an `Authorization: Bearer <token>` header. Never written to Terraform state or plan output - fetch it fresh via this ephemeral resource immediately before use rather than storing it anywhere yourself. `null` when the service's `query_auth_token_enabled` is `false`.
 - `base_url` (String) The service's base URL, echoed here as a convenience so the endpoint and its credentials can be fetched together without a separate `anyscale_service` data source lookup. Matches the same-named attribute on that data source.
 - `secondary_auth_token` (String, Sensitive) A secondary bearer token, present alongside `auth_token` only while a token rotation is in progress - authenticate with it the same way, as an `Authorization: Bearer <token>` header. `null` outside of an active rotation.

@@ -12,12 +12,14 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/dynamicplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -35,19 +37,19 @@ const (
 	serviceRolloutStrategyInPlace = "IN_PLACE"
 )
 
-// defaultServiceRolloutTimeout governs create/update/delete alike (one value
-// for all three, per timeouts.Opts{Create,Update,Delete: true} below).
-// A standard ROLLOUT takes tens of minutes on real infra; observed rollouts run
-// closer to ~20m, so 30m keeps real margin without being needlessly long.
-const defaultServiceRolloutTimeout = 30 * time.Minute
+// defaultServiceRolloutTimeout governs create, update and delete alike. Anyscale sets no
+// deadline on an unconstrained rollout (services_v2_rollout_duration_threshold_sec is defined but
+// never read), so this is the only limit; 60m matches the backend's in-place update bound.
+const defaultServiceRolloutTimeout = 60 * time.Minute
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                 = &ServiceResource{}
-	_ resource.ResourceWithConfigure    = &ServiceResource{}
-	_ resource.ResourceWithImportState  = &ServiceResource{}
-	_ resource.ResourceWithModifyPlan   = &ServiceResource{}
-	_ resource.ResourceWithUpgradeState = &ServiceResource{}
+	_ resource.Resource                   = &ServiceResource{}
+	_ resource.ResourceWithConfigure      = &ServiceResource{}
+	_ resource.ResourceWithImportState    = &ServiceResource{}
+	_ resource.ResourceWithModifyPlan     = &ServiceResource{}
+	_ resource.ResourceWithUpgradeState   = &ServiceResource{}
+	_ resource.ResourceWithValidateConfig = &ServiceResource{}
 )
 
 // NewServiceResource creates a new service resource.
@@ -78,6 +80,11 @@ type ServiceResourceModel struct {
 	MaxSurgePercent types.Int64    `tfsdk:"max_surge_percent"`
 	ConnectionIDs   types.List     `tfsdk:"connection_ids"`
 	Timeouts        timeouts.Value `tfsdk:"timeouts"`
+
+	// Service config inputs, sent together as the apply body's `config` (serviceConfigFromModel).
+	QueryAuthTokenEnabled types.Bool `tfsdk:"query_auth_token_enabled"`
+	GRPCServiceNames      types.List `tfsdk:"grpc_service_names"`
+	EnvVars               types.Map  `tfsdk:"env_vars"`
 
 	// Computed outputs. The four nested-object fields are typed as types.Object rather than the
 	// concrete ServiceObservabilityURLsModel/ServiceVersionModel/ServiceStatusChecklistModel
@@ -150,7 +157,9 @@ func (r *ServiceResource) Schema(ctx context.Context, req resource.SchemaRequest
 		Version: 1,
 		MarkdownDescription: `Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only ` + "`anyscale_service`" + `/` + "`anyscale_services`" + ` data sources, which share this resource's computed field shapes.
 
-A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, or ` + "`description`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_config_id`" + `, ` + "`connection_ids`" + `, ` + "`description`" + `, ` + "`query_auth_token_enabled`" + `, ` + "`grpc_service_names`" + `, or ` + "`env_vars`" + ` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so ` + "`terraform apply`" + ` converges to a steady RUNNING state rather than holding at a partial canary). ` + "`max_surge_percent`" + ` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+
+~> **Note:** Every rollout sends the service's whole ` + "`config`" + ` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as ` + "`max_uptime_timeout_sec`" + `, gRPC routing without ` + "`grpc_service_names`" + `, or cluster-level environment variables without ` + "`env_vars`" + `, on its first rollout from Terraform.
 
 ~> **Note:** ` + "`terraform destroy`" + ` terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.`,
 
@@ -219,7 +228,7 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(serviceRolloutStrategyRollout),
-				MarkdownDescription: "How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config` - changing `build_id`, `compute_config_id`, `connection_ids`, or `description` under `IN_PLACE` is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
+				MarkdownDescription: "How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config`: any other change that would roll out a new version is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(serviceRolloutStrategyRollout, serviceRolloutStrategyInPlace),
 				},
@@ -236,6 +245,28 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				Optional:    true,
 				MarkdownDescription: "Connection IDs to associate with the new service version. Null (the default) preserves the connections already attached; `[]` removes all of them. " +
 					"Never refreshed from the server, because copying the live set in would turn a later \"leave connections alone\" apply into \"remove every connection\"; read the live set from `primary_version.connection_ids`. After `terraform import`, a configured list equal to the live set is not treated as a change. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.",
+			},
+
+			"query_auth_token_enabled": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+				MarkdownDescription: "Whether requests to the service must carry a bearer token. Defaults to `true`. Changing it rolls out a new version that issues a new token or clears it; read the token with the `anyscale_service_credentials` ephemeral resource. Rejected at plan time under `IN_PLACE`.",
+			},
+
+			"grpc_service_names": schema.ListAttribute{
+				ElementType:         types.StringType,
+				Optional:            true,
+				MarkdownDescription: "gRPC service names the load balancer routes to the service: a gRPC request whose path starts with `/<name>` reaches it. Null or empty disables gRPC routing. At most one name while `query_auth_token_enabled` is `true`, two otherwise. Configure Ray Serve's side with `grpc_options` in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.",
+				Validators: []validator.List{
+					listvalidator.ValueStringsAre(stringvalidator.LengthAtLeast(1)),
+				},
+			},
+
+			"env_vars": schema.MapAttribute{
+				ElementType:         types.StringType,
+				Optional:            true,
+				MarkdownDescription: "Environment variables Anyscale sets for Ray on the service's cluster nodes. Unlike the Anyscale CLI, this does not also copy them into each application's `runtime_env`; set those in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.",
 			},
 
 			// ─── Computed outputs (reused from the anyscale_service data source's model - see
@@ -355,9 +386,9 @@ A change to ` + "`ray_serve_config`" + `, ` + "`build_id`" + `, ` + "`compute_co
 				Create:            true,
 				Update:            true,
 				Delete:            true,
-				CreateDescription: "Maximum time to wait for a create rollout to reach `RUNNING` (e.g. `20m`, `1h`). Defaults to `30m` - a standard `ROLLOUT` genuinely takes real time on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), but observed real rollouts run closer to ~20m, so this default carries real margin without being needlessly long. Purely local to this provider - never sent to or read from the Anyscale API.",
-				UpdateDescription: "Maximum time to wait for an update rollout, or the restart of a terminated service, to reach `RUNNING`. Same default as `create`. An update that changes only `tags`, `rollout_strategy`, `max_surge_percent`, or this block does not wait. A rollout still running at the timeout continues server-side and is settled on the next refresh.",
-				DeleteDescription: "Maximum time to wait for destroy to wait for termination to reach `TERMINATED` before deleting. Same default and rationale as `create`.",
+				CreateDescription: "Maximum time to wait for the create rollout to reach `RUNNING` (e.g. `45m`, `2h`). Defaults to `60m`. Anyscale sets no deadline on a rollout, so this is the only limit. Local to this provider; never sent to the API.",
+				UpdateDescription: "Same as `create`, for an update that rolls out a new version or restarts a terminated service. An update that rolls nothing out does not wait. A rollout still running at the timeout continues and is settled on the next refresh.",
+				DeleteDescription: "Maximum time to wait for termination before deleting. Defaults to `60m`.",
 			}),
 		},
 	}
@@ -474,6 +505,25 @@ func (r *ServiceResource) Configure(ctx context.Context, req resource.ConfigureR
 	r.client = client
 }
 
+// ValidateConfig rejects more gRPC service names than the backend accepts for the configured
+// bearer-auth setting, which it would otherwise reject only at apply.
+func (r *ServiceResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var names types.List
+	var auth types.Bool
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("grpc_service_names"), &names)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("query_auth_token_enabled"), &auth)...)
+	if resp.Diagnostics.HasError() || names.IsNull() || names.IsUnknown() || auth.IsUnknown() {
+		return
+	}
+	bearer := auth.IsNull() || auth.ValueBool()
+	if limit := serviceMaxGRPCServiceNames(bearer); len(names.Elements()) > limit {
+		resp.Diagnostics.AddAttributeError(path.Root("grpc_service_names"), "Too Many gRPC Service Names",
+			fmt.Sprintf("Anyscale accepts at most %d gRPC service name(s) when query_auth_token_enabled is %t; got %d. "+
+				"Each name is a path condition on the service's load balancer rule, which has a fixed condition limit.",
+				limit, bearer, len(names.Elements())))
+	}
+}
+
 // ModifyPlan enforces the backend's IN_PLACE invariant at plan time rather than letting a
 // PUT /apply 422 (traced: services_dao.upgrade_service_in_place hash-compares the whole version
 // config excluding ray_serve_config) opaquely surface during apply. Only relevant to Update -
@@ -520,25 +570,7 @@ func (r *ServiceResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 		return
 	}
 
-	// The frozen set: every deploy field besides ray_serve_config. The IN_PLACE backend path
-	// rejects a changed build/compute config/connection set, and silently drops a changed
-	// description (only the standard rollout path persists it), so all of them are refused here.
-	// Framed as the invariant (what CAN change under IN_PLACE), not as an allowlist, so it stays
-	// correct if a future deploy field is added to the schema.
-	var changed []string
-	if !plan.BuildID.Equal(state.BuildID) {
-		changed = append(changed, "build_id")
-	}
-	if !plan.ComputeConfigID.Equal(state.ComputeConfigID) {
-		changed = append(changed, "compute_config_id")
-	}
-	if serviceConnectionIDsChanged(&plan, &state) {
-		changed = append(changed, "connection_ids")
-	}
-	if !plan.Description.Equal(state.Description) {
-		changed = append(changed, "description")
-	}
-
+	changed := serviceInPlaceFrozenChanges(&plan, &state)
 	if len(changed) > 0 {
 		AddConfigError(&resp.Diagnostics, "Invalid Change Under IN_PLACE Rollout Strategy",
 			fmt.Sprintf(
@@ -800,6 +832,12 @@ func (r *ServiceResource) Create(ctx context.Context, req resource.CreateRequest
 		resp.Diagnostics.Append(setServiceVersionTracking(ctx, resp.Private,
 			&serviceVersionTracking{VersionID: finalService.PrimaryVersion.ID})...)
 	}
+	// A warning, not an error: an error here would taint a healthy new service, and the next
+	// refresh records the observed false, so the next plan shows the difference.
+	if finalService != nil && serviceAuthTokenMissing(&plan, finalService) {
+		resp.Diagnostics.AddAttributeWarning(path.Root("query_auth_token_enabled"),
+			serviceAuthTokenMissingSummary, serviceAuthTokenMissingDetail(finalService.ID))
+	}
 }
 
 // Read refreshes the Terraform state with the latest data.
@@ -862,6 +900,9 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 	//   - timeouts: purely local to this provider, never sent to or read from the API.
 	state.Name = types.StringValue(service.Name)
 	state.Description = types.StringPointerValue(service.Description)
+	// GET returns no `config`; token presence is the only readable signal of bearer auth (the CLI
+	// derives it the same way).
+	state.QueryAuthTokenEnabled = types.BoolValue(service.AuthToken != nil)
 	// primary_version can be transiently wire-null (a service still STARTING, before any version
 	// has ever gone healthy - see populateServiceResourceModelComputed). build_id/compute_config_id
 	// are Required, so there is no null to fall back to here - leave the prior state value alone
@@ -927,7 +968,61 @@ func serviceDeployFieldsChanged(plan, state *ServiceResourceModel) bool {
 		!plan.BuildID.Equal(state.BuildID) ||
 		!plan.ComputeConfigID.Equal(state.ComputeConfigID) ||
 		serviceConnectionIDsChanged(plan, state) ||
-		!plan.Description.Equal(state.Description)
+		!plan.Description.Equal(state.Description) ||
+		serviceAuthChanged(plan, state) ||
+		serviceStringCollectionChanged(plan.GRPCServiceNames, state.GRPCServiceNames) ||
+		serviceStringCollectionChanged(plan.EnvVars, state.EnvVars)
+}
+
+// serviceStringCollectionChanged compares a list or map input whose null and empty values send
+// the same request, so switching between them is not a deploy.
+func serviceStringCollectionChanged[T interface {
+	attr.Value
+	IsUnknown() bool
+	Elements() E
+}, E interface {
+	~[]attr.Value | ~map[string]attr.Value
+}](plan, state T) bool {
+	if !plan.IsUnknown() && !state.IsUnknown() && len(plan.Elements()) == 0 && len(state.Elements()) == 0 {
+		return false
+	}
+	return !plan.Equal(state)
+}
+
+// serviceAuthChanged reports a change to query_auth_token_enabled. A null prior value (state
+// written before the attribute existed, not yet refreshed) is not a change.
+func serviceAuthChanged(plan, state *ServiceResourceModel) bool {
+	return !state.QueryAuthTokenEnabled.IsNull() && !plan.QueryAuthTokenEnabled.Equal(state.QueryAuthTokenEnabled)
+}
+
+// serviceInPlaceFrozenChanges lists the deploy fields (serviceDeployFieldsChanged) a plan changes
+// that IN_PLACE cannot apply: all of them except ray_serve_config. The IN_PLACE backend path
+// (services_dao.upgrade_service_in_place) rejects a changed build, compute config or connection
+// set, and silently ignores the rest (description, and everything in the service config).
+func serviceInPlaceFrozenChanges(plan, state *ServiceResourceModel) []string {
+	var changed []string
+	if !plan.BuildID.Equal(state.BuildID) {
+		changed = append(changed, "build_id")
+	}
+	if !plan.ComputeConfigID.Equal(state.ComputeConfigID) {
+		changed = append(changed, "compute_config_id")
+	}
+	if serviceConnectionIDsChanged(plan, state) {
+		changed = append(changed, "connection_ids")
+	}
+	if !plan.Description.Equal(state.Description) {
+		changed = append(changed, "description")
+	}
+	if serviceAuthChanged(plan, state) {
+		changed = append(changed, "query_auth_token_enabled")
+	}
+	if serviceStringCollectionChanged(plan.GRPCServiceNames, state.GRPCServiceNames) {
+		changed = append(changed, "grpc_service_names")
+	}
+	if serviceStringCollectionChanged(plan.EnvVars, state.EnvVars) {
+		changed = append(changed, "env_vars")
+	}
+	return changed
 }
 
 // Update applies a new service version and waits for it to become healthy - but only when a
@@ -1088,7 +1183,29 @@ func (r *ServiceResource) Update(ctx context.Context, req resource.UpdateRequest
 		rolledBack := withPriorServiceDeployFields(plan, state)
 		resp.Diagnostics.Append(resp.State.Set(ctx, &rolledBack)...)
 		resp.Diagnostics.AddError("Service Rollout Rolled Back", serviceRolledBackDetail(serviceID, observer, finalService))
+		return
 	}
+
+	if serviceAuthTokenMissing(&plan, finalService) {
+		plan.QueryAuthTokenEnabled = types.BoolValue(false)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+		resp.Diagnostics.AddAttributeError(path.Root("query_auth_token_enabled"),
+			serviceAuthTokenMissingSummary, serviceAuthTokenMissingDetail(serviceID))
+	}
+}
+
+const serviceAuthTokenMissingSummary = "Bearer Token Not Issued"
+
+// serviceAuthTokenMissing reports a service that has no bearer token although the plan asked for
+// one. Anyscale can force tokens off for a cloud or project regardless of the request (the
+// services_v2_generate_auth_token flag, services_dao._should_use_bearer_token).
+func serviceAuthTokenMissing(plan *ServiceResourceModel, s *ServiceResult) bool {
+	return plan.QueryAuthTokenEnabled.ValueBool() && s.AuthToken == nil
+}
+
+func serviceAuthTokenMissingDetail(serviceID string) string {
+	return fmt.Sprintf("Anyscale did not issue a bearer token for service %s; bearer authentication may be disabled "+
+		"for this cloud or project. Set query_auth_token_enabled = false, or contact Anyscale support.", serviceID)
 }
 
 // prepareServiceRestart readies a PUT /apply that restarts a terminated service. The backend
@@ -1229,7 +1346,7 @@ func (r *ServiceResource) ImportState(ctx context.Context, req resource.ImportSt
 // Helper functions
 
 // applyServiceRequest mirrors the wire fields of the backend's ApplyProductionServiceV2Model
-// this resource actually sends. Fields deliberately not modeled (config, ray_gcs_external_storage_config,
+// this resource actually sends. Fields deliberately not modeled (ray_gcs_external_storage_config,
 // tracing_config, canary_percent, auto_complete_rollout, traffic_percent, version) are omitted
 // from the request entirely - matching Go's zero-value/omitempty behavior - so the backend
 // applies its own defaults, rather than this provider re-deriving or freezing them.
@@ -1250,7 +1367,74 @@ type applyServiceRequest struct {
 	// *[]string (not []string): wire semantics are null=preserve existing connections,
 	// []=explicitly remove all - a plain slice cannot represent that distinction once
 	// marshaled, and omitempty on a non-nil pointer to an empty slice still emits "[]".
-	ConnectionIDs *[]string `json:"connection_ids,omitempty"`
+	ConnectionIDs *[]string             `json:"connection_ids,omitempty"`
+	Config        *serviceConfigRequest `json:"config"`
+}
+
+// serviceConfigRequest is the apply body's `config` (the backend's ServiceConfig). The backend
+// stores a sent config whole, with every field this provider does not send reset to its default
+// (the router round-trips the request through .dict()/parse_obj, so compose_service's
+// exclude_unset excludes nothing). Terraform therefore owns the entire object and sends it on
+// every apply.
+type serviceConfigRequest struct {
+	Access    serviceAccessConfigRequest    `json:"access"`
+	Protocols serviceProtocolsConfigRequest `json:"protocols"`
+	// EnvVars is read by the cluster manager when it builds a node's Ray environment
+	// (cluster_manager_config_service._extract_env_vars_from_job_or_service_spec).
+	EnvVars map[string]string `json:"env_vars,omitempty"`
+}
+
+type serviceAccessConfigRequest struct {
+	UseBearerToken bool `json:"use_bearer_token"`
+}
+
+// serviceProtocolsConfigRequest carries only gRPC: HTTP keeps the backend default (enabled, port
+// 8000), and gRPC keeps its default port (9000), as the CLI does.
+type serviceProtocolsConfigRequest struct {
+	GRPC serviceGRPCConfigRequest `json:"grpc"`
+}
+
+type serviceGRPCConfigRequest struct {
+	Enabled      bool     `json:"enabled"`
+	ServiceNames []string `json:"service_names"`
+}
+
+// serviceMaxGRPCServiceNames is the backend's cap on gRPC service names
+// (ApplyProductionServiceV2Model.validate_config): the AWS listener rule allows
+// MAX_AWS_RULE_CONDITIONS (5) conditions, RESERVED_AWS_RULE_CONDITIONS (3) are reserved, and the
+// bearer-token header check takes one more.
+func serviceMaxGRPCServiceNames(bearerAuth bool) int {
+	if bearerAuth {
+		return 1
+	}
+	return 2
+}
+
+// serviceConfigFromModel builds the apply body's `config`: the one place every service-config
+// attribute is mapped.
+func serviceConfigFromModel(ctx context.Context, plan *ServiceResourceModel) (*serviceConfigRequest, error) {
+	grpcNames := []string{}
+	if !plan.GRPCServiceNames.IsNull() && !plan.GRPCServiceNames.IsUnknown() {
+		if diags := plan.GRPCServiceNames.ElementsAs(ctx, &grpcNames, false); diags.HasError() {
+			return nil, fmt.Errorf("invalid grpc_service_names: %v", diags)
+		}
+	}
+	var envVars map[string]string
+	if !plan.EnvVars.IsNull() && !plan.EnvVars.IsUnknown() {
+		if diags := plan.EnvVars.ElementsAs(ctx, &envVars, false); diags.HasError() {
+			return nil, fmt.Errorf("invalid env_vars: %v", diags)
+		}
+	}
+	return &serviceConfigRequest{
+		EnvVars: envVars,
+		Access: serviceAccessConfigRequest{
+			// Null only for a model that never went through the schema default.
+			UseBearerToken: plan.QueryAuthTokenEnabled.IsNull() || plan.QueryAuthTokenEnabled.ValueBool(),
+		},
+		Protocols: serviceProtocolsConfigRequest{
+			GRPC: serviceGRPCConfigRequest{Enabled: len(grpcNames) > 0, ServiceNames: grpcNames},
+		},
+	}, nil
 }
 
 // buildApplyServiceRequest converts a plan/config model into the PUT /apply request body shared
@@ -1296,6 +1480,11 @@ func buildApplyServiceRequest(ctx context.Context, plan *ServiceResourceModel) (
 		return nil, fmt.Errorf("invalid connection_ids: %v", diags)
 	}
 	body.ConnectionIDs = connIDs
+
+	body.Config, err = serviceConfigFromModel(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
 
 	return body, nil
 }

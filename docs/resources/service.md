@@ -4,7 +4,8 @@ page_title: "anyscale_service Resource - terraform-provider-anyscale"
 subcategory: ""
 description: |-
   Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only anyscale_service/anyscale_services data sources, which share this resource's computed field shapes.
-  A change to ray_serve_config, build_id, compute_config_id, connection_ids, or description rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so terraform apply converges to a steady RUNNING state rather than holding at a partial canary). max_surge_percent only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+  A change to ray_serve_config, build_id, compute_config_id, connection_ids, description, query_auth_token_enabled, grpc_service_names, or env_vars rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so terraform apply converges to a steady RUNNING state rather than holding at a partial canary). max_surge_percent only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+  ~> Note: Every rollout sends the service's whole config object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as max_uptime_timeout_sec, gRPC routing without grpc_service_names, or cluster-level environment variables without env_vars, on its first rollout from Terraform.
   ~> Note: terraform destroy terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.
 ---
 
@@ -12,7 +13,9 @@ description: |-
 
 Deploys an Anyscale Service and rolls out new versions on config change. Companion to the read-only `anyscale_service`/`anyscale_services` data sources, which share this resource's computed field shapes.
 
-A change to `ray_serve_config`, `build_id`, `compute_config_id`, `connection_ids`, or `description` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so `terraform apply` converges to a steady RUNNING state rather than holding at a partial canary). `max_surge_percent` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+A change to `ray_serve_config`, `build_id`, `compute_config_id`, `connection_ids`, `description`, `query_auth_token_enabled`, `grpc_service_names`, or `env_vars` rolls out a new version automatically (declarative auto-rollout: the new version always rolls to 100%, so `terraform apply` converges to a steady RUNNING state rather than holding at a partial canary). `max_surge_percent` only paces that rollout; it does not hold it. If Anyscale rolls the new version back, the apply fails and the change stays in the plan until a rollout succeeds; a rollout that outlives the apply (timeout, interrupt) is settled on the next refresh the same way. Staged/manual canary (hold at a partial percent, explicit promote/rollback) is intentionally not supported by this resource in this version - it does not fit a converging declarative model and may arrive later as separate provider actions layered on top, not as a change to this resource's lifecycle.
+
+~> **Note:** Every rollout sends the service's whole `config` object, and Anyscale resets any setting it omits. A service deployed with the Anyscale CLI and then imported loses any setting there that this resource does not set, such as `max_uptime_timeout_sec`, gRPC routing without `grpc_service_names`, or cluster-level environment variables without `env_vars`, on its first rollout from Terraform.
 
 ~> **Note:** `terraform destroy` terminates the service and then deletes the record entirely (the backend requires a service to be terminated before it can be deleted, so destroy performs both steps and waits for termination in between). This is a gone-for-good delete, not an archive - there is no Terraform-managed way to recover a destroyed service's history afterward.
 
@@ -70,14 +73,10 @@ resource "anyscale_service" "example" {
   # is safe to set from the first apply - create always performs a
   # standard deploy, since there is no version to upgrade yet.
   rollout_strategy = "ROLLOUT"
-  # Defaults to 30m, already sized for a real standard ROLLOUT (a full
-  # second cluster spins up before the gradual canary traffic-shift even
-  # starts). Raise it further for a heavier image, more replicas, or
-  # slower health checks than that default already assumes.
+  # Defaults to 60m; Anyscale sets no rollout deadline of its own.
   timeouts {
-    create = "1h"
-    update = "1h"
-    delete = "1h"
+    create = "90m"
+    update = "90m"
   }
 
   tags = {
@@ -89,7 +88,7 @@ resource "anyscale_service" "example" {
 # Minimal service - only the required inputs. project_id, tags, and the
 # rollout knobs all take sensible defaults (project_id resolves to your
 # org's default project for the compute config's cloud; rollout_strategy
-# defaults to ROLLOUT; an omitted timeouts block defaults to 30m for
+# defaults to ROLLOUT; an omitted timeouts block defaults to 60m for
 # create/update/delete alike).
 resource "anyscale_service" "minimal" {
   name              = "minimal-service"
@@ -155,9 +154,12 @@ output "service_live_ray_serve_config" {
 
 - `connection_ids` (List of String) Connection IDs to associate with the new service version. Null (the default) preserves the connections already attached; `[]` removes all of them. Never refreshed from the server, because copying the live set in would turn a later "leave connections alone" apply into "remove every connection"; read the live set from `primary_version.connection_ids`. After `terraform import`, a configured list equal to the live set is not treated as a change. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
 - `description` (String) Description of the service. Null if not set. Changing it rolls out a new version under `ROLLOUT` and is rejected at plan time under `IN_PLACE`.
+- `env_vars` (Map of String) Environment variables Anyscale sets for Ray on the service's cluster nodes. Unlike the Anyscale CLI, this does not also copy them into each application's `runtime_env`; set those in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.
+- `grpc_service_names` (List of String) gRPC service names the load balancer routes to the service: a gRPC request whose path starts with `/<name>` reaches it. Null or empty disables gRPC routing. At most one name while `query_auth_token_enabled` is `true`, two otherwise. Configure Ray Serve's side with `grpc_options` in `ray_serve_config`. Not refreshed: the API does not return it. Changing it rolls out a new version; rejected at plan time under `IN_PLACE`.
 - `max_surge_percent` (Number) Rollout pacing (0-100): how much excess capacity to allocate during a deploy; the rollout still converges to 100%. Off by default: unless Anyscale support has enabled resource-constrained upgrades for your cloud, create succeeds but every later deploy fails with a 400. Null lets the backend choose. Not readable from the API; a change to it alone takes effect on the next deploy.
 - `project_id` (String) The ID of the project this service starts clusters in. If omitted, the backend resolves your organization's default project for the compute config's cloud - that resolved value is written back here, so leaving this unset does not produce a diff on later plans. Immutable: changing it replaces the resource. Its cloud must match `compute_config_id`'s cloud, and a plan-time check rejects a mismatch (naming both cloud IDs; skipped when either ID is unknown or a lookup fails). To move to a compute config on a different cloud, change `project_id` in the same apply; leaving it unset keeps the project in state, so the check fails.
-- `rollout_strategy` (String) How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config` - changing `build_id`, `compute_config_id`, `connection_ids`, or `description` under `IN_PLACE` is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.
+- `query_auth_token_enabled` (Boolean) Whether requests to the service must carry a bearer token. Defaults to `true`. Changing it rolls out a new version that issues a new token or clears it; read the token with the `anyscale_service_credentials` ephemeral resource. Rejected at plan time under `IN_PLACE`.
+- `rollout_strategy` (String) How a deploy rolls in a new version: `ROLLOUT` (default) starts a new cluster and shifts traffic to it; `IN_PLACE` upgrades the existing cluster, which is faster but permits changing only `ray_serve_config`: any other change that would roll out a new version is rejected at plan time. The create deploy ignores it and is always standard, so `IN_PLACE` is safe to set from the start. Not readable from the API, so drift is never detected. Changing only this attribute does not redeploy the service; the new value takes effect on the next deploy.
 - `tags` (Map of String) Tags to associate with the service. The backend stores tags through a separate system from the service record itself (`/api/v2/tags/resource`, not the service GET/apply endpoints), so this resource makes its own extra calls to keep it a true round trip: read back on refresh, and - since that system's write endpoint only upserts (adds/updates) rather than replaces - any key removed from this map is explicitly deleted so it does not linger on the backend forever.
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
@@ -185,9 +187,9 @@ output "service_live_ray_serve_config" {
 
 Optional:
 
-- `create` (String) Maximum time to wait for a create rollout to reach `RUNNING` (e.g. `20m`, `1h`). Defaults to `30m` - a standard `ROLLOUT` genuinely takes real time on real infra (a full second cluster spins up before the gradual canary traffic-shift even starts), but observed real rollouts run closer to ~20m, so this default carries real margin without being needlessly long. Purely local to this provider - never sent to or read from the Anyscale API.
-- `delete` (String) Maximum time to wait for destroy to wait for termination to reach `TERMINATED` before deleting. Same default and rationale as `create`.
-- `update` (String) Maximum time to wait for an update rollout, or the restart of a terminated service, to reach `RUNNING`. Same default as `create`. An update that changes only `tags`, `rollout_strategy`, `max_surge_percent`, or this block does not wait. A rollout still running at the timeout continues server-side and is settled on the next refresh.
+- `create` (String) Maximum time to wait for the create rollout to reach `RUNNING` (e.g. `45m`, `2h`). Defaults to `60m`. Anyscale sets no deadline on a rollout, so this is the only limit. Local to this provider; never sent to the API.
+- `delete` (String) Maximum time to wait for termination before deleting. Defaults to `60m`.
+- `update` (String) Same as `create`, for an update that rolls out a new version or restarts a terminated service. An update that rolls nothing out does not wait. A rollout still running at the timeout continues and is settled on the next refresh.
 
 
 <a id="nestedatt--canary_version"></a>

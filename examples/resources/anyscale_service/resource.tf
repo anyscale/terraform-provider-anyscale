@@ -49,14 +49,10 @@ resource "anyscale_service" "example" {
   # is safe to set from the first apply - create always performs a
   # standard deploy, since there is no version to upgrade yet.
   rollout_strategy = "ROLLOUT"
-  # Defaults to 30m, already sized for a real standard ROLLOUT (a full
-  # second cluster spins up before the gradual canary traffic-shift even
-  # starts). Raise it further for a heavier image, more replicas, or
-  # slower health checks than that default already assumes.
+  # Defaults to 60m; Anyscale sets no rollout deadline of its own.
   timeouts {
-    create = "1h"
-    update = "1h"
-    delete = "1h"
+    create = "90m"
+    update = "90m"
   }
 
   tags = {
@@ -68,7 +64,7 @@ resource "anyscale_service" "example" {
 # Minimal service - only the required inputs. project_id, tags, and the
 # rollout knobs all take sensible defaults (project_id resolves to your
 # org's default project for the compute config's cloud; rollout_strategy
-# defaults to ROLLOUT; an omitted timeouts block defaults to 30m for
+# defaults to ROLLOUT; an omitted timeouts block defaults to 60m for
 # create/update/delete alike).
 resource "anyscale_service" "minimal" {
   name              = "minimal-service"

@@ -24,6 +24,7 @@ func serviceRolloutJSON(id, name, projectID, currentState, versionID, version st
 	return fmt.Sprintf(`{
 		"id": %[1]q, "name": %[2]q, "project_id": %[3]q, "cloud_id": "cld_findings",
 		"hostname": "findings.example.com", "base_url": "https://findings.example.com",
+		"auth_token": "mock-service-token", "secondary_auth_token": null,
 		"current_state": %[4]q, "goal_state": "RUNNING",
 		"creator_id": "usr_findings", "created_at": "2026-01-01T00:00:00Z",
 		"is_multi_version": false, "auto_rollout_enabled": true,
@@ -100,7 +101,7 @@ func TestAccServiceResource_UpdateRedeploysAndConverges(t *testing.T) {
 
 		// Once terminate has fired (the automatic end-of-test destroy), report TERMINATED so
 		// that wait loop resolves - otherwise it polls a state (RUNNING) that can never satisfy
-		// its target (TERMINATED) and hangs for the real delete timeout default (30m). Checked
+		// its target (TERMINATED) and hangs for the real delete timeout default (60m). Checked
 		// BEFORE the transitional-window logic since destroy always happens after both applies.
 		state := "RUNNING"
 		switch {
